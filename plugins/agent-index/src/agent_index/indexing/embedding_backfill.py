@@ -12,11 +12,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agent_index.chunking.base import Chunk
-from agent_index.indexing.embedding_batch import embed_and_store_pairs, routed_model_chunks
+from agent_index.indexing.embedding_batch import (
+    _require_current_input,
+    embed_and_store_pairs,
+    routed_model_chunks,
+)
 from agent_index.indexing.embedding_coverage import EmbeddingCoverage, embedding_profile_key
 from agent_index.indexing.pending_crawl import PendingCrawls, PendingCrawlConflict, recovery_scope
 from agent_index.indexing.state import IndexState
 from agent_index.store.content_snapshot import ContentSnapshot, ContentSnapshotUnavailable
+from agent_index.store.chunk_id_index import ChunkIdIndexPreparationRequired
+from agent_index.store.source_layout import SourceLayoutError
 
 if TYPE_CHECKING:
     from agent_index.engine.client import EngineClient
@@ -254,10 +260,25 @@ def backfill_embedding_slice(
     refusal = None
     with domain.write(store.content_store.db):
         try:
+            with closing(paths._connect()) as conn:
+                row = conn.execute(
+                    "SELECT payload FROM embedding_backfills WHERE source = ?", (spec.name,),
+                ).fetchone()
+            if row is None or row["payload"] != raw:
+                raise BackfillRepairRequired("Backfill intent changed concurrently; retry required")
             _require_current(payload, spec, connector, config, store)
             if payload["vectors"] != _vector_versions(config, store):
                 raise BackfillRepairRequired("Backfill vector coverage changed; restart required")
-        except (BackfillRepairRequired, ValueError, KeyError) as exc:
+            _require_current_input(store, chunks)
+            for name, profile in config.model_profiles.items():
+                coverage.missing(
+                    store.get_vector_table(name), routed_model_chunks(chunks, name, config.model_profiles),
+                    profile, bounded=True,
+                )
+        except (
+            BackfillRepairRequired, ValueError, KeyError,
+            ChunkIdIndexPreparationRequired, SourceLayoutError,
+        ) as exc:
             # Only these metadata checks precede every backfill effect.
             refusal = exc
         if refusal is None:

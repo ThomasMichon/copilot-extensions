@@ -380,3 +380,40 @@ def test_intervening_ordinary_write_refuses_after_clean_writer_exit(context, mon
     context.store.upsert_content([chunk("another ordinary change", source=context.connector.source_name)])
     prepare_chunk_id_index(content, max_rows=20)
     assert context.run(restart=True).offset == 2
+
+
+def test_intervening_covered_restart_refuses_cleanly_before_pair_work(context, monkeypatch) -> None:
+    assert context.run(row_budget=10).complete
+    content = context.store.content_store
+    read = content.read_snapshot
+    restarted = []
+
+    def intervening(*args, **kwargs):
+        records = read(*args, **kwargs)
+        if not restarted:
+            restarted.append(True)
+            assert context.run(restart=True).vector_rows_upserted == 0
+        return records
+
+    with monkeypatch.context() as patch:
+        patch.setattr(content, "read_snapshot", intervening)
+        with pytest.raises(BackfillRepairRequired, match="intent changed"):
+            context.run(restart=True)
+    assert len(context.client.calls) == 1
+    assert context.store._source_domain.receipt()["state"] == "clean"
+    assert context.run().offset == 4
+
+
+def test_unprepared_canonical_index_refuses_cleanly_then_can_be_prepared(context) -> None:
+    from agent_index.store.chunk_id_index import INDEX_NAME, ChunkIdIndexPreparationRequired
+
+    content = context.store.content_store
+    with context.store._source_domain.write(content.db):
+        context.store._source_domain.effect("fixture-index-drop")
+        content._get_or_create_table().drop_index(INDEX_NAME)
+    with pytest.raises(ChunkIdIndexPreparationRequired, match="missing"):
+        context.run()
+    assert context.client.calls == []
+    assert context.store._source_domain.receipt()["state"] == "clean"
+    prepare_chunk_id_index(content, max_rows=20)
+    assert context.run(restart=True).offset == 2

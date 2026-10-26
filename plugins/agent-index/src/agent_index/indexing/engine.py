@@ -494,6 +494,14 @@ def run_reindex(
             logger.warning("Unconfigured-source GC failed", exc_info=True)
             print("  WARNING: unconfigured-source GC failed (see logs)")
 
+    if (full and retirement.stale_generations and not gc_deferred
+            and os.environ.get("AGENT_INDEX_REINDEX_GC", "1") != "0"):
+        from agent_index.indexing.pending_crawl import PendingCrawls
+
+        gc_deferred = PendingCrawls(path_index).backfill_sources()
+        if gc_deferred:
+            logger.warning("Stale-source GC deferred: unfinished embedding backfills: %s", gc_deferred)
+
     if full and not failed_sources:
         state.last_full_reindex = time.time()
 

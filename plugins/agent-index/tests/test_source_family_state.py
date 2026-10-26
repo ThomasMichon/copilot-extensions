@@ -31,7 +31,10 @@ def test_path_family_lookup_is_literal_and_case_sensitive(tmp_path, family):
     assert set(paths.get_paths_by_prefix(family)) > set(expected)  # Legacy API stays compatible.
 
 
-def test_ordinary_run_reindex_defers_unfinished_backfill_gc(queued_source, caplog):
+@pytest.mark.parametrize("single_source_full", [False, True])
+def test_ordinary_run_reindex_defers_unfinished_backfill_gc(
+    queued_source, caplog, single_source_full,
+):
     from agent_index.indexing.pending_crawl import PendingCrawls
 
     repository, configure, run, config = queued_source
@@ -47,9 +50,9 @@ def test_ordinary_run_reindex_defers_unfinished_backfill_gc(queued_source, caplo
         conn.commit()
     finally:
         conn.close()
-    code, task = run()
+    code, task = run(full=True, source="git:alias") if single_source_full else run()
     assert code == 0 and task.status == "complete"
-    assert "Source GC deferred: unfinished embedding backfills: ['git:alias']" in caplog.text
+    assert "GC deferred: unfinished embedding backfills: ['git:alias']" in caplog.text
     assert PendingCrawls(paths).backfill_sources() == ["git:alias"]
     assert initialize_source_store(config)._source_domain.receipt()["state"] == "clean"
 
