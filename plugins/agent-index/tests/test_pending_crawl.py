@@ -18,6 +18,7 @@ from agent_index.sources.base import FileEntry
 from agent_index.sources.base import nonsecret_target
 from agent_index.sources.delta import SourceDelta
 from agent_index.sources.git_repo import GitRepoConnector
+from agent_index.sources.azure_devops import AzureDevOpsConnector
 
 
 def item(path: str, content: str) -> FileEntry:
@@ -263,24 +264,61 @@ def test_ssh_account_change_refuses_pending_replay(
     assert nonsecret_target(password_remote) == remote
 
 
-def test_pending_alias_blocks_sibling_but_not_an_independent_family(tmp_path: Path) -> None:
+@pytest.mark.parametrize("pending_family", ["forge:repo", "forge:repo:issues"])
+def test_pending_alias_blocks_sibling_but_not_an_independent_family(
+    tmp_path: Path, pending_family: str,
+) -> None:
     paths = PathIndex(tmp_path / "paths.db")
     journal = PendingCrawls(paths)
     manifest = CrawlManifest(
-        source="retired-alias", accounting_family="forge:repo", upserts=[item("a.md", "middle")],
+        source="retired-alias", accounting_family=pending_family,
+        upserts=[FileEntry("a.md", "middle", "markdown", pending_family)],
     )
     journal.save(manifest, scope="original", full=False)
     effects: list[str] = []
-    with pytest.raises(PendingCrawlConflict, match="retired-alias"):
-        recover_source(
-            "active-alias", scope="current", family="forge:repo", state=IndexState(),
-            state_file=tmp_path / "state.json", paths=paths, full=False,
-            acquire=lambda: effects.append("acquire"),
-            apply=lambda **kwargs: effects.append("apply"),
-        )
+    for family in ("forge:repo", "forge:repo:issues", "forge:repo:issues:comments"):
+        with pytest.raises(PendingCrawlConflict, match="retired-alias"):
+            recover_source(
+                "active-alias", scope="current", family=family, state=IndexState(),
+                state_file=tmp_path / "state.json", paths=paths, full=False,
+                acquire=lambda: effects.append("acquire"),
+                apply=lambda **kwargs: effects.append("apply"),
+            )
     assert effects == []
     journal.assert_family_available("retired-alias", "forge:repo")
     journal.assert_family_available("independent", "forge:other")
+    journal.assert_family_available("prefix-sibling", "forge:repoextra")
+    journal.assert_family_available("case-sibling", "FORGE:repo")
+
+
+@pytest.mark.parametrize("change", ["endpoint", "account", "queries"])
+def test_ado_effective_scope_change_refuses_pending_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
+    account = "account-a"
+    monkeypatch.setattr(AzureDevOpsConnector, "_get_authenticated_user_id", lambda self: account)
+
+    def connector(endpoint: str = "https://example.test") -> AzureDevOpsConnector:
+        return AzureDevOpsConnector(
+            "ado:org/project", token="fixture-placeholder", api_base=endpoint,
+            work_item_queries=[{"wiql": "SELECT [System.Id] FROM WorkItems"}],
+            pull_request_queries=[],
+        )
+
+    before = connector()
+    journal = PendingCrawls(PathIndex(tmp_path / "paths.db"))
+    manifest = CrawlManifest(
+        source=before.source_name, accounting_family=before.source_name,
+        upserts=[FileEntry("a.md", "pending", "markdown", before.source_name)],
+    )
+    journal.save(manifest, scope=recovery_scope("same-spec", before), full=False)
+    after = connector("https://other.example.test" if change == "endpoint" else before.api_base)
+    if change == "account":
+        account = "account-b"
+    if change == "queries":
+        after._work_item_queries = [{"saved_query_id": "different-query"}]
+    with pytest.raises(ValueError, match="configuration"):
+        journal.load(before.source_name, recovery_scope("same-spec", after))
 
 
 @pytest.mark.parametrize("stale", [False, True])

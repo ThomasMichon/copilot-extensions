@@ -57,12 +57,18 @@ class PendingCrawls:
             )
 
     def assert_family_available(self, source: str, family: str) -> None:
+        expression = (
+            "COALESCE(json_extract(payload, '$.manifest.accounting_family'), "
+            "json_extract(payload, '$.manifest.stored_family'), source)"
+        )
+        ancestors = [family[:i] for i, char in enumerate(family) if char == ":"] + [family]
+        placeholders = ", ".join("?" for _ in ancestors)
         with closing(self._paths._connect()) as conn:
             row = conn.execute(
-                "SELECT source FROM pending_crawls WHERE "
-                "COALESCE(json_extract(payload, '$.manifest.accounting_family'), "
-                "json_extract(payload, '$.manifest.stored_family'), source) = ? "
-                "AND source != ? LIMIT 1", (family, source),
+                f"SELECT source FROM pending_crawls WHERE source != ? AND "
+                f"({expression} IN ({placeholders}) OR "
+                f"({expression} >= ? AND {expression} < ?)) LIMIT 1",
+                (source, *ancestors, family + ":", family + ";"),
             ).fetchone()
         if row is not None:
             raise PendingCrawlConflict(
