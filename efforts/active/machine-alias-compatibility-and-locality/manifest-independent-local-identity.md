@@ -206,7 +206,11 @@ proposal #9114 does not activate those call sites or authorize live rollout.
   nonce; the two source-only contexts retain explicit hosting refusals.
   Real Manager entry passes all eight contexts. All disposable checkouts and
   branches are normally removed, with finalized records and receipts retained.
-- [ ] Review ordinary activation separately. Installed opt-in acceptance is not
+- [x] Review ordinary activation separately. Installed opt-in acceptance is not
   ordinary-default or rollout authorization. Preserve the low-level omitted-mode
   legacy contract; activate ordinary call sites only through separately reviewed
   [selection](ordinary-callsite-activation.md).
+  The separate proposal, implementation review, natural qualification and
+  subsequent explicit ordinary rollout/acceptance consent are complete.
+  Actual installed entry points pass across all eight native/guest contexts;
+  the October 26 journal records preserved records and exact resource cleanup.
