@@ -612,6 +612,12 @@ unchanged by this Linux replacement and retains its separate compiler-free
 migration gate. Darwin external
 termination currently holds when kernel-pinned custody cannot be established.
 
+Renewable expiry is decided from the current record while holding its mutation
+lock. A contended inspection remains explicitly unknown until a current read
+or the independent monotonic hard maximum; it is not evidence that a cached
+lease expired. Linux shell collection budgets can exceed 300 seconds, while
+each CLI process-stop attempt remains capped at 300 seconds.
+
 A long-lived daemon (one started by an installer, a hook, a CLI or a cutover
 and meant to outlive it) launches through one primitive instead of hand-built
 `Popen` kwargs:

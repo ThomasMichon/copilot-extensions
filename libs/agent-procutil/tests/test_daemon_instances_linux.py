@@ -205,6 +205,41 @@ def test_missing_lifecycle_interpreter_reports_a_held_record(tmp_path):
     assert receipt.record_path.exists()
 
 
+def test_shell_reconciliation_accepts_a_total_budget_above_one_stop_limit(tmp_path):
+    import agent_procutil
+
+    receipt = reserve_instance(DaemonInstanceSpec(
+        "large-reconcile-budget", tmp_path, Path(__file__).resolve(),
+        purpose="unattended-test", registry_root=tmp_path / "registry",
+        lease=DaemonLeasePolicy(2, 3),
+    ))
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import sys;sys.stdin.read(1)"],
+        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+    )
+    try:
+        store.bind_process(receipt, process.pid)
+        _, error = process.communicate(b"x", timeout=5)
+        assert process.returncode == 0, error
+        with store._locked(receipt) as path:
+            record = store._read(path)
+            record["deadline"] = str(time.time() - 1)
+            store._write(path, record)
+        result = subprocess.run(
+            ["bash", "-c", '. "$1"; reconcile_daemon_instances 128 600 "$2"',
+             "large-budget", str(Path(agent_procutil.__file__).with_name("daemon_instances.sh")),
+             str(receipt.registry_root)],
+            capture_output=True, text=True, timeout=8,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == f"settled\tprocess-exit-observed\t{receipt.instance_id}\n"
+        assert not receipt.record_path.exists()
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.communicate(timeout=5)
+
+
 def test_native_renewal_obeys_hard_cap(native_helper, tmp_path):
     process, receipt, record = start_supervised(
         native_helper, tmp_path, code="import time;time.sleep(30)", ttl=.8, cap=2,

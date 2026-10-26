@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Callable
 import ctypes
+from dataclasses import dataclass
 import errno
 import math
 import os
@@ -16,6 +18,14 @@ from . import _daemon_instance_store as store
 from ._daemon_instance_identity import birth_identity, path_identity
 from ._linux_pidfd import open_pidfd, send_pidfd_signal
 from .daemon_instances import DaemonInstanceReceipt
+
+
+@dataclass
+class _Lease:
+    deadline: float
+    hard: float
+    hard_mono: float
+    lease_mono: float
 
 
 def _exited(descriptor: int) -> bool:
@@ -33,6 +43,10 @@ def check() -> None:
         send_pidfd_signal(descriptor, 0)
     finally:
         os.close(descriptor)
+    if not all(hasattr(os, name) for name in (
+        "waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT", "CLD_EXITED",
+    )):
+        raise RuntimeError("daemon supervision requires unreaped-child wait observation")
 
 
 def _pin(pid: int, expected: str) -> int:
@@ -180,6 +194,45 @@ def _child(command: list[str], gate: int) -> None:
         os._exit(127)
 
 
+def _watch_child(
+    receipt: DaemonInstanceReceipt, record: dict[str, str], child: int, owner: int,
+    lease: _Lease, interrupted: Callable[[], bool],
+) -> int:
+    inspection_deferred = False
+    while True:
+        observed = os.waitid(os.P_PID, child, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        if observed is not None:
+            return observed.si_status if observed.si_code == os.CLD_EXITED else (
+                128 + observed.si_status
+            )
+        if interrupted() or _exited(owner) or time.monotonic() >= lease.hard_mono:
+            return 124
+        try:
+            with store._locked(receipt) as record_path:
+                updated = store._read(record_path)
+                if any(updated[key] != record[key] for key in (
+                    "pid", "birth", "supervisor_pid", "supervisor_birth",
+                    "owner_pid", "owner_birth", "hard_deadline",
+                )):
+                    raise ValueError("daemon supervision identity changed")
+                renewed = _deadline(updated, "deadline")
+                if renewed > lease.hard:
+                    raise ValueError("daemon lease exceeds hard maximum")
+                if renewed != lease.deadline:
+                    lease.deadline = renewed
+                    lease.lease_mono = time.monotonic() + renewed - time.time()
+                if time.monotonic() >= lease.lease_mono:
+                    return 124
+                inspection_deferred = False
+        except BlockingIOError:
+            if not inspection_deferred:
+                store._log.warning("daemon lease inspection deferred: inventory is locked")
+            inspection_deferred = True
+        if time.monotonic() >= lease.hard_mono:
+            return 124
+        time.sleep(.05)
+
+
 def supervise(path: Path, command: list[str], *, ready_fd: int | None = None) -> int:
     """Own one fresh child group until its owner/lease ends and descendants settle."""
     receipt = DaemonInstanceReceipt(path.stem, path.parent)
@@ -203,7 +256,7 @@ def supervise(path: Path, command: list[str], *, ready_fd: int | None = None) ->
             record = store._read(record_path)
             deadline, hard = _validate(record)
             wall, mono = time.time(), time.monotonic()
-            hard_mono, lease_mono = mono + hard - wall, mono + deadline - wall
+            lease = _Lease(deadline, hard, mono + hard - wall, mono + deadline - wall)
             owner = _pin(int(record["owner_pid"]), record["owner_birth"])
             if os.getpgrp() != os.getpid():
                 os.setpgid(0, 0)
@@ -236,33 +289,7 @@ def supervise(path: Path, command: list[str], *, ready_fd: int | None = None) ->
         os.write(gate_write, b"\1")
         os.close(gate_write)
         gate_write = None
-        result = 124
-        while True:
-            observed = os.waitid(os.P_PID, child, os.WEXITED | os.WNOHANG | os.WNOWAIT)
-            if observed is not None:
-                result = observed.si_status if observed.si_code == os.CLD_EXITED else (
-                    128 + observed.si_status
-                )
-                break
-            mono = time.monotonic()
-            if interrupted or _exited(owner) or mono >= min(hard_mono, lease_mono):
-                break
-            try:
-                with store._locked(receipt) as record_path:
-                    updated = store._read(record_path)
-                    if any(updated[key] != record[key] for key in (
-                        "pid", "birth", "supervisor_pid", "supervisor_birth",
-                    )):
-                        raise ValueError("daemon supervision identity changed")
-                    renewed = _deadline(updated, "deadline")
-                    if renewed > hard:
-                        raise ValueError("daemon lease exceeds hard maximum")
-                    if renewed != deadline:
-                        deadline = renewed
-                        lease_mono = mono + renewed - time.time()
-            except BlockingIOError:
-                pass
-            time.sleep(.05)
+        result = _watch_child(receipt, record, child, owner, lease, lambda: interrupted)
     except (OSError, ValueError, KeyError, RuntimeError) as error:
         store._log.error("daemon supervision refused: %s", error)
         result = 125

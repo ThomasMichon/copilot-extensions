@@ -43,12 +43,12 @@ def main(arguments: list[str] | None = None) -> int:
         ):
             parser.error("supervise requires a command and a valid admission descriptor")
         return linux.supervise(options.record, command, ready_fd=options.ready_fd)
-    if not math.isfinite(options.timeout) or not 0 < options.timeout <= 300:
-        parser.error("cleanup timeout must be finite and between zero and 300 seconds")
+    if not math.isfinite(options.timeout) or options.timeout <= 0:
+        parser.error("cleanup budget must be finite and positive")
     receipt = DaemonInstanceReceipt(options.record.stem, options.record.parent)
     if options.record != receipt.record_path:
         parser.error("cleanup requires a canonical instance record path")
-    result = store.cleanup(receipt, stop_timeout=options.timeout)
+    result = store.cleanup(receipt, stop_timeout=min(options.timeout, 300))
     print(f"{result.status}\t{result.reason}\t{result.instance_id}")
     if result.status == "held":
         print(f"daemon instance held: {result.instance_id} {result.reason}", file=sys.stderr)
