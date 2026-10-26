@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Callable
 
 from boundary import Experiment, inspect_static_boundary
+from network import NetworkIdentity, inspect_inventory, selected_containers
 from storage import Resources, StorageMonitor, Usage, VolumeIdentity
 
 
@@ -133,6 +134,31 @@ class DockerReader:
         return Usage(
             expected, started, finished, persistent, output, free,
         )
+
+    def network_inventory(
+        self, experiment: Experiment, container_id: str, *, peers: tuple[str, ...] = (),
+        expected: NetworkIdentity | None = None,
+    ) -> NetworkIdentity:
+        """Observe exact attachments twice; this does not probe egress or grant custody."""
+        selected = selected_containers(container_id, peers)
+        deadline = self.clock() + 30
+        observations: list[NetworkIdentity] = []
+        for _ in range(2):
+            containers = self._json(["container", "inspect", *selected], deadline)
+            networks = self._json([
+                "network", "inspect", f"{experiment.resource_prefix}-internal",
+            ], deadline)
+            try:
+                observed = inspect_inventory(experiment, selected, containers, networks)
+            except ValueError as error:
+                raise ReadError(str(error)) from error
+            if expected is not None and observed != expected:
+                raise ReadError("physical network differs from retained selection")
+            observations.append(observed)
+        if observations[0] != observations[1]:
+            raise ReadError("physical network changed during observation")
+        self._check_deadline(deadline)
+        return observations[1]
 
     def refresh(self, monitor: StorageMonitor) -> None:
         monitor.invalidate()

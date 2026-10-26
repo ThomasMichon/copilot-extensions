@@ -164,6 +164,7 @@ def test_get_and_context_share_execution_identity(topology, monkeypatch, capsys)
 
     config = cfg.Config(
         srcroot="", machine="example-host-wsl", platform="wsl",
+        configured_machine="example-host-wsl",
         repo_name="example",
         repos={"example": cfg.RepoConfig(anchor=str(topology), worktree_root="")},
     )

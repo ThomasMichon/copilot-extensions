@@ -5,7 +5,8 @@ Back to [Linux role fleet](README.md) and the
 Complements the merged [first causal-record source](dispatch-spawn-causal-logging.md).
 
 **Status: plan reviewed in #9069; first pure controls merged in #9071;
-ordinary-volume storage amendment reviewed in #9101.**
+ordinary-volume amendment reviewed in #9101; finite observations and
+storage-only monitoring merged in #9104.**
 This is an agent-recommended decomposition of the remaining isolated
 failure-reproduction and logging qualification work. It does not authorize
 resource creation, production fault injection, deployment or credential access.
@@ -227,15 +228,20 @@ The first [pure controls](../../../tools/reproducer-lab/README.md) parse the
 declaration and identify known unsafe or missing static Docker observations.
 They retain explicit separate monitoring, egress, custody and guest/runtime
 requirements, never a lab-ready result. The bounded source merged in #9071;
-the current candidate replaces the superseded capacity-backend requirement
-with separate monitored-volume measurements following #9101.
+the #9104 source replaces the superseded capacity-backend requirement with
+separate monitored-volume measurements following #9101.
 `reader.py` inspects exact physical selections and uses the existing finite
 process owner for a fixed non-root guest probe. `storage.py` refuses new work
 on missing/stale/failed measurements, thresholds, reserve or lifetime expiry.
-The candidate's synthetic controls do not close real boundary qualification,
+Its 206 synthetic controls do not close real boundary qualification,
 native capture or any persistence/fault gate.
 
-Review and merge that finite reader/monitoring source, then implement the
-remaining network/custody and guest/runtime prerequisites before a provisioning path.
+The next source adds finite, repeated internal-network/endpoint observations
+for explicit subject/peer IDs and exact static `/tmp`/`/run` configuration
+checks. Those observations remain non-atomic and do not establish egress,
+exclusive custody, peer posture or guest mount/runtime qualification.
+Implement those remaining prerequisites before a provisioning path.
+Reuse existing finite process, source and service owners;
+this remains ordinary integration-test tooling, not a new runtime or fleet.
 Keep persistent provisioning blocked until the exact resources, thresholds,
 case lifetime and actions receive separate approval.

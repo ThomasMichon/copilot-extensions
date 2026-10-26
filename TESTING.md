@@ -811,6 +811,15 @@ support. Ordinary-volume thresholds are monitored, never hard quotas. Those
 separately authorized native experiments remain open. No unconditional promotion
 or platform matrix is added.
 
+`tools/test_reproducer_lab_network.py` adds bounded synthetic observations of
+the exact internal bridge network, explicit subject/peer IDs, complete endpoint
+membership, external attachment refusal, physical replacement, retained resume
+selection and the final command's deadline. Run all three reproducer selectors
+together through the bounded supervisor. Static boundary controls also require
+the exact private `/tmp` and `/run` flags and declared byte sizes.
+These are mocked network inspections and static tmpfs configuration assertions,
+not actual egress, guest mount-table, peer-runtime or custody qualification.
+
 ## Wheel-input inspection
 
 `tools/test_installer_dependency_compile.py` covers both ordinary metadata-only

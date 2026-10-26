@@ -87,9 +87,11 @@ record-proven ordinary legacy lifecycle paths, supported legacy platform/path
 overrides and actual-platform fallback refusals. An unsupported mixed
 legacy-parent spelling cannot admit a tuple child that its lifecycle rejects.
 
-Complete registration and Manager entry-point proof, retained-allocation compatibility
-after later customization, the remainder of steps 2-3 and the complete validation
-matrix below remain open. Observed naming facts are not receiving-project or
+Registration and Manager entry-point source proof and retained-allocation
+compatibility after later customization are recorded below. The corrective
+source qualified and released in natural run `40185301956`; the complete
+installed validation matrix remains open.
+Observed naming facts are not receiving-project or
 allocation authority; existing admission receipts and identifiers must not be
 regenerated from a later optional customization.
 
@@ -140,14 +142,33 @@ do not turn a detected physical projection into an explicit binding. Scoped
 adoption checks prospective retained state through the existing repository
 identity and receipt before publishing registration or creating state.
 
+Manager source/entry proof merged in #8929 after current-head approval and
+required CI. Both real engine bootstrap producers preserve configured-binding
+provenance; actual Manager readers, local-only runner entry, source/row/Profiles
+identity and synchronous action routing share the same local context.
+Worker setup publishes the selected tuple; expired or invalidated configuration
+never re-enters the UI event loop. Full OS hostnames, supported legacy keys and
+normalized guest targets retain their separate meanings. The affected Manager
+packet passes 1,031 cases, with an additional 91-case task/launch/refusal packet.
+These are contained source proofs, not installed native/guest acceptance.
+
+Installed entry observation subsequently passed every registered native/guest
+project through the real Manager preparation/bootstrap and optional-map
+readers. Local sources remain ready without SSH, Profiles and row identity
+agree, and current publication IDs are preserved. The
+[current journal](journal/2026/10.25%20progress.md) separates these results and
+read-only lookup observations from the still-open actual allocation/Resume gate.
+
 ## Validation Plan
 
 - [x] Cross Windows, WSL and Linux registration/load source cases with absent,
   empty, unrelated-only and matching customized manifests; ordinary local use
   works without adding entries. Actual command/configuration proof merged
   in #8898; no installed or Manager acceptance is inferred.
-- [ ] Cross Manager local-source selection and launch with the same optional-map
-  shapes, preserving configured names and actual execution authority.
+- [x] Cross Manager local-source selection and launch-entry source behavior with
+  the same optional-map shapes, preserving configured names and actual execution
+  authority. Actual bootstrap/readers/runner and UI-routing proof merged in
+  #8929; installed process and native/guest acceptance remain separate below.
 - [x] Drive actual new tuple creation, tracking, JSON, lookup and resume through
   the corrected boundary, retaining physical/environment/one-term agreement.
   Source matrix merged in #8886; installed native/guest acceptance remains a
@@ -159,7 +180,18 @@ identity and receipt before publishing registration or creating state.
   optional customization is added later; no implicit relabel or owner transfer.
   Bounded source replay/repair merged in #8852, #8857 and #8865; installed
   opt-in acceptance remains independently required below.
-- [ ] Pass bounded decision/ownership regressions and existing guarded Source CI.
+- [x] Pass bounded decision/ownership regressions and existing guarded Source CI.
   Keep actual native, installer, Git and process evidence outside promotion.
-- [ ] Qualify and release the corrective source, verify installed opt-in behavior
-  on all registered native/guest projects, then review ordinary activation.
+- [x] Qualify and release the corrective source. Natural run `40185301956`
+  binds Dev `4eb0f1909d3dc6b99336ba9612219a5aebac035d` to the exact candidate
+  and unit packet; #8956 lands that qualified candidate on Main.
+- [x] Verify installed opt-in behavior on all registered native/guest projects.
+  Eight actual Git allocations and sixteen keyed replays preserve the original
+  tuples and bytes. Six allowed non-preview Resume plans preserve ID, path and
+  nonce; the two source-only contexts retain explicit hosting refusals.
+  Real Manager entry passes all eight contexts. All disposable checkouts and
+  branches are normally removed, with finalized records and receipts retained.
+- [ ] Review ordinary activation separately. Installed opt-in acceptance is not
+  ordinary-default or rollout authorization. Preserve the low-level omitted-mode
+  legacy contract; activate ordinary call sites only through separately reviewed
+  selection.
