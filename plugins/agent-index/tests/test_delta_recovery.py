@@ -42,7 +42,7 @@ def setup_round(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setattr("agent_index.chunking.get_chunker", lambda path: (chunker, "text"))
     monkeypatch.setattr(engine, "_embed_and_store_batch", lambda batch, *a, **k: len(batch))
     store = SimpleNamespace(
-        delete_stale_by_file=lambda *a, **k: 0, delete_by_file=lambda *a: [],
+        reconcile_file_chunks=lambda *a, **k: 0, delete_by_file=lambda *a: [],
     )
 
     def run() -> tuple[int, int, int]:
@@ -88,11 +88,11 @@ def test_retry_only_reuses_files_whose_cleanup_completed(
     connector.delta = SourceDelta(upserts=[first, second], commit="next")
     cleaned: list[str] = []
 
-    def cleanup(source: str, path: str, **kwargs: object) -> int:
+    def cleanup(source: str, path: str, keep_ids: set[str]) -> int:
         cleaned.append(path)
         return 0
 
-    monkeypatch.setattr(store, "delete_stale_by_file", cleanup)
+    monkeypatch.setattr(store, "reconcile_file_chunks", cleanup)
     batches: list[int] = []
 
     def embed(batch: list[object], *args: object, **kwargs: object) -> int:
@@ -104,7 +104,7 @@ def test_retry_only_reuses_files_whose_cleanup_completed(
     with monkeypatch.context() as patch:
         patch.setattr(engine, "_embed_and_store_batch", embed)
         if interruption == "cleanup":
-            patch.setattr(store, "delete_stale_by_file", fail)
+            patch.setattr(store, "reconcile_file_chunks", fail)
         with pytest.raises(RuntimeError, match="fixture"):
             run()
     assert state.sources["alias"].last_commit == "old"
@@ -192,7 +192,7 @@ def test_interrupted_cleanup_retries_real_stale_content_and_vectors(
         )
 
     with monkeypatch.context() as patch:
-        patch.setattr(store, "delete_stale_by_file", fail)
+        patch.setattr(store, "reconcile_file_chunks", fail)
         with pytest.raises(RuntimeError, match="fixture"):
             run()
     assert paths.get_content_hash(old.source, old.file_path) is None

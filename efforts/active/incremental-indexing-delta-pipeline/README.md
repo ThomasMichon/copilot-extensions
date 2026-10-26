@@ -137,7 +137,7 @@ After the reviewed proposal, the operator admitted execution:
 
 ### Phase 4 - Delta writes and derived maintenance
 
-- [ ] Skip identical content/vector upserts; support targeted metadata updates
+- [x] Skip identical content/vector upserts; support targeted metadata updates
   and batched stale/deleted chunk cleanup.
 - [ ] Publish a logical mutation result/generation once per committed delta.
   Only actual projection changes mark FTS or cluster slices dirty.
@@ -409,3 +409,46 @@ source-owner coordination rather than one large rewrite.
 - The first two Phase 5 integration-seam gates are resolved. The linked
   migration recipe describes provider-first consumption; actual consumer
   adoption and staged compatibility qualification remain open.
+
+### 2026-10-26 - Shared consumer seams reviewed and merged
+
+- PR #9067 merged as `66b742c0cb9b7d2bdc888073836ce052394ef64e`
+  after current-head Copilot approval and required green CI. Its intervening
+  rebase did not change agent-index dependencies; the 150-test qualified
+  composition and existing runtime guards remain applicable.
+- Next implement identical-content write avoidance together with explicit
+  keep-ID reconciliation. Timestamp-based cleanup must not delete reused
+  chunks whose content timestamp was intentionally left unchanged.
+  Continue exact hint consumption, hosted acquisition and bounded backfill;
+  the two efforts' complete acceptance gates remain open.
+- Release qualification found the already tracked artifact-build blocker
+  #8983: run `40302569499`, job `121504300687`, refused `setup.py` as
+  unsupported executable/alternate build configuration. Other executing
+  gate/unit jobs passed. Existing recovery PR #9061 owns the admitted-source
+  release repair; do not duplicate it or weaken artifact admission. These
+  reviewed Dev merges are not yet qualified release/consumer-serving proof.
+
+### 2026-10-26 - Canonical content no-ops and explicit file reconciliation
+
+- Opted the shared file pipeline into strict, bounded canonical row comparison.
+  Matching raw text and metadata retain their original timestamp and table
+  version; model-only backfill no longer rewrites canonical content. Legacy
+  direct store callers retain timestamp-refresh defaults and forced rebuilds
+  retain explicit writes.
+- Completed-file cleanup now receives the full keep-ID set, including empty
+  files, rather than using timestamps as evidence of membership. Reads require
+  complete, unique file IDs; obsolete deletions are scoped and batched at 200
+  IDs, retaining canonical retry authority until vector deletion succeeds.
+  Cleanup and pair-receipt pruning still precede file checkpoint publication.
+- Logical processed chunk totals remain compatible even when a content write
+  is skipped. This is not yet the planned per-stage mutation counter API.
+- The bounded native/recovery/consumer packet passed 233 tests. The final
+  strict-comparison packet passed 24 tests after the bounded duplicate-count
+  guard; helper type/lint checks and the runtime install contract passed.
+  Controls cover both layouts, raw-text normalized-hash collisions, metadata,
+  original timestamp/version preservation, new model pairs, retained/new chunks,
+  empty files, failed reads, source/path isolation and partial vector cleanup.
+- Phase 4's content/vector write-avoidance item is resolved. Exact hinted
+  acquisition, hosted pagination recovery, unchanged-item model backfill,
+  per-stage counters and logical/sliced maintenance remain next work; no
+  release, consumer adoption or live-serving gate is claimed.

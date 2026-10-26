@@ -31,7 +31,7 @@ def _run(
         multi_clients={},
         model_profiles=None,
         path_index=pi,
-        reconcile_file=lambda source, path: None,
+        reconcile_file=lambda source, path, keep_ids: None,
         stream_batch_size=2,
         resume_since=resume_since,
         force=force,

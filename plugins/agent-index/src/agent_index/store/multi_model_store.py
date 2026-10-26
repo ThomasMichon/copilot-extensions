@@ -186,9 +186,9 @@ class MultiModelStore(_ItemRepresentationMixin):
     # -- write ---------------------------------------------------------------
 
     @source_write
-    def upsert_content(self, chunks: list[Chunk]) -> int:
+    def upsert_content(self, chunks: list[Chunk], *, skip_identical: bool = False) -> int:
         """Store chunk content in the global content table."""
-        return self._content.upsert(chunks)
+        return self._content.upsert(chunks, skip_identical=skip_identical)
 
     @source_write
     def upsert_vectors(
@@ -286,6 +286,13 @@ class MultiModelStore(_ItemRepresentationMixin):
                 vt.delete_by_chunk_ids(chunk_ids)
         self._content.delete_by_file(source, file_path)
         return chunk_ids
+
+    @source_write
+    def reconcile_file_chunks(self, source: str, file_path: str, keep_ids: set[str]) -> int:
+        """Remove obsolete chunk identities after a complete file has been stored."""
+        from .content_mutations import reconcile_file_chunks
+
+        return reconcile_file_chunks(self, source, file_path, keep_ids)
 
     @source_write
     def delete_stale_by_file(

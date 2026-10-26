@@ -79,7 +79,7 @@ def test_restart_replays_pinned_delta_before_newer_net_delta_can_omit_reverted_f
         return len(batch)
 
     monkeypatch.setattr(engine, "_embed_and_store_batch", embed)
-    store = SimpleNamespace(delete_stale_by_file=lambda *a, **k: 0)
+    store = SimpleNamespace(reconcile_file_chunks=lambda *a, **k: 0)
 
     def run() -> None:
         engine._index_source(

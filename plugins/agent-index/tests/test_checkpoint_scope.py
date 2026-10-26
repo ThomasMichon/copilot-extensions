@@ -54,7 +54,7 @@ def round_fixture(tmp_path, monkeypatch, *, source_aware=True, new=True):
     monkeypatch.setattr(engine, "selected_layout", lambda: object() if source_aware else None)
     monkeypatch.setattr(engine, "_embed_and_store_files", embed)
     store = SimpleNamespace(
-        delete_stale_by_file=lambda *a, **k: 0, delete_by_file=delete,
+        reconcile_file_chunks=lambda *a, **k: 0, delete_by_file=delete,
     )
 
     def run(*, full=False):

@@ -55,7 +55,7 @@ class Store:
     def get_vector_table(self, model: str) -> Table:
         return self.tables[model]
 
-    def upsert_content(self, chunks: list[Chunk]) -> int:
+    def upsert_content(self, chunks: list[Chunk], *, skip_identical: bool = False) -> int:
         return len(chunks)
 
     def upsert_vectors(self, model: str, chunks: list[Chunk], vectors: np.ndarray) -> int:
@@ -308,7 +308,7 @@ def test_cleanup_failure_retries_without_reembedding_and_empty_file_prunes_recei
     entry = FileEntry(item.file_path, item.content, item.language, item.source)
     fail = True
 
-    def cleanup(source: str, path: str) -> None:
+    def cleanup(source: str, path: str, keep_ids: set[str]) -> None:
         if fail:
             raise RuntimeError("cleanup interrupted")
 

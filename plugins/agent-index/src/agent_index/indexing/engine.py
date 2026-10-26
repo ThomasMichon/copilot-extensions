@@ -622,8 +622,6 @@ def _apply_source_manifest(
         Tuple of (chunks_stored, chunks_deleted, files_crawled).
     """
     print(f"Indexing source: {source_name}")
-    run_start = time.time()
-
     if manifest.is_empty:
         print(f"  No changes detected for {source_name}")
         # Still update commit marker so we don't re-crawl next time
@@ -647,9 +645,9 @@ def _apply_source_manifest(
     total_stored = 0
     stale_cleaned = 0
 
-    def reconcile_file(src: str, path: str) -> None:
+    def reconcile_file(src: str, path: str, keep_ids: set[str]) -> None:
         nonlocal stale_cleaned
-        stale_cleaned += multi_store.delete_stale_by_file(src, path, before=run_start)
+        stale_cleaned += multi_store.reconcile_file_chunks(src, path, keep_ids)
 
     if manifest.upserts:
         if progress_cb:
@@ -742,7 +740,7 @@ def _embed_and_store_files(
     multi_clients: dict[str, EngineClient],
     model_profiles: dict[str, ModelProfile] | None = None,
     path_index: PathIndex,
-    reconcile_file: Callable[[str, str], None],
+    reconcile_file: Callable[[str, str, set[str]], None],
     stream_batch_size: int = STREAM_BATCH_SIZE,
     progress_cb: ProgressCallback | None = None,
     resume_since: float | None = None,
@@ -784,8 +782,9 @@ def _embed_and_store_files(
         for chunk in batch:
             retained.setdefault((chunk.source, chunk.file_path), set()).add(chunk.chunk_id)
         for source, path, _hash, _count in pending:
-            reconcile_file(source, path)
-            coverage.retain(source, path, retained.get((source, path), set()))
+            keep_ids = retained.get((source, path), set())
+            reconcile_file(source, path, keep_ids)
+            coverage.retain(source, path, keep_ids)
         path_index.mark_indexed_batch(pending)
         pending = []
 
@@ -804,6 +803,7 @@ def _embed_and_store_files(
             model_profiles,
             stream_batch_size=stream_batch_size,
             coverage=coverage, force=force, before_embed=before_store,
+            skip_identical_content=not force,
         )
         if pending:
             _checkpoint()
@@ -868,6 +868,7 @@ def _embed_and_store_batch(
     coverage: EmbeddingCoverage | None = None,
     force: bool = False,
     before_embed: Callable[[], None] | None = None,
+    skip_identical_content: bool = False,
 ) -> int:
     """Embed a batch of chunks via the engine(s) and upsert into stores.
 
@@ -889,9 +890,12 @@ def _embed_and_store_batch(
     for i in range(0, len(chunks), stream_batch_size):
         sub = chunks[i : i + stream_batch_size]
 
-        # Store content once (canonical chunk count)
-        content_count = multi_store.upsert_content(sub)
-        total += content_count
+        # Logical processed count is independent of physical content mutations.
+        if skip_identical_content:
+            multi_store.upsert_content(sub, skip_identical=True)
+        else:
+            multi_store.upsert_content(sub)
+        total += len(sub)
 
         # Embed with each model's engine, routing by content type
         for model_id, client in multi_clients.items():

@@ -1,0 +1,80 @@
+"""Strict canonical comparisons and identity-scoped file reconciliation."""
+
+from __future__ import annotations
+
+import json
+from typing import TYPE_CHECKING, Any
+
+from .repo_filter import _sql_str
+
+if TYPE_CHECKING:
+    from agent_index.chunking.base import Chunk
+
+    from .multi_model_store import MultiModelStore
+
+BATCH_SIZE = 200
+
+
+def content_record(chunk: Chunk) -> dict[str, Any]:
+    """Canonical persisted fields, excluding the physical write timestamp."""
+    return {
+        "chunk_id": chunk.chunk_id,
+        "source": chunk.source,
+        "file_path": chunk.file_path,
+        "chunk_type": chunk.chunk_type,
+        "language": chunk.language,
+        "content": chunk.content,
+        "content_hash": chunk.content_hash,
+        "line_start": chunk.line_start,
+        "line_end": chunk.line_end,
+        "metadata": json.dumps(chunk.metadata, sort_keys=True) if chunk.metadata else "",
+    }
+
+
+def changed_chunks(table: Any, chunks: list[Chunk]) -> list[Chunk]:
+    """Compare bounded raw rows; failed or incomplete reads never imply absence."""
+    changed: list[Chunk] = []
+    for start in range(0, len(chunks), BATCH_SIZE):
+        batch = chunks[start:start + BATCH_SIZE]
+        wanted = {chunk.chunk_id: content_record(chunk) for chunk in batch}
+        if len(wanted) != len(batch):
+            raise ValueError("Duplicate canonical chunk IDs in content batch")
+        ids = ", ".join(f"'{_sql_str(cid)}'" for cid in wanted)
+        predicate = f"chunk_id IN ({ids})"
+        count = table.count_rows(predicate)
+        if count > len(wanted):
+            raise RuntimeError("Incomplete or duplicate canonical chunk lookup")
+        rows = (
+            table.search().where(predicate).select(list(next(iter(wanted.values()))))
+            .limit(max(count, 1)).to_list()
+        )
+        stored = {row["chunk_id"]: row for row in rows}
+        if len(rows) != count or len(stored) != count or not stored.keys() <= wanted.keys():
+            raise RuntimeError("Incomplete or duplicate canonical chunk lookup")
+        changed.extend(chunk for chunk in batch if stored.get(chunk.chunk_id) != wanted[chunk.chunk_id])
+    return changed
+
+
+def reconcile_file_chunks(
+    store: MultiModelStore, source: str, file_path: str, keep_ids: set[str],
+) -> int:
+    """Delete only obsolete file IDs, keeping canonical rows until vectors succeed."""
+    content = store.content_store
+    stale = sorted(set(content.get_chunk_ids_by_file(source, file_path)) - keep_ids)
+    if not stale:
+        return 0
+    scope = f"source = '{_sql_str(source)}' AND file_path = '{_sql_str(file_path)}'"
+    table = content._get_or_create_table()
+    for start in range(0, len(stale), BATCH_SIZE):
+        batch = stale[start:start + BATCH_SIZE]
+        ids = ", ".join(f"'{_sql_str(cid)}'" for cid in batch)
+        predicate = f"{scope} AND chunk_id IN ({ids})"
+        if store._source_domain is not None:
+            from .source_projection import delete_canonical
+
+            delete_canonical(content, predicate)
+        else:
+            for model in store.model_ids:
+                store.get_vector_table(model).delete_by_chunk_ids(batch)
+            table.delete(predicate)
+    return len(stale)

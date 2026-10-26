@@ -183,10 +183,18 @@ Engine readiness is deferred until missing-pair selection produces a nonempty
 embedding plan. An empty delta, wholly reused file set or metadata-only update
 with verified pair coverage does not start embedding engines. Full reindexing
 forces pair writes, except for files already committed within its retry window.
-Reused files are excluded from timestamp-based stale cleanup. Changed files
-still refresh canonical content for that cleanup; identical-content write
-avoidance and keep-ID reconciliation remain subsequent work. In the selected
-source layout, content updates change vector provenance only when source or
+Completed changed files reconcile against their explicit retained chunk IDs
+before publishing checkpoints, including files that now produce no chunks.
+Unchanged canonical rows keep their original physical write timestamp and table
+version: bounded strict comparisons cover raw text and every persisted metadata
+field, not only the normalized content hash. Failed or incomplete reads cannot
+authorize rewrites or cleanup. Cleanup reads only that file's IDs and deletes
+obsolete IDs in batches; vector deletion precedes canonical deletion for retry.
+Logical processed chunk counts remain independent of actual content writes.
+Direct store calls still refresh timestamps by default for legacy callers;
+`skip_identical=True` is opt-in and requires identity-based rather than
+timestamp-based cleanup. Forced full rebuilds still write every presented row.
+In the selected source layout, content updates change vector provenance only when source or
 language actually differs, preserving vector table versions for metadata-only
 updates. Global vector-gap repair remains owned by its existing mechanism.
 

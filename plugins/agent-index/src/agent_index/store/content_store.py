@@ -179,42 +179,37 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin):
     # -- write ---------------------------------------------------------------
 
     @source_write
-    def upsert(self, chunks: list[Chunk]) -> int:
+    def upsert(self, chunks: list[Chunk], *, skip_identical: bool = False) -> int:
         """Insert or update chunk content by chunk_id.
 
-        Returns the number of rows written.
+        Returns actual rows written. Opt-in reuse requires keep-ID reconciliation,
+        not timestamp-based cleanup.
         """
+        from .content_mutations import BATCH_SIZE, changed_chunks, content_record
+
+        if not chunks:
+            return 0
         table = self._get_or_create_table()
         if self._source_domain is not None:
             from .source_projection import check_content_sources
-            check_content_sources(self, chunks)
+            for start in range(0, len(chunks), BATCH_SIZE):
+                check_content_sources(self, chunks[start:start + BATCH_SIZE])
+        if skip_identical:
+            chunks = changed_chunks(table, chunks)
+            if not chunks:
+                return 0
         now = time.time()
 
-        records = [
-            {
-                "chunk_id": c.chunk_id,
-                "source": c.source,
-                "file_path": c.file_path,
-                "chunk_type": c.chunk_type,
-                "language": c.language,
-                "content": c.content,
-                "content_hash": c.content_hash,
-                "line_start": c.line_start,
-                "line_end": c.line_end,
-                "metadata": json.dumps(c.metadata, sort_keys=True) if c.metadata else "",
-                "indexed_at": now,
-            }
-            for c in chunks
-        ]
+        records = [dict(content_record(c), indexed_at=now) for c in chunks]
 
         chunk_ids = [c.chunk_id for c in chunks]
         if self._source_domain is not None:
             self._source_domain.effect(f"content-upsert:{self._table_name}")
         try:
-            id_list = ", ".join(f"'{cid}'" for cid in chunk_ids)
+            id_list = ", ".join(f"'{_sql_str(cid)}'" for cid in chunk_ids)
             table.delete(f"chunk_id IN ({id_list})")
         except Exception:
-            if self._source_domain is not None:
+            if self._source_domain is not None or skip_identical:
                 raise
             pass
 
@@ -333,7 +328,7 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin):
         if not count:
             return []
         rows = table.search().where(predicate).select(["chunk_id"]).limit(count).to_list()
-        if len(rows) != count:
+        if len(rows) != count or len({r["chunk_id"] for r in rows}) != count:
             raise RuntimeError("Incomplete file chunk lookup")
         return [r["chunk_id"] for r in rows]
 

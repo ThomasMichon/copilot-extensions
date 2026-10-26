@@ -457,7 +457,7 @@ def test_queued_source_identity_publishes_only_after_success(queued_source, monk
             elif failure == "embed":
                 patch.setattr(EngineClient, "embed_texts", fail)
             else:
-                patch.setattr(MultiModelStore, "delete_stale_by_file", fail)
+                patch.setattr(MultiModelStore, "reconcile_file_chunks", fail)
             code, task = run(full=True)
             assert code == 0 and task.status == "partial", failure
         assert IndexState.load(config.state_file).stored_families == {"git:alias": "git:old"}
