@@ -109,6 +109,70 @@ def test_content_map_surfaces_enumeration_failure_after_prior_results(policy):
     assert settled == [1]
 
 
+@pytest.mark.parametrize("reader_failure", [False, True])
+def test_content_map_defers_shutdown_cancellation_until_readers_settle(
+    policy, monkeypatch, reader_failure,
+):
+    from concurrent.futures import ThreadPoolExecutor
+    import time
+
+    entered = threading.Event()
+    released = threading.Event()
+    settled = threading.Event()
+    cancellation = KeyboardInterrupt("main-thread shutdown interruption")
+    primary = OSError("original reader failure")
+    pools = []
+    shutdowns = []
+
+    class InterruptedPool(ThreadPoolExecutor):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            pools.append(self)
+
+        def shutdown(self, *args, **kwargs):
+            shutdowns.append(settled.is_set())
+            if len(shutdowns) == 1:
+                raise cancellation
+            return super().shutdown(*args, **kwargs)
+
+    def read(value):
+        if value == 0:
+            assert entered.wait(timeout=5)
+            if reader_failure:
+                raise primary
+        if value == 1:
+            entered.set()
+            try:
+                assert released.wait(timeout=5)
+            finally:
+                settled.set()
+        return value
+
+    def release():
+        assert entered.wait(timeout=5)
+        time.sleep(0.1)
+        released.set()
+
+    releaser = threading.Thread(target=release)
+    monkeypatch.setattr(policy._configuration, "ThreadPoolExecutor", InterruptedPool)
+    releaser.start()
+    caught = None
+    settled_at_exit = False
+    try:
+        policy._bounded_content_map(read, range(4))
+    except BaseException as error:
+        caught = error
+        settled_at_exit = settled.is_set()
+    finally:
+        released.set()
+        releaser.join(timeout=5)
+        for pool in pools:
+            ThreadPoolExecutor.shutdown(pool, wait=True)
+    assert caught is (primary if reader_failure else cancellation)
+    assert settled_at_exit
+    assert shutdowns == [True, True]
+
+
 def test_retained_case_distinct_files_are_both_verified(policy, tmp_path, monkeypatch):
     source = _package(tmp_path / "source", "fixture-source")
     upper, lower = source / "A.txt", source / "a.txt"

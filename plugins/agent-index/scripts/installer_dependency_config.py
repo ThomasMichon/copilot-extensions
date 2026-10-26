@@ -61,7 +61,10 @@ def bounded_content_map(check, inputs):
     """Settle four reads at a time, reporting failures in input order."""
     results = []
     iterator = iter(inputs)
-    with ThreadPoolExecutor(max_workers=4, thread_name_prefix="retained-content") as readers:
+    readers = ThreadPoolExecutor(max_workers=4, thread_name_prefix="retained-content")
+    pending = []
+    failed = False
+    try:
         while True:
             pending = []
             input_failure = None
@@ -78,6 +81,30 @@ def bounded_content_map(check, inputs):
                 raise input_failure
             if len(pending) < 4:
                 return results
+    except BaseException:
+        failed = True
+        raise
+    finally:
+        # A cancelled thread join is not proof that its reader has finished.
+        interruption = None
+        while True:
+            try:
+                for future in pending:
+                    if future.done():
+                        continue
+                    try:
+                        future.result()
+                    except BaseException as error:
+                        if isinstance(error, (KeyboardInterrupt, SystemExit)):
+                            interruption = interruption or error
+                        if not future.done():
+                            raise
+                readers.shutdown(wait=True)
+                break
+            except (KeyboardInterrupt, SystemExit) as error:
+                interruption = interruption or error
+        if interruption is not None and not failed:
+            raise interruption
 
 
 def retained_source_hashes(projects, mirror, *, native_path, check_time, error_type, content_map):
