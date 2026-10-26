@@ -227,11 +227,10 @@ class WorktreesRuntime:
             )
         except ProjectionUnavailable as exc:
             with self._lock:
-                wake = self._admitting and project not in self._unready_demand
-                if wake:
+                if self._admitting and project not in self._unready_demand:
                     self._unready_demand.add(project)
-            if wake and self._wake is not None:
-                self._wake.set()
+                    if self._wake is not None:
+                        self._wake.set()
             return self._failure("unready", publication_error or str(exc))
         except ProjectionError as exc:
             return self._failure("invalid-request", str(exc))

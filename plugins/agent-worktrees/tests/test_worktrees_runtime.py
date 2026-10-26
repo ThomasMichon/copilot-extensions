@@ -356,3 +356,30 @@ def test_worktrees_runtime_slow_progress_cannot_extend_the_read_deadline():
         server.shutdown()
         server.server_close()
         thread.join(timeout=1)
+
+
+def test_unavailable_wake_remains_inside_admission_fence(demand_owner, monkeypatch):
+    owner, _clock, wakes = demand_owner
+    entered = threading.Event()
+    finish = threading.Event()
+    original = owner._wake.set
+
+    def paused_wake():
+        entered.set()
+        assert finish.wait(timeout=5), "fixture wake was not released"
+        original()
+
+    monkeypatch.setattr(owner._wake, "set", paused_wake)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        response = pool.submit(owner.handle, request())
+        try:
+            assert entered.wait(timeout=5), "reader did not reach notification"
+            acquired = owner._lock.acquire(blocking=False)
+            if acquired:
+                owner._lock.release()
+        finally:
+            finish.set()
+        result = response.result(timeout=5)
+    assert not acquired, "close_admission could return before the accepted wake is sent"
+    assert result["error"]["code"] == "unready"
+    assert len(wakes) == 1
