@@ -144,6 +144,10 @@ never silently ignored as a passing observation. Polling is 20 ms; observer
 failure or an observed coverage gap over 500 ms blocks the packet. Window
 titles, raw environment and executable paths are not copied into the observation
 packet.
+An initially absent foreground window blocks observation startup. A later NULL
+or disappeared foreground identity is retained as an ambiguous violation while
+observation continues; Win32 permits NULL during activation transitions and
+does not define a last-error failure contract for `GetForegroundWindow`.
 
 Success requires actual two-cycle timing, exact registered-command execution,
 the contained-control Job-closure witness and surviving authenticated worker

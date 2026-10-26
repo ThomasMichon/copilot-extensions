@@ -42,6 +42,15 @@ def main() -> int:
                 "acquisition_budget": os.environ.get(
                     "WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC",
                 ),
+                "session_credentials_present": any(os.environ.get(key) for key in (
+                    "GH_TOKEN", "GITHUB_TOKEN", "AGENT_WORKTREES_AHP_AUTH_TOKEN",
+                )),
+                "git_override_present": any(key in os.environ for key in (
+                    "GIT_SSH_COMMAND", "GIT_DIR", "GIT_CONFIG_COUNT",
+                )),
+                "askpass_present": "SSH_ASKPASS" in os.environ,
+                "askpass_requirement": os.environ.get("SSH_ASKPASS_REQUIRE"),
+                "unattended": os.environ.get("CE_UPDATE_UNATTENDED"),
             }) + "\n")
             stream.flush()
         print("synthetic canonical updater started", file=sys.stderr, flush=True)
