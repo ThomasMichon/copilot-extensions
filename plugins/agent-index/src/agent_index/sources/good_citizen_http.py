@@ -42,6 +42,7 @@ class ApiResult:
     data: Any
     headers: httpx.Headers
     not_modified: bool = False
+    request: httpx.Request | None = None
 
 
 class GoodCitizenSession:
@@ -88,9 +89,12 @@ class GoodCitizenSession:
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
         etag: bool = True,
+        retry_status: Callable[[httpx.Response], bool] | None = None,
     ) -> ApiResult:
         """GET JSON while applying throttle, retry, rate-limit, and ETag handling."""
-        return self.request_json("GET", path, params=params, headers=headers, etag=etag)
+        return self.request_json(
+            "GET", path, params=params, headers=headers, etag=etag, retry_status=retry_status,
+        )
 
     def post_json(
         self,
@@ -119,6 +123,7 @@ class GoodCitizenSession:
         json: Any | None = None,
         headers: dict[str, str] | None = None,
         etag: bool = False,
+        retry_status: Callable[[httpx.Response], bool] | None = None,
     ) -> ApiResult:
         """Request JSON with bounded retries and upstream-directed backoff."""
         params = {key: value for key, value in (params or {}).items() if value is not None}
@@ -153,9 +158,13 @@ class GoodCitizenSession:
             self._last_request_at = time.monotonic()
 
             if response.status_code == httpx.codes.NOT_MODIFIED:
-                return ApiResult(data=None, headers=response.headers, not_modified=True)
+                return ApiResult(
+                    data=None, headers=response.headers, not_modified=True, request=response.request,
+                )
 
-            if response.status_code in self._retry_statuses:
+            if response.status_code in self._retry_statuses and (
+                retry_status is None or retry_status(response)
+            ):
                 if retries >= self._max_retries:
                     response.raise_for_status()
                 self._sleep_for_retry(response, retries)
@@ -173,7 +182,7 @@ class GoodCitizenSession:
             if etag and (response_etag := response.headers.get("ETag")):
                 self._etag_cache[cache_key] = response_etag
             self._respect_rate_limit(response)
-            return ApiResult(data=response.json(), headers=response.headers)
+            return ApiResult(data=response.json(), headers=response.headers, request=response.request)
 
     def paginate_continuation(
         self,

@@ -200,44 +200,36 @@ Each space owns its project/worktree registrations and settings independently.
 space key, not that group or the transport alias. Derived agent names preserve
 the registered keys, including the native Windows entry.
 
-For a topology using explicit spaces, start or adopt bridge from the registered
-source worktree. Bridge derives the daemon's key from that project's existing
-machine configuration through Worktrees' versioned `get execution-identity`
-read, using the same-installation peer launcher. There is no second bridge
-machine setting to maintain. Direct daemon launch captures the stable source
-repository before detach and working-directory changes. Adoption records that
-source repository automatically as `topologies.<profile>.source_repo`, so a
-supervised restart can recompute the identity without the caller's cwd.
-The private detach argument is passed only through the current/installed
-Python module launcher. Unverified legacy PATH launchers retain their original
-arguments; they do not certify support for the new source-context contract.
-An adopted `source_repo` selects that source project's configuration ahead of
-the topology's legacy control-plane fallback, even when both locators exist.
-For older profiles without `source_repo`, the declared control-plane project precedes the repository
-that happens to store shared topology; an in-repository topology source is the
-fallback when no control-plane project is declared. These are configuration
-locators, not identity authority.
-An originating registered source project takes precedence over profile locators;
-profiles supply context for a supervised or neutral-directory start. Without an
-originating project binding, all applicable profile bindings must agree.
+Bridge startup does not require a source repository, a configured source-project
+machine binding, or Worktrees' `get execution-identity` reader. It matches the
+current hostname against the adopted topology and filters by the actual runtime
+platform, keeping native Windows, WSL and Linux spaces distinct. No match leaves
+the daemon without a local machine selection; named remote targets remain
+available. Ambiguous matches are reported rather than choosing an arbitrary
+space. Automatic discovery considers all same-platform host-family candidates,
+even when one registered key exactly matches the observed hostname. A host
+registered only for another platform remains remote-only, including when
+adopted profiles list native and guest spaces separately.
+The combined inventory supplies one in-memory local selection reused for each
+profile and discovery/coverage pass; no derived selector is persisted. Unrelated
+scoped remotes do not change a selected unscoped host's legacy local transport.
+Scoped discovery never uses SSH/selection aliases as OS-hostname evidence, and
+an explicit different hostname is not overridden by a matching key or group label.
+Scoped remote-only selections retain no loopback route during same-platform
+runtime handoff, including legacy-projected spaces.
 
-Source configuration is read again for each resolver build; a derived key is
-never written into `local_execution_space`. The key must be canonical, exist
-in the adopted topology and match the actual daemon platform. Contradictory
-adopted sources, missing bindings, authority-command errors and platform
-mismatches fail explicitly. Hostnames, display labels, physical-host grouping,
-SSH aliases and ambient owner-reference variables do not select a local space.
-Only the recognized versioned contract with explicit configured-machine
-provenance can supply a derived key. An older scalar `get machine` result is
-never sufficient, even when a detected hostname happens to equal a registry key.
+An optional `local_execution_space` in the Bridge service configuration selects
+a canonical registered key explicitly, for example when several same-platform
+spaces share one hostname. That key must exist in the combined topology, select
+a registered space in a scoped topology, and match the daemon's actual platform.
+Invalid selectors fail explicitly. Detection never writes a selector or changes
+project configuration, and adopted `source_repo` metadata does not impose an
+identity prerequisite.
 
-Standalone bridge operation does not require Worktrees. Unscoped/legacy topology
-retains its existing behavior, and an existing `local_execution_space` selector
-remains supported when no project authority is available. When authority is
-available, that legacy selector must agree with it; it never overrides a
-refusal or contradiction. A standalone explicit-space topology with neither an
-authoritative project binding nor an existing selector reports the missing
-binding instead of guessing a space.
+This is discovery and transport locality, not workspace mutation authority.
+Receiving owners retain their existing project, execution-space, session and
+resource ownership checks. Removing the startup prerequisite does not authorize
+cross-environment allocation, takeover or replay.
 Local-agent/provider-only configurations with no machine inventory do not select
 an execution space at all: a residual legacy selector is inert in that mode,
 and no registered-space authority is inferred from it.

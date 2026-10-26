@@ -14,7 +14,7 @@ Target sshd, reverse connectors, managed installation, provider enrollment,
 deployment and preserving migration retain their existing owners and require
 separate qualification.
 
-## Selected policy and automatic admission
+## Selected policy and admission
 
 The deployment owner supplies strict bounded schema-v1 `agent-ssh.service` JSON.
 Required fields are `revision`, absolute `data_dir`, `fleet`, `gateway`, `slot`,
@@ -28,6 +28,10 @@ Each binding has exact `machine`, `environment`, `principal`, positive
 unique. Current Gateway authentication and caller grants still apply; a body
 label cannot select another identity. Only the configured principal can enroll
 its own declared machine/environment/generation under configured SSH policy.
+Without `enrollment_policy`, configured-binding automatic admission retains
+its existing request and directory-response contract. The optional explicit
+peer policy below adds a separate approval requirement; it does not replace
+Gateway authentication or declared bindings.
 
 An enrollment provides only canonical Ed25519 `public_key` and target
 `host_key` (nullable without inbound service), plus its exact binding and a
@@ -63,13 +67,107 @@ A first-start interruption may leave only the validated canonical lease file.
 That otherwise empty directory can retry through the same exclusive OS lease;
 a live holder or unrelated retained contents are never displaced or adopted.
 
+## Optional explicit peer approval
+
+Select this additional nonsecret configuration only on a capable service:
+
+```json
+{
+  "enrollment_policy": {
+    "mode": "peer-approval",
+    "recovery_principals": ["operator-recovery"]
+  }
+}
+```
+
+Recovery principals must be distinct from ordinary machine principals and
+retain their existing Gateway authentication and route grants. An empty list
+disables bootstrap/recovery; the service never invents an authority or acquires
+a credential. A deployment can compose its selected Vault/provider owner for
+that identity without giving this service private-key custody.
+
+The running `GET /enrollment` contract identifies
+`agent-ssh.enrollment-contract` version 1 and the selected policy.
+`fleet_manager.ssh_approval.PeerEnrollmentClient` requires this actual peer to
+advertise `peer-approval` before sending an effectful request. Its enrollment
+body also carries `enrollment_policy: "peer-approval"`, enforced at the store
+boundary, so a provider/configuration rollback after discovery cannot silently
+admit the request under the automatic policy. There is no compatibility replay.
+An older strict configuration reader rejects the optional policy; an old
+service without this API or a current service in automatic mode gives an
+explicit unsupported/not-selected result before the client submits anything.
+
+For this selected mode:
+
+| Operation | Authority and result |
+|-----------|----------------------|
+| `POST /enroll` | The authenticated declared requester submits its own public keys under the original request ID; HTTP 202 is durable pending state, not admission |
+| `GET /enrollment/requests/<request_id>` | The requester inspects its original pending/completed outcome |
+| `GET /enrollment/pending?after=<principal>` | An admitted peer or configured recovery authority inspects byte-bounded pages of pending public candidates; an unadmitted requester sees only its own |
+| `POST /enrollment/approve` | An already enrolled, currently configured peer approves exact `requester`, `request_id` and `fingerprint`; self-approval and caller-supplied approver fields refuse |
+| `POST /enrollment/recover` | Only a configured recovery principal may decide the exact candidate, additionally supplying `confirm: true` and a nonempty bounded `reason` |
+
+The candidate fingerprint is SHA-256 over canonical public candidate data:
+service identity, authenticated requester, complete target binding, policy
+digest, and client/host/optional relay public keys. Request IDs correlate
+delivery/retries separately; they do not change the public identity fingerprint.
+An approval covers that exact candidate, including equivalent pending request
+IDs, not another target or changed generation/key. The service derives the
+approver from authenticated caller context, never from a body label.
+
+Only activation commits public directory and relay authorization eligibility.
+Pending submission does neither and sends no directory-change notification.
+The decision, original request and directory update share the existing SQLite
+transaction, with caller withdrawal checked before commit. Native relay writes
+retain their existing post-commit reconciliation and original-request retry
+semantics. A successful retry wakes directory readers to recheck a previously
+committed revision; it does not mint another revision. Authentication, admission
+and actual native reach remain distinct.
+
+`agent-ssh.enrollment-result` version 1 reports `pending`, `active`, or
+`superseded`. Pending state has no admission decision. An active result
+identifies current public admission; a superseded completed decision remains
+inspectable without claiming current admission.
+An incumbent admitted before selecting this policy is reported as `retained`,
+not falsely relabeled peer-approved. Selecting the policy does not rotate or
+erase those existing keys. Changed pending bindings/policy refuse stale
+decisions; changing an admitted key still requires a new selected generation.
+Observing an unchanged admitted incumbent durably records that derived retained
+outcome in the existing transaction; it does not grant admission. Equivalent
+request IDs reuse an existing candidate decision instead of inventing another
+revision. Caller withdrawal before commit rolls back any such receipt repair.
+An inbound-enabled enrollment requires its host pin before the original request
+or pending candidate is journaled, so a corrected retry can use that same request
+ID. Outbound-only clients may still omit a host pin.
+A relay key equal to that candidate's client key is likewise rejected before
+journaling; approval cannot make that intrinsically conflicting identity valid.
+
+Enrollment receipts include the decision's original `directory_revision`, not
+an embedded global directory. Read the current directory through its existing
+API. The complete receipt is byte-checked before its transaction commits, and
+later directory growth cannot make that original outcome too large to retrieve.
+Recovery reasons are nonblank and at most 512 characters including padding;
+control characters are refused.
+
+Pending records share the existing bounded original-request journal. Listing
+returns the latest valid unapproved candidate per declared principal in
+principal order, within the existing 32 KiB response bound. A nonnull `next`
+cursor is the last returned principal; pass it as `after` (or
+`PeerEnrollmentClient.pending(after=cursor)`) until `next` is null.
+Each page reflects current authorized state; refresh from the first page for
+concurrent changes. No cursor grants authority or consumes a request, and
+earlier original IDs remain queryable.
+Unavailable approvers, missing credentials, transport errors and locked
+credential owners never trigger recovery automatically. Recovery is a separate
+explicit action, not a fallback in the client.
+
 ## Gateway routes and notifications
 
 Declare the service's namespace, for example `/ssh`, with `GET` and `POST` and
 appropriate caller grants in the existing Gateway manifest. The Gateway strips
 that namespace before dispatch:
 
-- `POST /enroll` automatically admits only the authenticated configured binding.
+- `POST /enroll`, in the default automatic mode, admits only the authenticated configured binding.
   The enrollment and its new public-directory revision commit together.
   An onboarding announcement is not proof that the new machine's listener or
   reverse connection is ready. Conflicting content under the original request
@@ -119,6 +217,14 @@ artifact flow, then the existing lifecycle/container manager invokes:
 ```text
 python -I -m agent_ssh_service --config <absolute-service-policy.json>
 ```
+
+The foreground entry point retains one daemon-instance admission through the
+registered service and any unsettled native-relay retirement. Production has
+no expiry; explicitly test-owned instances use their caller's lease. The native
+`sshd -D` process remains a supervised child under its original
+`NativeChildCustody`, not a second daemon owner. Container images must provide
+the selected UID's real passwd/home identity and a writable private state
+location; changing `HOME` alone does not select the instance registry.
 
 Credential references are loaded through Fleet's existing custody adapter.
 Current access tokens are reread for each actual admission; no provider login,
@@ -188,8 +294,13 @@ base, a complete wheel closure and an exact-version SHA-256 `requirements.lock`.
 Build from a dedicated context containing those inputs, not a checkout or a
 home directory. Installation is offline and hash-required; UID/GID 65532 runs
 with a read-only image filesystem, bounded writable `/tmp` and an owner-private
-persistent volume below `/data`. Mount configuration, trust and credential
-references separately, read-only. No public port or Docker socket is needed
+persistent volume below `/data`.
+The image provisions the selected UID's real passwd home as private writable
+`/data`; an existing UID 65532 retains its name and prior-home contents.
+The native-relay prerequisite check still runs first and requires its approved
+base to supply the selected account and OpenSSH prerequisites already.
+Mount configuration, trust and credential references separately, read-only.
+No public port or Docker socket is needed
 by the control-plane-only container. Native deployments use the same recipe
 with `NATIVE_RELAY=true` and an approved base already containing OpenSSH,
 `/bin/false`, `/run/sshd` and the selected non-root account (UID 65532).

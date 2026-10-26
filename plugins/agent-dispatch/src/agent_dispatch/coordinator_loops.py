@@ -198,6 +198,7 @@ def _spawn_self_deploy(python_path: Any) -> None:
     # so it must not pin whatever checkout was current when the check fired.
     spawn_dispatch_daemon(
         cmd,
+        finite_worker=True,
         log_name="logs/self-deploy.log",
         env={**os.environ, **windowless_python_env(python_path)},
         console_children=False,

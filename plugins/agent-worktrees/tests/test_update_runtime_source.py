@@ -127,6 +127,27 @@ def test_old_prepared_helper_refuses_instead_of_ignoring_pin(selected):
 
 
 @pytest.mark.parametrize("kind", ["engine", "module", "registered"])
+@pytest.mark.parametrize("fault", ["", "source", "completion", "selector"])
+def test_selected_repair_generation_preserves_exact_source_currentness(selected, kind, fault):
+    owner, artifact, runtime, source = selected
+    version = source.version + ".repair." + "d" * 32
+    slot = runtime / "versions" / version
+    slot.mkdir(parents=True)
+    (slot / ".install-complete.json").write_text(json.dumps(
+        {} if fault == "completion" else {
+            "version": version, "completed_at": "2026-01-01T00:00:00Z", "pid": os.getpid(),
+        },
+    ))
+    manifest = json.loads(source.identity)
+    manifest.update(service="agent-worktrees", runtime_version=version, venv=str(slot))
+    if fault == "source":
+        manifest["runtime_source"]["source_commit"] = "b" * 40
+    (runtime / "deploy-manifest.json").write_text(json.dumps(manifest))
+    (runtime / "current-version").write_text("foreign" if fault == "selector" else version)
+    assert plan(kind, owner, source).status == ("" if fault else "SKIPPED (current)")
+
+
+@pytest.mark.parametrize("kind", ["engine", "module", "registered"])
 def test_prepared_source_cannot_weaken_its_own_machine_gate(selected, kind, monkeypatch):
     owner, artifact, runtime, source = selected
     monkeypatch.setattr(reconcile, "manifest_runtime_scope", lambda path: (

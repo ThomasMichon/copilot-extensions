@@ -34,7 +34,9 @@ resource acquisition and identity bindings remain external adapters.
 | Existing #6241 owner | Operation admission and receipt authority | Existing Fleet Control V2 coordination |
 | `wobbly-contraption` | Retained construction/admission/lifecycle and setup-consumer integration, not generic artifact publication | Existing #6030 / #6240 / #6424 source custody |
 | `crooked-circuit` | Bounded SSH-service peer-approval source, client contract and isolated qualification | #8888; [peer-approval plan](peer-approval.md) |
-| `squeaky-buckle` | Bounded foreground Fleet SSH directory/local-writer consumer after merged #8000; no installation or deployment | #6681 source reservation6394061625 |
+| `squeaky-buckle` | Completed bounded foreground Fleet SSH directory/local-writer consumer after merged #8000; no installation or deployment | Merged #8910; bounded source reservation settled |
+| `restless-actuator` | Non-editable installed SSH runtime and source-denying native consumer qualification | #6681 source reservation6397956631 |
+| `patient-bearing` | Operator-allocated continuity-backed public-key machine enrollment and normal Manager/engine setup consumer | #6681 source allocation6408998175; [implementation boundary](continuity-bootstrap.md#selected-executable-slice) |
 
 ## Coordination
 
@@ -51,12 +53,22 @@ resource acquisition and identity bindings remain external adapters.
   Gateway/SSH onboarding integration and validation matrix.
 - No edits to reserved installer, authentication, ledger, controller or shared
   CLI files before their retained owners agree the integration seam.
+- The operator subsequently allocated the bounded missing first-touch enrollment
+  operation and its normal setup consumer to `patient-bearing` within those
+  existing authorities. This is the narrow exception recorded in
+  #6681 comment6408998175, not a transfer of broader construction, publication,
+  lifecycle, provider or SSH custody. Review the selected executable slice
+  before changing runtime semantics.
 - The bounded normal SSH consumer continuation is now selected under #6681:
   `squeaky-buckle` drives new `ssh_machine.py`/`ssh_machine_config.py`, focused
   tests/docs and narrow `serve --role ssh-client`/optional-closure wiring.
   This is an explicit source slice, not takeover of retained worktrees,
   construction/admission or operational authority. Existing shared lifecycle,
   provider, credential and deployment gates remain with their owners.
+- `restless-actuator` owns only the existing standalone SSH preparer's
+  non-editable dependency selection, focused preparation tests and a new
+  source-denying installed consumer witness. It does not select a release,
+  approve an artifact/feed, add an installer or wire normal role lifecycle.
 - The construction owner accepted two exclusive new source leaves:
   `fleet-manager/src/fleet_manager/gateway_ssh_policy.py` and its matching
   `test_gateway_ssh_policy.py` belong to `ticking-wrench`; the separate
@@ -121,6 +133,12 @@ The following contract decomposition and validation techniques are
 **agent-recommended** implementation proposals, not additional operator grants.
 
 ## Proposed Contract
+
+The [continuity-backed first-touch amendment](continuity-bootstrap.md) adds
+README/harness-context selection, already-authenticated user continuity,
+scoped Gateway enrollment before SSH and separate ordinary human sessions.
+It preserves the retained owners below and the separately selected
+[peer-approval policy](peer-approval.md); it is not delivered setup behavior.
 
 ### Portable setup modules and operation ownership
 
@@ -338,6 +356,13 @@ onboarded merely because its source is published.
   release/source/proof seam before privileged publication or setup wiring.
 - [x] Review the coherent integration-contract amendment against retained
   lifecycle, routing, authentication, credential and Chat scopes.
+- [ ] Review and implement the [continuity/bootstrap contract](continuity-bootstrap.md)
+  through the retained installer, credential/enrollment and human-session
+  adapters; preserve existing machine-proof and peer-approval requirements.
+- [x] Review the [selected executable slice](continuity-bootstrap.md#selected-executable-slice):
+  explicit public-key machine authentication, a real current-policy producer
+  and original-operation enrollment in the existing journal, followed by the
+  normal Manager/engine setup consumer. No new issuer or parallel registry.
 
 ### Phase 2 - Driver and directional policy
 
@@ -358,12 +383,18 @@ onboarded merely because its source is published.
 
 ### Phase 3 - Actual setup and durable convergence
 
+- [x] Implement the allocated public-key receiver/current-policy/journal and
+  normal Manager/engine local-projection consumer; qualify the actual synthetic
+  source/process/TLS path. Installed distribution and native/provider/live
+  acceptance remain open below.
 - [x] Implement the bounded explicit foreground Fleet SSH-directory consumer,
   composing the existing authenticated client and local profile/login-key
   writers with native lease and shutdown custody. This is source capability,
   not managed setup, enrollment or an adopted installation.
 - [ ] Wire the accepted role setup entry point to admitted target-local
   lifecycle/enrollment/authorization/profile effects.
+- [ ] Consume the harness-selected continuity source and delegated first-touch
+  or confirmation path before assuming a Gateway connection or SSH transport.
 - [ ] Persist stage outcomes, desired/applied digests, owner generation and
   uncertain-operation reconciliation through the existing authorities.
 - [ ] Implement owner-managed startup/reconnect catch-up, no-op repeat,
@@ -383,13 +414,14 @@ The selected policy is **`explicit-peer-approval`**. The detailed decomposition
 in the [peer-approval plan](peer-approval.md) is agent-recommended realization,
 not installation, credential or live-adoption authority.
 
-- [ ] Review the #8888 vision/contract amendment before implementation.
-- [ ] Implement optional exact-fingerprint peer admission and separate explicit
+- [x] Review the #8888 vision/contract amendment before implementation:
+  #8894 merged at `1fcf4f5f16926762e3a85ef799f55eaf02aeb81a`.
+- [x] Implement optional exact-fingerprint peer admission and separate explicit
   bootstrap/recovery in the existing SSH service, preserving its automatic
   configured-binding baseline when the policy is absent.
-- [ ] Qualify the actual client/Gateway/store contract, restart, original-request
+- [x] Qualify the actual client/Gateway/store contract, restart, original-request
   recovery, stale/unauthorized decisions and mixed-version refusal.
-- [ ] Merge the bounded source and record its retained release/adoption boundary;
+- [x] Merge the bounded source and record its retained release/adoption boundary;
   do not mark the broader setup or live mesh items complete.
 
 ## Validation Plan
@@ -425,20 +457,123 @@ not installation, credential or live-adoption authority.
 - [ ] Clean-room and available live lanes; mark synthetic versus real evidence
   explicitly, including unexercised suspend/logout and channel-close cases.
 - [ ] Verify private policy is not embedded in public examples, tests or docs.
-- [ ] Peer-approval selection: pending public identities never enter active
+- [ ] Qualify the [continuity bootstrap validation](continuity-bootstrap.md#validation-obligations),
+  including source/account/grant refusal, Gateway-first targets, pairing
+  recovery and the separate normal human-session boundary.
+- [ ] Qualify the selected public-key profile and actual source-to-setup-to-Gateway
+  path, including restart/lost replies, current-source revocation and rollback
+  floors, private local key custody, mixed-version refusal and unchanged token
+  profiles. Installed and live acceptance remain distinct.
+- [x] Qualify the bounded POSIX source path with synthetic delegation, real TLS,
+  original-operation recovery, private-file custody, unchanged active channels,
+  ordered publication, mixed-version refusal and two-harness state isolation.
+  This does not qualify source-denying installed distribution or native providers.
+- [x] Qualify the Linux noneditable Fleet SDK closure with checkout access
+  physically refused before imports, through the real synthetic TLS CLI and
+  Manager/engine consumer. Restart the receiver at the same origin/journal and
+  retain the original machine key and operation. Manager/engine installation,
+  native providers, released construction and live adoption remain open.
+- [x] Peer-approval selection: pending public identities never enter active
   directory or native relay authorization before exact authenticated approval;
   explicit recovery cannot become a missing-approver fallback.
-- [ ] Peer-approval compatibility: absent policy retains the old contract;
+- [x] Peer-approval compatibility: absent policy retains the old contract;
   incapable or rolled-back providers refuse the required policy before effects.
 
 ## Proposal
 
 The proposal is reviewed and merged. Accepted policy/runtime source leaves are
 being implemented independently; shared setup integration remains with its
-retained owner. No managed setup/apply, enrollment, live rollout, lifecycle
-takeover or implementation completion is asserted.
+retained authority, with the bounded operator allocation above. No managed
+setup/apply, enrollment, live rollout, lifecycle takeover or implementation
+completion is asserted.
 
 ## Journal
+
+### 2026-10-26 - Source-denying installed continuity SDK qualified
+
+- #9066 merged to `dev` as `a15737268e591255b077bea514bb2e3e0ed0f551`.
+  Exact head `6b777583bda552793cb3e6275777bc26d681b389` received Copilot
+  approval `5650118978` with no open findings; all required checks passed
+  before the normal managed Maintainer completion.
+- Re-read the full parent Plan and Validation Plan. Resolve only the bounded
+  Linux installed-SDK item: the final contained packet passed all 11 cases,
+  including an intentional source-import refusal, actual CLI and source
+  Manager/engine consumers, and same-origin receiver/journal restart with the
+  original key and operation. This does not install the Manager/engine product
+  or qualify real continuity providers, native Windows/macOS or live enrollment.
+- Continue through the retained release/construction owners for the selected
+  engine's supported service-Gateway SDK closure. The independently bootstrapped
+  Komodo substrate has its own reviewed #8860/#8872 source appointment under
+  #6030; do not replace it with a second installer or count its plan as execution.
+  Human sessions, actual role setup/lifecycle, published/installed revisions and
+  live adoption remain open. Neither #6681 nor #6236 is complete.
+
+### 2026-10-26 - Executable first-touch source merged; installation stays gated
+
+- #9047 merged to `dev` as `528c8b1c53d00ff8c561f78324f5b951339eaf71`.
+  Exact head `33f1782779388e0335605dad5bd23ed1e5651bfa` received a
+  current Copilot Comment with no open findings; required CI passed and all
+  review threads were resolved before the normal managed Maintainer merge.
+- Re-read this full Plan/Validation Plan. Resolve only the bounded source and
+  synthetic qualification items above: 643 affected Fleet cases passed, followed
+  by 57 engine/setup cases with 23 platform skips and eight continuity controls.
+  The normal Manager -> engine -> isolated SDK -> real TLS path is exercised,
+  not replaced by an injected enrollment result.
+- The retained construction/release owner must supply Fleet's service-Gateway
+  SDK closure in the selected engine environment. No unsupported cross-project
+  dependency, private installer, new token issuer or second journal was added.
+  Continue installed source-denying/native qualification and owner-approved
+  provider/human-session/setup/lifecycle integration under the existing trackers.
+  #6681 and #6236 remain open; no runtime update, live enrollment, deployment
+  or predecessor retirement occurred.
+
+### 2026-10-25 - Public-key enrollment implementation plan reviewed
+
+- #9039 merged the selected executable slice to `dev` as
+  `f1f5a3862c3a5ee30969a147349eda354357dab2`, after exact-head Copilot
+  approval with no open findings and required successful CI.
+- Re-read the full Plan and Validation Plan and resolve only the selected
+  executable-plan review item. Public-key authentication, actual enrollment
+  publication/journal recovery and normal Manager/engine setup consumption
+  remain to implement and qualify; no runtime or installed gate closes.
+- Continue the allocated receiver and current-policy/operation integration
+  before migrating its normal setup caller. No live credential, enrollment,
+  installation, service, network or deployment effect occurred.
+
+### 2026-10-25 - Continuity bootstrap and human-session contract source
+
+- #9038 merged the three governing vision refinements and proposed
+  continuity-bootstrap contract to `dev` as
+  `5bd6275d19f409ed4e6515eec5d86c1f7040414e`, after current-head Copilot
+  approval and required CI. The parent Plan/Validation Plan remains open.
+- The amendment adds no executable setup, verifier, issuer, enrollment or
+  provider behavior. Existing peer approval and retained implementation owners
+  remain unchanged. The next slice is the normal installer/adoption and
+  receiving identity/enrollment integration, not a new private installer or
+  live adoption inferred from a documentation merge.
+
+### 2026-10-25 - Peer-approval source merged; integration remains open
+
+- #8917 merged to `dev` as `e5ec299aceb81808a987e8752fa47566a630ae23`
+  at 13:34:11Z. Exact submitted head
+  `ccd78d077dea205091d515e89a38f4ef3b1930b7` received approval
+  `5643362836`; all three review threads were resolved and required CI passed.
+- Both full native service suites passed on that exact head in
+  [40197079356](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40197079356):
+  Windows control-plane and Linux service/native-relay qualification. These
+  are disposable authenticated Gateway/CLI fixtures, not installed adoption.
+- The rebuilt local focused packet passed all 55 enrollment cases. Seven
+  installed production modules matched source. The local whole-suite startup
+  timeouts under measured CPU saturation were not relabeled passing or waived:
+  the same unchanged deadlines passed in the pinned full native suites.
+- Re-read the Plan and Validation Plan and resolved only the four explicit
+  peer-approval source/qualification items. The parent remains Active.
+  Release, authentication/setup composition, provider interoperability, actual
+  fleet adoption and predecessor retirement remain with #6681 and its existing
+  owners; this source slice transfers its remaining responsibility there.
+- No installation, runtime update, credential action, fleet deployment or
+  serving-predecessor retirement occurred. Source merge is not release or
+  evidence that a running deployment enforces the selected policy.
 
 ### 2026-10-24 - Foreground Fleet SSH consumer source
 
@@ -459,6 +594,74 @@ takeover or implementation completion is asserted.
   acquire/rotate keys, renew a provider, change sshd, deploy or retire a
   predecessor. General node hosting and the broader Plan/Validation items stay
   open; release/artifact selection and actual adoption require their owners.
+
+### 2026-10-25 - Explicit peer-approval source
+
+- #8894 merged the scoped intent and plan after approval and required checks.
+  The selected policy extends the existing service; automatic configured-binding
+  admission remains the absent-policy baseline.
+- Implemented durable pending public candidates, exact authenticated peer
+  decisions, separately configured confirmed recovery, and the supported
+  runtime-selected client contract. The original store owns activation,
+  historical decisions, generation checks and original-request recovery.
+- The native Windows contained suite passed 116 tests with six explicit
+  Linux-only skips. Real TLS/JWT/DPoP and the installed CLI's retained-state
+  restart are exercised with synthetic identities. All five installed changed
+  source bodies match the candidate. Linux native/disposable
+  qualification and implementation review/publication remain outstanding.
+- No live installation, credential access, provider/setup takeover or
+  production migration is included. Broader integration and live adoption
+  remain with #6681 and its retained owners.
+- Review of #8917 found that an embedded near-limit directory could strand
+  committed outcomes and a maximum-size pending list could exceed its frame.
+  The new unreleased receipt now retains the decision's original directory
+  revision instead of embedding the global catalog, and checks its complete
+  encoded size before commit. Pending inspection uses byte-bounded `after` /
+  `next` pages without dropping candidates or reducing the binding limit.
+- The review-corrected Windows suite passed 120 tests with six explicit skips;
+  four focused wire-limit/transaction controls and the installed CLI's signed
+  paging/restart control also passed. All five changed installed source bodies
+  match the candidate. The earlier exact-head Linux/Windows run
+  [40176923839](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40176923839)
+  passed on `a8e7d19df91f7b8fed0e05541803996d0b83ac6a`; these corrections still
+  require fresh current-head review, required CI and native qualification.
+- The next review identified a retained outcome synthesized after a policy
+  round trip without persisting its decision. Observation now repairs that
+  receipt transactionally, reuses the original decision for equivalent request
+  aliases, and rolls back if the observing request is withdrawn.
+- The rebuilt Windows suite passes 127 tests with six Linux-only skips,
+  including four retained-history controls and real-process metadata controls.
+  The offline distribution check also passes with its unchanged ten-second
+  CLI deadline; metadata parsing no longer imports runtime-only dependencies.
+  All six installed changed production modules match the candidate and Ruff
+  passes. The preceding head passed both hosted native jobs in run
+  [40182383847](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40182383847);
+  this corrected head still requires fresh review, CI and native qualification.
+- Review of the next head found an intrinsically invalid inbound candidate
+  could be journaled without its required host pin. Validation now refuses
+  that candidate before recording its request, and likewise refuses a relay
+  key identical to its own client key. Corrected original-ID retries remain
+  usable in both modes; outbound-only clients may still omit host pins.
+  The host-pin controls first reproduced the defect against the preceding
+  installed wheel. The rebuilt final Windows suite passes 133 tests with six
+  Linux-only skips; Ruff passes. The preceding head passed both native jobs
+  in run [40187342145](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40187342145).
+  Fresh current-head review and qualification remain required before merge.
+- The rebased review found a one-byte terminal-page edge: `null` can exceed a
+  one-character continuation cursor. The regression reproduces an actual
+  32,769-byte terminal response against the 32,768-byte transport bound through
+  the client/service path. Page construction now budgets both representations.
+- Qualification of the newly merged Fleet consumer also exposed its frozen
+  Gateway clock versus a restarted realtime CLI. Both native restart fixtures
+  now share the existing realtime-clock helper. Invalid local writer scopes
+  refuse before credential-runtime imports; an import guard reproduces and
+  protects that ordering without changing the CLI's fifteen-second deadline.
+- All 55 focused enrollment regressions pass against the rebuilt provider,
+  including the exact transport boundary. The latest local whole-suite run
+  passed 139 cases with six Linux-only skips but hit four native startup
+  deadlines while aggregate host CPU remained at 100%, including an unchanged
+  foreground-custody fixture. No timeout or authentication allowance was raised.
+  Fresh pinned Linux/Windows whole-suite qualification remains a merge gate.
 
 ### 2026-10-16 - Intake and current boundary
 
@@ -765,3 +968,30 @@ takeover or implementation completion is asserted.
   The 69-case Fleet/authorization/adapter packet and nine rebuilt installed
   consumer cases pass locally. Final-head native/CI/review remain pending;
   earlier native success is not substituted for the newer source.
+
+### 2026-10-25 - Non-editable installed runtime qualification
+
+- The preceding foreground source is delivered by merged #8910 at
+  `6254e0f9eb49231db76f23da54fe7dc5223f753e`. Final-head native
+  run40189515793 passed Windows85/6 platform skips, Linux84/7 platform skips
+  and both real Linux StrictModes/login cases before merge. Its review and
+  required checks passed; that settles only the preceding bounded source.
+- Follow-through found a narrower qualification gap: the standalone SSH
+  preparer still allowed editable shared-library dependencies, while its
+  installed-origin assertion covered only Fleet and agent-ssh. Selecting
+  `--no-editable` in that existing guarded preparer keeps the disposable
+  runtime's entire dependency graph installed, without a new resolver policy.
+- The new witness starts the actual foreground CLI without site startup or
+  `.pth` processing, admits only the selected environment's package locations,
+  checks every installed distribution's file inventory and non-editable
+  metadata, and refuses source-checkout reads outside that exact environment.
+  An intentional source import is refused by the same guard. The existing
+  connected/later-join and disconnected/restart scenarios exercise real
+  authenticated transport and native local writers; native OS identity/ACL
+  helpers remain allowed.
+- Local Windows qualification passed all 88 service cases with six native
+  platform skips, including the three new cases. The affected preparation
+  packet passed 73 cases with six platform skips. Hosted exact-head Windows
+  and Linux, current-head review and required CI remain publication gates.
+  This is installed-runtime evidence, not authenticated release-artifact
+  admission, managed setup, live fleet adoption or predecessor retirement.

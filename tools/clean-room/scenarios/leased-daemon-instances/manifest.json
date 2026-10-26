@@ -1,0 +1,27 @@
+{
+  "name": "leased-daemon-instances",
+  "description": "Credential-free Tier-P source proof for cross-root daemon attribution, owner renewal, hard expiry, abrupt owner loss, and installer reclamation that preserves production instances and unrelated proof files.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": {
+    "present": ["python3", "bash"],
+    "provisioned_by_flow": []
+  },
+  "auth": {
+    "copilot": "none",
+    "gh": "none",
+    "ado": "none"
+  },
+  "validates": "attributed-daemon-instances",
+  "config": {
+    "CR_DAEMON_SOURCE_ROOT": "Candidate source mounted read-only; defaults to CR_HARNESS_MOUNT or /harness.",
+    "CR_DAEMON_NATIVE_HELPER_ROOT": "Prebuilt helper bundle containing daemon_instances.sh and native/linux-ARCH/daemon-instance.",
+    "CR_DAEMON_SOURCE_BUILD": "Set to 1 only to select explicit native source construction in a build-toolchain image; never a daemon-startup fallback."
+  },
+  "expected_artifacts": ["cr-report.json", "cr-logs/daemon-instance-probe.log"],
+  "stages": [
+    {"n": 0, "title": "fresh source-only environment"},
+    {"n": 1, "title": "real instance lifetime and installer cleanup"}
+  ]
+}

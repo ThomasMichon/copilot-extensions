@@ -193,6 +193,7 @@ function Rec($value) {{ Add-Content -LiteralPath $Events -Value $value }}
 function Get-BootstrapPython {{ return {q(sys.executable)} }}
 function Get-PayloadHash {{ return 'fingerprint' }}
 function Write-Fail($value) {{ Write-Host $value }}
+function Write-Step($value) {{ }}
 . (Join-Path $ScriptDir 'versioned_runtime_native.ps1')
 . (Join-Path $ScriptDir 'source-runtime.ps1')
 {_function(plugin, 'Invoke-VersionedSlotClean', language)}
@@ -309,7 +310,9 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 function Write-ServiceHeader($value) {{ }}
 function Write-ServiceOk($value) {{ }}
 function Write-Ok($value) {{ }}
-function Deploy-SelfProvisioningBinstub {{ throw 'Unexpected binstub publication' }}
+function Deploy-SelfProvisioningBinstub {{
+    if ('{plugin}' -ne 'agent-codespaces') {{ throw 'Unexpected binstub publication' }}
+}}
 function Materialize-SnapshotDependencies {{ throw 'Source snapshot was rematerialized' }}
 {_function(plugin, 'Invoke-Stamp', language)}
 Initialize-SourceRuntime
@@ -479,6 +482,8 @@ function Invoke-UvPipInstallResilient {{
     param($UvCommand, $Arguments)
     if ($Arguments -contains '--editable') {{ throw 'Editable escaped source admission' }}
     if ($Arguments -notcontains '--reinstall-package') {{ throw 'Reinstall lost' }}
+    [IO.File]::WriteAllText((Join-Path $InstallDir 'install-arguments.json'),
+        (ConvertTo-Json -InputObject @($Arguments) -Compress))
     Rec 'INSTALL'
     return @{{ ExitCode = 0; Output = '' }}
 }}
@@ -501,6 +506,8 @@ Assert-SourceRuntime
 UV_CMD=fixture-uv
 invoke_uv_pip_install_resilient() {{
     [[ " $* " != *" --editable "* && " $* " == *" --reinstall-package "* ]] || return 1
+    "$(_bootstrap_python)" -c 'import json,pathlib,sys; pathlib.Path(sys.argv[1]).write_text(json.dumps(sys.argv[2:]))' \
+        "$INSTALL_DIR/install-arguments.json" "$@"
     rec INSTALL
 }}
 {_function(plugin, '_install_package_into', language)}
@@ -510,12 +517,23 @@ _assert_source_runtime
 """
     result = _run(tmp_path, language, script)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert (tmp_path / "events").read_text().splitlines() == ["INSTALL"] * 9
+    assert (tmp_path / "events").read_text().splitlines() == ["INSTALL"]
+    arguments = json.loads((tmp_path / "install/install-arguments.json").read_text())
+    assert "--no-editable" in arguments and "--editable" not in arguments
+    indices = [index for index, argument in enumerate(arguments) if argument == "--reinstall-package"]
+    assert [arguments[index + 1] for index in indices] == [
+        "agent-ssh-manager", "agent-credential-relay", "agent-config-migrate", "agent-zdd",
+        "agent-venue-copilot", "agent-session-liveness-probe", "agent-single-instance-lease",
+        "agent-remote-login-shell", "agent-codespaces",
+    ]
+    assert [_quote(arguments[index + 2], language)[1:-1] for index in indices] == [
+        _quote(payload / "libs/local-lib", language)[1:-1],
+    ] * 8 + [_quote(payload, language)[1:-1]]
 
 
 @pytest.mark.parametrize("language", ["ps1", "sh"])
 @pytest.mark.parametrize("selector", ["current-version", "last-known-good", None])
-def test_codespaces_generated_resolver_requires_an_exact_source_selector(
+def test_codespaces_vendored_resolver_requires_an_exact_source_selector(
     tmp_path: Path, language: str, selector: str | None,
 ) -> None:
     payload, selected = _payload(tmp_path, "agent-codespaces")
@@ -540,14 +558,12 @@ def test_codespaces_generated_resolver_requires_an_exact_source_selector(
     if selector:
         (install / selector).write_text(selected, encoding="utf-8")
     q = _quote(install, language)
+    resolver = _quote(install / "bin" / f"resolve-runtime.{language}", language)
     script = (
-        f"$_root = {q}\n"
-        + _function("agent-codespaces", "_resolve_cs_py", language)
-        + "\n_resolve_cs_py\n"
+        f"$env:AGENT_RT_ROOT = {q}\n. {resolver} -TraceMode read-only\n$AgentRtPy\n"
         if language == "ps1" else
-        f"_root={q}\n"
-        + _function("agent-codespaces", "_resolve_python", language)
-        + "\n_resolve_python\n"
+        f"export AGENT_RT_ROOT={q}\nAGENT_RT_RESOLVE_TRACE_MODE=read-only\n"
+        f". {resolver}\nprintf '%s\\n' \"$AGENT_RT_PY\"\n"
     )
     result = _run(tmp_path, language, script)
     if selector:

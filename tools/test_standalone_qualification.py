@@ -54,6 +54,27 @@ def test_pane_argv_portfolio_is_manual_pinned_and_keeps_work_scoped():
     ]
 
 
+def test_manager_uninstall_portfolio_is_manual_and_keeps_native_owner():
+    workflow = source_workflow(SCRIPT.parent.parent, "installation-context-full.yml")
+    triggers = workflow["on"] if "on" in workflow else workflow[True]
+    inputs = triggers["workflow_dispatch"]["inputs"]
+    assert "manager-uninstall" in inputs["portfolio"]["options"]
+    assert inputs["portfolio"]["default"] == "context"
+    job = workflow["jobs"]["manager-uninstall-windows"]
+    assert job["if"] == (
+        "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'manager-uninstall'"
+    )
+    assert job["runs-on"] == "windows-latest" and job["timeout-minutes"] == 15
+    assert not job.get("strategy")
+    commands = [step for step in job["steps"] if "run" in step]
+    assert commands[0]["env"]["EXPECTED_SOURCE"] == "${{ github.sha }}"
+    assert "actual == os.environ['EXPECTED_SOURCE']" in commands[0]["run"]
+    assert commands[1]["run"].split() == [
+        "python", r"tools\run-manager-runtime-acceptance.py",
+        "--root", ".validation", "--contract", "uninstall",
+    ]
+
+
 def test_chat_preparation_retains_both_canonical_build_resource_owners(tmp_path):
     assert runner.standalone_build_resources("services/chat", source_root=tmp_path) == (
         tmp_path / "libs" / "versioned-runtime",

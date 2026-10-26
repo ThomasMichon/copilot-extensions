@@ -22,6 +22,13 @@ from worktree_manager import engine_process
 PLAN = {"action": "exec", "work_dir": "/checkout", "cmd": ["copilot"], "env": {}}
 
 
+@pytest.fixture(autouse=True)
+def _admit_fixture_owner(monkeypatch):
+    from worktree_manager import hosting_admission
+
+    monkeypatch.setattr(hosting_admission, "require_owner_hosting", lambda *a, **k: None)
+
+
 @pytest.mark.parametrize("selection", [{"new": True}, {"worktree_id": "wt-a"}, {"base": True}])
 def test_foreground_plan_waits_without_aggregate_deadline(monkeypatch, selection):
     monkeypatch.setattr(ec, "engine_base_command", lambda: ["engine"])
@@ -114,22 +121,44 @@ def test_manager_defers_only_shell_delegated_preparation(tmp_path, monkeypatch, 
 
 
 @pytest.mark.parametrize("deferred", [False, True])
-def test_projection_deferral_reaches_only_the_selected_engine_call(monkeypatch, deferred):
+def test_projection_deferral_reaches_only_the_selected_engine_call(tmp_path, monkeypatch, deferred):
+    profile = str(tmp_path / "profile")
+    monkeypatch.setenv("HOME", profile)
+    monkeypatch.setenv("USERPROFILE", profile)
+    monkeypatch.setenv("HOMEDRIVE", "C:")
+    monkeypatch.setenv("HOMEPATH", r"\Users\fixture")
+    monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(tmp_path / "selected-payload"))
+    expected_path = os.environ["PATH"]
     script = (
-        "import json,os;"
+        "import json,ntpath,os;from pathlib import Path;"
         f"plan={PLAN!r};"
         "plan['deferred']=os.environ.get('AGENT_WORKTREES_DEFER_PROJECTIONS');"
+        "plan['home']=str(Path.home());"
+        "plan['windows_home']=ntpath.expanduser('~');"
+        "plan['profile']=os.environ.get('USERPROFILE');"
+        "plan['path']=os.environ.get('PATH');"
+        "plan['payload']=os.environ.get('AGENT_WORKTREES_PAYLOAD_ROOT');"
+        "plan['parent_python']=os.environ.get('PYTHONHOME');"
         "print(json.dumps(plan))"
     )
     monkeypatch.setattr(ec, "engine_base_command", lambda: [sys.executable, "-c", script])
+    monkeypatch.setattr(ec, "installed_engine_command", lambda *a:
+                        pytest.fail("projection deferral replaced the selected engine provider"))
+    monkeypatch.setenv("PYTHONHOME", str(tmp_path / "foreign-python"))
     monkeypatch.delenv("AGENT_WORKTREES_DEFER_PROJECTIONS", raising=False)
     plan = ec.resolve_launch_plan("demo", new=True, defer_projections=deferred)
     assert plan.raw["deferred"] == ("1" if deferred else None)
+    assert plan.raw["home"] == plan.raw["windows_home"] == plan.raw["profile"] == profile
+    assert plan.raw["path"] == expected_path
+    assert plan.raw["payload"] == str(tmp_path / "selected-payload")
+    assert plan.raw["parent_python"] is None
     assert "AGENT_WORKTREES_DEFER_PROJECTIONS" not in os.environ
 
 
 def test_projection_deferral_survives_bare_resume_compatibility_retry(monkeypatch):
     calls = []
+    monkeypatch.setattr(ec, "engine_base_command", lambda: ["selected-engine"])
+    monkeypatch.setenv("USERPROFILE", "selected-profile")
 
     def old_runtime(project, args, **kwargs):
         calls.append(kwargs)
@@ -142,7 +171,9 @@ def test_projection_deferral_survives_bare_resume_compatibility_retry(monkeypatc
         "demo", worktree_id="wt-a", bare_resume=True, defer_projections=True,
     ).is_exec
     assert len(calls) == 2
-    assert all(call["environment"] == {"AGENT_WORKTREES_DEFER_PROJECTIONS": "1"} for call in calls)
+    assert all(call["environment"]["AGENT_WORKTREES_DEFER_PROJECTIONS"] == "1" for call in calls)
+    assert all(call["environment"]["USERPROFILE"] == "selected-profile" for call in calls)
+    assert all(call["engine_command"] == ["selected-engine"] for call in calls)
 
 
 def test_progress_arrives_before_slow_real_engine_finishes(tmp_path, monkeypatch):

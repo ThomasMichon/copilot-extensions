@@ -53,6 +53,84 @@ def test_snapshot_reuse_preserves_every_published_byte_and_timestamp(selected, t
     assert snapshot == root / "snapshots" / identity.runtime_version
 
 
+@pytest.mark.parametrize("winerror", [5, 32, 33])
+def test_snapshot_retries_transient_windows_publication_locks(selected, tmp_path, monkeypatch, winerror):
+    payload, identity = selected
+    rename = Path.rename
+    attempts, delays = [], []
+
+    def locked(path, destination):
+        if path.name == "payload" and path.parent.name.startswith(".source-"):
+            attempts.append(path)
+            if len(attempts) < 3:
+                error = PermissionError("synthetic Windows publication lock")
+                error.winerror = winerror
+                raise error
+        return rename(path, destination)
+
+    monkeypatch.setattr(Path, "rename", locked)
+    monkeypatch.setattr(source.time, "sleep", delays.append)
+    snapshot = source.publish_source_snapshot(payload, tmp_path / "runtime", identity)
+    assert len(attempts) == 3
+    assert delays == [.5, 1.0]
+    assert source.read_source_identity(snapshot, identity.package_version) == identity
+    assert not list(snapshot.parent.glob(".source-*"))
+
+
+@pytest.mark.parametrize("winerror, expected_attempts", [(5, 4), (87, 1)])
+def test_snapshot_publication_lock_failure_is_bounded_and_explicit(
+    selected, tmp_path, monkeypatch, winerror, expected_attempts,
+):
+    payload, identity = selected
+    rename = Path.rename
+    attempts, delays = [], []
+
+    def denied(path, destination):
+        if path.name == "payload" and path.parent.name.startswith(".source-"):
+            attempts.append(path)
+            error = PermissionError("synthetic permanent publication denial")
+            error.winerror = winerror
+            raise error
+        return rename(path, destination)
+
+    monkeypatch.setattr(Path, "rename", denied)
+    monkeypatch.setattr(source.time, "sleep", delays.append)
+    root = tmp_path / "runtime"
+    with pytest.raises(PermissionError, match="permanent publication denial"):
+        source.publish_source_snapshot(payload, root, identity)
+    assert len(attempts) == expected_attempts
+    assert len(delays) == expected_attempts - 1
+    assert not (root / "snapshots" / identity.runtime_version).exists()
+    assert not list((root / "snapshots").glob(".source-*"))
+    assert source.read_source_identity(payload, identity.package_version) == identity
+
+
+@pytest.mark.parametrize("changed_input", ["source", "candidate"])
+def test_snapshot_revalidates_inputs_after_transient_publication_lock(
+    selected, tmp_path, monkeypatch, changed_input,
+):
+    payload, identity = selected
+    rename = Path.rename
+    attempts = []
+
+    def changed(path, destination):
+        if path.name == "payload" and path.parent.name.startswith(".source-"):
+            attempts.append(path)
+            _change_tree(payload if changed_input == "source" else path)
+            error = PermissionError("synthetic Windows publication lock")
+            error.winerror = 32
+            raise error
+        return rename(path, destination)
+
+    monkeypatch.setattr(Path, "rename", changed)
+    monkeypatch.setattr(source.time, "sleep", lambda _: None)
+    root = tmp_path / "runtime"
+    with pytest.raises(source.SourceIdentityError, match="identity changed"):
+        source.publish_source_snapshot(payload, root, identity)
+    assert len(attempts) == 1
+    assert not (root / "snapshots" / identity.runtime_version).exists()
+
+
 def test_conflicting_winner_is_not_repaired_or_nested_into(selected, tmp_path):
     payload, identity = selected
     root = tmp_path / "runtime"

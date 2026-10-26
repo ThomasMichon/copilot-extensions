@@ -47,6 +47,14 @@ _AGENT_BRIDGE_MODULES = (
     "session_host/launcher.py",
 )
 _MAIN = "agent_bridge.session_host.launcher:main"
+_PROCUTIL_MODULES = (
+    "__init__.py", "_async.py", "_caller_owned.py", "_darwin_caller_owned.py",
+    "_daemon_instance_child.py", "_daemon_instance_identity.py", "_daemon_instance_native.py",
+    "_daemon_instance_owner.py",
+    "_daemon_instance_store.py", "_interpreter.py", "_linux_pidfd.py", "_windows_caller_owned.py",
+    "daemon.py", "daemon_broker.py", "daemon_instances.py", "native_child.py",
+    "owned_process.py", "startup.py", "streaming.py",
+)
 
 
 def _pkg_root() -> Path:
@@ -56,12 +64,13 @@ def _pkg_root() -> Path:
 
 def _bundle_sources() -> tuple[tuple[str, Path], ...]:
     """Archive-relative paths and their source files for the host closure."""
-    procutil_source = Path(agent_procutil.__file__).resolve()
+    procutil_root = Path(agent_procutil.__file__).resolve().parent
     return tuple(
         (f"agent_bridge/{rel}", _pkg_root() / rel)
         for rel in _AGENT_BRIDGE_MODULES
+    ) + tuple(
+        (f"agent_procutil/{name}", procutil_root / name) for name in _PROCUTIL_MODULES
     ) + (
-        ("agent_procutil/__init__.py", procutil_source),
         ("agent_bridge/hosting_policy.py", _pkg_root() / "session_host/receiver_policy.py"),
     )
 

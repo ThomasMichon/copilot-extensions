@@ -28,6 +28,12 @@ def _commit(value: str) -> str:
     return value.lower()
 
 
+def _context(value: str) -> str:
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", value):
+        raise argparse.ArgumentTypeError("Context must be a declared lowercase identifier.")
+    return value
+
+
 def _require_commit(source: protocol.Source, commit: str | None) -> None:
     if commit is not None and source.commit != commit:
         raise protocol.SetupError(
@@ -261,6 +267,7 @@ def command(argv: list[str]) -> int:
     parser.add_argument("--commit", type=_commit)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--trust-repository-setup", action="store_true")
+    parser.add_argument("--context", type=_context)
     try:
         args = parser.parse_args(argv)
     except SystemExit as error:
@@ -276,6 +283,9 @@ def command(argv: list[str]) -> int:
             if path.exists():
                 selected = protocol.inspect(path, canonical)
                 _require_commit(selected.source, args.commit)
+                if args.context:
+                    from .repository_continuity import selected as select_context
+                    select_context(selected, args.context)
                 print(f"Commit: {selected.source.commit}\nSetup entry: {selected.script}")
             else:
                 print("Setup declaration: uninspected until acquisition.")
@@ -284,6 +294,9 @@ def command(argv: list[str]) -> int:
         source = acquire(name, path, args.repository, commit=args.commit)
         print(f"Acquisition/registration: ready\nCommit: {source.commit}", flush=True)
         selected = protocol.inspect(source.path, source.url)
+        if args.context:
+            from .repository_continuity import selected as select_context
+            select_context(selected, args.context)
         if selected.source != source:
             raise protocol.SetupError("Repository revision changed before setup qualification.")
         print(f"Setup entry: {selected.script}", flush=True)
@@ -291,6 +304,9 @@ def command(argv: list[str]) -> int:
         if not trusted and _terminal():
             trusted = input("Run setup from this exact repository revision? [y/N] ").strip().lower() == "y"
         result = protocol.run(selected, apply=True, trusted=trusted)
+        if result.status == "ready" and args.context:
+            from .repository_continuity import run as run_continuity
+            result = run_continuity(selected, args.context, apply=args.apply)
         print(f"Repository setup: {result.status}: {result.message}", flush=True)
         return 0 if result.status == "ready" else 1
     except (protocol.SetupError, OSError, subprocess.TimeoutExpired, repos.RepositoryResolutionError) as error:

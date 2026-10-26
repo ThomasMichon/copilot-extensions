@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -11,6 +13,26 @@ from subprocess import Popen
 log = logging.getLogger("agent-codespaces")
 
 DEFAULT_OWNER_STARTUP_TIMEOUT = 30.0
+
+
+def spawn_owner_process(root: Path, *, source: str) -> tuple[Popen[bytes], Path]:
+    """Launch the owner with its existing durable cwd, console and log policy."""
+    from agent_procutil import spawn_daemon
+    from agent_procutil.daemon_instances import DaemonInstanceSpec
+
+    root = Path(os.path.abspath(root))
+    root.mkdir(parents=True, exist_ok=True)
+    log_path = root / "logs" / "owner-stdio.log"
+    child = spawn_daemon(
+        [sys.executable, "-m", "agent_codespaces", "owner"],
+        instance=DaemonInstanceSpec("agent-codespaces-owner", root, Path(source).resolve()),
+        cwd=os.path.expanduser("~"),
+        log_path=log_path,
+        console_children=True,
+        display="agent_codespaces owner",
+        env_overrides={"AGENT_CODESPACES_HOME": str(root)},
+    )
+    return child, log_path
 
 
 def wait_for_owner_startup(

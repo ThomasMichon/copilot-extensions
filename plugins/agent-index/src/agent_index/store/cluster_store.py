@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .source_layout import SourceLayoutError, domain_for, source_read, source_write
+from .projection_snapshot import ClusterCoverage
 
 if TYPE_CHECKING:
     from agent_index.store.clustering import Cluster
@@ -56,7 +57,21 @@ CREATE INDEX IF NOT EXISTS idx_clusters_size
     ON clusters(size);
 CREATE INDEX IF NOT EXISTS idx_members_item
     ON cluster_members(source, file_path);
+
+CREATE TABLE IF NOT EXISTS cluster_coverage (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    signature TEXT NOT NULL,
+    items INTEGER NOT NULL,
+    slices INTEGER NOT NULL,
+    clusters INTEGER NOT NULL
+);
 """
+_SCHEMA += "\n".join(
+    f"CREATE TRIGGER IF NOT EXISTS cluster_coverage_{table}_{event.lower()} "
+    f"AFTER {event} ON {table} BEGIN DELETE FROM cluster_coverage; END;"
+    for table in ("clusters", "cluster_members")
+    for event in ("INSERT", "UPDATE", "DELETE")
+)
 
 
 @dataclass(frozen=True)
@@ -123,13 +138,17 @@ class ClusterStore:
     # -- write ---------------------------------------------------------------
 
     @source_write
-    def replace_all(self, clusters: list[Cluster]) -> int:
+    def replace_all(
+        self, clusters: list[Cluster], *, coverage: ClusterCoverage | None = None,
+    ) -> int:
         """Atomically swap in a fresh full set of clusters.
 
         A clustering run is a full recompute, so the simplest correct refresh
         is to wipe and reinsert in one transaction.  Returns the number of
         clusters written.
         """
+        if coverage is not None and coverage.clusters != len(clusters):
+            raise ValueError("Cluster coverage does not describe the stored artifact")
         now = time.time()
         if self._source_domain is not None:
             self._source_domain.effect("cluster-replace")
@@ -139,6 +158,7 @@ class ClusterStore:
             conn.execute("BEGIN")
             conn.execute("DELETE FROM cluster_members")
             conn.execute("DELETE FROM clusters")
+            conn.execute("DELETE FROM cluster_coverage")
             for cluster in clusters:
                 cid = cluster_id_for(cluster)
                 rep = cluster.representative
@@ -175,11 +195,35 @@ class ClusterStore:
                         for rank, m in enumerate(cluster.members)
                     ],
                 )
+            if coverage is not None:
+                conn.execute(
+                    "INSERT INTO cluster_coverage VALUES (1, ?, ?, ?, ?)",
+                    (coverage.signature, coverage.items, coverage.slices, coverage.clusters),
+                )
             conn.commit()
             return len(clusters)
         except Exception:
             conn.rollback()
             raise
+        finally:
+            conn.close()
+
+    @source_read
+    def covered_stats(self, signature: str) -> dict[str, int | float] | None:
+        if not Path(self._db_path).is_file():
+            return None
+        conn = self._connect()
+        try:
+            if conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'cluster_coverage'",
+            ).fetchone() is None:
+                return None
+            row = conn.execute(
+                "SELECT signature, items, slices, clusters FROM cluster_coverage WHERE singleton = 1",
+            ).fetchone()
+            if row is None or row["signature"] != signature:
+                return None
+            return ClusterCoverage(**dict(row)).stats()
         finally:
             conn.close()
 

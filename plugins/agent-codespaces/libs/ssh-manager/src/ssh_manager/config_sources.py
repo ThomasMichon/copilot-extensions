@@ -116,6 +116,8 @@ class SSHProfileSource:
     the SSH config Host entry (e.g., "borealis", "atlas-core-wsl").
     All connection details (hostname, user, port, key, proxy) are
     resolved by OpenSSH from the config file.
+    ``resolve_timeout`` optionally bounds the local ``ssh -G`` subprocess;
+    omitted callers retain the existing unbounded configuration-read policy.
     """
 
     def __init__(
@@ -124,11 +126,13 @@ class SSHProfileSource:
         user: str | None = None,
         port: int | None = None,
         config_file: str | None = None,
+        resolve_timeout: float | None = None,
     ) -> None:
         self._host_alias = host_alias
         self._user = user
         self._port = port
         self._config_file = config_file
+        self._resolve_timeout = resolve_timeout
         self._cached_config: SSHConfig | None = None
         self._cache_lock = threading.Lock()
 
@@ -168,6 +172,7 @@ class SSHProfileSource:
             stderr=subprocess.PIPE,
             text=True,
             check=False,
+            timeout=self._resolve_timeout,
             creationflags=(
                 subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
             ),

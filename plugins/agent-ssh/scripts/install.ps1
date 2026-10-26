@@ -1085,6 +1085,10 @@ if ($needsInstallLock -and -not (Enter-InstallLock)) {
 
 try {
 Assert-SourceRuntimeIdentity
+if ($Action -in @('install', 'update', 'provision') -and -not $DryRun) {
+    . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+}
 if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 
 if ($Action -eq 'status') {
@@ -1155,7 +1159,7 @@ if (-not $script:RuntimeConstructionReuse) {
 if ($Force -or -not (Test-Path $VenvPython)) {
     Invoke-VersionedSlotClean
     if ($uvPath) {
-        if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython -PythonVersion '3.10' -UvCommand $uvPath -RequireSignedBase ($env:OS -eq 'Windows_NT') -AllowExisting $true)) {
+        if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython -PythonVersion '3.10' -UvCommand $uvPath -RequireSignedBase ($env:OS -eq 'Windows_NT') -AllowExisting $true -WithoutPip)) {
             Write-Step 'uv/signed-Python venv creation failed -- falling back to system python -m venv'
             $fallback = Invoke-NativeCapture { & $pythonCmd -m venv $VenvDir }
             if ($fallback.ExitCode -ne 0) {
@@ -1272,7 +1276,8 @@ if ($SourceRuntimeIdentity) {
 } elseif (Test-Path $snapshotSourceMarker) {
     $sourcePath = (Get-Content -LiteralPath $snapshotSourceMarker -Raw).Trim()
 }
-Write-DeployManifest `
+$sourcePublication = [bool]$env:COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN
+$manifest = Write-DeployManifest `
     -Service 'agent-ssh' `
     -Plugin 'agent-ssh' `
     -InstallPath $InstallDir `
@@ -1291,7 +1296,23 @@ Write-DeployManifest `
         ($SourceRuntimeIdentity | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $fields[$_.Name] = $_.Value }
         $fields
     } else { @{} }) `
-    -PayloadHash $(if ($SourceRuntimeIdentity) { $sourceManifestHash } else { Get-PayloadHash })
+    -PayloadHash $(if ($SourceRuntimeIdentity) { $sourceManifestHash } else { Get-PayloadHash }) `
+    -PassThru:$sourcePublication
+if ($sourcePublication) {
+    $publicationProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
+        $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
+    } else { (Get-Location).Path }
+    $result = Invoke-Hidden -FilePath (Get-BootstrapPython) -ArgList @(
+        '-I', '-B', '-X', 'utf8', (Join-Path $sourcePath 'scripts/command_binding.py'),
+        '--payload-root', $sourcePath, '--source-payload-root', $sourcePath,
+        '--plugin-id', 'agent-ssh', '--legacy-root', $InstallDir,
+        '--project-root', $publicationProject, '--publish-legacy', '--write-manifest'
+    ) -InputText ($manifest | ConvertTo-Json -Depth 8 -ErrorAction Stop)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Command ownership validation refused SSH source manifest publication: $result"
+    }
+    Write-Ok "Deploy manifest written (source: $($manifest.source.kind))"
+}
 
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'

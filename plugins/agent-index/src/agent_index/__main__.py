@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import DaemonInstanceSpec, daemon_entrypoint
+
 import argparse
 import contextlib
-import io
 import json
 import os
 import signal
@@ -15,12 +16,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from agent_procutil import (
-    no_window_kwargs,
-    spawn_daemon,
-    windowless_python,
-    windowless_python_env,
-)
+from agent_procutil import no_window_kwargs, spawn_daemon, windowless_python, windowless_python_env
 import httpx
 
 from . import http_auth
@@ -591,6 +587,7 @@ def _config_from_args(args: argparse.Namespace) -> Config:
     return Config(host=host, port=cfg.port if port is None else int(port))
 
 
+@daemon_entrypoint("agent-index", source=__file__, purpose="production")
 def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
     """Lazily import and delegate to the real ``.server.serve``.
 
@@ -626,7 +623,9 @@ def _dispatch_to_server_venv(
 
     cmd = [str(server_python), "-I", "-X", "utf8", "-m", "agent_index"]
     if raw_args is not None:
-        cmd.extend(raw_args)
+        from .index_command import absolute_hint_file_argv
+
+        cmd.extend(absolute_hint_file_argv(raw_args))
     else:
         cfg = _config_from_args(args)
         cmd.extend([subcommand, "--host", cfg.host, "--port", str(cfg.port)])
@@ -1155,18 +1154,9 @@ def cmd_stop(_args: argparse.Namespace) -> int:
 
 
 def cmd_index(args: argparse.Namespace) -> int:
-    try:
-        from agent_index.indexing import engine as indexing_engine
+    from agent_index.index_command import run_index_command
 
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            result = indexing_engine.run_reindex(full=args.full, source=args.source)
-        _emit(result)
-        # A per-source failure is swallowed by the run loop (so other sources
-        # still index); surface it here as a non-zero exit rather than letting a
-        # wholly-failed reindex look like a clean run (#1350).
-        return 1 if result.get("sources_failed") else 0
-    except Exception as exc:
-        return _emit_error(exc)
+    return run_index_command(args, _emit, _emit_error)
 
 
 def cmd_index_worker(args: argparse.Namespace) -> int:
@@ -1383,7 +1373,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
             windowless_python(python), "-I", "-X", "utf8", "-m", "agent_index",
             start_command, "--host", cfg.host, "--port", str(port), "--passive",
         ]
-        root = install_dir().resolve()
+        root = Path(os.path.abspath(install_dir()))
         root.mkdir(parents=True, exist_ok=True)
         env = {k: v for k, v in os.environ.items() if k not in {"PYTHONPATH", "PYTHONHOME"}}
         overrides = dict(windowless_python_env(python))
@@ -1393,6 +1383,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
             overrides["AGENT_INDEX_LOG_LEVEL"] = "warning"
         handle = spawn_daemon(
             cmd, cwd=root, log_path=root / "service-stdio.log", env=env, env_overrides=overrides,
+            instance=DaemonInstanceSpec("agent-index", root, Path(__file__).resolve()),
             display=f"agent_index {start_command} --passive --port {port}",
         )
         passive_instance.update({"port": port, "pid": handle.pid})
@@ -1728,6 +1719,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_index = sub.add_parser("index", help="populate or refresh the durable index")
     p_index.add_argument("--source", help="source name to index instead of configured defaults")
     p_index.add_argument("--full", action="store_true", help="run a full reindex")
+    p_index.add_argument("--change-hints-file", type=Path, help="v1 acquisition-hint JSON (requires --source)")
     p_index.set_defaults(func=cmd_index)
 
     # Internal: run a single queued task in a detached versioned worker process

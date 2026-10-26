@@ -284,6 +284,7 @@ def _load(path: Path, name: str):
 def repair_case(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest,
 ):
+    marketplace = getattr(request, "param", "fixture")
     # This module is intentionally independent of _conftest_sandbox's roster.
     # No source/lifecycle capability from the driving session may enter it.
     for name in tuple(os.environ):
@@ -408,7 +409,7 @@ def repair_case(
         "    raise SystemExit(real.main())\n",
         encoding="utf-8",
     )
-    incumbent = home / ".copilot/installed-plugins/fixture/agent-worktrees"
+    incumbent = home / ".copilot/installed-plugins" / marketplace / "agent-worktrees"
     published = root / "registered-payload"
     # Both initial payloads precede every ownership or damage mutation.
     payload_copies = [
@@ -423,12 +424,13 @@ def repair_case(
     settings = home / ".copilot/settings.json"
     settings.write_text(json.dumps({
         "extraKnownMarketplaces": {
-            "fixture": {"source": {"source": "github", "repo": "Example/Extensions"}},
+            marketplace: {"source": {"source": "github", "repo": "Example/Extensions"}},
         },
+        "enabledPlugins": {f"agent-worktrees@{marketplace}": True},
     }), encoding="utf-8")
     ledger = home / ".copilot/config.json"
     ledger.write_text(json.dumps({"installedPlugins": [{
-        "name": "agent-worktrees", "marketplace": "fixture",
+        "name": "agent-worktrees", "marketplace": marketplace,
         "version": json.loads((incumbent / "plugin.json").read_text())["version"],
         "cache_path": str(incumbent),
     }]}), encoding="utf-8")
@@ -437,7 +439,7 @@ def repair_case(
     acquisitions = []
 
     def acquire_registered_payload(command, environment, cwd, **kwargs):
-        assert command[-3:] == ["plugin", "update", "agent-worktrees@fixture"]
+        assert command[-3:] == ["plugin", "update", f"agent-worktrees@{marketplace}"]
         assert environment["COPILOT_HOME"] == str(home / ".copilot")
         acquisitions.append(list(command))
         _copy_fixture_tree(published, incumbent, symlinks=True, dirs_exist_ok=True)

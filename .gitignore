@@ -36,6 +36,7 @@ uv.lock
 
 # Cached per-plugin dev venvs built by tools/run-plugin-tests.py
 /.test-venvs/
+.test-runs/
 
 # Capture-owner recovery inputs and stable publication lock; never evidence.
 /plugins/agent-bridge/contract/.capture-publication/
@@ -52,3 +53,4 @@ wcs_err.log
 # ci-flakiness-telemetry-and-reliability effort for whether/when a
 # periodic-refresh job should check one in instead).
 tools/ci_telemetry.sqlite3
+**/native/linux-*/daemon-instance

@@ -1012,6 +1012,32 @@ because the receiver was updated. Source publication and rollout remain separate
 
 ## Persistence
 
+The ASGI admission lifecycle retains its instance through event-writer and
+database-close settlement, including startup failure and shutdown cancellation.
+A bounded writer-stop timeout keeps admission live until the actual writer
+thread retires and close is retried; cancellation of an asyncio facade is not
+native completion evidence. An already-retired writer's historical write error
+is logged once without creating a permanent admission hold.
+
+Hosted roster shutdown also retains the original discovery operation behind
+its cancellable joiners, plus provider-native reads and sample futures. The
+cache's own bounded stop API is unchanged. Readiness replacement transfers
+retiring cache holders to the app; final hosting shutdown waits for every
+retained operation before releasing admission, including cancellation or a
+startup failure. Late discovery results still pass the original generation
+fence. Separately admitted Session Hosts are not absorbed into this custody.
+Cancelling the bounded stop attempt itself permits a new stop attempt, not a
+busy retry of its cancelled facade. Cancelling an already-dispatched discovery
+owner destroys its completion proof; hosting retains an unknown admission hold.
+Whole-loop cancel-all is therefore not graceful settlement of those holders:
+it remains responsive but requires an external process-exit boundary rather
+than claiming that daemon threads or cancelled Tasks have retired.
+Late hosting attachment protects the original live discovery Task before
+bounded stop cancels its joiner; it does not replay discovery. A never-started
+coroutine can be cancelled without native work. Already-lost discovery receipts
+or discarded attempt history instead retain an explicit unknown hold through
+the external process-exit boundary, never a false compatibility/finished claim.
+
 - **Sessions:** SQLite database at `~/.agent-bridge/sessions.db` (WAL mode)
 - **Config:** YAML at `~/.agent-bridge/config.yaml`
 - **Auth:** Bearer token at `~/.agent-bridge/auth.yaml`

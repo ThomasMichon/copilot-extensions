@@ -27,6 +27,8 @@ from .gateway_service_channel import (
     unpack, wire_headers,
 )
 from .gateway_service_context import METHODS
+from .machine_identity import PROFILE as MACHINE_PROFILE, machine_headers, make_machine_proof
+from .planning import canonical
 from .gateway_service_handler import (
     PROFILE, HandlerBinding, RequestLifetime, ServiceRequest, respond,
 )
@@ -82,13 +84,19 @@ class ServiceConnector:
     """
 
     def __init__(self, *, slot: str, gateway_origin: str, backend_origin: str | None = None,
-                 access_token_callback: Callable[[], Awaitable[str]], proof_key: Any,
+                 access_token_callback: Callable[[], Awaitable[str]] | None = None, proof_key: Any,
                  gateway_ca: str | None = None, backend_ca: str | None = None,
                  methods: frozenset[str] = METHODS,
-                 handler: HandlerBinding | None = None) -> None:
+                 handler: HandlerBinding | None = None,
+                 machine_principal: str | None = None, machine_audience: str | None = None) -> None:
         check(isinstance(slot, str) and 0 < len(slot) <= 128, "invalid-slot")
         check(bool(methods) and methods <= METHODS, "invalid-methods")
-        check(callable(access_token_callback), "invalid-token-source")
+        self._machine = isinstance(machine_principal, str) and bool(machine_principal) \
+            and isinstance(machine_audience, str) and bool(machine_audience)
+        check((self._machine and access_token_callback is None)
+              or (machine_principal is None and machine_audience is None
+                  and callable(access_token_callback)), "invalid-token-source")
+        self._principal, self._audience = machine_principal, machine_audience
         check((backend_origin is None) != (handler is None), "select-one-backend")
         check(handler is None or type(handler) is HandlerBinding, "invalid-handler")
         self.slot = slot
@@ -116,16 +124,29 @@ class ServiceConnector:
             raise TransportError("invalid-frame") from None
 
     async def _admit(self, session: aiohttp.ClientSession) -> str:
-        async with session.get(self.gateway + "/_fleet/challenge",
+        endpoint = "/_fleet/machine-challenge" if self._machine else "/_fleet/challenge"
+        async with session.get(self.gateway + endpoint,
                                ssl=self._gateway_tls, allow_redirects=False) as response:
             challenge = await self._json(response)
-        shape(challenge, {"nonce"})
-        access = await asyncio.wait_for(self._access(), 5)
-        check(isinstance(access, str) and 0 < len(access) <= 8192, "invalid-token-source")
+        shape(challenge, {"nonce", "profile"} if self._machine else {"nonce"})
+        check(not self._machine or challenge["profile"] == MACHINE_PROFILE, "unsupported-profile")
         uri = self.gateway + "/_fleet/service-admit"
-        proof = make_proof(self._key, access, nonce=challenge["nonce"], target_uri=uri)
-        async with session.post(uri, json={"slot": self.slot, "access": access, "proof": proof,
-                                          **({"profile": PROFILE} if self.handler else {})},
+        payload = {"slot": self.slot, **({"profile": PROFILE} if self.handler else {})}
+        authenticated = {}
+        if self._machine:
+            body = canonical(payload)
+            proof = make_machine_proof(
+                self._key, principal=self._principal, audience=self._audience,
+                kind="service", resource=self.slot, method="POST", target_uri=uri,
+                nonce=challenge["nonce"], body=body)
+            authenticated = machine_headers(self._principal, proof)
+        else:
+            assert self._access is not None
+            access = await asyncio.wait_for(self._access(), 5)
+            check(isinstance(access, str) and 0 < len(access) <= 8192, "invalid-token-source")
+            proof = make_proof(self._key, access, nonce=challenge["nonce"], target_uri=uri)
+            body = canonical(payload | {"access": access, "proof": proof})
+        async with session.post(uri, data=body, headers=authenticated,
                                 ssl=self._gateway_tls, allow_redirects=False) as response:
             ticket = await self._json(response)
         shape(ticket, {"ticket"})

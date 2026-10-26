@@ -1298,7 +1298,8 @@ function New-SignedVenv {
         -PythonVersion '3.10' `
         -UvCommand 'uv' `
         -RequireSignedBase ($env:OS -eq 'Windows_NT') `
-        -AllowExisting $true)
+        -AllowExisting $true `
+        -WithoutPip)
 }
 
 # #1643: venue providers (agent-codespaces / agent-containers) are PURE
@@ -2169,24 +2170,31 @@ function Write-Binstubs {
     $rootLit = $InstallDir -replace "'", "''"
     $sourceRoot = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
     $sourceLit = $sourceRoot -replace "'", "''"
+    $qualifiedSource = if ($SourceRuntimeIdentity) { '$true' } else { '$false' }
     $ps1 = @'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $env:PYTHONUTF8 = '1'
+Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
 $_root = '__ROOT__'
 # -File's redirected native stdin is not an object pipeline.
 $_pipelineInput = $MyInvocation.ExpectingInput -and $MyInvocation.Line
 $_source = '__SOURCE__'
+$_qualifiedSource = __QUALIFIED_SOURCE__
 $_snap = ''
 try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
 $_payload = $_snap
 # Older ordinary snapshots have no source receipt. Prefer their exact publisher
 # while it exists; never discover a different marketplace through PATH or a glob.
-if (-not $_snap -or -not [IO.File]::Exists((Join-Path $_snap 'snapshot-provenance.json'))) {
+if (-not $_qualifiedSource -and
+    (-not $_snap -or -not [IO.File]::Exists((Join-Path $_snap 'snapshot-provenance.json')))) {
     $_payload = if ([IO.File]::Exists((Join-Path $_source 'scripts\runtime-gate.ps1'))) { $_source } else { '' }
 }
 $_gate = if ($_payload) { Join-Path $_payload 'scripts\runtime-gate.ps1' } else { '' }
-if (-not $_gate -or -not [IO.File]::Exists($_gate)) {
+if (-not $_gate -or -not [IO.File]::Exists($_gate) -or -not (
+    Select-String -LiteralPath $_gate -SimpleMatch '# Installation driver contract: bridge-first-use-v1' -Quiet
+)) {
     if (-not $env:COPILOT_EXTENSIONS_CONTEXT) {
         $_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
         if ([IO.File]::Exists($_resolver) -and
@@ -2217,7 +2225,7 @@ if (-not $_gate -or -not [IO.File]::Exists($_gate)) {
             }
         }
     }
-    [Console]::Error.WriteLine('[agent-bridge] retained runtime gate is unavailable. Re-enable/update the owning plugin, then retry.')
+    [Console]::Error.WriteLine('[agent-bridge] retained runtime gate lacks the queued command contract. Re-enable/update the owning plugin, then retry.')
     exit 126
 }
 $env:AGENT_BRIDGE_INSTALL_DIR = $_root
@@ -2226,7 +2234,7 @@ $env:AGENT_BRIDGE_PAYLOAD_ROOT = $_payload
 if ($_pipelineInput) { (Get-Variable input -ValueOnly) | & $_gate @args } else { & $_gate @args }
 exit $LASTEXITCODE
 '@
-    $ps1 = $ps1.Replace('__ROOT__', $rootLit).Replace('__SOURCE__', $sourceLit)
+    $ps1 = $ps1.Replace('__ROOT__', $rootLit).Replace('__SOURCE__', $sourceLit).Replace('__QUALIFIED_SOURCE__', $qualifiedSource)
     [System.IO.File]::WriteAllText($BinstubPs1, $ps1, (New-Object System.Text.UTF8Encoding($true)))
 
     # cmd fallback: delegate entirely to the .ps1 binstub so resolution stays
@@ -2381,6 +2389,13 @@ function Invoke-Stamp {
         }
         $snapDir = $snapshot.Trim()
         [void](Test-PayloadUnchangedSinceAdmission -SourceIdentityOnly)
+        $sourceRoot = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
+        $sourceProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
+            $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
+        } elseif ($env:COPILOT_PROJECT_DIR) { $env:COPILOT_PROJECT_DIR } else { (Get-Location).Path }
+        Publish-LegacySnapshotSource -SnapshotDir $snapDir -HelperDirectory $ScriptDir `
+            -PayloadRoot $sourceRoot -PluginId agent-bridge -RuntimeRoot $InstallDir `
+            -ProjectRoot $sourceProject -SnapshotId (Split-Path -Leaf $snapDir) -PayloadVersion $SrcVersion
         $nativeError = ''
         [void](Invoke-Hidden -FilePath $py -ArgList @(
             '-I', '-B', (Join-Path $ScriptDir 'versioned_runtime.py'), '--root', $InstallDir,
@@ -2397,7 +2412,12 @@ function Invoke-Stamp {
         New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
         $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
         Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
-            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+            $destination = Join-Path $snapTmp $_.Name
+            if ($_.PSIsContainer) {
+                Copy-InstallerStageDirectory $_.FullName $destination
+            } else {
+                Copy-Item -LiteralPath $_.FullName -Destination $destination -Force
+            }
         }
         Materialize-SnapshotVendoredLibs -SnapshotDir $snapTmp
         Materialize-SnapshotInstallerEngine -SnapshotDir $snapTmp
@@ -3645,6 +3665,10 @@ $script:InstallerLifecycleOutcome = 'fail'
 if ($script:InstallerLifecycleAction) { Write-InstallerLifecycle begin }
 try {
     Initialize-SourceRuntime
+    if ($Action -in @('install', 'update', 'provision')) {
+        . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+        Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+    }
     switch ($Action) {
         'install'   { Invoke-Install }
         'uninstall' { Invoke-Uninstall }

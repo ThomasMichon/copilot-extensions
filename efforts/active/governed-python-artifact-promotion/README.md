@@ -284,6 +284,28 @@ probe qualification, CI authorization and lifecycle validation remain with
       counters do not invalidate healthy same-input reuse. This explicit
       preparation API does not enable consumers, approve a live feed or
       complete source/revocation/provider/retention contracts.
+- [x] Compose independently authenticated configured source, native exact
+      runtime/build locking, governed wheel acquisition and separate immutable
+      build tools through the existing source-profile completion owner (#8880).
+      Actual built/runtime metadata, installed target and health, build-only
+      exclusion and unchanged transaction-level reuse are qualified. This is
+      explicit preparation, not default-marketplace authentication, persistent
+      offline admission, enabled installation or activation-time revocation.
+- [x] Compose the explicit authenticated-source transaction with actual Manager
+      installation and persisted unchanged-generation admission (#8991).
+      Current source/policy/feed authentication, target, local selection and
+      constructor evidence gate reuse; integrity refuses rather than repairing.
+      A real fresh process reuses without package-feed access or reconstruction.
+      Default marketplace/bootstrap authentication, production dependency
+      qualification, dependency-unchanged updates, measured defaults and
+      installation savings remain open.
+- [x] Provide explicit registered-marketplace source authentication (#9005).
+      Actual installed ownership, registration and ledger select a consistent
+      native cache; independent acquisition authenticates its exact commit/tree,
+      and canonical preparation must match the installed assembly/version.
+      Custody and current source/configuration checks remain live through
+      consumption. This is a repository-only provider, not normal bootstrap
+      integration or measured production installation savings.
 - [ ] Complete the reviewed [wheel-input admission slice](wheel-input-admission.md):
       authenticated approval/acquisition, supplied revocation and enabled real
       consumer contracts remain open after the bounded construction component.
@@ -307,6 +329,77 @@ probe qualification, CI authorization and lifecycle validation remain with
       immutable-slot assembly, health gates, activation, and rollback.
 - [ ] Validate across supported platform/architecture/Python-ABI
       combinations, including a clean-room first install.
+
+#### Bootstrap-safe normal consumer _(agent-recommended; plan approved in #9009)_
+
+The next implementation stretch closes the gap between the explicit providers
+above and an actual installer. `libs/installer-engine/installer-engine.ps1`
+and its POSIX sibling supply bootstrap helpers; they do not invoke the new
+profile owner. Worktrees' `scripts/runtime_install.py` invokes
+`installer_engine.numbered_candidate` from its existing Python lifecycle.
+Bridge still uses the existing shell construction adapter. Do not assume that
+shipping the shared Python engine makes every installer a migrated consumer.
+#9006 packages the existing command lifecycle SDK for prepared sources; retain
+that implementation and #7028's source/deployment ownership.
+
+The admission tools currently import `packaging` and repository-relative
+modules. A fresh bootstrap must neither import them from an incidental host
+environment nor install them using the admission code they are needed to run.
+Use the following ordered implementation and acceptance gates:
+
+- [x] Extract the existing native feed-projection/capture mechanism into the
+      shared installer's standard-library layer. Keep profile selection and
+      approval in their current owner; capture consumes its retained native UV
+      transaction, not a second configuration reader. Preserve authentication,
+      OS trust, redirect policy, seasoning, unsupported-policy refusals and
+      secret-safe keyed identities. Preserve existing repository APIs through
+      thin compatibility adapters, not copied alternate implementations.
+      Implemented and qualified in #9010; this does not admit tooling or enable
+      an ordinary consumer.
+- [x] Admit the declared admission-tool dependency through a bounded
+      standard-library bootstrap, using the existing native compiler, retained
+      feed capture, actual wheel inspector/acquisition and immutable constructor.
+      Start with the dependency-free `packaging` wheel required by the current
+      admission code. Native UV selects its exact governed-feed version/file;
+      freeze that lock before construction and require actual metadata to have
+      no dependencies, extras or unsupported wheel layout. This restricted seed
+      must not grow a requirement/version resolver or execute a source backend.
+      Reuse the existing installation-owned immutable build-tool namespace and
+      third-party-only constructor mode, not a global mutable tooling venv.
+      Bind source/tooling bytes, interpreter, exact lock and effective policy;
+      retain custody through health and invalidate reuse on changed inputs.
+      Implemented and qualified in #9015. The restricted seed is inert until
+      a real consumer supplies its source/policy owner; complete toolkit
+      packaging, ordinary enabling and production savings remain open.
+- [ ] Package the existing admission code and its complete first-party imports
+      as a canonical, self-contained installer toolkit. Retain one source of
+      truth and the existing payload-generation/materialization conventions.
+      Reuse the actual source acquisition/preparation owners; remove repository
+      path assumptions rather than reaching into another installed plugin or
+      executing a fetched repository's tooling. Run semantic profile validation
+      under the admitted tooling interpreter, never via ambient `packaging`.
+      Keep public first-party artifacts free of third-party dependency bytes.
+- [ ] Connect Worktrees' real installation lifecycle first, preserving its
+      `agent-worktrees` owner and runtime root separately from Manager's
+      `worktree-manager` component. Carry the actual installed owner through
+      self-staging. Compose real release discovery and source-provider selection;
+      do not manufacture an unavailable index or relabel a marketplace plugin
+      as Manager. Keep source, current policy, acquisition and revocation checks
+      alive through the existing health/publication/rollback owner.
+- [ ] Qualify and enable that ordinary install/update path only after its full
+      bootstrap and consumer tests pass. Missing/nonmatching artifacts may
+      select the authority's permitted governed-source fallback; invalid
+      artifacts/source never do. A tooling admission failure is not artifact
+      absence and cannot silently select an ungoverned installer. Preserve the
+      current supported path while the new lane is inert; do not gate ordinary
+      installation on artifact publication proof. Migrate other installers
+      only through their actual construction/lifecycle adapters.
+
+No new service, approval database, installation authority, constructor, source
+resolver or deployment permission is introduced. This plan does not credit
+production feed qualification, dependency-unchanged updates or installation
+savings. The parent remains Active until its complete Plan and Validation Plan
+are resolved.
 
 #### First consumer lane _(authority-lock direction; review before implementation)_
 
@@ -548,12 +641,73 @@ verified answer against its actual repository or machine configuration:
 
 ## Validation Plan
 
+- [x] Qualify the restricted dependency-free Packaging seed (#9015).
+      All 29 selected native jobs pass,
+      including Linux/Windows seed compilation, controlled TLS acquisition,
+      actual offline tooling health/reuse and POSIX interpreter-link custody.
+      The 1,824-case admitted unit packet passes with coverage under the
+      unchanged 300-second bound. Actual owner CLI selection and exact frozen
+      cutoffs are retained; intentionally dropped settings refuse before
+      resolution or HTTP. Fresh copied-payload `-I -S` import/inspection does
+      not load ambient Packaging or repository tools.
+      This does not qualify the complete toolkit or ordinary
+      fresh/existing installation, production feeds, enabled defaults,
+      dependency-unchanged offline discovery, measured savings or rollout.
+- [x] Qualify the standard-library native feed-capture extraction (#9010).
+      The exact admitted unit packet passes 1,800 cases with coverage inside
+      its unchanged 300-second bound. All 27 selected Linux/Windows/macOS
+      native jobs pass on the reviewed head, including actual retained feed/
+      source compilation, acquisition, profile/Manager compatibility and
+      copied-payload `-I -S` first touch without Packaging or repository tools.
+      Current-head approval, no review threads and required green CI qualify
+      this mechanism only, not tooling installation, ordinary consumer
+      enablement, production feed eligibility, measured savings or rollout.
+- [ ] Qualify bootstrap-safe admission and the actual ordinary consumer:
+      isolated `-I -S` first-touch imports without repository paths or site
+      packages; actual governed native compilation/acquisition and installed
+      tooling health; a dependency-bearing or malformed seed, unsupported
+      configuration, changed bytes/policy and forged source all refuse before
+      publication. Prove no backend execution or unapproved endpoint request,
+      bounded child settlement and invocation-owned cleanup. Then exercise real
+      Windows/POSIX installer entry points on fresh and existing installations,
+      with artifact outage versus integrity refusal, retained unchanged reuse,
+      exact component ownership and prior-selection/rollback preservation.
+      Keep existing lifecycle-SDK packaging and mixed-version callers working.
+      Record measured cold/warm time, network and physical storage before
+      selecting default budgets or claiming a faster normal installation.
+- [x] Qualify the explicit registered-marketplace source provider. #9005's final
+      head passes required CI, all 22 selected Linux/Windows native jobs and
+      Copilot approval, with both review threads resolved. Actual Git/ledger/
+      preparation controls reject forged cached commits, changed closures,
+      ambiguous caches and version/configuration changes; preserve selected
+      older source; separate marketplace owners; honor explicit native homes
+      and empty environments; and qualify Windows source paths over 260
+      characters. This does not qualify default bootstrap, production feed/
+      closure eligibility, measured savings or rollout.
 - [ ] Implement and qualify the [feed-availability validation contract](feed-availability-validation.md#implementation-validation-plan)
       under #7529 and #4876: exact production-resolver coverage, admitted probe
       semantics, durable claim/fence recovery, real worker failover and CI
       routing, and owned installation/update/rollback/stop. This is future
       implementation, not completed by accepting the documentation-only design.
 
+- [x] Qualify explicit Manager source installation and cross-invocation reuse.
+      #8991's final head passes required CI and all 17 selected hosted native
+      Linux/Windows/macOS jobs. A clean current-head owner-authored Comment
+      has no concrete findings or unresolved threads. Real Manager cases
+      cover absolute/no-PATH and command-selected UV, account/resolver changes,
+      source-profile version checks, provenance-corruption refusal and genuine
+      health repair. Controlled authentication changes invalidate the keyed
+      policy identity without persisting credentials. This does not qualify
+      default bootstrap, live production dependencies or measured speedup.
+- [x] Qualify explicit authenticated-source preparation and the composed
+      source-profile owner. #8880's final head passes required CI and all 11
+      selected native Linux/Windows/macOS jobs, with fresh/reused tools-target
+      refusal, precompile feed-policy refusal, real build-only requirements,
+      backend descendant settlement and actual offline runtime health/reuse.
+      The 1,792-case admitted unit packet passes under the unchanged 300-second
+      whole-execution budget. Current-head review has no open issues and every
+      thread is resolved. This does not credit a live feed, default provider,
+      installation speedup, persistent offline admission or production caller.
 - [x] Qualify bounded exact-wheel preparation with real TLS/authentication,
       pre-request redirect refusal, independent count/byte/storage/deadline
       bounds, worker settlement, offline installed health and unchanged-input
@@ -756,6 +910,12 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-25 - Explicit source preparation merged; real installation next
+
+[Merged evidence and next slice](journal/2026/10.25%20source-preparation.md).
+The parent remains **Active**; the next work is the real shared-installer
+entry and persisted admission/reuse, not another standalone preparation owner.
 
 ### 2026-10-24 - Explicit source-fallback transaction design approved
 

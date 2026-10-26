@@ -23,6 +23,18 @@ from agent_containers.config import ContainersConfig, FleetConfig, RESTRICTED_PR
 from tests._hosting_owner import policy_reply
 
 
+@pytest.fixture
+def synthetic_keeper_processes(monkeypatch):
+    calls = []
+
+    def spawn(argv, *, instance, popen, **kwargs):
+        calls.append(instance)
+        return popen(argv, **kwargs)
+
+    monkeypatch.setattr(forward_keeper, "spawn_instance", spawn)
+    return calls
+
+
 def _args(**kw):
     base = dict(
         name="repo-1",
@@ -1091,7 +1103,7 @@ def test_forward_keeper_holds_share_one_container_forward(tmp_path, monkeypatch)
 
 
 def test_forward_keeper_restarts_pre_upgrade_keeper_and_preserves_old_mux_hold(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, synthetic_keeper_processes
 ):
     monkeypatch.setattr(forward_keeper, "_STORE", shared_forward_keeper.KeeperStore(tmp_path))
     monkeypatch.setattr(shared_forward_keeper, "pid_alive", lambda pid: pid == 100)
@@ -1130,7 +1142,7 @@ def test_forward_keeper_restarts_pre_upgrade_keeper_and_preserves_old_mux_hold(
     assert set(state["holds"]) == {"wt-anchor-repo", "other@repo-1"}
 
 
-def test_forward_keeper_restarts_only_when_forward_changes(tmp_path, monkeypatch):
+def test_forward_keeper_restarts_only_when_forward_changes(tmp_path, monkeypatch, synthetic_keeper_processes):
     monkeypatch.setattr(forward_keeper, "_STORE", shared_forward_keeper.KeeperStore(tmp_path))
     monkeypatch.setattr(shared_forward_keeper, "pid_alive", lambda pid: pid == 100)
     stopped = []
@@ -1446,7 +1458,7 @@ def test_forward_keeper_session_alive_fails_open_on_state_os_error(monkeypatch):
     assert forward_keeper._any_hold_alive("repo-1", object(), startup_grace=0) is True
 
 
-def test_forward_keeper_restart_preserves_existing_holds(tmp_path, monkeypatch):
+def test_forward_keeper_restart_preserves_existing_holds(tmp_path, monkeypatch, synthetic_keeper_processes):
     monkeypatch.setattr(forward_keeper, "_STORE", shared_forward_keeper.KeeperStore(tmp_path))
     monkeypatch.setattr(shared_forward_keeper, "pid_alive", lambda pid: False)
 

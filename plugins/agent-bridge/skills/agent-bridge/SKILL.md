@@ -35,10 +35,11 @@ description: >
 > PowerShell, invoke the catalog path as
 > `& "<agent-bridge catalog argv[0]>" <args>`.
 >
-> The payload shim provisions its own runtime on first use and works without
-> agent-worktrees. The first call may take ~30–120s (watch for
-> `::agent-provisioning::`); let it finish and surface any exact provisioning
-> failure instead of improvising a toolchain install.
+> Cold legacy first use observes the packaged installation driver's fixed
+> `provision` action and works without agent-worktrees. Watch for
+> `::agent-provisioning::` on stderr: its status path is driver-owned progress,
+> not readiness or an ETA. Let it finish and surface exact failures rather
+> than improvising a toolchain install; caller exit does not cancel the owner.
 >
 > If session-start hooks did not publish the catalog, enumerate installed
 > payloads for this plugin and fail unless exactly one exists. Invoke that

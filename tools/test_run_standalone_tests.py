@@ -336,9 +336,12 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
     extra = "[test]" if component == "services/index" else "[dev]"
     assert any(argument.endswith(component.replace("/", os.sep) + extra) for argument in installs[0])
     if component == "services/ssh":
+        assert "--no-editable" in installs[0]
         assert any(argument.endswith(
             str(Path("fleet-manager")) + "[service-gateway,ssh-client]",
         ) for argument in installs[0])
+    else:
+        assert "--no-editable" not in installs[0]
     if component in ("services/index", "services/dispatch", "services/pr", "services/ssh"):
         assert "--override" in installs[0]
 

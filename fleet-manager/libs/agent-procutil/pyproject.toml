@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv]
+exclude-newer = "7 days"
+
+[project]
+# Distribution name is namespaced (agent-procutil, not the squattable
+# "procutil") to prevent dependency-confusion; the import module is
+# ``agent_procutil``. Mirrors agent-config-migrate / agent-ssh-manager.
+name = "agent-procutil"
+version = "0.1.1-dev1"
+description = "Shared Windows-headless / detached process-spawn kwargs for Copilot CLI plugins"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Thomas Michon" }
+]
+# Pure stdlib (os + subprocess); no runtime dependencies.
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+agent_procutil = ["native_daemon.ps1", "native_owned.ps1", "native_owned.sh", "native_daemon.sh", "daemon_instances.ps1", "daemon_instances.sh", "daemon_instance_native.c", "native/*/daemon-instance"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 99
+
+[project.optional-dependencies]
+metrics = ["psutil>=7.0"]
+dev = [
+    "pytest>=9.1.1",
+    "psutil>=7.0",
+    "setuptools>=83.0.0",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests legitimately use `assert` (pytest).
+"tests/**" = ["S101"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

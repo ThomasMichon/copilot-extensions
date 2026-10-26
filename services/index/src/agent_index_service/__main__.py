@@ -77,6 +77,26 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _serve(config, *, passive: bool = False) -> int:
+    from agent_procutil.daemon_instances import admit_daemon_instance
+
+    with admit_daemon_instance(
+        "agent-index", source=__file__, purpose="production",
+    ):
+        from .composition import core_environment, load_core
+
+        with core_environment(config):
+            core = load_core(native=True)
+            from agent_index.config import Config
+            if config.store_layout is not None:
+                from agent_index.index_config import IndexConfig
+                from agent_index.store.source_layout import initialize_source_store
+
+                initialize_source_store(IndexConfig())
+            core.serve(Config(host="127.0.0.1", port=config.port), passive=passive)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -144,18 +164,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         from .composition import core_environment, load_core, require_installed_core
 
+        if args.command in {"serve", "start"}:
+            return _serve(config, passive=args.passive)
         with core_environment(config):
             core = load_core(native=args.command in {"serve", "start", "deploy"})
-            if args.command in {"serve", "start"}:
-                from agent_index.config import Config
-
-                if config.store_layout is not None:
-                    from agent_index.index_config import IndexConfig
-                    from agent_index.store.source_layout import initialize_source_store
-
-                    initialize_source_store(IndexConfig())
-                core.serve(Config(host="127.0.0.1", port=config.port), passive=args.passive)
-                return 0
             if args.command == "deploy":
                 require_installed_core()
                 config.home.mkdir(parents=True, exist_ok=True)

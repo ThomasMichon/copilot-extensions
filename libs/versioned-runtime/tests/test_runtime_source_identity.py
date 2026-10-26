@@ -138,8 +138,11 @@ def test_source_identity_accepts_original_and_normalized_dev_versions(version: s
 @pytest.mark.parametrize("version", ["0.4.1-dev3", "0.4.1.dev3+base"])
 @pytest.mark.parametrize("commit_size", [40, 64])
 @pytest.mark.parametrize("repair", [False, True])
-def test_source_and_repair_slots_preserve_the_declared_package_version(version, commit_size, repair):
+@pytest.mark.parametrize("profile", [False, True])
+def test_source_and_repair_slots_preserve_the_declared_package_version(version, commit_size, repair, profile):
     qualified = identity.runtime_version(version, "a" * commit_size, ASSEMBLY)
+    if profile:
+        qualified += ".profile." + "c" * 16
     if repair:
         qualified += ".repair." + "b" * 32
     assert identity._runtime().package_version(qualified) == version

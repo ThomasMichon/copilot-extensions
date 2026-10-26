@@ -43,7 +43,7 @@ _aw_update_entry() (
     shift
     for _arg do
         case "$_arg" in
-            --no-manager|--auth-report|--help|-h|--request-status|--request-status=*|--recovery-status|--recover-after-restart|--recover-for-repair)
+            --phase|--phase=*|--plugin|--plugin=*|--no-manager|--auth-report|--help|-h|--request-status|--request-status=*|--recovery-status|--recover-after-restart|--recover-for-repair)
                 return 0 ;;
         esac
     done
@@ -207,6 +207,7 @@ EOF
     exit $?
 )
 # Return 0 only for calls not handled here; handled updates terminate the caller.
+_aw_update_diagnostic=0
 case "${1-}:${3-}" in
     update:*|--project:update|-p:update|--project=*:*)
         _aw_is_update=0
@@ -215,6 +216,9 @@ case "${1-}:${3-}" in
             _aw_bypass=0
             for _aw_arg do
                 case "$_aw_arg" in
+                    --phase|--phase=*|--plugin|--plugin=*)
+                        _aw_bypass=1
+                        _aw_update_diagnostic=1 ;;
                     --no-manager|--auth-report|--help|-h|--request-status|--request-status=*|--recovery-status|--recover-after-restart|--recover-for-repair)
                         _aw_bypass=1 ;;
                 esac

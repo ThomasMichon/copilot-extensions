@@ -7,12 +7,11 @@
     so a WSL-hosted listener stays reachable. An idle WSL distro terminates and
     takes its services with it.
 
-    The keepalive is a detached `sleep infinity` inside the distro, launched via
-    a **windowless** VBS launcher (WScript.Shell.Run style 0) so wsl.exe never
-    flashes a console window -- registering a Scheduled Task to run wsl.exe
-    directly would pop a visible console on every fire (the task -Hidden flag
-    hides the task, not the child console). A logon trigger re-establishes it
-    after each reboot.
+    A native PowerShell lifecycle owner tracks the WSL transport and its
+    `sleep infinity`. A windowless VBS launcher uses conhost --headless so
+    neither PowerShell nor wsl.exe allocates a visible console. The owner and
+    shared instance binding are installed together; no Python is required.
+    A logon trigger re-establishes the production keepalive after each reboot.
 
     Run from the copilot-extensions repo root:
       $ka = 'plugins\wsl-setup\skills\setting-up-wsl\references\wsl-keepalive.ps1'
@@ -66,23 +65,44 @@ function Resolve-TaskName {
 
 function New-KeepaliveVbs {
     param([string]$Distro, [string]$Service, [string]$VbsPath)
-    # Build the in-distro command: optionally start the service, then pin.
-    $svc = if ($Service) { "systemctl start $Service; " } else { "" }
-    $inner = "$svc" + "exec sleep infinity"
-    # VBScript quoting: a literal double-quote inside a string literal must be
-    # DOUBLED. Use [char]34 to sidestep PowerShell's own quote-escaping entirely.
-    $q  = [char]34          # one literal "  (delimits VBS string literals)
-    $dq = "$q$q"            # ""  -> one escaped quote inside a VBS string
-    # The sh -c payload is wrapped in escaped quotes so it survives as one arg.
-    $wslCmd  = "wsl.exe -d $Distro -u root --exec /bin/sh -c $dq$inner$dq"
-    $runLine = "CreateObject(${q}WScript.Shell${q}).Run ${q}$wslCmd${q}, 0, False"
+    $owner = Join-Path (Split-Path $VbsPath -Parent) 'wsl-keepalive-owner.ps1'
+    $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $conhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
+    $arguments = @($conhost, '--headless', $powershell, '-NoProfile', '-NonInteractive',
+        '-ExecutionPolicy', 'Bypass', '-File', $owner, '-Distro', $Distro)
+    if ($Service) { $arguments += @('-Service', $Service) }
+    $quoteNative = {
+        param([string]$Value)
+        '"' + (($Value -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"'
+    }
+    $command = ($arguments | ForEach-Object { & $quoteNative $_ }) -join ' '
+    $vbsCommand = $command.Replace('"', '""')
+    $runLine = 'CreateObject("WScript.Shell").Run "' + $vbsCommand + '", 0, False'
     $vbs = @(
         "' Windowless WSL keepalive launcher (managed by wsl-setup plugin).",
         "' Run style 0 = hidden; no console window or flash.",
         $runLine
     ) -join "`r`n"
     New-Item -ItemType Directory -Force (Split-Path $VbsPath) | Out-Null
-    Set-Content -Path $VbsPath -Value $vbs -Encoding ASCII
+    Set-Content -Path $VbsPath -Value $vbs -Encoding Unicode
+}
+
+function Publish-KeepaliveInstanceHelpers {
+    foreach ($name in @('wsl-keepalive-owner.ps1', 'daemon_instances.ps1')) {
+        $source = Join-Path $PSScriptRoot $name
+        $entry = Get-Item -LiteralPath $source -Force -ErrorAction Stop
+        if ($entry.PSIsContainer -or ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw 'Keepalive requires ordinary instance helpers from its owning payload.'
+        }
+    }
+    [void][IO.Directory]::CreateDirectory($InstallDir)
+    foreach ($name in @('wsl-keepalive-owner.ps1', 'daemon_instances.ps1')) {
+        $source = Join-Path $PSScriptRoot $name
+        $destination = Join-Path $InstallDir $name
+        if ([IO.Path]::GetFullPath($source) -ne [IO.Path]::GetFullPath($destination)) {
+            Copy-Item -LiteralPath $source -Destination $destination -Force
+        }
+    }
 }
 
 function Invoke-Install {
@@ -90,6 +110,9 @@ function Invoke-Install {
     if (-not (Test-Admin)) { Write-Fail "install must run in an ELEVATED shell (Scheduled Task registration)."; exit 1 }
     $tn = Resolve-TaskName
     $vbsPath = Join-Path $InstallDir "$tn.vbs"
+    . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+    Publish-KeepaliveInstanceHelpers
 
     Write-Step "Deploying windowless launcher -> $vbsPath"
     New-KeepaliveVbs -Distro $Distro -Service $Service -VbsPath $vbsPath

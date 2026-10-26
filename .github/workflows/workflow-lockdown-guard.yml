@@ -90,7 +90,7 @@
 # default"), regardless of what the PR head or even `dev` currently
 # contains, and still exposes `github.event.pull_request` metadata for the
 # untrusted head. This job never checks out or executes PR content -- it
-# only reads the PR's file list via the REST API -- so it carries none of
+# reads the PR's file list and Git objects as inert data -- so it carries none of
 # the classic `pull_request_target` secret-exfiltration risk (see this
 # repo's own `promote-trigger.yml` for the citation on that risk
 # class).
@@ -372,6 +372,38 @@ jobs:
                 "account may modify workflows, actions, or CODEOWNERS -- ask them to " +
                 "make this change, or split it out of this PR.",
             );
+
+      # These replace repository-owned pre-push validators. Keep them inside
+      # this already-required job, not an informational success-shaped sibling.
+      # Only trusted workflow tooling is checked out; PR commits are inert data.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Fetch publication candidates as inert Git objects
+        shell: bash
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git -c core.hooksPath= -c core.fsmonitor=false fetch \
+            --no-tags --no-recurse-submodules origin "$BASE" "$HEAD"
+      - name: Required identifier and final-diff size publication checks
+        shell: bash
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP: "1"
+          COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI: |
+            ${{ secrets.FORBIDDEN_IDS_FACILITY }}
+            ${{ secrets.FORBIDDEN_IDS_WORK }}
+        run: |
+          python tools/check-no-internal-identifiers.py --ci --base "$BASE" --git-ref "$HEAD"
+          python tools/check-large-files.py --base "$BASE" --head "$HEAD"
 
   source-attribution:
     name: source-attribution

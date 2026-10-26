@@ -194,7 +194,10 @@ def _detect_local_machine(
     """Match the local hostname to a machine in topology."""
     import socket
 
-    from machine_transport import find_machine_entry, is_local_machine
+    from machine_transport import (
+        AmbiguousMachineError, entry_physical_host, find_machine_entry,
+        is_local_machine,
+    )
 
     hostname = socket.gethostname()
     platform = _detect_platform()
@@ -209,16 +212,31 @@ def _detect_local_machine(
             raise ValueError("local_execution_space does not match this daemon's execution platform")
         return selected, platform
     if scoped:
-        selected = find_machine_entry(
-            machines, hostname, reject_ambiguous=True, execution_platform=platform,
-        )
-        if selected is not None and selected.legacy_key:
-            return selected, platform
-        if not any(machine.execution_platform and not machine.legacy_key for machine in machines.values()):
-            return selected, platform
-        raise ValueError(
-            "explicit local_execution_space is required for independent registered spaces"
-        )
+        observed = hostname.casefold()
+        families = {
+            entry_physical_host(entry).casefold()
+            for entry in machines.values()
+            if observed == (entry.hostname or entry_physical_host(entry)).casefold()
+        }
+        candidates = [
+            entry for entry in machines.values()
+            if entry.execution_platform == platform
+            and entry_physical_host(entry).casefold() in families
+            and (not entry.hostname or entry.hostname.casefold() == observed)
+        ]
+        if len(candidates) > 1:
+            raise AmbiguousMachineError(
+                f"Observed hostname {hostname!r} has ambiguous {platform} entries; "
+                "configure local_execution_space"
+            )
+        if candidates:
+            return candidates[0], platform
+        machines = {
+            key: entry for key, entry in machines.items()
+            if not entry.execution_platform
+            and entry_physical_host(entry).casefold() in families
+            and (not entry.hostname or entry.hostname.casefold() == observed)
+        }
 
     try:
         machine_config = find_machine_entry(machines, hostname, reject_ambiguous=True)
@@ -342,6 +360,9 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
     from .execution_identity import resolve_execution_space
 
     selector = resolve_execution_space(cfg, all_machines)
+    combined_local, local_platform = _detect_local_machine(all_machines, selector)
+    local_key = combined_local.key if combined_local else None
+    local_identity = (local_key, local_platform)
     for profile_name, profile, machines in loaded_profiles:
         if profile.agents_config:
             agents_path = Path(profile.agents_config).expanduser()
@@ -359,11 +380,7 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
             log.info("Control-plane project '%s' (from %s)", cp_project, cp_source)
         repo_root = Path(profile.machines_yaml).expanduser().resolve().parent
         related = _load_related_entries(repo_root)
-        local_machine, local_platform = (
-            _detect_local_machine(machines, selector) if selector in machines
-            else (None, _detect_platform()) if selector is not None
-            else _detect_local_machine(machines)
-        )
+        local_machine = machines.get(local_key) if local_key is not None else None
         from .config import load_repo_bridge_config
 
         repo_cfg = load_repo_bridge_config(repo_root)
@@ -385,7 +402,7 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
     discovered = discover_local_agents()
     if discovered and all_machines:
         _enrich_local_agents(
-            discovered, all_machines, selector,
+            discovered, all_machines, resolved_local_identity=local_identity,
         )
     for name, agent in discovered.items():
         if name in all_agents:
@@ -395,7 +412,7 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
             )
             continue
         covering = _find_covering_agent(
-            agent, all_agents, all_machines, selector,
+            agent, all_agents, all_machines, resolved_local_identity=local_identity,
         )
         if covering:
             log.info(
@@ -412,7 +429,7 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
             all_agents,
             all_machines,
             topology_errors=topology_errors,
-            local_execution_space=selector,
+            resolved_local_identity=local_identity,
         )
         log.info(
             "Resolver built: %d machines, %d agents (%d derived, %d auto-discovered)",

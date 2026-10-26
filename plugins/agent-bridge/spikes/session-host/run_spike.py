@@ -22,6 +22,9 @@ Windows survival toggles model agent-bridge's kill-on-close Job on the front:
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_test_lifecycle, default_registry_root
+import os
+
 import argparse
 import json
 import shutil
@@ -53,6 +56,26 @@ def _find_copilot() -> str:
 
 
 def main() -> int:
+    if "COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT" in os.environ:
+        if not os.environ["COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT"]:
+            raise ValueError("An explicit test lifecycle context is empty")
+        return _run_spike()
+    with daemon_test_lifecycle(
+        owner=f"session-host-fixture:{os.getpid()}", registry_root=default_registry_root(),
+    ) as environment:
+        previous = {key: os.environ.get(key) for key in environment}
+        os.environ.update(environment)
+        try:
+            return _run_spike()
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+
+def _run_spike() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--child", choices=("synthetic", "real"), default="synthetic")
     ap.add_argument("--frames", type=int, default=12)

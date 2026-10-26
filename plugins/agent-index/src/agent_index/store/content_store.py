@@ -27,6 +27,7 @@ import pyarrow as pa
 from agent_procutil import no_window_kwargs as no_window_kwargs
 
 from agent_index.store.content_fts_worker import _ContentFtsWorkerMixin, fts_retryable
+from agent_index.store.content_item_reads import _ContentItemReadsMixin
 from agent_index.store.lance_connection import connect_content_store
 from agent_index.store.repo_filter import _like_pattern, _sql_str, repo_filter_sql
 from agent_index.store.source_layout import (
@@ -108,7 +109,7 @@ def _decode_metadata(raw: object) -> dict:
         return {}
 
 
-class ContentStore(_ContentFtsWorkerMixin):
+class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin):
     """LanceDB-backed store for chunk content and metadata.
 
     Owns the canonical ``chunks`` table and the BM25 full-text index.
@@ -178,42 +179,38 @@ class ContentStore(_ContentFtsWorkerMixin):
     # -- write ---------------------------------------------------------------
 
     @source_write
-    def upsert(self, chunks: list[Chunk]) -> int:
+    def upsert(self, chunks: list[Chunk], *, skip_identical: bool = False) -> int:
         """Insert or update chunk content by chunk_id.
 
-        Returns the number of rows written.
+        Returns actual rows written. Opt-in reuse requires keep-ID reconciliation,
+        not timestamp-based cleanup.
         """
+        from .content_mutations import BATCH_SIZE, changed_chunks, coalesce_chunks, content_record
+
+        chunks = coalesce_chunks(chunks)
+        if not chunks:
+            return 0
         table = self._get_or_create_table()
         if self._source_domain is not None:
             from .source_projection import check_content_sources
-            check_content_sources(self, chunks)
+            for start in range(0, len(chunks), BATCH_SIZE):
+                check_content_sources(self, chunks[start:start + BATCH_SIZE])
+        if skip_identical:
+            chunks = changed_chunks(table, chunks)
+            if not chunks:
+                return 0
         now = time.time()
 
-        records = [
-            {
-                "chunk_id": c.chunk_id,
-                "source": c.source,
-                "file_path": c.file_path,
-                "chunk_type": c.chunk_type,
-                "language": c.language,
-                "content": c.content,
-                "content_hash": c.content_hash,
-                "line_start": c.line_start,
-                "line_end": c.line_end,
-                "metadata": json.dumps(c.metadata, sort_keys=True) if c.metadata else "",
-                "indexed_at": now,
-            }
-            for c in chunks
-        ]
+        records = [dict(content_record(c), indexed_at=now) for c in chunks]
 
         chunk_ids = [c.chunk_id for c in chunks]
         if self._source_domain is not None:
             self._source_domain.effect(f"content-upsert:{self._table_name}")
         try:
-            id_list = ", ".join(f"'{cid}'" for cid in chunk_ids)
+            id_list = ", ".join(f"'{_sql_str(cid)}'" for cid in chunk_ids)
             table.delete(f"chunk_id IN ({id_list})")
         except Exception:
-            if self._source_domain is not None:
+            if self._source_domain is not None or skip_identical:
                 raise
             pass
 
@@ -318,30 +315,23 @@ class ContentStore(_ContentFtsWorkerMixin):
         # Query chunk_ids before deleting so callers can clean up vector tables
         chunk_ids = self.get_chunk_ids_by_file(source, file_path)
         if chunk_ids:
-            try:
-                table.delete(f"source = '{source}' AND file_path = '{file_path}'")
-            except Exception:
-                logger.warning(
-                    "Failed to delete chunks for %s:%s", source, file_path,
-                    exc_info=True,
-                )
+            table.delete(
+                f"source = '{_sql_str(source)}' AND file_path = '{_sql_str(file_path)}'"
+            )
         return chunk_ids
 
     @source_read
     def get_chunk_ids_by_file(self, source: str, file_path: str) -> list[str]:
         """Return chunk_ids for a specific file within a source."""
         table = self._get_or_create_table()
-        try:
-            rows = (
-                table.search()
-                .where(f"source = '{source}' AND file_path = '{file_path}'")
-                .select(["chunk_id"])
-                .limit(10000)
-                .to_list()
-            )
-            return [r["chunk_id"] for r in rows]
-        except Exception:
+        predicate = f"source = '{_sql_str(source)}' AND file_path = '{_sql_str(file_path)}'"
+        count = table.count_rows(predicate)
+        if not count:
             return []
+        rows = table.search().where(predicate).select(["chunk_id"]).limit(count).to_list()
+        if len(rows) != count:
+            raise RuntimeError("Incomplete file chunk lookup")
+        return list(dict.fromkeys(r["chunk_id"] for r in rows))
 
     @source_write
     def delete_stale(self, source: str, *, before: float) -> int:
@@ -380,20 +370,17 @@ class ContentStore(_ContentFtsWorkerMixin):
     ) -> list[str]:
         """Return chunk_ids for stale chunks of a specific file."""
         table = self._get_or_create_table()
-        try:
-            rows = (
-                table.search()
-                .where(
-                    f"source = '{source}' AND file_path = '{file_path}' "
-                    f"AND indexed_at < {before}"
-                )
-                .select(["chunk_id"])
-                .limit(10000)
-                .to_list()
-            )
-            return [r["chunk_id"] for r in rows]
-        except Exception:
+        predicate = (
+            f"source = '{_sql_str(source)}' AND file_path = '{_sql_str(file_path)}' "
+            f"AND indexed_at < {before}"
+        )
+        count = table.count_rows(predicate)
+        if not count:
             return []
+        rows = table.search().where(predicate).select(["chunk_id"]).limit(count).to_list()
+        if len(rows) != count:
+            raise RuntimeError("Incomplete stale chunk lookup")
+        return [r["chunk_id"] for r in rows]
 
     @source_write
     def delete_stale_by_file(
@@ -412,22 +399,14 @@ class ContentStore(_ContentFtsWorkerMixin):
                 f"AND indexed_at < {before}"
             ))
         table = self._get_or_create_table()
-        try:
-            initial = table.count_rows()
-            table.delete(
-                f"source = '{source}' AND file_path = '{file_path}' "
-                f"AND indexed_at < {before}"
-            )
-            remaining = table.count_rows()
-            removed = initial - remaining
-            if removed > 0:
-                logger.info(
-                    "Deleted %d stale chunks for %s:%s",
-                    removed, source, file_path,
-                )
-            return removed
-        except Exception:
-            return 0
+        predicate = (
+            f"source = '{_sql_str(source)}' AND file_path = '{_sql_str(file_path)}' "
+            f"AND indexed_at < {before}"
+        )
+        removed = table.count_rows(predicate)
+        if removed:
+            table.delete(predicate)
+        return removed
 
     # -- maintenance ---------------------------------------------------------
 
@@ -574,50 +553,6 @@ class ContentStore(_ContentFtsWorkerMixin):
             line_end=max(r.get("line_end", 0) for r in rows),
             metadata=_decode_metadata(first.get("metadata")),
         )
-
-    @source_read
-    def get_chunks_for_file(
-        self, source: str, file_path: str,
-    ) -> list[ChunkRecord]:
-        """Return all chunks for a ``(source, file_path)`` item, line-ordered.
-
-        Unlike ``get_document`` (which joins chunk text into one preview), this
-        keeps the chunks separate so callers can pool their per-chunk vectors
-        and weight by line span.  Returns an empty list if the item has no
-        chunks.
-        """
-        table = self._get_or_create_table()
-        try:
-            rows = (
-                table.search()
-                .where(
-                    f"source = '{_sql_str(source)}' "
-                    f"AND file_path = '{_sql_str(file_path)}'"
-                )
-                .limit(10000)
-                .to_list()
-            )
-        except Exception:
-            return []
-        if not rows:
-            return []
-
-        rows.sort(key=lambda r: (r.get("line_start", 0), r.get("line_end", 0)))
-        return [
-            ChunkRecord(
-                chunk_id=r["chunk_id"],
-                source=r["source"],
-                file_path=r["file_path"],
-                chunk_type=r.get("chunk_type", ""),
-                language=r.get("language", ""),
-                content=r.get("content", ""),
-                content_hash=r.get("content_hash", ""),
-                line_start=r.get("line_start", 0),
-                line_end=r.get("line_end", 0),
-                metadata=_decode_metadata(r.get("metadata")),
-            )
-            for r in rows
-        ]
 
     @source_write
     def ensure_fts_index(self, *, max_retries: int = 5) -> bool:
@@ -954,35 +889,6 @@ class ContentStore(_ContentFtsWorkerMixin):
         except Exception:
             logger.debug("distinct_sources scan failed", exc_info=True)
             return set()
-
-    @source_read
-    def distinct_items(self) -> list[tuple[str, str]]:
-        """Return distinct ``(source, file_path)`` content items, sorted.
-
-        Projects only ``source`` + ``file_path`` (never the large ``content``
-        column) so the similarity-cluster pass can enumerate every content
-        item cheaply even as the index grows.
-        """
-        table = self._get_or_create_table()
-        try:
-            total = table.count_rows()
-            if total == 0:
-                return []
-            rows = (
-                table.search()
-                .select(["source", "file_path"])
-                .limit(total)
-                .to_list()
-            )
-        except Exception:
-            logger.debug("distinct_items scan failed", exc_info=True)
-            return []
-        items = {
-            (r["source"], r["file_path"])
-            for r in rows
-            if r.get("source") is not None and r.get("file_path") is not None
-        }
-        return sorted(items)
 
     @source_read
     def stats(self) -> dict[str, Any]:

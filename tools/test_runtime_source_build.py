@@ -31,6 +31,85 @@ from test_runtime_source_lock import target as target  # noqa: PLC0414
 from wheel_input_fixture import wheel_bytes
 
 
+def test_native_source_configuration_rechecks_without_resolving_or_contacting_feed(
+    adopter, configured_source, target, feeds, tmp_path, monkeypatch,
+):
+    from runtime_source_lock import retain_source_configuration
+
+    source_with_process_owner(configured_source, build_only=True)
+    state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
+    env = environment(adopter, state, tmp_path)
+    selected = plan(adopter)
+    monkeypatch.setattr(configuration, "_opaque_index_identity", lambda value: hashlib.sha256(value.encode()).hexdigest())
+    actual_run = subprocess.run
+
+    def without_resolution(argv, *args, **kwargs):
+        if len(argv) > 2 and list(argv[1:3]) == ["pip", "compile"] and "--show-settings" not in argv:
+            pytest.fail("settings-only source capture executed dependency resolution")
+        return actual_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", without_resolution)
+    records, paths = [], []
+    for changes in (
+        {}, {}, {"exclude_newer": "2020-01-01T00:00:00Z"},
+        {"resolution": "lowest"}, {"prerelease": "disallow"}, {"fork-strategy": "fewest"},
+    ):
+        env = environment(adopter, state, tmp_path, **changes)
+        with builds.retain_authenticated_source(
+            selected, installation=adopter[1], deadline=time.monotonic() + 60,
+        ) as authenticated, retain_source_configuration(
+            selected, payload=authenticated.payload, expected_source=authenticated.identity,
+            target=target, component="fixture", uv=shutil.which("uv"), python=Path(sys.executable),
+            deadline=time.monotonic() + 60, env=env, wheel_witness=True,
+            include_build_tools=True, installation=adopter[1],
+        ) as captured:
+            captured.verify()
+            record = captured.record()
+            assert record["schema"] == "copilot-extensions.source-configuration"
+            assert record["source"] == authenticated.identity.document()
+            assert record["build_roots"] and len(captured.projections) == 2
+            assert not {"pins", "files", "native_lock_sha256"} & record.keys()
+            assert not captured.output.exists()
+            assert not state["requests"]
+            records.append(record)
+            paths.append(captured.payload)
+    assert records[0] == records[1]
+    assert all(record["configuration_policy"] != records[0]["configuration_policy"] for record in records[2:])
+    assert all(not path.exists() for path in paths)
+
+
+@pytest.mark.parametrize("denied_package", ["packaging", "fixture-build-input"])
+def test_current_build_input_revocation_refuses_before_tools_installation_or_backend(
+    adopter, configured_source, target, feeds, tmp_path, monkeypatch, denied_package,
+):
+    project = source_with_process_owner(configured_source)
+    if denied_package == "fixture-build-input":
+        manifest = project / "pyproject.toml"
+        manifest.write_text(manifest.read_text().replace(
+            'dependencies=["agent-procutil"]',
+            'dependencies=["agent-procutil","fixture-build-input==1.0"]',
+        ))
+        select_source(configured_source)
+    state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
+    packaging_feed(state)
+    build_only_feed(state)
+    selected = json.loads(state["routes"][f"/simple/{denied_package}/"][2])["files"][0]
+    denied = frozenset({"sha256:" + selected["hashes"]["sha256"]})
+    env = environment(adopter, state, tmp_path)
+    monkeypatch.setattr(configuration, "_opaque_index_identity", lambda value: hashlib.sha256(value.encode()).hexdigest())
+    monkeypatch.setattr(builds.engine, "numbered_candidate", lambda *args, **options: pytest.fail(
+        "revoked build input reached the tools constructor",
+    ))
+    monkeypatch.setattr(builds, "retain_source_profile", lambda *args, **options: pytest.fail(
+        "revoked build input reached a backend",
+    ))
+    with pytest.raises(ValueError, match="revoked"):
+        with builds.retain_source_runtime_inputs(
+            plan(adopter), **options(adopter, target, env), revoked_inputs=lambda: denied,
+        ):
+            pytest.fail("revoked inputs became a runtime")
+
+
 @pytest.fixture
 def tmp_path(tmp_path_factory):
     return tmp_path_factory.mktemp("src")
@@ -351,6 +430,7 @@ def test_unadmitted_source_build_inputs_never_execute_a_backend(
 def test_rejected_native_source_settings_never_execute_compiler_or_request_packages(
     adopter, configured_source, target, feeds, tmp_path, monkeypatch, setting, message,
 ):
+    monkeypatch.setattr(configuration, "_opaque_index_identity", lambda value: hashlib.sha256(value.encode()).hexdigest())
     source_with_process_owner(configured_source)
     state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
     packaging_feed(state)

@@ -2,18 +2,33 @@
 
 from __future__ import annotations
 
-import json
 import os
-import re
 import sys
 from collections.abc import Mapping
 
-from .repo_accounts import remote_host
-from .update_auth_process import publish_group, run
+from .repo_urls import remote_host
+from .update_auth_bootstrap import publish_group
 
 SECRET_KEY = "pass" + "word"
 NATIVE_KEY = "CE_UPDATE_AUTH_NATIVE_CREDENTIAL"
 NON_INTERACTIVE = {"GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
+_REQUEST_LIMIT = 1024 * 1024
+
+
+def read_request(stream) -> str:
+    """Git terminates one credential request with a blank line, not necessarily EOF."""
+    lines = []
+    size = 0
+    while True:
+        line = stream.readline(_REQUEST_LIMIT - size + 1)
+        size += len(line)
+        if size > _REQUEST_LIMIT:
+            raise ValueError("credential request exceeds its limit")
+        if not line:
+            return "".join(lines)
+        lines.append(line)
+        if line in ("\n", "\r\n"):
+            return "".join(lines)
 
 
 def parse_attributes(text: str) -> dict[str, str]:
@@ -31,6 +46,8 @@ def _has_credentials(attributes: Mapping[str, str]) -> bool:
 
 
 def env_token(owner: str, env: Mapping[str, str], host: str = "github.com") -> str:
+    import re
+
     host = remote_host(host)
     configured_host = env.get("GH_HOST", "")
     enterprise = host != "github.com"
@@ -58,7 +75,12 @@ def original_environment(env: Mapping[str, str]) -> dict[str, str]:
     raw = env.get("CE_UPDATE_AUTH_BASE_CONFIG")
     if raw is None:
         return dict(env)
-    config = json.loads(raw)
+    if raw == "{}":
+        config = {}
+    else:
+        import json
+
+        config = json.loads(raw)
     if not isinstance(config, dict) or any(
         not _config_key(key) or not isinstance(value, str) for key, value in config.items()
     ):
@@ -67,6 +89,8 @@ def original_environment(env: Mapping[str, str]) -> dict[str, str]:
 
 
 def base_config(env: Mapping[str, str]) -> str:
+    import json
+
     return json.dumps(
         {key: value for key, value in original_environment(env).items() if _config_key(key)}
     )
@@ -77,6 +101,8 @@ def run_chain(
     request: str,
     env: Mapping[str, str],
 ) -> str:
+    from .update_auth_process import run
+
     # Let Git replay its own configuration at the child's actual cwd. Rebuilding
     # a host-only helper list loses URL-specific helpers, includes and reset order.
     # Keep repeated capability/state attributes intact across the native protocol.
@@ -96,7 +122,13 @@ def route(operation: str, stdin: str, env: Mapping[str, str]) -> str:
     if attributes.get("protocol", "https") == "https":
         host = remote_host(host)
     owner = attributes.get("path", "").split("/")[0].lower()
-    routes = json.loads(env.get("CE_UPDATE_AUTH_ROUTES", "{}"))
+    raw_routes = env.get("CE_UPDATE_AUTH_ROUTES", "{}")
+    if raw_routes == "{}":
+        routes = {}
+    else:
+        import json
+
+        routes = json.loads(raw_routes)
     # Host-qualified keys prevent the same owner spelling on another server
     # from receiving a credential intended for this GitHub host.
     repository = attributes.get("path", "").strip("/").removesuffix(".git").lower()
@@ -105,6 +137,8 @@ def route(operation: str, stdin: str, env: Mapping[str, str]) -> str:
         if operation != "get" or selected["method"] in ("deny", "anonymous"):
             return ""
         if selected["method"] == "native":
+            import json
+
             native = json.loads(env[NATIVE_KEY])
             if not isinstance(native, dict) or set(native) != {"authtype", "credential"} or any(
                 not isinstance(value, str) or not value for value in native.values()
@@ -121,6 +155,8 @@ def route(operation: str, stdin: str, env: Mapping[str, str]) -> str:
         if selected["method"] == "env":
             secret = env_token(owner, env, host)
         elif selected["method"] == "gh":
+            from .update_auth_process import run
+
             args = ["gh", "auth", "token", "--hostname", host, "--user", account]
             token_env = {
                 key: value
@@ -159,7 +195,7 @@ def main() -> int:
     publish_group()
     try:
         response = route(
-            sys.argv[1] if len(sys.argv) > 1 else "get", sys.stdin.read(1024 * 1024), os.environ
+            sys.argv[1] if len(sys.argv) > 1 else "get", read_request(sys.stdin), os.environ
         )
     except (OSError, ValueError, RuntimeError):
         # Never print helper attributes, argv, or exceptions containing credentials.

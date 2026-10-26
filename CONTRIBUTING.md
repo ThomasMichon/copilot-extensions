@@ -187,21 +187,21 @@ copilot-extensions finalize          # clean up the worktree
 - **Update an open PR** with `copilot-extensions push-changes` (it re-pushes the
   `pr/<slug>` head; it will NOT land on `main`).
 - Managed publication has a 30-second `pr.push_timeout_seconds` deadline.
-  Pre-push reads every non-deletion ref update from Git, validates its pushed
-  tree, and uses the published tip as the incremental base. First publication
-  or rewritten refs select a related contribution/release base; unavailable
-  objects or an unrelated base refuse publication instead of skipping checks.
-  This keeps main-based bootstrap branches independent of unrelated `dev`
-  history without weakening the configured identifier checks.
-  Pre-push runs only the configured identifier-leak check on that selected diff.
-  It never launches cross-repo discovery or file-size/history scans. Supply
-  identifiers through the environment, local list, or configured CI-format
-  input; a cross-repo sweep is an explicit manual audit, not a push prerequisite.
-  File-size enforcement and repository contract, architecture, version,
-  documentation, and whole-tree guards run in required CI instead of delaying
-  transport. Staged Python lint, skill validity, and effort/vision structure
-  remain at pre-commit. No hook automatically rewrites or restages partially
-  staged files; run the suggested lint autofix explicitly before committing.
+  Pre-push performs only cheap branch/ref policy: ordinary protected-branch
+  updates, protected-branch deletion and publishing `worktree/*` are refused.
+  Managed publication retains its existing `AGENT_WORKTREES_PR_PUSH=1` marker.
+  Identifier-leak and final-diff size checks run in the existing required trusted
+  `workflow-lockdown-guard` job, never in the transport path. See the migration
+  and exact validator-to-CI mapping in `docs/pipelines.md`.
+  Repository contract, architecture, version, documentation and whole-tree
+  guards remain in CI. Staged Python lint, skill
+  validity and effort/vision structure already run
+  at pre-commit. No hook automatically rewrites or restages partially staged
+  files; run the suggested lint autofix explicitly before committing.
+  No runtime/Python startup, live identifier sweep, ancestor scan or validator
+  runs merely to authorize a push. Required review and provider branch rules
+  remain independent gates. Foreign chained hooks still run and can be costly;
+  their owners must migrate repository-specific validation to CI separately.
   Explicit manual identifier audits retain the standard-library finite-process
   owner, descendant cleanup within ten seconds, no self-provisioning, and
   32 MiB/1 MiB stdout/stderr caps. Unsafe cleanup, decoding, output-budget or
@@ -1149,10 +1149,9 @@ The repo ships git hooks under `tools/hooks/`:
   over it, the loader silently drops the skill),
   `tools/check-effort-vision-structure.py` on any staged effort/vision
   `README.md`.
-- **`pre-push`** — runs `tools/check-no-internal-identifiers.py` against every
-  actual non-deletion ref update, with `--no-live-sweep`. It consumes configured
-  identifier inputs only, without starting another runtime or discovering
-  repositories. Invalid or unavailable ref/base inputs refuse publication.
+- **`pre-push`** — branch/ref policy only, with no runtime, validator or
+  repository discovery. Protected branches and private worktree refs remain
+  guarded; foreign chained hooks retain their own behavior.
 - **CI** — retains file-size enforcement on the final contribution diff and
   the repository-wide contract, structure, consistency, and source guards.
   Neither local hook runs file-size or history enforcement.

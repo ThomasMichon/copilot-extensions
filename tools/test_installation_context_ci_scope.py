@@ -146,6 +146,71 @@ def test_displaced_native_sources_and_unavailable_portfolio_remain_explicit() ->
     assert set(trigger) == {"schedule", "workflow_dispatch"}
 
 
+@pytest.mark.parametrize(("name", "route"), [
+    ("update-diagnostics-linux", "ubuntu-latest"),
+    ("update-diagnostics-windows", "windows-latest"),
+])
+def test_update_diagnostics_native_packet_preserves_bounds_and_source(name, route):
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    job = workflow["jobs"][name]
+    assert job["if"] == "${{ inputs.update_diagnostics }}"
+    assert job["runs-on"] == route
+    checkout = job["steps"][0]
+    assert checkout["with"] == {"ref": "${{ github.sha }}", "persist-credentials": False}
+    identity = next(step for step in job["steps"] if step.get("id") == "source")
+    assert "os.environ['GITHUB_SHA']" in identity["run"]
+    tooling = next(step for step in job["steps"] if step.get("id") == "tooling")
+    assert tooling["run"] == "python tools/run-plugin-tests.py agent-worktrees --prepare-only"
+    families = [
+        step for step in job["steps"] if step.get("name", "").startswith("Qualify ")
+    ]
+    commands = [step["run"] for step in families]
+    expected = {
+        "tests/test_update_auth.py", "tests/test_update_driver.py",
+        "tests/test_update_launch_cli.py", "tests/test_update_entry.py",
+        "tests/test_update_entry_windows.py",
+    }
+    assert all(any(path in command for command in commands) for path in expected)
+    for step in families:
+        command = step["run"]
+        assert "tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers" in command
+        assert "!cancelled() && steps.tooling.outcome == 'success'" in step["if"]
+        assert not any(flag in command for flag in (
+            "--test-timeout", "--timeout", "--plugin-timeout", "--allow-host-state",
+        ))
+    assert not any(step.get("continue-on-error", False) for step in job["steps"])
+
+
+@pytest.mark.parametrize("matches", [False, True])
+def test_update_diagnostics_checks_actual_checkout_before_reporting_source(
+    monkeypatch, capsys, matches,
+):
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    step = next(
+        item for item in workflow["jobs"]["update-diagnostics-linux"]["steps"]
+        if item.get("name") == "Record exact update qualification source"
+    )
+    argv = shlex.split(step["run"])
+    assert argv[:2] == ["python", "-c"] and len(argv) == 3
+    expected = "a" * 40
+    monkeypatch.setenv("GITHUB_SHA", expected)
+    monkeypatch.setattr(
+        subprocess, "check_output",
+        lambda *a, **kw: (expected if matches else "b" * 40) + "\n",
+    )
+    if matches:
+        exec(compile(argv[2], "<update-workflow-identity>", "exec"), {})
+        assert capsys.readouterr().out == f"source={expected}\n"
+    else:
+        with pytest.raises(AssertionError):
+            exec(compile(argv[2], "<update-workflow-identity>", "exec"), {})
+        assert not capsys.readouterr().out
+
+
 @pytest.mark.parametrize("fail_on", ["tools/seasoned_uv.py", "-m"])
 def test_windows_step_does_not_mask_native_admission_failure(
     tmp_path, fail_on,
@@ -249,8 +314,20 @@ def test_scoped_binding_remains_an_explicit_bounded_native_portfolio(
             f"github.event_name == 'workflow_dispatch' && inputs.portfolio == '{portfolio}'"
         )
         assert job["runs-on"] == runner and job["timeout-minutes"] == 10
-        assert "strategy" not in job
-        executions = [step["run"].split() for step in job["steps"] if "run" in step]
+        if plugin == "bridge":
+            assert job["strategy"] == {
+                "fail-fast": False,
+                "matrix": {"packet": [
+                    "available", "pointer and not publisher", "publisher and not pointer",
+                    "publisher-and-pointer and not deactivated", "deactivated",
+                ]},
+            }
+            selector = [
+                "-k", "test_bridge_cell_stamp_preserves_global_ownership and (${{ matrix.packet }})",
+            ]
+        else:
+            assert "strategy" not in job
+        executions = [shlex.split(step["run"]) for step in job["steps"] if "run" in step]
         assert executions == [[
             "python", "tools/run-plugin-tests.py", "payload-invocation",
             "--test-file", f"tests/{test_file}", *selector,
@@ -369,6 +446,10 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "ssh-service-linux", "ssh-service-windows",
         "pr-artifacts-linux", "pr-artifacts-windows",
         "dependency-compile-linux", "dependency-compile-windows",
+        "source-build-linux", "source-build-windows",
+        "marketplace-source-linux", "marketplace-source-windows",
+        "installer-latency-linux", "installer-latency-windows",
+        "logger-installer-latency-linux", "logger-installer-latency-windows",
         "candidate-profiles-linux", "candidate-profiles-windows",
         "chat-construction-linux", "chat-construction-windows",
         "ssh-snapshot-native-linux", "ssh-snapshot-native-windows",
@@ -404,6 +485,21 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         assert "-m " not in step["run"].rsplit("pytest", 1)[1]
         if runner == "windows-latest":
             assert step["env"]["INSTALLATION_CONTEXT_POWERSHELL"] == "powershell"
+
+
+def test_logger_batch_acceptance_is_optional_and_bounded() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    for platform, runner in (("linux", "ubuntu-latest"), ("windows", "windows-latest")):
+        job = workflow["jobs"][f"logger-installer-latency-{platform}"]
+        assert job["if"] == "${{ inputs.dependency_compile }}"
+        assert job["runs-on"] == runner and job["timeout-minutes"] == 6
+        command = next(step["run"] for step in job["steps"] if "run" in step)
+        assert "agent-logger" in command and "--allow-explicit-tiers" in command
+        assert "--test-file tests/test_install_batch.py" in command
+        assert "--test-timeout 300 --timeout 300" in command
+        assert not job.get("continue-on-error")
 
 
 def test_foundation_snapshot_staging_is_disposable_and_bounded() -> None:
@@ -465,6 +561,78 @@ def test_pull_requests_command_adoption_uses_explicit_native_portfolio() -> None
             "--test-timeout", "60", "--timeout", "180",
         ]
         assert not job.get("continue-on-error")
+
+
+@pytest.mark.parametrize(("platform", "runner", "opt_in"), [
+    ("linux", "ubuntu-latest", "UPDATE_DRIVER_NATIVE_LINUX_GENESIS"),
+    ("windows", "windows-latest", "UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS"),
+])
+def test_bridge_commands_partition_real_native_cases_without_relaxing_bounds(
+    platform, runner, opt_in,
+) -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert "bridge-commands" in trigger["workflow_dispatch"]["inputs"]["portfolio"]["options"]
+    job = workflow["jobs"][f"bridge-commands-{platform}"]
+    assert job["if"] == (
+        "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'"
+    )
+    assert job["timeout-minutes"] == 35 and not job.get("continue-on-error")
+    assert job["runs-on"] == runner
+    assert job["strategy"]["fail-fast"] is False
+    matrix = job["strategy"]["matrix"]
+    assert set(matrix) == ({"packet", "include"} if platform == "windows" else {"packet"})
+    packets = {packet["name"]: packet["select"] for packet in matrix["packet"]}
+    assert packets == {
+        "refusal-driver": "refusal and (missing-driver or old-driver or old-resolver or old-dispatcher)",
+        "refusal-policy": "refusal and (managed or malformed-policy or no-self or nested)",
+        "refusal-source": "refusal and (unselected or unavailable or missing-provenance or malformed-provenance)",
+        "refusal-context": "refusal and (pinned or custom-root or cell or ordinary-copy)",
+        **{entry: f"original_operation and {entry}" for entry in ("payload", "primary", "ordinary")},
+        "concurrent": "concurrent", "failed": "failed", "transport": "cold_wait",
+    }
+    if platform == "windows":
+        assert matrix["include"] == [{
+            "packet": {"name": "cmd", "select": "original_operation and cmd"},
+        }]
+    assert job["env"][opt_in] == "1"
+    execution = next(step["run"] for step in job["steps"] if "run" in step)
+    assert shlex.split(execution) == [
+        "python", "tools/run-plugin-tests.py", "update-driver",
+        "--test-file", "tests/test_first_use_bridge_command.py",
+        "-k", "${{ matrix.packet.select }}", "--test-timeout", "900", "--timeout", "1080",
+    ]
+    publication = workflow["jobs"][f"bridge-command-publication-{platform}"]
+    assert publication["if"] == job["if"] and publication["timeout-minutes"] == 35
+    assert not publication.get("continue-on-error")
+    assert publication["runs-on"] == runner
+    assert publication["strategy"]["fail-fast"] is False
+    assert publication["strategy"]["matrix"] == {
+        "packet": [
+            "cell_stamp and available", "cell_stamp and pointer and not publisher",
+            "cell_stamp and publisher and not pointer",
+            "cell_stamp and publisher-and-pointer and not deactivated",
+            "cell_stamp and deactivated",
+            "actual and legacy and payload", "actual and selected-cell and payload",
+            "actual and catalog", "actual and stamped-global",
+            "actual and stamped-unavailable", "actual and stamped-no-pointer",
+        ],
+    }
+    execution = next(step["run"] for step in publication["steps"] if "run" in step)
+    assert shlex.split(execution) == [
+        "python", "tools/run-plugin-tests.py", "payload-invocation", "--allow-explicit-tiers",
+        "--test-file", "tests/test_bridge_first_use_publication.py", "-k", "${{ matrix.packet }}",
+        "--test-timeout", "60", "--timeout", "900",
+    ]
+    controls = workflow["jobs"][f"bridge-command-controls-{platform}"]
+    assert controls["if"] == job["if"] and controls["timeout-minutes"] == 35
+    assert not controls.get("continue-on-error")
+    assert controls["runs-on"] == runner and "strategy" not in controls
+    required = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
+    for name in ("bridge-commands", "bridge-command-publication", "bridge-command-controls"):
+        assert f"{name}-{platform}" not in required["jobs"]
 
 
 def test_logger_command_adoption_uses_explicit_native_portfolio() -> None:
@@ -587,6 +755,56 @@ def test_ssh_recipes_use_explicit_bounded_native_portfolio() -> None:
         ]
 
 
+def test_bridge_snapshots_use_explicit_bounded_native_portfolio() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert "bridge-snapshots" in trigger["workflow_dispatch"]["inputs"]["portfolio"]["options"]
+    for name, runner, opt_in in (
+        ("bridge-snapshots-linux", "ubuntu-latest", "UPDATE_DRIVER_NATIVE_LINUX_GENESIS"),
+        ("bridge-snapshots-windows", "windows-latest", "UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS"),
+    ):
+        job = workflow["jobs"][name]
+        assert job["if"] == (
+            "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-snapshots'"
+        )
+        assert job["runs-on"] == runner and job["timeout-minutes"] == 35
+        assert job["env"][opt_in] == "1" and not job.get("continue-on-error")
+        checkout = next(step for step in job["steps"] if step.get("uses") == "actions/checkout@v4")
+        assert checkout["with"]["persist-credentials"] is False
+        bootstrap = next(step for step in job["steps"]
+                         if step.get("name") == "Preserve canonical-installed-only bootstrap publication")
+        assert bootstrap["env"]["UPDATE_DRIVER_BRIDGE_BOOTSTRAP_ACCEPTANCE"] == "1"
+        assert [step["run"].split() for step in job["steps"] if "run" in step] == [
+            ["python", "tools/run-plugin-tests.py", "update-driver",
+             "--test-file", "tests/test_first_use_bridge_snapshot.py",
+             "-k", '"not', 'actual"', "--test-timeout", "90", "--timeout", "600"],
+            ["python", "tools/run-plugin-tests.py", "update-driver",
+             "--test-file", "tests/test_first_use_bridge_snapshot.py",
+             "-k", '"actual', "and", "not", 'actual_stamp"', "--test-timeout", "900", "--timeout", "1080"],
+            ["python", "tools/run-plugin-tests.py", "runtime-source",
+             "--test-file", "tests/test_prepare_runtime_source.py",
+             "--test-file", "tests/test_source_snapshot_publication.py",
+             "--test-timeout", "120", "--timeout", "600"],
+            ["python", "tools/run-plugin-tests.py", "agent-procutil",
+             "--test-file", "tests/test_native_daemon_shell.py",
+             "-k", "waitable", "--test-timeout", "90", "--timeout", "180"],
+            ["python", "tools/run-plugin-tests.py", "update-driver",
+             "--test-file", "tests/test_first_use_bridge_snapshot.py",
+             "-k", "actual_stamp", "--test-timeout", "900", "--timeout", "1080"],
+            ["python", "tools/run-plugin-tests.py", "update-driver",
+             "--test-file", "tests/test_first_use_bridge.py",
+             "-k", '"not', 'native_caller_loss"', "--test-timeout", "900", "--timeout", "900"],
+            ["python", "tools/run-plugin-tests.py", "update-driver",
+             "--test-file", "tests/test_first_use_logger_snapshot.py",
+             "-k", '"not', 'actual"', "--test-timeout", "90", "--timeout", "600"],
+            ["python", "tools/run-plugin-tests.py", "agent-bridge",
+             "--test-file", "tests/test_bootstrap_driver.py",
+             "--test-timeout", "60", "--timeout", "180"],
+        ]
+
+
 def test_bridge_recipes_use_explicit_bounded_native_portfolio() -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
@@ -622,6 +840,50 @@ def test_bridge_recipes_use_explicit_bounded_native_portfolio() -> None:
              "--test-file", "tests/test_install_ps1_s4u_recovery.py",
              "--test-file", "tests/test_install_lifecycle_emit.py",
              "--test-timeout", "60", "--timeout", "180"],
+        ]
+
+
+def test_bridge_bootstrap_uses_explicit_bounded_native_portfolio() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert "bridge-bootstrap" in trigger["workflow_dispatch"]["inputs"]["portfolio"]["options"]
+    for name, runner, opt_in in (
+        ("bridge-bootstrap-linux", "ubuntu-latest", "UPDATE_DRIVER_NATIVE_LINUX_GENESIS"),
+        ("bridge-bootstrap-windows", "windows-latest", "UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS"),
+    ):
+        job = workflow["jobs"][name]
+        assert job["if"] == (
+            "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-bootstrap'"
+        )
+        assert job["runs-on"] == runner and job["timeout-minutes"] == 35
+        assert job["env"][opt_in] == "1" and not job.get("continue-on-error")
+        assert job["env"]["UPDATE_DRIVER_BRIDGE_BOOTSTRAP_ACCEPTANCE"] == "1"
+        checkout = next(step for step in job["steps"] if step.get("uses") == "actions/checkout@v4")
+        assert checkout["with"]["persist-credentials"] is False
+        assert [step["run"].split() for step in job["steps"] if "run" in step] == [
+            ["python", "tools/run-plugin-tests.py", "update-driver",
+             "--test-file", "tests/test_first_use_bridge_bootstrap.py",
+             "-k", '"not', 'hook_deadline"', "--test-timeout", "900", "--timeout", "900"],
+            ["python", "tools/run-plugin-tests.py", "update-driver",
+             "--test-file", "tests/test_first_use_bridge_bootstrap.py",
+             "-k", "hook_deadline", "--test-timeout", "900", "--timeout", "1080"],
+            ["python", "tools/run-plugin-tests.py", "update-driver",
+             "--test-file", "tests/test_first_use_bridge.py",
+             "-k", '"not', 'native_caller_loss"', "--test-timeout", "900", "--timeout", "900"],
+            ["python", "tools/seasoned_uv.py", "--uv", "uv", "--registry-only",
+             "--", "--system", "pytest", "packaging"],
+            ["python", "-m", "pytest", "-q",
+             "libs/versioned-runtime/tests/test_bootstrap_selected_readiness.py"],
+            ["python", "tools/run-plugin-tests.py", "agent-bridge",
+             "--test-file", "tests/test_bootstrap_driver.py",
+             "--test-file", "tests/test_install_ps1_s4u_recovery.py",
+             "--test-file", "tests/test_install_lifecycle_emit.py",
+             "--test-timeout", "60", "--timeout", "360"],
+            ["python", "tools/run-plugin-tests.py", "payload-invocation", "--allow-explicit-tiers",
+             "--test-file", "tests/test_bootstrap_publication.py", "-k", "agent-bridge",
+             "--test-timeout", "120", "--timeout", "600"],
         ]
 
 
@@ -743,7 +1005,38 @@ def test_compile_acceptance_is_bounded_native_and_independently_selected() -> No
             'python -m pytest -q tools/test_installer_dependency_compile.py '
             'tools/test_installer_dependency_policy.py '
             'tools/test_runtime_source_lock.py '
-            '-k "compile or real_uv_registry_transitive_and_isolated_build_age or runtime_source_lock"',
+            'tools/test_runtime_source_authentication.py '
+            'tools/test_runtime_source_feed.py '
+            '-k "compile or real_uv_registry_transitive_and_isolated_build_age or runtime_source_lock '
+            'or runtime_source_authentication or runtime_source_feed"',
+        ]
+
+
+def test_installer_latency_contracts_are_native_bounded_and_opt_in() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    for platform, runner in (("linux", "ubuntu-latest"), ("windows", "windows-latest")):
+        job = workflow["jobs"][f"installer-latency-{platform}"]
+        assert job["if"] == "${{ inputs.dependency_compile }}"
+        assert job["runs-on"] == runner and job["timeout-minutes"] == 6
+        assert not job.get("strategy") and not job.get("continue-on-error")
+        commands = [step["run"] for step in job["steps"] if "run" in step]
+        assert commands[:2] == [
+            "python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest pyyaml",
+            "python -m pytest -q tools/test_installer_venv_seeding.py",
+        ]
+        assert commands[2] == (
+            "python -m pytest -q "
+            "tools/test_run_plugin_tests.py::test_short_temp_alias_reaches_real_daemon_registry"
+        )
+        daemon_step = next(step for step in job["steps"] if step.get("run") == commands[2])
+        assert daemon_step["if"] == "runner.os == 'Windows'"
+        assert shlex.split(commands[3]) == [
+            "python", "tools/run-plugin-tests.py", "agent-codespaces", "--allow-explicit-tiers",
+            "--test-file", "tests/test_installer_engine_adoption.py",
+            "-k", "library_install_order_retry_and_errors or native_batch_installs_cold or signed_venv_recovery",
+            "--test-timeout", "180", "--timeout", "300",
         ]
 
 

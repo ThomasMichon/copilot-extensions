@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-containers"
-version = "0.2.117-dev1"
+version = "0.2.118-dev1"
 description = "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver"
 readme = "README.md"
 license = "MIT"
@@ -100,6 +100,7 @@ provider-exec = [
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "setuptools>=83.0.0",
 ]
 
 [tool.ruff.lint]

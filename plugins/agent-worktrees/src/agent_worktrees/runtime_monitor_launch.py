@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 
 def retained_monitor_argv(argv: list[str]) -> list[str]:
-    slot = Path(argv[0]).absolute().parent.parent
+    slot = Path(os.path.abspath(argv[0])).parent.parent
     if slot.parent.name != "versions" or slot.name == "dev":
         return list(argv)
     bootstrap = slot / ".runtime-bootstrap"

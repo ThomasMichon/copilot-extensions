@@ -91,6 +91,9 @@ view highlighting whether resolved head matches the just-resumed session).
 **2026-10-24 continuation:** prioritize purpose-first Summary and Claims over
 handoff session selection; add a switchable work-topology summary pane,
 attention indicators, a permanent claims status line and clickable view tabs.
+The 2026-10-25 operator revision replaces required clickable view tabs with
+visible mode-switching hotkey guides; the two-row and same-window requirements
+remain.
 The public-safe request capture, sequencing and acceptance details are in
 [purpose-first.md](purpose-first.md). This expands the same Companion effort;
 it does not retire the retained manual-cutover, expected-head or app-input
@@ -394,9 +397,12 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
 - [ ] Implement a compact topology presentation for phases, sub-agents,
       bridges, downstream worktrees, open PRs and accumulated tool-call stats,
       using the same sources as other companion clients.
-- [ ] Implement explicit CLI/summary pane switching with attention indicators
+- [x] Implement explicit CLI/summary pane switching with attention indicators
       that preserve the live CLI and its answer boundary.
-- [ ] Deliver a permanent second claims status line and clickable view tabs
+      Source merged in #8881 and #8941; installed/native-client attention
+      acceptance remains separately unchecked in Validation.
+- [ ] Deliver a permanent second claims status line and actionable mode-switch
+      hotkey guides
       through the Mux-bind owner, with tmux/psmux qualification.
 
 ## Validation Plan
@@ -410,7 +416,7 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
       agent/bridge/worktree/PR relationships and authoritative tool totals.
 - [ ] Purpose-first: prove actual CLI/summary switches preserve the original
       session/process/pane and surface question/idle attention without answers.
-- [ ] Purpose-first: qualify two-line status and real click/key dispatch on
+- [ ] Purpose-first: qualify two-line status and real mode-switch key dispatch on
       tmux and psmux, including narrow terminals and unrelated sessions.
 - [ ] Purpose-first: record source, clean-room, installed/native and rollout
       evidence separately; no passed source test substitutes for a live lane.
@@ -468,6 +474,62 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
 - [x] Unit tests green per step; `tools/check-module-size.py` clean.
 
 ## Journal
+
+### 2026-10-25 - Operator selected keyboard guides instead of click tabs
+
+- The operator revised the purpose-first chrome request: "We can instead
+  show some hotkey guides to switch modes." Update standing intent and this
+  continuation through normal review before implementing the revised chrome.
+- The second permanent Claims row and same-window CLI/Summary panes remain
+  required. Guides must describe actual registered, context-appropriate
+  actions, retaining the distinction between Ctrl+K's popup and persistent
+  pane navigation. Do not advertise an unimplemented direct-toggle shortcut.
+- This withdraws the new clickable-mode-tab requirement, not the relay
+  root's historical accepted click deferral or any existing app-input,
+  manual/head, source/provider, native or resource hold. No unreleased mux,
+  live rebinding, runtime installation or rollout was selected.
+
+### 2026-10-25 - Optional attention consumer merged; native chrome boundary
+
+- #8941 merged after current-head Copilot approval, resolution of its
+  reviewed refresh single-flight race and required CI. Re-read this entire
+  root. Close only the Step 6 switching/attention source row; preserve the
+  actual native-client, rollout, topology and every retained manual/head,
+  app-input, relay and resource acceptance item under its existing owner.
+- Final source `5ec8862bc112ee71e5f14b0edfdc69a0dc5ac23b` passed 117
+  graph/attention/native tests plus 43 provider tests on Ubuntu 24.04 / tmux
+  3.4, and 41 attention/native tests on Windows / disposable PSMux 3.3.6 in
+  run `40183515001`. Neither platform packet skipped tests. The focused
+  post-review local packet passed 80 tests; the blocked-replacement
+  regression failed before the fix and passed after it. The earlier
+  integrated Windows packet passed 237 tests with one POSIX-only skip.
+- The optional indicator is explicitly last-reported and continuity-unknown.
+  Its independent worker revalidates one displayed head, uses bounded pulse
+  reads, failure backoff and stale-selection fencing, and cancels its owned
+  child on exit. Changed heads require Refresh. Hidden/unknown observer
+  visibility does not poll the engine. Nudges navigate only, never answer
+  or approve input.
+- Native qualification found that PSMux 3.3.6 can synthesize a client listing
+  while detached; the new visibility reader uses exact-pane
+  `session_attached` evidence instead. PSMux 3.3.5 setup/CLI/directory
+  instability remains separately unqualified under #8811; clean controls
+  did not establish causality. Pinned 3.3.6 results do not qualify the older
+  build, and no installed compatibility floor or runtime was changed.
+- Further isolated native research proved two stored status rows on PSMux
+  3.3.6 through its own state dump with options targeted to that disposable
+  session's server; a separate control retained one row. Indexed option
+  getters were not authoritative. This is stored-state/isolation evidence,
+  not rendered status or real-client mouse dispatch.
+- Released PSMux 3.4.0 still treats custom tmux mouse key names as unmodelled
+  and only routes status-format ranges to native windows. Its unreleased
+  development branch has a mouse-key routing implementation, but that is
+  not a released/qualified runtime. Native windows are not the selected
+  same-window pane design. Keep the withheld mouse-bind safety boundary;
+  do not silently enable it, substitute a layout or declare click delivery.
+- Continue native chrome through the existing Mux-bind owner after selecting
+  the supported-backend path. No live bindings, user mux, runtime update,
+  manual cutover or rollout was exercised. The interrupted keyed workspace
+  allocation remains separately owned and pending.
 
 ### 2026-10-25 - Root-attention provider merged; optional UI consumer next
 

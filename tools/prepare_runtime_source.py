@@ -29,7 +29,7 @@ _RUNTIME_LIBRARY = (
     else _TOOL_DIRECTORY.parent / "libs" / "versioned-runtime"
 )
 sys.path.insert(0, str(_RUNTIME_LIBRARY))
-from versioned_runtime import construction_lease
+from versioned_runtime import _AV_RETRY_ATTEMPTS, _AV_RETRY_BACKOFF, _is_transient_lock, construction_lease
 from versioned_runtime_source import (
     SOURCE_FILE,
     SourceIdentity,
@@ -66,6 +66,18 @@ def _remaining(deadline: float | None, cap: float = 120) -> float:
     return min(cap, remaining)
 
 
+def _rename_prepared(payload: Path, destination: Path, *, deadline: float | None) -> None:
+    for attempt in range(_AV_RETRY_ATTEMPTS):
+        _remaining(deadline)
+        try:
+            payload.rename(destination)
+            return
+        except OSError as error:
+            if os.name != "nt" or not _is_transient_lock(error) or attempt == _AV_RETRY_ATTEMPTS - 1:
+                raise
+            time.sleep(min(_remaining(deadline), _AV_RETRY_BACKOFF * (attempt + 1)))
+
+
 def _git(source: Path, *arguments: str, deadline: float | None = None) -> str:
     environment = {
         key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")
@@ -76,7 +88,7 @@ def _git(source: Path, *arguments: str, deadline: float | None = None) -> str:
     creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     result = subprocess.run(
         ["git", "--no-replace-objects", "-c", "core.fsmonitor=false",
-         "-c", "core.autocrlf=false", "-C", str(source), *arguments],
+         "-c", "core.autocrlf=false", "-c", "core.longpaths=true", "-C", str(source), *arguments],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
         timeout=_remaining(deadline), env=environment, check=False, creationflags=creationflags,
     )
@@ -205,7 +217,10 @@ def prepare(
     with tempfile.TemporaryDirectory(prefix=prefix, dir=output) as temporary:
         work = Path(temporary)
         archive = work / "source.tar"
-        git_command(source, "archive", "--format=tar", "--output", str(archive), commit)
+        git_command(
+            source, "-c", "tar.umask=0022", "archive", "--format=tar",
+            "--output", str(archive), commit,
+        )
         snapshot = work / "source"
         snapshot.mkdir()
         _extract_archive(archive, snapshot, deadline=deadline)
@@ -247,7 +262,7 @@ def prepare(
                         "Existing prepared generation conflicts with selected inputs"
                     )
                 return PreparedSource(destination, identity, reused=True)
-            payload.rename(destination)
+            _rename_prepared(payload, destination, deadline=deadline)
             return PreparedSource(destination, identity, reused=False)
 
 

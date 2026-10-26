@@ -10,6 +10,7 @@ from textual.screen import Screen
 from textual.widgets import OptionList
 
 from test_picker_tui import _fixture_source
+from worktree_manager.seed_history import HistoryCursor
 from worktree_manager.production_picker import context
 from worktree_manager.production_picker.picker_tui import actions_prompt
 from worktree_manager.production_picker.picker_tui.engine import PickerApp, PickerScreen
@@ -48,10 +49,10 @@ def test_history_read_never_blocks_actions_paint_or_escape(eligible, monkeypatch
         def __init__(self, project):
             assert project == "example"
 
-        def entries(self):
+        def cursor(self):
             entered.set()
             assert release.wait(5), "test must release the history reader"
-            return ["history text"]
+            return HistoryCursor(["history text"])
 
     monkeypatch.setattr(actions_prompt, "SeedHistory", Store)
 
@@ -95,9 +96,9 @@ def test_history_completion_preserves_new_text_and_cursor(monkeypatch):
         def __init__(self, project):
             pass
 
-        def entries(self):
+        def cursor(self):
             assert release.wait(5)
-            return ["history text"]
+            return HistoryCursor(["history text"])
 
     monkeypatch.setattr(actions_prompt, "SeedHistory", Store)
 

@@ -9,6 +9,7 @@ This document describes the implementation as it exists today. It intentionally 
 | CLI | `src/agent_vault/cli.py` | Parses `agent-vault` commands, resolves the active vault on each call, cold-starts the service, performs persistent-cache tier-0 reads, and sends newline-framed JSON requests to the daemon. |
 | Credential reader | `src/agent_vault/credential_reads.py` | Owns the cache-first `get` handler, pinned read-only behavior and authoritative cache reconciliation; the CLI retains its existing handler export and IPC/lifecycle seams. |
 | Service | `src/agent_vault/service.py` | Owns the in-memory KeePass master-password cache and credential-value cache, verifies/unlocks databases, handles entry operations, GCM delegation, KEK operations, endpoint advertisement, and shutdown. |
+| Accepted requests | `src/agent_vault/service_connections.py` | Retains accepted connections and native request futures until server shutdown actually settles them. |
 | KeePassXC backend | `src/agent_vault/keepassxc.py` | Locates `keepassxc-cli` and maps service actions to `keepassxc-cli` commands. KeePassXC is the only secret-store backend today. |
 | SSH key preparation | `src/agent_vault/ssh_key.py` | Validates and reuses a whole Ed25519 pair; separately confirmed first creation uses one existing create-only protected-field write. Returns public metadata, not private material or enrollment authority. |
 | Config resolver | `src/agent_vault/config.py` | Resolves database, group, vault name, port, runtime paths, and config files from env, repo config, extension config, global named vaults, and defaults. |
@@ -68,6 +69,25 @@ On startup the daemon writes a rendezvous file at `~/.agent-vault/run/endpoint.j
 5. Registered extension transports. `before_builtin=True` transports run before built-ins; default transports run after built-ins fail.
 
 This matches the discovery/transport patterns while preserving the legacy fixed port for backward compatibility.
+
+Detached startup retains the lexical absolute home selection for custody
+checks. A linked home or parent is refused before creating the runtime directory
+or launch log; it is never rewritten to the linked target and inherited as safe.
+
+Direct async `run_server` callers retain daemon admission through accepted
+requests, including Windows named-pipe requests. Shutdown rejects new work,
+closes idle connections, and settles already-started native calls and response
+cleanup before removing endpoint/PID state, including after partial startup
+failure. Repeated cancellation cannot cancel an admitted credential operation
+or shut down an embedding loop's shared executor. The existing `stop`
+acknowledgement is sent before draining; this adds no credential replay,
+native-process termination, or change to password/cache custody.
+Listener-close failures do not bypass draining: independent closures are still
+attempted, and the exact failed closure is retried while admission remains held.
+An unresolved close is not treated as stopped intake, even after native requests
+finish. Once closure and owned request/connection cleanup are confirmed, the
+first failure is resurfaced rather than being replaced by repeated outer
+cancellation.
 
 ## Unlock, TTL, prompting, and failure mode
 

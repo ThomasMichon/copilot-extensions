@@ -34,6 +34,12 @@ def _commit(value: str) -> str:
     return value.lower()
 
 
+def _context(value: str) -> str:
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", value):
+        raise argparse.ArgumentTypeError("context must be a declared lowercase identifier")
+    return value
+
+
 def parse(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="worktree-manager setup", allow_abbrev=False)
     parser.add_argument("--apply", action="store_true")
@@ -41,10 +47,11 @@ def parse(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--repository-target")
     parser.add_argument("--repository-commit", type=_commit)
     parser.add_argument("--trust-repository-setup", action="store_true")
+    parser.add_argument("--context", type=_context)
     args = parser.parse_args(argv)
     if (
         args.repository_target is not None or args.repository_commit is not None
-        or args.trust_repository_setup
+        or args.trust_repository_setup or args.context is not None
     ) and not args.repository:
         parser.error("repository target, commit and setup trust require --repository")
     if args.repository_target is not None and not Path(args.repository_target).expanduser().is_absolute():
@@ -70,6 +77,8 @@ def run(args: argparse.Namespace) -> int:
         command.extend(["--commit", args.repository_commit])
     if args.trust_repository_setup:
         command.append("--trust-repository-setup")
+    if args.context is not None:
+        command.extend(["--context", args.context])
     try:
         return run_engine_passthrough(None, command, terminal_aware=True)
     except EngineError as error:

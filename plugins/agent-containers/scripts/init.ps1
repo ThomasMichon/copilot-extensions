@@ -38,6 +38,11 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
 
+if ((Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN) -and $Action -ne 'stamp' -and
+    -not (Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET)) {
+    throw 'Prepared-source transaction requires a frozen source target; upgrade the update engine before profile construction.'
+}
+
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
 function Copy-InstallerStageDirectory {
     param([string]$Source, [string]$Destination)
@@ -735,6 +740,10 @@ if (-not (Enter-InstallLock)) {
 
 try {
 Assert-SourceRuntimeIdentity
+if ($Action -in @('install', 'init', 'provision')) {
+    . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+}
 if ($Action -eq 'stamp') {
     if ($Profile) { throw 'Select a runtime profile with provision, not stamp' }
     Invoke-Stamp

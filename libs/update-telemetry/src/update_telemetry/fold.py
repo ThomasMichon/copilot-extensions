@@ -131,6 +131,8 @@ def fold(
     """
     targets = fold_targets(events)
     outcome = run_outcome(targets, hint) if final else oc.IN_PROGRESS
+    if final and hint == oc.SKIPPED and error_code is None and not oc.is_failure(outcome):
+        outcome = oc.SKIPPED
     run_doc = dict(run)
     run_doc["outcome"] = outcome
     run_doc["exit_code"] = oc.exit_code_for(outcome, error_code) if final else None
@@ -143,13 +145,13 @@ def fold(
          if t.get("required", True) and oc.is_failure(t.get("outcome"))),
         key=lambda name: -oc.SEVERITY[targets[name]["outcome"]],
     )
-    if final and run_doc["exit_code"] == 0:
+    if final and run_doc["exit_code"] == 0 and outcome != oc.SKIPPED:
         last_success = {
             "run_id": run.get("id"),
             "ended_at": run.get("ended_at"),
             "duration_ms": run.get("duration_ms"),
         }
-    elif final:
+    elif final and outcome != oc.SKIPPED:
         # Summary and remediation come from one source: the worst required
         # target when it set the run's outcome, otherwise the run's own error.
         first = targets[failing[0]] if failing else {}

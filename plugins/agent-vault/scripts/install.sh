@@ -1189,6 +1189,12 @@ esac
 case "$ACTION" in
     install|update|provision|stamp) _assert_source_runtime || exit 1 ;;
 esac
+case "$ACTION:${DRY_RUN:-0}" in
+    install:0|update:0|provision:0)
+        . "$SCRIPT_DIR/installer-instance-reconcile.sh"
+        reconcile_installer_instances "$SCRIPT_DIR"
+        ;;
+esac
 case "$ACTION" in
     install)   do_install || exit 1 ;;
     stamp)     do_stamp || exit 1 ;;

@@ -31,6 +31,8 @@ re-spawn) and surfaced for a human, which is the safe default.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import hashlib
 import json
 import logging
@@ -3556,220 +3558,11 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
 
         Returns the ids of tasks spawned this cycle.
         """
-        now = time.time() if now is None else now
-        self.reconcile()
-        self.reconcile_reserving()
-        self.release_requested_bodies(now=now)
-        self.bind_headless_owner_sessions()
-        self.renew_restricted_grants()
-        self.nudge_idle_headless_tasks(now=now)
-        self.cool_dormant_bodies()
-        self.release_resumed_cold_tasks(now=now)
-        self.recover_stranded_cold_reservations()
-        self.recover_stranded_releasing_reservations(now=now)
-        if self.evaluator is not None:
-            self.advance_via_evaluator()
-        if self.heartbeat or self.publish_activity:
-            self.hold_live_leases()
-        if self.recover:
-            self.recover_gone()
-        if self.consistency_sweep:
-            # Read-only and additive (see sweep_spawn_consistency's own
-            # docstring) -- never gates spawning, only classifies+logs.
-            try:
-                self.sweep_spawn_consistency()
-            except Exception:  # pragma: no cover -- never let a cycle die on this
-                log.exception("spawn-consistency sweep failed")
-            try:
-                self.sweep_task_reservation_consistency()
-            except Exception:  # pragma: no cover -- never let a cycle die on this
-                log.exception("task-reservation consistency sweep failed")
-        self.redrive_unclaimed_spawns()
-        if self.nudge:
-            self.nudge_stalled(now=now)
-        failed_counts = self._failed_spawn_counts()
-        eligible = list(self._eligible(now))
-        if failed_counts is None:
-            log.warning(
-                "could not determine failed-spawn counts this cycle; "
-                "blocking new spawns rather than risking a retry past "
-                "max_attempts (existing active work is unaffected)"
-            )
-            dead_lettered: set[str] = set()
-            active = self.max_concurrent
-        else:
-            dead_lettered = self._log_dead_lettered(eligible, failed_counts)
-            active = len(self._active_reservations())
-        spawned: list[str] = []
-        for task in eligible:
-            if task["id"] in dead_lettered:
-                continue
-            if active >= self.max_concurrent:
-                break
-            if self.capacity_gate is not None and not self.capacity_gate(task):
-                # No capacity for this task right now (e.g. a fleet pool that is
-                # entirely asleep). Defer WITHOUT reserving so no spawn attempt is
-                # burned toward the dead-letter bound -- it is retried next cycle.
-                continue
-            try:
-                before_reserve = self._recheck_governance("pre-mutation:reserve-spawn")
-                if before_reserve is not None and before_reserve.get("status") != "ready":
-                    log.warning(
-                        "supervisor refused reservation at %s: %s (%s)",
-                        before_reserve.get("checkpoint"),
-                        before_reserve.get("reason"),
-                        before_reserve.get("status"),
-                    )
-                    break
-                from .ordinary_bridge import reserve_for_backend
-                resp = reserve_for_backend(
-                    self.client, task, self.supervisor_id,
-                    ordinary=getattr(self.spawn_fn, "ordinary_bridge_for", lambda _: False)(task),
-                    restricted=getattr(self.spawn_fn, "restricted_bridge_for", lambda _: False)(task),
-                )
-            except DispatchError:
-                continue
-            if resp.get("coordinator_launch") and (resp["coordinator_launch"].get("ok") or resp["reservation"].get("state") != "failed"): return spawned + ([task["id"]] if resp["coordinator_launch"].get("ok") else [])
-            if not resp.get("reserved"):
-                continue
-            reservation = resp["reservation"]
-            key = reservation["key"]
-            active += 1
-            from . import bridge
-            from .embody import EmbodyUnavailable
-            try:
-                spawn_task = self._prepare_spawn_task(task, reservation)
-            except SpawnPreparationRetained as exc:
-                from .workspace_binding import defer_pending_creation
+        from .supervisor_cycle import poll_once
 
-                if defer_pending_creation(self.client, key, exc):
-                    active -= 1
-                log.error(
-                    "spawn preparation retained reservation %s for task %s: %s",
-                    key,
-                    task["id"],
-                    exc,
-                )
-                continue
-            except (
-                DispatchError,
-                EmbodyUnavailable,
-                bridge.BridgeUnavailable,
-            ) as exc:
-                try:
-                    self.client.fail_spawn(
-                        key,
-                        detail=f"reusable worktree preparation failed: {exc}",
-                    )
-                    active -= 1
-                except DispatchError:
-                    log.exception("bookkeeping failed for reservation %s", key)
-                log.warning(
-                    "spawn preparation failed for task %s (%s): %s",
-                    task["id"],
-                    key,
-                    exc,
-                )
-                continue
-            before_spawn = self._recheck_governance("pre-mutation:spawn")
-            if before_spawn is not None and before_spawn.get("status") != "ready":
-                try:
-                    if spawn_task.get("spawn_worktree_ownership") == "created":
-                        self.client.request_spawn_release(
-                            key,
-                            detail=(
-                                "installation governance changed before spawn: "
-                                f"{before_spawn.get('reason')}"
-                            ),
-                            disposition="failed",
-                            finished_startup_revision=reservation.get("startup_revision"),
-                        )
-                    else:
-                        self.client.fail_spawn(
-                            key,
-                            detail=(
-                                "installation governance changed before spawn: "
-                                f"{before_spawn.get('reason')}"
-                            ),
-                        )
-                except DispatchError:
-                    log.exception("bookkeeping failed for reservation %s", key)
-                log.warning(
-                    "supervisor released reservation %s after %s: %s (%s)",
-                    key,
-                    before_spawn.get("checkpoint"),
-                    before_spawn.get("reason"),
-                    before_spawn.get("status"),
-                )
-                break
-            ok, handle = self.spawn_fn(spawn_task)
-            if ok and not handle.get("session"):
-                # No usable identity means no published spawn or absence proof.
-                ok = False
-                handle = {
-                    **handle,
-                    "error": (
-                        handle.get("error")
-                        or "spawn reported success with no session id"
-                    ),
-                }
-            try:
-                if ok:
-                    self.client.record_spawn(
-                        key,
-                        session_handle=handle.get("session"),
-                        worktree=handle.get("worktree"),
-                        startup_complete=True,
-                        startup_revision=reservation.get("startup_revision"),
-                        **({"session_info": handle["session_info"]} if "session_info" in handle else {}),
-                    )
-                    if self.publish_activity:
-                        self.client.set_activity(task["id"], "ACTIVE", reservation_key=key)
-                    spawned.append(task["id"])
-                    log.info("spawned embody for task %s (%s)", task["id"], key)
-                else:
-                    detail = handle.get("error", "spawn failed")
-                    if handle.get("retained"):
-                        log.error("spawn reservation %s retained for explicit repair: %s", key, detail)
-                    elif handle.get("deferred"):
-                        self.client.defer_spawn(
-                            key, detail=detail,
-                            **({"expected_generation": handle["expected_generation"]}
-                               if "expected_generation" in handle else {}),
-                        )
-                        active -= 1
-                        log.info(
-                            "spawn deferred (carried session busy) for task %s (%s): %s",
-                            task["id"],
-                            key,
-                            handle.get("error"),
-                        )
-                    elif spawn_task.get("spawn_worktree_ownership") == "created" and not handle.get("preserve_workspace"):
-                        request_failed_created_spawn_release(
-                            self.client, key, handle, spawn_task, detail
-                        )
-                        log.warning(
-                            "spawn failed for task %s (%s): %s",
-                            task["id"],
-                            key,
-                            handle.get("error"),
-                        )
-                    else:
-                        self.client.fail_spawn(key, detail=detail)
-                        active -= 1
-                        log.warning(
-                            "spawn failed for task %s (%s): %s",
-                            task["id"],
-                            key,
-                            handle.get("error"),
-                        )
-            except DispatchError:
-                log.exception("bookkeeping failed for reservation %s", key)
-        if self.event_wake is not None:
-            self.event_wake.acknowledge()
-        self._sync_event_subscriptions()
-        return spawned
+        return poll_once(self, now=now)
 
+    @daemon_entrypoint("agent-dispatch-lane", source=__file__, purpose="production")
     def serve(
         self,
         *,
@@ -3781,8 +3574,12 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         Push delivery changes latency only; the timeout always preserves ordinary
         fixed-interval reconciliation as the correctness floor.
         """
+        event_wake = self.event_wake
+        from .diagnostic_logs import maintain_file_logging
+
         try:
             while True:
+                maintain_file_logging()
                 boundary = self._recheck_governance("iteration-boundary")
                 if boundary is not None and boundary.get("status") != "ready":
                     log.warning(
@@ -3799,15 +3596,21 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 try:
                     spawned = self.poll_once()
                     if on_cycle is not None:
-                        on_cycle(spawned)
+                        from .spawn_diagnostics import SpawnDiagnostics
+
+                        with SpawnDiagnostics(supervisor_id=self.supervisor_id).stage("on_cycle"):
+                            on_cycle(spawned)
                 except KeyboardInterrupt:
                     return
-                except Exception:  # pragma: no cover -- never let the loop die on a blip
-                    log.exception("supervision cycle failed")
+                except Exception as exc:
+                    # The causal stage already recorded the filtered error. Rendering
+                    # its traceback here would reintroduce credentials and prompts.
+                    log.error("supervision cycle failed (%s); inspect spawn stage records",
+                              type(exc).__name__)
                 try:
                     self.wait_for_turn_end(interval)
                 except KeyboardInterrupt:
                     return
         finally:
-            if self.event_wake is not None:
-                self.event_wake.close()
+            if event_wake is not None:
+                event_wake.close_and_wait()

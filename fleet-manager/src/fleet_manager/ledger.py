@@ -13,14 +13,17 @@ from .planning import PlanError, identifier, integer
 class OperationLedger:
     """Persist admitted intent/outbox/audit atomically for one installation."""
 
-    def __init__(self, path, *, authority, installation):
+    def __init__(self, path, *, authority, installation, enable_enrollment=False):
+        if type(enable_enrollment) is not bool:
+            raise PlanError("enrollment migration selection must be boolean")
         identifier(authority, "ledger authority")
         identifier(installation, "ledger installation")
         self.path = Path(path).resolve()
         self.authority, self.installation = authority, installation
+        self._version = 5 if enable_enrollment else 4
         with self._transaction(verify=False) as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2, 3, 4):
+            if version not in (0, 1, 2, 3, 4, 5) or (version == 5 and not enable_enrollment):
                 raise PlanError("unsupported operation ledger schema")
             if version == 0:
                 existing = connection.execute(
@@ -73,6 +76,11 @@ class OperationLedger:
             if version == 3:
                 create_release_history(connection)
                 connection.execute("PRAGMA user_version=4")
+                version = 4
+            if version == 4 and enable_enrollment:
+                from .enrollment_journal import create_schema
+                create_schema(connection)
+                connection.execute("PRAGMA user_version=5")
 
     @staticmethod
     def _check_tables(connection, version):
@@ -89,6 +97,13 @@ class OperationLedger:
             columns["allocation_claims"] = ("resource", "operation_id")
         if version >= 4:
             columns["allocation_releases"] = ("operation_id", "resource", "generation", "proof")
+        if version >= 5:
+            columns["enrollment_floors"] = ("gateway", "revision", "digest")
+            columns["machine_enrollments"] = (
+                "operation_id", "gateway", "machine", "principal", "key_thumbprint", "binding",
+                "withdrawn_revision")
+            from .enrollment_journal import verify_schema
+            verify_schema(connection)
         objects = connection.execute(
             "SELECT type,name FROM sqlite_master WHERE name NOT GLOB 'sqlite_*'"
         ).fetchall()
@@ -117,12 +132,15 @@ class OperationLedger:
                 connection.execute("PRAGMA query_only=ON")
             connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
             if verify:
-                if connection.execute("PRAGMA user_version").fetchone()[0] != 4:
+                if connection.execute("PRAGMA user_version").fetchone()[0] != self._version:
                     raise PlanError("unsupported operation ledger schema")
                 identity = connection.execute("SELECT authority,installation FROM identity").fetchall()
                 if identity != [(self.authority, self.installation)]:
                     raise PlanError("operation ledger identity mismatch")
                 verify_release_index(connection)
+                if self._version == 5:
+                    from .enrollment_journal import verify_schema
+                    verify_schema(connection)
             yield connection
             connection.commit()
         finally:
@@ -151,6 +169,8 @@ class OperationLedger:
     def admit(self, intent):
         """Caller must already authorize scope. This method performs no effects."""
         value = self._scope(intent)
+        if value["command"] == "machine.enroll":
+            raise PlanError("machine enrollment requires its exclusive journal transaction")
         with self._transaction() as connection:
             return self._admit(connection, value, intent)
 

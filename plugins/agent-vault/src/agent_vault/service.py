@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import asyncio
 import contextlib
 import json
@@ -44,6 +46,8 @@ from .rendezvous import (
     resolve,
     write_endpoint,
 )
+from .service_endpoints import advertised_endpoint
+from .service_connections import VaultConnections, settle_owned
 from .winpipe import pipe_send, start_pipe_server
 
 # Service inactivity timeout (0 = never, set via --persistent)
@@ -890,9 +894,13 @@ async def handle_client(
     writer: asyncio.StreamWriter,
     service: VaultService,
     transport: str = "unknown",
+    *,
+    _connections: VaultConnections | None = None,
 ) -> None:
     peer = writer.get_extra_info("peername", "?")
     try:
+        if _connections is not None and (_connections.closing or service._shutdown):
+            return
         data = await asyncio.wait_for(reader.readline(), timeout=5.0)
         if not data:
             return
@@ -908,9 +916,15 @@ async def handle_client(
         client = request.get("_client", "")
         log.debug("< %s from %s%s", action, peer, f" client={client}" if client else "")
 
-        response = await asyncio.get_event_loop().run_in_executor(
-            None, service.handle_request, request, str(peer), transport
-        )
+        if _connections is None:
+            worker = asyncio.get_running_loop().run_in_executor(
+                None, service.handle_request, request, str(peer), transport
+            )
+        else:
+            worker = _connections.request(writer, request, str(peer), transport)
+            if worker is None:
+                return
+        response = await settle_owned(worker)
 
         ok = response.get("ok", False)
         log.debug(
@@ -929,56 +943,36 @@ async def handle_client(
     finally:
         writer.close()
         with contextlib.suppress(Exception):
-            await writer.wait_closed()
+            await settle_owned(writer.wait_closed())
 
 
-def advertised_endpoint(
-    *,
-    is_windows: bool,
-    unix_bound: bool,
-    socket_path: str,
-    pipe_bound: bool = False,
-    pipe_address: str | None = None,
-    tcp_bound: bool,
-    tcp_address: str | None,
-) -> tuple[str, str, list[tuple[str, str]]] | None:
-    """Pick the endpoint to advertise for discovery, preferring the OS-native one.
-
-    Rung order (``docs/patterns/service-transport.md``): a POSIX host advertises
-    its **Unix domain socket**; a Windows host advertises its **named pipe** when
-    bound, else falls back to its loopback **TCP** endpoint. When the primary is
-    the Windows **named pipe** and TCP is *also* bound, the TCP endpoint rides
-    along as an **alternate** so a cross-boundary client that can't open the pipe
-    -- a WSL guest reaching a Windows-hosted daemon (#3426) -- still finds a
-    dialable port. POSIX (unix) and TCP-primary advertisements are unchanged (empty
-    ``alt``). Returns ``(transport, address, alt)`` where ``alt`` is a
-    possibly-empty list of ``(transport, address)`` secondaries, or ``None`` if
-    nothing bound.
-    """
-    if unix_bound and not is_windows:
-        return ("unix", socket_path, [])
-    if pipe_bound and pipe_address and is_windows:
-        tcp_alt = [("tcp", tcp_address)] if tcp_bound and tcp_address else []
-        return ("pipe", pipe_address, tcp_alt)
-    if tcp_bound and tcp_address:
-        return ("tcp", tcp_address, [])
-    return None
-
-
-
+@daemon_entrypoint("agent-vault", source=__file__, purpose="production")
 async def run_server(service: VaultService, tcp_port: int | None = None) -> None:
     servers = []
+    pipe_servers: list = []
+    connections = VaultConnections(service, handle_client)
+    try:
+        await _serve(service, tcp_port, servers, pipe_servers, connections)
+    finally:
+        reason = (
+            "shutdown requested" if service._shutdown
+            else "inactivity timeout" if service.is_expired else "server stopped"
+        )
+        log.info("Stopping: %s", reason)
+        await settle_owned(connections.close(servers, pipe_servers, cleanup))
 
+
+async def _serve(service, tcp_port, servers, pipe_servers, connections):
     unix_bound = False
     if not IS_WINDOWS:
         if os.path.exists(SOCKET_PATH):
             os.unlink(SOCKET_PATH)
         unix_srv = await asyncio.start_unix_server(
-            lambda r, w: handle_client(r, w, service, transport="unix"),
+            connections.callback("unix"),
             path=SOCKET_PATH,
         )
-        os.chmod(SOCKET_PATH, 0o600)
         servers.append(unix_srv)
+        os.chmod(SOCKET_PATH, 0o600)
         unix_bound = True
         log.info("Listening on Unix socket %s", SOCKET_PATH)
 
@@ -987,7 +981,7 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
     bound_port: int | None = None
     try:
         tcp_srv = await asyncio.start_server(
-            lambda r, w: handle_client(r, w, service, transport="tcp"),
+            connections.callback("tcp"),
             host="127.0.0.1",
             port=port,
         )
@@ -1009,13 +1003,12 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
     # the preferred, port-free local endpoint; TCP stays as the legacy + WSL/
     # fallback path until Stage D retires it. Any pipe failure degrades cleanly to
     # TCP-only, so this can never make the daemon less reachable than today.
-    pipe_servers: list = []
     pipe_bound = False
     if IS_WINDOWS:
         try:
-            pipe_servers = await start_pipe_server(
-                PIPE_PATH, lambda r, w: handle_client(r, w, service, transport="pipe")
-            )
+            pipe_servers.extend(await start_pipe_server(
+                PIPE_PATH, connections.callback("pipe")
+            ))
             pipe_bound = bool(pipe_servers)
             if pipe_bound:
                 log.info("Listening on named pipe %s", PIPE_PATH)
@@ -1064,20 +1057,8 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
         ),
     )
 
-    try:
-        while not service._shutdown and not service.is_expired:
-            await asyncio.sleep(0.5)
-    finally:
-        reason = "shutdown requested" if service._shutdown else "inactivity timeout"
-        log.info("Stopping: %s", reason)
-        for srv in servers:
-            srv.close()
-            await srv.wait_closed()
-        # Pipe servers expose close() but not wait_closed().
-        for psrv in pipe_servers:
-            with contextlib.suppress(Exception):
-                psrv.close()
-        cleanup()
+    while not service._shutdown and not service.is_expired:
+        await asyncio.sleep(0.5)
 
 
 def cleanup() -> None:
@@ -1232,6 +1213,53 @@ def daemonize_windows(argv: list[str]) -> None:
     spawn_service([*argv[2:], "--foreground"])
 
 
+def _prepare_service(args, *, handoff_payload=None, handoff_consumed=False):
+    from .service_logging import configure_logging
+
+    configure_logging(log, str(LOG_FILE), verbose=args.verbose)
+    existing = send_command({"action": "ping"})
+    if existing and existing.get("ok"):
+        pid = existing["pid"]
+        if is_process_alive(pid):
+            print(f"Vault service already running - PID {pid}, cli={existing['cli']}")
+            sys.exit(0)
+        cleanup()
+    service = VaultService()
+    if args.persistent:
+        service.ttl_override = 0
+        log.info("Persistent mode - inactivity timeout disabled")
+    service.initialize()
+    if args.handoff_stdin:
+        from .cutover import apply_handoff_payload, consume_pending_handoff
+
+        payload = handoff_payload if handoff_consumed else consume_pending_handoff(
+            environ=os.environ, stdin=sys.stdin,
+        )
+        warmed = apply_handoff_payload(service, payload)
+        log.info("Drain-safe cutover: warmed %d vault(s) from predecessor handoff", warmed)
+    return service
+
+
+@daemon_entrypoint("agent-vault", source=__file__, purpose="production")
+def _run_resident(args, *, handoff_payload=None, handoff_consumed=False):
+    """Admit the actual resident before initialization and retain it through shutdown."""
+    service = _prepare_service(
+        args, handoff_payload=handoff_payload, handoff_consumed=handoff_consumed,
+    )
+    if args.foreground:
+        print(
+            f"Vault service starting (cli={service.cli.status(resolve_kpdb(required=False))}, "
+            f"TCP 127.0.0.1:{args.tcp_port or configured_tcp_port()})"
+        )
+
+    def sig_handler(signum, frame):
+        service._shutdown = True
+
+    signal.signal(signal.SIGTERM, sig_handler)
+    signal.signal(signal.SIGINT, sig_handler)
+    asyncio.run(run_server(service, tcp_port=args.tcp_port))
+
+
 def main() -> None:
     import argparse
 
@@ -1260,9 +1288,8 @@ def main() -> None:
             "the AGENT_VAULT_HANDOFF_JSON env var (the systemd-managed "
             "restart path) or, failing that, stdin (the direct-invocation "
             "path) -- and warm this generation with it before serving -- no "
-            "re-unlock. Consumed BEFORE any fork/daemonize so the warmed "
-            "state carries into the detached child via copy-on-write memory; "
-            "never touches disk, never logged."
+            "re-unlock. Consumed before detaching and applied by the admitted "
+            "resident; never touches disk, never logged."
         ),
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose logging")
@@ -1276,17 +1303,6 @@ def main() -> None:
     )
 
     log.setLevel(level)
-
-    try:
-        fh = logging.handlers.RotatingFileHandler(
-            str(LOG_FILE), maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
-        fh.setLevel(level)
-        fh.setFormatter(logging.Formatter(
-            "%(asctime)s %(name)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
-        logging.getLogger().addHandler(fh)
-        log.debug("Log file: %s", LOG_FILE)
-    except Exception as exc:
-        log.warning("Could not open log file %s: %s", LOG_FILE, exc)
 
     if args.ping:
         resp = send_command({"action": "ping"})
@@ -1322,70 +1338,44 @@ def main() -> None:
         sys.exit(1)
 
     existing = send_command({"action": "ping"})
-    if existing and existing.get("ok"):
-        pid = existing["pid"]
-        if is_process_alive(pid):
-            print(f"Vault service already running - PID {pid}, cli={existing['cli']}")
-            sys.exit(0)
-        cleanup()
-
-    service = VaultService()
-    if args.persistent:
-        service.ttl_override = 0
-        log.info("Persistent mode - inactivity timeout disabled")
-    service.initialize()
-
-    if args.handoff_stdin:
-        # Drain-safe cutover (#743): consume + apply BEFORE any fork/daemonize,
-        # so the warmed state carries into the eventual detached child via
-        # copy-on-write memory -- never written to disk, never logged. See
-        # cutover.consume_pending_handoff for the two carriers (env var for a
-        # systemd-managed restart, stdin for a direct invocation).
-        from .cutover import apply_handoff_payload, consume_pending_handoff
-
-        payload = consume_pending_handoff(environ=os.environ, stdin=sys.stdin)
-        warmed = apply_handoff_payload(service, payload)
-        log.info(
-            "Drain-safe cutover: warmed %d vault(s) from predecessor handoff", warmed
-        )
-
-    tcp_port = args.tcp_port
+    if existing and existing.get("ok") and is_process_alive(existing["pid"]):
+        print(f"Vault service already running - PID {existing['pid']}, cli={existing['cli']}")
+        return
 
     if args.foreground:
-        print(
-            f"Vault service starting (cli={service.cli.status(resolve_kpdb(required=False))}, "
-            f"TCP 127.0.0.1:{tcp_port or configured_tcp_port()})"
-        )
+        _run_resident(args)
+        return
 
-        def sig_handler(signum, frame):
-            service._shutdown = True
+    handoff_payload = None
+    if args.handoff_stdin:
+        from .cutover import consume_pending_handoff
 
-        signal.signal(signal.SIGTERM, sig_handler)
-        signal.signal(signal.SIGINT, sig_handler)
-
-        asyncio.run(run_server(service, tcp_port=tcp_port))
-    else:
-        if IS_WINDOWS:
+        handoff_payload = consume_pending_handoff(environ=os.environ, stdin=sys.stdin)
+    if IS_WINDOWS:
+        try:
+            if handoff_payload is not None:
+                os.environ["AGENT_VAULT_HANDOFF_JSON"] = json.dumps(handoff_payload)
             daemonize_windows(["-m", "agent_vault.service", *sys.argv[1:]])
-            time.sleep(1.0)
-            resp = send_command({"action": "ping"})
-            if resp and resp.get("ok"):
-                print(f"Vault service started - PID {resp['pid']}, cli={resp['cli']}")
-            else:
-                print("Vault service started (waiting for readiness...)")
+        finally:
+            if args.handoff_stdin:
+                os.environ.pop("AGENT_VAULT_HANDOFF_JSON", None)
+        time.sleep(1.0)
+        resp = send_command({"action": "ping"})
+        if resp and resp.get("ok"):
+            print(f"Vault service started - PID {resp['pid']}, cli={resp['cli']}")
         else:
-            is_daemon = daemonize_unix()
-            if is_daemon:
-                signal.signal(signal.SIGTERM, lambda s, f: setattr(service, "_shutdown", True))
-                signal.signal(signal.SIGINT, lambda s, f: setattr(service, "_shutdown", True))
-                asyncio.run(run_server(service, tcp_port=tcp_port))
-            else:
-                time.sleep(0.3)
-                resp = send_command({"action": "ping"})
-                if resp and resp.get("ok"):
-                    print(f"Vault service started - PID {resp['pid']}, cli={resp['cli']}")
-                else:
-                    print("Vault service started")
+            print("Vault service started (waiting for readiness...)")
+    elif daemonize_unix():
+        _run_resident(
+            args, handoff_payload=handoff_payload, handoff_consumed=True,
+        )
+    else:
+        time.sleep(0.3)
+        resp = send_command({"action": "ping"})
+        if resp and resp.get("ok"):
+            print(f"Vault service started - PID {resp['pid']}, cli={resp['cli']}")
+        else:
+            print("Vault service started")
 
 
 if __name__ == "__main__":

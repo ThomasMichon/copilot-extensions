@@ -369,6 +369,42 @@ def test_source_ast_selector_omits_only_closed_packet_inputs(tmp_path, event, pa
     )
 
 
+@pytest.mark.parametrize("path", [
+    "tools/daemon-coverage.json",
+    "tools/check-daemon-coverage.py",
+    "worktree-manager/bin/manager-runtime.ps1",
+    "fleet-manager/src/fleet_manager/gateway_server.py",
+    "services/pr/src/agent_pull_requests_service/hosting.py",
+    "libs/agent-procutil/src/agent_procutil/daemon_instance_native.c",
+    "tools/clean-room/scenarios/example/fixtures/worker.py",
+    "plugins/agent-worktrees/bin/agent-worktrees-update-entry.ps1",
+])
+def test_daemon_policy_and_every_shipped_owner_reach_canonical_ci_guard(tmp_path, path):
+    from promotion_unit_contract import ci_requires_code_checks, ci_requires_source_ast_guards
+
+    raw = (path + "\0").encode()
+    read_diff = lambda _argv: raw
+    assert ci_requires_code_checks("pull_request", "a" * 40, "b" * 40, read_diff)
+    assert ci_requires_source_ast_guards("pull_request", "a" * 40, "b" * 40, read_diff)
+    output = tmp_path / "guard-output"
+    execute_source_ast_selector(output, "pull_request", read_diff)
+    assert output.read_text() == "run=true\n"
+
+
+def test_daemon_checker_is_in_the_existing_required_source_guard_step():
+    root = Path(__file__).resolve().parents[2]
+    workflow = yaml.safe_load((root / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    scans = [
+        step for step in workflow["jobs"]["checks"]["steps"]
+        if step.get("run") == "python tools/run-source-ast-guards.py"
+    ]
+    assert len(scans) == 1
+    assert scans[0]["if"] == GUARD.SOURCE_AST_CONDITION
+    assert "continue-on-error" not in scans[0]
+    runner = (root / "tools/run-source-ast-guards.py").read_text(encoding="utf-8")
+    assert '"check-daemon-coverage.py",' in runner
+
+
 @pytest.mark.parametrize("failure", ["unavailable", "encoding", "path"])
 def test_source_ast_selector_errors_never_emit_skipped_success(tmp_path, failure):
     output = tmp_path / "outputs"

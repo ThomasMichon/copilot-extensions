@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import argparse
 import asyncio
 import json
@@ -96,6 +98,7 @@ def _bind_listen_socket(host: str, port: int) -> socket.socket:
     return sock
 
 
+@daemon_entrypoint("agent-bridge", source=__file__, purpose="production")
 def _cmd_start(
     args: argparse.Namespace, *,
     required_runtime_environment: tuple[str, ...] | None = None,

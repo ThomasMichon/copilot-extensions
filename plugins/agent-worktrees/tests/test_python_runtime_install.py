@@ -194,6 +194,63 @@ def test_source_deployment_uses_exact_verified_snapshot_before_construction(
         assert not root.exists()
 
 
+@pytest.mark.parametrize("source_backed", [False, True])
+@pytest.mark.parametrize("recover_manager", [False, True])
+def test_source_health_failure_routes_to_canonical_distinct_repair_after_custody(
+    driver, tmp_path, monkeypatch, source_backed, recover_manager,
+):
+    from types import SimpleNamespace
+
+    root, plugin, owner = (tmp_path / name for name in ("runtime", "payload", "owner"))
+    plugin.mkdir()
+    (plugin / "pyproject.toml").write_text('[project]\nname="agent-worktrees"\nversion="1.0.0"\n')
+    source = driver.runtime_source
+    identity = source.SourceIdentity(
+        "agent-worktrees", "1.0.0", "a" * 40, "b" * 40, "c" * 64,
+        source.runtime_version("1.0.0", "a" * 40, "c" * 64),
+    ) if source_backed else None
+    calls = []
+
+    @contextmanager
+    def held(**kwargs):
+        calls.append("held")
+        try:
+            yield
+        finally:
+            calls.append("released")
+
+    monkeypatch.setattr(driver, "Governance", lambda *a: SimpleNamespace(
+        root=root, payload=owner, held=held,
+    ))
+    monkeypatch.setattr(source, "read_source_identity", lambda *a, **k: identity)
+    monkeypatch.setattr(source, "publish_source_snapshot", lambda *a: plugin)
+    monkeypatch.setattr(driver, "_source_provenance", lambda *a: {})
+    monkeypatch.setattr(driver, "_selected", lambda *a: None)
+
+    def construct(*args, **kwargs):
+        raise driver.engine.HealthRepairRequired("controlled installed-health failure")
+
+    def repair(requested, selected, **kwargs):
+        assert calls == ["held", "released"]
+        assert requested == root and selected == plugin
+        assert kwargs["payload"] == owner and kwargs["mode"] == "repair"
+        assert kwargs["expected_source_identity"] == source.manifest_fields(identity)
+        assert kwargs["recover_adopted_manager"] is recover_manager
+        return {"runtime_version": "distinct-repair"}
+
+    monkeypatch.setattr(driver.engine, "numbered_candidate", construct)
+    monkeypatch.setitem(sys.modules, "runtime_install_modes", SimpleNamespace(run=repair))
+    arguments = dict(
+        payload=owner, uv=tmp_path / "uv", base_python=Path(sys.executable),
+        recover_adopted_manager=recover_manager,
+    )
+    if source_backed:
+        assert driver.install(root, plugin, **arguments) == {"runtime_version": "distinct-repair"}
+    else:
+        with pytest.raises(driver.engine.HealthRepairRequired):
+            driver.install(root, plugin, **arguments)
+
+
 @pytest.mark.parametrize("rollback,interrupted", [
     (False, False), (True, False), (False, True), (True, True),
 ])

@@ -399,6 +399,8 @@ class Run:
         """Close the run; return the exit code for this process's result."""
         error_code = (error or {}).get("code")
         own = oc.worst([outcome, *self._own_required])
+        if outcome == oc.SKIPPED and error_code is None and not oc.is_failure(own):
+            own = oc.SKIPPED
         code = oc.exit_code_for(own, error_code)
         try:
             self._close_step(error, outcome)

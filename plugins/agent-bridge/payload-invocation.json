@@ -5,6 +5,7 @@
   "module": "agent_bridge",
   "legacyRuntimeRoot": ".agent-bridge",
   "installationContext": "required",
+  "installerLifecycle": true,
   "noSelfProvisionEnv": "AGENT_BRIDGE_NO_SELFPROVISION",
   "purpose": "Communicate with persistent agent sessions",
   "installer": "install",

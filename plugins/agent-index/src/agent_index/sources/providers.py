@@ -39,6 +39,26 @@ treated as empty or trusted as-is:
 - ``content-current-commit --source <source>`` -> ``{"commit": "<sha>" |
   null}``
 
+The current-commit response may add a versioned ``source_delta`` declaration;
+:mod:`agent_index.sources.provider_delta` owns its wire schema and compatibility
+window. Only negotiated v1 enables ``--delta-version 1`` on the existing
+``content-discover-changed`` verb. Legacy and valid future-only providers use
+explicitly logged reconciliation with unchanged syntax. One connector instance
+captures one metadata/cursor snapshot for one crawl; instantiate a fresh
+connector when selecting a new provider generation or starting another crawl.
+Negotiation fixes the canonical family before recovery or acquisition. V1
+recovery includes the command, requested subtree, declared family/account and
+effective target. Every negotiated acquisition response (including full
+``content-discover``, legacy-shaped ``content-discover-changed`` and
+``content-list-paths``) must echo its actual executing ``source_delta`` scope,
+still support v1 and exactly match the cached
+family/account/target before any entries are returned; missing or mismatched
+echoes fail without a legacy retry. Legacy recovery retains its command-based
+identity. Providers must declare stable nonsecret identities, never credentials
+or rotating tokens. Full reconciliation retains old syntax and may return
+canonical descendant sources inside the requested subtree. Direct acquisition
+on an unnegotiated connector retains the old behavior without a metadata probe.
+
 A response's own ``"source"`` field(s) (in ``entries`` or ``content-list-
 paths``' keys) are **verified against the requested ``--source``** -- an
 entry must claim exactly that source or a strict descendant of it
@@ -53,9 +73,9 @@ exactly, or hierarchically in either direction (``"git"`` vs. ``"git:foo"``)
 built-in connector or another provider (including one discovered in the same
 scan) -- it never silently shadows part of an existing registration.
 
-Not yet implemented in this first slice (tracked as follow-up, not a silent
-gap): mid-call cancellation of a running provider subprocess (``cancel_check``
-is honored only *before* a call starts, not while one is in flight -- a
+Not yet implemented (tracked as follow-up, not a silent gap): mid-call
+cancellation of a running provider subprocess (``cancel_check``
+is honored before and after a call, not while one is in flight -- a
 runaway provider is still bounded by the per-call timeout), and periodic
 re-scanning on demand (this module's discovery runs once, at server startup).
 """
@@ -77,6 +97,14 @@ from agent_procutil import no_window_kwargs
 from dropin_registry import EntryDecision, Finding, scan_directory
 
 from agent_index.sources.base import FileEntry
+from agent_index.sources.delta import SourceDelta
+from agent_index.sources.provider_delta import (
+    CONTRACT,
+    DeltaDeclaration,
+    parse_declaration,
+    parse_delta,
+    validate_scope_echo,
+)
 
 log = logging.getLogger(__name__)
 
@@ -327,12 +355,39 @@ class CliSourceConnector:
     def __init__(self, source: str, manifest: ProviderManifest) -> None:
         self._source = source
         self._manifest = manifest
+        self._negotiated = False
+        self._declaration: DeltaDeclaration | None = None
+        self._commit: str | None = None
 
     @property
     def source_name(self) -> str:
+        self._negotiate()
+        if self._declaration is not None and self._declaration.available:
+            return self._declaration.family
         return self._source
 
-    def _run(self, verb: str, *args: str) -> Any:
+    @property
+    def delta_available(self) -> bool:
+        """Whether this executed provider explicitly supports complete v1 deltas."""
+        self._negotiate()
+        return self._declaration is not None and self._declaration.available
+
+    @property
+    def recovery_identity(self) -> tuple[str, ...]:
+        self._negotiate()
+        declaration = self._declaration
+        if declaration is not None and declaration.available:
+            return (
+                CONTRACT, "1", self._source, json.dumps(self._manifest.command),
+                declaration.family, declaration.account, declaration.target,
+            )
+        return self._source, *self._manifest.command
+
+    def _run(
+        self, verb: str, *args: str, cancel_check: Callable[[], None] | None = None,
+    ) -> Any:
+        if cancel_check is not None:
+            cancel_check()
         cmd = [*self._manifest.command, verb, *args]
         try:
             result = subprocess.run(  # noqa: S603 -- provider path is operator-configured
@@ -350,6 +405,9 @@ class CliSourceConnector:
                 f"content-domain provider {self._manifest.source_name!r} "
                 f"failed to run {verb!r}: {exc}"
             ) from exc
+        finally:
+            if cancel_check is not None:
+                cancel_check()
         if result.returncode != 0:
             raise ProviderError(
                 f"content-domain provider {self._manifest.source_name!r} "
@@ -427,9 +485,8 @@ class CliSourceConnector:
         return source == self._source or source.startswith(f"{self._source}:")
 
     def discover(self, cancel_check: Callable[[], None] | None = None) -> list[FileEntry]:
-        if cancel_check is not None:
-            cancel_check()
-        data = self._run("content-discover", "--source", self._source)
+        data = self._run("content-discover", "--source", self._source, cancel_check=cancel_check)
+        self._validate_acquisition_scope(data)
         return self._entries(data, "content-discover")
 
     def discover_changed(
@@ -437,18 +494,53 @@ class CliSourceConnector:
         last_commit: str | None,
         cancel_check: Callable[[], None] | None = None,
     ) -> list[FileEntry]:
+        args = ("--last-commit", last_commit) if last_commit else ()
+        data = self._run(
+            "content-discover-changed", "--source", self._source, *args, cancel_check=cancel_check,
+        )
+        self._validate_acquisition_scope(data)
+        return self._entries(data, "content-discover-changed")
+
+    def _validate_acquisition_scope(self, data: object) -> None:
+        declaration = self._declaration
+        if not self._negotiated or declaration is None or not declaration.available:
+            return
+        try:
+            validate_scope_echo(data, declaration)
+        except ValueError as exc:
+            raise ProviderError(f"content-domain provider invalid acquisition scope: {exc}") from exc
+
+    def discover_delta(
+        self,
+        last_commit: str | None,
+        cancel_check: Callable[[], None] | None = None,
+    ) -> SourceDelta:
+        """Acquire a complete delta only after explicit runtime negotiation."""
         if cancel_check is not None:
             cancel_check()
+        self._negotiate(cancel_check)
+        declaration = self._declaration
+        if declaration is None or not declaration.available:
+            raise ProviderError("source delta v1 not negotiated; use legacy reconciliation")
         args = ("--last-commit", last_commit) if last_commit else ()
-        data = self._run("content-discover-changed", "--source", self._source, *args)
-        return self._entries(data, "content-discover-changed")
+        data = self._run(
+            "content-discover-changed", "--source", self._source, *args,
+            "--delta-version", "1", cancel_check=cancel_check,
+        )
+        try:
+            return parse_delta(data, declaration, self._entries)
+        except ValueError as exc:
+            raise ProviderError(
+                f"content-domain provider returned invalid source delta: {exc}",
+            ) from exc
 
     def list_paths(
         self, cancel_check: Callable[[], None] | None = None
     ) -> dict[str, set[str]]:
-        if cancel_check is not None:
-            cancel_check()
-        data = self._run("content-list-paths", "--source", self._source)
+        data = self._run(
+            "content-list-paths", "--source", self._source, cancel_check=cancel_check,
+        )
+        self._validate_acquisition_scope(data)
         if not isinstance(data, dict) or not isinstance(data.get("paths"), dict):
             raise ProviderError(
                 f"content-domain provider {self._manifest.source_name!r} "
@@ -473,7 +565,15 @@ class CliSourceConnector:
         return result
 
     def current_commit(self) -> str | None:
-        data = self._run("content-current-commit", "--source", self._source)
+        self._negotiate()
+        return self._commit
+
+    def _negotiate(self, cancel_check: Callable[[], None] | None = None) -> None:
+        if self._negotiated:
+            return
+        data = self._run(
+            "content-current-commit", "--source", self._source, cancel_check=cancel_check,
+        )
         if not isinstance(data, dict) or "commit" not in data:
             raise ProviderError(
                 f"content-domain provider {self._manifest.source_name!r} "
@@ -485,7 +585,21 @@ class CliSourceConnector:
                 f"content-domain provider {self._manifest.source_name!r} "
                 "'content-current-commit' 'commit' must be a string or null"
             )
-        return commit
+        try:
+            declaration = parse_declaration(data, self._source)
+        except ValueError as exc:
+            raise ProviderError(f"content-domain provider invalid source_delta: {exc}") from exc
+        if declaration is None or not declaration.available:
+            reason = "missing source_delta declaration" if declaration is None else (
+                "unsupported source_delta versions"
+            )
+            log.warning(
+                "content-domain provider %r: %s; selecting legacy reconciliation",
+                self._manifest.source_name, reason,
+            )
+        self._commit = commit
+        self._declaration = declaration
+        self._negotiated = True
 
 
 def _prefixes_overlap(a: str, b: str) -> bool:

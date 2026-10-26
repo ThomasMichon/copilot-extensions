@@ -773,9 +773,16 @@ _DAEMON_EXTRA_CREATIONFLAGS = (
 class DaemonSpawnError(OSError):
     """:func:`spawn_daemon` could not give the daemon its own lifetime."""
 
-    def __init__(self, message: str = "", *, cleanup_confirmed: bool = True) -> None:
+    def __init__(
+        self, message: str = "", *, cleanup_confirmed: bool = True,
+        process_created: bool | None = None, admission_sent: bool = True,
+        process_identity: tuple[int, str] | None = None,
+    ) -> None:
         super().__init__(message)
         self.cleanup_confirmed = cleanup_confirmed
+        self.process_created = process_created
+        self.admission_sent = admission_sent
+        self.process_identity = process_identity
 
 
 def _validated_daemon_cwd(cwd: str | os.PathLike[str] | None) -> str:
@@ -944,6 +951,7 @@ def spawn_daemon(
     extra_creationflags: int = 0,
     display: str | None = None,
     stderr_log_path: str | os.PathLike[str] | None = None,
+    instance=None,
 ) -> subprocess.Popen | WindowsDaemonProcess:
     """Launch a resident daemon; load its implementation only for daemon callers.
 
@@ -957,5 +965,5 @@ def spawn_daemon(
         argv, cwd=cwd, log_path=log_path, env=env, env_overrides=env_overrides,
         console_children=console_children, breakaway=breakaway,
         contained_fallback=contained_fallback, extra_creationflags=extra_creationflags,
-        display=display, stderr_log_path=stderr_log_path,
+        display=display, stderr_log_path=stderr_log_path, instance=instance,
     )

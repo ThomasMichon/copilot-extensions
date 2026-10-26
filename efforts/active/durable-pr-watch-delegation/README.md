@@ -394,11 +394,15 @@ existing serving/consumer contract, not a second watcher or evaluator._
   malformed binding, restart, credential-loss and ambiguous-response controls
   through the real Gateway and durable queue/store. Keep live provider, image,
   independent evaluator and installed/fleet acceptance separate (#8945, #8957).
-- [ ] Qualify the actual watch-service and Dispatch consumer with the native
+- [x] Qualify the actual watch-service and Dispatch consumer with the native
   credential-backed observation path and typed credential exchange in one
   isolated integration. Preserve renewal/refusal, original intent and one wake
   after recovery; synthetic issuers/forge responses do not close live provider,
-  installed, image or fleet acceptance.
+  installed, image or fleet acceptance (GitHub source proof in #8975).
+- [ ] Qualify the corresponding native ADO configured-observation reader through
+  the same actual watcher, typed credential exchange and scoped Dispatch path.
+  Preserve provider-native state and credential refusal without crediting
+  GitHub-only coverage as ADO parity or taking over broader conformance.
 
 ### Phase 3 - Fenced dispatch delegation _(agent-recommended)_
 
@@ -744,6 +748,31 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-25 - Merge native credential-backed watcher integration
+
+- #8975 merged as `5773f281ac4881bb98ca44dfe74e87ed55fa171f` from
+  approved head `19eeb2cc1b9d8c83d6045d91c4f06f23b2f0bd0d`.
+  Copilot review `5643127045` approved without findings; complete reviews and
+  review/issue comments were read. Required CI `40191259030` passed.
+- Exact-head native run `40191323874` passed all four selected jobs:
+  Dispatch passed 236 cases on Windows and 235 on Linux with one explicit
+  platform skip; PR service/client passed 296 plus 44 standalone cases on each
+  platform. Totals were 576 Windows passes and 575 Linux passes with one skip.
+  The joined control executes actual native GitHub snapshot construction and
+  typed credential acquisition through the watcher and durable queue. Only
+  issuer/provider and forge responses are synthetic; no live provider
+  permission, image or deployment is certified.
+- Local validation passed the joined case with 15 existing transport cases,
+  all four refactored credential controls and a final focused run including
+  captured-log and SQLite-sidecar secrecy checks. The integration fixture uses
+  current time, explicit test-issuer renewal and completed native observation
+  before consuming recovery; production/native-command deadlines are unchanged.
+- Re-read the parent Plan/Validation after merge, refreshed the recorded merged
+  head and used managed completion to retain its backup and reconcile only the
+  already-merged commit. Continue the finite ADO native-reader counterpart
+  above. Independent evaluator, live provider, image and installed/fleet
+  acceptance and their existing owners remain open. No runtime was activated.
 
 ### 2026-10-25 - Merge scoped durable intent and coordinator composition
 

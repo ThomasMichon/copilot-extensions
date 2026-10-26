@@ -65,7 +65,7 @@ def test_daemon_log_header_keeps_ordinary_fields_verbatim():
 
 
 def test_spawn_daemon_launches_with_undecodable_or_multiline_executable(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, declared_mock_daemon,
 ):
     from agent_procutil import daemon_broker
 

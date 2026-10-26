@@ -2,6 +2,8 @@
 
 import os
 from pathlib import Path
+import platform
+import shutil
 import signal
 import subprocess
 import sys
@@ -13,6 +15,45 @@ from agent_procutil._caller_owned import _pidfd_exited
 from agent_procutil._linux_pidfd import open_pidfd
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux native daemon admission")
+
+
+@pytest.mark.parametrize("disposable", [False, True])
+def test_native_daemon_waitable_child_preserves_real_exit_status(tmp_path, disposable):
+    from contextlib import nullcontext
+    from agent_procutil.daemon_instances import daemon_test_lifecycle
+
+    source = Path(__file__).parents[1] / "src/agent_procutil"
+    helpers = tmp_path / "helpers"
+    helpers.mkdir()
+    for name in ("native_daemon.sh", "daemon_instances.sh", "_build_native.py", "daemon_instance_native.c"):
+        shutil.copy2(source / name, helpers / name)
+    artifact = helpers / "native" / f"linux-{platform.machine()}" / "daemon-instance"
+    built = subprocess.run(
+        [sys.executable, str(helpers / "_build_native.py"), "--output", str(artifact)],
+        capture_output=True, text=True, timeout=90,
+    )
+    assert built.returncode == 0, built.stdout + built.stderr
+    worker = tmp_path / "worker.sh"
+    worker.write_text("#!/usr/bin/env bash\nsleep .1\nexit 37\n", encoding="utf-8")
+    env = dict(os.environ)
+    env.pop("COPILOT_EXTENSIONS_TEST_CONTAINED", None)
+    env.pop("COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT", None)
+    lifecycle = daemon_test_lifecycle(
+        owner="native-wait-test", registry_root=tmp_path / "registry",
+    ) if disposable else nullcontext({})
+    with lifecycle as declaration:
+        result = subprocess.run(
+            ["bash", "--noprofile", "--norc", "-c",
+             'set -euo pipefail; source "$1"; '
+             'start_native_daemon "$2" "$3" "$3/daemon.log"; '
+             'printf "%s %s\\n" "$__native_daemon_pid" "$__native_daemon_wait_pid"; '
+             'code=0; wait "$__native_daemon_wait_pid" || code=$?; exit "$code"',
+             "native-wait", str(helpers / "native_daemon.sh"), str(worker), str(tmp_path)],
+            env={**env, **declaration}, capture_output=True, text=True, timeout=20,
+        )
+        assert result.returncode == 37, result.stdout + result.stderr
+        actual, waitable = map(int, result.stdout.split())
+        assert (actual != waitable) is disposable
 
 
 @pytest.mark.parametrize("contained", [False, True])

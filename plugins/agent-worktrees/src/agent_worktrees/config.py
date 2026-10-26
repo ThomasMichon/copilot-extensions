@@ -774,7 +774,7 @@ def _home() -> Path:
     """
     override = os.environ.get("AGENT_HOME", "").strip()
     if override:
-        return Path(override)
+        return Path(os.path.abspath(override))
     if sys.platform == "win32":
         return Path(os.environ.get("USERPROFILE", str(Path.home())))
     return Path.home()
@@ -837,8 +837,8 @@ def legacy_install_dir() -> Path:
 
 
 def install_dir() -> Path:
-    """Selected legacy or installation-cell runtime/state root."""
-    return registry_paths.registry_root(legacy_install_dir())
+    """Selected lexical absolute legacy/cell root, preserving filesystem aliases."""
+    return Path(os.path.abspath(registry_paths.registry_root(legacy_install_dir())))
 
 
 def project_dir(name: str | None = None) -> Path:

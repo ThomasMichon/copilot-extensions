@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import types
 
+from agent_index.chunking.base import Chunk
 from agent_index.indexing import engine
 from agent_index.indexing.path_index import PathIndex
 
@@ -16,19 +17,24 @@ class _FakeChunker:
     def __init__(self, n: int) -> None:
         self._n = n
 
-    def chunk(self, content: object, path: str, source: str | None = None) -> list[object]:
-        return [object() for _ in range(self._n)]
+    def chunk(self, content: str, path: str, source: str = "") -> list[Chunk]:
+        return [Chunk(content, path, "text", "text", i, i, source) for i in range(self._n)]
 
 
-def _run(pi: PathIndex, files: list[types.SimpleNamespace], resume_since: float | None):
+def _run(
+    pi: PathIndex, files: list[types.SimpleNamespace], resume_since: float | None,
+    *, force: bool = False,
+):
     return engine._embed_and_store_files(
         files,
         multi_store=None,
         multi_clients={},
         model_profiles=None,
         path_index=pi,
+        reconcile_file=lambda source, path, keep_ids: None,
         stream_batch_size=2,
         resume_since=resume_since,
+        force=force,
     )
 
 
@@ -63,15 +69,19 @@ def test_checkpoint_and_resume_skip(monkeypatch, tmp_path) -> None:
     assert stored3 == 3
 
 
-def test_no_resume_reembeds_everything(monkeypatch, tmp_path) -> None:
+def test_normal_round_reuses_compatible_files(monkeypatch, tmp_path) -> None:
     pi = PathIndex(tmp_path / "path_index.db")
     monkeypatch.setattr(engine, "_embed_and_store_batch", lambda batch, *a, **k: len(batch))
     monkeypatch.setattr("agent_index.chunking.get_chunker", lambda path: (_FakeChunker(2), "text"))
 
     files = _files([("git", "a.py", "AAA"), ("git", "b.py", "BBB")])
     _run(pi, files, None)
-    # Even though the files are already stored, a fresh run (resume_since=None)
-    # re-embeds them all — full-rebuild semantics are preserved.
     stored, stored_files = _run(pi, files, None)
+    assert stored == 0
+    assert stored_files == set()
+
+    # An explicit full rebuild still forces writes, and can resume its own work.
+    stored, stored_files = _run(pi, files, None, force=True)
     assert stored == 4  # 2 files * 2 chunks, nothing skipped
     assert stored_files == {("git", "a.py"), ("git", "b.py")}
+    assert _run(pi, files, 0.0, force=True) == (0, set())

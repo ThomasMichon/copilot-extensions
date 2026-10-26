@@ -55,6 +55,14 @@ configuration schema, deployment package or concrete machine.
 
 ## Authority and source boundaries
 
+The [continuity-backed first-touch contract](../gateway-ssh-fleet-onboarding/continuity-bootstrap.md)
+extends this existing bootstrap boundary to new machines without prior Gateway
+credentials or SSH. Standard upstream setup consumes explicit harness context
+and an already-authenticated user source, then delegates scoped enrollment to
+the existing authority. Discovery, bootstrap delegation, current enrollment
+and SSH/peer admission remain distinct; the slow-sync store is not another
+issuer or live authorization database.
+
 | Boundary | Authoritative responsibility |
 | --- | --- |
 | Harness plus paired private repository | Reusable behavior/templates plus the actual persistent desired loadout and policy references, under the repositories' publication gates. |

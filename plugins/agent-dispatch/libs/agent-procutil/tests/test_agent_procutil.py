@@ -696,15 +696,30 @@ def _access_denied() -> OSError:
 
 
 @pytest.fixture()
-def fake_popen(monkeypatch):
+def fake_popen(monkeypatch, tmp_path):
     from agent_procutil import daemon, daemon_broker
+    from agent_procutil import _daemon_instance_store
+    monkeypatch.setattr(_daemon_instance_store, "bind_process", lambda *_: None)
+    from agent_procutil.daemon_instances import DaemonInstanceSpec
+    original = pu.spawn_daemon
+
+    def explicit_fixture(*args, **kwargs):
+        if "instance" not in kwargs:
+            kwargs["instance"] = DaemonInstanceSpec(
+                "fixture", tmp_path, Path(__file__).resolve(),
+            )
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(pu, "spawn_daemon", explicit_fixture)
 
     monkeypatch.setattr(daemon_broker, "caller_in_job", lambda: False)
     calls: list = []
     fake = _FakePopen(calls)
     monkeypatch.setattr(pu.subprocess, "Popen", fake)
     monkeypatch.setattr(
-        daemon, "spawn_brokered_daemon", Mock(side_effect=pu.DaemonSpawnError("fixture")),
+        daemon, "spawn_brokered_daemon", Mock(side_effect=pu.DaemonSpawnError(
+            "fixture", process_created=False, admission_sent=False,
+        )),
     )
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     return fake
@@ -832,7 +847,9 @@ def test_spawn_daemon_explicit_env_replaces_inherited(tmp_path, monkeypatch, fak
     monkeypatch.setenv("SPAWN_DAEMON_LEAK", "1")
     pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "d.log", env={"A": "1"})
     (_, kwargs), = fake_popen.calls
-    assert kwargs["env"] == {"A": "1"}
+    assert kwargs["env"]["A"] == "1"
+    assert "SPAWN_DAEMON_LEAK" not in kwargs["env"]
+    assert kwargs["env"]["COPILOT_EXTENSIONS_DAEMON_INSTANCE"]
 
 
 def test_spawn_daemon_posix_new_session(tmp_path, monkeypatch, fake_popen):
@@ -863,6 +880,8 @@ def test_spawn_daemon_breakaway_denied_is_surfaced(tmp_path, monkeypatch, fake_p
 
     assert isinstance(info.value, OSError)
     assert len(fake_popen.calls) == 1
+    from agent_procutil.daemon_instances import inspect_instances
+    assert inspect_instances() == []
     assert "daemon not started" in log_path.read_text(encoding="utf-8")
 
 
@@ -886,6 +905,8 @@ def test_spawn_daemon_other_spawn_errors_propagate(tmp_path, monkeypatch, fake_p
     with pytest.raises(FileNotFoundError):
         pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "d.log")
     assert len(fake_popen.calls) == 1
+    from agent_procutil.daemon_instances import inspect_instances
+    assert inspect_instances() == []
 
 
 def test_spawn_daemon_access_denied_without_breakaway_propagates(
@@ -896,6 +917,8 @@ def test_spawn_daemon_access_denied_without_breakaway_propagates(
     with pytest.raises(OSError):
         pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "d.log", breakaway=False)
     assert len(fake_popen.calls) == 1
+    from agent_procutil.daemon_instances import inspect_instances
+    assert inspect_instances() == []
 
 
 def _fake_credential_argv() -> tuple[list[str], str]:

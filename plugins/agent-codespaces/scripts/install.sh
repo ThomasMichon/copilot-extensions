@@ -549,16 +549,21 @@ _install_package_into() {
     local sources=("$SSH_MGR_DIR" "$CRED_RELAY_DIR" "$CFG_MIGRATE_DIR"
         "$ZDD_DIR" "$VENUE_COPILOT_DIR" "$SESSION_LIVENESS_PROBE_DIR"
         "$SINGLE_INSTANCE_LEASE_DIR" "$REMOTE_LOGIN_SHELL_DIR" "$PLUGIN_DIR")
-    local i output mode_args
+    local i output install_args=(--python "$py")
+    if [[ "$mode" != "--editable" ]]; then
+        install_args+=(--no-editable)
+    fi
     for i in "${!packages[@]}"; do
-        mode_args=(--reinstall-package "${packages[$i]}")
-        [[ "$mode" == "--editable" ]] && mode_args=(--editable)
-        if ! output="$(invoke_uv_pip_install_resilient "$UV_CMD" --python "$py" \
-            "${mode_args[@]}" "${sources[$i]}" --quiet 2>&1)"; then
-            _fail "${packages[$i]} install failed: $output"
-            return 1
+        if [[ "$mode" == "--editable" ]]; then
+            install_args+=(--editable "${sources[$i]}")
+        else
+            install_args+=(--reinstall-package "${packages[$i]}" "${sources[$i]}")
         fi
     done
+    if ! output="$(invoke_uv_pip_install_resilient "$UV_CMD" "${install_args[@]}" --quiet 2>&1)"; then
+        _fail "agent-codespaces closure install failed: $output"
+        return 1
+    fi
 }
 
 # Stamp _build_info.py into the INSTALLED site-packages copy (post-install).
@@ -1297,6 +1302,12 @@ case "$ACTION" in
             exit 1
         fi
         _assert_source_runtime || exit 1
+        ;;
+esac
+case "$ACTION" in
+    install|update|provision)
+        . "$SCRIPT_DIR/installer-instance-reconcile.sh"
+        reconcile_installer_instances "$SCRIPT_DIR"
         ;;
 esac
 case "$ACTION" in

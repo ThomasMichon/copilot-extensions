@@ -25,7 +25,7 @@ from build_toolchain_lock import ToolchainLock, _query_marker_environment
 from runtime_profile import SCHEMA, ProfileError, RuntimeProfile, _wheel_filename, validate_profile
 from runtime_profile_wheels import profile_wheel_inputs
 from runtime_source_lock import SourceLockCandidate
-from installer_engine import _package_roots, _source_files, numbered_candidate, runtime
+from installer_engine import _package_roots, _source_files, freeze_inputs, numbered_candidate, runtime
 from installer_dependency_policy import _private_retained_root, _select_uv_executable, _temporary_inputs, _toml
 from installer_wheel_inputs import WheelLimits, _check_deadline, _ordinary, inspect_archive
 from installer_wheel_snapshot import (
@@ -197,10 +197,20 @@ def retain_source_profile(
     ):
         raise ProfileError("build-only closure differs from the retained source selection")
     with _temporary_inputs(None) as temporary:
-        output = _private_retained_root(Path(temporary)).resolve(strict=True) / "built"
+        workspace = _private_retained_root(Path(temporary)).resolve(strict=True)
+        output = workspace / "built"
+        frozen = freeze_inputs(candidate.payload, workspace / "source", deadline=deadline) if offline else None
+        if frozen is not None:
+            if frozen.payload_hash != before:
+                raise ProfileError("compact build source differs from its retained selection")
+            selected_projects = _selected_projects(
+                frozen.packages, root, record["extras"], record["target"]["environment"], deadline,
+            )
         local_projects = {}
         for project_path in selected_projects:
             candidate.verify(deadline=deadline)
+            if frozen is not None and before != runtime.fingerprint_source(_source_files(frozen.packages)):
+                raise ProfileError("compact source changed before backend execution")
             wheel = build_wheel(
                 project_path, output, toolchain=toolchain, reserved_names=set(archives),
                 uv=uv, deadline=deadline,
@@ -222,6 +232,8 @@ def retain_source_profile(
             expected[wheel.name] = _digest(wheel, limits.max_archive_bytes, deadline)
         if before != runtime.fingerprint_source(_source_files(projects)):
             raise ProfileError("source changed while building the exact wheel closure")
+        if frozen is not None and before != runtime.fingerprint_source(_source_files(frozen.packages)):
+            raise ProfileError("compact source changed while building the exact wheel closure")
         observed_toolchain = toolchain.record if build_record is None else {
             "packages": toolchain.packages, "admitted_profile": build_profile.record(),
         }

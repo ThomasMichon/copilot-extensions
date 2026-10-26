@@ -2249,6 +2249,12 @@ if [[ "$ACTION" != uninstall && "$ACTION" != stamp && "$ACTION" != engine && "$A
 fi
 
 case "$ACTION" in
+    install|update|provision)
+        . "$SCRIPT_DIR/installer-instance-reconcile.sh"
+        reconcile_installer_instances "$SCRIPT_DIR"
+        ;;
+esac
+case "$ACTION" in
     install)
         _ensure_runtime || exit 1
         _service_cutover || _ensure_running

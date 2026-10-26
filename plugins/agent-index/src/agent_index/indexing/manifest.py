@@ -10,18 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from agent_index.sources.base import FileEntry
-
-
-@dataclass
-class DeletedFile:
-    """A file that was removed from a source and should be de-indexed.
-
-    Uses the exact ``(source, path)`` identity stored in the index —
-    no prefix matching, no ambiguity.
-    """
-
-    source: str
-    path: str
+from agent_index.sources.delta import DeletedFile as DeletedFile
 
 
 @dataclass
@@ -51,6 +40,7 @@ class CrawlManifest:
     commit: str | None = None
     stats: CrawlStats = field(default_factory=CrawlStats)
     stored_family: str | None = None
+    accounting_family: str | None = None
 
     @property
     def is_empty(self) -> bool:

@@ -292,7 +292,7 @@ def main(argv=None):
 def configuration_pivot():
     from .production_picker.picker_tui.pivots import parse_manifest
 
-    command = [sys.executable, "-m", "worktree_manager.installation_updates"]
+    command = [sys.executable, "-B", "-m", "worktree_manager.installation_updates"]
     inherited = engine_client.inherited_engine_command()
     if inherited:
         command += ["--engine-argv", json.dumps(inherited)]

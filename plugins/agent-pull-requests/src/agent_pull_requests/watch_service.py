@@ -178,12 +178,28 @@ class WatchService:
         self._withdraw()
         acquisition = asyncio.create_task(self._closing.acquire())
         try:
-            await asyncio.wait_for(acquisition, timeout=timeout)
+            # wait_for can swallow cancellation racing a completed acquisition on Python 3.11.
+            done, _ = await asyncio.wait({acquisition}, timeout=timeout)
+            if acquisition not in done:
+                raise TimeoutError("watch service is not drained")
+            acquisition.result()
         except BaseException:
+            if not acquisition.done():
+                acquisition.cancel()
+            settlement = asyncio.gather(acquisition, return_exceptions=True)
+            interrupted = False
+            while not settlement.done():
+                try:
+                    await asyncio.shield(settlement)
+                except asyncio.CancelledError:
+                    interrupted = True
+            await settlement
             if acquisition.done() and not acquisition.cancelled() and (
                 acquisition.exception() is None and acquisition.result()
             ):
                 self._closing.release()
+            if interrupted:
+                raise asyncio.CancelledError
             raise
         drain = None
         try:

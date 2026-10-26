@@ -76,12 +76,55 @@ written can still be an active handler. Do not interpret them as task counts.
 The control server excludes the drain RPC itself from its inventory-read
 count; it must not wait for its own handler to finish.
 
+## Local-status shutdown settlement
+
+The 120-second retirement decision and bounded local-status `shutdown()` are
+not worker-completion proofs. At final teardown the monitor uses
+`InProcessRuntime.shutdown_and_wait()`: close local-status admission, perform
+the existing bounded stop, then retain host daemon admission until the owned
+sweep target has finished and its thread is joined, and the concrete status
+server's full accepted-handler count reaches zero. Teardown retains those
+owners even if runtime fields are cleared. Partial-start cleanup uses the
+same settlement path; repeated interrupts cannot release custody early.
+
+Final teardown attempts each owned surface even when an earlier cleanup raises.
+It retries failed intake/authority cleanup without treating an exception as a
+successful zero count, and preserves the original monitor error (or first
+cleanup error) until settlement finishes. Local-status stop failures retain
+their concrete server/sweep/cache owners: intake must actually close before a
+zero handler count authorizes release. A permanently failing close retains
+custody rather than claiming retirement.
+
+This host-only wait runs outside cache/server locks, not in a status request
+handler. A closed cache fences late SQLite access but does not mean assembly
+has retired. The wait does not change election, drain deadlines, supersession
+authority, caller-owned feed subscribers or independent replacement children.
+
 The nonstreaming control handler does not cancel its callback when a client
 socket deadline expires. The client can report a timeout while the daemon is
 still waiting for its lock or polling busy work. A response write after the
 client disconnects can then fail. Consequently, client failure, daemon drain
 completion and caller rollback are separate observations; one does not prove
 the others happened.
+
+## Managed-mux handler custody
+
+The separate `mux_link.InProcessRuntime` intrinsically retains a reference to
+the existing host daemon admission before constructing its cache or listener.
+Its unchanged `shutdown()` closes native intake and fences the cache, but a
+runtime-owned retirement worker retains the concrete server, cache and admission
+until the native accept/reaper threads and every accepted handler have finished.
+A closed cache, a cleared runtime field or an unknown handler count is not
+settlement. No handler joins itself, and no new caller method is required.
+
+Shutdown attempts the cache fence even if native close raises. Transient native
+cleanup failures are retried before the original error is propagated; repeated
+interrupts do not replace that first error. If native closure remains unavailable
+beyond the bounded caller observation, the concrete retirement owner continues
+holding admission rather than certifying a zero count. Production custody has
+no expiry. Routing, election, drain ACKs and replacement authority are unchanged.
+The monitor's existing final cleanup must still reach `managed_mux_runtime.shutdown()`
+when an earlier surface fails; this intrinsic custody does not execute skipped calls.
 
 ## Reading the logs
 

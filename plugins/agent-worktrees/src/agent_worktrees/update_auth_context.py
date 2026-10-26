@@ -76,14 +76,19 @@ class Session:
             report, overlay = self._prepare_report(selected, required=required)
             self.reports[context], self.overlays[context] = report, overlay
             self.context_required[context] = required
-        if include_anchors and not self.anchors_prepared:
-            for source in sources.anchors():
-                if source.cwd is None:
-                    raise ValueError("anchor auth source requires a checkout context")
-                report, overlay = self._prepare_report([source])
-                self.anchor_reports[source.cwd], self.anchor_overlays[source.cwd] = report, overlay
-            self.anchors_prepared = True
+        if include_anchors:
+            self.prepare_anchors()
         return self.reports[context]
+
+    def prepare_anchors(self) -> None:
+        if self.anchors_prepared:
+            return
+        for source in sources.anchors():
+            if source.cwd is None:
+                raise ValueError("anchor auth source requires a checkout context")
+            report, overlay = self._prepare_report([source])
+            self.anchor_reports[source.cwd], self.anchor_overlays[source.cwd] = report, overlay
+        self.anchors_prepared = True
 
     def _prepare_report(self, selected: list[auth.Source], *, required: bool = True):
         if selected:
@@ -270,11 +275,15 @@ def _marketplace_context() -> Path | None:
 def run_update(args: argparse.Namespace, steps) -> int:
     with session() as value:
         if value is not None and getattr(args, "target", None) is None:
-            value.prepare(
-                _marketplace_context(), include_anchors=not (
-                    getattr(args, "target", None) or getattr(args, "no_anchor_sync", False)
+            phase = getattr(args, "phase", None)
+            if phase == "anchors":
+                value.prepare_anchors()
+            elif phase in (None, "payloads") and not getattr(args, "plugin", None):
+                value.prepare(
+                    _marketplace_context(), include_anchors=(
+                        phase is None and not getattr(args, "no_anchor_sync", False)
+                    ),
                 )
-            )
         rc = steps(args)
         if value is not None and rc == 0:
             return 1 if value.anchor_failed else 4 if value.unresolved else 0

@@ -101,6 +101,13 @@ including during Gateway unavailability. Implement and review the source first;
 this integration choice is not approval to install, activate or migrate a live
 controller. Existing identity/provider and lifecycle owners remain authoritative.
 
+The operator accepted reusing the existing Git-backed coordination store for a
+**distinct permanent service-custody record**, not another database or a renamed
+task lease. The [custody realization proposal](runner-service-custody.md) records
+the agent-recommended protocol, provider interlock and mixed-version gates.
+That proposal must clear source review before implementation. No permanent
+record, provider migration or live adoption is claimed by this choice.
+
 ### 1. Template and allocation composition
 
 Extend the existing installed fleet-manager package rather than adding a

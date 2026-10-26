@@ -7,12 +7,15 @@ import shutil
 import subprocess
 import sys
 from contextlib import nullcontext
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agent_procutil import no_window_kwargs
+
+if TYPE_CHECKING:
+    from .runtime_source import ResolvedSource
 
 try:
     from update_telemetry.human import HumanOperation, current_operation
@@ -28,6 +31,8 @@ class _Installation:
     sdk: Path
     context_arguments: dict[str, Any] | None = None
     primitive: ModuleType | None = None
+    artifact: Path | None = None
+    source_pin: str | None = None
 
 
 @dataclass(frozen=True)
@@ -57,7 +62,9 @@ class PreparedUpdate:
     environment: dict[str, str] | None = field(default=None, repr=False)
 
 
-def prepare_update(rest: list[str]) -> PreparedUpdate:
+def prepare_update(
+    rest: list[str], *, runtime_source: ResolvedSource | None = None,
+) -> PreparedUpdate:
     """Consume only the private bootstrap prefix before ordinary orchestration."""
     if rest[:1] != ["--repair-engine"]:
         return PreparedUpdate(rest)
@@ -71,7 +78,10 @@ def prepare_update(rest: list[str]) -> PreparedUpdate:
                 print(message, file=sys.stderr)
             prepared = PreparedUpdate(rest, True, 2)
         else:
-            repaired = _repair_installation(Path(rest[1]))
+            repaired = _repair_installation(
+                Path(rest[1]),
+                **({"runtime_source": runtime_source} if runtime_source is not None else {}),
+            )
             prepared = PreparedUpdate(rest[2:], True, repaired.exit_code, repaired.environment)
         if human is not None:
             human.complete(
@@ -157,7 +167,9 @@ def _legacy_binding(
     )
 
 
-def _refresh_source(source: Path, environment: dict[str, str]) -> _RefreshedSource:
+def _refresh_source(
+    source: Path, environment: dict[str, str], *, independent: bool = False,
+) -> _RefreshedSource:
     """Validate captured ownership before rehydrating missing or damaged source bytes."""
     from .engine_origin import refresh_registered_origin, select_registered_origin
 
@@ -255,6 +267,8 @@ def _refresh_source(source: Path, environment: dict[str, str]) -> _RefreshedSour
     helper["_ordinary"](root / "bin")
     if (root / "bin").exists() and not (root / "bin").is_dir():
         raise RuntimeError("Engine runtime bin is not an ordinary directory")
+    if independent and context:
+        raise RuntimeError("Prepared-source engine repair requires an authorized legacy installation")
     refresh_registered_origin(primitive, origin, environment=environment)
     return _RefreshedSource(expected, origin.payload, context or None)
 
@@ -362,13 +376,14 @@ def _wait(command: list[str], environment: dict[str, str], cwd: Path) -> int:
 
 def _invoke(installation: _Installation, action: str, environment: dict[str, str]) -> int:
     """The supported CLI validates ownership, mints a capability, and holds custody."""
+    artifact = installation.artifact or installation.payload
     if os.name == "nt":
         host = shutil.which("pwsh") or shutil.which("powershell.exe")
         if host is None:
             raise RuntimeError("PowerShell is required for engine repair")
         native = [
             host, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-            str(installation.payload / "scripts/install.ps1"), action,
+            str(artifact / "scripts/install.ps1"), action,
             "-InstallDir", str(installation.root),
         ]
         if installation.context_arguments is not None:
@@ -380,7 +395,7 @@ def _invoke(installation: _Installation, action: str, environment: dict[str, str
         if host is None:
             raise RuntimeError("Bash is required for engine repair")
         native = [
-            host, str(installation.payload / "scripts/install.sh"), action,
+            host, str(artifact / "scripts/install.sh"), action,
             "--install-dir", str(installation.root),
         ]
         if installation.context_arguments is not None:
@@ -401,13 +416,20 @@ def _invoke(installation: _Installation, action: str, environment: dict[str, str
         "--payload-root", str(installation.sdk),
         "--source-payload-root", str(installation.payload),
         "--plugin-id", "agent-worktrees", "--legacy-root", str(installation.root),
+        "--project-root", str(Path.cwd()),
         "--run-lifecycle", "--managed-deployment", "--", *native,
     ]
     child = dict(environment)
-    # These locators name the actual selected executable/build payload, not the
-    # unrelated Manager checkout. They grant nothing without CLI admission.
+    # Ownership locators retain the incumbent even when a separate prepared
+    # artifact supplies the native installer and frozen build inputs.
     child["COPILOT_PLUGIN_ROOT"] = str(installation.payload)
     child["COPILOT_PLUGIN_STAGED_FROM"] = str(installation.payload)
+    if installation.source_pin is not None:
+        from .runtime_source_repair import PIN_ENV
+
+        child[PIN_ENV] = installation.source_pin
+        child["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] = str(Path.cwd())
+        child["AGENT_WORKTREES_TARGETED_UPDATE"] = "1"
     child["PATH"] = str(Path(base).parent) + os.pathsep + child.get("PATH", "")
     if installation.context_arguments is not None:
         if installation.primitive is None:
@@ -416,30 +438,51 @@ def _invoke(installation: _Installation, action: str, environment: dict[str, str
             **installation.context_arguments,
         ) as patch:
             return _wait(native, {**child, **patch}, installation.payload)
-    return _wait(command, child, installation.payload)
+    return _wait(command, child, artifact)
 
 
-def _repair_installation(source: Path) -> RepairResult:
+def _repair_installation(
+    source: Path, *, runtime_source: ResolvedSource | None = None,
+) -> RepairResult:
     """Restore only the attributable installation, using its owning source."""
     environment = dict(os.environ)
     try:
-        refreshed = _refresh_source(source, environment)
+        from .runtime_source_config import configured_source, require_marketplace
+
+        if runtime_source is None:
+            require_marketplace()
+        elif configured_source() != runtime_source.selection:
+            raise ValueError("Runtime source policy changed before engine repair")
+        refreshed = _refresh_source(
+            source, environment, **({"independent": True} if runtime_source is not None else {}),
+        )
         expected = refreshed.identity
         if refreshed.context is not None:
             environment["COPILOT_EXTENSIONS_CONTEXT"] = refreshed.context
         selected = _incumbent(source, environment, refreshed.payload)
         if _identity(selected) != expected:
             raise RuntimeError("Engine installation/source identity changed during acquisition")
+        artifact = pin = None
+        if runtime_source is not None:
+            from .runtime_source_repair import prepare_engine
+
+            artifact, pin = prepare_engine(runtime_source)
         current = _incumbent(source, environment, refreshed.payload)
         if _identity(current) != expected:
             raise RuntimeError("Engine installation/source identity changed during repair")
+        if runtime_source is not None:
+            current = replace(current, artifact=artifact, source_pin=pin)
         rc = _invoke(current, "update", environment)
         if rc:
             return RepairResult(rc)
         if not (current.root / "bin").is_dir():
             raise RuntimeError("Engine update returned success without its runtime bin")
+        if runtime_source is not None:
+            from .runtime_source_repair import verify_engine
+
+            verify_engine(current.root, current.source_pin)
         return RepairResult(0, environment)
-    except (OSError, ValueError, RuntimeError, ImportError) as error:
+    except (OSError, ValueError, RuntimeError, ImportError, SyntaxError) as error:
         message = f"Engine repair refused: {error}"
         human = current_operation() if HumanOperation else None
         if human is not None:

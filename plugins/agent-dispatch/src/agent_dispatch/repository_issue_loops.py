@@ -172,6 +172,7 @@ def validate_config(
     inherited_script_fields: frozenset[str] = frozenset(),
     resolve_resources: bool = True,
     worker_identity_cwd: str | None = None,
+    snapshot=None,
 ) -> dict[str, Any]:
     """Validate/normalize a declaration. ``cwd`` (declaring repo root, if
     known) threads a named ``worker_identity`` to its repo-local override.
@@ -194,7 +195,7 @@ def validate_config(
         )
     if data.get("kind") != "repository-issue-loop":
         raise RegistrarError("repository-issue-loop kind must be 'repository-issue-loop'")
-    snapshot = RepositoryResourceSnapshot()
+    snapshot = snapshot or RepositoryResourceSnapshot()
     cwd = execution_root(
         data.get("execution_repo"), cwd, snapshot=snapshot, resolve_resources=resolve_resources,
     )

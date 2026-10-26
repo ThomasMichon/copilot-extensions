@@ -4,20 +4,21 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import subprocess
-import sys
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
+from collections.abc import Iterator
 from pathlib import Path
-
-from agent_procutil import no_window_kwargs
 
 from . import engine_client as ec
 from .runtime_source import ResolvedSource, acquire
 from .runtime_source_config import configured_source
-from .self_install import _runtime_installer, default_root, running_payload_dir
+from .runtime_source_prepare import prepare as _prepare, preparer as _preparer
+from .self_install import default_root
 
 SCHEMA = "copilot-extensions.prepared-runtime-sources"
 CONTRACT = 1
+TARGET_SCHEMA = "copilot-extensions.runtime-source-target"
+PROVIDER_SCHEMA = "copilot-extensions.runtime-source-target-provider"
 
 
 @dataclass(frozen=True)
@@ -26,17 +27,32 @@ class PreparedSuite:
     engine_command: list[str] | None = None
 
 
-def _preparer() -> Path:
-    payload = running_payload_dir()
-    packaged = payload / "scripts/runtime-source-tools/prepare_runtime_source.py"
-    if packaged.is_file():
-        return packaged
-    # Source development uses this checkout's canonical tools, never fetched code.
-    if (payload.parent / ".git").exists():
-        canonical = payload.parent / "tools/prepare_runtime_source.py"
-        if canonical.is_file():
-            return canonical
-    raise ValueError("Manager source preparation assets are unavailable; repair the Manager payload")
+@contextmanager
+def repair_selection(arguments: list[str]) -> Iterator[ResolvedSource | None]:
+    """Hold one service-source choice through engine repair and suite execution."""
+    selection = configured_source()
+    if (
+        arguments[:1] != ["--repair-engine"] or len(arguments) < 2
+        or selection.channel == "marketplace"
+    ):
+        yield None
+        return
+    _source_options(arguments[2:])
+    with acquire(selection) as resolved:
+        yield resolved
+
+
+def _source_options(arguments: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False, exit_on_error=False)
+    parser.add_argument("--skip-modules", nargs="*")
+    parser.add_argument("--runtime-sources")
+    try:
+        options, _unknown = parser.parse_known_args(arguments)
+    except argparse.ArgumentError as error:
+        raise ValueError(f"Invalid source-backed update arguments: {error}") from error
+    if options.runtime_sources is not None:
+        raise ValueError("Manager owns --runtime-sources; do not supply a second source packet")
+    return options
 
 
 def _targets(inventory: dict, arguments: list[str]) -> list[str]:
@@ -51,15 +67,7 @@ def _targets(inventory: dict, arguments: list[str]) -> list[str]:
             "Selected engine lacks prepared runtime source support. No update was run; "
             "update that engine through its existing marketplace/setup flow first."
         )
-    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False, exit_on_error=False)
-    parser.add_argument("--skip-modules", nargs="*")
-    parser.add_argument("--runtime-sources")
-    try:
-        options, _unknown = parser.parse_known_args(arguments)
-    except argparse.ArgumentError as error:
-        raise ValueError(f"Invalid source-backed update arguments: {error}") from error
-    if options.runtime_sources is not None:
-        raise ValueError("Manager owns --runtime-sources; do not supply a second source packet")
+    options = _source_options(arguments)
     names = []
     for row in _engine_rows(inventory):
         name = row["id"]
@@ -79,55 +87,56 @@ def _targets(inventory: dict, arguments: list[str]) -> list[str]:
     return sorted(names)
 
 
-def _prepare(
-    tool: Path, resolved: ResolvedSource, name: str, output: Path,
-) -> dict:
-    command = [
-        sys.executable, "-I", "-B", "-X", "utf8", str(tool),
-        "--source", str(resolved.checkout), "--commit", resolved.commit,
-        "--branch", resolved.selection.branch, "--plugin", name, "--output", str(output),
-    ]
-    try:
-        result = subprocess.run(
-            command, capture_output=True, text=True, encoding="utf-8", errors="replace",
-            stdin=subprocess.DEVNULL, env=ec._engine_environment(),
-            timeout=600, check=False, **no_window_kwargs(),
-        )
-    except subprocess.SubprocessError as error:
-        raise ValueError(f"Runtime source preparation for {name} failed: {error}") from error
-    if result.returncode:
-        raise ValueError(f"Runtime source preparation for {name} failed: {result.stderr.strip()}")
-    record = json.loads(result.stdout)
-    if (
-        not isinstance(record, dict) or not isinstance(record.get("payload"), str)
-        or not isinstance(record.get("identity"), dict)
-    ):
-        raise ValueError(f"Runtime source preparer returned an invalid receipt for {name}")
-    payload = Path(record["payload"])
-    identity = record["identity"]
-    if (
-        not payload.is_absolute() or payload.parent != output / name
-        or identity.get("plugin") != name
-        or not isinstance(identity.get("package_version"), str)
-        or identity.get("source_commit") != resolved.commit
-        or identity.get("source_tree") != resolved.tree
-    ):
-        raise ValueError(f"Runtime source preparer returned a different selection for {name}")
-    source = _runtime_installer().runtime_source
-    observed = source.read_source_identity(payload, identity.get("package_version"), plugin=name)
-    if observed is None or observed.document() != identity or payload.name != observed.runtime_version:
-        raise ValueError(f"Runtime source preparer returned conflicting bytes for {name}")
-    return {
-        "payload": str(payload),
-        "identity": {"runtime_source": identity, "runtime_version": observed.runtime_version},
-    }
+def _unique_object(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"Duplicate source target declaration key: {key}")
+        result[key] = value
+    return result
+
+
+def _check_target_support(inventory: dict, records: dict) -> None:
+    """An old V1 engine may not silently ignore required profile semantics."""
+    for name, record in records.items():
+        path = Path(record["payload"]) / "runtime-source-target.json"
+        if path.is_symlink() or (path.exists() and not path.is_file()):
+            raise ValueError("Source target declaration must be an ordinary file")
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_unique_object)
+        except FileNotFoundError:
+            if name == "agent-containers":
+                raise ValueError(
+                    "Containers requires a source target declaration; upgrade its source tooling "
+                    "before updating this profile-owning runtime"
+                ) from None
+            continue
+        if (
+            not isinstance(value, dict) or set(value) != {"schema", "version", "planner"}
+            or value["schema"] != PROVIDER_SCHEMA or type(value["version"]) is not int
+            or value["version"] != 1 or not isinstance(value["planner"], str)
+            or re.fullmatch(r"scripts/[a-z][a-z0-9_]*\.py", value["planner"]) is None
+        ):
+            raise ValueError("Unsupported source target declaration")
+        capability = inventory["runtime_sources"].get("target_contract")
+        if (
+            not isinstance(capability, dict) or capability.get("schema") != TARGET_SCHEMA
+            or type(capability.get("version")) is not int or capability["version"] != 1
+        ):
+            raise ValueError(
+                "Selected engine lacks required source target planning support. No update was run; "
+                "upgrade that engine through its existing marketplace/setup flow first."
+            )
 
 
 def prepare_suite(
     project: str | None, arguments: list[str], *, environment: dict[str, str] | None = None,
+    runtime_source: ResolvedSource | None = None,
 ) -> PreparedSuite:
     """Default to marketplace; otherwise qualify and pin before either update stage."""
     selection = configured_source()
+    if runtime_source is not None and runtime_source.selection != selection:
+        raise ValueError("Runtime source policy changed after engine repair selection")
     if selection.channel == "marketplace":
         return PreparedSuite(arguments)
     command = ec.engine_base_command() if environment is None else ec.installed_engine_command(environment)
@@ -149,7 +158,8 @@ def prepare_suite(
     names = _targets(inventory, arguments)
     tool = _preparer()
     output = default_root().absolute() / "runtime-sources/prepared"
-    with acquire(selection) as resolved:
+    with (nullcontext(runtime_source) if runtime_source is not None else acquire(selection)) as resolved:
         records = {name: _prepare(tool, resolved, name, output) for name in names}
+    _check_target_support(inventory, records)
     packet = json.dumps({"schema": SCHEMA, "version": CONTRACT, "sources": records}, sort_keys=True)
     return PreparedSuite([*arguments, "--runtime-sources", packet], command)

@@ -4,7 +4,9 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import select
 import shutil
+import subprocess
 import time
 from collections.abc import Callable
 from functools import cache
@@ -29,6 +31,7 @@ PLUGINS = (
     "agent-machines", "budget-guidance",
 )
 pytestmark = [pytest.mark.portfolio_tier("T3"), pytest.mark.timeout(60)]
+DRIVER_BOOTSTRAPS = {"agent-vault", "agent-bridge"}
 
 
 @pytest.fixture(scope="session")
@@ -67,7 +70,7 @@ def _bootstrap_fixture(
             )
             suffix = "sh"
         (scripts / f"{name}.{suffix}").write_text(content, encoding="utf-8")
-    if plugin == "agent-vault":
+    if plugin in DRIVER_BOOTSTRAPS:
         engines = None
         if os.name == "nt":
             stock = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
@@ -79,13 +82,34 @@ def _bootstrap_fixture(
         (driver / "foundation-produce.ps1").write_text(
             "param([string]$Root,[string]$SourceHash)\n"
             "[IO.File]::WriteAllText((Join-Path $Root 'bootstrap-foundation-entered'), $SourceHash)\n"
+            "$deadline = [DateTime]::UtcNow.AddSeconds(25)\n"
+            "while (-not (Test-Path (Join-Path $Root 'bootstrap-foundation-release')) -and "
+            "[DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 20 }\n"
             "exit 37\n", encoding="utf-8",
         )
         (driver / "foundation-produce.sh").write_text(
             '#!/usr/bin/env bash\nprintf "%s" "$2" >"$1/bootstrap-foundation-entered"\n'
+            'for ((i=0; i<1250; i++)); do\n'
+            '  [[ ! -f "$1/bootstrap-foundation-release" ]] || break\n'
+            '  sleep .02\n'
+            'done\n'
             "printf 'fixture bootstrap foundation refusal\\n' >&2\nexit 37\n",
             encoding="utf-8",
         )
+        if os.name == "nt":
+            # This packet owns publication admission, not daemon qualification.
+            # Adapt only the contained launch effect; native portfolios use the real broker.
+            (fixture["payload"] / "libs/agent-procutil/src/agent_procutil/native_daemon.ps1").write_text(
+                "function Start-NativeDaemon {\n"
+                "param($Script, $Arguments, $WorkingDirectory, $LogPath)\n"
+                "$root = Split-Path -Parent $LogPath\n"
+                "[IO.File]::WriteAllText((Join-Path $root 'bootstrap-native-launch'), 'launched')\n"
+                "[IO.File]::AppendAllText($LogPath, 'fixture native launch refusal')\n"
+                "$effect = [pscustomobject]@{Id=424242;StartTime=[DateTime]::UtcNow}\n"
+                "$effect | Add-Member -MemberType ScriptMethod -Name Dispose -Value {}\n"
+                "return $effect\n"
+                "}\n", encoding="utf-8",
+            )
     return environment
 
 
@@ -95,12 +119,69 @@ def _bootstrap_snapshot(fixture: dict) -> dict:
     return {name: value for name, value in _snapshot(fixture["home"]).items() if name not in profiles}
 
 
-def _assert_vault_driver_launch(fixture: dict, result, action: str) -> None:
+def _run_bootstrap(fixture: dict, environment: dict, command: list[str], host=None):
+    if fixture["payload"].name not in DRIVER_BOOTSTRAPS:
+        return _run(fixture, environment, command, host)
+    assert host is None
+    started = time.monotonic()
+    output, errors = (fixture["home"] / name for name in ("bootstrap-stdout", "bootstrap-stderr"))
+    timed_out = None
+    with output.open("wb") as stdout, errors.open("wb") as stderr:
+        caller = subprocess.Popen(
+            command, cwd=fixture["home"], env=environment,
+            stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        try:
+            caller.wait(timeout=30)
+        except subprocess.TimeoutExpired as error:
+            timed_out = error
+            caller.kill()
+            caller.wait(timeout=10)
+    result = subprocess.CompletedProcess(
+        command, caller.returncode, output.read_text(encoding="utf-8-sig"),
+        errors.read_text(encoding="utf-8-sig"),
+    )
+    result.bootstrap_elapsed = time.monotonic() - started
+    plugin = fixture["payload"].name
+    prefix = f"[{plugin}] driver launch acknowledgement: "
+    frame = next(
+        (line.removeprefix(prefix) for line in result.stderr.splitlines() if line.startswith(prefix)),
+        None,
+    )
+    if frame is None:
+        if timed_out is not None:
+            root = fixture["home"] / ".copilot-extensions/update-driver"
+            diagnostic = "\n".join(
+                f"{path.name}:\n{path.read_text(errors='replace')}"
+                for path in root.glob("*.log")
+            )
+            pytest.fail(f"{timed_out}\n{result.stdout}\n{result.stderr}\n{diagnostic}")
+        return result
+    if os.name == "nt":
+        # Start-NativeDaemon is a no-process effect adapter in this packet.
+        return result
+    root = fixture["home"] / ".copilot-extensions" / "update-driver"
+    release = root / "bootstrap-foundation-release"
+    descriptor = os.pidfd_open(int(frame.split()[0].removeprefix("launched:")))
+    try:
+        release.touch()
+        assert select.select([descriptor], [], [], 30)[0], result.stderr
+    finally:
+        os.close(descriptor)
+    if timed_out is not None:
+        raise timed_out
+    return result
+
+
+def _assert_driver_launch(fixture: dict, result, action: str) -> None:
     root = fixture["home"] / ".copilot-extensions" / "update-driver"
     assert f"bootstrap {action} supervision launched" in result.stderr, result.stdout + result.stderr
     deadline = time.monotonic() + 25
     while time.monotonic() < deadline:
         diagnostic = "\n".join(path.read_text(errors="replace") for path in root.glob("first-use-*.log"))
+        if (root / "bootstrap-native-launch").is_file() and "fixture native launch refusal" in diagnostic:
+            break
         if (root / "bootstrap-foundation-entered").is_file() and (
             "Foundation construction failed" in diagnostic or
             "fixture bootstrap foundation refusal" in diagnostic
@@ -115,10 +196,10 @@ def _assert_vault_driver_launch(fixture: dict, result, action: str) -> None:
     assert not (root / "queue.sqlite3").exists()
 
 
-def _assert_hook_deadline(fixture: dict, started: float) -> None:
+def _assert_hook_deadline(fixture: dict, result) -> None:
     hooks = json.loads((fixture["payload"] / "hooks.json").read_text(encoding="utf-8"))
     deadline = hooks["hooks"]["sessionStart"][0]["timeoutSec"]
-    elapsed = time.monotonic() - started
+    elapsed = result.bootstrap_elapsed
     assert elapsed <= deadline, f"bootstrap admission took {elapsed:.2f}s; hook deadline is {deadline}s"
 
 
@@ -160,16 +241,18 @@ def test_bootstrap_family_still_stamps_standalone(
         if plugin == "agent-machines" and shell == "powershell" else
         _command(binding_fixture, shell, "bootstrap-check")
     )
-    host = powershell_host(binding_fixture, environment) if shell == "powershell" else None
-    started = time.monotonic()
-    result = _run(
+    host = (
+        powershell_host(binding_fixture, environment)
+        if shell == "powershell" and plugin not in DRIVER_BOOTSTRAPS else None
+    )
+    result = _run_bootstrap(
         binding_fixture, environment, command, host,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) == {}
-    if plugin == "agent-vault":
-        _assert_hook_deadline(binding_fixture, started)
-        _assert_vault_driver_launch(binding_fixture, result, "stamp")
+    if plugin in DRIVER_BOOTSTRAPS:
+        _assert_hook_deadline(binding_fixture, result)
+        _assert_driver_launch(binding_fixture, result, "stamp")
         return
     expected = "stamp-binstub" if plugin == "agent-machines" and shell == "powershell" else "stamp"
     assert (binding_fixture["legacy"] / "installer-dispatched").read_text().strip() == expected
@@ -179,6 +262,10 @@ def test_bootstrap_family_still_stamps_standalone(
 
 def _installed(fixture: dict, *, healthy: bool) -> None:
     (fixture["payload"] / "pyproject.toml").write_text('version = "2.0.0"\n', encoding="utf-8")
+    declaration = fixture["payload"] / "plugin.json"
+    document = json.loads(declaration.read_text(encoding="utf-8"))
+    document["version"] = "2.0.0"
+    _write(declaration, document)
     manifest = {
         "source": {
             "version": "2.0.0" if healthy else "1.0.0", "path": str(fixture["payload"]),
@@ -196,6 +283,9 @@ def _installed(fixture: dict, *, healthy: bool) -> None:
         interpreter.parent.mkdir(parents=True)
         interpreter.write_text("healthy interpreter fixture\n", encoding="utf-8")
         interpreter.chmod(0o755)
+        (interpreter.parent.parent / ".install-complete.json").write_text(json.dumps({
+            "version": "2.0.0", "completed_at": "2026-01-01T00:00:00Z", "pid": 1,
+        }), encoding="utf-8")
         if fixture["payload"].name == "agent-machines":
             binstub = fixture["home"] / ".local/bin" / (
                 "agent-machines.cmd" if os.name == "nt" else "agent-machines"
@@ -236,7 +326,7 @@ def test_bootstrap_family_helperless_compatibility(
 ) -> None:
     environment = _bootstrap_fixture(binding_fixture, shell, plugin, bootstrap_payloads)
     suffix = "ps1" if shell == "powershell" else "sh"
-    if plugin == "agent-vault":
+    if plugin in DRIVER_BOOTSTRAPS:
         native_suffix = "ps1" if os.name == "nt" else "sh"
         helper = binding_fixture["payload"] / f"scripts/installation-context/installation-context.{native_suffix}"
     else:
@@ -253,7 +343,7 @@ def test_bootstrap_family_helperless_compatibility(
     result = _run(
         binding_fixture, environment, command, host,
     )
-    compatible_missing = state == "missing" and plugin != "agent-vault"
+    compatible_missing = state == "missing" and plugin not in DRIVER_BOOTSTRAPS
     assert result.returncode == (0 if compatible_missing else 3), result.stdout + result.stderr
     assert json.loads(result.stdout) == {}
     witness = binding_fixture["legacy"] / "installer-dispatched"
@@ -367,21 +457,23 @@ def test_bootstrap_family_standalone_drift_still_dispatches(
     _installed(binding_fixture, healthy=False)
     command = _recording_processes(binding_fixture, shell, environment)
     _policy(binding_fixture, binding_fixture["legacy"], binding_fixture["arguments"], "standalone")
-    host = powershell_host(binding_fixture, environment) if shell == "powershell" else None
-    started = time.monotonic()
-    result = _run(binding_fixture, environment, command, host)
+    host = (
+        powershell_host(binding_fixture, environment)
+        if shell == "powershell" and plugin not in DRIVER_BOOTSTRAPS else None
+    )
+    result = _run_bootstrap(binding_fixture, environment, command, host)
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) == {}
-    if plugin == "agent-vault":
-        _assert_hook_deadline(binding_fixture, started)
-        _assert_vault_driver_launch(binding_fixture, result, "provision")
+    if plugin in DRIVER_BOOTSTRAPS:
+        _assert_hook_deadline(binding_fixture, result)
+        _assert_driver_launch(binding_fixture, result, "install" if plugin == "agent-bridge" else "provision")
         return
     witness = Path(environment["BOOTSTRAP_PROCESS_WITNESS"])
     deadline = time.monotonic() + 2
     while not witness.exists() and time.monotonic() < deadline:
         time.sleep(0.01)
     assert witness.read_text() == "spawn"
-    if shell == "powershell" and plugin in {"agent-bridge", "agent-dispatch"}:
+    if shell == "powershell" and plugin == "agent-dispatch":
         status = json.loads((binding_fixture["legacy"] / "reconcile-status.json").read_text())
         assert status["launched_pid"] == 424242
         assert status["wrapper_started_at"]
@@ -479,7 +571,7 @@ def test_bootstrap_publication_with_stock_bash(
     result = _run(binding_fixture, environment, command)
 
     assert json.loads(result.stdout) == {}, result.stdout + result.stderr
-    if plugin == "agent-vault":
+    if plugin in DRIVER_BOOTSTRAPS:
         assert result.returncode == 3, result.stdout + result.stderr
         assert "Runtime publication refused" in result.stderr
         assert _bootstrap_snapshot(binding_fixture) == before

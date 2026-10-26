@@ -1,0 +1,5 @@
+.test-runs/
+.pytest_cache/
+build/
+dist/
+src/agent_procutil/native/**/daemon-instance

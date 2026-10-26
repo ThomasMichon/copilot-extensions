@@ -15,7 +15,7 @@ class _ItemRepresentationMixin:
 
     @source_read
     def item_representation(
-        self, source: str, file_path: str,
+        self, source: str, file_path: str, *, strict: bool = False,
     ) -> ItemRepresentation | None:
         """Build a content item's per-model centroids + exact-dup key.
 
@@ -28,7 +28,7 @@ class _ItemRepresentationMixin:
 
         Returns None if the item has no indexed chunks.
         """
-        records = self._content.get_chunks_for_file(source, file_path)
+        records = self._content.get_chunks_for_file(source, file_path, strict=strict)
         if not records:
             return None
 
@@ -37,7 +37,7 @@ class _ItemRepresentationMixin:
         centroids: dict[str, np.ndarray] = {}
         chunk_ids = [r.chunk_id for r in records]
         for model_id, vt in self._vector_tables.items():
-            vec_map = vt.get_vectors(chunk_ids)
+            vec_map = vt.get_vectors(chunk_ids, strict=strict)
             if not vec_map:
                 continue
             # Preserve line order; weight each chunk by its line span so longer
@@ -65,13 +65,13 @@ class _ItemRepresentationMixin:
         )
 
     @source_read
-    def iter_item_representations(self) -> Iterator[ItemRepresentation]:
+    def iter_item_representations(self, *, strict: bool = False) -> Iterator[ItemRepresentation]:
         """Yield an ``ItemRepresentation`` for every distinct content item.
 
         Drives the offline clustering pass.  Items with no pooled centroid
         (no vectors yet) are skipped.
         """
-        for source, file_path in self._content.distinct_items():
-            rep = self.item_representation(source, file_path)
+        for source, file_path in self._content.distinct_items(strict=strict):
+            rep = self.item_representation(source, file_path, strict=strict)
             if rep is not None and rep.centroids:
                 yield rep

@@ -9,7 +9,8 @@ shared install module resolved at install or runtime. Shared primitives such as
 resolved from a common location, so each installed plugin still ships everything
 it needs. This document is the reference, and
 `tools/check-install-contract.py` enforces conformance (run it
-manually or wire it as a git `pre-push` hook).
+explicitly while developing; publication validation belongs in CI, not a
+git `pre-push` hook).
 
 Runtime installation and communication compatibility are separate contracts.
 For a new or changed CLI/service boundary, apply
@@ -62,6 +63,11 @@ the original source location.
 The native installer pins the complete receipt before waiting for its transaction
 lock and passes that same receipt into profile construction or deferred stamping.
 A valid receipt-only change is refused even when its runtime generation is unchanged.
+The collected updater uses Containers'
+[read-only source-target contract](../plugins/agent-containers/docs/runtime-source-target.md)
+to retain this independent profile dimension through planning, pinned execution
+and selected/completed-slot currentness, without changing the original source
+receipt or the installation's owner/data root.
 
 Source-qualified generations require an exact `current-version` or
 `last-known-good` selector. If neither resolves and source-qualified slots exist,
@@ -2028,6 +2034,39 @@ or a source outside this reporter's supported shape produces an explicit notice
 and retains the existing Git authentication path, not a false auth refusal.
 Known failed credentials reported by a capable engine still block that fetch.
 
+### Supported standalone Manager removal
+
+The Manager's existing `scripts/runtime_install.py` owns optional
+`--root <target> --uninstall [--apply] [--json]`. It is a provider-first
+`worktree-manager.uninstall` generation-1 expansion, declared in the executing
+immutable payload's `references/uninstall-contract.json`; package versions and
+newer marketplace metadata are not capability negotiation. No ordinary caller
+emits new syntax against an older selected provider. Missing/invalid capability
+or unsupported legacy ownership gives explicit refusal without reconstruction;
+existing install/update behavior remains available.
+
+Construction seals an attributable per-slot inventory before completion.
+The inventory is created privately even under a permissive POSIX umask.
+Manager-owned child interpreters, including daemon, configuration and demo
+self-reexecution, disable bytecode writes to preserve that seal.
+Removal validates all present generations and integrations, then revalidates
+under canonical construction, exclusive retention and publication custody.
+Manager frontdoor publication uses that same publication authority. The
+daemon's existing spawn lease prevents ordinary service startup during removal;
+live/unknown lifecycle custody refuses, while settled routing history and
+persistent control files remain intact. No parallel selector, service or
+force-cleared lock is introduced.
+Present targets refuse preview and apply when reliable process enumeration is
+unavailable (currently outside Windows and Linux `/proc`).
+
+Preview/absence do not provision or create lock files. Apply requires a base
+interpreter and installer outside the target, withdraws only owned artifacts,
+preserves durable/unknown state and reports partial failure as incomplete.
+It never retires application/mux processes or restores selectors into a partly
+removed slot. See the
+[Manager removal operation](../worktree-manager/README.md#remove-an-owned-installation)
+for invocation, supported-target limits, result statuses and rollback behavior.
+
 ## Update-flow robustness — self-stage, watchdog, completion markers (#935)
 
 The runtime is (re)installed by **four** cooperating mechanisms, and the danger is
@@ -2683,6 +2722,25 @@ from the admitted artifact. Execution holds the existing owner's managed
 module install fallback. This does not create an installation cell, data root,
 new driver, or a public alternative installation command.
 
+SSH, Machines and MCP's native publications under that transaction pin pass their
+unbound schema-3 manifest to the original installed owner's existing
+`command_binding.py --publish-legacy --write-manifest` operation. The borrowed
+management lease supplies ownership validation and atomic publication; a refused
+SDK call cannot fall back to replacing the manifest directly. Machines captures
+its original source locator before constructing an immutable snapshot, and MCP
+retains that locator before activation.
+`source.path` therefore retains the owning publisher while `source.version`
+remains the prepared package version and `runtime_source` identifies its exact
+code assembly. Ordinary unpinned and cell publication retain their separate
+existing paths; this does not declare those publishers migrated.
+
+The POSIX installer engine exposes `render_deploy_manifest` with the existing
+manifest writer's eight inputs. It returns the same JSON without staging or
+publishing into the runtime root, allowing the source caller to use the owning
+SDK's publication transaction. The equivalent PowerShell builder is
+`Write-DeployManifest -PassThru`. Ordinary `write_deploy_manifest` retains
+its own existing staging, publication-evidence and atomic replacement paths.
+
 The full canonical source pin crosses that child boundary in the call-scoped
 `COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN` environment entry. Its version-1
 capability declaration is the literal `SOURCE_PIN_ENV` assignment in the exact
@@ -2701,15 +2759,31 @@ rather than silently ignoring a required pin. Nothing retires the existing
 explicit CLI pin.
 
 A package-version match alone cannot skip a prepared-source update. Its receipt
-must match the full source identity and runtime version, select that exact
-existing completed slot, and name its venv. Completion-probe subprocess failures,
+must match the full source identity, select that completed source slot or its
+strictly named distinct repair generation, record the actual selected runtime
+version, and name its venv. A healthy selected repair remains current for the
+original exact source pin; a foreign receipt or incomplete repair does not.
+Source-backed engine construction routes the canonical health-repair-required
+outcome through its existing distinct-generation repair owner rather than
+rewriting the damaged slot. Ordinary package-only behavior is unchanged.
+An ordinary update's requested adopted-Manager recovery survives that fallback,
+its control process and final settlement. Runtime-only callers retain their
+disabled recovery setting; health repair does not silently broaden that scope.
+Completion-probe subprocess failures,
 including timeouts, become explicit receipt failures on the collected step,
 not exceptions that abort the remaining update portfolio. Native candidate construction and
 health remain the installer's responsibility. Ordinary runtime updates clear
 inherited transaction pins. This is provider-side, unprofiled legacy-runtime
 execution support: Manager's non-marketplace suite-update preflight remains
-closed until acquisition, whole-portfolio execution and outcome handling are
-connected. Namespaced source execution and profile-specific target selection
+capability-aware and owns acquisition and whole-portfolio preparation. Fresh
+legacy engine repair may prepare its source before inventory is available, using
+the same trusted Manager toolkit and incumbent publication custody. The original
+service-source lease and exact commit/tree survive repair through suite
+preparation/execution; the Manager checkout is only the policy SDK, never an
+implicit service-source choice. Its native repair is runtime-only and verifies
+the actual selected completed source slot before ordinary suite orchestration.
+See [Manager's source contract](../worktree-manager/README.md#independent-runtime-source-acquisition).
+Namespaced source execution and profile-specific target selection
 are not inferred from this internal API.
 
 > **Self-stage caveat (#935).** When the `install-contract:v4 self-stage` prologue
@@ -3353,6 +3427,10 @@ budgets and a per-metadata-file budget. It compares every archive's SHA-256 and
 actual Requires-Python, Provides-Extra and Requires-Dist with the validated
 record. The shared wheel inspector checks distribution/version/tag identity,
 safe members and each RECORD entry without extracting or executing code.
+`tools/runtime_wheel_inspection.py` owns this semantic layer over the shared
+stdlib archive inspector. Runtime admission imports it without loading promotion
+or publication tooling. The promotion adapter invokes the same inspector and
+additionally binds inspected members to the selected first-party source.
 Runtime RECORD entries support SHA-256, SHA-384 and SHA-512; weak/unsupported
 algorithms refuse, while archive locks remain SHA-256. Distribution aliases and
 runtime versions compare by normalized identity. First-party promotion retains
@@ -3462,6 +3540,40 @@ long selected wheel names. The same deadline caps closed-wheel constructor child
 retry waits through installed health; ordinary source child defaults are
 unchanged.
 
+The shared `installer_native_feed.py` captures a caller's retained native UV
+settings using only the standard-library installer resources. It owns parsing,
+captured credential/OS-trust inputs and supported feed-policy refusals, not
+configuration precedence, profile approval, source authentication or resolution.
+Its caller supplies the existing secret-safe keyed identity operation; capture
+does not create a credential key or another approval store. The pure public-index
+rejection policy is shared with the existing build-tool trust owner through
+`installer_feed_policy.py`, without importing network acquisition into that
+owner. Canonical installer synchronization ships both helpers with each Python
+adopter. Their presence does not enable artifact/profile consumption.
+
+The inert shared `installer_packaging_seed.retain_packaging_seed` supplies the
+admission toolkit's restricted `packaging>=23` bootstrap. It inherits the actual
+owner's held native compiler settings, applicable CLI resolution options and
+frozen seasoning cutoffs, rather than
+reading ambient configuration again. A fixed metadata-only project lets that
+same native UV compiler select one exact governed-feed wheel without running a
+source backend. The bounded stdlib inspector refuses dependencies, extras,
+non-pure/platform wheels, entry points and paths outside Packaging's Python
+package/dist-info layout before the existing offline constructor can execute it.
+The owner callback must verify the independently authenticated selected source
+and supplied revocations and return the actual current installation policy.
+It runs before resolution/construction and throughout retained health/custody.
+
+This uses the existing installation-owned `.source-build-tools` namespace and
+third-party-only immutable constructor, not a shared mutable venv or another
+approval mechanism. Its exact binding includes source, effective policy,
+native lock, inspected wheel/acquisition, interpreter bytes/facts and invoked
+installer/runtime tooling bytes. Changed bindings cannot reuse the old
+generation. Windows probes use an explicit native executable path for long
+immutable-slot names. This component does not activate an ordinary runtime,
+ship a complete toolkit, connect an ordinary installer or establish production
+feed availability, enabled budgets or installation savings.
+
 The repository-only `runtime_feed_configuration.retain_native_feed_inputs`
 composes an existing release selection with freshly resolved installation
 policy and the canonical retained UV preflight. It does not implement another
@@ -3503,16 +3615,28 @@ the actual configured-runtime-source acquisition owner with canonical source
 preparation, the retained native compiler and the same governed feed worker.
 It uses no artifact index or fabricated release selection. An unsupported
 default marketplace source provider remains unavailable rather than guessed.
+Manager's existing `source_config.default_root` owns its configuration root;
+`self_install.default_root` re-exports that same function. Reading configured
+runtime-source policy therefore needs no Manager installer import and preserves
+the existing environment/home precedence. These narrow primitives do not yet
+package a complete installer toolkit or enable an ordinary installer.
 
 One native source lock includes declared runtime/build requirements and the
 frontend's `packaging` dependency. Its actual installation owner validates
 the held native indexes, credential/trust providers and supported configuration
 before the compiler can make package requests. The same retained transaction
 then resolves dependencies and supplies acquisition; no second resolver pass
-or artifact selection is introduced. Exact native wheel witnesses must be
+or artifact selection is introduced. `retain_source_configuration` exposes
+that existing pre-execution boundary without running the compiler; its native
+configuration identity is included in new source locks for later owner
+revalidation. It is not a source-lock candidate or an approval.
+Exact native wheel witnesses must be
 unambiguous; inspection precedes backend execution. A separate numbered
 build-tools environment runs the existing frontend offline, with owned
-deadline-bound children. Built runtime metadata must agree with authenticated
+deadline-bound children. The existing verified source-copy helper supplies a
+compact build workspace, avoiding Windows backend working-directory limits;
+both retained and compact source hashes remain checked around backend execution.
+Built runtime metadata must agree with authenticated
 static declarations. The final complete runtime profile contains only its
 reachable runtime closure, not build-only packages. Generation identity binds
 source, lock, build and actual acquisition facts through the existing receipt.
@@ -3535,6 +3659,107 @@ candidate verifier's nonserialized owner hook, not an approval map. This explici
 production consumer, persistent offline discovery, source-cache GC, activation
 or a live-feed exception. See [source preparation](../tools/prepare_runtime_source.md)
 and [validation coverage](../TESTING.md#wheel-input-inspection).
+
+### Explicit registered-marketplace source authentication
+
+`runtime_marketplace_source.retain_authenticated_marketplace_source` is a
+repository-only provider for an actual installed native Git/GitHub marketplace.
+It resolves effective registration, installation ownership and the native
+installed ledger through their existing owners. The reusable
+`plugin_resolve.inventory.native_git_inventory_item` proves only cache
+consistency: remote/ref, real commit/tree, catalog and complete referenced bytes.
+It does not authenticate the origin behind a local remote URL. Ordinary
+registered inventory and acquisition retain their existing behavior.
+
+The provider independently acquires the exact cached commit through
+`worktree_manager.runtime_source.acquire`, requires its fetched Main ancestry
+and tree, and runs canonical source preparation. The installed payload's actual
+assembly and version, including the ledger version, must match that prepared
+payload. It retains the acquisition lease and private prepared inputs and
+rechecks policy, runtime-source preferences, registration, ledger, cache and
+both payloads through consumption. Keep its context open and call `verify()`
+at the existing backend, health and publication boundaries.
+
+This initial provider supports root catalogs with `plugins/<plugin>` payloads
+and absent/Main/full-commit refs using the existing Main acquisition semantics.
+Other refs and layouts remain explicitly unavailable, never reinterpreted as
+the latest branch tip. Missing native evidence is unavailable; attributable
+corrupt, foreign, ambiguous or changed evidence refuses. It neither refreshes
+the native installation nor changes runtime-source preferences, requires
+artifact publication, maps the marketed engine to the distinct Manager identity,
+or enables bootstrap. Bootstrap-safe packaging, normal installer integration,
+production feed/closure qualification and measured installation savings remain
+separate gates.
+
+### Explicit Manager source-install integration
+
+The repository caller `runtime_source_build.install_manager_source_runtime`
+composes that held transaction with the actual Manager `self_install` lifecycle.
+It accepts only the base Manager installation owner, passes the authenticated
+prepared payload and complete first-party/runtime wheel set, and rechecks source
+policy at candidate health and immediately before publication. Installed
+interpreter markers must match the selected target before completion; the
+selected interpreter and UV executable are forwarded through installation and
+repair rather than rediscovered from the caller's interpreter, PATH or SDK.
+Command-name UV inputs are resolved once before admission, and that absolute
+selection is retained through both installation attempts.
+
+The existing standalone candidate adapter accepts these optional closed inputs
+without importing repository tooling or `packaging` during bootstrap. It derives
+the source generation's `.profile.<lock-id-prefix>` before admission and retains
+the existing construction, health, repair, retention and selector-recovery
+owners. Matching selected profile generations retain `already-current` reporting.
+Update detection compares the package version after removing generated source,
+profile and repair identity suffixes; those suffixes do not invent a new release.
+Ordinary source installation remains unchanged.
+
+Across invocations, `runtime_source_reuse.retain_source_runtime_reuse` can
+borrow the selected completed generation under the existing retention lease.
+It reads bounded, ordinary constructor evidence, verifies its full receipt
+and installed payload against the completion identity, and compares the
+current authenticated source, owner, native configuration, target, component,
+extras, local package selection, build profile and final profile. Configuration
+identity includes native resolution, prerelease, fork and dependency modes.
+Feed identity also binds the captured authentication headers through the
+existing machine-keyed opaque digest. Account changes and credential rotation
+invalidate reuse without persisting credentials in constructor evidence.
+Obsolete selections are unavailable; missing receipts on completed generations,
+malformed or changed evidence are integrity refusals, not permission to rebuild
+around them.
+Present but malformed completion markers are also integrity refusals; only
+genuinely absent completion evidence permits cold admission. Reuse rechecks
+completion identity during consumption. Closed construction and reuse clamp
+each construction/retention lock wait to the held wheel-input deadline rather
+than restarting an independent wait budget.
+Nonordinary selected slot paths refuse rather than becoming apparent absence.
+Reuse validates installed input evidence, including recorded URLs and archive
+digests, before invoking module health. Evidence mismatches or malformed origin
+metadata are integrity refusals, not permission to reacquire source inputs
+through the health-repair path. Module-health failures remain repairable.
+
+`WheelReuseInputs` is read-only constructor evidence, not cached wheel bytes
+or approval. The same engine can health-check its exact existing generation,
+including installed distributions, versions and archive origins, but cannot
+construct a missing runtime or a repair from this type. A genuine installed
+health failure releases receipt custody before normal source admission
+reacquires actual bytes and enters the existing distinct-generation repair
+path. The Manager lifecycle still owns publication and selector recovery.
+
+The optional `revoked_inputs` callback supplies current, immutable digest
+denials; it cannot approve inputs. Source admission checks it before installing
+build tools and before each backend, and installation/reuse rechecks it at
+health and immediately before publication. It covers source, lock, profile,
+build and runtime wheel identities. This callback does not query a feed for
+fresh server-side revocations; a consumer requiring that evidence must obtain
+it through its current authority before proceeding.
+
+This is an explicit repository API, not a new CLI mode or default bootstrap
+selection. Its caller still owns source/feed authentication; constructor input
+objects and receipts are not approval. The settings-only warm path makes no
+package-feed requests, resolves no dependencies and rebuilds no runtime;
+configured-source authentication may still access its selected Git origin.
+Default marketplace/bootstrap integration, production dependency/native
+qualification and measured cold/warm speedup remain separate gates.
 
 ### Bounded wheel inspection
 
@@ -3973,10 +4198,33 @@ failed health, timeout and abrupt caller death. Equivalent POSIX execution and
 the authorized installed signed-Python deployment lane remains unverified; these
 fixtures do not complete the first-adopter or portfolio acceptance gates.
 
+`New-SignedVenv` retains seeded stdlib construction by default. UV-owned
+callers can pass `-WithoutPip`: the signed `--copies` path then also uses
+`--without-pip`, avoiding an unused `ensurepip` installation. Bridge, Logger,
+Vault, Pull Requests, the SSH UV branch and the foundation prerequisite producer
+use that option. It does not remove pip from existing slots or change genuine
+Python/pip fallback construction. Signature, slot-health and publication checks
+remain unchanged.
+
+Logger installs its existing setuptools/PyYAML prerequisites together, then
+submits its seven explicit helper roots and plugin root in one retained
+transaction. This replaces ten governed UV calls with two without removing
+dependencies or weakening build isolation, seasoning or reinstall policy.
+The local batch uses `--no-editable` to override canonical development
+mappings and preserves a named reinstall for every root. Either failure stops
+before runtime activation; retained healthy construction reuse stays unchanged.
+
 `agent-codespaces` uses the canonical-reference form for both installers.
-Its Connection Owner service, sibling-library install order, and Windows
+Its Connection Owner service, complete explicit local closure, and Windows
 signed-Python recovery/venv health probes remain plugin-owned; uv acquisition,
 transient retries, and deploy-manifest writing use the shared engine.
+Both installers submit the eight helper roots and plugin root in one retained
+UV transaction, preserving every named `--reinstall-package` selection or all
+nine editable roots. Normal installs explicitly pass `--no-editable` so canonical
+development mappings cannot conflict with those non-editable direct roots.
+UV resolves their dependency order once; a closure failure
+still refuses construction. Windows requires UV and omits pip seeding from
+its signed-copy venv as well.
 PowerShell `stamp` materializes both engine files and all declared local
 libraries into the snapshot, rewriting canonical references to snapshot-local
 paths before publishing it. POSIX `stamp` retains its owning-payload pointer;
@@ -4209,3 +4457,61 @@ Wire it as a `pre-push` hook (see `tools/hooks/pre-push`, which also runs
 if any privately-configured internal identifier leaks into the tree; it no-ops
 unless a denylist is configured, see the agent-codespaces README "Local
 identifier guard").
+## Native daemon-instance artifact construction
+
+The shared `agent-procutil` Linux kernel binding is a **prebuilt runtime asset**,
+not a first-use compiler prerequisite. Supported Linux wheels contain the
+executable `agent_procutil/native/linux-<architecture>/daemon-instance`
+(`x86_64` or `aarch64`) and carry a platform-specific wheel tag. Ordinary
+startup and reconciliation never invoke `cc`, install a toolchain, or treat
+the C source alone as delivered native capability. An unavailable or
+unsupported binding refuses explicitly.
+
+Explicit source/package builds require a C compiler. The package-owned
+`_build_native.py --output <absolute-output>` command and wheel build hook own
+that step; they do not fetch build dependencies. Governed artifact construction
+admits only the exact registered build hook. Its source verifier independently
+rebuilds the declared ELF on the matching Linux build platform and compares
+bytes, in addition to the ordinary wheel RECORD and candidate-source checks.
+This is an artifact-construction prerequisite, not a runtime probe or installer
+fallback.
+
+For `installer_instance_reconcile.reconcile_installer_instances(helper_root,
+registry_root=...)`, `helper_root` contains the shared `daemon_instances.sh`
+and its native executable (or `daemon_instances.ps1` on Windows). The Python
+adapter loads `installer-instance-reconcile.sh` / `.ps1` beside its **own
+module**, not from that native binding directory. Ship the Python adapter and
+its platform wrapper together; a procutil wheel package directory is a valid
+native binding root without an installer wrapper copied into it.
+
+Namespaced provisioning uses the same adapter, after its existing context and
+governance admission, including healthy reuse. A pending selection record is
+not cleanup authority: Index's recovery path must successfully validate and
+commit the existing selection transaction before its provision coordinator
+reconciles daemon instances. Unknown, refused, or failed recovery does not
+invoke cleanup. Status, import, and other read-only paths remain non-mutating.
+
+Source payload assembly on the matching supported Linux build host can
+explicitly stage the already-built, source-verified wheel asset through:
+
+```bash
+python tools/sync-versioned-runtime.py --only-installer-instances --native-wheel <procutil-wheel>
+```
+
+The same command with `--check` audits the selected family and executable.
+Without `--native-wheel`, synchronization carries source/native adapters but
+does not claim to deliver a Linux executable. Generated native binaries are
+ignored by Git and are not hand-committed. Build/test scratch (`.test-runs`)
+is excluded from library payload copies and input fingerprints.
+Copy exclusion happens before traversal. Unfiltered build contexts still reject
+links inside scratch; excluding a path from fingerprints or a filtered-copy
+scan never authorizes an unfiltered copy to follow it.
+
+The on-demand artifact qualification is
+`tools/test_native_daemon_artifacts.py::test_real_built_wheel_and_source_fanout_find_native_with_no_python_or_cc`,
+with `PROCUTIL_NATIVE_ARTIFACT_ACCEPTANCE=1` in a supported Linux build
+environment. It builds through the canonical wheel owner, verifies source-bound
+ELF bytes, installs the wheel offline, exercises package/source native lookup
+without Python or compiler on PATH, and runs the native lifetime/artifact
+selectors against the installed package. It is not part of ordinary unit-only
+PR collection.

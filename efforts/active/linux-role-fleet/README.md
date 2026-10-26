@@ -187,6 +187,14 @@ replace ARC's pod lifecycle, or turn a session/task lease into permanent service
 ownership. The [adoption-first sequence](runner-loadouts.md#adoption-first-priority)
 retains the existing release, provider, custody, credential and activation gates.
 
+The operator subsequently accepted reusing the existing canonical Git-backed
+coordination store for a distinct permanent service-custody record, rather than
+another store or an extended task lease. The
+[custody realization proposal](runner-service-custody.md) preserves provider
+admission, exact accepted transfer and incumbent-safe reconciliation. Its
+protocol details are agent-recommended and await source review; live adoption
+and temporary-obligation discharge remain separately gated.
+
 The [runner-loadout realization plan](runner-loadouts.md) extends this
 existing campaign and #7192; it is not a second controller or a replacement
 for #6240/#6424/#6241 and #6681 ownership. Its decomposition and validation
@@ -271,6 +279,10 @@ mutation follows from this amendment.
   and container-owned logging; preserve explicit incomplete-attempt protection.
 - [ ] Validate concurrent writers, native Windows/POSIX handles, protocol
   output/privacy and truthful failed/rolled-back/committed outcomes.
+- [ ] Deliver the [persistent isolated spawn reproducer](persistent-isolated-reproducer.md)
+  through a reviewed source plan, bounded synthetic implementation and separately
+  approved real persistence/fault qualification. Existing restricted-provider
+  invariants, ephemeral tests and native/installer/deployment owners stay unchanged.
 
 ### Mission amendment - Setup, refresh and first useful services
 
@@ -430,6 +442,10 @@ All entries are **agent-recommended implementation gates**.
   protected incomplete-attempt handling; size/count-only rotation is not proof.
 - [ ] Pure contracts: explicit provider/adapter selection, fixed named operations,
   untrusted/ambiguous input refusal and no raw remote script/URL/executable API.
+- [ ] Reproducer acceptance follows its [isolation and fault matrix](persistent-isolated-reproducer.md#validation-plan):
+  actual bounded persistent storage, no production reach, literal unknown
+  outcomes and independently retained evidence. Fake peers do not qualify native
+  CLI, actual task START, review completion or released/running adoption.
 - [ ] Client-only fresh install and uninstall on Windows/Linux: no controller,
   Komodo/database, host daemon, worker mutation or local secret issuer; API
   credentials are supplied through the existing provider custody contract.
@@ -468,6 +484,45 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+- #9069 merged the persistent isolated reproducer source proposal as
+  `2a17f7219697a4b324754d0d000f6eab5c429894` after exact-head Copilot approval
+  and all required checks. Re-read this complete Plan and Validation Plan.
+  The next bounded source slice implements pure experiment declaration and
+  boundary controls; no persistent resources or guest services are created.
+  Actual backend/quota support, provisioning approval, native capture, strict
+  pre-effect observation and running qualification remain open. Existing
+  restricted-provider policy and ephemeral test behavior remain unchanged.
+- #9044 merged the bounded Dispatch spawn-causal-logging source as
+  `649c58cce494f0703c86e580647d7c0ad3b37880` after exact-head Copilot
+  approval, resolved feedback and required checks. Actual worker-lane stages,
+  scheduling decisions, ordinary Bridge caller outcomes, legacy-message
+  filtering and standalone quiet maintenance reuse existing owners.
+  Isolated controls passed 898 (35 explicit platform/native skips), and the
+  admitted in-process packet passed 1,853. Re-read this complete Plan and
+  Validation Plan after merge; the broader logging, native, container,
+  release/install and live-fleet gates remain open. The next logging stretch
+  specifies the minimal persistent isolated reproducer and remaining
+  owner-specific capture/timeline boundaries, without production activation.
+- #9041 merged the bounded Dispatch spawn-causal-logging source plan after
+  exact-head Copilot approval and required checks. This accepts the first
+  implementation scope, not its logging or running-state validation. The next
+  slice wires the actual worker-lane application sink and records entry before
+  reconciliation, scheduling and ordinary Bridge calls through existing owners.
+  Native capture, wider retention integration, release/install qualification and
+  every broader fleet gate remain open. No live configuration changed.
+- #8875 merged the operator-selected in-process Gateway/ARC source bridge
+  after exact-head Copilot approval, resolved feedback and required-source
+  checks. The managed provider confirmed completion using the Maintainer
+  exception to an additional code-owner vote; no required CI was bypassed.
+  Re-read this full Request, Plan and Validation Plan immediately after merge.
+  This delivers source composition and the qualified installed-consumer path,
+  not a deployed controller or incumbent adoption receipt. The next stretch
+  establishes durable provider/service custody and an inspected adopt-in-place
+  transition through the existing host/controller owners. Preserve the actual
+  pool's identity, capacity, isolation and in-flight work; retain temporary
+  protection until the canonical provider acknowledges durable ownership.
+  All live adoption, production binding, reconciliation, lifecycle and actual-job
+  gates above remain open. No fleet, routing, capacity or credential state changed.
 - Prepared the operator-selected in-process deployment-control source slice:
   the existing service Gateway retains the original verified caller, applies
   separate current operation policy and invokes the fixed ARC owner without a

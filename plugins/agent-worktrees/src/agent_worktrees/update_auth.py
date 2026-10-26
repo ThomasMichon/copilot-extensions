@@ -22,8 +22,8 @@ from ._git_credential_route import (
     original_environment,
     parse_attributes,
 )
-from .repo_accounts import remote_host
-from .update_auth_process import run
+from .repo_urls import remote_host
+from .update_auth_process import module_argv, run
 
 
 class ResolverUnavailable(RuntimeError):
@@ -151,11 +151,9 @@ def command_scope(env: Mapping[str, str], entries: Sequence[tuple[str, str]]) ->
 
 
 def router_helper(python: str = sys.executable) -> str:
-    return (
-        "!"
-        + shlex.quote(python.replace("\\", "/"))
-        + (" -I -X utf8 -m agent_worktrees._git_credential_route")
-    )
+    argv = module_argv("agent_worktrees._git_credential_route", python=python)
+    argv[0] = argv[0].replace("\\", "/")
+    return "!" + shlex.join(argv)
 
 
 def non_repository_environment(env: Mapping[str, str], cwd: Path) -> dict[str, str]:
@@ -280,7 +278,7 @@ def _check_native(
     credential: Mapping[str, str], src: Source, expected: str | None, env, runner,
 ) -> dict[str, str]:
     identity = runner(
-        [sys.executable, "-I", "-X", "utf8", "-m", "agent_worktrees.update_auth_probe"],
+        module_argv("agent_worktrees.update_auth_probe"),
         input=json.dumps({"host": src.host, **credential}), env=env,
     )
     if identity.timed_out:

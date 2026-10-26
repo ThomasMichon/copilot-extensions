@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import subprocess
 
 import pytest
 
@@ -184,27 +183,33 @@ def test_spawn_status_monitor_uses_clean_runtime_env(monkeypatch):
     monkeypatch.setattr(monitor_roots, "_engine_runtime_home", lambda: monitor_roots.Path("C:/runtime"))
     monkeypatch.setattr(
         monitor_roots,
-        "windowless_daemon_kwargs",
-        lambda breakaway=True: {"creationflags": 123} if breakaway else {},
-    )
-    monkeypatch.setattr(
-        subprocess,
-        "Popen",
+        "spawn_daemon",
         lambda argv, **kwargs: popen_calls.append((list(argv), kwargs)),
     )
 
     assert monitor_roots._spawn_status_monitor(["C:/aw.ps1"]) is True
-    assert popen_calls == [(
-        ["C:/aw.ps1", "status-monitor"],
-        {
-            "stdin": subprocess.DEVNULL,
-            "stdout": subprocess.DEVNULL,
-            "stderr": subprocess.DEVNULL,
-            "cwd": str(monitor_roots.Path("C:/runtime")),
-            "env": {"KEEP": "1"},
-            "creationflags": 123,
-        },
-    )]
+    assert len(popen_calls) == 1
+    argv, options = popen_calls[0]
+    assert argv == ["C:/aw.ps1", "status-monitor"]
+    assert options["cwd"] == monitor_roots.Path("C:/runtime").absolute()
+    assert options["env"] == {"KEEP": "1"}
+    assert options["console_children"] is True
+    assert options["log_path"].name == "picker-status-monitor.log"
+    assert options["instance"].service == "agent-worktrees-status-monitor"
+
+
+def test_spawn_status_monitor_anchors_relative_root_before_instance_spec(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(monitor_roots.engine_client, "_engine_environment", lambda: {})
+    monkeypatch.setattr(monitor_roots, "_engine_runtime_home", lambda: monitor_roots.Path("engine-root"))
+    captured = {}
+    monkeypatch.setattr(
+        monitor_roots, "spawn_daemon",
+        lambda argv, **kwargs: captured.update(kwargs),
+    )
+    assert monitor_roots._spawn_status_monitor(["synthetic-engine"])
+    assert captured["cwd"] == tmp_path / "engine-root"
+    assert captured["instance"].runtime_root == tmp_path / "engine-root"
 
 
 def test_spawn_status_monitor_returns_false_on_failure(monkeypatch):
@@ -214,11 +219,10 @@ def test_spawn_status_monitor_returns_false_on_failure(monkeypatch):
         lambda: {},
     )
     monkeypatch.setattr(monitor_roots, "_engine_runtime_home", lambda: monitor_roots.Path("C:/runtime"))
-    monkeypatch.setattr(monitor_roots, "windowless_daemon_kwargs", lambda breakaway=True: {})
 
     def _boom(*_args, **_kwargs):
         raise OSError("nope")
 
-    monkeypatch.setattr(subprocess, "Popen", _boom)
+    monkeypatch.setattr(monitor_roots, "spawn_daemon", _boom)
 
     assert monitor_roots._spawn_status_monitor(["C:/aw.ps1"]) is False

@@ -187,7 +187,7 @@ class TestEnablePreviewMode:
         assert "schema_version" not in data
         assert data["label"] == "Demo Queue"
         assert data["list"][0] == sys.executable
-        assert data["list"][1:] == ["-m", "worktree_manager.demo_pivot", "list"]
+        assert data["list"][1:] == ["-B", "-m", "worktree_manager.demo_pivot", "list"]
 
     def test_disables_real_plugin_pivot_materialization(self, monkeypatch):
         import os
@@ -294,7 +294,7 @@ class TestDemoPivotFixture:
         by_name = {f["name"]: f for f in fields}
         criteria = by_name["criteria"]
         assert criteria["type"] == "multichoice"
-        assert criteria["options_command"][:3] == [
-            sys.executable, "-m", "worktree_manager.demo_pivot",
+        assert criteria["options_command"][:4] == [
+            sys.executable, "-B", "-m", "worktree_manager.demo_pivot",
         ]
         assert criteria["options_command"][-1] == "vocabulary"

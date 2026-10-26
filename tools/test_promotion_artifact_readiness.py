@@ -16,7 +16,7 @@ import pytest
 import yaml
 
 from _promotion_workflow_test_support import (
-    assert_source_owned_boundary, source_owned, source_workflow,
+    assert_source_owned_boundary, source_owned, source_owned_controller, source_workflow,
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -74,8 +74,7 @@ def _materializer_controller(root):
 
 
 def _materializer_source(root, destination):
-    workflow = yaml.safe_load((root / ".github/workflows/validate-and-promote.yml").read_text())
-    if not source_owned(workflow["jobs"]):
+    if not source_owned_controller(root):
         return root
     state = json.loads((root / ".github/release-pipeline-state.json").read_text())
     dev = state["last_promotion"]["dev_head"]
@@ -93,10 +92,9 @@ def _materializer_source(root, destination):
 @pytest.fixture
 def generated_materializer_checkout(tmp_path):
     root = Path(__file__).resolve().parent.parent
-    source_workflow = yaml.safe_load((root / ".github/workflows/validate-and-promote.yml").read_text())
     dev = (
         json.loads((root / ".github/release-pipeline-state.json").read_text())["last_promotion"]["dev_head"]
-        if source_owned(source_workflow["jobs"])
+        if source_owned_controller(root)
         else _materializer_git(root, "rev-parse", "HEAD").decode().strip()
     )
     generated = tmp_path / "generated-checkout"
@@ -107,6 +105,7 @@ def generated_materializer_checkout(tmp_path):
     (control / "workflows/validate-and-promote.yml").write_text(
         yaml.safe_dump(_materializer_controller(root)), encoding="utf-8",
     )
+    (control / "promotion-control.json").write_text("{}", encoding="utf-8")
     (control / "release-pipeline-state.json").write_text(
         json.dumps({"last_promotion": {"dev_head": dev}}), encoding="utf-8",
     )
@@ -131,8 +130,18 @@ def generated_materializer_checkout(tmp_path):
 def _assert_pinned_materializer(root, tmp_path, helper):
     workflow = _materializer_controller(root)
     source = _materializer_source(root, tmp_path / "validated-dev")
-    pin = workflow["env"]["RELEASE_HELPERS_SHA"]
-    assert re.fullmatch(r"[0-9a-f]{40}", pin), "release helpers require an immutable Git commit"
+    pin = workflow.get("env", {}).get("RELEASE_HELPERS_SHA")
+    if pin is None:
+        helper_checkout = next(step["with"] for step in workflow["jobs"]["compose-candidate"]["steps"]
+                               if step.get("with", {}).get("path") == "reviewed-helpers")
+        assert helper_checkout["ref"] == "${{ needs.gate.outputs.sha }}"
+        pin = (
+            json.loads((root / ".github/release-pipeline-state.json").read_text())[
+                "last_promotion"
+            ]["dev_head"] if source_owned_controller(root)
+            else _materializer_git(root, "rev-parse", "HEAD").decode().strip()
+        )
+    assert re.fullmatch(r"[0-9a-f]{40}", pin), "release helpers require an immutable admitted commit"
     if helper == "obsolete":
         pin = "c2caa135dbb5c1d6bbacfee5c48f9b6a0c17d104"
     tools = tmp_path / "reviewed-helpers" / "tools"
@@ -185,8 +194,19 @@ print(json.dumps(report))
 
 
 @pytest.mark.parametrize("helper", ["workflow", "obsolete"])
-def test_native_pinned_materializer_expands_current_flat_sources(tmp_path, helper):
+def test_native_pinned_materializer_expands_current_flat_sources(tmp_path, helper, monkeypatch):
+    selected = []
+    read_git = _materializer_git
+
+    def observe(root, *arguments):
+        if arguments[0] == "show" and ":tools/" in arguments[1]:
+            selected.append(arguments[1].split(":", 1)[0])
+        return read_git(root, *arguments)
+
+    monkeypatch.setattr(sys.modules[__name__], "_materializer_git", observe)
     _assert_pinned_materializer(Path(__file__).resolve().parent.parent, tmp_path, helper)
+    if helper == "obsolete":
+        assert selected and set(selected) == {"c2caa135dbb5c1d6bbacfee5c48f9b6a0c17d104"}
 
 
 def test_source_artifact_builder_accepts_actual_pinned_materializer_output(tmp_path):
@@ -693,6 +713,17 @@ def test_retry_pr_lookup_reuses_only_the_exact_eligible_candidate(
 
 
 def _assert_readiness_ci(jobs, *, builder_minutes, split_publication):
+    if "unit-tests" in jobs:
+        assert set(jobs) == {"checks", "unit-tests", "pr-gate"}
+        assert jobs["unit-tests"]["timeout-minutes"] == 5
+        assert jobs["unit-tests"]["permissions"] == {"contents": "read", "actions": "read"}
+        assert jobs["unit-tests"]["if"] == "github.event_name != 'push'"
+        assert set(jobs["pr-gate"]["needs"]) == {"checks", "unit-tests"}
+        manifest = json.loads((Path(__file__).resolve().parent / "promotion-unit-manifest.json").read_bytes())
+        assert {
+            "tools/promotion_artifact_readiness.py", "tools/promotion_candidate.py",
+        } <= set(manifest["coverage_targets"])
+        return
     paths = [
         ".github/workflows/ci.yml", "tools/promotion_artifact_readiness.py",
         "tools/test_promotion_artifact_readiness.py", "tools/test_promotion_candidate_retry.py",
@@ -765,70 +796,71 @@ def _assert_readiness_ci(jobs, *, builder_minutes, split_publication):
 
 def test_required_ci_collects_readiness_and_retry_in_their_changed_path_lanes():
     root = Path(__file__).resolve().parent.parent
-    jobs = yaml.safe_load((root / ".github/workflows/ci.yml").read_text())["jobs"]
-    controller = yaml.safe_load(
-        (root / ".github/workflows/validate-and-promote.yml").read_text(),
-    )["jobs"]
-    profile = _pr_profile(controller)
-    # Dev owns the declared recipe; generated Main retains its independent,
-    # older combined native lane rather than copying Dev's split or budgets.
     declared = source_workflow(root, "ci.yml")["jobs"]
     _assert_readiness_ci(declared, builder_minutes=10, split_publication=True)
-    if profile == "legacy":
-        _assert_readiness_ci(jobs, builder_minutes=10, split_publication=True)
-    else:
-        _assert_readiness_ci(jobs, builder_minutes=5, split_publication=False)
 
 
-@pytest.mark.parametrize("job_id", ["checks", "windows-python-artifact-builder"])
-@pytest.mark.parametrize("promotion_run,changed,expected", [
-    ("123-1", "tools/promotion_artifact_readiness.py", "run=true"),
-    ("123-1", "plugins/demo-plugin/README.md", "run=true"),
-    ("123-1", "docs/unrelated.md", "run=false"),
-    ("", "tools/promotion_artifact_readiness.py", "run=false"),
-    ("123-1", "tools/promotion_artifact_readiness.py", None),
+@pytest.mark.parametrize("job_id", ["checks", "unit-tests"])
+@pytest.mark.parametrize("event,changed,expected", [
+    ("pull_request", "tools/promotion_artifact_readiness.py", "run=true"),
+    ("pull_request", "plugins/demo-plugin/README.md", "run=false"),
+    ("pull_request", "docs/unrelated.md", "run=false"),
+    ("workflow_dispatch", "tools/promotion_artifact_readiness.py", "run=true"),
+    ("workflow_dispatch", "docs/unrelated.md", "run=true"),
 ])
-def test_native_artifact_detector_covers_promotion_dispatch_without_changing_manual_mode(
-    repo, tmp_path, job_id, promotion_run, changed, expected,
+def test_native_source_impact_keeps_units_only_and_manual_selection_conservative(
+    repo, tmp_path, job_id, event, changed, expected,
 ):
-    bash, git = shutil.which("bash"), shutil.which("git")
-    if os.name == "nt" and git:
-        candidate = Path(git).resolve().parent.parent / "bin" / "bash.exe"
-        bash = str(candidate) if candidate.is_file() else None
-    if not bash:
-        pytest.skip("native Bash is unavailable")
     base = _git(["rev-parse", "HEAD"], repo)
     target = repo / changed
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("changed input\n", encoding="utf-8")
     _git(["add", "--", changed], repo)
     _git(["commit", "-qm", "event-scoped input"], repo)
-    if expected is None:
-        _git(["checkout", "--orphan", "root-candidate"], repo)
-        _git(["commit", "-qm", "root candidate has no diff parent"], repo)
+    head = _git(["rev-parse", "HEAD"], repo)
     root = Path(__file__).resolve().parent.parent
-    job = yaml.safe_load((root / ".github/workflows/ci.yml").read_text())["jobs"][job_id]
+    job = source_workflow(root, "ci.yml")["jobs"][job_id]
     assert next(step for step in job["steps"] if step.get("uses") == "actions/checkout@v4")[
         "with"
-    ]["fetch-depth"] == 0
-    step = next(step for step in job["steps"] if step.get("id") == "python-artifact-builder")
-    script = step["run"].replace("${{ github.event_name }}", "workflow_dispatch").replace(
-        "${{ github.event.pull_request.base.sha }}", base,
-    ).replace("${{ github.event.before }}", base)
+    ]["fetch-depth"] in (0, "0")
+    step = next(step for step in job["steps"]
+                if step.get("id") == ("code-impact" if job_id == "checks" else "impact"))
+    from _promotion_workflow_test_support import heredoc
+    script = heredoc(step["run"]).replace(
+        'str(Path("tools").resolve())', repr(str(root / "tools")),
+    )
     output = tmp_path / "scope-output"
     environment = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     environment.update({
         "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
-        "CI_PROMOTION_RUN": promotion_run, "GITHUB_OUTPUT": output.as_posix(),
+        "EVENT": event, "BASE": base, "HEAD": head, "GITHUB_OUTPUT": output.as_posix(),
     })
     result = subprocess.run(
-        [bash, "--noprofile", "--norc", "-e", "-o", "pipefail"], cwd=repo,
+        [sys.executable, "-I", "-B", "-"], cwd=repo,
         input=script, text=True, capture_output=True, env=environment, timeout=15,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
-    if expected is None:
-        assert result.returncode != 0
-        assert not output.exists()
-    else:
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert output.read_text().strip() == expected
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert output.read_text().strip() == expected
+
+
+def test_native_generated_main_impact_uses_recorded_dev_recipe(
+    repo, tmp_path, generated_materializer_checkout, monkeypatch,
+):
+    generated = generated_materializer_checkout
+    (generated / ".github/workflows/ci.yml").write_text(
+        "name: Preserved Main CI\njobs:\n  metadata:\n    name: metadata\n",
+        encoding="utf-8",
+    )
+    assert "unit-tests" not in yaml.safe_load(
+        (generated / ".github/workflows/ci.yml").read_text(),
+    )["jobs"]
+    tools = generated / "tools"
+    tools.mkdir()
+    shutil.copyfile(Path(__file__).with_name("promotion_unit_contract.py"), tools / "promotion_unit_contract.py")
+    monkeypatch.setitem(globals(), "__file__", str(tools / Path(__file__).name))
+    scope = tmp_path / "source-impact"
+    scope.mkdir()
+    test_native_source_impact_keeps_units_only_and_manual_selection_conservative(
+        repo, scope, "unit-tests", "pull_request", "tools/promotion_artifact_readiness.py", "run=true",
+    )

@@ -138,13 +138,8 @@ class VectorTable:
         table = self._get_or_create_table()
         if self._source_domain is not None:
             self._source_domain.effect(f"vector-delete:{self._table_name}")
-        try:
-            id_list = ", ".join(f"'{cid}'" for cid in chunk_ids)
-            table.delete(f"chunk_id IN ({id_list})")
-        except Exception:
-            if self._source_domain is not None:
-                raise
-            pass
+        id_list = ", ".join(f"'{cid}'" for cid in chunk_ids)
+        table.delete(f"chunk_id IN ({id_list})")
 
     @source_write
     def delete_stale(self, *, before: float) -> int:
@@ -241,7 +236,7 @@ class VectorTable:
         return arr
 
     @source_read
-    def get_vectors(self, chunk_ids: list[str]) -> dict[str, np.ndarray]:
+    def get_vectors(self, chunk_ids: list[str], *, strict: bool = False) -> dict[str, np.ndarray]:
         """Batch-read stored embeddings for *chunk_ids* present in this table.
 
         Returns ``{chunk_id: vector}`` for the ids that exist here; ids absent
@@ -261,13 +256,20 @@ class VectorTable:
                 .to_list()
             )
         except Exception:
+            if strict:
+                raise
+            logger.warning("Vector batch read failed", exc_info=True)
             return {}
         out: dict[str, np.ndarray] = {}
         for r in rows:
             vec = r.get("vector")
             if vec is None:
+                if strict:
+                    raise RuntimeError("Stored vector is missing")
                 continue
             arr = np.asarray(vec, dtype=np.float32)
+            if strict and (arr.shape != (self._dim,) or not np.isfinite(arr).all()):
+                raise RuntimeError("Stored vector has invalid dimensions or values")
             if arr.shape == (self._dim,):
                 out[r["chunk_id"]] = arr
         return out

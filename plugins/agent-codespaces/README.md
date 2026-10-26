@@ -96,6 +96,15 @@ their login shell, including on a cold foreground fallback without cached auth.
 Full SSH provisioning and fresh `create` provisioning carry that context too;
 fresh creation also supplies it to authenticated control-repository bootstrap.
 
+Connection Owner retirement waits for its already-admitted native work: late
+factory results remain in channel custody, mirror append/push work keeps its
+slot and OS lock until settled, and channel teardown waits for native process
+and registered proxy cleanup rather than relying on forward health. Repeated
+cancellation does not abandon teardown. The beacon's bounded `stop()` remains
+unchanged; daemon finalization additionally joins its thread before withdrawing
+liveness. Shutdown never starts an unstarted transport or replays an unknown
+transcript push, and dirty/prune markers retain any owed work for a later Owner.
+
 `ssh`, `copilot`, and `namespace-resolve` accept repeatable
 `--stage-plugin SOURCE` and `--stage-plugin-disabled SOURCE`. The latter preserves
 an explicit disabled selection; paths, spaces, and `=false` in a source remain
@@ -193,6 +202,12 @@ This migration does not cover primary/payload command publishers, selected
 snapshots, explicit installers or namespaced/custom-root bootstrap publication.
 
 ## Configuration
+
+Runtime-home overrides are anchored to the selecting process's cwd and
+normalized lexically, including `..`, before daemon reservation or admission.
+The owner child receives that same canonical home even when launched from
+HOME. Filesystem links are not resolved away; instance custody checks still
+refuse redirected runtime roots.
 
 **Most repos need no config at all.** agent-codespaces works out of the box on
 standard GitHub CodeSpaces by **convention**:

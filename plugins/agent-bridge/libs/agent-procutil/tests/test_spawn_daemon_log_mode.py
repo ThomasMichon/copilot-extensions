@@ -20,7 +20,7 @@ posix_only = pytest.mark.skipif(
 
 
 @pytest.fixture()
-def recorded_spawn(monkeypatch):
+def recorded_spawn(monkeypatch, declared_mock_daemon):
     """Fake Popen that records the log file's mode at the moment of launch."""
     seen: list[int] = []
 

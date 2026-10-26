@@ -29,7 +29,11 @@ NATIVE = pytest.mark.skipif(
 
 
 def _fixture(tmp_path, plugin):
-    payload = tmp_path / "payload"
+    home = tmp_path / "home"
+    payload = (
+        home / ".copilot/installed-plugins/fixture/agent-bridge"
+        if plugin == "agent-bridge" else tmp_path / "payload"
+    )
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
     for path in LIBRARY.iterdir():
@@ -49,7 +53,20 @@ def _fixture(tmp_path, plugin):
         '*) printf "reconcile\\n" >> "$HOME/children" ;;\nesac\n',
         encoding="utf-8",
     )
-    home = tmp_path / "home"
+    if plugin == "agent-bridge":
+        query = scripts / "installation-context/json-query.awk"
+        query.parent.mkdir()
+        shutil.copyfile(REPO / "libs/installation-context/json-query.awk", query)
+        driver = payload / "libs/update-driver/scripts/first-use.sh"
+        driver.parent.mkdir(parents=True)
+        driver.write_text(
+            "# Installation driver lifecycle contract: bridge-install-v1\n"
+            '[[ ! -e "$3/runtime-deployment.json" ]] || exit 3\n'
+            'action=reconcile; [[ "$6" != stamp ]] || action=stamp\n'
+            'printf "%s\\n" "$action" >>"$HOME/children"\n'
+            'printf "launched:123 log:%s/first-use-00000000-0000-0000-0000-000000000000.log\\n" "$1"\n',
+            encoding="utf-8",
+        )
     root = home / f".{plugin}"
     root.mkdir(parents=True)
     _manifest(root)
@@ -289,19 +306,9 @@ def test_marker_only_before_after_installer_count(tmp_path, capsys):
     assert original.returncode == 0, original.stderr
     _wait_for_child(home)
     status = root / "reconcile-status.json"
-    for _ in range(50):
-        try:
-            settled = status.exists() and json.loads(status.read_text()).get("completed_at")
-        except json.JSONDecodeError:
-            settled = False
-        if settled:
-            break
-        time.sleep(0.1)
-    else:
-        pytest.fail("baseline fixture reconcile did not settle")
+    assert not status.exists(), "the fixture driver does not own legacy status publication"
     assert _children(home) == ["reconcile"]
     (home / "children").unlink()
-    status.unlink()
     hook.write_text(candidate, encoding="utf-8")
     result, after_elapsed = _hook(payload, home)
     assert result.returncode == 0, result.stderr

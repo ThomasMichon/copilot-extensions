@@ -105,6 +105,12 @@ def test_no_production_call_is_rejected_by_the_collector_and_packet_verifier(tmp
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     output = tmp_path / "packet"
     monkeypatch.setattr(RUNNER, "ROOT", root)
+    def fixture_helpers(selected_root, selected_manifest, *, development_root):
+        assert selected_root == root and selected_manifest == manifest
+        assert development_root is None
+        return set()
+
+    monkeypatch.setattr(RUNNER, "verify_helper_contract", fixture_helpers)
     monkeypatch.setattr(sys, "argv", [
         "run-promotion-unit-tests.py", "--source-sha", "a" * 40,
         "--manifest", str(manifest_path), "--output-dir", str(output),

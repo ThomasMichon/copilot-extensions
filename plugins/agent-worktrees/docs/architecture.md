@@ -468,7 +468,7 @@ modeled on `tools/check-headless-launch.py`) scans every `picker_tui/*.py`
 file (except `inbox.py` itself, which IS the primitive) for a raw
 `call_from_thread(` call and fails the build if one is found, with an inline
 `# inbox-guard: allow <why>` escape hatch for a genuinely-intentional
-exception. It runs in CI and in the local pre-push hook alongside
+exception. It runs in CI alongside
 `check-headless-launch.py`.
 
 **Known remaining gap.** `engine_pivot_actions.py`'s

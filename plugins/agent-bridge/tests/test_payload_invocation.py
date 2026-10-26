@@ -494,6 +494,7 @@ def test_payload_manifest_describes_agent_bridge_runtime() -> None:
         "noSelfProvisionEnv": "AGENT_BRIDGE_NO_SELFPROVISION",
         "purpose": "Communicate with persistent agent sessions",
         "installer": "install",
+        "installerLifecycle": True,
         "windowsCatalogShim": "powershell",
         "powershellPipelineInput": True,
         "provisionMode": "direct",

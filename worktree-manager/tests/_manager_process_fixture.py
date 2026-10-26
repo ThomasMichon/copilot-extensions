@@ -26,12 +26,18 @@ def synthetic_runtime(root: Path, version: str, *, program: str | None = None) -
     slot = root / "versions" / version
     venv.EnvBuilder(with_pip=False).create(slot)
     source = Path(__file__).resolve().parents[1]
-    si._copy_payload(source, slot / "payload")
+    package_source = source
+    if program is None:
+        si._copy_payload(source, slot / "payload")
+        package_source = slot / "payload"
+    else:
+        # Program controls need the real shell boundary, not standalone assembly.
+        shutil.copytree(source / "bin", slot / "payload" / "bin")
     purelib = slot / ("Lib/site-packages" if os.name == "nt" else
                       f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages")
     purelib.mkdir(parents=True, exist_ok=True)
     adapter = si._runtime_installer()
-    for package in adapter.engine._package_roots(slot / "payload"):
+    for package in adapter.engine._package_roots(package_source):
         shutil.copytree(
             package / "src", purelib, dirs_exist_ok=True,
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.egg-info"),

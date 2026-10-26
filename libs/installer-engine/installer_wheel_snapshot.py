@@ -145,6 +145,67 @@ class WheelSnapshot:
 
 
 @dataclass(frozen=True)
+class WheelReuseInputs:
+    """Existing constructor evidence; cannot supply bytes for construction.
+
+    The current installation owner must independently admit its source, profile
+    and policy before use. This type verifies only the bounded receipt shape.
+    """
+
+    generation: str
+    canonical_json: str
+    deadline: float
+
+    def receipt(self) -> dict:
+        self.verify()
+        return json.loads(self.canonical_json)
+
+    @property
+    def distributions(self) -> tuple[tuple[str, str, str, str], ...]:
+        return tuple(
+            (name, wheel["version"], wheel["filename"], wheel["sha256"])
+            for name, wheel in sorted(self.receipt()["distributions"].items())
+        )
+
+    def verify(self) -> None:
+        _check_deadline(self.deadline)
+        try:
+            record = json.loads(self.canonical_json)
+            binding = json.dumps(record["binding"], sort_keys=True, separators=(",", ":"), allow_nan=False)
+            if (
+                not isinstance(self.generation, str) or not self.generation or self.generation == "dev"
+                or not isinstance(record, dict) or set(record) - {"acquisition"} != {
+                    "construction", "lock_id", "binding", "distributions",
+                }
+                or record["construction"] != "closed-wheels"
+                or not isinstance(record["binding"], dict) or not record["binding"]
+                or record["lock_id"] != "sha256:" + hashlib.sha256(binding.encode("ascii")).hexdigest()
+                or self.canonical_json != json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False)
+                or not isinstance(record["distributions"], dict) or not record["distributions"]
+            ):
+                raise ValueError
+            filenames = set()
+            for name, wheel in record["distributions"].items():
+                _check_deadline(self.deadline)
+                if (
+                    re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name) is None
+                    or not isinstance(wheel, dict) or set(wheel) != {"version", "filename", "sha256"}
+                    or not isinstance(wheel["version"], str) or not wheel["version"]
+                    or not isinstance(wheel["filename"], str)
+                    or re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.+-]*\.whl", wheel["filename"]) is None
+                    or _unsafe_windows_component(wheel["filename"])
+                    or wheel["filename"].casefold() in filenames
+                    or not isinstance(wheel["sha256"], str)
+                    or re.fullmatch(r"sha256:[0-9a-f]{64}", wheel["sha256"]) is None
+                ):
+                    raise ValueError
+                filenames.add(wheel["filename"].casefold())
+        except (KeyError, TypeError, ValueError, UnicodeError):
+            raise WheelError("existing wheel evidence has an invalid constructor receipt") from None
+        _check_deadline(self.deadline)
+
+
+@dataclass(frozen=True)
 class WheelInstallInputs:
     """Inspected construction data; never profile/feed approval or a trust token.
 

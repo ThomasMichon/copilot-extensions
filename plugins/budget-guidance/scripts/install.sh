@@ -676,6 +676,12 @@ if [[ "$ACTION" == install || "$ACTION" == update || "$ACTION" == stamp || "$ACT
     _source_runtime_unchanged || exit 1
 fi
 
+case "$ACTION" in
+    install|update|provision)
+        . "$SCRIPT_DIR/installer-instance-reconcile.sh"
+        reconcile_installer_instances "$SCRIPT_DIR"
+        ;;
+esac
 # Cheap 'stamp': snapshot the exact owning payload, then splat the binstub and
 # defer the venv build to first use. The wrapper provisions only from this
 # immutable versioned snapshot and never searches other marketplace payloads.

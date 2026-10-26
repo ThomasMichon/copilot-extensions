@@ -69,7 +69,7 @@ def _initialize(plugin: str, language: str) -> str:
             start = text.index("$sourceMetadata = Join-Path")
             end = text.index("\nfunction Assert-SourceRuntimeIdentity", start)
         else:
-            start = text.index('if [[ -e "$PLUGIN_DIR/runtime-source.json"')
+            start = text.index('if [[ -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}"')
             end = text.index("\n_assert_source_runtime_identity()", start)
         return text[start:end] + "\n"
     name = "Initialize-SourceRuntime" if language == "ps1" else "_initialize_source_runtime"
@@ -109,16 +109,16 @@ def _writer(plugin: str, language: str) -> str:
             if language == "sh" else
             text.index("\n$sourcePath =", text.index("# Source manifest inputs"))
         )
-        end = text.index("\necho ''" if language == "sh" else "\nWrite-Host ''", start)
+        end = text.index("\necho ''" if language == "sh" else "\n$prevEAP =", start)
     elif plugin == "agent-pull-requests":
         start = text.index(
             'source_fields="$(_source_manifest_fields)"' if language == "sh" else
             "$sourceFields = Get-SourceManifestFields",
         )
-        end = text.index('\necho ""' if language == "sh" else "\n    Write-Host ''", start)
+        end = text.index('\necho ""' if language == "sh" else "\n    $prevEAP =", start)
     elif plugin == "budget-guidance":
         start = text.index('KIND="$(_source_kind "$PLUGIN_DIR")"' if language == "sh" else "$kind = Get-SourceKind")
-        end = text.index("\necho ''" if language == "sh" else "\nWrite-Host ''", start)
+        end = text.index("\necho ''" if language == "sh" else "\n$prevEAP =", start)
     else:
         start = text.index("# -- 5. Deploy manifest" if language == "sh" else "# -- 5. Write deploy manifest")
         end_marker = (
@@ -182,6 +182,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 $env:COMPUTERNAME = 'fixture'
 $PluginDir = {q(payload)}
+$sourceManifestPath = $PluginDir
 $ScriptDir = Join-Path $PluginDir 'scripts'
 $PSScriptRoot = $ScriptDir
 $InstallDir = {q(root)}
@@ -248,6 +249,7 @@ $payloadHash = if ({'$true' if plugin in SHARED else '$false'}) {{ Get-PayloadHa
     return f"""
 set -euo pipefail
 PLUGIN_DIR={q(payload)}
+SOURCE_MANIFEST_PATH="$PLUGIN_DIR"
 SCRIPT_DIR="$PLUGIN_DIR/scripts"
 INSTALL_DIR={q(root)}
 MANIFEST_PATH="$INSTALL_DIR/deploy-manifest.json"

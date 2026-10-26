@@ -11,6 +11,12 @@ from .orphanage import OrphanageScreen
 from .styles import canonical_key
 
 class PickerScreenInputMixin:
+    def action_launch_history(self):
+        from .. import context
+        from ...launch_history_screen import LaunchHistoryScreen
+
+        self.app.push_screen(LaunchHistoryScreen(context.project()))
+
     def _dispatch_key(self, key, character=None):
         # NOTE: this MUST NOT be named ``handle_key`` -- Textual's
         # ``Widget.handle_key`` is an ``async`` coroutine its ``_on_key``

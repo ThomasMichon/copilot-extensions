@@ -84,6 +84,13 @@ or a fabricated placement lease.
 
 The explicit launch authorizes only this foreground process's local work.
 SIGINT/SIGTERM withdraw later work and signal the existing bounded drain.
+If that drain times out, the foreground retains its daemon admission and the
+same writer/service instance while retrying its bounded `close()` to actual
+settlement. A completed or cancelled owner task is not proof that disk,
+connector or Gateway work stopped. Repeated caller cancellation cannot cancel
+this retained cleanup or mark the instance finished early; the original outcome
+is reported only after the writer releases. This does not change production
+expiry or grant replacement, cutover or recovery authority.
 Real Gateway TLS/PoP admission authorizes service attachment and each remote
 caller's lifetime; the existing typed credential worker authorizes forge reads.
 Neither labels nor decoded JWT claims grant these permissions. Service access

@@ -10,6 +10,9 @@ def _config(tmp_path: Path, *, enabled: bool = True) -> SimpleNamespace:
     return SimpleNamespace(
         cluster_enabled=enabled,
         clusters_db=tmp_path / "clusters.db",
+        cluster_threshold_default=0.8,
+        cluster_thresholds={},
+        cluster_min_size=2,
     )
 
 
@@ -23,14 +26,17 @@ def test_refresh_clusters_runs_pass(monkeypatch, tmp_path) -> None:
         def __init__(self, path):
             calls["path"] = path
 
-    def fake_run_clustering_pass(multi_store, store, config):
+        def covered_stats(self, signature):
+            return None
+
+    def fake_run_clustering_pass(multi_store, store, config, *, coverage_signature=None):
         calls["args"] = (multi_store, store, config)
         return {"items": 3, "slices": 1, "clusters": 1, "elapsed_ms": 5}
 
     monkeypatch.setattr(cluster_store, "ClusterStore", FakeClusterStore)
     monkeypatch.setattr(cluster_pass, "run_clustering_pass", fake_run_clustering_pass)
 
-    multi_store = object()
+    multi_store = SimpleNamespace(projection_snapshot=lambda: {"version": 1})
     config = _config(tmp_path)
     stats = indexing_engine._refresh_clusters(multi_store, config)
 

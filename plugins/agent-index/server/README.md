@@ -17,3 +17,10 @@ versioned service venv, and never on a search client. See
 It depends on the base `agent-index` package (for `IndexConfig`,
 `engine.generation`, and `engine.client` -- the shared identity/config surface
 both programs read) plus `torch`, `transformers`, and `sentence-transformers`.
+
+Lifespan teardown runs even after application failure or cancellation. It
+refuses new inference with HTTP 503, joins the idle monitor, and waits for
+already-admitted inference (including response conversion outside the GPU
+lock) before unloading the model and releasing instance admission. Repeated
+task cancellation cannot discard native completion. An embedding caller
+retains ownership of its event loop and shared executor.

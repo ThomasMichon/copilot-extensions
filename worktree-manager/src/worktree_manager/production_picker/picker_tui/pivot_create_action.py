@@ -65,6 +65,17 @@ def _parse_create_fields(
         if not isinstance(ftype, str) or ftype not in valid_types:
             raise ManifestError(f"{where}[{i}].type must be one of {sorted(valid_types)}")
         field: dict = {"name": normalized_name, "type": ftype}
+        for key, limit in (("label", 200), ("description", 1000)):
+            if key not in item:
+                continue
+            value = item[key]
+            if (
+                not isinstance(value, str) or not value.strip() or len(value) > limit
+                or "\0" in value
+                or (key == "label" and any(ord(c) < 32 or ord(c) == 127 for c in value))
+            ):
+                raise ManifestError(f"{where}[{i}].{key} must be bounded readable text")
+            field[key] = value
         allow_other = item.get("allow_other", False)
         if not isinstance(allow_other, bool):
             raise ManifestError(

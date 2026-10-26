@@ -24,6 +24,8 @@ Python that can ``import agent_mcp`` (e.g. the plugin's installed venv)::
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_test_lifecycle, default_registry_root
+
 import argparse
 import contextlib
 import json
@@ -197,6 +199,26 @@ def _shutdown_serve(env: dict) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if "COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT" in os.environ:
+        if not os.environ["COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT"]:
+            raise ValueError("An explicit test lifecycle context is empty")
+        return _run_benchmark(argv)
+    with daemon_test_lifecycle(
+        owner=f"multiplexer-benchmark:{os.getpid()}", registry_root=default_registry_root(),
+    ) as environment:
+        previous = {key: os.environ.get(key) for key in environment}
+        os.environ.update(environment)
+        try:
+            return _run_benchmark(argv)
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+
+def _run_benchmark(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--sessions", type=int, default=7,
                     help="number of concurrent MCP sessions per mode (default 7)")

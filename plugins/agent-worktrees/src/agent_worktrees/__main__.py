@@ -5136,6 +5136,8 @@ def build_parser() -> argparse.ArgumentParser:
     from . import record_cli
 
     resolve_cli.add_parsers(sub)
+    from . import launch_attempt_inspection
+    launch_attempt_inspection.add_parsers(sub)
 
     p = sub.add_parser(
         "execution-leg",
@@ -5333,6 +5335,7 @@ def _current_session_ids() -> set[str]:
 # fleet, reconcile, delegates, hook -- each of those is fixed to do its own
 # lazy `from . import <module>` at its own call site instead).
 _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
+    'launch-attempts': ('launch_attempt_inspection', 'cmd_launch_attempts'),
     'dev-status': ('installation_cli', 'cmd_dev_status'),
     'dev-release': ('installation_cli', 'cmd_dev_release'),
     'anchor-check': ('maintenance_cli', 'cmd_anchor_check'),
@@ -6022,11 +6025,13 @@ def _load_full_command_surface() -> None:
             args, json_output=output._json_output, json_error=output._json_error
         )
     from .record_cli import cmd_record
+    from .launch_attempt_inspection import cmd_launch_attempts
 
     from . import update_launch_cli
 
     from .session_observations_cli import cmd_session_attention, cmd_session_observations
     COMMAND_MAP = {
+        "launch-attempts": cmd_launch_attempts,
         "resolve": cmd_resolve,
         "execution-leg": cmd_execution_leg,
         "post-exit": cmd_post_exit,

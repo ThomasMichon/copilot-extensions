@@ -254,7 +254,7 @@ def cold_environment(installation, project, area):
             "sha256sum", "iconv", "cat", "mkdir", "sync", "awk", "date", "mktemp", "mv",
             "rm", "cp", "flock", "grep", "sleep", "setsid", "mkfifo", "rmdir", "curl",
             "tar", "gzip", "head", "chmod", "sed", "tr", "ps", "realpath", "cut",
-            "wc", "od", "id", "getent", "hostname", "ln", "touch", "tail", "diff",
+            "wc", "od", "id", "getent", "hostname", "ln", "touch", "tail", "diff", "base64",
         ):
             executable = shutil.which(name)
             assert executable, f"native tool unavailable: {name}"

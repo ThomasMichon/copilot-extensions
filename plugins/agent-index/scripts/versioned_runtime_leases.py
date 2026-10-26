@@ -359,6 +359,35 @@ def _publication_lease(root: Path, *, timeout: float = 60.0):
     return _kernel_lease(root, "selectors", kind="publication", shared=False, timeout=timeout)
 
 @contextmanager
+def batch_removal_custody(root: Path, versions: list[str]):
+    """Hold all candidate guards before acquiring the single selector guard.
+
+    The installation owner must validate selection, artifact ownership and live
+    processes inside this context. This grants custody, not deletion authority.
+    Persistent lease files remain in place after settlement.
+    """
+    from contextlib import ExitStack
+
+    if not versions or len({value.lower() for value in versions}) != len(versions):
+        raise ValueError("batch removal requires distinct ordinary generations")
+    for version in versions:
+        if (
+            not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]*", version)
+            or version.endswith(".") or version.lower() == "dev"
+        ):
+            raise ValueError("batch removal requires distinct ordinary generations")
+    ordered = sorted(versions, key=str.lower)
+    with ExitStack() as custody:
+        for version in ordered:
+            custody.enter_context(construction_lease(root, version, timeout=0))
+        for version in ordered:
+            custody.enter_context(_kernel_lease(
+                root, version, kind="retention", shared=False, timeout=0,
+            ))
+        custody.enter_context(_publication_lease(root, timeout=0))
+        yield
+
+@contextmanager
 def _cleanup_lease(root: Path, version: str, *, allow_construction_owner: bool = False):
     owns_construction = _ownership_key(root, version) in getattr(_construction_owners, "keys", ())
     if owns_construction and not allow_construction_owner:

@@ -107,14 +107,14 @@ def _function(ext: str, name: str) -> str:
     return match.group(0) + "\n"
 
 
-def _run(ext: str, script: str, tmp_path: Path, env: dict[str, str]):
+def _run(ext: str, script: str, tmp_path: Path, env: dict[str, str], *, timeout=45):
     path = tmp_path / f"harness.{ext}"
     path.write_text(script, encoding="utf-8")
     command = ["bash", str(path)] if ext == "sh" else [PWSH, "-NoProfile", "-File", str(path)]
     try:
         return subprocess.run(
             command, env=env, cwd=tmp_path, capture_output=True, text=True,
-            timeout=45, check=False,
+            timeout=timeout, check=False,
         )
     except subprocess.TimeoutExpired as exc:
         log = tmp_path / "uv.jsonl"
@@ -614,11 +614,63 @@ def attributed_library_sources(tmp_path_factory):
     }
 
 
+def _small_attributed_sources(tmp_path, *, editable, canonical=None):
+    canonical = editable if canonical is None else canonical
+    repository = tmp_path / "publisher"
+    payload = repository / "plugins" / "agent-codespaces"
+    engine = repository / "libs" / "installer-engine" if canonical else payload / "scripts"
+    engine.mkdir(parents=True)
+    for name in (
+        "installer-engine.sh", "installer-engine.ps1",
+        "installer_dependency_policy.py", "installer_dependency_config.py",
+    ):
+        shutil.copyfile(ENGINE / name, engine / name)
+    library_root = repository / "libs" if canonical else payload / "libs"
+    sources = [library_root / name.removeprefix("agent-") for name in PACKAGES[:-1]] + [payload]
+    for name, source in zip(PACKAGES, sources):
+        source.mkdir(parents=True, exist_ok=True)
+        dependencies = list(PACKAGES[:-1]) if source == payload else []
+        build = (
+            '[build-system]\nrequires=["setuptools>=83.0.0"]\nbuild-backend="setuptools.build_meta"\n'
+            if editable else
+            '[build-system]\nrequires=[]\nbuild-backend="fixture_backend"\nbackend-path=["."]\n'
+        )
+        text = (
+            build +
+            f'[project]\nname="{name}"\nversion="1.0"\ndependencies={json.dumps(dependencies)}\n'
+        )
+        if editable:
+            text += '[tool.setuptools.packages.find]\nwhere=["src"]\n'
+            (source / "src").mkdir()
+            (source / "src" / "fixture_source.py").write_text("VALUE = 1\n", encoding="utf-8")
+        if source == payload:
+            text += "[tool.uv.sources]\n" + "".join(
+                f'{package}={{path={json.dumps(os.path.relpath(path, source).replace(os.sep, "/"))},'
+                f'editable={str(canonical).lower()}}}\n'
+                for package, path in zip(PACKAGES[:-1], sources[:-1])
+            )
+        (source / "pyproject.toml").write_text(text, encoding="utf-8")
+        (source / "fixture_backend.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (payload / "plugin.json").write_text(json.dumps({
+        "name": "agent-codespaces", "version": "1.0",
+        "repository": "https://github.com/ThomasMichon/copilot-extensions",
+    }), encoding="utf-8")
+    if canonical:
+        roster = repository / ".github" / "plugin" / "marketplace.json"
+        roster.parent.mkdir(parents=True)
+        roster.write_text(json.dumps({
+            "name": "copilot-extensions",
+            "plugins": [{"name": "agent-codespaces", "version": "1.0", "source": "plugins/agent-codespaces"}],
+        }), encoding="utf-8")
+    return engine, sources
+
+
 @pytest.mark.parametrize("ext", ["sh", "ps1"])
 @pytest.mark.parametrize("editable", [False, True])
 @pytest.mark.parametrize("mode", ["sre", "fatal"])
+@pytest.mark.timeout(120)
 def test_codespaces_library_install_order_retry_and_errors(
-    tmp_path, ext, editable, mode, attributed_library_sources,
+    tmp_path, ext, editable, mode,
 ):
     if ext == "ps1" and PWSH is None:
         pytest.skip("pwsh unavailable")
@@ -627,7 +679,9 @@ def test_codespaces_library_install_order_retry_and_errors(
     env = _env(tmp_path)
     uv = _fake_uv(tmp_path)
     env["TEST_UV_MODE"] = mode
-    engine, sources = attributed_library_sources["canonical" if editable else "local"]
+    engine, sources = _small_attributed_sources(
+        tmp_path, editable=editable, canonical=editable or mode == "sre",
+    )
     env["TEST_UV_EXPECTED_SOURCES"] = json.dumps({
         tomllib.loads((source / "pyproject.toml").read_text())["project"]["name"]: str(source)
         for source in sources
@@ -647,33 +701,98 @@ def test_codespaces_library_install_order_retry_and_errors(
         script += f"if (-not (Install-PackageInto -Python '{python}'"
         script += " -Editable" if editable else ""
         script += ")) { exit 1 }\n"
-    result = _run(ext, script, tmp_path, env)
+    result = _run(ext, script, tmp_path, env, timeout=90)
     log = tmp_path / "uv.jsonl"
     assert log.exists(), result.stdout + result.stderr
     calls = [json.loads(line) for line in log.read_text().splitlines()]
     assert bool(result.returncode) == (mode == "fatal"), result.stdout + result.stderr
+    expected = ["pip", "install", "--python", str(python)]
+    if not editable:
+        expected.append("--no-editable")
+    for package, source in zip(PACKAGES, sources):
+        expected.extend((["--editable"] if editable else ["--reinstall-package", package]) + [str(source)])
+    expected.append("--quiet")
+    assert [_without_policy_arguments(args) for args in calls] == (
+        [expected] * (1 if mode == "fatal" else 3)
+    )
     if mode == "fatal":
-        assert len(calls) == 1
         assert "permanent failure" in result.stderr
-        assert PACKAGES[0] in result.stderr
-        mode_args = ["--editable"] if editable else ["--reinstall-package", PACKAGES[0]]
-        assert _without_policy_arguments(calls[0]) == [
-            "pip", "install", "--python", str(python), *mode_args, str(sources[0]), "--quiet",
-        ]
+        assert "agent-codespaces closure install failed" in result.stderr
         if ext == "ps1":
             assert "(exit 23)" in result.stderr
-        return
-    assert len(calls) == len(PACKAGES) + 2
-    calls = [_without_policy_arguments(args) for args in calls]
-    offset = 0
-    for index, (package, source) in enumerate(zip(PACKAGES, sources)):
-        args = calls[offset]
-        assert args[:4] == ["pip", "install", "--python", str(python)]
-        attempts = 3 if index == 0 else 1
-        assert calls[offset : offset + attempts] == [args] * attempts
-        assert args[-2:] == [str(source), "--quiet"]
-        assert args[4:-2] == (["--editable"] if editable else ["--reinstall-package", package])
-        offset += attempts
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.portfolio_tier("T3")
+def test_codespaces_native_batch_installs_cold_and_refreshes_warm_local_sources(tmp_path):
+    if PWSH is None:
+        pytest.skip("pwsh unavailable")
+    uv = shutil.which("uv")
+    if not uv:
+        pytest.skip("native UV unavailable")
+    engine, sources = _small_attributed_sources(tmp_path, editable=False, canonical=True)
+    backend = """
+import pathlib, tomllib, zipfile
+VALUE = 1
+def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
+    project = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]
+    name = project["name"].replace("-", "_")
+    filename = name + "-1.0-py3-none-any.whl"
+    prefix = name + "-1.0.dist-info/"
+    metadata = "Metadata-Version: 2.3\\nName: " + project["name"] + "\\nVersion: 1.0\\n"
+    metadata += "".join("Requires-Dist: " + item + "\\n" for item in project["dependencies"])
+    with zipfile.ZipFile(pathlib.Path(wheel_directory) / filename, "w") as wheel:
+        wheel.writestr(prefix + "METADATA", metadata + "\\n")
+        wheel.writestr(prefix + "WHEEL", "Wheel-Version: 1.0\\nRoot-Is-Purelib: true\\nTag: py3-none-any\\n")
+        wheel.writestr(prefix + "RECORD", "")
+        wheel.writestr(name + "/__init__.py", "VALUE = " + str(VALUE) + "\\n")
+    return filename
+"""
+    for source in sources:
+        (source / "fixture_backend.py").write_text(backend, encoding="utf-8")
+    env = _env(tmp_path)
+    env.update(UV_OFFLINE="1", UV_NO_INDEX="1", UV_PYTHON_DOWNLOADS="never",
+               UV_CACHE_DIR=str(tmp_path / "cache"))
+    slot = tmp_path / "venv"
+    flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    subprocess.run(
+        [sys._base_executable, "-I", "-m", "venv", "--copies", "--without-pip", str(slot)],
+        env=env, check=True, capture_output=True, timeout=30, creationflags=flags,
+    )
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    script = _prelude("ps1", engine) + _function("ps1", "Install-PackageInto")
+    script += (
+        "Set-Item Function:Invoke-FixtureUvInstall -Value ${function:Invoke-UvPipInstallResilient}\n"
+        "$script:InstallCalls = 0\n"
+        "function Invoke-UvPipInstallResilient { param($UvCommand, $Arguments)\n"
+        "  $script:InstallCalls++\n"
+        "  Invoke-FixtureUvInstall -UvCommand $UvCommand -Arguments $Arguments\n}\n"
+        f"$UvCommand='{uv}'\nfunction Remove-ConsoleTrampolines {{ param($VenvDir) }}\n"
+    )
+    script += "".join(f"${var}='{path}'\n" for var, path in zip(PS_VARIABLES, sources))
+    script += (
+        f"if (-not (Install-PackageInto -Python '{python}')) {{ exit 1 }}\n"
+        "if ($script:InstallCalls -ne 1) { throw 'Closure used multiple retained installs' }\n"
+    )
+    for expected in (1, 2):
+        if expected == 2:
+            (sources[0] / "fixture_backend.py").write_text(
+                backend.replace("VALUE = 1", "VALUE = 2"), encoding="utf-8",
+            )
+        result = _run("ps1", script, tmp_path, env, timeout=120)
+        assert result.returncode == 0, result.stdout + result.stderr
+        probe = tmp_path / "probe.py"
+        probe.write_text(
+            "import importlib\nfrom importlib.metadata import distributions\n"
+            f"assert {{d.metadata['Name']:d.version for d in distributions()}} == "
+            f"{dict.fromkeys(PACKAGES, '1.0')!r}\n"
+            f"assert importlib.import_module('agent_ssh_manager').VALUE == {expected}\n",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            [str(python), "-I", str(probe)], env=env, check=True, capture_output=True,
+            timeout=15, creationflags=flags,
+        )
 
 
 def test_codespaces_canonical_reference_registration_and_release_materialization(tmp_path):
@@ -967,6 +1086,7 @@ def test_codespaces_signed_venv_recovery_keeps_usable_nonzero_result(tmp_path, u
         driver = tmp_path / "signed-python.py"
         driver.write_text(
             "import sys\nfrom pathlib import Path\n"
+            "assert '--without-pip' in sys.argv\n"
             "root = Path(sys.argv[-1])\n"
             "(root / 'Scripts').mkdir(parents=True)\n"
             "(root / 'Scripts' / 'python.exe').touch()\n"
@@ -982,12 +1102,14 @@ def test_codespaces_signed_venv_recovery_keeps_usable_nonzero_result(tmp_path, u
     else:
         signed = tmp_path / "signed-python"
         signed.write_text(
-            '#!/bin/sh\nmkdir -p "$4/Scripts"\ntouch "$4/Scripts/python.exe" "$4/pyvenv.cfg"\n'
+            '#!/bin/sh\nset -eu\n[ "$4" = "--without-pip" ]\n'
+            'for argument in "$@"; do slot="$argument"; done\n'
+            'mkdir -p "$slot/Scripts"\ntouch "$slot/Scripts/python.exe" "$slot/pyvenv.cfg"\n'
             f"exit {signed_rc}\n",
             encoding="utf-8",
         )
         signed.chmod(0o755)
-    # Signed invocation is: -m venv --copies <slot>.
+    # Signed invocation is: -m venv --copies --without-pip <slot>.
     script = (
         _prelude("ps1")
         + _function("ps1", "Deploy-Venv")

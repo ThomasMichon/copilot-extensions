@@ -179,6 +179,68 @@ def test_real_host_process_preserves_query_arguments_and_exit_code(monkeypatch, 
     assert json.loads(report.read_text(encoding="utf-8")) == arguments
 
 
+@pytest.mark.parametrize("option", ["--change-hints-file", "--change-hints-file=", "--change-hints-f="])
+def test_real_host_process_reads_caller_relative_hint_file(monkeypatch, tmp_path, option):
+    from agent_index import transport
+
+    runtime = tmp_path / "server-runtime"
+    venv.EnvBuilder(with_pip=False).create(runtime)
+    if os.name == "nt":
+        python = runtime / "Scripts" / "python.exe"
+        site_packages = runtime / "Lib" / "site-packages"
+    else:
+        python = runtime / "bin" / "python"
+        site_packages = runtime / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+    package = site_packages / "agent_index"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    caller = tmp_path / "caller directory"
+    caller.mkdir()
+    hosted_cwd = tmp_path / "installation"
+    hosted_cwd.mkdir()
+    (caller / "hints.json").write_text('{"origin":"caller"}', encoding="utf-8")
+    (hosted_cwd / "hints.json").write_text('{"origin":"installation"}', encoding="utf-8")
+    report = tmp_path / "forwarded.json"
+    (package / "__main__.py").write_text(
+        "import argparse, json\nfrom pathlib import Path\n"
+        "parser = argparse.ArgumentParser()\n"
+        "parser.add_argument('command')\nparser.add_argument('--source')\n"
+        "parser.add_argument('--change-hints-file', type=Path)\n"
+        "args = parser.parse_args()\n"
+        f"Path({str(report)!r}).write_text(json.dumps({{"
+        "'cwd': str(Path.cwd()), 'path': str(args.change_hints_file), "
+        "'payload': json.loads(args.change_hints_file.read_text(encoding='utf-8'))"
+        "}), encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(caller)
+    monkeypatch.delenv(config.SOURCE_MODE_ENV, raising=False)
+    monkeypatch.setenv(config.SERVER_VENV_PYTHON_ENV, str(python))
+    monkeypatch.setenv(config.HOME_ENV, str(hosted_cwd))
+    monkeypatch.setattr(cli, "install_dir", lambda: hosted_cwd)
+    monkeypatch.setattr(transport, "plan_route", lambda: ("host", None))
+    monkeypatch.setattr(transport, "maybe_delegate", lambda *_: None)
+    popen = cli.subprocess.Popen
+
+    def spawn(cmd, **kwargs):
+        return popen(cmd, **{**kwargs, **no_window_kwargs()})
+
+    monkeypatch.setattr(cli.subprocess, "Popen", spawn)
+    flags = [option + "hints.json"] if option.endswith("=") else [option, "hints.json"]
+    assert cli.main(["index", "--source", "git:sample", *flags]) == 0
+    recorded = json.loads(report.read_text(encoding="utf-8"))
+    assert Path(recorded["cwd"]) == hosted_cwd
+    assert Path(recorded["path"]) == caller / "hints.json"
+    assert recorded["payload"] == {"origin": "caller"}
+
+
+def test_hint_path_normalization_preserves_other_argv():
+    from agent_index.index_command import absolute_hint_file_argv
+
+    for args in ([], ["search", "--", "--change-hints-file"], ["index", "--"], ["index", "--full"]):
+        assert absolute_hint_file_argv(args) == args
+
+
 def test_cmd_start_dispatches_to_the_server_venv_when_provisioned(monkeypatch, tmp_path):
     server_python = tmp_path / "server-venv" / "python3"
     _make_executable(server_python)

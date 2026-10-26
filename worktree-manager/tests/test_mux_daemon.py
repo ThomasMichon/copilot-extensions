@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 import platform
 import subprocess
 import threading
@@ -1916,6 +1915,78 @@ def test_ensure_daemon_running_end_to_end_with_a_real_subprocess(tmp_path):
             proc.kill()
 
 
+@pytest.mark.parametrize("root_source", ["cli", "environment"])
+@pytest.mark.parametrize("relative_root", ["relative-runtime", "../relative-runtime"])
+def test_relative_root_cli_starts_an_admitted_daemon(tmp_path, root_source, relative_root):
+    """Exercise argument parsing, admission and the real resident rendezvous."""
+    import os
+    import sys
+
+    cwd = tmp_path / "caller" if relative_root.startswith("..") else tmp_path
+    cwd.mkdir(exist_ok=True)
+    root = tmp_path / "relative-runtime"
+    env = dict(os.environ, WORKTREE_MANAGER_ROOT=relative_root)
+    command = [sys.executable, "-m", "worktree_manager", "mux-daemon", "run"]
+    if root_source == "cli":
+        env["WORKTREE_MANAGER_ROOT"] = "not-the-selected-root"
+        command.append(f"--root={relative_root}")
+    proc = subprocess.Popen(
+        command, cwd=cwd, env=env,
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+    )
+    try:
+        deadline = time.monotonic() + 10
+        live = False
+        while time.monotonic() < deadline and proc.poll() is None:
+            data = mux_daemon.read_lock_data(mux_daemon.lock_path(root))
+            if data is not None and mux_daemon._daemon_is_live(data):
+                live = True
+                break
+            time.sleep(0.05)
+        detail = proc.stderr.read().decode(errors="replace") if proc.poll() is not None else ""
+        assert live, f"{root_source} relative-root startup never became ready: {detail}"
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+        proc.stderr.close()
+
+
+@pytest.mark.parametrize("root_source", ["cli", "environment"])
+def test_relative_root_keeps_redirected_runtime_admission_held(tmp_path, root_source):
+    import os
+    import sys
+
+    target = tmp_path / "runtime"
+    target.mkdir()
+    alias = tmp_path / "alias"
+    if os.name == "nt":
+        result = subprocess.run(
+            [os.environ["COMSPEC"], "/d", "/c", "mklink", "/J", str(alias), str(target)],
+            capture_output=True, text=True, timeout=15,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        assert result.returncode == 0, result.stderr
+    else:
+        alias.symlink_to(target, target_is_directory=True)
+    cwd = tmp_path / "caller"
+    cwd.mkdir()
+    env = dict(os.environ, WORKTREE_MANAGER_ROOT="../alias")
+    command = [sys.executable, "-m", "worktree_manager", "mux-daemon", "run"]
+    if root_source == "cli":
+        env["WORKTREE_MANAGER_ROOT"] = str(tmp_path / "unselected")
+        command.append("--root=../alias")
+    result = subprocess.run(
+        command, cwd=cwd, env=env, capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode != 0
+    assert "daemon runtime anchor is redirected" in result.stderr
+    assert list(target.iterdir()) == []
+
+
 def test_spawn_detached_scrubs_auth_env(monkeypatch):
     captured = {}
 
@@ -1926,7 +1997,7 @@ def test_spawn_detached_scrubs_auth_env(monkeypatch):
             pass
         return _Proc()
 
-    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(mux_daemon_process, "spawn_daemon", _fake_popen)
     monkeypatch.setenv("GH_TOKEN", "gh-token")
     monkeypatch.setenv("GITHUB_TOKEN", "github-token")
     monkeypatch.setenv("AGENT_WORKTREES_AHP_AUTH_TOKEN", "ahp-token")
@@ -1945,7 +2016,7 @@ def test_spawn_detached_never_inherits_caller_cwd(monkeypatch, tmp_path, given):
         captured["cwd"] = kwargs.get("cwd")
         return object()
 
-    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(mux_daemon_process, "spawn_daemon", _fake_popen)
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setattr(mux_daemon_process.os.path, "expanduser", lambda _p: str(home))
@@ -1956,15 +2027,7 @@ def test_spawn_detached_never_inherits_caller_cwd(monkeypatch, tmp_path, given):
 
 
 def test_spawn_detached_windows_kwargs_avoid_console_flash(monkeypatch):
-    """Regression test (2026-09-26 flashing-console bug): the daemon's own
-    subsequent per-tick ``subprocess.run([mux_bin, ...])`` calls (in
-    ``apply_status_options``/``_mux_session_alive``) are console-subsystem
-    children. A parent spawned with ``DETACHED_PROCESS`` gives such children
-    no console to inherit, so each one allocates -- and flashes -- its own.
-    Assert the Windows branch never sets ``DETACHED_PROCESS`` and does set
-    ``CREATE_NO_WINDOW``, matching ``agent_procutil.windowless_daemon_kwargs``'s
-    documented contract. ``_is_windows()`` reads ``os.name``, not
-    ``sys.platform`` -- patch that."""
+    """Recurring mux children retain the common console-safe launch contract."""
     captured = {}
 
     def _fake_popen(argv, **kwargs):
@@ -1973,29 +2036,18 @@ def test_spawn_detached_windows_kwargs_avoid_console_flash(monkeypatch):
             pass
         return _Proc()
 
-    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
-    import agent_procutil
-
-    monkeypatch.setattr(agent_procutil, "_is_windows", lambda: True)
+    monkeypatch.setattr(mux_daemon_process, "spawn_daemon", _fake_popen)
     monkeypatch.setattr(
         mux_daemon.mux_daemon_process, "direct_daemon_python", lambda executable: (executable, {}),
     )
-    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
-
     assert mux_daemon._spawn_detached(["python", "-m", "worktree_manager"]) is True
-    flags = captured["kwargs"].get("creationflags", 0)
-    # These constants only exist on the ``subprocess`` module on Windows;
-    # mirror agent_procutil's own portable fallbacks so this test can run
-    # (and correctly assert Windows-shaped kwargs) on any host OS.
-    create_no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
-    detached_process = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
-    assert flags & create_no_window
-    assert not flags & detached_process
+    assert captured["kwargs"]["console_children"] is True
+    assert captured["kwargs"]["instance"].lifecycle == "resident"
+    assert captured["kwargs"]["log_path"].name == "mux-daemon.log"
 
 
 def test_spawn_detached_posix_kwargs_unaffected(monkeypatch):
-    """POSIX has no console-subsystem concept; confirm the fix left its
-    ``start_new_session`` behavior alone."""
+    """Platform detach flags remain owned by the common attributed launcher."""
     captured = {}
 
     def _fake_popen(argv, **kwargs):
@@ -2004,12 +2056,11 @@ def test_spawn_detached_posix_kwargs_unaffected(monkeypatch):
             pass
         return _Proc()
 
-    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
-    monkeypatch.setattr(os, "name", "posix")
-    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    monkeypatch.setattr(mux_daemon_process, "spawn_daemon", _fake_popen)
 
     assert mux_daemon._spawn_detached(["python", "-m", "worktree_manager"]) is True
-    assert captured["kwargs"].get("start_new_session") is True
+    assert captured["kwargs"]["instance"].lifecycle == "resident"
+    assert "start_new_session" not in captured["kwargs"]
     assert "creationflags" not in captured["kwargs"]
 
 

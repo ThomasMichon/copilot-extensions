@@ -35,10 +35,17 @@ DEFAULT_REF = "main"
 CONFIG_NAME = "config.toml"
 
 
+def default_root() -> Path:
+    """Manager installation/configuration root, without importing its installer."""
+    env = os.environ.get("WORKTREE_MANAGER_ROOT")
+    if env:
+        return Path(env)
+    home = Path(os.environ.get("USERPROFILE") or os.path.expanduser("~"))
+    return home / ".worktree-manager"
+
+
 def config_path(root: Path | None = None) -> Path:
     """Path to the user-level config file under the install root."""
-    from .self_install import default_root
-
     return (root or default_root()) / CONFIG_NAME
 
 

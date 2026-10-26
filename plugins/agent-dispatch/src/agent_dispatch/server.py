@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import logging
 import os
 import socket
@@ -273,6 +275,7 @@ def _clear_routing() -> None:
         log.debug("zdd routing clear-on-shutdown skipped", exc_info=True)
 
 
+@daemon_entrypoint("agent-dispatch-coordinator", source=__file__, purpose="production")
 def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = False) -> None:
     """Bind and serve the coordinator (blocking).
 
@@ -466,14 +469,38 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
         # Always release even on an early raise/SystemExit above -- the
         # readiness-gated release path above already cleared this to None on
         # its own success, so this is a no-op there.
-        if start_lock is not None:
-            start_lock.release()
-        if fed_runner is not None:
-            fed_runner.stop()
-        _clear_routing()
-        clear_endpoint(run_dir(), owner_pid=os.getpid())
-        if sock is not None:
-            sock.close()
+        try:
+            if start_lock is not None:
+                start_lock.release()
+        finally:
+            try:
+                if fed_runner is not None:
+                    _settle_federation(fed_runner, interrupted=sys.exc_info()[1])
+            finally:
+                _clear_routing()
+                clear_endpoint(run_dir(), owner_pid=os.getpid())
+                if sock is not None:
+                    sock.close()
+
+
+def _settle_federation(runner, *, interrupted=None) -> None:
+    """Keep the hosting admission until bounded local retirement confirms success."""
+    retry = False
+    while True:
+        try:
+            if retry:
+                time.sleep(0.05)
+            if runner.stop(resign=not retry) is True:
+                break
+            if not retry:
+                log.warning("federation cleanup pending; hosting admission retained")
+        except BaseException as exc:
+            if interrupted is None:
+                interrupted = exc
+                log.warning("federation cleanup interrupted; hosting admission retained")
+        retry = True
+    if interrupted is not None:
+        raise interrupted
 
 
 def _maybe_start_federation(*, drain_gate=None):
@@ -490,6 +517,7 @@ def _maybe_start_federation(*, drain_gate=None):
 
     if not _cfg.federation_enabled():
         return None
+    runner = None
     try:
         from .federation_runner import runner_from_config
 
@@ -503,7 +531,13 @@ def _maybe_start_federation(*, drain_gate=None):
             _cfg.federation_instance(),
         )
         return runner
-    except Exception as exc:
+    except BaseException as exc:
+        if runner is not None:
+            _settle_federation(
+                runner, interrupted=exc if not isinstance(exc, Exception) else None,
+            )
+        if not isinstance(exc, Exception):
+            raise
         log.warning("federation runner not started (serving without it): %s", exc)
         return None
 

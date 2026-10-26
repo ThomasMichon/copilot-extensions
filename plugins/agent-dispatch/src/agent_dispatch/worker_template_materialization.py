@@ -48,7 +48,9 @@ def _absolute_or_named(value: object) -> bool:
     )
 
 
-def materialize_template(selected: dict, overrides: dict, name: str, repo_root: str) -> dict:
+def materialize_template(
+    selected: dict, overrides: dict, name: str, repo_root: str, *, snapshot=None,
+) -> dict:
     from . import registrar_discovery as rd
     from .registrar_document import _identity_origin_root, qualify_supplier_context
     from .registrar_reconcile import declaration_to_registration
@@ -68,7 +70,7 @@ def materialize_template(selected: dict, overrides: dict, name: str, repo_root: 
     request = {"extends": selected["reference"], **overrides, "name": name, "owner": OWNER}
     origins = {}
     context = {}
-    resources = RepositoryResourceSnapshot(execution=False)
+    resources = snapshot or RepositoryResourceSnapshot(execution=False)
     expected_context = selected["recipe_context"]
     document = resolve_extends(
         request, base_dir=directory, activation=selected["activation"], path_origins=origins,
@@ -158,7 +160,7 @@ def materialize_template(selected: dict, overrides: dict, name: str, repo_root: 
             from .producers.emitter import validate_spec
 
             try:
-                validate_spec(dict(declaration.spec), resolve_resources=True)
+                validate_spec(dict(declaration.spec), resolve_resources=True, snapshot=snapshot)
             except ValueError as exc:
                 raise RegistrarError(f"template dependency validation failed: {exc}") from exc
             for key in ("repository_issue_loop", "effort_driver_loop"):
@@ -168,7 +170,7 @@ def materialize_template(selected: dict, overrides: dict, name: str, repo_root: 
                     or _absolute_or_named(declaration.spec.get("cwd"))
                 ):
                     raise RegistrarError("worker identity source context cannot yet be materialized safely")
-    data, relocated = validate_configuration(name, document, repo_root)
+    data, relocated = validate_configuration(name, document, repo_root, snapshot=snapshot)
     def registrations(declarations):
         result = []
         for declaration in declarations:

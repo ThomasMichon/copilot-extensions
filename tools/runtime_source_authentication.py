@@ -27,7 +27,7 @@ from installer_wheel_inputs import _check_deadline
 import prepare_runtime_source
 from versioned_runtime_source import SourceIdentity, read_source_identity
 from worktree_manager import runtime_source, runtime_source_config
-from worktree_manager.self_install import default_root
+from worktree_manager.source_config import default_root
 
 
 @dataclass(frozen=True)

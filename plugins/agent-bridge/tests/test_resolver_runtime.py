@@ -162,8 +162,37 @@ def test_restore_different_execution_platform_refuses(resolver, monkeypatch):
         restore_resolver(payload)
 
 
-def test_scoped_topology_cannot_restore_an_unknown_local_identity(resolver):
-    payload = capture_resolver(resolver)
-    payload["local_key"] = None
+@pytest.mark.parametrize("kind", ["unmatched", "foreign-platform", "ssh-alias"])
+@pytest.mark.parametrize("legacy", [False, True])
+def test_remote_only_scoped_state_roundtrips_without_local_authority(monkeypatch, kind, legacy):
+    monkeypatch.setattr(agent_registry, "_detect_platform", lambda: "linux")
+    monkeypatch.setattr("socket.gethostname", lambda: "workstation")
+    machine = MachineConfig(
+        "remote", "Remote", hostname="another-host", physical_host="another-host",
+        execution_platform="linux",
+        ssh_environments=[SshEnvironment("linux", "remote-ssh")],
+    )
+    if kind == "foreign-platform":
+        machine.hostname = "workstation"
+        machine.execution_platform = "windows"
+        machine.ssh_environments = [SshEnvironment("windows", "remote-ssh")]
+    elif kind == "ssh-alias":
+        machine.ssh_environments[0].alias = "workstation"
+    machine.legacy_key = machine.key if legacy else ""
+    original = AgentResolver({}, {machine.key: machine})
+    assert original._local_machine is None
+    payload = capture_resolver(original)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("remote-only restoration must not rediscover or acquire local authority")
+
+    monkeypatch.setattr(agent_registry, "_detect_local_machine", forbidden)
+    restored = restore_resolver(payload)
+    assert restored._local_machine is None
+    assert restored._local_platform == "linux"
+    assert not restored.is_local_transport("remote-ssh", execution_space_key="remote")
+    assert not restored.is_local_transport("workstation")
+    assert capture_resolver(restored) == payload
+    monkeypatch.setattr(agent_registry, "_detect_platform", lambda: "windows")
     with pytest.raises(PrivateIPCError, match=Refusal.AUTHORITY.value):
         restore_resolver(payload)
