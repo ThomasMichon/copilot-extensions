@@ -53,8 +53,11 @@ survival; neither substitutes for the other.
   and the current journal; preserve open PRs, test resources and unresolved
   lifecycle effects. A phase or release is not whole-effort completion.
 - No host uninstall, shared-daemon restart or installed rollout is authorized
-  merely by this plan. Destructive tests use explicitly disposable roots and
-  owned processes. Installed acceptance uses the target's normal approval flow.
+  merely by this plan. The operator subsequently authorized one selected live
+  Windows test host for the [live round trip](live-roundtrip.md), including
+  backups, uninstall/reinstall, re-release and necessary promotion fixes.
+  This does not authorize effects on other hosts or waive repository, OS
+  privilege, connectivity, custody or data-preservation gates.
 - Reuse #9022's conduct-guidance companion and #9040's reviewed shared YAML
   banner contract, including their retained automatic-maintenance owners.
   This effort integrates standby with session survival; it does not introduce
@@ -121,6 +124,17 @@ The detailed fencing, negative controls and rollout admission below are
 **agent-recommended implementation/validation refinements**, not additional
 verbatim operator requirements.
 
+**2026-10-26 selected live-host direction (summary):** use the explicitly
+selected Windows test machine to audit the install footprint, separate durable
+state from reconstructible runtime data, back up the data first, and carefully
+uninstall services/tools while preserving SSH-Gateway connectivity and muxed
+Copilot. Prove a clean middle, then reinstall and reconnect to the retained data
+so execution carries on. The operator explicitly authorized uninstall,
+reinstall, re-release and necessary Main-promotion workflow repairs until this
+round trip works. The [literal follow-up](inception-transcript.md#operator---selected-live-test-host)
+redacts only the private host name. Concrete host identity and operational
+records remain private; the generic execution contract is [live-roundtrip.md](live-roundtrip.md).
+
 ## Plan
 
 ### Phase 1 - Reviewed contract and shared ownership
@@ -139,7 +153,7 @@ verbatim operator requirements.
 
 ### Phase 2 - Literal disposable-installation reproduction
 
-- [ ] Review and implement the supported Manager uninstall prerequisite
+- [x] Review and implement the supported Manager uninstall prerequisite
   (#8864) in [manager-uninstall.md](manager-uninstall.md), then return to this
   same real-removal baseline.
 - [ ] Reproduce current behavior with real installed A, an interactive owned
@@ -202,6 +216,9 @@ verbatim operator requirements.
 - [ ] Obtain any required selected-host rollout approval, use the canonical
   updater, and validate a fresh native launch/exit. Existing sessions may
   still carry their older wrapper and are not rollout evidence.
+- [ ] Execute the explicitly authorized selected-host [live round trip](live-roundtrip.md):
+  protected connectivity and consistent backups first, attributable removal,
+  recorded clean middle, reinstall/state reconciliation and same-session proof.
 - [ ] Re-read every Plan/Validation item, promote durable truth to owner docs,
   settle owned test/PR resources, mark Done and archive through normal review.
 
@@ -255,6 +272,10 @@ operator's installation-survival contract.
   quiet, cleanup remains a bounded summary and updated batch tails remain valid.
 - [ ] Normal release, explicitly approved selected-host installed validation,
   durable evidence and final effort review pass before declaring Done.
+- [ ] Selected live host: verified restorable backups precede removal;
+  SSH-Gateway and the same mux/Copilot processes remain usable at every phase;
+  owned runtime/services are absent at the clean middle with explicit protected
+  exceptions; reinstall preserves durable state and pending-effect custody.
 
 ## Proposal
 
@@ -276,6 +297,19 @@ and does not delay final Copilot exit indefinitely merely to deliver a lifecycle
 notice; the existing bounded/quiet absent-handler contract remains intact.
 
 ## Journal
+
+### 2026-10-26 - Selected live-host round trip authorized
+
+- The operator selected one live Windows test host and explicitly authorized
+  audit, state separation, backups, careful uninstall/reinstall, re-release and
+  necessary Main-promotion repairs until a real clean-middle round trip works.
+  Preserve SSH-Gateway connectivity and muxed Copilot; no other host is covered.
+- Added the generic live-roundtrip charter and validation obligations for
+  review before effects. Read-only preflight reached the declared host through
+  its existing Gateway forward; the remote shell is not elevated.
+- No host files, services, installations or maintenance banner have been
+  changed. The supported Manager uninstall prerequisite is source-merged;
+  the complete parent process-survival and maintenance-standby gates remain open.
 
 ### 2026-10-24 - Canonical proposal
 
@@ -520,3 +554,39 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
 - Next, inventory the concrete installer/ownership/lifecycle seams and
   implement the smallest supported removal operation. No operator-host
   uninstall, live-session intervention or rollout follows from plan approval.
+
+### 2026-10-26 - Maintenance integration intent merged
+
+- #9045 merged as `2687e35fa9216bb93c0907d4547d5f1b264e8ae2` after
+  exact-head Copilot approval with no findings and required green CI. The
+  managed merge used the repository-authorized exception for an additional
+  CODEOWNER vote, not a waiver of findings or status checks.
+- Re-read the canonical Plan and Validation Plan after guarded pull-forward.
+  The maintenance extension is reviewed intent only: normal YAML guidance
+  delivery, native standby and safe resumption remain unchecked, as do the
+  original actual two-product session-survival gates.
+- Resume the supported Manager uninstall prerequisite first. Preserve its
+  three review fixes while reconciling current native qualification portfolios;
+  resolve the real test failure and rerun changed-head native acceptance before
+  returning to production wrapper/current-handler migration.
+
+### 2026-10-26 - Supported Manager uninstall source merged
+
+- #8955 merged as `c2cc00e92b47f1e9036b3ae4d9e8f329ee796309` after
+  exact-head Copilot approval, resolution of every review thread and required
+  green CI. The metadata-triggered CI run also passed before managed completion;
+  the repository-authorized additional-CODEOWNER exception did not waive CI.
+- Qualified source `0d78da44bffbb5120fc45d4b1e0fcefc1d21f9d6` passed
+  203 affected Windows tests with three POSIX-only skips, all 206 Linux tests
+  without skips, and actual installed daemon/configuration-list/removal/reinstall
+  flows on both platforms. The fresh Windows lane was `40292624279`; the
+  Linux native test passed in 58.20 seconds. Artifact and installed/source
+  identities, durable-state bytes and exact disposable cleanup were verified.
+- This closes the supported-uninstaller source prerequisite only. Normal
+  containing release, approved installed acceptance, actual same-process
+  interactive two-product survival, copied wrappers/current handlers and YAML
+  maintenance standby remain open.
+- Re-read the canonical Plan and Validation Plan. Return to the real
+  interactive baseline and current launch-contract inventory, preserving
+  #5579's forwarding ownership. Do not treat this merged prerequisite as
+  completion or retire the continuing parent worktree.

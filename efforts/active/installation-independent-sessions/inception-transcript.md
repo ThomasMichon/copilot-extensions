@@ -78,3 +78,10 @@ The operator confirmed the proposed slug:
 ## Operator - Priority and maintenance window
 
 > I have quiesced nearly all other sessions across all machines. Your work, which isolated Copilot sessions from updates to copilot-extensions tools and services, has priorty. I'm expanding the vision to include the concept of a "maintenance window and notification", where if the agent-* tols suddenly disappear out from under a running agent, then agent need to have a strategy to "pause", read a local-machine banner with instructions, and wait out the maintenance window. Once the maintenance window ends (the yaml file clears), then agents can resume.
+
+## Operator - Selected live test host
+
+Only the private host name is redacted below. The authorization applies to
+that one operator-selected machine, not to an arbitrary host or fleet.
+
+> As you continue this effort, feel free to use \<selected-test-host> as your test machine: you may audit the install footprint, separate state files from runtime data, and then carefully uninstall copilot-extensions services and tools from it, taking care to leave SSH-gateway connectivity running. Try to get to the point where you only leave muxed copilot processes alive, with all our services stopped and gone. Then focus on being able to perform a reinstall which stitches back up to the runtime data and carries on as though nothing was amiss. YOu have my full approval to uninstall, reinstall, re-release, and unblock main promotion with workflow fixes as needed until \<selected-test-host> demonstrates a "round trip" through install and reinstall, with a "clean state" in the middle. Definitiely worth making backups of data we store in ~/.agent- and ~/.&lt;repo&gt; first!

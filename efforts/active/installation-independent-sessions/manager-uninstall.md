@@ -2,10 +2,10 @@
 
 Back to the [canonical effort](README.md). Tracking issue: #8864.
 
-**Status:** reviewed contract; implementation review corrections under validation.
-The earlier candidate qualified actual Linux and Windows removal; the revised
-candidate still requires changed-head native qualification and passing review.
-No release or host operation is asserted by this document.
+**Status:** source prerequisite complete; #8955 merged after exact-head review,
+required CI and actual Linux/Windows qualification. Normal containing release
+and parent session-survival acceptance remain open. No host operation is
+asserted by this document.
 
 ## Selected intent
 
@@ -67,11 +67,11 @@ introducing a service or a machine-global selector.
 ## Independently updated boundary
 
 Apply [service-contract evolution](../../../docs/patterns/service-contract-evolution.md).
-The eventual implementation must declare its uninstall contract/capability
-separately from package versions, against the actual selected installer/runtime.
-This document does not claim that declaration already exists.
+The implementation declares its uninstall contract/capability separately from
+package versions, against the actual selected installer/runtime, in the
+executing payload's `references/uninstall-contract.json`.
 
-The proposed identity is `worktree-manager.uninstall`, generation 1, initially
+The identity is `worktree-manager.uninstall`, generation 1, initially
 supporting generation-1 callers/providers. Older providers have no established
 uninstall baseline; preserve their existing install/update operations without
 treating arbitrary deletion as equivalent uninstall support. A new provider may
@@ -90,13 +90,13 @@ Document supported legacy targets and rollback/refusal behavior.
 1. [x] Read the current Manager/standalone installer entrypoints, owned artifact
    inventory, root authority, locks, retention and service lifecycle. Select
    the smallest compatible operation and record its actual interface.
-2. Implement safe preview/refusal and supported uninstall through those owners,
+2. [x] Implement safe preview/refusal and supported uninstall through those owners,
    including standalone packaging and user-facing documentation.
-3. Add focused unit and real subprocess controls, plus a changefile. Preserve
+3. [x] Add focused unit and real subprocess controls, plus a changefile. Preserve
    old install/update callers and truthful unsupported uninstall behavior.
-4. Exercise actual installed removal/reinstall in disposable Linux and native
+4. [x] Exercise actual installed removal/reinstall in disposable Linux and native
    Windows roots; do not substitute prototype deletion or host rollout.
-5. Land through the normal review/CI flow, then return to the parent effort's
+5. [x] Land through the normal review/CI flow, then return to the parent effort's
    real interactive Copilot/mux baseline and copied-wrapper migration.
 
 ## Validation
@@ -245,3 +245,15 @@ termination, credential change or installed rollout is authorized by this plan.
 - The complete affected engine, inventory, configuration and removal packet
   passed 203 Windows tests with three explicit POSIX skips. Changed-head
   native qualification and review remain required.
+- The final source `0d78da44bffbb5120fc45d4b1e0fcefc1d21f9d6` passed
+  all 206 Linux tests without skips, including actual relative/absolute-parent
+  CLI roots, symlink refusal, configuration transport and exact receipts.
+  The native Linux flow passed in 58.20 seconds; fresh Windows run
+  `40292624279` passed the same actual installed daemon, configuration list,
+  sealed-runtime and removal/reinstall contract. Source/installed hashes,
+  artifact bytes, durable-state preservation and exact cleanup were verified.
+- #8955 merged as `c2cc00e92b47f1e9036b3ae4d9e8f329ee796309` after
+  exact-head approval, all review threads resolved and required CI green.
+  This completes #8864's supported removal source slice, not the parent
+  interactive Copilot, current-handler, maintenance-standby, normal release
+  or approved installed acceptance gates.
