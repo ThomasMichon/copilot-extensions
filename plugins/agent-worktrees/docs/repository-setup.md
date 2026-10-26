@@ -144,7 +144,7 @@ context. Ordinary repository setup must first be trusted and ready.
 The engine then consumes the [Fleet continuity
 contract](../../../fleet-manager/docs/continuity-bootstrap.md) through its own
 selected Python runtime with isolation, not an ambient executable on `PATH`.
-That selected engine environment needs the optional `fleet-onboarding` SDK
+That selected engine environment needs the Fleet SDK and its service-Gateway
 dependency supplied by its normal construction owner. Capability discovery,
 bounded native process custody and check/apply preserve the original operation.
 Missing support, source access, authentication or an unknown result refuses the

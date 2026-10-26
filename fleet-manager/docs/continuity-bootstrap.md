@@ -151,8 +151,10 @@ A trusted harness's version-two setup declaration names
 the [engine contract](../../plugins/agent-worktrees/docs/repository-setup.md)
 owns selection and trust. The engine uses the Fleet SDK in **its own selected
 interpreter**, with Python isolation, not an executable discovered on `PATH`.
-The optional `fleet-onboarding` dependency supplies that SDK; its installation
-and release remain with the existing construction owner. Missing/older support
+The existing construction/release owner must supply the Fleet SDK and its
+service-Gateway dependency closure in that selected engine environment.
+This source slice does not add a cross-project path dependency to the plugin's
+library-only installation graph or introduce another installer. Missing/older support
 refuses only the optional context stage and retains completed Manager/core work.
 
 The private source JSON has exactly `schema: "fleet-manager.continuity-projection"`,
