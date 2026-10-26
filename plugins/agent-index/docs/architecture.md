@@ -60,6 +60,17 @@ per-source chunk totals as file checkpoints change, including deletions and
 replayed batches. Existing path databases receive a one-time aggregate backfill;
 ordinary rounds read only these source totals, not unchanged file rows.
 
+Before mutating a nonempty acquired delta, the engine journals its complete
+manifest and target in the existing path-index SQLite database. A retry first
+finishes that pinned acquisition, atomically publishes and flushes the existing
+JSON source cursor, then clears the journal and acquires fresh changes. This
+prevents a newer net delta from omitting an item partially written by an
+interrupted older delta (for example, a file changed and then reverted).
+Source/account configuration changes refuse replay rather than applying old
+work under a new scope. The journal is not another checkpoint authority.
+Pending work must finish through a journal-capable engine before rolling back
+to an older engine; old runtimes do not implement this recovery contract.
+
 Engine readiness is deferred until the first nonempty embedding batch; an empty
 delta or wholly reused file set does not start embedding engines. Reused files
 are excluded from timestamp-based stale cleanup. Metadata/model changes are

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import time
+import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC
 from typing import TYPE_CHECKING
@@ -60,7 +62,21 @@ class IndexState:
         }
         if self.stored_families:
             data["stored_families"] = self.stored_families
-        path.write_text(json.dumps(data, indent=2) + "\n")
+        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            with temporary.open("x", encoding="utf-8", newline="\n") as stream:
+                stream.write(json.dumps(data, indent=2) + "\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+            if os.name != "nt":
+                directory = os.open(path.parent, os.O_RDONLY)
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def mark_source_indexed(self, name: str, commit: str | None, chunk_count: int) -> None:
         """Update state after indexing a source."""

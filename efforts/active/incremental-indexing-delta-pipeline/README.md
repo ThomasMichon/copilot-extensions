@@ -99,7 +99,7 @@ After the reviewed proposal, the operator admitted execution:
   provider metadata revisions and snapshot-completeness evidence.
 - [ ] Distinguish event deltas, bounded polling and complete reconciliation.
   Incomplete/truncated pages must never authorize deletion of unseen items.
-- [ ] Specify lossless queued unions and trailing deltas for changes received
+- [x] Specify lossless queued unions and trailing deltas for changes received
   during active work. Preserve existing full-task sequencing guarantees.
 - [ ] Design external-provider capability/version negotiation and staged
   producer/consumer compatibility using the existing contract-evolution policy.
@@ -215,3 +215,16 @@ source-owner coordination rather than one large rewrite.
   1 existing skip), including 100/10,000/100,000-row fixtures. Task/event
   payloads, external-provider negotiation, per-chunk/model reuse and
   maintenance generations remain open; this is not end-to-end completion.
+
+### 2026-10-25 - Durable hint receiver merged
+
+- Merged #9046 as `507bd27ff` after current-head Copilot approval, green CI
+  and an independent 63-test queue/domain/sequencing/worker selection.
+- Version-1 acquisition hints now preserve exact source/family/account scope,
+  changed identities, distinct ref ranges, event IDs and metadata revisions.
+  Queued unions are lossless and processing work retains a separate trailing
+  row. SQLite fences keep hinted rows invisible to legacy dequeue code,
+  including after an older retry/release operation.
+- This is receiver-first expansion only. Worker/HTTP/CLI capability migration
+  and connector consumption remain the next intake stretch; the queue merge
+  does not enable hinted execution or complete Phase 1.

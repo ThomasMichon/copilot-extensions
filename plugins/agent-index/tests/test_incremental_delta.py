@@ -145,7 +145,9 @@ def test_compatible_upsert_skips_chunker_engine_and_stale_cleanup(
     )
     result = engine._index_source(
         "configured",
-        config=SimpleNamespace(model_profiles={}, stream_batch_size=2),
+        config=SimpleNamespace(
+            model_profiles={}, stream_batch_size=2, state_file=tmp_path / "state.json",
+        ),
         state=state, path_index=paths,
         multi_store=SimpleNamespace(delete_stale_by_file=forbidden),
         multi_clients={}, full=False, before_store=forbidden,

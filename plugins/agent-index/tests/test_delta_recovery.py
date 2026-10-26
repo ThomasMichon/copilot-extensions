@@ -40,7 +40,9 @@ def setup_round(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
 
     def run() -> tuple[int, int, int]:
         return engine._index_source(
-            "alias", config=SimpleNamespace(model_profiles={}, stream_batch_size=2),
+            "alias", config=SimpleNamespace(
+                model_profiles={}, stream_batch_size=2, state_file=tmp_path / "state.json",
+            ),
             state=state, path_index=paths, multi_store=store, multi_clients={}, full=False,
         )
 
@@ -175,7 +177,10 @@ def test_interrupted_cleanup_retries_real_stale_content_and_vectors(
 
     def run() -> None:
         engine._index_source(
-            "alias", config=SimpleNamespace(model_profiles={"fixture": profile}, stream_batch_size=2),
+            "alias", config=SimpleNamespace(
+                model_profiles={"fixture": profile}, stream_batch_size=2,
+                state_file=tmp_path / "state.json",
+            ),
             state=state, path_index=paths, multi_store=store, multi_clients={}, full=False,
         )
 
@@ -244,12 +249,15 @@ def test_chunking_failure_does_not_advance_delta_cursor(
     connector.delta = SourceDelta(
         upserts=[FileEntry("one.md", "new", "markdown", "forge:repo")], commit="next",
     )
-    monkeypatch.setattr(
-        "agent_index.chunking.get_chunker", lambda path: (SimpleNamespace(chunk=fail), "text"),
-    )
-    with pytest.raises(RuntimeError, match="fixture"):
-        run()
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            "agent_index.chunking.get_chunker", lambda path: (SimpleNamespace(chunk=fail), "text"),
+        )
+        with pytest.raises(RuntimeError, match="fixture"):
+            run()
     assert state.sources["alias"].last_commit == "old"
+    assert run()[0] == 2
+    assert state.sources["alias"].last_commit == "next"
 
 
 @pytest.mark.parametrize("stale", [False, True])

@@ -1,0 +1,105 @@
+"""Replay acquired source work before observing a newer upstream delta."""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Callable
+from contextlib import closing
+from dataclasses import asdict
+from pathlib import Path
+from typing import Protocol
+
+from agent_index.indexing.manifest import CrawlManifest, CrawlStats
+from agent_index.indexing.path_index import PathIndex
+from agent_index.indexing.state import IndexState
+from agent_index.sources.base import FileEntry
+from agent_index.sources.delta import DeletedFile, SourceDelta
+
+
+class ApplyManifest(Protocol):
+    def __call__(self, *, manifest: CrawlManifest, full: bool) -> tuple[int, int, int]: ...
+
+
+class PendingCrawls:
+    """A write-ahead acquisition journal, not another source-cursor authority."""
+
+    def __init__(self, paths: PathIndex) -> None:
+        self._paths = paths
+        with closing(paths._connect()) as conn, conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS pending_crawls "
+                "(source TEXT PRIMARY KEY, scope TEXT NOT NULL, payload TEXT NOT NULL)",
+            )
+
+    def load(self, source: str, scope: str) -> tuple[CrawlManifest, bool] | None:
+        with closing(self._paths._connect()) as conn, conn:
+            row = conn.execute(
+                "SELECT scope, payload FROM pending_crawls WHERE source = ?", (source,),
+            ).fetchone()
+        if row is None:
+            return None
+        if row["scope"] != scope:
+            raise ValueError("Pending crawl belongs to a different source/account configuration")
+        data = json.loads(row["payload"])
+        if not isinstance(data, dict) or set(data) != {"version", "full", "manifest"}:
+            raise ValueError("Invalid pending crawl envelope")
+        if type(data["version"]) is not int or data["version"] != 1 or type(data["full"]) is not bool:
+            raise ValueError("Unsupported pending crawl version or mode")
+        raw = data["manifest"]
+        if not isinstance(raw, dict) or set(raw) != set(CrawlManifest.__dataclass_fields__):
+            raise ValueError("Invalid pending crawl manifest")
+        if raw["source"] != source:
+            raise ValueError("Pending crawl source does not match its journal key")
+        manifest = CrawlManifest(
+            source=source,
+            upserts=[FileEntry(**item) for item in raw["upserts"]],
+            deletions=[DeletedFile(**item) for item in raw["deletions"]],
+            commit=raw["commit"], stats=CrawlStats(**raw["stats"]),
+            stored_family=raw["stored_family"], accounting_family=raw["accounting_family"],
+        )
+        self._validate(manifest)
+        return manifest, data["full"]
+
+    @staticmethod
+    def _validate(manifest: CrawlManifest) -> None:
+        SourceDelta(
+            upserts=manifest.upserts, deletions=manifest.deletions, commit=manifest.commit,
+        ).validate(manifest.accounting_family or manifest.stored_family or manifest.source)
+
+    def save(self, manifest: CrawlManifest, *, scope: str, full: bool) -> None:
+        self._validate(manifest)
+        payload = json.dumps({"version": 1, "full": full, "manifest": asdict(manifest)})
+        with closing(self._paths._connect()) as conn, conn:
+            conn.execute(
+                "INSERT INTO pending_crawls (source, scope, payload) VALUES (?, ?, ?)",
+                (manifest.source, scope, payload),
+            )
+
+    def clear(self, source: str) -> None:
+        with closing(self._paths._connect()) as conn, conn:
+            conn.execute("DELETE FROM pending_crawls WHERE source = ?", (source,))
+
+
+def recover_source(
+    source: str, *, scope: str, state: IndexState, state_file: Path,
+    paths: PathIndex, full: bool, acquire: Callable[[], CrawlManifest], apply: ApplyManifest,
+) -> tuple[int, int, int]:
+    """Drain pinned partial work, persist its cursor, then acquire current changes."""
+    journal = PendingCrawls(paths)
+    totals = (0, 0, 0)
+    pending = journal.load(source, scope)
+    if pending is not None:
+        manifest, pending_full = pending
+        totals = apply(manifest=manifest, full=pending_full)
+        state.save(state_file)
+        journal.clear(source)
+
+    manifest = acquire()
+    if not manifest.is_empty:
+        journal.save(manifest, scope=scope, full=full)
+    current = apply(manifest=manifest, full=full)
+    # Clearing before this save would reintroduce lost revert/deletion recovery.
+    state.save(state_file)
+    if not manifest.is_empty:
+        journal.clear(source)
+    return totals[0] + current[0], totals[1] + current[1], totals[2] + current[2]

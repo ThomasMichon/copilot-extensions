@@ -17,10 +17,12 @@ vector tables alongside the shared content store.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import time
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
+from functools import partial
 from typing import TYPE_CHECKING
 
 from agent_index.store.source_layout import selected_layout
@@ -382,6 +384,9 @@ def run_reindex(
                     resume_since=resume_since,
                     connector_kwargs=connector_kwargs,
                     before_store=prepare_embedding,
+                    source_scope=hashlib.sha256(
+                        json.dumps(asdict(spec), sort_keys=True).encode(),
+                    ).hexdigest(),
                 )
                 total_chunks += stored
                 total_deleted += deleted
@@ -571,6 +576,39 @@ def _index_source(
     resume_since: float | None = None,
     connector_kwargs: dict[str, object] | None = None,
     before_store: Callable[[], None] | None = None,
+    source_scope: str | None = None,
+) -> tuple[int, int, int]:
+    """Replay pinned partial acquisition before observing newer source changes."""
+    from agent_index.indexing.pending_crawl import recover_source
+
+    return recover_source(
+        source_name, scope=source_scope or source_name, state=state,
+        state_file=config.state_file, paths=path_index, full=full,
+        acquire=partial(
+            _crawl_source, source_name, config=config, state=state, path_index=path_index,
+            full=full, progress_cb=progress_cb, connector_kwargs=connector_kwargs,
+        ),
+        apply=partial(
+            _apply_source_manifest, source_name, config=config, state=state,
+            path_index=path_index, multi_store=multi_store, multi_clients=multi_clients,
+            progress_cb=progress_cb, resume_since=resume_since, before_store=before_store,
+        ),
+    )
+
+
+def _apply_source_manifest(
+    source_name: str,
+    *,
+    manifest: CrawlManifest,
+    config: IndexConfig,
+    state: IndexState,
+    path_index: PathIndex,
+    multi_store: MultiModelStore,
+    multi_clients: dict[str, EngineClient],
+    full: bool,
+    progress_cb: ProgressCallback | None = None,
+    resume_since: float | None = None,
+    before_store: Callable[[], None] | None = None,
 ) -> tuple[int, int, int]:
     """Index a single data source using the four-phase pipeline.
 
@@ -584,20 +622,6 @@ def _index_source(
     """
     print(f"Indexing source: {source_name}")
     run_start = time.time()
-
-    # ── Phase 1: Crawl ──────────────────────────────────────
-    if progress_cb:
-        progress_cb.phase("crawling", msg=f"Crawling {source_name}")
-
-    manifest = _crawl_source(
-        source_name,
-        config=config,
-        state=state,
-        path_index=path_index,
-        full=full,
-        progress_cb=progress_cb,
-        connector_kwargs=connector_kwargs,
-    )
 
     if manifest.is_empty:
         print(f"  No changes detected for {source_name}")
@@ -699,6 +723,8 @@ def _crawl_source(
     """Compatibility entrypoint for the separately owned crawl phase."""
     from agent_index.indexing.crawl import collect_source_changes
 
+    if progress_cb:
+        progress_cb.phase("crawling", msg=f"Crawling {source_name}")
     return collect_source_changes(
         source_name, state=state, path_index=path_index, full=full,
         source_aware=bool(selected_layout()), progress_cb=progress_cb,
