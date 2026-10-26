@@ -32,6 +32,13 @@ def test_visible_observer_control_also_refuses_shared_hosts(monkeypatch):
         module.observe_canary(Path("not-a-real-interpreter"))
 
 
+def test_window_identity_query_refuses_shared_hosts(monkeypatch):
+    module = _fixture()
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    with pytest.raises(RuntimeError, match="GitHub-hosted Windows ARM64"):
+        module.window_identity(0)
+
+
 def test_native_jump_profile_has_two_hops_without_credentials():
     source = _fixture().profile_text("synthetic-console --stdio")
     assert "ProxyJump jump-first.invalid,jump-last.invalid" in source

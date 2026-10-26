@@ -113,7 +113,38 @@ def serve_proxy(marker: Path) -> None:
     time.sleep(60)
 
 
-def observe_canary(console_python: Path) -> None:
+def window_identity(window: int) -> dict:
+    require_hosted_windows()
+    user = ctypes.WinDLL("user32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    user.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user.GetWindowThreadProcessId.restype = wintypes.DWORD
+    user.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.QueryFullProcessImageNameW.argtypes = [
+        wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD),
+    ]
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    pid = wintypes.DWORD()
+    user.GetWindowThreadProcessId(window, ctypes.byref(pid))
+    name = ctypes.create_unicode_buffer(256)
+    user.GetClassNameW(window, name, len(name))
+    evidence = {"window": window, "pid": pid.value, "class": name.value}
+    handle = kernel.OpenProcess(0x1000, False, pid.value) if pid.value else None
+    if not handle:
+        return {**evidence, "image_query_error": ctypes.get_last_error()}
+    try:
+        image = ctypes.create_unicode_buffer(32768)
+        size = wintypes.DWORD(len(image))
+        if not kernel.QueryFullProcessImageNameW(handle, 0, image, ctypes.byref(size)):
+            return {**evidence, "image_query_error": ctypes.get_last_error()}
+        return {**evidence, "image": Path(image.value).name}
+    finally:
+        kernel.CloseHandle(handle)
+
+
+def observe_canary(console_python: Path) -> dict:
     require_hosted_windows()
     from agent_procutil import spawn_sync_in_kill_on_close_job
     from windows_proxy_probe import terminal_windows
@@ -132,10 +163,14 @@ def observe_canary(console_python: Path) -> None:
         raise RuntimeError("Observer canary has no native Job custody")
     try:
         deadline = time.monotonic() + 5
-        while not set(terminal_windows()) - baseline:
+        while not (visible := set(terminal_windows()) - baseline):
             if process.poll() is not None or time.monotonic() >= deadline:
                 raise RuntimeError("Visible-window observer did not detect its owned canary")
             time.sleep(0.01)
+        evidence = {
+            "process": process.pid,
+            "windows": [window_identity(window) for window in sorted(visible)],
+        }
     finally:
         try:
             if process.stdin is not None:
@@ -150,6 +185,7 @@ def observe_canary(console_python: Path) -> None:
         if time.monotonic() >= deadline:
             raise RuntimeError("Owned observer canary window did not retire")
         time.sleep(0.01)
+    return evidence
 
 
 async def drive(root: Path) -> dict:
@@ -165,7 +201,7 @@ async def drive(root: Path) -> dict:
     console_python = Path(sys._base_executable).with_name("python.exe")
     if not console_python.is_file():
         raise RuntimeError("The selected Python has no console-subsystem peer")
-    await asyncio.to_thread(observe_canary, console_python)
+    canary = await asyncio.to_thread(observe_canary, console_python)
     await asyncio.sleep(0.1)
     home = Path(os.environ["USERPROFILE"])
     config_file = home / ".ssh" / "config"
@@ -217,8 +253,11 @@ async def drive(root: Path) -> dict:
 
     baseline = terminal_windows()
     observed: dict[int, bool] = {}
+    window_events: dict[int, dict] = {}
     foreground_changed = False
     stop = asyncio.Event()
+    observation_started = time.monotonic()
+    phase = "before-cycles"
 
     async def monitor():
         nonlocal foreground_changed
@@ -226,6 +265,15 @@ async def drive(root: Path) -> dict:
             for window, foreground in terminal_windows().items():
                 if window not in baseline:
                     observed[window] = observed.get(window, False) or foreground
+                    if window not in window_events:
+                        window_events[window] = {
+                            **window_identity(window), "first_phase": phase,
+                            "first_seconds": round(time.monotonic() - observation_started, 6),
+                        }
+                    window_events[window].update({
+                        "last_phase": phase,
+                        "last_seconds": round(time.monotonic() - observation_started, 6),
+                    })
                 if foreground and not baseline.get(window, False):
                     foreground_changed = True
             await asyncio.sleep(0.01)
@@ -240,6 +288,7 @@ async def drive(root: Path) -> dict:
         proxy._track_owner_job = record_track
         SSHProfileSource._resolve_effective_config = record_profile
         for index, mode in enumerate(("timeout", "cancel")):
+            phase = f"{mode}-launch"
             processes.clear()
             ssh_processes.clear()
             jobs.clear()
@@ -268,6 +317,7 @@ async def drive(root: Path) -> dict:
                 if missing_jobs or len(ssh_processes) != 3:
                     raise RuntimeError("The full native SSH jump chain was not owned")
                 census.pin(jobs)
+                phase = f"{mode}-ready"
                 if len(census.handles) < 7:
                     raise RuntimeError("Native census did not include SSH and proxy-client descendants")
                 if mode == "cancel":
@@ -286,6 +336,7 @@ async def drive(root: Path) -> dict:
                 cycles.append({
                     "kind": mode, "ssh_processes": len(ssh_processes),
                     "pinned_processes": len(census.handles), "cleanup_confirmed": True,
+                    "pinned_process_ids": sorted(census.handles),
                     "metadata_queries": len(query_seconds),
                     "metadata_seconds": round(sum(query_seconds), 6),
                     "version_queries": proxy._client_shell.cache_info().misses - version_queries,
@@ -293,6 +344,7 @@ async def drive(root: Path) -> dict:
                     **evidence,
                 })
             finally:
+                phase = f"{mode}-cleanup"
                 if not task.done():
                     task.cancel()
                     try:
@@ -318,6 +370,7 @@ async def drive(root: Path) -> dict:
         "parent_console_handle": console_window(), "parent_machine": platform.machine(),
         "parent_platform": sysconfig.get_platform(),
         "parent_python_version": platform.python_version(),
+        "observer_canary": canary, "observed_windows": list(window_events.values()),
         "observer_control_detected_and_retired": True,
         "cycles": cycles, "new_visible_terminal_windows": len(observed),
         "terminal_took_foreground": foreground_changed,
