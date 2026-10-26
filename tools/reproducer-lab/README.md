@@ -274,6 +274,9 @@ Before acquisition, before yielding custody, on each returned
 `0700` posture. Bounded mount-table reads reuse `guest_mounts.py` and the existing
 `mounts.py` parser. `/lab/state` must be an exact writable mount on a different
 device from the read-only root, without nested/shadowed mounts. The initial
+parser also rejects any `/lab` ancestor mount: a same-device overmount can hide
+an older state record still present in mountinfo. Device equality alone does
+not prove that record is the opened directory's effective mount. The initial
 nonvolatile filesystem selection supports ext4, XFS, Btrfs and ZFS; unfamiliar
 filesystems refuse rather than being presumed durable. The open directory device
 must match that mount. Each observation has a five-second elapsed ceiling,

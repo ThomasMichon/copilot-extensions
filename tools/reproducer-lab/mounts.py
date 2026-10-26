@@ -93,6 +93,7 @@ def inspect_state_mount(table: object, device: str) -> StateMount:
         or state is None or "rw" not in state.options or "ro" in state.options
         or state.filesystem not in {"ext4", "xfs", "btrfs", "zfs"}
         or state.device != device or state.device == root.device
+        or "/lab" in inventory
         or any(path.startswith("/lab/state/") for path in inventory)
     ):
         raise ValueError("effective durable state mount is unavailable or unsupported")

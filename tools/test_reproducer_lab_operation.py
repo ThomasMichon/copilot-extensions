@@ -58,6 +58,13 @@ def test_shadowed_or_nested_state_mount_refuses(suffix: str) -> None:
         mounts.inspect_state_mount(TABLE + suffix, "8:1")
 
 
+@pytest.mark.parametrize("device", ["8:1", "8:2"])
+def test_ancestor_overmount_refuses_even_on_same_device(device: str) -> None:
+    table = TABLE + f"3 1 {device} /other /lab rw - ext4 /dev/synthetic rw\n"
+    with pytest.raises(ValueError, match="state mount"):
+        mounts.inspect_state_mount(table, "8:1")
+
+
 @pytest.mark.parametrize("filesystem", ["ext4", "xfs", "btrfs", "zfs"])
 def test_supported_nonvolatile_filesystems(filesystem: str) -> None:
     assert mounts.inspect_state_mount(TABLE.replace("ext4", filesystem), "8:1").filesystem == filesystem
@@ -243,6 +250,23 @@ def test_late_directory_posture_change_refuses(
     monkeypatch.setattr(guest_operation, "read_mount_table", table)
     with pytest.raises(ValueError, match="directory changed"):
         guest_operation.observe_state()
+    with pytest.raises(OSError):
+        os.fstat(opened[0])
+
+
+def test_hidden_state_record_refuses_before_lock_creation(
+    state_probe: tuple[list[int], Path], monkeypatch: Any,
+) -> None:
+    opened, path = state_probe
+    table = TABLE + "3 1 8:1 /other /lab rw - ext4 /dev/synthetic rw\n"
+    monkeypatch.setattr(guest_operation, "read_mount_table", lambda: table)
+    monkeypatch.setattr(
+        guest_operation, "_new_lock", lambda: pytest.fail("hidden state created a lock"),
+    )
+    with pytest.raises(ValueError, match="state mount"):
+        with guest_operation.operation():
+            pytest.fail("hidden state entered an operation")
+    assert list(path.iterdir()) == []
     with pytest.raises(OSError):
         os.fstat(opened[0])
 
