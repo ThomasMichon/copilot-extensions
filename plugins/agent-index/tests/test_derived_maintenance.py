@@ -111,8 +111,8 @@ def test_mutation_during_cluster_computation_never_publishes_new_coverage(corpus
     old_key = cluster_signature(store, config)
     iterate = store.iter_item_representations
 
-    def mutate():
-        yield from iterate()
+    def mutate(**kwargs):
+        yield from iterate(**kwargs)
         store.upsert_vectors("small", [item("one.md")], np.array([[0, 1]], np.float32))
 
     monkeypatch.setattr(store, "iter_item_representations", mutate)
@@ -347,6 +347,66 @@ def test_failed_cluster_pass_keeps_old_coverage_and_retry_remains_due(corpus, mo
     retried = engine._refresh_clusters(store, config)
     assert retried is not None and "maintenance_skipped" not in retried
     assert artifact.covered_stats(new_key)["maintenance_skipped"] == 1
+
+
+@pytest.mark.parametrize("phase", ["items", "chunks", "vectors"])
+def test_native_read_failure_cannot_publish_covered_partial_clusters(corpus, monkeypatch, phase):
+    config, store, selected = corpus
+    assert engine._refresh_clusters(store, config)["clusters"] == 1
+    old_key = cluster_signature(store, config)
+    store.upsert_vectors("small", [item("two.md")], np.array([[0, 1]], np.float32))
+    new_key = cluster_signature(store, config)
+    table = (
+        store.get_vector_table("small")._get_or_create_table() if phase == "vectors"
+        else store.content_store._get_or_create_table()
+    )
+    native_search = type(table).search
+    calls = 0
+
+    def fail_once(handle, *args, **kwargs):
+        nonlocal calls
+        if handle.name == table.name:
+            calls += 1
+            if calls == (2 if phase == "chunks" else 1):
+                raise RuntimeError(f"fixture {phase} read failure")
+        return native_search(handle, *args, **kwargs)
+
+    monkeypatch.setattr(type(table), "search", fail_once)
+    if selected:
+        with pytest.raises(RuntimeError, match=f"fixture {phase} read failure"):
+            engine._refresh_clusters(store, config)
+    else:
+        assert engine._refresh_clusters(store, config) is None
+    artifact = ClusterStore(config.clusters_db)
+    assert artifact.covered_stats(old_key) is not None
+    assert artifact.covered_stats(new_key) is None
+    retried = engine._refresh_clusters(store, config)
+    assert retried is not None and "maintenance_skipped" not in retried
+    assert artifact.covered_stats(new_key) is not None
+
+
+@pytest.mark.parametrize("phase", ["items", "chunks"])
+def test_strict_content_reads_refuse_truncated_results(tmp_path, monkeypatch, phase):
+    monkeypatch.delenv("AGENT_INDEX_STORE_LAYOUT", raising=False)
+    content = ContentStore(tmp_path / "lance")
+    content.upsert([item("one.md"), item("two.md")])
+    table = content._get_or_create_table()
+    native_search = type(table).search
+
+    def truncated_search(handle, *args, **kwargs):
+        query = native_search(handle, *args, **kwargs)
+        native_to_list = query.to_list
+        query.to_list = lambda: native_to_list()[:1]
+        return query
+
+    monkeypatch.setattr(type(table), "search", truncated_search)
+    if phase == "items":
+        with pytest.raises(RuntimeError, match="Incomplete content item"):
+            content.distinct_items(strict=True)
+    else:
+        content.upsert([replace(item("one.md"), line_start=2, line_end=2)])
+        with pytest.raises(RuntimeError, match="Incomplete file chunk"):
+            content.get_chunks_for_file("git:sample", "one.md", strict=True)
 
 
 def test_recreated_table_same_name_and_version_invalidates_local_identity(tmp_path, monkeypatch):

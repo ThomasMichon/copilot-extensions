@@ -101,7 +101,7 @@ After the reviewed proposal, the operator admitted execution:
   Incomplete/truncated pages must never authorize deletion of unseen items.
 - [x] Specify lossless queued unions and trailing deltas for changes received
   during active work. Preserve existing full-task sequencing guarantees.
-- [ ] Design external-provider capability/version negotiation and staged
+- [x] Design external-provider capability/version negotiation and staged
   producer/consumer compatibility using the existing contract-evolution policy.
   Legacy providers remain usable through an explicitly observable reconcile
   path; never silently drop a required delta field.
@@ -300,6 +300,10 @@ source-owner coordination rather than one large rewrite.
   predates the coverage schema. The exact old empty-replacement SQL and all six
   artifact insert/update/delete boundaries pass regression tests (39-test
   focused maintenance/API packet).
+- A second review found tolerant legacy reads could mask transient failures
+  as empty inputs. Cluster construction now selects complete, strict reads;
+  native one-time item/chunk/vector failures preserve prior artifacts and leave
+  the next unchanged round due for recomputation (98-test retained packet).
 - Native fixtures with 100, 10,000 and 100,000 content rows in both layouts
   measured the same metadata-only work for two covered rounds: 12 legacy or 24
   source-aware table-refresh calls, zero enumeration, builder, index recreation
@@ -314,3 +318,21 @@ source-owner coordination rather than one large rewrite.
   gates, the complete count matrix, consumer integration, release or rollout.
   Continue with negotiated provider checkpoint fencing, precise chunk/model
   reuse and the shared consumer injection path.
+
+### 2026-10-26 - Negotiated provider and completed-checkpoint isolation merged
+
+- PR #9059 merged as `6a48ea7efd3fbbbe811b8eb261d364fb6d737fed`
+  after current-head Copilot approval and required green CI. Independent
+  provider/checkpoint/recovery/Git/compatibility tests passed (278).
+- Provider metadata advertises additive v1 support; only supported receivers
+  receive the delta flag. Negotiated full, changed-entry and path-list responses
+  echo executing family/account/target before data can affect stored rows.
+  Old/future receivers retain the observable legacy reconciliation path.
+- Completed checkpoints now persist the existing acquisition-scope identity,
+  not only pending journals. Missing or changed scope requires explicit full
+  reconciliation before cursor reuse; successful transitions bind identity and
+  cursor together, and failures retain prior state and recovery evidence.
+- The external negotiation design gate is resolved. Actual hint consumption,
+  hosted pagination/recovery, full source-lease ownership, shared embedding
+  reuse and downstream adoption remain open. Continue those planned slices;
+  this merge is not an effort completion or deployment.

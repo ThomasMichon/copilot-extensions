@@ -43,7 +43,7 @@ def run_clustering_pass(
     # Group each item's per-space centroid into its (bucket, model_id) slice.
     slices: dict[tuple[str, str], list[ClusterEntry]] = defaultdict(list)
     item_count = 0
-    for rep in multi_store.iter_item_representations():
+    for rep in multi_store.iter_item_representations(strict=True):
         item_count += 1
         bucket = source_bucket(rep.source)
         for model_id, centroid in rep.centroids.items():

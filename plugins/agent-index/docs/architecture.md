@@ -360,6 +360,8 @@ metadata without enumerating items, rewriting the artifact or starting an FTS
 child. Changing inputs or policy invalidates coverage; computation verifies its
 input key again before publishing. Explicit full indexing forces clustering.
 Unqualified remote storage logs the limitation and runs an uncached pass.
+Cluster construction uses complete, failure-propagating item/chunk/vector reads;
+an unsuccessful read cannot publish partial output as covered input.
 
 This is conservative physical-version reuse, not a logical mutation generation,
 source cursor, new reader authority or lock. A real change still invokes the

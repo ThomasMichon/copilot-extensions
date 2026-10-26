@@ -27,6 +27,7 @@ import pyarrow as pa
 from agent_procutil import no_window_kwargs as no_window_kwargs
 
 from agent_index.store.content_fts_worker import _ContentFtsWorkerMixin, fts_retryable
+from agent_index.store.content_item_reads import _ContentItemReadsMixin
 from agent_index.store.lance_connection import connect_content_store
 from agent_index.store.repo_filter import _like_pattern, _sql_str, repo_filter_sql
 from agent_index.store.source_layout import (
@@ -108,7 +109,7 @@ def _decode_metadata(raw: object) -> dict:
         return {}
 
 
-class ContentStore(_ContentFtsWorkerMixin):
+class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin):
     """LanceDB-backed store for chunk content and metadata.
 
     Owns the canonical ``chunks`` table and the BM25 full-text index.
@@ -557,50 +558,6 @@ class ContentStore(_ContentFtsWorkerMixin):
             metadata=_decode_metadata(first.get("metadata")),
         )
 
-    @source_read
-    def get_chunks_for_file(
-        self, source: str, file_path: str,
-    ) -> list[ChunkRecord]:
-        """Return all chunks for a ``(source, file_path)`` item, line-ordered.
-
-        Unlike ``get_document`` (which joins chunk text into one preview), this
-        keeps the chunks separate so callers can pool their per-chunk vectors
-        and weight by line span.  Returns an empty list if the item has no
-        chunks.
-        """
-        table = self._get_or_create_table()
-        try:
-            rows = (
-                table.search()
-                .where(
-                    f"source = '{_sql_str(source)}' "
-                    f"AND file_path = '{_sql_str(file_path)}'"
-                )
-                .limit(10000)
-                .to_list()
-            )
-        except Exception:
-            return []
-        if not rows:
-            return []
-
-        rows.sort(key=lambda r: (r.get("line_start", 0), r.get("line_end", 0)))
-        return [
-            ChunkRecord(
-                chunk_id=r["chunk_id"],
-                source=r["source"],
-                file_path=r["file_path"],
-                chunk_type=r.get("chunk_type", ""),
-                language=r.get("language", ""),
-                content=r.get("content", ""),
-                content_hash=r.get("content_hash", ""),
-                line_start=r.get("line_start", 0),
-                line_end=r.get("line_end", 0),
-                metadata=_decode_metadata(r.get("metadata")),
-            )
-            for r in rows
-        ]
-
     @source_write
     def ensure_fts_index(self, *, max_retries: int = 5) -> bool:
         """Create or rebuild the BM25 full-text index on content.
@@ -936,35 +893,6 @@ class ContentStore(_ContentFtsWorkerMixin):
         except Exception:
             logger.debug("distinct_sources scan failed", exc_info=True)
             return set()
-
-    @source_read
-    def distinct_items(self) -> list[tuple[str, str]]:
-        """Return distinct ``(source, file_path)`` content items, sorted.
-
-        Projects only ``source`` + ``file_path`` (never the large ``content``
-        column) so the similarity-cluster pass can enumerate every content
-        item cheaply even as the index grows.
-        """
-        table = self._get_or_create_table()
-        try:
-            total = table.count_rows()
-            if total == 0:
-                return []
-            rows = (
-                table.search()
-                .select(["source", "file_path"])
-                .limit(total)
-                .to_list()
-            )
-        except Exception:
-            logger.debug("distinct_items scan failed", exc_info=True)
-            return []
-        items = {
-            (r["source"], r["file_path"])
-            for r in rows
-            if r.get("source") is not None and r.get("file_path") is not None
-        }
-        return sorted(items)
 
     @source_read
     def stats(self) -> dict[str, Any]:
