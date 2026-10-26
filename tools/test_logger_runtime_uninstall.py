@@ -863,3 +863,74 @@ def test_posix_logger_disables_loaded_timer_without_unit_files(tmp_path, preview
     if preview:
         assert f"would disable + remove: {name.removesuffix('.timer')}.service / .timer" in result.stdout
     _assert_state(root, durable, removed=not preview)
+
+
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+@pytest.mark.parametrize("alias", ["separator", "dot-component"])
+@pytest.mark.parametrize("active", [False, True])
+@pytest.mark.parametrize("legacy", ["none", "owned", "foreign"])
+def test_native_logger_default_root_alias_uses_default_task_and_commands(tmp_path, host, alias, active, legacy):
+    executable = shutil.which(host) if os.name == "nt" else None
+    if executable is None:
+        pytest.skip("native Windows shell required")
+    root, durable, env = _fixture(tmp_path, "owned")
+    default = root.parent / ".agent-logger"
+    root.rename(default)
+    root = default
+    commands = root.parent / ".local" / "bin"
+    commands.mkdir(parents=True)
+    names = (
+        "session-sync", "agent-logger", "collate-session", "read-session-digest",
+        "prepare-session-log", "ramp-up-session",
+    )
+    for name in names:
+        for extension in ("ps1", "cmd"):
+            (commands / f"{name}.{extension}").write_text("default compatibility command")
+    disabled = tmp_path / "task-disabled"
+    removed = tmp_path / "task-removed"
+    env.update(
+        LOGGER_TEST_DISABLED=str(disabled), LOGGER_TEST_REMOVED=str(removed),
+        LOGGER_TEST_TASK_STATE="Running" if active else "Ready",
+        LOGGER_TEST_ROOT=str(root), LOGGER_TEST_LEGACY=legacy,
+        LOGGER_TEST_TASK_NAME="Agent Logger Session Sync" if legacy == "none"
+        else "Agent Logger Session Sync - abcdef123456",
+    )
+    wrapper = tmp_path / "default-task.ps1"
+    wrapper.write_text(
+        "param($Installer, $Root)\n$ErrorActionPreference='Stop'\n"
+        "function Get-ScheduledTask { param($TaskName, $ErrorAction) "
+        "if (-not $TaskName -and $env:LOGGER_TEST_LEGACY -ne 'none') { "
+        "$owner=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value; "
+        "if ($env:LOGGER_TEST_LEGACY -eq 'foreign') { $owner='S-1-5-18' }; "
+        "$launcher=Join-Path $env:LOGGER_TEST_ROOT 'bin\\session-sync-task.ps1'; "
+        "[pscustomobject]@{TaskName=$env:LOGGER_TEST_TASK_NAME; TaskPath='\\'; "
+        "Actions=@([pscustomobject]@{Arguments=('-I \"' + $launcher + '\"')}); "
+        "Principal=[pscustomobject]@{UserId=$owner}}; return }; "
+        "if ($TaskName -eq $env:LOGGER_TEST_TASK_NAME) { "
+        "[pscustomobject]@{State=$env:LOGGER_TEST_TASK_STATE} } }\n"
+        "function Disable-ScheduledTask { param($TaskName, $ErrorAction) "
+        "if ($TaskName -ne $env:LOGGER_TEST_TASK_NAME) { throw 'wrong task' }; "
+        "[IO.File]::WriteAllText($env:LOGGER_TEST_DISABLED, 'disabled') }\n"
+        "function Unregister-ScheduledTask { param($TaskName, $Confirm) "
+        "if ($TaskName -ne $env:LOGGER_TEST_TASK_NAME) { throw 'wrong task' }; "
+        "[IO.File]::WriteAllText($env:LOGGER_TEST_REMOVED, 'removed') }\n"
+        "& $Installer uninstall -InstallDir $Root\n",
+        encoding="utf-8",
+    )
+    requested = str(root) + ("\\" if alias == "separator" else "\\.\\")
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-File", str(wrapper),
+         str(INSTALLERS / "install.ps1"), requested],
+        capture_output=True, text=True, timeout=90, env=env,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    refused = active or legacy == "foreign"
+    assert result.returncode == (1 if refused else 0), result.stdout + result.stderr
+    assert disabled.exists() is (legacy != "foreign")
+    assert removed.exists() is not refused
+    if legacy == "foreign":
+        assert "owned by another account" in result.stderr
+    _assert_state(root, durable, removed=not refused)
+    for name in names:
+        for extension in ("ps1", "cmd"):
+            assert (commands / f"{name}.{extension}").exists() is refused

@@ -602,7 +602,10 @@ if ($Action -eq 'uninstall' -and ($InstallDir -split '[\\/]' -contains '..')) {
     throw 'Logger uninstall requires a root without parent-traversal components'
 }
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
-$legacyInstallDir = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.agent-logger'))
+if ($InstallDir.Length -gt [IO.Path]::GetPathRoot($InstallDir).Length) {
+    $InstallDir = $InstallDir.TrimEnd([char[]]'/\')
+}
+$legacyInstallDir = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.agent-logger')).TrimEnd([char[]]'/\')
 $publishGlobalBinstubs = [StringComparer]::OrdinalIgnoreCase.Equals(
     $InstallDir,
     $legacyInstallDir
@@ -1892,6 +1895,37 @@ function Invoke-Stamp {
     }
 }
 
+function Get-LoggerUninstallTaskNames {
+    $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    [void]$names.Add($TaskName)
+    foreach ($candidate in @(Get-ScheduledTask -ErrorAction Stop)) {
+        if (-not $candidate.PSObject.Properties['TaskName'] -or
+            -not $candidate.PSObject.Properties['TaskPath'] -or
+            -not $candidate.PSObject.Properties['Actions']) { continue }
+        if ($candidate.TaskPath -ne '\' -or
+            $candidate.TaskName -notmatch '^Agent Logger Session Sync(?: - [a-f0-9]{12})?$') { continue }
+        $bound = $false
+        foreach ($action in @($candidate.Actions)) {
+            if ($action.PSObject.Properties['Arguments'] -and
+                "$($action.Arguments)".IndexOf(('"' + $TaskLauncher + '"'),
+                    [StringComparison]::OrdinalIgnoreCase) -ge 0) { $bound = $true }
+        }
+        if (-not $bound) { continue }
+        if (-not $candidate.PSObject.Properties['Principal'] -or
+            -not $candidate.Principal.UserId) { throw 'Logger task ownership cannot be revalidated' }
+        $owner = $candidate.Principal.UserId
+        if ($owner -notlike 'S-1-*') {
+            $owner = ([Security.Principal.NTAccount]::new($owner)).Translate(
+                [Security.Principal.SecurityIdentifier]).Value
+        }
+        if ($owner -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) {
+            throw 'Logger task runtime is owned by another account; uninstall refused'
+        }
+        [void]$names.Add($candidate.TaskName)
+    }
+    return @($names | Sort-Object)
+}
+
 try {
     . (Join-Path $ScriptDir 'versioned_runtime_native.ps1')
     . (Join-Path $ScriptDir 'source-runtime.ps1')
@@ -1929,20 +1963,22 @@ switch ($Action) {
         $null = Invoke-Hidden -FilePath $uninstallPython -ArgList $uninstallGuardArgs -ErrorOutput ([ref]$guardError)
         if ($LASTEXITCODE -ne 0) { throw $guardError }
         if ($DryRun) { Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow }
-        if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
-            if ($DryRun) {
-                Write-Host "[dry-run] would remove scheduled task: $TaskName"
-            } else {
-                Disable-ScheduledTask -TaskName $TaskName -ErrorAction Stop | Out-Null
-                $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-                if ($task.State -in @('Running', 'Queued', 'Unknown')) {
-                    throw 'Active Logger sync task; uninstall refused after disabling new scheduled starts'
+        foreach ($uninstallTaskName in @(Get-LoggerUninstallTaskNames)) {
+            if (Get-ScheduledTask -TaskName $uninstallTaskName -ErrorAction SilentlyContinue) {
+                if ($DryRun) {
+                    Write-Host "[dry-run] would remove scheduled task: $uninstallTaskName"
+                } else {
+                    Disable-ScheduledTask -TaskName $uninstallTaskName -ErrorAction Stop | Out-Null
+                    $task = Get-ScheduledTask -TaskName $uninstallTaskName -ErrorAction Stop
+                    if ($task.State -in @('Running', 'Queued', 'Unknown')) {
+                        throw 'Active Logger sync task; uninstall refused after disabling new scheduled starts'
+                    }
+                    Unregister-ScheduledTask -TaskName $uninstallTaskName -Confirm:$false
+                    Write-Changed "scheduled task removed (config at $InstallDir kept)"
                 }
-                Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-                Write-Changed "scheduled task removed (config at $InstallDir kept)"
+            } else {
+                Write-Warn2 "no scheduled task found"
             }
-        } else {
-            Write-Warn2 "no scheduled task found"
         }
         if (-not $DryRun) {
             $guardError = ''
