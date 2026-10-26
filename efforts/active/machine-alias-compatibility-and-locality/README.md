@@ -495,8 +495,10 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
       allocations; live activation requires its own explicit authorization.
       The proposal passed review in #9114. Ordinary source call-site selection,
       receiving-anchor configuration propagation and contained entry regressions
-      are implemented; source review, qualified publication and separately
-      authorized installed activation remain pending.
+      merged in #9125 after final-head approval and passing required checks.
+      Qualified publication and separately authorized installed activation
+      remain pending. The first natural publication attempt is blocked by
+      verifier-initialization failure #9131; no ordinary rollout occurred.
 - [ ] Preserve existing IDs, paths, refs, records, queued work and live sessions;
       retain supported legacy lookup and allocation replay. No automatic
       relabel, rename, policy widening or data migration.

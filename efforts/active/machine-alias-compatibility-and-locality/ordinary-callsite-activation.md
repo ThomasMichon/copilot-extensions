@@ -94,9 +94,11 @@ structured physical metadata.
   refusal handling before activating that adoption boundary.
 - [x] Exercise actual new-record adoption and paired flows; retain original
   legacy/tuple replay and competing if-absent winners unchanged.
-- [ ] Pass affected bounded tests, unchanged admitted unit-only packet, source
+- [x] Pass affected bounded tests, unchanged admitted unit-only packet, source
   guards, documentation/install-contract and independent current-head review.
   Add the ordinary Worktrees changefile; never hand-edit versions.
+  #9125 merged after final-head approval, all four addressed threads resolved
+  and passing required checks. The current journal records the source gates.
 - [ ] Merge the source implementation, then observe natural qualification and
   exact release publication. No duplicate controller or integration promotion
   requirement is introduced.
@@ -109,23 +111,23 @@ structured physical metadata.
 
 ## Validation Plan
 
-- [ ] Cross Windows, WSL and Linux ordinary source entries with absent, empty,
+- [x] Cross Windows, WSL and Linux ordinary source entries with absent, empty,
   unrelated, matching, unscoped and sibling-only maps. Validate real entry
   arguments and resulting tracking/JSON, not just a helper returning a tuple.
-- [ ] Prove preview and actual New use the same identity dimensions. Cover a
+- [x] Prove preview and actual New use the same identity dimensions. Cover a
   configured guest shorthand, physical-plus-environment selection, custom key,
   alias, literal physical suffix and historical repeated-qualifier records.
-- [ ] Retain explicit ambiguity, malformed map, conflicting environment, foreign
+- [x] Retain explicit ambiguity, malformed map, conflicting environment, foreign
   guest/native, receiving-project and namespace refusal before new effects.
-- [ ] Exercise anchor adoption from the actual receiving configuration and
+- [x] Exercise anchor adoption from the actual receiving configuration and
   external linked-Git adoption outside the managed worktree root. Existing
   records remain byte-identical, including a competing if-absent winner.
-- [ ] Replay old and new completed creation/admission receipts across ordinary
+- [x] Replay old and new completed creation/admission receipts across ordinary
   selection; preserve ID/path/branch/nonce/relationships and prevent a second
   allocation. Pending/interrupted and changed-intent cases still refuse.
-- [ ] Verify existing legacy and tuple Resume/lookup, paired knowledge, owner,
+- [x] Verify existing legacy and tuple Resume/lookup, paired knowledge, owner,
   controller and resource boundaries, with no physical-host-only authority.
-- [ ] Keep real Git, filesystem, SQLite, cross-process and installed/native
+- [x] Keep real Git, filesystem, SQLite, cross-process and installed/native
   effects in existing bounded development/acceptance lanes, not new promotion
   prerequisites or an expanded required unit node inventory.
 - [ ] After separately authorized rollout, observe actual ordinary creation and
