@@ -123,9 +123,9 @@ owns enrollment, refusal and cross-runner mechanics.
 The existing `instructions/agent-worktrees/session-guidance.instructions.md`
 file in the exact Copilot session contains a compact **Current machine
 identity** block. `hostname` is the observed OS hostname; `machine` is the
-canonical physical machine from the shared registry map. `environment` identifies
+physical machine from the shared local execution context. `environment` identifies
 the current execution environment, while `execution_machine` retains the compact
-registered execution name (the former `machine` value). `alias` is the friendly
+execution name, optionally customized by the machine map. `alias` is the selected friendly
 display name; `platform` remains available for compatibility. Native and guest
 environments may share one physical name without sharing execution authority.
 Resolution status and source are separate contextual facts, never authorization.
@@ -137,8 +137,14 @@ its project during registration refreshes the identity from that project's
 registry before final guidance is read. Native context rollover reads
 the same file through the existing session-guidance pointer. No machine
 inventory or machine-specific value is checked into instruction projections.
-Without usable registry context, the observed hostname remains visible while
-machine, execution name and alias are explicitly unresolved. An oversized combined guidance
+An absent, empty or unrelated-only map does not make local identity unresolved:
+the existing OS/substrate context supplies the physical and execution names.
+Only the effective explicit configuration binding can customize that selection;
+the detected `Config.machine` scalar is not promoted into an explicit binding.
+Selected registry metadata may add a friendly name, but sibling-only metadata
+does not become local customization. Invalid, ambiguous or conflicting maps
+remain explicitly unresolved with a reason; an unavailable project likewise
+does not claim a configured identity. An oversized combined guidance
 file retains the bounded machine block and reports the omitted guidance.
 The initial hook claims the launch under a per-session OS file lock.
 Lifecycle rewrites check that same launch ownership, read current snapshots,
@@ -150,9 +156,11 @@ authorization or evidence that the model read the file.
 The legacy `machine-context` command labels the physical machine, observed
 hostname, execution identity, environment and friendly name separately.
 `System environment` retains descriptive OS metadata; `SSH alias` identifies
-transport rather than an execution environment. Without registry metadata it
-labels the physical machine unresolved while retaining the configured execution
-identity, observed hostname and actual platform. These presentation changes do
+transport rather than an execution environment. It uses the same local context
+without requiring registry enrollment; absent customization is not a warning.
+Invalid topology or identity selection retains an explicit warning on stderr
+and unresolved physical identity rather than emitting success-shaped metadata.
+These presentation changes do
 not rename records, IDs, paths or execution addresses; `get machine` still
 returns the configured execution identifier.
 

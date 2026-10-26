@@ -2,6 +2,7 @@
 
 Parent: [effort](README.md).
 
+- [2026-10-26](journal/2026/10.26%20progress.md): Source reconciliation and remaining manifest-independent structured guidance; ordinary activation remains gated.
 - [2026-10-25](journal/2026/10.25%20progress.md): Project-registration configuration-entry proof and continuing Manager/installed acceptance gates.
 - [2026-10-24](journal/2026/10.24%20progress.md): Qualified no-restart recovery release and supported guest repair/update acceptance; remaining identity work stays active.
 - [2026-10-22](journal/2026/10.22%20progress.md): Fresh-source recovery, native acquisition and publication-boundary acceptance.

@@ -53,10 +53,12 @@ reproducer. One successful legacy preview and unchanged roster totals do not
 prove all records resolve, and do not establish that this mismatch caused the
 transient failure.
 
-The admission and guidance source repairs subsequently merged as #7321 and
-#7334. Prospective creation semantics, qualified delivery and installed
-acceptance remain open; these source merges do not prove the containing
-rollout complete.
+The admission and structured-dimension guidance source repairs subsequently
+merged as #7321 and #7334. The gated prospective producers and installed opt-in
+acceptance subsequently passed the source and rollout gates recorded below.
+Read-only guidance still required matching registry metadata; the current
+manifest-independent correction closes that remaining source discrepancy.
+Ordinary activation remains separately reviewed, not inferred from opt-in proof.
 
 ## Boundary inventory
 
@@ -372,37 +374,51 @@ coverage, not native or installed-consumer acceptance.
 - [x] The same configured physical machine is reported in Windows and WSL;
   environment and compact execution ID differ explicitly and OS hostname is
   independent metadata.
-- [ ] Physical deployment selectors admit the already-declared host in either
+- [x] Physical deployment selectors admit the already-declared host in either
   permitted environment without adding duplicate physical machines. An omitted
   or foreign physical host still refuses; update and launch decisions agree.
-- [ ] Native and guest locality/mutation fences stay distinct. A physical-host
+  The shared runtime predicate and real configuration-boundary controls landed
+  in #7321; later optional-map controls preserve explicit policy omissions.
+- [x] Native and guest locality/mutation fences stay distinct. A physical-host
   match does not authorize opening or modifying a sibling's records.
-- [ ] Exact custom execution keys and configured transport aliases remain
+  The source producer, receiving-record and installed opt-in matrices retain
+  the separate execution owner, receiving project and namespace gates.
+- [x] Exact custom execution keys and configured transport aliases remain
   valid. Ambiguous registry names, conflicting environments and guest/native
   collisions refuse instead of falling back to hostname or suffix guesses.
-- [ ] Newly generated IDs include the selected environment once for the
+  Source coverage is mapped above; the later local-context correction retains
+  explicit ambiguity and profile-platform refusal controls.
+- [x] Newly generated IDs include the selected environment once for the
   declared physical name. A physical name that itself ends in a platform-like
   suffix is not silently truncated.
-- [ ] Existing physical/environment tuples, compact legacy labels, repeated
+  Actual opt-in producer and installed allocation proof use the physical tuple,
+  not suffix suppression. Ordinary producer activation remains gated.
+- [x] Existing physical/environment tuples, compact legacy labels, repeated
   historical ID prefixes and admitted allocation replay resolve without
   changing their stored bytes.
-- [ ] New records store the physical tuple and separate execution-owner
+  Source retained-allocation controls and installed previews/keyed replays pass.
+- [x] New records store the physical tuple and separate execution-owner
   identity; serialization, JSON, paired creation and relationship consumers
   agree without changing the identity representation of existing records.
-- [ ] `<machine>-wsl` and physical machine plus explicit WSL environment select
+  This is the gated source and installed opt-in contract, not an assertion
+  that ordinary call sites select the tuple producer yet.
+- [x] `<machine>-wsl` and physical machine plus explicit WSL environment select
   the same declared guest across appropriate one-term creation, lookup and
   resume interfaces. Custom keys remain usable, conflicting contexts refuse,
   and native/guest mutation authority stays distinct.
-- [ ] Admitted creation-key replay and interrupted-creation repair retain exact
+- [x] Admitted creation-key replay and interrupted-creation repair retain exact
   historical allocations under the new producer, including changed current
   registry spelling, or report a demonstrated identity conflict without
   allocating a replacement.
-- [ ] Bounded in-process unit fixtures cover the decision rules; actual Git,
+- [x] Bounded in-process unit fixtures cover the decision rules; actual Git,
   installed runtime, cross-process and native acceptance stay outside promotion.
-- [ ] Installed Windows and WSL creation, lookup and resume work across all
+- [x] Installed Windows and WSL creation, lookup and resume work across all
   registered projects; current Manager sources and rows agree with the direct
   resolver. Removed paths and any unavailable or unreproduced case are reported
   separately, not counted as passing proof.
+  The current journal records eight actual allocations, sixteen exact keyed
+  replays, six allowed non-preview Resume plans and two source-only hosting
+  refusals, alongside existing-record previews and actual Manager entry.
 - [ ] Queue, session, head, title, flags, paths, claims and owner/ref bytes are
   preserved through the authorized rollout. Any necessary data migration is a
   separately reviewed, explicitly approved operation.

@@ -17,7 +17,7 @@ import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
-from agent_worktrees import session_context
+from agent_worktrees import machine_instructions, session_context
 
 
 class _Args:
@@ -52,6 +52,8 @@ def test_emits_identity_without_machines_yaml(monkeypatch, capsys):
     monkeypatch.setattr(m, "_resolve_active_project", lambda _p: ("proj", None))
     monkeypatch.setattr(m.cfg, "set_active_project", lambda _p: None)
     monkeypatch.setattr(m.cfg, "load_config", lambda: _Config())
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "Observed-Host")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
 
     def _raise(_rd, **kwargs):
         raise FileNotFoundError
@@ -60,9 +62,9 @@ def test_emits_identity_without_machines_yaml(monkeypatch, capsys):
     rc = m.cmd_machine_context(_Args())
     assert rc == 0
     context = json.loads(capsys.readouterr().out)["additionalContext"]
-    assert "Machine: unresolved" in context
-    assert "Execution identity: foo" in context
-    assert "Hostname:" in context
+    assert "Machine: observed-host\n" in context
+    assert "Execution identity: observed-host\n" in context
+    assert "Hostname: Observed-Host\n" in context
     assert "Project: proj" in context
 
 
@@ -72,12 +74,8 @@ def test_emits_additional_context_in_project(monkeypatch, capsys):
     monkeypatch.setattr(m.cfg, "set_active_project", lambda _p: None)
     monkeypatch.setattr(m.cfg, "load_config", lambda: _Config())
     monkeypatch.setattr(m.cfg, "load_machines_yaml", lambda _rd, **kwargs: {"foo": sentinel})
-    monkeypatch.setattr(
-        m.cfg, "render_copilot_instructions",
-        lambda _entry, project="", machine="": (
-            f"Machine: {machine}\nHostname: bar\nProject: " + project
-        ),
-    )
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "foo")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
 
     rc = m.cmd_machine_context(_Args())
     assert rc == 0
@@ -156,10 +154,11 @@ def test_session_machine_identity_reads_registry_without_worktree_binding(tmp_pa
 
 
 @pytest.mark.parametrize("config_available", [True, False])
-def test_session_machine_identity_keeps_unresolved_hostname_explicit(
+def test_session_machine_identity_requires_project_not_machine_enrollment(
     tmp_path, monkeypatch, config_available,
 ):
     monkeypatch.setattr(session_context.socket, "gethostname", lambda: "VM-ABC")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
     config = (
         SimpleNamespace(default_repo=SimpleNamespace(anchor=str(tmp_path)))
         if config_available else None
@@ -169,12 +168,18 @@ def test_session_machine_identity_keeps_unresolved_hostname_explicit(
     facts = json.loads(context.split("```json\n", 1)[1].split("\n```", 1)[0])
 
     assert facts["hostname"] == "VM-ABC"
-    assert facts["machine"] is None and facts["alias"] is None
-    assert facts["execution_machine"] is None
+    assert facts["alias"] is None
     assert facts["environment"] == facts["platform"]
-    assert facts["status"] == "unresolved"
-    assert facts["source"] == "os-hostname"
-    assert facts["reason"] == ("FileNotFoundError" if config_available else "project-unavailable")
+    if config_available:
+        assert facts["machine"] == facts["execution_machine"] == "vm-abc"
+        assert facts["status"] == "resolved"
+        assert facts["source"] == "local-execution-context"
+        assert "reason" not in facts
+    else:
+        assert facts["machine"] is None and facts["execution_machine"] is None
+        assert facts["status"] == "unresolved"
+        assert facts["source"] == "os-hostname"
+        assert facts["reason"] == "project-unavailable"
 
 
 def test_session_machine_identity_does_not_guess_from_configured_machine(tmp_path, monkeypatch):
@@ -183,6 +188,7 @@ def test_session_machine_identity_does_not_guess_from_configured_machine(tmp_pat
         encoding="utf-8",
     )
     monkeypatch.setattr(session_context.socket, "gethostname", lambda: "VM-ABC")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
     config = SimpleNamespace(
         machine="other-host", default_repo=SimpleNamespace(anchor=str(tmp_path)),
     )
@@ -190,8 +196,9 @@ def test_session_machine_identity_does_not_guess_from_configured_machine(tmp_pat
         session_context.render_machine_context(config).split("```json\n", 1)[1].split("\n```", 1)[0]
     )
 
-    assert facts["machine"] is None
-    assert facts["reason"] == "hostname-not-registered"
+    assert facts["machine"] == facts["execution_machine"] == "vm-abc"
+    assert facts["status"] == "resolved"
+    assert "reason" not in facts
 
 
 @pytest.mark.parametrize("platform", ["windows", "wsl"])
@@ -287,27 +294,24 @@ def test_machine_guidance_keeps_physical_environment_and_execution_distinct(
     assert f"Environment: {platform}\n" in text
 
 
-@pytest.mark.parametrize("failure", ["config", "topology", "metadata", "missing", "render"])
+@pytest.mark.parametrize("failure", ["config", "topology", "resolution", "render"])
 def test_machine_context_warning_stream(monkeypatch, capsys, failure):
     monkeypatch.setattr(m, "_resolve_active_project", lambda _p: ("proj", None))
     monkeypatch.setattr(cfg, "set_active_project", lambda _p: None)
     monkeypatch.setattr(cfg, "load_config", lambda: _Config(machine="example-host-wsl"))
     monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
     monkeypatch.setattr(cfg, "load_machines_yaml", lambda _repo, **kwargs: {})
-    monkeypatch.setattr(cfg, "find_machine_metadata", lambda *_args: object())
-    monkeypatch.setattr(
-        cfg, "render_copilot_instructions", lambda *_args, **_kwargs: "Machine: example-host-wsl",
-    )
 
     def fail(*_args, **_kwargs):
         raise ValueError("fixture error")
 
-    if failure == "missing":
-        monkeypatch.setattr(cfg, "find_machine_metadata", lambda *_args: None)
+    if failure == "resolution":
+        monkeypatch.setattr("machine_transport.resolve_local_execution_context", fail)
+    elif failure == "render":
+        monkeypatch.setattr(machine_instructions, "render_local_context", fail)
     else:
         target = {
             "config": "load_config", "topology": "load_machines_yaml",
-            "metadata": "find_machine_metadata", "render": "render_copilot_instructions",
         }[failure]
         monkeypatch.setattr(cfg, target, fail)
     assert m.cmd_machine_context(_Args()) == 0
