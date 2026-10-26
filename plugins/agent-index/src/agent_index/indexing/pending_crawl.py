@@ -111,6 +111,13 @@ class PendingCrawls:
                 "SELECT source FROM pending_crawls ORDER BY source",
             )]
 
+    def backfill_sources(self) -> list[str]:
+        """Unfinished derived jobs defer retirement, not ordinary acquisition."""
+        with closing(self._paths._connect()) as conn:
+            return [row["source"] for row in conn.execute(
+                "SELECT source FROM embedding_backfills WHERE complete = 0 ORDER BY source",
+            )]
+
     def load(self, source: str, scope: str) -> tuple[CrawlManifest, bool] | None:
         with closing(self._paths._connect()) as conn, conn:
             row = conn.execute(

@@ -358,3 +358,25 @@ def test_explicit_discard_preserves_data_and_refuses_a_newer_job(context) -> Non
     PendingCrawls(context.paths).assert_gc_available()
     assert context.store.projection_snapshot() == before
     assert context.config.state_file.read_bytes() == state
+
+
+def test_intervening_ordinary_write_refuses_after_clean_writer_exit(context, monkeypatch) -> None:
+    content = context.store.content_store
+    read = content.read_snapshot
+
+    def intervening(*args, **kwargs):
+        records = read(*args, **kwargs)
+        context.store.upsert_content([chunk("ordinary change", source=context.connector.source_name)])
+        prepare_chunk_id_index(content, max_rows=20)
+        return records
+
+    with monkeypatch.context() as patch:
+        patch.setattr(content, "read_snapshot", intervening)
+        with pytest.raises(BackfillRepairRequired, match="changed"):
+            context.run()
+    assert context.client.calls == []
+    assert context.store._source_domain.receipt()["state"] == "clean"
+    assert content.capture_snapshot().rows == 6
+    context.store.upsert_content([chunk("another ordinary change", source=context.connector.source_name)])
+    prepare_chunk_id_index(content, max_rows=20)
+    assert context.run(restart=True).offset == 2

@@ -216,8 +216,13 @@ dirty/repair disposition; restart does not clear it. Completed matching jobs
 return through metadata checks without another content read or embedding call.
 
 The existing GC guard refuses retirement while a backfill is unfinished, but
-ordinary crawl acquisition is not fenced for the job's lifetime. Explicit
-`discard_embedding_backfill` removes only an exactly matching derived intent
+ordinary crawl acquisition is not fenced for the job's lifetime. Ordinary
+`run_reindex` GC reports a nonfatal deferral while retaining that guard,
+so successful acquisition does not become a failed indexing round. Known
+pre-effect writer-admission refusals propagate only after a clean writer exit;
+effectful failures retain the normal uncertainty disposition.
+
+Explicit `discard_embedding_backfill` removes only an exactly matching derived intent
 under clean source-domain exclusion; it requires caller authorization and
 preserves canonical data, coverage and acquisition checkpoints. This also
 allows deliberate abandonment of a stale job before retirement. New guard

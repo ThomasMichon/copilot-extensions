@@ -114,7 +114,7 @@ def _decode(raw: str, complete: int) -> dict:
 
 def _vector_versions(config: IndexConfig, store: MultiModelStore) -> dict[str, int]:
     return {
-        name: store.get_vector_table(name)._get_or_create_table().version
+        name: store.content_store.db.open_table(store.get_vector_table(name).table_name).version
         for name in sorted(config.model_profiles)
     }
 
@@ -251,24 +251,32 @@ def backfill_embedding_slice(
             before_embed()
 
     coverage = EmbeddingCoverage(paths)
+    refusal = None
     with domain.write(store.content_store.db):
-        _require_current(payload, spec, connector, config, store)
-        if payload["vectors"] != _vector_versions(config, store):
-            raise BackfillRepairRequired("Backfill vector coverage changed; restart required")
-        written = embed_and_store_pairs(
-            chunks, store, clients, config.model_profiles, stream_batch_size=row_budget,
-            coverage=coverage, bounded=True,
-            before_embed=prepare, after_store=after_store,
-        )
-        for name, profile in config.model_profiles.items():
-            selected = routed_model_chunks(chunks, name, config.model_profiles)
-            if coverage.missing(store.get_vector_table(name), selected, profile, bounded=True):
-                raise BackfillRepairRequired("Backfill pair coverage is incomplete")
-        vectors = _vector_versions(config, store)
-        # Retain proven vector versions without acknowledging the offset. A
-        # restart after the clean writer exit can replay this same covered page.
-        payload = {**payload, "vectors": vectors}
-        raw = _save_progress(paths, spec.name, raw, payload)
+        try:
+            _require_current(payload, spec, connector, config, store)
+            if payload["vectors"] != _vector_versions(config, store):
+                raise BackfillRepairRequired("Backfill vector coverage changed; restart required")
+        except (BackfillRepairRequired, ValueError, KeyError) as exc:
+            # Only these metadata checks precede every backfill effect.
+            refusal = exc
+        if refusal is None:
+            written = embed_and_store_pairs(
+                chunks, store, clients, config.model_profiles, stream_batch_size=row_budget,
+                coverage=coverage, bounded=True,
+                before_embed=prepare, after_store=after_store,
+            )
+            for name, profile in config.model_profiles.items():
+                selected = routed_model_chunks(chunks, name, config.model_profiles)
+                if coverage.missing(store.get_vector_table(name), selected, profile, bounded=True):
+                    raise BackfillRepairRequired("Backfill pair coverage is incomplete")
+            vectors = _vector_versions(config, store)
+            # Retain proven vector versions without acknowledging the offset. A
+            # restart after the clean writer exit can replay this same covered page.
+            payload = {**payload, "vectors": vectors}
+            raw = _save_progress(paths, spec.name, raw, payload)
+    if refusal is not None:
+        raise refusal
     end = min(start + row_budget, snapshot.rows)
     with domain.read(store.content_store.db):
         _require_current(payload, spec, connector, config, store)

@@ -165,7 +165,13 @@ def gc_configured_snapshot(
     """Retain canonical rows separately from active configured crawl identities."""
     from agent_index.indexing.pending_crawl import PendingCrawls
 
-    pending = PendingCrawls(path_index).sources()
+    journal = PendingCrawls(path_index)
+    backfills = journal.backfill_sources()
+    if backfills:
+        log.warning("Source GC deferred: unfinished embedding backfills: %s", backfills)
+        return {"purged": {}, "kept": [], "chunks_deleted": 0, "dry_run": False,
+                "deferred": backfills}
+    pending = journal.sources()
     if pending:
         log.warning("Source GC deferred: complete pending crawls with original configuration: %s",
                     pending)
