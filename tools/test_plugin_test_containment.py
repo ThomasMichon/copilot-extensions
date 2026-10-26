@@ -1106,6 +1106,37 @@ def test_environment_audit_failure_cannot_mask_unreaped_retention(
             shutil.rmtree(sandbox.name)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows sandbox paths")
+@pytest.mark.parametrize("unreaped", [False, True])
+def test_windows_long_path_sandbox_cleanup_preserves_unreaped_retention(tmp_path, unreaped):
+    sandbox = plugin_test_containment.TestSandbox(dir=tmp_path)
+    native = Path("\\\\?\\" + str(Path(sandbox.name).absolute()))
+    marker = native / ("nested-" * 15) / ("snapshot-" * 8) / "preserved.txt"
+    assert len(str(marker)) > 260
+
+    def execute():
+        with sandbox:
+            marker.parent.mkdir(parents=True)
+            marker.write_text("owned")
+            if unreaped:
+                raise plugin_test_containment.UnreapedProcessError("synthetic custody remains")
+
+    try:
+        if unreaped:
+            with pytest.raises(plugin_test_containment.UnreapedProcessError):
+                execute()
+        else:
+            execute()
+        assert sandbox.retained is unreaped
+        if unreaped:
+            assert marker.read_text() == "owned"
+        else:
+            assert not native.exists()
+    finally:
+        if native.exists():
+            shutil.rmtree(native)
+
+
 def test_run_contained_detects_and_fails_on_persistent_environment_drift(
     tmp_path, capfd, monkeypatch
 ):
