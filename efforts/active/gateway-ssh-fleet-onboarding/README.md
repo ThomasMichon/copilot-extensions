@@ -468,6 +468,11 @@ not installation, credential or live-adoption authority.
   original-operation recovery, private-file custody, unchanged active channels,
   ordered publication, mixed-version refusal and two-harness state isolation.
   This does not qualify source-denying installed distribution or native providers.
+- [x] Qualify the Linux noneditable Fleet SDK closure with checkout access
+  physically refused before imports, through the real synthetic TLS CLI and
+  Manager/engine consumer. Restart the receiver at the same origin/journal and
+  retain the original machine key and operation. Manager/engine installation,
+  native providers, released construction and live adoption remain open.
 - [x] Peer-approval selection: pending public identities never enter active
   directory or native relay authorization before exact authenticated approval;
   explicit recovery cannot become a missing-approver fallback.

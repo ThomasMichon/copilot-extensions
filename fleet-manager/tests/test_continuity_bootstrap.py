@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+from dataclasses import replace
 import hashlib
 import json
 import os
@@ -12,6 +13,7 @@ import sqlite3
 import sys
 import shlex
 import subprocess
+from urllib.parse import urlsplit
 
 from agent_procutil import no_window_kwargs
 import pytest
@@ -19,6 +21,8 @@ import pytest
 from fleet_manager import planning
 from fleet_manager.continuity_bootstrap import _state, bootstrap
 from fleet_manager import private_state
+from fleet_manager.gateway_service_server import STATE, start
+from fleet_manager.ledger import OperationLedger
 from gateway_service_transport_fixtures import Rig
 from test_gateway_enrollment import EnrollmentHarness, GRANT
 
@@ -26,6 +30,7 @@ from test_gateway_enrollment import EnrollmentHarness, GRANT
 @pytest.mark.parametrize("consumer", ["fleet-cli", "manager-engine"])
 def test_real_cli_first_touch_check_restart_and_same_private_key(
     tmp_path: Path, consumer: str,
+    sdk_runtime: tuple[Path, list[str]] | None = None,
 ) -> None:
     async def scenario() -> None:
         rig = Rig(tmp_path)
@@ -61,8 +66,11 @@ def test_real_cli_first_touch_check_restart_and_same_private_key(
                 package = Path(__file__).parents[1] / "src"
                 environment = dict(os.environ)
                 environment["PYTHONPATH"] = str(package) + os.pathsep + environment.get("PYTHONPATH", "")
+                command = (
+                    sdk_runtime[1] if sdk_runtime else
+                    [sys.executable, "-m", "fleet_manager"])
                 child = await asyncio.create_subprocess_exec(
-                    sys.executable, "-m", "fleet_manager", "bootstrap",
+                    *command, "bootstrap",
                     "--source", str(source), "--harness", "harness-a",
                     "--state-root", str(state), *arguments,
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -74,13 +82,26 @@ def test_real_cli_first_touch_check_restart_and_same_private_key(
                 repository = Path(__file__).parents[2]
                 engine_python = repository / ".test-venvs/linux/agent-worktrees/bin/python"
                 if os.name == "nt" or not engine_python.is_file():
+                    if sdk_runtime:
+                        pytest.fail("installed SDK qualification requires the prepared POSIX engine test environment")
                     pytest.skip("source qualification requires the prepared POSIX engine test environment")
-                installed = await asyncio.create_subprocess_exec(
+                if sdk_runtime is None:
+                    installed = await asyncio.create_subprocess_exec(
+                        str(engine_python), "-I", "-c",
+                        "import importlib.util;raise SystemExit(importlib.util.find_spec('fleet_manager') is None)",
+                        **no_window_kwargs())
+                    if await installed.wait():
+                        pytest.skip("selected engine test environment needs its Fleet service-Gateway SDK")
+                support = await asyncio.create_subprocess_exec(
                     str(engine_python), "-I", "-c",
-                    "import importlib.util;raise SystemExit(importlib.util.find_spec('fleet_manager') is None)",
+                    "import json,sysconfig;print(json.dumps(sorted({"
+                    "sysconfig.get_path('purelib'),sysconfig.get_path('platlib')})))",
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                     **no_window_kwargs())
-                if await installed.wait():
-                    pytest.skip("selected engine test environment needs its Fleet service-Gateway SDK")
+                support_stdout, support_stderr = await asyncio.wait_for(support.communicate(), 15)
+                assert support.returncode == 0, support_stderr
+                if sdk_runtime:
+                    engine_python = sdk_runtime[0]
                 home = tmp_path / "home"
                 home.mkdir(mode=0o700)
                 harness = tmp_path / "harness"
@@ -121,7 +142,9 @@ def test_real_cli_first_touch_check_restart_and_same_private_key(
                     "import sys;sys.path[:0]=" + repr([
                         str(repository / "plugins/agent-worktrees/src"),
                         str(repository / "libs/agent-procutil/src")])
-                    + ";from pathlib import Path;"
+                    + ";import site;"
+                    + "[site.addsitedir(path) for path in " + repr(json.loads(support_stdout))
+                    + "];from pathlib import Path;"
                     "import fleet_manager,hashlib;"
                     "package=Path(fleet_manager.__file__).parent;"
                     "expected=" + repr({
@@ -130,11 +153,24 @@ def test_real_cli_first_touch_check_restart_and_same_private_key(
                     + ";assert all(hashlib.sha256((package/name).read_bytes()).hexdigest()==value "
                     "for name,value in expected.items()),'selected test SDK differs from current source';"
                     "from agent_worktrees import repos,repository_bootstrap;"
+                    + (
+                        "from agent_worktrees import repository_continuity;"
+                        "original=repository_continuity.run_caller_owned;"
+                        "exec(" + repr(
+                            "def guarded_sdk(command, **options):\n"
+                            "    assert command[:4] == [sys.executable, '-I', '-m', 'fleet_manager']\n"
+                            f"    return original({sdk_runtime[1]!r} + command[4:], **options)\n"
+                            "repository_continuity.run_caller_owned = guarded_sdk\n"
+                        ) + ");" if sdk_runtime else ""
+                    )
+                    +
                     "repos._repos_yaml_path=lambda:Path(sys.argv[1]);"
                     "assert sys.argv[2:4]==['repos','setup'];"
                     "raise SystemExit(repository_bootstrap.command(sys.argv[4:]))")
                 manager_driver = (
-                    "import sys;sys.path.insert(0," + repr(str(repository / "worktree-manager/src"))
+                    "import sys,site;"
+                    "[site.addsitedir(path) for path in " + repr(json.loads(support_stdout))
+                    + "];sys.path.insert(0," + repr(str(repository / "worktree-manager/src"))
                     + ");from worktree_manager import engine_client,repository_bootstrap;"
                     "engine_client.set_engine_command([sys.argv[1],'-c',sys.argv[2],sys.argv[3]]);"
                     "raise SystemExit(repository_bootstrap.run(repository_bootstrap.parse(sys.argv[4:])))")
@@ -169,6 +205,19 @@ def test_real_cli_first_touch_check_restart_and_same_private_key(
             assert GRANT.encode() not in retained
             if os.name != "nt":
                 assert (state / "machine.json").stat().st_mode & 0o077 == 0
+            if sdk_runtime:
+                old_nonce = rig.state.authority.challenge()
+                await rig.serving.close()
+                enrollment.ledger = OperationLedger(
+                    enrollment.ledger.path, authority="authority-a",
+                    installation="installation-a", enable_enrollment=True)
+                rig.serving = await start(
+                    replace(rig.listener, port=urlsplit(rig.origin).port, origin=rig.origin),
+                    rig.policy, reload_interval=0.05, clock=rig.h.clock,
+                    enrollment_journal=enrollment.ledger)
+                rig.state = rig.serving.app[STATE]
+                assert rig.serving.origin == rig.origin
+                assert rig.state.authority.challenge() != old_nonce
             assert (await process())[0] == 0
             assert (await process("--apply"))[0] == 0
             assert (state / "machine.json").read_bytes() == retained

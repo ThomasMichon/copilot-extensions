@@ -4,8 +4,11 @@ Back to [Gateway and SSH Fleet Onboarding](README.md).
 Coordination remains with #6681, #6236, #6240/#6424, #5789/#6443/#6804 and
 the separately selected [peer-approval contract](peer-approval.md).
 
-**Agent-recommended contract amendment, not implemented setup, credential
-issuance or live enrollment.** This extends the existing onboarding effort,
+**Reviewed contract with a bounded implemented enrollment/consumer slice, not
+complete installed setup or live enrollment.** The implemented boundary and
+qualification are recorded in the
+[runtime contract](../../../fleet-manager/docs/continuity-bootstrap.md#qualification-and-release-boundary).
+This extends the existing onboarding effort,
 not a new installer, account/enrollment registry, storage owner or control loop.
 It realizes the Installer's
 [harness-selected continuity](../../../visions/installer/README.md#harness-selected-continuity-bootstrap),

@@ -214,9 +214,25 @@ uses real Manager -> engine -> isolated Fleet SDK processes, with a synthetic
 grant and actual TLS enrollment/connect receiver. A conflicting `fleet-manager`
 on `PATH` is not selected.
 
-These results are **not** installed source-denying distribution, native Windows/
-macOS provider qualification, approved live enrollment, normal human navigation
-or managed deployment/soak evidence. Providers expand first; callers activate
+The full/manual `client_distribution_full` lane in
+`tests/test_continuity_installed.py` builds a fresh noneditable
+`Fleet[service-gateway]` SDK closure using the maintained seasoned build path.
+An isolated `-I -S` process installs a checkout-read audit guard before package
+imports, admits only that runtime's site directories, checks every installed
+distribution's metadata/file inventory and noneditable location, and compares
+the installed Fleet source bytes. An intentional checkout import must refuse.
+Both finite CLI and normal Manager -> engine -> SDK scenarios enroll against
+the real synthetic TLS receiver, restart that receiver at the same origin with
+its original journal, reconnect with the unchanged machine-state bytes and
+retain exactly one enrollment and operation. A conflicting source still refuses.
+The Manager and engine drivers themselves remain source fixtures using their
+prepared engine dependencies; those dependencies are not admitted into the
+guarded SDK process. This qualifies the Linux installed **SDK**, not an
+installed Manager/engine product or a released construction path.
+
+These results are **not** native Windows/macOS provider qualification, approved
+live enrollment, normal human navigation or managed deployment/soak evidence.
+Providers expand first; callers activate
 only for the selected declaration/capability. No old profile or declaration
 generation is retired. A source merge does not install the optional SDK or
 change any running Gateway.
