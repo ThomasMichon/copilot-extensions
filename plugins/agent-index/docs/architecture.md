@@ -37,7 +37,9 @@ an empty success or inferred whole-corpus deletion.
 
 This path does not call `current_commit()`, `list_paths()` or read all stored
 paths: the connector owns coherent base-to-target coverage. Full reindexing and
-legacy connectors retain the existing snapshot/discovery path. The opt-in Python
+legacy connectors retain the snapshot/discovery path, with stored-path
+reconciliation limited to the connector's exact canonical family in either
+storage layout. The opt-in Python
 protocol does not change the external provider CLI wire format; provider
 capability negotiation and durable event/task payloads remain separate work.
 
@@ -73,9 +75,16 @@ nonsecret `recovery_identity` tuple. Built-in Git binds the resolved checkout,
 remote target and selected ref, including environment/registry resolution;
 GitHub binds the API/repository target, and legacy CLI providers bind their
 registered command. Providers remain responsible for stable backend identity.
-Credential-bearing URL components are excluded; ambiguous query/fragment target
+Credential-bearing URL components are excluded, except SSH usernames remain
+part of the target because they select remote home directories.
+Ambiguous query/fragment target
 semantics refuse recovery rather than silently selecting an identity.
 The journal is not another checkpoint authority.
+Another crawl alias cannot acquire or mutate that same family while acquired
+work remains pending. Source garbage collection also defers before deletion or
+cursor retirement and reports the pending sources as failures. Restore the
+original source configuration and complete its pending crawl before retiring
+or retargeting it; deleting the journal is not a supported recovery path.
 Pending work must finish through a journal-capable engine before rolling back
 to an older engine; old runtimes do not implement this recovery contract.
 

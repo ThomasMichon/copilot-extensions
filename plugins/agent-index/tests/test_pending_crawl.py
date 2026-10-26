@@ -11,7 +11,7 @@ import pytest
 from agent_index.indexing import engine
 from agent_index.indexing.manifest import CrawlManifest, CrawlStats
 from agent_index.indexing.path_index import PathIndex
-from agent_index.indexing.pending_crawl import PendingCrawls, recover_source
+from agent_index.indexing.pending_crawl import PendingCrawlConflict, PendingCrawls, recover_source
 from agent_index.indexing.pending_crawl import recovery_scope
 from agent_index.indexing.state import IndexState
 from agent_index.sources.base import FileEntry
@@ -261,3 +261,88 @@ def test_ssh_account_change_refuses_pending_replay(
     assert nonsecret_target(remote) == remote
     password_remote = remote.replace("account_b@", "account_b:temporary-password@")
     assert nonsecret_target(password_remote) == remote
+
+
+def test_pending_alias_blocks_sibling_but_not_an_independent_family(tmp_path: Path) -> None:
+    paths = PathIndex(tmp_path / "paths.db")
+    journal = PendingCrawls(paths)
+    manifest = CrawlManifest(
+        source="retired-alias", accounting_family="forge:repo", upserts=[item("a.md", "middle")],
+    )
+    journal.save(manifest, scope="original", full=False)
+    effects: list[str] = []
+    with pytest.raises(PendingCrawlConflict, match="retired-alias"):
+        recover_source(
+            "active-alias", scope="current", family="forge:repo", state=IndexState(),
+            state_file=tmp_path / "state.json", paths=paths, full=False,
+            acquire=lambda: effects.append("acquire"),
+            apply=lambda **kwargs: effects.append("apply"),
+        )
+    assert effects == []
+    journal.assert_family_available("retired-alias", "forge:repo")
+    journal.assert_family_available("independent", "forge:other")
+
+
+@pytest.mark.parametrize("stale", [False, True])
+@pytest.mark.parametrize("source_aware", [False, True])
+def test_gc_cannot_retire_state_while_a_crawl_is_pending(
+    tmp_path: Path, stale: bool, source_aware: bool,
+) -> None:
+    from agent_index.indexing.gc import gc_configured_snapshot, gc_stale_sources
+    from agent_index.indexing.state import SourceState
+
+    paths = PathIndex(tmp_path / "paths.db")
+    paths.mark_indexed("retired:family", "a.md", content_hash="old", chunk_count=2)
+    state = IndexState(
+        sources={"retired-alias": SourceState(last_commit="old", chunk_count=2)},
+        stored_families={"retired-alias": "retired:family"}, total_chunks=2,
+    )
+    journal = PendingCrawls(paths)
+    manifest = CrawlManifest(
+        source="retired-alias", accounting_family="retired:family",
+        upserts=[FileEntry("a.md", "middle", "markdown", "retired:family")],
+    )
+    journal.save(manifest, scope="original", full=False)
+    store = SimpleNamespace(
+        source_counts=lambda: {"retired:family": 2},
+        delete_by_source_exact=lambda *a: pytest.fail("deleted before pending crawl completed"),
+    )
+    if stale:
+        with pytest.raises(PendingCrawlConflict, match="original configuration"):
+            gc_stale_sources(store, paths, state)
+    else:
+        result = gc_configured_snapshot(
+            store, paths, state, configured_names=frozenset(), source_aware=source_aware,
+        )
+        assert result["deferred"] == result["pending_crawls"] == ["retired-alias"]
+        assert result["purged"] == {}
+    assert state.sources["retired-alias"].last_commit == "old"
+    assert state.total_chunks == 2
+    assert paths.get_content_hash("retired:family", "a.md") == "old"
+    assert journal.load("retired-alias", "original") == (manifest, False)
+
+
+@pytest.mark.parametrize("full", [False, True])
+def test_legacy_reconciliation_uses_canonical_not_requested_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, full: bool,
+) -> None:
+    from agent_index.indexing.crawl import collect_source_changes
+
+    paths = PathIndex(tmp_path / "paths.db")
+    paths.mark_indexed("forge:repo", "gone.md")
+    paths.mark_indexed("forge:other", "keep.md")
+    connector = SimpleNamespace(
+        source_name="forge:repo", current_commit=lambda: "target",
+        discover=lambda **k: [], discover_changed=lambda *a, **k: [],
+        list_paths=lambda **k: {"forge:repo": set()},
+    )
+    manifest = collect_source_changes(
+        "forge", state=IndexState(), path_index=paths, full=full, source_aware=False,
+        connector=connector,
+    )
+    assert [(entry.source, entry.path) for entry in manifest.deletions] == [
+        ("forge:repo", "gone.md"),
+    ]
+    journal = PendingCrawls(paths)
+    journal.save(manifest, scope="scope", full=full)
+    assert journal.load("forge", "scope") == (manifest, full)

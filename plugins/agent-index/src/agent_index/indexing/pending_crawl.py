@@ -21,6 +21,10 @@ class ApplyManifest(Protocol):
     def __call__(self, *, manifest: CrawlManifest, full: bool) -> tuple[int, int, int]: ...
 
 
+class PendingCrawlConflict(RuntimeError):
+    """Acquired work must finish before another owner mutates or retires its data."""
+
+
 def recovery_scope(config_scope: str, connector: SourceConnector) -> str:
     """Bind stable account configuration to the same resolved connector used to crawl."""
     identity = getattr(connector, "recovery_identity", None)
@@ -46,6 +50,40 @@ class PendingCrawls:
                 "CREATE TABLE IF NOT EXISTS pending_crawls "
                 "(source TEXT PRIMARY KEY, scope TEXT NOT NULL, payload TEXT NOT NULL)",
             )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS pending_crawl_family ON pending_crawls "
+                "(COALESCE(json_extract(payload, '$.manifest.accounting_family'), "
+                "json_extract(payload, '$.manifest.stored_family'), source))",
+            )
+
+    def assert_family_available(self, source: str, family: str) -> None:
+        with closing(self._paths._connect()) as conn:
+            row = conn.execute(
+                "SELECT source FROM pending_crawls WHERE "
+                "COALESCE(json_extract(payload, '$.manifest.accounting_family'), "
+                "json_extract(payload, '$.manifest.stored_family'), source) = ? "
+                "AND source != ? LIMIT 1", (family, source),
+            ).fetchone()
+        if row is not None:
+            raise PendingCrawlConflict(
+                f"Complete pending crawl {row['source']!r} with its original configuration "
+                f"before indexing another alias for {family!r}",
+            )
+
+    def assert_gc_available(self) -> None:
+        with closing(self._paths._connect()) as conn:
+            row = conn.execute("SELECT source FROM pending_crawls LIMIT 1").fetchone()
+        if row is not None:
+            raise PendingCrawlConflict(
+                f"Complete pending crawl {row['source']!r} with its original configuration "
+                "before source garbage collection",
+            )
+
+    def sources(self) -> list[str]:
+        with closing(self._paths._connect()) as conn:
+            return [row["source"] for row in conn.execute(
+                "SELECT source FROM pending_crawls ORDER BY source",
+            )]
 
     def load(self, source: str, scope: str) -> tuple[CrawlManifest, bool] | None:
         with closing(self._paths._connect()) as conn, conn:
@@ -99,9 +137,11 @@ class PendingCrawls:
 def recover_source(
     source: str, *, scope: str, state: IndexState, state_file: Path,
     paths: PathIndex, full: bool, acquire: Callable[[], CrawlManifest], apply: ApplyManifest,
+    family: str | None = None,
 ) -> tuple[int, int, int]:
     """Drain pinned partial work, persist its cursor, then acquire current changes."""
     journal = PendingCrawls(paths)
+    journal.assert_family_available(source, family or source)
     totals = (0, 0, 0)
     pending = journal.load(source, scope)
     if pending is not None:

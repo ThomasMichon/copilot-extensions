@@ -297,6 +297,7 @@ def run_reindex(
     from agent_index.engine.lifecycle import ensure_engine, stop_engine
     from agent_index.index_config import IndexConfig
     from agent_index.indexing.path_index import PathIndex
+    from agent_index.indexing.pending_crawl import PendingCrawlConflict
     from agent_index.indexing.runner import IndexingCancelled
     from agent_index.indexing.state import IndexState
     from agent_index.store.multi_model_store import MultiModelStore
@@ -440,6 +441,13 @@ def run_reindex(
                 source_aware=bool(selected_layout()),
             )
             gc_deferred = gc_summary.get("deferred", [])
+            for pending in gc_summary.get("pending_crawls", []):
+                if not any(failure["source"] == pending for failure in failed_sources):
+                    failed_sources.append({
+                        "source": pending,
+                        "error": "Complete pending crawl with its original configuration "
+                                 "before source retirement",
+                    })
             purged = gc_summary["purged"]
             if purged:
                 print("\nPurging sources removed from config...")
@@ -447,6 +455,8 @@ def run_reindex(
                     print(f"  purged {src}: {cnt} chunks")
                 total_deleted += gc_summary["chunks_deleted"]
                 sources_purged = sorted(purged)
+        except PendingCrawlConflict:
+            raise
         except Exception:
             if selected_layout():
                 raise
@@ -464,7 +474,7 @@ def run_reindex(
         # scheme, so if remote /api/ingest producers (e.g. a revived
         # agent-index-push-daemon) write machine-scoped sources, either disable this
         # or add their names to AGENT_INDEX_GC_KEEP_SOURCES.
-        if os.environ.get("AGENT_INDEX_REINDEX_GC", "1") != "0":
+        if os.environ.get("AGENT_INDEX_REINDEX_GC", "1") != "0" and not gc_deferred:
             print("\nGarbage-collecting stale source generations...")
             try:
                 from agent_index.indexing.gc import gc_stale_sources
@@ -477,6 +487,8 @@ def run_reindex(
                     print(f"  GC removed {gc_summary['chunks_deleted']} stale chunks")
                 else:
                     print("  No stale sources found")
+            except PendingCrawlConflict:
+                raise
             except Exception:
                 if selected_layout():
                     raise
@@ -585,7 +597,7 @@ def _index_source(
     connector = get_connector(source_name, **(connector_kwargs or {}))
     return recover_source(
         source_name, scope=recovery_scope(source_scope or source_name, connector), state=state,
-        state_file=config.state_file, paths=path_index, full=full,
+        state_file=config.state_file, paths=path_index, full=full, family=connector.source_name,
         acquire=partial(
             _crawl_source, source_name, config=config, state=state, path_index=path_index,
             full=full, progress_cb=progress_cb, connector_kwargs=connector_kwargs,

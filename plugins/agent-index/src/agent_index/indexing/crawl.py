@@ -62,10 +62,7 @@ def collect_source_changes(
         )
 
     commit = connector.current_commit()
-    stored_by_source = (
-        path_index.get_paths_by_family(canonical) if canonical is not None
-        else path_index.get_paths_by_prefix(source_name)
-    )
+    stored_by_source = path_index.get_paths_by_family(connector.source_name)
     if full:
         upserts = connector.discover(cancel_check=cancel_check)
         if cancel_check:
