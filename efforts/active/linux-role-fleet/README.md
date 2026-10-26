@@ -284,8 +284,8 @@ mutation follows from this amendment.
   approved real persistence/fault qualification. Existing restricted-provider
   invariants, ephemeral tests and native/installer/deployment owners stay unchanged.
   The operator selected ordinary persistent volumes with monitored storage
-  thresholds, not hard quotas; the linked amendment preserves that distinction
-  and requires review before changing the source controls.
+  thresholds, not hard quotas; #9101 reviewed the linked amendment before
+  implementation of that source policy.
 
 ### Mission amendment - Setup, refresh and first useful services
 
@@ -488,6 +488,13 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+- #9101 merged the operator-selected ordinary-volume amendment as
+  `512b9d46371b1e698f73f4305dd8148adc4b21ef` after exact-head Copilot approval
+  and required checks. Re-read this Plan and Validation Plan. Implement the
+  finite host reader and monitored usage/free-space refusal next; thresholds
+  do not become hard quotas. No resources, services or host settings changed.
+  Real isolation/persistence/fault, strict-write and native gates remain open,
+  with separate provisioning approval still required.
 - #9071 merged the first pure reproducer controls as
   `85d0d535ba244fda76a3ac53952a69da0efdee14` after exact-head Copilot approval,
   resolution of both capability/cgroup findings and required checks.

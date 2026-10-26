@@ -153,13 +153,14 @@ def inspect_static_boundary(
     if host.get("NetworkMode") != f"{experiment.resource_prefix}-internal":
         violations.append("network selection differs from the experiment")
     _check_mounts(experiment, observed.get("Mounts"), violations)
+    _check_mount_declarations(experiment, host.get("Mounts"), violations)
     _check_environment(config.get("Env"), violations)
     # Static inspection cannot establish persistence, actual egress or ownership.
     return StaticObservation(tuple(violations), _UNRESOLVED)
 
 
 _UNRESOLVED: Final = (
-    "bounded persistent storage and native-output capacity backend is not implemented",
+    "fresh persistent/evidence usage and backing free-space monitoring must be measured separately",
     "effective internal-network membership and egress have not been probed",
     "exclusive resource and host-driver custody have not been established",
     "guest source, volatile mounts and runtime configuration have not been qualified",
@@ -190,6 +191,31 @@ def _check_mounts(experiment: Experiment, mounts: object, violations: list[str])
             violations.append("persistent mount is not the declared writable named volume")
     if seen != set(expected):
         violations.append("a required persistent destination is missing")
+
+
+def _check_mount_declarations(experiment: Experiment, mounts: object, violations: list[str]) -> None:
+    if not isinstance(mounts, list) or len(mounts) != len(experiment.volumes):
+        violations.append("full-volume mount declarations are incomplete")
+        return
+    seen: set[str] = set()
+    for mount in mounts:
+        if not isinstance(mount, dict):
+            violations.append("full-volume mount declaration is malformed")
+            continue
+        target = mount.get("Target")
+        if not isinstance(target, str) or target not in experiment.volumes or target in seen:
+            violations.append("full-volume mount target is foreign or duplicated")
+            continue
+        seen.add(target)
+        options = mount.get("VolumeOptions", {})
+        if (
+            mount.get("Type") != "volume"
+            or mount.get("Source") != experiment.volumes[target]
+            or mount.get("ReadOnly", False) is not False
+            or not isinstance(options, dict)
+            or options.get("Subpath", "") != ""
+        ):
+            violations.append("persistent mount must expose the full declared writable volume")
 
 
 def _check_environment(environment: object, violations: list[str]) -> None:
