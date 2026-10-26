@@ -152,6 +152,14 @@ expression while leaving incompatible call sites.
 
 ## Journal
 
+- 2026-10-26: Hosted review follow-up now derives qualification roots from
+  controller-discovered commands, including development and preserved Main
+  recipes, and requires actual executable function-body hits rather than
+  import-phase line attribution. Added a real import-inside-test refusal,
+  new-command enrollment refusals, generated-Main source-recipe replay and an
+  explicit obsolete-helper selection witness. All 2,041 admitted cases passed
+  in 23.517 seconds; the focused helper/materializer/controller cohort passed
+  328 cases. Main activation, publication and rollout remain open.
 - 2026-10-26: Architecture follow-up closed structural dynamic-input coverage,
   synchronized executable-copy origins and conditional CLI compatibility gaps.
   Runtime publication validation and controller checking now share the same

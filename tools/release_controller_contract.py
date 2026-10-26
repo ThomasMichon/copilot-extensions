@@ -116,8 +116,8 @@ def required_mode_arguments(operation: str, profile: str, declaration: tuple) ->
     }
 
 
-def helper_implementations(workflow: dict) -> set[str]:
-    scripts = "\n".join(
+def helper_implementations(workflow: dict | str) -> set[str]:
+    scripts = workflow if isinstance(workflow, str) else "\n".join(
         step.get("run", "") for job in workflow["jobs"].values() for step in job.get("steps", [])
     )
     return set(re.findall(r"reviewed-helpers/tools/([A-Za-z0-9_-]+\.py)", scripts)) | set(

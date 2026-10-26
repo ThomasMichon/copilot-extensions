@@ -154,12 +154,13 @@ def test_unregistered_executable_input_cannot_hide_outside_qualification(tmp_pat
 
 def _contract(root):
     sources = {}
+    _source(root, ".github/workflows/validate-and-promote.yml", b"jobs: {}\n")
     for name in helpers.ENTRYPOINTS:
         relative = f"tools/{name}.py"
-        _source(root, relative, b"def decision(): return True")
+        _source(root, relative, b"def decision():\n    return True\n")
         sources[relative] = hashlib.sha256((root / relative).read_bytes()).hexdigest()
     for name in set(helpers.BUILD_INPUTS) | helpers.BUILD_DECISIONS:
-        _source(root, name, b"def build(): return True")
+        _source(root, name, b"def build():\n    return True\n")
         sources[name] = hashlib.sha256((root / name).read_bytes()).hexdigest()
     return {
         "sources": sources, "coverage_targets": [
@@ -191,14 +192,65 @@ def test_new_helper_and_native_build_inputs_require_binding_and_coverage(tmp_pat
 def test_hash_binding_or_import_only_coverage_is_not_decision_qualification(tmp_path):
     manifest = _contract(tmp_path)
     coverage = {"files": {
-        name: {"contexts": {"1": [manifest["nodes"][0] + "|call"]}}
+        name: {"contexts": {"2": [manifest["nodes"][0] + "|call"]}}
         for name in manifest["coverage_targets"]
     }}
     helpers.verify_helper_coverage(tmp_path, manifest, coverage)
     untested = deepcopy(coverage)
-    untested["files"]["tools/tag_promotion.py"]["contexts"] = {"1": [""]}
+    untested["files"]["tools/tag_promotion.py"]["contexts"] = {"1": [manifest["nodes"][0] + "|call"]}
     with pytest.raises(UnitEvidenceError, match="positive call coverage"):
         helpers.verify_helper_coverage(tmp_path, manifest, untested)
+
+
+def test_controller_discovered_command_cannot_escape_qualified_source_or_coverage(tmp_path):
+    manifest = _contract(tmp_path)
+    new = "tools/new_release_command.py"
+    _source(tmp_path, new, b"def publish():\n    return True\n")
+    development = tmp_path / "development"
+    _source(
+        development, ".github/workflows/validate-and-promote.yml",
+        b"jobs:\n  publisher:\n    steps:\n      - run: python reviewed-helpers/tools/new_release_command.py\n",
+    )
+    with pytest.raises(UnitEvidenceError, match="unbound=.*new_release_command"):
+        helpers.verify_helper_contract(tmp_path, manifest, development_root=development)
+    manifest["sources"][new] = hashlib.sha256((tmp_path / new).read_bytes()).hexdigest()
+    with pytest.raises(UnitEvidenceError, match="uncovered=.*new_release_command"):
+        helpers.verify_helper_contract(tmp_path, manifest, development_root=development)
+    manifest["coverage_targets"].append(new)
+    assert new in helpers.verify_helper_contract(tmp_path, manifest, development_root=development)
+    controller = (development / ".github/workflows/validate-and-promote.yml").read_text()
+    assert new in helpers.verify_helper_contract(tmp_path, manifest, controllers=(controller,))
+
+
+def test_import_inside_a_test_is_not_executable_decision_body_coverage(tmp_path):
+    import coverage as collector
+    import importlib.util
+
+    manifest = _contract(tmp_path)
+    name = "tools/tag_promotion.py"
+    context = manifest["nodes"][0] + "|call"
+    cov = collector.Coverage(
+        data_file=None, config_file=False, include=[str(tmp_path / name)], context=context,
+    )
+    with cov.collect():
+        spec = importlib.util.spec_from_file_location("synthetic_release_helper", tmp_path / name)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    files = {
+        target: {"contexts": {"2": [context]}} for target in manifest["coverage_targets"]
+    }
+    files[name] = {"contexts": {
+        str(line): values for line, values in cov.get_data().contexts_by_lineno(str(tmp_path / name)).items()
+    }}
+    assert files[name]["contexts"] == {"1": [context]}
+    with pytest.raises(UnitEvidenceError, match="positive call coverage"):
+        helpers.verify_helper_coverage(tmp_path, manifest, {"files": files})
+    with cov.collect():
+        assert module.decision() is True
+    files[name]["contexts"] = {
+        str(line): values for line, values in cov.get_data().contexts_by_lineno(str(tmp_path / name)).items()
+    }
+    helpers.verify_helper_coverage(tmp_path, manifest, {"files": files})
 
 
 def test_native_compiler_source_is_hash_bound_data_not_a_unit_or_coverage_target(tmp_path):

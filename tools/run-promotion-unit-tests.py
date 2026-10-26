@@ -87,7 +87,7 @@ def main() -> int:
             dev_sha=args.source_sha, candidate_tree=args.candidate_tree,
         )
     verify_sources(ROOT, manifest["sources"])
-    verify_helper_contract(ROOT, manifest)
+    verify_helper_contract(ROOT, manifest, development_root=args.development_root)
     args.output_dir.mkdir(parents=True, exist_ok=False)
     os.environ["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     os.environ.pop("PYTEST_ADDOPTS", None)

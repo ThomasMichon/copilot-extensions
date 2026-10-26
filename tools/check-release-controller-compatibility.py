@@ -28,15 +28,16 @@ def main() -> int:
     verify_helper_selection(prepared)
     verify_controller_inputs(prepared, implementations)
     manifest = json.loads((ROOT / "tools/promotion-unit-manifest.json").read_bytes())
-    verify_helper_contract(ROOT, manifest)
     main = subprocess.run(
         ["git", "--no-replace-objects", "rev-parse", "--verify", f"{args.main_ref}^{{commit}}"],
         cwd=ROOT, check=True, capture_output=True, text=True, timeout=30,
     ).stdout.strip()
-    current = yaml.safe_load(subprocess.run(
+    current_bytes = subprocess.run(
         ["git", "--no-replace-objects", "show", f"{main}:{WORKFLOW}"],
         cwd=ROOT, check=True, capture_output=True, timeout=30,
-    ).stdout)
+    ).stdout
+    current = yaml.safe_load(current_bytes)
+    verify_helper_contract(ROOT, manifest, controllers=(current_bytes.decode("utf-8"),))
     try:
         verify_controller_inputs(current, implementations)
         verify_helper_selection(current)

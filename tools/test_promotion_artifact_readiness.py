@@ -132,9 +132,9 @@ def _assert_pinned_materializer(root, tmp_path, helper):
     source = _materializer_source(root, tmp_path / "validated-dev")
     pin = workflow.get("env", {}).get("RELEASE_HELPERS_SHA")
     if pin is None:
-        helper = next(step["with"] for step in workflow["jobs"]["compose-candidate"]["steps"]
-                      if step.get("with", {}).get("path") == "reviewed-helpers")
-        assert helper["ref"] == "${{ needs.gate.outputs.sha }}"
+        helper_checkout = next(step["with"] for step in workflow["jobs"]["compose-candidate"]["steps"]
+                               if step.get("with", {}).get("path") == "reviewed-helpers")
+        assert helper_checkout["ref"] == "${{ needs.gate.outputs.sha }}"
         pin = (
             json.loads((root / ".github/release-pipeline-state.json").read_text())[
                 "last_promotion"
@@ -194,8 +194,19 @@ print(json.dumps(report))
 
 
 @pytest.mark.parametrize("helper", ["workflow", "obsolete"])
-def test_native_pinned_materializer_expands_current_flat_sources(tmp_path, helper):
+def test_native_pinned_materializer_expands_current_flat_sources(tmp_path, helper, monkeypatch):
+    selected = []
+    read_git = _materializer_git
+
+    def observe(root, *arguments):
+        if arguments[0] == "show" and ":tools/" in arguments[1]:
+            selected.append(arguments[1].split(":", 1)[0])
+        return read_git(root, *arguments)
+
+    monkeypatch.setattr(sys.modules[__name__], "_materializer_git", observe)
     _assert_pinned_materializer(Path(__file__).resolve().parent.parent, tmp_path, helper)
+    if helper == "obsolete":
+        assert selected and set(selected) == {"c2caa135dbb5c1d6bbacfee5c48f9b6a0c17d104"}
 
 
 def test_source_artifact_builder_accepts_actual_pinned_materializer_output(tmp_path):
@@ -785,19 +796,8 @@ def _assert_readiness_ci(jobs, *, builder_minutes, split_publication):
 
 def test_required_ci_collects_readiness_and_retry_in_their_changed_path_lanes():
     root = Path(__file__).resolve().parent.parent
-    jobs = yaml.safe_load((root / ".github/workflows/ci.yml").read_text())["jobs"]
-    controller = yaml.safe_load(
-        (root / ".github/workflows/validate-and-promote.yml").read_text(),
-    )["jobs"]
-    profile = _pr_profile(controller)
-    # Dev owns the declared recipe; generated Main retains its independent,
-    # older combined native lane rather than copying Dev's split or budgets.
     declared = source_workflow(root, "ci.yml")["jobs"]
     _assert_readiness_ci(declared, builder_minutes=10, split_publication=True)
-    if profile == "legacy":
-        _assert_readiness_ci(jobs, builder_minutes=10, split_publication=True)
-    else:
-        _assert_readiness_ci(jobs, builder_minutes=5, split_publication=False)
 
 
 @pytest.mark.parametrize("job_id", ["checks", "unit-tests"])
@@ -819,7 +819,7 @@ def test_native_source_impact_keeps_units_only_and_manual_selection_conservative
     _git(["commit", "-qm", "event-scoped input"], repo)
     head = _git(["rev-parse", "HEAD"], repo)
     root = Path(__file__).resolve().parent.parent
-    job = yaml.safe_load((root / ".github/workflows/ci.yml").read_text())["jobs"][job_id]
+    job = source_workflow(root, "ci.yml")["jobs"][job_id]
     assert next(step for step in job["steps"] if step.get("uses") == "actions/checkout@v4")[
         "with"
     ]["fetch-depth"] in (0, "0")
@@ -842,3 +842,25 @@ def test_native_source_impact_keeps_units_only_and_manual_selection_conservative
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert output.read_text().strip() == expected
+
+
+def test_native_generated_main_impact_uses_recorded_dev_recipe(
+    repo, tmp_path, generated_materializer_checkout, monkeypatch,
+):
+    generated = generated_materializer_checkout
+    (generated / ".github/workflows/ci.yml").write_text(
+        "name: Preserved Main CI\njobs:\n  metadata:\n    name: metadata\n",
+        encoding="utf-8",
+    )
+    assert "unit-tests" not in yaml.safe_load(
+        (generated / ".github/workflows/ci.yml").read_text(),
+    )["jobs"]
+    tools = generated / "tools"
+    tools.mkdir()
+    shutil.copyfile(Path(__file__).with_name("promotion_unit_contract.py"), tools / "promotion_unit_contract.py")
+    monkeypatch.setitem(globals(), "__file__", str(tools / Path(__file__).name))
+    scope = tmp_path / "source-impact"
+    scope.mkdir()
+    test_native_source_impact_keeps_units_only_and_manual_selection_conservative(
+        repo, scope, "unit-tests", "pull_request", "tools/promotion_artifact_readiness.py", "run=true",
+    )

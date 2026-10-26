@@ -270,10 +270,14 @@ select implementation code. Helper checkouts do not persist credentials.
 The signer retains its existing successful source-unit prerequisite; Main
 still owns job privileges, pause, lifecycle, publication and exact-head landing.
 
-`promotion_release_helpers.py` resolves the repository-owned static import
-closure and registered dynamic build inputs as data. Qualification requires
+`promotion_release_helpers.py` discovers direct and indirect helper commands
+from both the development recipe and preserved Main controller, then resolves
+their repository-owned static import closure and registered dynamic build inputs
+as data. A new controller command cannot remain outside qualification merely
+because it was absent from an older entrypoint list. Qualification requires
 their byte admission, coverage enrollment for release-tool decision bodies,
-and actual test-call coverage rather than import-only observations. Registered
+and actual test-call hits inside executable function bodies, not module
+initialization or definition lines reached by an import inside a test. Registered
 native compiler source is hash-bound data, not an executable unit or a coverage
 target. Real build/compiler behavior remains separate development validation.
 Synchronized executable copies borrow only their canonical origin's coverage;

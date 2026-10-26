@@ -1501,9 +1501,10 @@ def _run_workflow_validator(repo, directory, dev, main, monkeypatch, *, report=N
     current = source_owned(workflow["jobs"])
     validator = next(
         step for step in workflow["jobs"]["python-artifacts"]["steps"]
-        if step.get("name") == (
-            "Validate untrusted bundles using qualified admitted-source helpers" if current
-            else "Validate untrusted bundles using only trusted default-branch code"
+        if (
+            ("--validate-artifacts" in step.get("run", "")
+             or "artifacts.validate_composed_artifacts(" in step.get("run", ""))
+            if current else step.get("name") == "Validate untrusted bundles using only trusted default-branch code"
         )
     )
     if "compose-candidate" in workflow["jobs"]:
@@ -1636,9 +1637,10 @@ def test_workflow_separates_candidate_execution_signing_and_release_authority():
     assert checkout["with"]["persist-credentials"] is False
     validator = next(
         step for step in steps
-        if step.get("name") == (
-            "Validate untrusted bundles using qualified admitted-source helpers" if current
-            else "Validate untrusted bundles using only trusted default-branch code"
+        if (
+            ("--validate-artifacts" in step.get("run", "")
+             or "artifacts.validate_composed_artifacts(" in step.get("run", ""))
+            if current else step.get("name") == "Validate untrusted bundles using only trusted default-branch code"
         )
     )
     if current:

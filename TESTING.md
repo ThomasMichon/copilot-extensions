@@ -1639,9 +1639,12 @@ Git-storage, thread and sleep effects, including attempted effects caught by a
 test. Test writes are confined to synthetic temporary storage.
 
 Release-helper qualification additionally resolves the canonical repository
-import closure and registered executable build inputs. Every release-tool
-decision module must be enrolled and have positive production call coverage;
-hash binding or import-only coverage cannot substitute. The native C source
+import closure from controller-discovered commands and registered executable
+build inputs. Candidate verification includes both the preserved Main control
+and its development recipe. Every release-tool decision module must be enrolled
+and have positive test-call hits inside executable decision-function bodies;
+hash binding, module initialization or import-only coverage cannot substitute.
+The native C source
 is an explicitly admitted data input, including source-bound materialized
 copies, never a selected unit or Python coverage target.
 `test_release_helper_contract.py`, `test_release_helper_decisions.py` and

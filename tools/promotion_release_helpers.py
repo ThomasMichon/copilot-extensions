@@ -5,6 +5,7 @@ import ast
 from pathlib import Path
 
 from promotion_unit_contract import UnitEvidenceError, verify_sources
+from release_controller_contract import helper_implementations
 
 ENTRYPOINTS = (
     "promotion_frozen_candidate", "promote_release", "publish_python_artifacts",
@@ -59,12 +60,20 @@ def _modules(root: Path) -> dict[str, Path]:
     return result
 
 
-def helper_closure(root: Path, *, entrypoints: tuple[str, ...] = ENTRYPOINTS) -> tuple[set[str], set[str]]:
+def helper_closure(
+    root: Path, *, entrypoints: tuple[str, ...] = ENTRYPOINTS,
+    controllers: tuple[str, ...] = (),
+) -> tuple[set[str], set[str]]:
     """Resolve repository imports as data, including registered dynamic loaders."""
     modules = _modules(root)
-    pending = list(entrypoints)
+    commands = {
+        name.removesuffix(".py") for controller in controllers
+        for name in helper_implementations(controller)
+    }
+    roots = set(entrypoints) | commands
+    pending = list(roots)
     visited, sources, decisions = set(), set(), set()
-    for name in entrypoints:
+    for name in roots:
         if name not in modules:
             raise UnitEvidenceError(f"missing release implementation: {name}")
     while pending:
@@ -131,9 +140,25 @@ def helper_closure(root: Path, *, entrypoints: tuple[str, ...] = ENTRYPOINTS) ->
     return sources, decisions
 
 
-def verify_helper_contract(root: Path, manifest: dict) -> set[str]:
+def _controller(root: Path) -> str:
+    path = root / ".github/workflows/validate-and-promote.yml"
+    if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
+        raise UnitEvidenceError("release controller is indirect")
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise UnitEvidenceError(f"release controller is unavailable: {path}") from error
+
+
+def verify_helper_contract(
+    root: Path, manifest: dict, *, development_root: Path | None = None,
+    controllers: tuple[str, ...] = (),
+) -> set[str]:
     """Require byte admission and positive decision coverage before privileges."""
-    sources, decisions = helper_closure(root)
+    controls = (_controller(root), *controllers)
+    if development_root is not None:
+        controls += (_controller(development_root),)
+    sources, decisions = helper_closure(root, controllers=controls)
     sources.update(BUILD_INPUTS)
     sources.update(BUILD_DECISIONS)
     decisions.update(BUILD_DECISIONS)
@@ -151,9 +176,31 @@ def verify_helper_contract(root: Path, manifest: dict) -> set[str]:
     return decisions
 
 
-def verify_helper_coverage(root: Path, manifest: dict, coverage: dict) -> None:
+def _decision_lines(path: Path) -> set[int]:
+    tree = ast.parse(path.read_bytes())
+    definitions = {
+        node.lineno for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+    return {
+        statement.lineno for function in ast.walk(tree)
+        if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
+        for statement in ast.walk(function)
+        if isinstance(statement, ast.stmt)
+        and not isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        and not (
+            isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Constant)
+            and isinstance(statement.value.value, str)
+        )
+        and statement.lineno not in definitions
+    }
+
+
+def verify_helper_coverage(
+    root: Path, manifest: dict, coverage: dict, *, development_root: Path | None = None,
+) -> None:
     """An import-only observation is not a test of a helper's decision rules."""
-    decisions = verify_helper_contract(root, manifest)
+    decisions = verify_helper_contract(root, manifest, development_root=development_root)
     required = {
         f"{node}|call" for node in manifest["nodes"]
     }
@@ -161,8 +208,8 @@ def verify_helper_coverage(root: Path, manifest: dict, coverage: dict) -> None:
     missing = [
         name for name in sorted(decisions)
         if name not in files or not any(
-            required.intersection(contexts)
-            for contexts in files[name]["contexts"].values()
+            required.intersection(files[name]["contexts"].get(str(line), ()))
+            for line in _decision_lines(root / name)
         )
     ]
     if missing:
