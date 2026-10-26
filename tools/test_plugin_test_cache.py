@@ -179,6 +179,24 @@ def _overlong_private_wheel(root):
     )
 
 
+def _native_private_paths(root):
+    return (
+        native_test_paths.native_test_path(root / ".bootstrap-uv-cache"),
+        native_test_paths.native_test_path(_overlong_private_wheel(root)),
+    )
+
+
+@pytest.mark.parametrize("root", [
+    r"\\server\share\cache", r"\\?\C:\cache", r"\\?\UNC\server\share\cache",
+])
+def test_private_fixture_preserves_unc_and_native_root_spelling(monkeypatch, root):
+    monkeypatch.setattr(native_test_paths, "os", SimpleNamespace(name="nt"))
+    logical = PureWindowsPath(root)
+    cache, wheel = _native_private_paths(logical)
+    assert str(cache) == str(native_test_paths.native_test_path(logical / ".bootstrap-uv-cache"))
+    assert str(wheel) == str(native_test_paths.native_test_path(_overlong_private_wheel(logical)))
+
+
 @pytest.mark.parametrize("root", ["C:\\", r"C:\t"])
 def test_private_wheel_fixture_exceeds_max_path_with_minimal_root(root):
     wheel = _overlong_private_wheel(PureWindowsPath(root))
@@ -195,11 +213,9 @@ def test_rebuild_removes_overlong_private_cache_without_replacing_leased_root(
     python = root / "fixture-python"
     python.touch()
     (root / ".dep-fingerprint").write_text("stale")
-    cache = root / ".bootstrap-uv-cache"
     wheel = _overlong_private_wheel(root)
     assert len(str(wheel.absolute())) > 260
-    native_cache = Path("\\\\?\\" + str(cache.absolute()))
-    native_wheel = Path("\\\\?\\" + str(wheel.absolute()))
+    native_cache, native_wheel = _native_private_paths(root)
     native_wheel.parent.mkdir(parents=True)
     native_wheel.write_bytes(b"private cached wheel")
     sibling = root.with_name("unrelated")

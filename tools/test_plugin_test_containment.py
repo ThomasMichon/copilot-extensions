@@ -1136,6 +1136,25 @@ def _overlong_sandbox_marker(root):
     return root / ("nested-" * 25) / ("snapshot-" * 8) / "preserved.txt"
 
 
+def _native_sandbox_paths(root):
+    return (
+        plugin_test_containment.native_test_path(root),
+        plugin_test_containment.native_test_path(_overlong_sandbox_marker(root)),
+    )
+
+
+@pytest.mark.parametrize("root", [
+    r"\\server\share\cache", r"\\?\C:\cache", r"\\?\UNC\server\share\cache",
+])
+def test_sandbox_fixture_preserves_unc_and_native_root_spelling(monkeypatch, root):
+    helper = plugin_test_containment.native_test_path
+    monkeypatch.setattr(sys.modules[helper.__module__], "os", SimpleNamespace(name="nt"))
+    logical = PureWindowsPath(root)
+    native, marker = _native_sandbox_paths(logical)
+    assert str(native) == str(helper(logical))
+    assert str(marker) == str(helper(_overlong_sandbox_marker(logical)))
+
+
 @pytest.mark.parametrize("root", ["C:\\", r"C:\t"])
 def test_sandbox_fixture_exceeds_max_path_with_minimal_root(root):
     marker = _overlong_sandbox_marker(PureWindowsPath(root))
@@ -1147,8 +1166,7 @@ def test_sandbox_fixture_exceeds_max_path_with_minimal_root(root):
 @pytest.mark.parametrize("unreaped", [False, True])
 def test_windows_long_path_sandbox_cleanup_preserves_unreaped_retention(tmp_path, unreaped):
     sandbox = plugin_test_containment.TestSandbox(dir=tmp_path)
-    native = Path("\\\\?\\" + str(Path(sandbox.name).absolute()))
-    marker = _overlong_sandbox_marker(native)
+    native, marker = _native_sandbox_paths(Path(sandbox.name).absolute())
     assert len(str(marker)) > 260
 
     def execute():
