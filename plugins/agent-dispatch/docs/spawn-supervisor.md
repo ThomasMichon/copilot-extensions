@@ -113,7 +113,13 @@ define those separate behaviors.
 
 Task events, spawn reservations and Bridge creation/acquisition journals retain
 different parts of the sequence. They are not a complete diagnostic transcript
-of every scheduling decision, child process or failed allocation. Ordinary
+of every scheduling decision, child process or failed allocation. Default
+worker-lane [application diagnostics](diagnostic-logs.md#spawn-causal-records)
+record cycle/stage entry before reconciliation, selection, reservation,
+preparation, backend and bookkeeping calls, followed by returned/error records
+with elapsed time. Existing task/generation/reservation identities correlate
+ordinary Bridge caller outcomes; missing completion remains unknown. These
+records do not capture Bridge-internal startup or native child streams. Ordinary
 Bridge subprocess tracing is implemented by
 [`launch_debug`](../src/agent_dispatch/launch_debug.py): it is opt-in through
 `AGENT_DISPATCH_BRIDGE_CLI_TRACE` or the installation's `launch-debug.json`
@@ -546,15 +552,13 @@ actionable summary when its blocked task set changes, rather than repeating one
 warning per task on every cycle.
 
 **Where that log (and every other `agent-dispatch.*` log call) actually goes.**
-Both the coordinator and the supervisor normally run headless (`pythonw.exe`,
-no console), and neither configured a logging handler until
-copilot-extensions#4990 — every `log.info`/`log.warning`/`log.exception` call
-across the whole package, including this dead-letter summary and every
-recovery-path message above, was silently dropped. `configure_file_logging`
-(`logging_setup.py`) now wires a rotating file handler into both daemon
-entrypoints at startup: `<install_dir>/logs/coordinator.log` and
-`<install_dir>/logs/supervisor.log` (`<install_dir>` is normally
-`~/.agent-dispatch`; see `install_paths.install_dir()`). Read these first when
+The coordinator, supervisor daemon and its separately launched worker lanes
+configure the existing application handler at their own entrypoints.
+`configure_file_logging` (`logging_setup.py`) writes the retained JSONL namespace
+`<install_dir>/logs/diagnostics/{coordinator,supervisor}.jsonl`; old text files
+remain discoverable and untouched. Resolve actual locations with
+`agent-dispatch logs` rather than assuming the legacy default root
+(`install_paths.install_dir()` owns it). Read the application records first when
 diagnosing a stalled lane instead of guessing from `list`/`show`/`doctor`
 output alone — see `troubleshooting-agent-dispatch`.
 

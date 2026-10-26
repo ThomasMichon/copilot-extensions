@@ -1,0 +1,230 @@
+"""Real application output and synthetic call ordering; no child or network."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import subprocess
+from pathlib import Path
+from unittest.mock import Mock
+
+import pytest
+
+from agent_dispatch import logging_setup, supervise_cli
+from agent_dispatch.ordinary_bridge_diagnostics import run
+from agent_dispatch.spawn_diagnostics import SpawnDiagnostics
+from agent_dispatch.supervisor import Supervisor
+
+
+@pytest.fixture
+def sink(tmp_path: Path):
+    package = logging.getLogger("agent-dispatch")
+    previous = package.handlers[:], package.level, package.propagate
+    package.handlers = []
+    path = logging_setup.configure_file_logging("supervisor", install_dir=tmp_path)
+
+    def read() -> list[dict]:
+        if not path.exists():
+            return []
+        return [
+            {**row, "stage_record": json.loads(row["message"])}
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if (row := json.loads(line))["logger"] == "agent-dispatch.spawn"
+        ]
+
+    yield read
+    for handler in package.handlers:
+        handler.close()
+    package.handlers, package.level, package.propagate = previous
+
+
+def lane(monkeypatch: pytest.MonkeyPatch) -> Supervisor:
+    supervisor = Supervisor(Mock(), spawn_fn=Mock(return_value=(True, {"session": "body-a"})),
+                            machine="synthetic", supervisor_id="lane-a",
+                            heartbeat=False, publish_activity=False, recover=False,
+                            nudge=False, consistency_sweep=False)
+    for name in (
+        "reconcile", "reconcile_reserving", "release_requested_bodies",
+        "bind_headless_owner_sessions", "renew_restricted_grants", "nudge_idle_headless_tasks",
+        "cool_dormant_bodies", "release_resumed_cold_tasks", "recover_stranded_cold_reservations",
+        "recover_stranded_releasing_reservations", "redrive_unclaimed_spawns",
+        "_sync_event_subscriptions",
+    ):
+        monkeypatch.setattr(supervisor, name, Mock())
+    monkeypatch.setattr(supervisor, "_failed_spawn_counts", lambda: {})
+    monkeypatch.setattr(supervisor, "_eligible", lambda _: [{"id": "task-a", "generation": 4}])
+    monkeypatch.setattr(supervisor, "_active_reservations", lambda: [])
+    monkeypatch.setattr(supervisor, "_log_dead_lettered", lambda *_: set())
+    monkeypatch.setattr(supervisor, "_prepare_spawn_task", lambda task, _: task)
+    monkeypatch.setattr(supervisor, "_recheck_governance", lambda _: None)
+    supervisor.client.reserve_spawn.return_value = {
+        "reserved": True, "reservation": {"key": "reservation-a", "creation_key": "creation-a"},
+    }
+    return supervisor
+
+
+def test_lane_configures_its_own_sink_before_scope_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    monkeypatch.setattr(supervise_cli, "configure_file_logging", lambda name: calls.append(name))
+
+    def scope(_args: argparse.Namespace) -> None:
+        assert calls == ["supervisor"]
+        return None
+
+    monkeypatch.setattr(supervise_cli, "_scope_repo", scope)
+    monkeypatch.setattr(supervise_cli, "_resolve_cli_module", lambda: Mock(_REPO_UNRESOLVED="no repo"))
+    assert supervise_cli._run_supervise(argparse.Namespace()) == 2
+
+
+def test_entry_is_retained_before_blocking_stage_and_failure_has_no_success(sink, monkeypatch) -> None:
+    supervisor = lane(monkeypatch)
+    failure = RuntimeError("synthetic database busy")
+
+    def blocked() -> None:
+        rows = sink()
+        assert [(r["stage_record"]["stage"], r["stage_record"]["outcome"]) for r in rows] == [
+            ("cycle", "entered"), ("reconcile", "entered"),
+        ]
+        raise failure
+
+    monkeypatch.setattr(supervisor, "reconcile", blocked)
+    with pytest.raises(RuntimeError) as caught:
+        supervisor.poll_once()
+    assert caught.value is failure
+    rows = sink()
+    events = [r["stage_record"] for r in rows]
+    assert [(e["stage"], e["outcome"]) for e in events[-2:]] == [
+        ("reconcile", "error"), ("cycle", "error"),
+    ]
+    assert events[-2]["error"] == "synthetic database busy"
+    assert events[1]["call_id"] == events[-2]["call_id"]
+    assert events[-2]["elapsed_seconds"] >= 0
+    assert len({e["cycle_id"] for e in events}) == 1
+    assert all(r["pid"] and r["ts"].endswith("+00:00") and r["runtime_version"] for r in rows)
+    assert all("process_start_token" in r and "runtime_prefix" in r for r in rows)
+    supervisor.spawn_fn.assert_not_called()
+
+
+@pytest.mark.parametrize("decision", ["capacity", "governance", "contention", "concurrency", "retry-budget"])
+def test_scheduling_explains_no_backend(sink, monkeypatch, decision: str) -> None:
+    supervisor = lane(monkeypatch)
+    expected = {
+        "capacity": "no_capacity", "governance": "governance_before_reserve",
+        "contention": "reservation_contended", "concurrency": "concurrency_limit",
+    }
+    if decision == "capacity":
+        supervisor.capacity_gate = lambda _: False
+    elif decision == "governance":
+        monkeypatch.setattr(supervisor, "_recheck_governance", lambda _: {"status": "refused"})
+    elif decision == "contention":
+        supervisor.client.reserve_spawn.return_value = {"reserved": False}
+    elif decision == "concurrency":
+        monkeypatch.setattr(supervisor, "_active_reservations", lambda: ["active"])
+    else:
+        monkeypatch.setattr(supervisor, "_log_dead_lettered", lambda *_: {"task-a"})
+    assert supervisor.poll_once() == []
+    events = [row["stage_record"] for row in sink()]
+    if decision == "retry-budget":
+        assert any(e.get("exhausted_count") == 1 for e in events)
+    else:
+        assert any(e.get("reason") == expected[decision] for e in events)
+    supervisor.spawn_fn.assert_not_called()
+
+
+def test_admitted_spawn_and_bookkeeping_are_correlated_once(sink, monkeypatch) -> None:
+    supervisor = lane(monkeypatch)
+    def backend(_task: dict) -> tuple[bool, dict]:
+        records = [r["stage_record"] for r in sink() if r["stage_record"]["stage"] == "backend"]
+        assert [r["outcome"] for r in records] == ["entered"]
+        return True, {"session": "body-a"}
+
+    supervisor.spawn_fn.side_effect = backend
+    assert supervisor.poll_once() == ["task-a"]
+    supervisor.spawn_fn.assert_called_once()
+    supervisor.client.record_spawn.assert_called_once()
+    events = [row["stage_record"] for row in sink()]
+    for stage in ("prepare", "backend", "record_spawn"):
+        records = [e for e in events if e["stage"] == stage]
+        assert [e["outcome"] for e in records] == ["entered", "returned"]
+        assert all(e["task_id"] == "task-a" and e["generation"] == 4 and
+                   e["reservation_key"] == "reservation-a" and e["creation_key"] == "creation-a"
+                   for e in records)
+    assert events[-1]["spawned_count"] == 1
+
+
+def test_failed_backend_sanitizes_application_records_not_primary_detail(sink, monkeypatch) -> None:
+    monkeypatch.setenv("SYNTHETIC_API_TOKEN", "sensitive-fixture-value")
+    supervisor = lane(monkeypatch)
+    detail = "connection refused allocation-a sensitive-fixture-value"
+    supervisor.spawn_fn.return_value = False, {"error": detail}
+    assert supervisor.poll_once() == []
+    supervisor.client.fail_spawn.assert_called_once_with("reservation-a", detail=detail)
+    text = logging.getLogger("agent-dispatch").handlers[0].path.read_text(encoding="utf-8")
+    assert "connection refused allocation-a" in text
+    assert "sensitive-fixture-value" not in text
+
+
+def test_malformed_prompt_is_not_copied_into_diagnostics(sink, monkeypatch) -> None:
+    supervisor = lane(monkeypatch)
+    supervisor.capacity_gate = lambda _: False
+    monkeypatch.setattr(supervisor, "_eligible", lambda _: [{
+        "id": "task-a", "generation": {"prompt": "opaque malformed generation"},
+        "prompt": {"environment": "opaque malformed task"},
+    }])
+    assert supervisor.poll_once() == []
+    text = json.dumps(sink())
+    assert "opaque malformed" not in text
+    assert any(row["stage_record"].get("reason") == "no_capacity" for row in sink())
+
+
+def test_sink_degradation_is_visible_without_changing_stage_result(sink, monkeypatch, capsys) -> None:
+    handler = logging.getLogger("agent-dispatch").handlers[0]
+
+    def unavailable(*_args) -> None:
+        raise OSError("synthetic sink unavailable")
+
+    monkeypatch.setattr(handler, "encoder", unavailable)
+    with SpawnDiagnostics().stage("synthetic_call") as result:
+        result["ok"] = True
+    assert handler.last_error == "OSError"
+    assert "diagnostics degraded" in capsys.readouterr().err
+
+
+def test_bridge_failure_keeps_benign_cause_not_credentials_or_prompt(sink, monkeypatch) -> None:
+    monkeypatch.setenv("SYNTHETIC_API_TOKEN", "sensitive-fixture-value")
+    monkeypatch.setenv("AGENT_DISPATCH_BRIDGE_CLI_TRACE", "0")
+    diagnostics = SpawnDiagnostics(task_id="task-a", reservation_key="reservation-a",
+                                   secrets={"STARTUP_PROMPT_SECRET": "private model prompt"})
+    runner = Mock(return_value=subprocess.CompletedProcess(
+        [], 69, '{"error":"database busy at allocation-a","prompt":"private model prompt"}',
+        "connection refused allocation-a sensitive-fixture-value private model prompt",
+    ))
+    result = run(["bridge"], ["--json", "create", "example"], diagnostics=diagnostics,
+                 runner=runner, timeout=5, prompt_input="private model prompt")
+    assert result.returncode == 69
+    runner.assert_called_once()
+    records = [row["stage_record"] for row in sink()]
+    assert [e["outcome"] for e in records] == ["entered", "returned"]
+    assert records[-1]["returncode"] == 69
+    serialized = json.dumps(records)
+    assert "sensitive-fixture-value" not in serialized
+    assert "private model prompt" not in serialized
+    assert "database busy at allocation-a" in serialized
+    assert "connection refused allocation-a" in serialized
+
+
+def test_timeout_does_not_emit_argv_or_invent_exit(sink, monkeypatch) -> None:
+    monkeypatch.setenv("AGENT_DISPATCH_BRIDGE_CLI_TRACE", "0")
+    timeout = subprocess.TimeoutExpired(["bridge", "opaque argument"], 5, stderr=b"database busy")
+    runner = Mock(side_effect=timeout)
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        run(["bridge"], ["--json", "send", "body-a"], diagnostics=SpawnDiagnostics(),
+            runner=runner, timeout=5)
+    assert caught.value is timeout
+    events = [row["stage_record"] for row in sink()]
+    assert events[-1]["outcome"] == "error"
+    assert events[-1]["error_type"] == "TimeoutExpired"
+    assert all("returncode" not in e for e in events)
+    assert "opaque argument" not in json.dumps(events)
+    assert "database busy" in json.dumps(events)

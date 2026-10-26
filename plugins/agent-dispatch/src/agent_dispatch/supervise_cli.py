@@ -37,6 +37,7 @@ from .client_authority import (
     supervisor_authority_target as _supervisor_authority_target,
 )
 from .loop_commands import _resolve_cli_module
+from .logging_setup import configure_file_logging
 
 
 def _proxy(name: str):
@@ -432,7 +433,6 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
     # `copilot plugin update`); this daemon is lazy-started and inherits the
     # launching session's CWD. Relocate before the long-lived loop.
     from . import procutil
-    from .logging_setup import configure_file_logging
     from .supervisor_daemon import SupervisorDaemon, supervisor_lease_scope
 
     procutil.relocate_off_payload()
@@ -674,6 +674,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
 
 @daemon_entrypoint("agent-dispatch-lane", source=__file__, purpose="production")
 def _run_supervise(args: argparse.Namespace) -> int:
+    configure_file_logging("supervisor")
     from .supervisor import (
         Supervisor,
         make_embody_spawn,

@@ -1850,7 +1850,10 @@
         "tools/promotion_unit_tests/test_namespace_contract.py::test_actual_provider_wire_drift_is_incomplete_not_empty[invalid-row]",
         "tools/promotion_unit_tests/test_namespace_contract.py::test_actual_provider_wire_drift_is_incomplete_not_empty[truncated-json]",
         "tools/promotion_unit_tests/test_namespace_contract.py::test_actual_provider_wire_drift_is_incomplete_not_empty[partial]",
-        "tools/promotion_unit_tests/test_namespace_contract.py::test_actual_provider_failure_cannot_publish_an_empty_roster"
+        "tools/promotion_unit_tests/test_namespace_contract.py::test_actual_provider_failure_cannot_publish_an_empty_roster",
+        "tools/promotion_unit_tests/test_dispatch_spawn_diagnostics.py::test_entry_precedes_work_and_return_preserves_correlation",
+        "tools/promotion_unit_tests/test_dispatch_spawn_diagnostics.py::test_causal_exception_is_same_object_without_false_return",
+        "tools/promotion_unit_tests/test_dispatch_spawn_diagnostics.py::test_opaque_envelope_and_prompt_are_not_application_output"
     ],
     "sources": {
         "tools/build_python_artifacts.py": "681155f69ab15bf8c385a34419d86bfb467703336087b7e30f69d035c9c3199c",
@@ -2064,7 +2067,10 @@
         "plugins/agent-containers/src/agent_containers/resolver.py": "9850607dc718a5218e5a87016630aa3001569645040fd47e3ff0ab55acaceb8f",
         "plugins/agent-bridge/src/agent_bridge/agent_registry_common.py": "73de7083d14afe3d31b96702efc137fb15f7a948bc97e3b915f5547a82898d40",
         "plugins/agent-bridge/src/agent_bridge/reader_admission.py": "3114cdb53c6f11f82f2c01e1cf4d46b4afaeebd28aa34e2d7f8459bb7fcc23c3",
-        "plugins/agent-bridge/src/agent_bridge/agent_registry_namespace.py": "7a2aea050cddaffeb6bb6c58f78d12f30caed19e74c375df68171baddd78a41a"
+        "plugins/agent-bridge/src/agent_bridge/agent_registry_namespace.py": "7a2aea050cddaffeb6bb6c58f78d12f30caed19e74c375df68171baddd78a41a",
+        "tools/promotion_unit_tests/test_dispatch_spawn_diagnostics.py": "97369957c731fa4f7bdada463fad63f3e29f597558da4fb9d4f327fe145dfe13",
+        "plugins/agent-dispatch/src/agent_dispatch/spawn_diagnostics.py": "19b3877df1725f8d3e77cf911f31a8c393a060b4557d683a9ff688e38c1b8c77",
+        "libs/agent-procutil/src/agent_procutil/diagnostics.py": "c5e3c4e15f1e853c4da3a2916514dbc50b743272b54223780fae6262bd3dc113"
     },
     "coverage_targets": [
         "libs/installer-engine/installer_packaging_seed.py",
@@ -2154,7 +2160,8 @@
         "plugins/agent-containers/src/agent_containers/resolver.py",
         "plugins/agent-bridge/src/agent_bridge/agent_registry_common.py",
         "plugins/agent-bridge/src/agent_bridge/reader_admission.py",
-        "plugins/agent-bridge/src/agent_bridge/agent_registry_namespace.py"
+        "plugins/agent-bridge/src/agent_bridge/agent_registry_namespace.py",
+        "plugins/agent-dispatch/src/agent_dispatch/spawn_diagnostics.py"
     ],
     "max_seconds": 300
 }

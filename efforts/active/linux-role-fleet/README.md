@@ -476,6 +476,13 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+- #9041 merged the bounded Dispatch spawn-causal-logging source plan after
+  exact-head Copilot approval and required checks. This accepts the first
+  implementation scope, not its logging or running-state validation. The next
+  slice wires the actual worker-lane application sink and records entry before
+  reconciliation, scheduling and ordinary Bridge calls through existing owners.
+  Native capture, wider retention integration, release/install qualification and
+  every broader fleet gate remain open. No live configuration changed.
 - #8875 merged the operator-selected in-process Gateway/ARC source bridge
   after exact-head Copilot approval, resolved feedback and required-source
   checks. The managed provider confirmed completion using the Maintainer

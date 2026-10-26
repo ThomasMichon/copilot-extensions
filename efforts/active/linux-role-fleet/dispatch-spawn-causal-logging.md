@@ -3,7 +3,7 @@
 Back to the [logging integration plan](logging-conventions.md) and
 [Linux role fleet effort](README.md). Tracker: [#8377](https://github.com/ThomasMichon/copilot-extensions/issues/8377).
 
-**Status: proposed bounded implementation slice.** This adds causal records
+**Status: implementation under review.** This adds causal records
 through existing Dispatch logging owners, not a new collector, allocation
 ledger, delivery protocol or complete fleet-logging qualification.
 
@@ -95,3 +95,17 @@ Resolve only this slice's source gates when its implementation merges.
 The parent logging inventory, native/installer/container adapters and running
 qualification remain open. Do not change updater, service, credential, queue,
 registrar or production configuration to demonstrate these records.
+
+## Journal
+
+- 2026-10-25: #9041 accepted this bounded source plan. The implementation uses
+  the existing application handler in the actual lane process and preserves
+  the supervisor's ordered lifecycle behind a cohesive cycle module. Focused
+  isolated regression controls passed (890; 35 platform/native cases skipped),
+  including original-key startup/retry and the new real-file causal records.
+  The positively admitted in-memory packet passed (1,853), adding three pure
+  entry/error/privacy controls without expanding its effect permissions or
+  budget. Stale test fixtures were corrected to the existing hosting flag,
+  explicit admission fixture and shared daemon-launch API; no production
+  launch contract changed. Source review/merge and all running-state gates
+  remain open.
