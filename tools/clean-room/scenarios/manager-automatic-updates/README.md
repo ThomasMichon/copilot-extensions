@@ -6,6 +6,10 @@ construction with retained slot-local launchers.
 It never changes the production Worker, policy or process modules. Both copied
 runtime generations are checked byte-for-byte against the candidate's
 `automatic_updates_*.py` files.
+The qualification owner supplies the existing shared disposable-daemon
+lifecycle declaration to actual fixture children. Startup and detached launches
+use the same instance-admission substrate as production, with explicit test
+expiry rather than a competing fixture registry. Production has no expiry.
 
 ## Evidence boundary
 
@@ -148,6 +152,10 @@ An initially absent foreground window blocks observation startup. A later NULL
 or disappeared foreground identity is retained as an ambiguous violation while
 observation continues; Win32 permits NULL during activation transitions and
 does not define a last-error failure contract for `GetForegroundWindow`.
+Toolhelp process-entry types and function signatures are configured once, so
+continuous polling and concurrent child identity checks cannot replace each
+other's ctypes pointer types. Case results retain the original failure as well
+as any later cleanup failure.
 
 Success requires actual two-cycle timing, exact registered-command execution,
 the contained-control Job-closure witness and surviving authenticated worker

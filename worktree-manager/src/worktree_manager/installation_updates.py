@@ -107,7 +107,7 @@ def _operations(*, engine_source=None):
     for request in update_driver.status():
         argv = request.spec.argv
         target = _stored_target(argv)
-        if target is None or (request.spec.backend == "manager" and target != "worktree-manager"):
+        if target is None:
             continue
         expected_source = source if request.spec.backend == "manager" else (
             engine_source if request.spec.backend == "engine" else None

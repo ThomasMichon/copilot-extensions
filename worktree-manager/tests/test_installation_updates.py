@@ -119,13 +119,54 @@ def test_manager_plugin_submission_uses_the_manager_durable_admission_boundary(i
         id="targeted-request", state="pending", exit_code=None, error=None,
         log_path=tmp_path / "targeted.log",
     )
-    monkeypatch.setattr(update_driver, "enqueue", lambda spec, **kwargs: calls.append(spec) or request)
+
+    def enqueue(spec, **kwargs):
+        calls.append(spec)
+        request.spec = spec
+        return request
+
+    monkeypatch.setattr(ui, "_operations", READ_OPERATIONS)
+    monkeypatch.setattr(update_driver_cli, "_source_key", lambda: "manager-source")
+    monkeypatch.setattr(update_driver, "runtime_command", lambda module, args=(): (("/fixture/python", "-m", module, *args), {}))
+    monkeypatch.setattr(update_driver, "enqueue", enqueue)
+    monkeypatch.setattr(update_driver, "status", lambda: (request,) if calls else ())
     monkeypatch.setattr(update_driver, "ensure_worker", lambda *a, **k: None)
+    monkeypatch.setattr(update_driver, "wait", lambda *a, **k: pytest.fail("detached submission waited"))
     monkeypatch.setattr(ui.engine_client, "run_engine_passthrough", lambda *a, **k:
         pytest.fail("plugin submission bypassed Manager admission"))
     assert ui.submit("guide") == 0
     assert len(calls) == 1 and calls[0].backend == "manager"
     assert calls[0].argv == ("--target", "guide")
+    assert calls[0].source == "manager-source"
+    for state, exit_code, activity, error in (
+        ("pending", None, "queued", None),
+        ("running", None, "running", None),
+        ("completed", 1, "failed", "selected payload build failed"),
+        ("completed", 0, "succeeded", None),
+    ):
+        request.state, request.exit_code, request.error = state, exit_code, error
+        progress = f"Selected guide update: {activity}"
+        request.log_path.write_text(progress, encoding="utf-8")
+        row = next(row for row in ui.inventory()["entries"] if row["id"] == "guide")
+        assert row["activity"] == activity
+        assert row["card"]["status"] == activity
+        body = row["card"]["body"]
+        assert progress in body and request.id in body
+        operation = json.loads(body.split("Durable operation: ", 1)[1].split("\n\n", 1)[0])
+        assert operation["exit_code"] == exit_code and operation["error"] == error
+        assert operation["log"] == str(request.log_path)
+
+    from dataclasses import replace
+
+    for spec in (
+        replace(calls[0], source="foreign-manager-source"),
+        replace(calls[0], backend="foreign-backend"),
+        replace(calls[0], backend="engine"),
+    ):
+        request.spec = spec
+        row = next(row for row in ui.inventory()["entries"] if row["id"] == "guide")
+        assert row["activity"] == "idle"
+        assert "Durable operation:" not in row["card"]["body"]
 
 
 def test_public_manager_plugin_target_refuses_unsupported_source_before_submission(

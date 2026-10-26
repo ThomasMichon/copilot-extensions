@@ -14,6 +14,7 @@ from typing import Any
 
 from agent_procutil import no_window_kwargs, spawn_daemon
 from agent_procutil.daemon_broker import WindowsDaemonProcess
+from agent_procutil.daemon_instances import DaemonInstanceSpec
 
 from .automatic_updates_policy import PolicyError, state_dir
 
@@ -155,6 +156,9 @@ def spawn_worker(
         env=update_environment(root), console_children=True,
         breakaway=True, contained_fallback=False,
         display="Manager automatic maintenance",
+        instance=DaemonInstanceSpec(
+            "worktree-manager-automatic-updates", root.absolute(), Path(__file__).resolve(),
+        ),
     )
 
 

@@ -114,28 +114,30 @@ def legacy_triggers() -> list[str]:
     installed = [str(path) for path in paths if path.exists() or path.is_symlink()]
     if installed:
         return installed
-    # A loaded/running unit can outlive deleted unit files.
-    for name in (LEGACY_NAME, SELF_NAME):
+    # Loaded timers and running services can outlive deleted unit files.
+    for unit in (f"{LEGACY_NAME}.timer", f"{LEGACY_NAME}.service", f"{SELF_NAME}.service"):
         try:
             result = subprocess.run(
-                ["systemctl", "--user", "show", f"{name}.service",
+                ["systemctl", "--user", "show", unit,
                  "--property=LoadState,ActiveState", "--no-pager"],
                 capture_output=True, text=True, timeout=10, check=False,
             )
         except FileNotFoundError:
-            return []
+            return installed
+        except (OSError, subprocess.SubprocessError) as error:
+            raise PolicyError(f"legacy user-unit inventory failed for {unit}: {error}") from error
         if result.returncode != 0:
             raise PolicyError(
-                "legacy user-service inventory is unavailable: " + result.stderr.strip()
+                f"legacy user-unit inventory is unavailable for {unit}: " + result.stderr.strip()
             )
         properties = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
         if properties.get("ActiveState") in ("active", "activating", "deactivating", "reloading"):
-            installed.append(f"{name}.service ({properties['ActiveState']})")
+            installed.append(f"{unit} ({properties['ActiveState']})")
         elif (
             properties.get("ActiveState") not in ("inactive", "failed")
             or properties.get("LoadState") not in ("not-found", "loaded", "masked")
         ):
-            raise PolicyError("legacy service activity could not be verified")
+            raise PolicyError(f"legacy unit activity could not be verified: {unit}")
     return installed
 
 

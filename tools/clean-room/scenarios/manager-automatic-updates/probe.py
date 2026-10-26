@@ -29,6 +29,22 @@ def qualify(source: Path, workdir: Path, *, cycles: int, native_startup: bool) -
     fixtures.verify_prepared(fixtures.payload_path(source))
     workdir = fixtures.private_directory(workdir)
     manager = fixtures.load_manager(source)
+    from agent_procutil.daemon_instances import daemon_test_lifecycle, default_registry_root
+
+    with daemon_test_lifecycle(
+        owner="manager-automatic-updates-qualification", registry_root=default_registry_root(),
+    ) as instance_environment:
+        return _qualify_cases(
+            source, workdir, manager, cycles=cycles, native_startup=native_startup,
+            instance_environment=instance_environment,
+        )
+
+
+def _qualify_cases(
+    source: Path, workdir: Path, manager: dict, *, cycles: int, native_startup: bool,
+    instance_environment: dict[str, str],
+) -> dict:
+    windows_native = native_startup and sys.platform == "win32"
     report = {
         "schema": 1, "passed": False, "cycle_kind": "finite-guarded-command-fixture",
         "real_installation_cycles": False, "native_startup": native_startup,
@@ -48,10 +64,12 @@ def qualify(source: Path, workdir: Path, *, cycles: int, native_startup: bool) -
                     report["handover"] = lifecycle.case(
                         source, workdir / "h", manager, cycles=cycles,
                         native_startup=True, windows_observer=observer,
+                        instance_environment=instance_environment,
                     )
                     report["failed_successor"] = lifecycle.case(
                         source, workdir / "f", manager, cycles=1,
                         failing_standby=True, windows_observer=observer,
+                        instance_environment=instance_environment,
                     )
                 packet = observer.packet()
                 report["windows_observation"] = packet
@@ -69,14 +87,17 @@ def qualify(source: Path, workdir: Path, *, cycles: int, native_startup: bool) -
                     api.close()
         report["handover"] = lifecycle.case(
             source, workdir / "handover", manager, cycles=cycles, native_startup=native_startup,
+            instance_environment=instance_environment,
         )
         report["failed_successor"] = lifecycle.case(
             source, workdir / "failed-successor", manager, cycles=1, failing_standby=True,
             native_startup=native_startup,
+            instance_environment=instance_environment,
         )
         if native_startup:
             report["native_signal_drain"] = lifecycle.signal_drain_case(
                 source, workdir / "native-signal-drain", manager,
+                instance_environment=instance_environment,
             )
         report["passed"] = True
         return report
