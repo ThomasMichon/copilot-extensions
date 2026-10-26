@@ -489,6 +489,25 @@ completion is asserted.
 
 ## Journal
 
+### 2026-10-26 - Source-denying installed continuity SDK qualified
+
+- #9066 merged to `dev` as `a15737268e591255b077bea514bb2e3e0ed0f551`.
+  Exact head `6b777583bda552793cb3e6275777bc26d681b389` received Copilot
+  approval `5650118978` with no open findings; all required checks passed
+  before the normal managed Maintainer completion.
+- Re-read the full parent Plan and Validation Plan. Resolve only the bounded
+  Linux installed-SDK item: the final contained packet passed all 11 cases,
+  including an intentional source-import refusal, actual CLI and source
+  Manager/engine consumers, and same-origin receiver/journal restart with the
+  original key and operation. This does not install the Manager/engine product
+  or qualify real continuity providers, native Windows/macOS or live enrollment.
+- Continue through the retained release/construction owners for the selected
+  engine's supported service-Gateway SDK closure. The independently bootstrapped
+  Komodo substrate has its own reviewed #8860/#8872 source appointment under
+  #6030; do not replace it with a second installer or count its plan as execution.
+  Human sessions, actual role setup/lifecycle, published/installed revisions and
+  live adoption remain open. Neither #6681 nor #6236 is complete.
+
 ### 2026-10-26 - Executable first-touch source merged; installation stays gated
 
 - #9047 merged to `dev` as `528c8b1c53d00ff8c561f78324f5b951339eaf71`.
