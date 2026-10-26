@@ -1,0 +1,21 @@
+{
+  "comment": "Expose explicit Linux diagnostic file and directory sync without changing ordinary fail-open delivery",
+  "changes": [
+    {
+      "plugin": "libs/process-telemetry",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

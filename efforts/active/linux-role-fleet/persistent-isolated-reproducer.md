@@ -13,9 +13,9 @@ remains open. Effective volatile-mount observation source merged in #9124;
 actual guest qualification remains open.
 Explicit offline-mode and loopback/no-route observation source merged in #9128;
 no actual offline case or resource provisioning has been qualified.
-The next source slice implements fixed guest-state operation exclusion through
-the existing shared primitive; real shared-volume and crash qualification remains
-open. Its API and limitations live in the [tool guide](../../../tools/reproducer-lab/README.md#fixed-guest-operation-exclusion).
+Fixed guest-state operation exclusion source merged in #9134 through the existing
+shared primitive; real shared-volume and crash qualification remains open.
+Its API and limitations live in the [tool guide](../../../tools/reproducer-lab/README.md#fixed-guest-operation-exclusion).
 This is an agent-recommended decomposition of the remaining isolated
 failure-reproduction and logging qualification work. It does not authorize
 resource creation, production fault injection, deployment or credential access.
@@ -289,3 +289,14 @@ Reuse existing finite process, source and service owners;
 this remains ordinary integration-test tooling, not a new runtime or fleet.
 Keep persistent provisioning blocked until the exact resources, thresholds,
 case lifetime and actions receive separate approval.
+
+The next strict-write source slice reuses
+[`DiagnosticLog.write_event_strict`](../../../libs/process-telemetry/README.md#explicit-strict-pre-effect-write)
+and the existing append/custody owners. Its direct Linux file-plus-directory sync
+API propagates failure and refuses malformed, expired or oversized records;
+ordinary fail-open logging and buffered callbacks remain unchanged. Synthetic
+syscall/caller controls do not qualify a mounted volume, a driver-crash outcome
+or an actual backend call. Wire it at the selected case's pre-effect boundary,
+then qualify storage failure before any backend action on separately approved
+resources. Missing executing-runtime capability refuses rather than substituting
+queue acceptance or later readback. No parent validation checkbox closes here.

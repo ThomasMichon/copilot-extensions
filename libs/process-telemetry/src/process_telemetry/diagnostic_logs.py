@@ -14,7 +14,9 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from .append import append_bytes
+from .append import (
+    STRICT_RECORD_BYTES, append_bytes, append_bytes_strict, strict_write_capability,
+)
 
 RETENTION = timedelta(days=30)
 MAINTENANCE_SECONDS = 60.0
@@ -29,6 +31,10 @@ def _utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         raise ValueError("diagnostic retention requires an aware clock")
     return value.astimezone(timezone.utc)
+
+
+def _invalid_json_constant(value: str) -> None:
+    raise ValueError(f"strict diagnostic JSON forbids {value}")
 
 
 def _diagnostic_files(directory: Path, component: str) -> list[Path]:
@@ -79,8 +85,10 @@ class DiagnosticLog(logging.Handler):
             self.maintain(force=True)
 
     @contextmanager
-    def _custody(self):
-        if self._create_parent:
+    def _custody(self, *, create_parent: bool | None = None):
+        if create_parent is None:
+            create_parent = self._create_parent
+        if create_parent:
             self.directory.mkdir(parents=True, exist_ok=True)
         with self._custody_factory(self.directory / f".{self.component}.lock"):
             yield
@@ -289,6 +297,38 @@ class DiagnosticLog(logging.Handler):
                 append_bytes(self.path, data)
         except Exception as error:
             self._degraded(error)
+
+    def write_event_strict(self, event: dict) -> None:
+        """Synchronously persist an explicit pre-effect record or raise.
+
+        No buffering, maintenance, silent age skip or automatic parent creation.
+        Caller-owned persistent storage and custody are prerequisites, not facts
+        inferred from this method's successful return.
+        """
+        try:
+            if strict_write_capability() is None:
+                raise NotImplementedError("strict diagnostic sync is unavailable on this platform")
+            now = _utc(self.clock())
+            stamp = self._event_stamp(event)
+            if stamp is None or stamp < now - RETENTION:
+                raise ValueError("strict diagnostic timestamp is invalid or expired")
+            data = self.encoder(event)
+            if (
+                type(data) is not bytes or not 0 < len(data) <= STRICT_RECORD_BYTES
+                or not data.endswith(b"\n") or b"\n" in data[:-1] or b"\r" in data
+            ):
+                raise ValueError("strict diagnostics require one bounded UTF-8 JSONL record")
+            decoded = json.loads(data.decode("utf-8"), parse_constant=_invalid_json_constant)
+            if not isinstance(decoded, dict) or decoded != event:
+                raise ValueError("strict diagnostic encoder changed the record fields")
+            if not self.directory.is_dir():
+                raise FileNotFoundError("strict diagnostic directory must already exist")
+            with self._custody(create_parent=False):
+                self._rollover(now)
+                append_bytes_strict(self.path, data)
+        except Exception as error:
+            self._degraded(error)
+            raise
 
 
 def iso_timestamp(event: dict) -> datetime:
