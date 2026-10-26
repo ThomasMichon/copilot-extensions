@@ -488,6 +488,16 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+- #9124 merged bounded effective volatile-mount observations as
+  `4d0ee4b02552f6d193a8d3b177fdec8ae0a4d5d9` after exact-head Copilot
+  approval, resolved documentation feedback and all required checks.
+  The combined selectors passed 399 controls, including 60 new synthetic/local
+  descriptor controls and two existing explicitly selected real local-Git cases.
+  Re-read the complete Plan and Validation Plan. Actual guest mount/persistence,
+  exclusive resource/interrupted-driver custody, controlled egress, full guest
+  runtime/source, native output and strict pre-effect qualification remain open.
+  Continue the custody and complete guest/case prerequisites; no real Docker
+  resource, service or production state was created or changed.
 - #9115 merged immutable local source staging as
   `1aabdbd663b4b2b5a2c32a37fbdabd2dc9051c2e` after exact-head Copilot
   approval, resolved feedback and all required checks. The bounded selectors

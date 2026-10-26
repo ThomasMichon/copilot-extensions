@@ -100,7 +100,10 @@ def _stub_create_worktree_core_internals(
         "_prepare_worktree_source",
         lambda *_a, **_k: SimpleNamespace(start_point="HEAD"),
     )
-    monkeypatch.setattr(m.git_ops, "create_worktree", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        m.git_ops, "create_worktree",
+        lambda _anchor, path, *_a, **_k: Path(path).mkdir(parents=True),
+    )
     monkeypatch.setattr(m.cfg, "tracking_dir", lambda project=None: tmp_path / "tracking")
     monkeypatch.setattr(
         m.tracking,

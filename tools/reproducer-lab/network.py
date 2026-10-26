@@ -33,6 +33,8 @@ def inspect_inventory(
     experiment: Experiment, selected: tuple[str, ...], containers: object, networks: object,
 ) -> NetworkIdentity:
     """Reject incomplete or foreign attachments in bounded Docker inspect output."""
+    if experiment.network_mode != "internal":
+        raise ValueError("internal network inventory requires the internal mode")
     if not selected:
         raise ValueError("a selected subject container is required")
     selected_containers(selected[0], selected[1:])
