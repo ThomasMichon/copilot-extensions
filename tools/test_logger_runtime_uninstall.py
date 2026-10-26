@@ -564,3 +564,90 @@ def test_posix_logger_relative_root_survives_marketplace_self_staging(tmp_path):
     _assert_state(root, durable, removed=True)
     _assert_state(other, other_durable, removed=False)
     assert not (other / ".install.lock").exists()
+
+
+@pytest.mark.parametrize("alias", ["trailing-slash", "dot-component"])
+@pytest.mark.parametrize("active", [False, True])
+def test_posix_logger_default_root_alias_uses_default_units_and_commands(tmp_path, alias, active):
+    bash = shutil.which("bash") if os.name != "nt" else None
+    if bash is None:
+        pytest.skip("native POSIX Bash required")
+    root, durable, env = _fixture(tmp_path, "owned")
+    default = root.parent / ".agent-logger"
+    root.rename(default)
+    root = default
+    units = root.parent / ".config" / "systemd" / "user"
+    units.mkdir(parents=True)
+    for kind in ("timer", "service"):
+        (units / f"agent-logger-sync.{kind}").write_text("default unit")
+    commands = root.parent / ".local" / "bin"
+    commands.mkdir(parents=True)
+    names = (
+        "session-sync", "agent-logger", "collate-session", "read-session-digest",
+        "prepare-session-log", "ramp-up-session",
+    )
+    for name in names:
+        (commands / name).write_text("default compatibility command")
+    fakebin = tmp_path / "fakebin"
+    fakebin.mkdir()
+    log = tmp_path / "systemctl-calls"
+    env["LOGGER_TEST_CALLS"] = str(log)
+    env["LOGGER_TEST_ACTIVE"] = "0" if active else "3"
+    systemctl = fakebin / "systemctl"
+    systemctl.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$*" >> "$LOGGER_TEST_CALLS"\n'
+        'case "$2" in\n'
+        'disable|daemon-reload) exit 0;;\n'
+        'is-active) exit "$LOGGER_TEST_ACTIVE";;\n'
+        '*) exit 1;;\nesac\n',
+    )
+    systemctl.chmod(0o755)
+    env["PATH"] = str(fakebin) + os.pathsep + env["PATH"]
+    requested = str(root) + ("/" if alias == "trailing-slash" else "/./")
+    result = subprocess.run(
+        [bash, str(INSTALLERS / "install.sh"), "uninstall", "--install-dir", requested],
+        capture_output=True, text=True, timeout=45, env=env,
+    )
+    assert result.returncode == (1 if active else 0), result.stdout + result.stderr
+    calls = log.read_text().splitlines()
+    assert "--user disable --now agent-logger-sync.timer" in calls
+    assert "--user is-active --quiet agent-logger-sync.service" in calls
+    if active:
+        assert "Active Logger sync service" in result.stderr
+    _assert_state(root, durable, removed=not active)
+    for kind in ("timer", "service"):
+        assert (units / f"agent-logger-sync.{kind}").exists() is active
+    for name in names:
+        assert (commands / name).exists() is active
+
+
+@pytest.mark.parametrize("lifecycle", [False, True])
+def test_logger_bom_manifest_provenance_fallback(tmp_path, monkeypatch, lifecycle):
+    root, durable, _ = _fixture(tmp_path, "owned")
+    record = {"schema_version": 3, "service": "agent-logger"}
+    if lifecycle:
+        record["commandLifecycle"] = {"owner": "incumbent"}
+    manifest = root / "deploy-manifest.json"
+    manifest.write_text(json.dumps(record), encoding="utf-8-sig")
+    spec = importlib.util.spec_from_file_location("logger_bom_test", INSTALLERS / "uninstall_guard.py")
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    binding = helper._load("_logger_bom_binding", "command_binding.py")
+    primitive = binding._load_primitive(INSTALLERS.parent)
+    monkeypatch.setattr(primitive, "probe_legacy_entrypoint", lambda **kwargs: {"allowMutation": True})
+    monkeypatch.setattr(binding, "_load_primitive", lambda _: primitive)
+
+    def unavailable(*args, **kwargs):
+        raise binding.SourceProvenanceUnavailable("fixture provenance unavailable")
+
+    monkeypatch.setattr(binding, "publish_legacy_binding", unavailable)
+    monkeypatch.setattr(helper, "_load", lambda *args: binding)
+    before = manifest.read_bytes()
+    assert before.startswith(b"\xef\xbb\xbf")
+    if lifecycle:
+        with pytest.raises(RuntimeError, match="lifecycle ownership cannot be revalidated"):
+            helper.validate(root)
+    else:
+        assert helper.validate(root) == (primitive, None)
+    assert manifest.read_bytes() == before
+    _assert_state(root, durable, removed=False)

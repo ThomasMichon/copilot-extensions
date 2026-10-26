@@ -133,7 +133,7 @@ def check_root(root: Path) -> bool:
             legacy_root=root, project_root=Path.cwd(),
         )
     except binding.SourceProvenanceUnavailable:
-        if manifest.exists() and primitive.read_json(manifest).get("commandLifecycle") is not None:
+        if manifest.exists() and primitive.read_deployment_manifest(manifest).get("commandLifecycle") is not None:
             raise RuntimeError("Cannot revalidate incumbent lifecycle ownership; uninstall refused")
     return True
 

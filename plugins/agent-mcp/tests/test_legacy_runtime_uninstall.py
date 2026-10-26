@@ -884,3 +884,37 @@ def test_final_windows_relative_root_uses_provider_location(tmp_path: Path, host
         path: path.read_bytes() for root in (default, owned)
         for path in root.rglob("*") if path.is_file()
     } == before
+
+
+@pytest.mark.parametrize("lifecycle", [False, True])
+def test_bom_manifest_provenance_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lifecycle: bool,
+) -> None:
+    root, _, _ = _fixture(tmp_path)
+    record: dict[str, object] = {"schema_version": 3, "service": "agent-mcp"}
+    if lifecycle:
+        record["commandLifecycle"] = {"owner": "incumbent"}
+    manifest = root / "deploy-manifest.json"
+    manifest.write_text(json.dumps(record), encoding="utf-8-sig")
+    spec = importlib.util.spec_from_file_location("mcp_bom_test", SCRIPTS / "uninstall_runtime.py")
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    binding = helper._load("_mcp_bom_binding", "command_binding.py")
+    primitive = binding._load_primitive(SCRIPTS.parent)
+    monkeypatch.setattr(primitive, "probe_legacy_entrypoint", lambda **kwargs: {"allowMutation": True})
+    monkeypatch.setattr(binding, "_load_primitive", lambda _: primitive)
+
+    def unavailable(*args: Any, **kwargs: Any) -> None:
+        raise binding.SourceProvenanceUnavailable("fixture provenance unavailable")
+
+    monkeypatch.setattr(binding, "publish_legacy_binding", unavailable)
+    monkeypatch.setattr(helper, "_load", lambda *args: binding)
+    before = manifest.read_bytes()
+    assert before.startswith(b"\xef\xbb\xbf")
+    if lifecycle:
+        with pytest.raises(RuntimeError, match="Cannot revalidate incumbent lifecycle ownership"):
+            helper.check_root(root)
+    else:
+        assert helper.check_root(root) is True
+    assert manifest.read_bytes() == before
+    _assert_derived(root, present=True)

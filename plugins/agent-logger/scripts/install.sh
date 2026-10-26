@@ -340,6 +340,15 @@ fi
 # is the authoritative TOTAL bound, this just shortens single-request stalls.
 if [[ -z "${UV_HTTP_TIMEOUT:-}" ]]; then export UV_HTTP_TIMEOUT=60; fi
 
+_bootstrap_python() {
+    # Keep construction supervision outside the candidate being built.
+    local __c
+    for __c in python3 python; do
+        if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
+    done
+    return 1
+}
+
 if [[ $# -gt 0 ]]; then
     shift
 fi
@@ -367,6 +376,14 @@ if [[ "$ACTION" == uninstall ]]; then
 fi
 if [[ "$INSTALL_DIR" != /* ]]; then
     INSTALL_DIR="$PWD/$INSTALL_DIR"
+fi
+if [[ "$ACTION" == uninstall ]]; then
+    py="$(_bootstrap_python)" || {
+        printf '%s\n' 'Cannot validate Logger uninstall ownership without a bootstrap Python' >&2
+        exit 1
+    }
+    INSTALL_DIR="$("$py" -I -B "$SCRIPT_DIR/uninstall_guard.py" \
+        --root "$INSTALL_DIR" --resolve-root)" || exit 1
 fi
 LEGACY_INSTALL_DIR="$HOME/.agent-logger"
 legacy_cmp="$(printf '%s' "$LEGACY_INSTALL_DIR" | tr '\\' '/' | tr '[:upper:]' '[:lower:]')"
@@ -485,15 +502,6 @@ _rt_python() {
     # after bin/ is deployed. Empty -> the caller reports "not installed".
     [[ -n "$py" && -x "$py" ]] || return 1
     printf '%s' "$py"
-}
-
-_bootstrap_python() {
-    # Keep construction supervision outside the candidate being built.
-    local __c
-    for __c in python3 python; do
-        if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
-    done
-    return 1
 }
 
 _payload_hash() {

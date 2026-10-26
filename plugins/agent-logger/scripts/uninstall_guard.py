@@ -105,7 +105,7 @@ def validate(root: Path):
     try:
         receipt = binding.publish_legacy_binding(primitive, **arguments)
     except binding.SourceProvenanceUnavailable:
-        if manifest.exists() and primitive.read_json(manifest).get("commandLifecycle") is not None:
+        if manifest.exists() and primitive.read_deployment_manifest(manifest).get("commandLifecycle") is not None:
             raise RuntimeError("Logger lifecycle ownership cannot be revalidated") from None
     return primitive, receipt
 
@@ -220,6 +220,7 @@ def remove_runtime(root: Path, shell: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", required=True)
+    parser.add_argument("--resolve-root", action="store_true")
     parser.add_argument("--idle", action="store_true")
     parser.add_argument("--prepare", action="store_true")
     parser.add_argument("--remove-runtime", action="store_true")
@@ -230,6 +231,8 @@ def main() -> int:
             raise RuntimeError("Logger uninstall requires a root without parent-traversal components")
         root = Path(os.path.abspath(args.root))
         owner = validate(root)
+        if args.resolve_root:
+            print(root)
         if args.idle:
             refuse_live_runtime(root)
         if args.prepare:
