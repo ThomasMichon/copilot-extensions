@@ -68,6 +68,21 @@ structured-policy work and separately reviewed ordinary activation remain open.
 The parent effort remains Active.
 The qualified release does not establish installation or default activation.
 
+**Current status (2026-10-26):** structured guidance and separately reviewed
+ordinary call-site selection are released and installed after explicit
+ordinary-activation consent. Actual ordinary creation/replay/Resume acceptance
+and Manager new-row observation pass across all eight native/guest project
+contexts. Only the eight explicitly approved validation checkouts and branches
+are normally finalized; retained records and creation receipts preserve their
+identities. Phase 3d's delivery, installed acceptance and parent reconciliation
+are verified. Phase 3b/3c obligations and the parent closure gate remain open
+with their retained owners. Canonical native source #7068 is merged; the
+all-record/resident-roster gate is not complete. The separately tracked #7097
+integrity capability continues in the reviewed authoritative-daemon intake,
+not as completed implementation.
+The [current journal](journal/2026/10.26%20progress.md) records exact qualification,
+selected runtimes, acceptance, consent and lifecycle evidence.
+
 **Physical-machine clarification:** machine name, OS hostname and execution
 environment are separate dimensions. A compact host/environment address is
 appropriate only where an interface needs one execution identifier; it must not
@@ -434,10 +449,17 @@ _(Operator-selected convergence; detailed mechanism is agent-recommended.)_
   Native/history repair, legacy handoff, authority/doctor/registry/locality,
   cache/serialization and exact CI producer-clone regressions have bounded
   contained coverage without increasing the normal test deadlines.
-- [ ] Land the source candidate through final-head review and required dev CI.
-- [x] Blocked; transferred to `#7097`: targeted authoritative handling of
+- [x] Land the source candidate through final-head review and required dev CI.
+  #7068 merged as `b367d11da269b9844dd5a1af305fdfcf3c6ca492`;
+  the original owner records final-head approval and passing required checks.
+- [x] Blocked; transferred to `agent-worktrees-authoritative-daemon / #7097`: targeted authoritative handling of
   misplaced duplicates/orphans without lifecycle destruction or a weakened
   receiving-project fence.
+  Reviewed intake #8764 preserves the complete
+  [direct Plan, Validation and continuing coordination](../agent-worktrees-authoritative-daemon/README.md#7097---approved-exact-misplaced-store-integrity-repair)
+  and `GLOBAL-7097` validation. Administrative closure of #7097 does not mean
+  implementation completion, transfer native/resource custody or authorize live
+  repair. The containing all-record/resident-roster gate remains below.
 - [ ] Coordinator verifies all native records and resident roster show canonical
   ownership, with wrong-store blockers resolved or explicitly transferred. A
   direct exact-record write alone is not a resident projection refresh.
@@ -472,13 +494,14 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
       corrections and installed opt-in acceptance close this source gate.
       Ordinary call-site activation remains the separately reviewed gate in
       that plan; no low-level default is changed.
-- [ ] Review and execute the [manifest-independent local-identity amendment](manifest-independent-local-identity.md);
+- [x] Review and execute the [manifest-independent local-identity amendment](manifest-independent-local-identity.md);
       machine maps customize rather than admit ordinary local use.
       The intent and corrective plan passed review in #7773. Registration/load source proof merged
       in #8898 and Manager source/entry proof in #8929; qualified release and
       installed opt-in acceptance are recorded above. The read-only guidance
-      correction is delivered; separately reviewed ordinary activation remains open.
-- [ ] Make runtime admission, structured machine guidance and prospective
+      correction and separately reviewed ordinary activation are delivered;
+      the current journal records native/guest acceptance.
+- [x] Make runtime admission, structured machine guidance and prospective
       worktree naming/metadata consume the correct dimension. Keep native and
       guest execution authority distinct and use the same policy in update and
       launch reconciliation.
@@ -489,21 +512,31 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
       That source follow-up merged in #9110 after current-head approval and
       required CI, qualified in natural `40378983487`, and reached Main #9116.
       Actual selected installed guidance agrees across all eight native/guest
-      project contexts. Ordinary call-site activation remains separate below.
-- [ ] Review and execute the [ordinary call-site activation proposal](ordinary-callsite-activation.md)
+      project contexts. Ordinary call-site activation is completed separately below.
+- [x] Review and execute the [ordinary call-site activation proposal](ordinary-callsite-activation.md)
       separately. Preserve omitted-mode legacy APIs and all retained
       allocations; live activation requires its own explicit authorization.
       The proposal passed review in #9114. Ordinary source call-site selection,
       receiving-anchor configuration propagation and contained entry regressions
       merged in #9125 after final-head approval and passing required checks.
       Qualified publication and separately authorized installed activation
-      remain pending. The first natural publication attempt is blocked by
-      verifier-initialization failure #9131; no ordinary rollout occurred.
-- [ ] Preserve existing IDs, paths, refs, records, queued work and live sessions;
+      were separated after verifier-initialization failure #9131. Bounded
+      availability repair #9133 merged; natural `40400213313` now qualifies
+      the source and Main #9135 lands the identical candidate tree. Installed
+      ordinary activation subsequently receives explicit consent. Both supported
+      updates, all eight actual installed contexts and exact new-resource
+      lifecycle verification pass. Parent reconciliation retains #6945's
+      installed guest-entry matrix and #7057's all-native-record/resident-roster
+      acceptance; #7097's complete integrity intake remains separately owned.
+      No parent completion or new operational authority follows.
+- [x] Preserve existing IDs, paths, refs, records, queued work and live sessions;
       retain supported legacy lookup and allocation replay. No automatic
       relabel, rename, policy widening or data migration.
-- [ ] Pass bounded in-process decision regressions and required Source CI, then
+- [x] Pass bounded in-process decision regressions and required Source CI, then
       qualify and release the implementation through normal promotion.
+      Natural `40400213313` qualifies exact Dev `4714b76ccd`, including #9125
+      and #9133; Main #9135 and immutable evidence are recorded in the current
+      journal. This does not close installed activation or retained owner gates.
 - [x] Complete #7743 native supported fresh-bootstrap recovery, complete
       registered-suite update and the normal installed project-update entry.
       Both durable requests settle successfully; all 16 registered suite
@@ -568,7 +601,8 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
   Normal owner status and new-resource claim journaling remain separate.
   All test checkouts and
   branches are removed through normal finalization, retaining records/receipts.
-  This does not activate ordinary producers or close the remaining Phase 3d work.
+  The subsequent separately authorized ordinary activation is recorded in Phase
+  3d; this evidence does not close the remaining Phase 3b/3c owner gates.
 - [ ] Satisfy the [guest-identity validation matrix](guest-execution-identity.md#validation-plan)
   before declaring the #6945 containing rollout gap closed.
 - [x] For Phase 3c, prove read-only dry-run, exact selection and JSON, local
@@ -580,10 +614,14 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
   including knowledge-only repositories, with no competing public API.
 - [x] For Phase 3c, distinguish exact-record truth from stale resident/list
   projections; no source-only invocation claims to upgrade or patch the daemon.
-- [ ] For Phase 3d, verify physical name/hostname/environment/execution-ID
+- [x] For Phase 3d, verify physical name/hostname/environment/execution-ID
   separation, update/launch gate agreement, new single-environment naming,
   unchanged legacy lookup and native/guest refusal boundaries using the
   [validation matrix](physical-machine-environment-boundary.md#validation-plan).
+  Source, qualified release and separately authorized actual installed ordinary
+  acceptance pass; all four low-level omitted-mode APIs remain `legacy`.
+  The current journal records preserved historical data and exact validation
+  resource retirement separately from the parent closure gate.
 - [x] Classify the operator-reported retained guest worktree using its installed
   owning-project roster and actual Picker data-source path: it is present with
   unchanged guest metadata; the open Manager instances enumerate another

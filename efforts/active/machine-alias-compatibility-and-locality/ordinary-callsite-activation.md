@@ -99,15 +99,27 @@ structured physical metadata.
   Add the ordinary Worktrees changefile; never hand-edit versions.
   #9125 merged after final-head approval, all four addressed threads resolved
   and passing required checks. The current journal records the source gates.
-- [ ] Merge the source implementation, then observe natural qualification and
+- [x] Merge the source implementation, then observe natural qualification and
   exact release publication. No duplicate controller or integration promotion
   requirement is introduced.
-- [ ] Obtain explicit ordinary-activation rollout authorization, use the normal
+  Natural `40400213313` qualifies exact Dev `4714b76ccd` and frozen candidate
+  `710672f3e9`; Main #9135 lands the identical qualified tree. The current
+  journal records immutable evidence and the still-separate activation gate.
+- [x] Obtain explicit ordinary-activation rollout authorization, use the normal
   updater and verify selected installed native/guest entry points. Preserve
   historical tracking and unrelated work; dispose only specifically authorized
   new validation resources through their ordinary lifecycle.
-- [ ] Reconcile the parent Plan/Validation Plan, retaining separately owned
+  Separate rollout/acceptance consent and then exact eight-resource cleanup
+  consent are recorded in the journal. Both updates and the eight installed
+  contexts pass. All eight new checkouts and branches are normally finalized;
+  their records, tuples, nonces and creation receipts remain retained.
+- [x] Reconcile the parent Plan/Validation Plan, retaining separately owned
   guest-installation/native-repair work or explicit named transfers before closure.
+  Live owner evidence credits merged native source #7068, retains #6945's
+  guest-entry matrix and #7057's all-record/resident-roster acceptance, and
+  follows #7097's reviewed #8764 intake into the authoritative-daemon effort.
+  This proposal is delivered; the parent remains Active without a custody
+  reassignment, real-record repair or acceptance waiver.
 
 ## Validation Plan
 
@@ -130,7 +142,13 @@ structured physical metadata.
 - [x] Keep real Git, filesystem, SQLite, cross-process and installed/native
   effects in existing bounded development/acceptance lanes, not new promotion
   prerequisites or an expanded required unit node inventory.
-- [ ] After separately authorized rollout, observe actual ordinary creation and
+- [x] After separately authorized rollout, observe actual ordinary creation and
   non-preview Resume planning in every registered native/guest project. Report
   source-only hosting and missing paths separately; execute no returned agent
   command merely to make allocation acceptance appear complete.
+  Both supported updates complete after separate explicit consent. Actual
+  installed ordinary Create, retained allocation replay and allowed Resume
+  plans pass in all eight contexts; the two source-only projects retain their
+  hosting refusal. The current journal records the selected runtimes and
+  exact approved retirement of all eight new checkouts and branches, retaining
+  their finalized records and creation receipts.
