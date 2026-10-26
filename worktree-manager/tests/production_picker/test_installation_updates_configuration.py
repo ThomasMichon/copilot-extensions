@@ -141,6 +141,7 @@ def test_unresponsive_engine_preserves_manager_rows_through_production_list(tmp_
 
 
 def test_selected_cell_context_survives_actual_configuration_transport(tmp_path, monkeypatch):
+    import update_driver
     from _installation_context_fixtures import namespaced_fixture, write_json
     from worktree_manager import engine_client
 
@@ -156,6 +157,7 @@ def test_selected_cell_context_survives_actual_configuration_transport(tmp_path,
     write_json(legacy, {"version": "legacy", "enabled": "inactive"})
     write_json(cell, {"version": "cell", "enabled": "active"})
     engine = tmp_path / "engine.py"
+    observation = tmp_path / "engine-observation.json"
     engine.write_text(
         "import json,os,pathlib,sys\n"
         "pointer=os.environ.get('COPILOT_EXTENSIONS_CONTEXT')\n"
@@ -168,14 +170,23 @@ def test_selected_cell_context_survives_actual_configuration_transport(tmp_path,
         "'source':str(root),'updatable':True,'limitation':''}]}))\n"
         "else:\n"
         " assert '--target' in sys.argv and pointer\n"
-        " print(json.dumps({'request_id':'cell-request','state':'pending','exit_code':None,'context':pointer}))\n"
+        f" pathlib.Path({str(observation)!r}).write_text(json.dumps({{'context':pointer,'arguments':sys.argv[1:],'has_custody':bool(os.environ.get('UPDATE_DRIVER_WITNESS'))}}))\n"
     )
     wrapper = tmp_path / "inventory.py"
     wrapper.write_text(
+        "import sys,update_driver\n"
         "from pathlib import Path\n"
         "from worktree_manager import agent_plugin_runtime as apr,installation_updates as ui\n"
         f"apr._canonical_os_profile=lambda environment:Path({str(home)!r})\n"
         f"apr._durable_home=lambda ic,environment:Path({str(home / '.copilot-extensions')!r})\n"
+        "original=update_driver.runtime_command\n"
+        "def command(module,args=()):\n"
+        " if module=='worktree_manager': return (sys.executable,str(Path(__file__).resolve()),'execute',*args),{}\n"
+        " return original(module,args)\n"
+        "update_driver.runtime_command=command\n"
+        "if sys.argv[1:2]==['execute']:\n"
+        " from worktree_manager import __main__ as manager\n"
+        " raise SystemExit(manager.main(sys.argv[2:]))\n"
         "raise SystemExit(ui.main())\n"
     )
     monkeypatch.setenv("HOME", str(home))
@@ -193,15 +204,21 @@ def test_selected_cell_context_survives_actual_configuration_transport(tmp_path,
     row = next(row for row in rows if row["id"] == "guide")
     assert row["payload"] == "cell" and row["enabled"] == "active"
     assert str(install.parent) in row["source"]
+    assert before == {p: p.read_bytes() for p in home.rglob("*") if p.is_file()}
     update = next(action for action in reg.actions if action.key == "update")
     argv = list(pivots.format_template(update.run, {"id": "guide"}))
     argv = [sys.executable, "-B", str(wrapper), *argv[4:]]
     ok, message = runtime.run_resolved(argv, preserve_output=True)
     assert ok, message
-    assert json.loads(message) == {
-        "request_id": "cell-request", "state": "pending", "exit_code": None, "context": str(install),
-    }
-    assert before == {p: p.read_bytes() for p in home.rglob("*") if p.is_file()}
+    receipt = json.loads(message.splitlines()[0])
+    request = update_driver.wait(
+        receipt["request_id"], root=home / ".copilot-extensions/update-driver", timeout=30,
+    )
+    assert request.state == "completed" and request.exit_code == 0
+    seen = json.loads(observation.read_text())
+    assert seen["context"] == str(install) and seen["has_custody"] is True
+    assert seen["arguments"] == ["update", "--no-manager", "--target", "guide"]
+    assert all(path.read_bytes() == body for path, body in before.items())
 
 
 def test_catalog_failure_uses_production_warning_banner(monkeypatch):

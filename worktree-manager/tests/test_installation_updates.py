@@ -110,16 +110,22 @@ def test_submit_revalidates_and_forwards_only_selected_target(inventory, monkeyp
     assert len(calls) == 1
 
 
-def test_manager_plugin_submission_uses_engine_identity_not_manager_queue(inventory, monkeypatch):
+def test_manager_plugin_submission_uses_the_manager_durable_admission_boundary(inventory, monkeypatch, tmp_path):
     import update_driver
 
     calls = []
     monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
-    monkeypatch.setattr(update_driver, "enqueue", lambda *a, **k: pytest.fail("plugin used Manager source identity"))
-    monkeypatch.setattr(ui.engine_client, "run_engine_passthrough", lambda project, args, **kwargs:
-        calls.append((project, args, kwargs)) or 0)
+    request = SimpleNamespace(
+        id="targeted-request", state="pending", exit_code=None, error=None,
+        log_path=tmp_path / "targeted.log",
+    )
+    monkeypatch.setattr(update_driver, "enqueue", lambda spec, **kwargs: calls.append(spec) or request)
+    monkeypatch.setattr(update_driver, "ensure_worker", lambda *a, **k: None)
+    monkeypatch.setattr(ui.engine_client, "run_engine_passthrough", lambda *a, **k:
+        pytest.fail("plugin submission bypassed Manager admission"))
     assert ui.submit("guide") == 0
-    assert calls == [(None, ["update", "--no-manager", "--target", "guide", "--detach", "--json"], {"headless": True})]
+    assert len(calls) == 1 and calls[0].backend == "manager"
+    assert calls[0].argv == ("--target", "guide")
 
 
 def test_public_manager_plugin_target_refuses_unsupported_source_before_submission(

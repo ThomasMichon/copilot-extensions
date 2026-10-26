@@ -197,6 +197,41 @@ def test_windows_baseline_console_is_not_a_new_fixture_window(windows_probe: tup
     assert observer.packet()["violations"] == []
 
 
+def test_get_foreground_window_null_does_not_read_stale_last_error(windows_probe: tuple) -> None:
+    module, _ = windows_probe
+    api = module.WinAPI.__new__(module.WinAPI)
+    api.user = SimpleNamespace(GetForegroundWindow=lambda: None)
+    api._check = Mock(side_effect=AssertionError("NULL has no GetLastError contract"))
+    assert api.foreground() == 0
+    api._check.assert_not_called()
+
+
+def test_initial_null_foreground_does_not_create_a_passing_observer(windows_probe: tuple) -> None:
+    module, _ = windows_probe
+    api = DesktopStub(module)
+    api.front = 0
+    with pytest.raises(module.NativeBlocked, match="foreground-unavailable"):
+        module.WindowObserver(api)
+
+
+def test_null_foreground_is_retained_without_stopping_later_observation(windows_probe: tuple) -> None:
+    module, _ = windows_probe
+    api = DesktopStub(module)
+    observer = module.WindowObserver(api)
+    api.front = 0
+    observer.sample()
+    child = module.ProcessInfo(123456, 2, api.root.pid, "python.exe", 1)
+    api.visible[20] = module.WindowInfo(20, child, (child.key, api.root.key))
+    api.front = 20
+    observer.sample()
+    packet = observer.packet()
+    assert packet["samples"] == 2 and packet["observer_error"] is None
+    assert packet["passed"] is False
+    assert {item["kind"] for item in packet["violations"]} == {
+        "foreground-unobservable", "visible", "foreground",
+    }
+
+
 def test_windows_new_fixture_window_and_focus_are_observed(windows_probe: tuple) -> None:
     module, _ = windows_probe
     api = DesktopStub(module)
