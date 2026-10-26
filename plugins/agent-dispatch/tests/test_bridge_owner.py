@@ -253,3 +253,77 @@ def test_invalid_auth_header_is_unknown_with_real_validation(http, monkeypatch, 
     assert tracking.liveness_verdict("wt", owner_session_id="s") == tracking.UNKNOWN
     tasks = [{"status": "started", "owner": "local/wt"}]
     assert tracking.enrich_tasks(tasks) == tasks
+
+
+def test_installed_owner_reads_reuse_code_but_reread_authority(http, monkeypatch, tmp_path):
+    from agent_dispatch import peer_launch
+    from tests.test_procutil import FIRST_MARKETPLACE_ID, _make_namespaced_context
+
+    cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
+    own = _make_namespaced_context(cell)
+    peer = _make_namespaced_context(cell, plugin_id="agent-bridge")
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(own.parent))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
+    (peer.parent / "auth.yaml").write_text("token: fixture-token", encoding="utf-8")
+    counts = {"context": 0, "governance": 0}
+    active = peer_launch._active_context
+    governance = peer_launch._governance
+
+    def read_context(*args, **kwargs):
+        counts["context"] += 1
+        return active(*args, **kwargs)
+
+    def read_governance(*args, **kwargs):
+        counts["governance"] += 1
+        return governance(*args, **kwargs)
+
+    monkeypatch.setattr(peer_launch, "_active_context", read_context)
+    monkeypatch.setattr(peer_launch, "_governance", read_governance)
+    monkeypatch.setattr(peer_launch, "_load_primitive", lambda *a: pytest.fail("no code reload"))
+    # Count the exact reader work independently of the display-only wave budget.
+    # Wave deduplication and elapsed-budget behavior have their own controls.
+    for i in range(40):
+        assert tracking.resolve_live_session(f"wt-{i}")
+    assert counts == {"context": 80, "governance": 80}
+    assert len(http["calls"]) == 80
+    # Changed authority must refuse on the very next lookup, not after a TTL.
+    value = json.loads(own.read_text(encoding="utf-8"))
+    value["state"] = "inactive"
+    own.write_text(json.dumps(value), encoding="utf-8")
+    assert tracking.liveness_verdict("wt-0", owner_session_id="s") == tracking.UNKNOWN
+    assert len(http["calls"]) == 80
+
+
+@pytest.mark.parametrize("corrupt", ["inline", "root", "peer"])
+def test_cached_validator_code_preserves_owner_and_source_refusals(http, monkeypatch, tmp_path, corrupt):
+    from tests.test_procutil import FIRST_MARKETPLACE_ID, _make_namespaced_context
+
+    cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
+    own = _make_namespaced_context(cell)
+    peer = _make_namespaced_context(cell, plugin_id="agent-bridge")
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(own.parent))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
+    if corrupt == "inline":
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT",
+            json.dumps({"installReceipt": str(own), "marketplaceId": "foreign"}))
+    elif corrupt == "root":
+        monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(own.parent / "foreign"))
+    else:
+        value = json.loads(peer.read_text(encoding="utf-8"))
+        value["marketplaceId"] = "foreign"
+        peer.write_text(json.dumps(value), encoding="utf-8")
+    assert tracking.liveness_verdict("wt", owner_session_id="s") == tracking.UNKNOWN
+    assert http["calls"] == []
+
+
+def test_packaged_owner_validation_matches_native_boundary(http, monkeypatch, tmp_path):
+    from agent_dispatch import _installation_context as primitive, peer_launch
+    from tests.test_procutil import FIRST_MARKETPLACE_ID, _make_namespaced_context
+
+    cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
+    own = _make_namespaced_context(cell)
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(own.parent))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
+    expected = peer_launch.validate_owner("agent-dispatch", own.parent, str(own))
+    actual = bridge_owner._owner_context(primitive, peer_launch, own.parent, str(own))
+    assert actual == expected

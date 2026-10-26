@@ -3222,6 +3222,8 @@ listener checks and authentication reuse Dispatch's local Bridge client. An
 explicit installation context validates the Dispatch owner and same-cell Bridge
 receipts/governance before selecting that cell's rendezvous and credentials;
 legacy config-directory and explicit loopback-URL overrides remain supported.
+Packaged validator code is reused in-process; receipts, source identity and
+governance are revalidated on every lookup, without an authority-result cache.
 Reads never ensure a service, enumerate providers or read conversations.
 
 Only the resolve endpoint's documented 404 means an absent owner. Discovery,

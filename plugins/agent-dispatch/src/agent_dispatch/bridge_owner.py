@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import time
 import urllib.error
@@ -79,6 +80,35 @@ def _bounded_open(request: Any, *, timeout: float, deadline: float) -> Any:
     )
 
 
+def _owner_context(primitive: Any, peer_launch: Any, root: Path, raw: str) -> dict[str, Any]:
+    # Use packaged code already imported by this process; authority is still
+    # reread and validated for every call, never retained as a cached decision.
+    if (
+        not root.is_absolute() or root.name != "agent-dispatch"
+        or root.parent.name != "plugins" or root.parent.parent.parent.name != "marketplaces"
+    ):
+        raise ValueError("Explicit context requires a canonical cell install root")
+    cell = root.parent.parent
+    durable = cell.parent.parent
+    declared = json.loads(raw) if raw.lstrip().startswith("{") else None
+    pointer = declared.get("installReceipt") if declared is not None else raw
+    if not isinstance(pointer, str) or not pointer:
+        raise ValueError("Explicit context must name an installation receipt")
+    own = peer_launch._active_context(
+        primitive, Path(pointer), durable, "agent-dispatch", cell, dict(os.environ),
+    )
+    if not primitive.paths_equal(own["pluginRoot"], root):
+        raise ValueError("Explicit context does not belong to this owner installation")
+    if declared is not None and any(
+        value != own.get(key) for key, value in declared.items() if key != "action"
+    ):
+        raise ValueError("Explicit inline context conflicts with its canonical receipt")
+    own["invocationGovernance"] = peer_launch._governance(
+        primitive, own, durable, dict(os.environ),
+    )
+    return own
+
+
 def _config_dir() -> Path | None:
     """Retain native same-cell admission without launching a peer interpreter."""
     from . import peer_launch
@@ -93,7 +123,7 @@ def _config_dir() -> Path | None:
     try:
         from . import _installation_context as primitive
 
-        own = peer_launch.validate_owner("agent-dispatch", root, raw)
+        own = _owner_context(primitive, peer_launch, root, raw)
         cell = Path(own["cellRoot"])
         durable = cell.parent.parent
         receipt = cell / "plugins" / "agent-bridge" / "install.json"
