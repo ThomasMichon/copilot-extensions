@@ -36,6 +36,15 @@ with open(sys.argv[1], encoding="utf-8") as stream:
     report = json.load(stream)
 assert report["passed"] is True
 assert report["real_installation_cycles"] is False
+handover = report["handover"]
+assert handover["health_responsive_during_update"] is True
+assert handover["old_process_exit_verified"] is True
+assert handover["concurrent_update_exit"] == 0
+assert handover["concurrent_request_state"] == "pending"
+assert handover["concurrent_ownership_exit"] == 3
+assert handover["no_concurrent_installation"] is True
+assert handover["cadence_observed"] is (handover["requested_cycles"] == 2)
+assert report["failed_successor"]["failed_candidate_preserved_owner"] is True
 for name in ("handover", "failed_successor"):
     assert report[name]["cleanup_verified"] is True
 print(json.dumps(report, sort_keys=True))

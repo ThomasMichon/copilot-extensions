@@ -1,4 +1,4 @@
-"""Real contained lifecycle qualification; native startup remains an explicit venue run."""
+"""Portable native-adapter contracts; actual cold lifecycle runs in the Tier-P scenario."""
 
 from __future__ import annotations
 
@@ -19,55 +19,6 @@ from unittest.mock import Mock
 import pytest
 
 
-@pytest.mark.skipif(os.name == "nt", reason="contained Linux fixture; native Windows gates are separate")
-@pytest.mark.skipif(
-    os.environ.get("COPILOT_EXTENSIONS_ALLOW_EXPLICIT_TEST_TIERS") != "1",
-    reason="explicit real-process qualification; use --allow-explicit-tiers",
-)
-def test_contained_real_worker_qualification(tmp_path: Path) -> None:
-    repository = Path(__file__).resolve().parents[2]
-    probe = repository / "tools/clean-room/scenarios/manager-automatic-updates/probe.py"
-    environment = dict(os.environ)
-    environment["PYTHONDONTWRITEBYTECODE"] = "1"
-    # Reuse only the package manager's dependency-preparation cache, not user state.
-    cache_environment = dict(environment)
-    for name in ("HOME", "USERPROFILE", "XDG_CACHE_HOME"):
-        cache_environment.pop(name, None)
-    cache = subprocess.run(
-        [str(shutil.which("uv")), "cache", "dir"], env=cache_environment,
-        capture_output=True, text=True, timeout=15, check=True,
-    ).stdout.strip()
-    environment["UV_CACHE_DIR"] = cache
-    environment["UV_OFFLINE"] = "1"
-    completed = subprocess.run(
-        [sys.executable, str(probe), "qualify", "--source", str(repository),
-         "--workdir", str(tmp_path / "qualification"), "--cycles", "1"],
-        env=environment, capture_output=True, text=True, timeout=220, check=False,
-    )
-    if (
-        completed.returncode == 1
-        and "canonical fixture preparation failed" in completed.stdout
-        and "Packages were unavailable because the network was disabled" in completed.stdout
-    ):
-        pytest.skip(
-            "runner cache lacks canonical UV project-resolution metadata; real-process "
-            "qualification is blocked, not passed; run the credential-free Tier-P scenario"
-        )
-    assert completed.returncode == 0, completed.stdout + completed.stderr
-    report = json.loads(completed.stdout.splitlines()[-1])
-    assert report["passed"] is True
-    assert report["real_installation_cycles"] is False
-    assert report["handover"]["health_responsive_during_update"] is True
-    assert report["handover"]["old_process_exit_verified"] is True
-    assert report["handover"]["concurrent_update_exit"] == 0
-    assert report["handover"]["concurrent_request_state"] == "pending"
-    assert report["handover"]["concurrent_ownership_exit"] == 3
-    assert report["handover"]["no_concurrent_installation"] is True
-    assert report["handover"]["cadence_observed"] is False
-    assert report["failed_successor"]["failed_candidate_preserved_owner"] is True
-    assert all(report[key]["cleanup_verified"] for key in ("handover", "failed_successor"))
-
-
 def test_prepare_selfcontained_candidate_without_source_runtime_changes(tmp_path: Path) -> None:
     repository = Path(__file__).resolve().parents[2]
     scenario = repository / "tools/clean-room/scenarios/manager-automatic-updates"
@@ -83,6 +34,9 @@ def test_prepare_selfcontained_candidate_without_source_runtime_changes(tmp_path
     assert (output / "payload/.install-complete").is_file()
     assert (output / "payload/libs/agent-procutil/src/agent_procutil/__init__.py").is_file()
     assert (output / "probe.py").is_file()
+    assert all((output / name).is_file() for name in (
+        "windows_observation.py", "windows_events.py", "windows_controls.py",
+    ))
 
 
 @pytest.fixture
@@ -166,6 +120,7 @@ class DesktopStub:
         self.visible = {10: module.WindowInfo(10, self.root, (self.root.key,))}
         self.front = 10
         self.handles = {self.root.pid: self.root.pid}
+        self.console_images = module.CONSOLE_IMAGES
 
     def refresh_processes(self) -> None:
         pass
@@ -176,8 +131,19 @@ class DesktopStub:
     def foreground(self) -> int:
         return self.front
 
+    def window_identity(self, hwnd: int) -> tuple[int, int]:
+        return self.visible[hwnd].process.pid, 42
+
+    def raw_windows(self) -> dict:
+        return {hwnd: self.window_identity(hwnd) for hwnd in self.visible}
+
     def process(self, pid: int) -> object:
-        return self.records[pid]
+        if pid in self.records:
+            return self.records[pid]
+        return next(window.process for window in self.visible.values() if window.process.pid == pid)
+
+    def lineage(self, pid: int) -> tuple:
+        return next(window.lineage for window in self.visible.values() if window.process.pid == pid)
 
     def session(self, pid: int) -> int:
         return 1
@@ -187,6 +153,12 @@ class DesktopStub:
 
     def facts(self) -> object:
         return desktop_facts(self.module)
+
+    def require_desktop(self) -> None:
+        self.module.require_desktop(self.facts())
+
+    def event_hooks(self, receive, on_error) -> object:
+        return SimpleNamespace(count=2, start=lambda: None, drain=lambda: None, close=lambda: None)
 
 
 def test_windows_baseline_console_is_not_a_new_fixture_window(windows_probe: tuple) -> None:
@@ -324,7 +296,7 @@ def test_null_foreground_is_retained_without_stopping_later_observation(windows_
     assert packet["samples"] == 2 and packet["observer_error"] is None
     assert packet["passed"] is False
     assert {item["kind"] for item in packet["violations"]} == {
-        "foreground-unobservable", "visible", "foreground",
+        "foreground-null", "visible", "foreground",
     }
 
 
@@ -380,7 +352,7 @@ def test_windows_background_observer_failure_cannot_mint_zero_window_pass(
     api = DesktopStub(module)
     observer = module.WindowObserver(api)
     observer.stop = SimpleNamespace(wait=lambda _: False)
-    api.windows = Mock(side_effect=TypeError("native signature mismatch"))
+    api.event_hooks = Mock(side_effect=TypeError("native signature mismatch"))
     observer._run()
     assert "TypeError" in observer.packet()["observer_error"]
     assert observer.packet()["passed"] is False
