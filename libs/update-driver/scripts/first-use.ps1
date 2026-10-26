@@ -93,7 +93,8 @@ if ($plugin -cin @('agent-bridge', 'agent-dispatch')) {
     }
     $ownHelpers = if ($plugin -ceq 'agent-bridge') { @('repair-scheduled-task.ps1') } else {
         @('installer-instance-reconcile.ps1', 'installer-instance-reconcile.sh',
-          'source-runtime.ps1', 'source-runtime.sh', 'supervisor-lifecycle.ps1', 'base-python.ps1')
+          'source-runtime.ps1', 'source-runtime.sh', 'supervisor-lifecycle.ps1', 'base-python.ps1',
+          'runtime-gate.ps1', 'runtime-gate.sh', 'resolve-runtime.ps1', 'resolve-runtime.sh')
     }
     foreach ($helper in $ownHelpers) {
         if (-not [IO.File]::Exists((Join-Path $Payload "scripts\$helper"))) {

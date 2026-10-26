@@ -99,6 +99,7 @@ DISPATCH_HELPERS = (
     "versioned_runtime_publication.py", "versioned_runtime_leases.py",
     "installer-instance-reconcile.ps1", "installer-instance-reconcile.sh",
     "source-runtime.ps1", "source-runtime.sh", "supervisor-lifecycle.ps1", "base-python.ps1",
+    "runtime-gate.ps1", "runtime-gate.sh", "resolve-runtime.ps1", "resolve-runtime.sh",
 )
 
 

@@ -78,6 +78,7 @@ def test_dispatch_fixed_action_keeps_native_options_context_custody_and_result(
     "lifecycle", "catalog", "compound", "install", "missing-helper", "missing-native",
     "missing-reconcile", "missing-source",
     "missing-supervisor", "missing-base",
+    "missing-gate-ps1", "missing-gate-sh", "missing-resolver-ps1", "missing-resolver-sh",
 ])
 def test_dispatch_refusal_precedes_acquisition_queue_and_publication(
     owning_dispatch, area, monkeypatch, native, action, reason,
@@ -118,6 +119,10 @@ def test_dispatch_refusal_precedes_acquisition_queue_and_publication(
             "missing-source": "source-runtime.ps1",
             "missing-supervisor": "supervisor-lifecycle.ps1",
             "missing-base": "base-python.ps1",
+            "missing-gate-ps1": "runtime-gate.ps1",
+            "missing-gate-sh": "runtime-gate.sh",
+            "missing-resolver-ps1": "resolve-runtime.ps1",
+            "missing-resolver-sh": "resolve-runtime.sh",
         }[reason]
         (payload / "scripts" / name).unlink()
     elif reason in {"dispatcher", "module", "provision-mode", "lifecycle", "catalog"}:

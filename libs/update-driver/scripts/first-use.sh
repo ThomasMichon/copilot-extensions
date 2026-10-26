@@ -107,7 +107,9 @@ if [[ "$plugin" == agent-bridge || "$plugin" == agent-dispatch ]]; then
     done
     own_helpers=(repair-scheduled-task.ps1)
     if [[ "$plugin" == agent-dispatch ]]; then
-        own_helpers=(installer-instance-reconcile.ps1 installer-instance-reconcile.sh source-runtime.ps1 source-runtime.sh supervisor-lifecycle.ps1 base-python.ps1)
+        own_helpers=(installer-instance-reconcile.ps1 installer-instance-reconcile.sh
+            source-runtime.ps1 source-runtime.sh supervisor-lifecycle.ps1 base-python.ps1
+            runtime-gate.ps1 runtime-gate.sh resolve-runtime.ps1 resolve-runtime.sh)
     fi
     for helper in "${own_helpers[@]}"; do
         [[ -f "$payload/scripts/$helper" ]] || {
