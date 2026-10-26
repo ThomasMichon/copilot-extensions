@@ -119,11 +119,20 @@ def main() -> int:
     run.add_argument("--cycles", type=int, choices=(1, 2), default=1)
     run.add_argument("--native-startup", action="store_true",
                      help="explicitly authorize fixture-only current-user native registration")
+    controls = sub.add_parser("observe-controls")
+    controls.add_argument("--workdir", type=Path, required=True)
+    controls.add_argument("--allow-visible-controls", action="store_true",
+                          help="authorize one short-lived owned window and foreground restoration")
     args = parser.parse_args()
     try:
         if args.action == "prepare":
             output = fixtures.prepare(args.source, args.output)
             print(json.dumps({"prepared": True, "scenario": str(output)}))
+        elif args.action == "observe-controls":
+            from windows_controls import run_controls
+            report = run_controls(args.workdir, allow_visible_controls=args.allow_visible_controls)
+            print(json.dumps(report, sort_keys=True))
+            return 0 if report["passed"] else 2
         else:
             print(json.dumps(qualify(
                 args.source, args.workdir, cycles=args.cycles, native_startup=args.native_startup,

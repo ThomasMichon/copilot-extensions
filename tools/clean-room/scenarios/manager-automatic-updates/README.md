@@ -160,10 +160,24 @@ An initially absent foreground window blocks observation startup. A later NULL
 or disappeared foreground identity is retained as an ambiguous violation while
 observation continues; Win32 permits NULL during activation transitions and
 does not define a last-error failure contract for `GetForegroundWindow`.
-Toolhelp process-entry types and function signatures are configured once, so
-continuous polling and concurrent child identity checks cannot replace each
-other's ctypes pointer types. Case results retain the original failure as well
-as any later cleanup failure.
+Foreground HWND/PID/TID and raw visible-window capture are bracketed directly;
+the foreground identity is not inferred by joining against an earlier window
+enumeration. Costly Toolhelp snapshots, process pinning and lineage attribution
+are kept off the capture cadence. Process-entry types and function signatures
+are configured once, preserving concurrent identity inspection.
+
+The registering observer thread also pumps out-of-context foreground and
+CREATE/DESTROY/SHOW/HIDE WinEvents, without skip-own-process/thread flags.
+Minimal callbacks retain source thread, HWND, object/child identifiers,
+generated ticks, delivery delay and receipt time. CREATE alone is not visibility;
+a relevant SHOW or foreground event remains a violation even if its window has
+already disappeared before enrichment. Unknown identities, delayed delivery,
+callback errors and bounded-packet overflow cannot become a zero-window pass.
+The packet retains chronological anomalies with neighboring captures, recent
+capture brackets, per-stage costs and first/last channel coverage. Readiness
+precedes any fixture launch. Final capture, queue drain, checked unhook and
+observer join precede sealing; repeated packet reads cannot extend observation
+time. Original case errors and separate cleanup errors are retained.
 
 Success requires actual two-cycle timing, exact registered-command execution,
 the contained-control Job-closure witness and surviving authenticated worker
@@ -173,6 +187,29 @@ in the supplied scratch root; raw fixture logs/specs remain private and should
 not be published wholesale. Cleanup disables/drains only this fixture and
 removes only its exact-owned Run value; no Task Scheduler, UAC, deployed process
 or other startup entry is touched.
+
+### Separate native observer sensitivity controls
+
+The following is **not** part of a quiet-desktop qualification. It needs
+separate operator consent because it briefly shows one owned top-level window,
+changes foreground focus to it, restores the original foreground and destroys
+only that owned window. It performs no enrollment or worker launch:
+
+```powershell
+py -3 <prepared-scenario>/probe.py observe-controls --workdir "$env:TEMP\observer-$([Guid]::NewGuid().ToString('N').Substring(0,8))" --allow-visible-controls
+```
+
+Use a normal unelevated desktop console, never SSH. Without
+`--allow-visible-controls`, it refuses before native API access. Its
+`observer-controls.json` must show the owned SHOW event and foreground events
+for both activation and restoration, with healthy bounded capture and checked
+hook cleanup. The observation packet must intentionally fail its zero-window
+policy; sensitivity success cannot certify a quiet-desktop or two-cycle pass.
+Portable controls additionally cover an A-to-B-to-A focus sequence between
+identical polls, short-lived SHOW/HIDE, missing earlier enumeration, failed
+direct identity, delayed callbacks, overflow, startup/stop coverage gaps and
+immutable completion time. Native sensitivity remains unqualified until this
+separately consented control actually runs.
 
 Reports and per-case logs remain in the caller's scratch directory. On any
 cleanup deadline failure, retain that directory and diagnose it; the probe
@@ -186,10 +223,14 @@ python tools/run_tests_in_devcontainer.py worktree-manager \
   --allow-explicit-tiers
 ```
 
-If its pre-seeded pip cache lacks UV's canonical project-resolution metadata,
-the process qualification reports an explicit skip, not a passing lifecycle
-witness. Run the Tier-P scenario with normal dependency resolution (or provide a
-properly warmed UV cache); do not copy an installed environment around the check.
+This packet covers portable API/observer controls and exact self-contained
+scenario preparation under the unchanged 30-second pytest item budget.
+Actual cold runtime construction and process qualification run in the existing
+Tier-P scenario, not inside a pytest item. Its report phase checks responsiveness,
+old-owner retirement, pending concurrent admission, exclusive ownership,
+failed-successor preservation and cleanup. Missing canonical dependency metadata
+fails that real-process lane rather than being silently skipped or extending
+pytest deadlines. Do not copy an installed environment around the check.
 
 See the [clean-room operator guide](../../README.md) and the
 [Manager-owned maintenance matrix](../../../../efforts/active/source-managed-runtime-installs/maintenance.md).

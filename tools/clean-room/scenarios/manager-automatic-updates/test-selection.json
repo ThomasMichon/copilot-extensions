@@ -1,1 +1,1 @@
-{"version":1,"plugin":"worktree-manager","nodes":[],"files":["tests/test_automatic_updates_native.py"],"include_guards":false}
+{"version":1,"plugin":"worktree-manager","nodes":[],"files":["tests/test_automatic_updates_native.py","tests/test_windows_observation.py"],"include_guards":false}
