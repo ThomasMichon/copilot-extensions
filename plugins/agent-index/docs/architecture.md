@@ -55,6 +55,11 @@ Connectors whose current mode cannot prove delta coverage can expose
 `delta_available=False`; Git's working-tree fallback retains its existing
 snapshot path and logs that legacy reconciliation selection. Remote/ref reads
 remain pinned even if the named ref moves during discovery.
+Git paths are decoded per NUL-framed record. Non-UTF-8 paths are explicitly
+logged and excluded in both full and incremental discovery rather than
+inventing lossy stored identities or blocking unrelated items. Commit fields
+and records use NUL framing, so control characters in commit messages remain
+content rather than accidental record boundaries.
 
 Presented files use bounded, exact checkpoint lookups. A normal round reuses
 only complete file fingerprints covering text, language, metadata, chunker

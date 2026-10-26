@@ -37,6 +37,7 @@ from agent_procutil import no_window_kwargs
 
 from agent_index.sources.base import FileEntry, nonsecret_target
 from agent_index.sources.delta import SourceDelta
+from agent_index.sources.git_records import commit_records, decode_git_path, nul_git_paths
 from agent_index.sources.credentials import (
     SourceCredentialError,
     TokenProvider,
@@ -476,25 +477,28 @@ class GitRepoConnector:
 
     def _tracked_paths(self) -> list[str]:
         if self._use_worktree:
-            output = self._git(["ls-files", "-z"])
+            output = self._git_bytes(["ls-files", "-z"])
         else:
-            output = self._git(["ls-tree", "-r", "--name-only", "-z", self._index_rev()])
-        return [path for path in output.split("\0") if path]
+            output = self._git_bytes(["ls-tree", "-r", "--name-only", "-z", self._index_rev()])
+        return nul_git_paths(output)
 
     def _changed_paths(self, last_commit: str) -> list[str]:
-        output = self._git(["diff", "--name-status", f"{last_commit}..{self._index_rev()}", "--"])
+        output = self._git_bytes([
+            "diff", "--name-status", "--no-renames", "-z", f"{last_commit}..{self._index_rev()}", "--",
+        ])
+        records = output.split(b"\0")
+        if records[-1] != b"" or len(records) % 2 != 1:
+            raise ValueError("Incomplete Git changed-path records")
         paths: list[str] = []
-        for line in output.splitlines():
-            if not line.strip():
+        for offset in range(0, len(records) - 1, 2):
+            status, raw_path = records[offset:offset + 2]
+            if status not in {b"A", b"M", b"D", b"T"} or not raw_path:
+                raise ValueError("Invalid Git changed-path record")
+            if status == b"D":
                 continue
-            parts = line.split("\t")
-            status = parts[0]
-            if status.startswith("D"):
-                continue
-            if status.startswith(("R", "C")) and len(parts) >= 3:
-                paths.append(parts[2])
-            elif len(parts) >= 2:
-                paths.append(parts[1])
+            path = decode_git_path(raw_path)
+            if path is not None:
+                paths.append(path)
         return paths
 
     def _discover_files(
@@ -569,8 +573,10 @@ class GitRepoConnector:
     ) -> list[FileEntry]:
         args = [
             "log",
+            "-z",
+            "--no-show-signature",
             "--date=iso-strict",
-            "--format=%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1e",
+            "--format=%H%x00%an%x00%ae%x00%aI%x00%s%x00%b",
         ]
         if last_commit:
             args.append(f"{last_commit}..{self._index_rev()}")
@@ -578,17 +584,9 @@ class GitRepoConnector:
             args.append(self._index_rev())
         output = self._git(args)
         entries: list[FileEntry] = []
-        for record in output.split("\x1e"):
+        for fields in commit_records(output):
             if cancel_check:
                 cancel_check()
-            record = record.strip("\n")
-            if not record:
-                continue
-            fields = record.split("\x1f", 5)
-            if len(fields) < 6:
-                if strict:
-                    raise ValueError("Incomplete Git commit record")
-                continue
             sha, author_name, author_email, authored_at, subject, body = fields
             if strict and re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", sha) is None:
                 raise ValueError("Invalid Git commit identity")

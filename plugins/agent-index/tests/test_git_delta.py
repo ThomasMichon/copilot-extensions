@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import os
 from pathlib import Path
 
 import pytest
@@ -99,10 +100,19 @@ def test_git_delta_is_bounded_by_changes_not_stored_corpus(
     assert state.sources[source.source_name].last_commit == base
 
 
-def test_git_delta_renames_deletes_binary_transitions_and_unusual_paths(repo: Path) -> None:
+@pytest.mark.parametrize("destination", [
+    "renamed.md",
+    pytest.param(
+        "tab\tand\nnewline.md",
+        marks=pytest.mark.skipif(os.name == "nt", reason="Win32 forbids control-character filenames"),
+    ),
+])
+def test_git_delta_renames_deletes_binary_transitions_and_unusual_paths(
+    repo: Path, destination: str,
+) -> None:
     base = git(repo, "rev-parse", "HEAD")
     (repo / "remove.md").unlink()
-    (repo / "rename.md").rename(repo / "tab\tand\nnewline.md")
+    (repo / "rename.md").rename(repo / destination)
     (repo / "binary.md").write_bytes(b"new\0binary")
     (repo / "add.py").write_text("print('new')\n", encoding="utf-8")
     target = commit(repo)
@@ -111,11 +121,61 @@ def test_git_delta_renames_deletes_binary_transitions_and_unusual_paths(repo: Pa
     assert delta.commit == target
     assert {item.path for item in delta.deletions} == {"remove.md", "rename.md", "binary.md"}
     files = {item.path: item for item in delta.upserts if item.language != "commit"}
-    assert set(files) == {"tab\tand\nnewline.md", "add.py"}
-    assert files["tab\tand\nnewline.md"].content == "rename.md\n"
+    assert set(files) == {destination, "add.py"}
+    assert files[destination].content == "rename.md\n"
     assert all(item.metadata["commit"] == target for item in files.values())
     commits = [item.path for item in delta.upserts if item.language == "commit"]
     assert commits == [f"commits/{target}.txt"]
+
+
+@pytest.mark.parametrize("suffix", [b".png", b".md"])
+def test_non_utf8_git_path_does_not_block_other_items_or_invent_a_stored_identity(
+    repo: Path, suffix: bytes, caplog: pytest.LogCaptureFixture,
+) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    (repo / "edit.md").write_text("normal edit\n", encoding="utf-8")
+    middle = commit(repo)
+    executable = shutil.which("git") or "git"
+
+    def binary_git(args: list[str], data: bytes | None = None) -> bytes:
+        return subprocess.run(
+            [executable, *args], cwd=repo, input=data, capture_output=True, check=True,
+            **no_window_kwargs(),
+        ).stdout
+
+    raw_tree = binary_git(["ls-tree", "-z", middle])
+    blob = git(repo, "rev-parse", f"{middle}:keep.md").encode()
+    raw_tree += b"100644 blob " + blob + b"\tasset-\xff" + suffix + b"\0"
+    tree = binary_git(["mktree", "-z"], raw_tree).decode().strip()
+    target = binary_git(
+        ["commit-tree", tree, "-p", middle], b"Add unsupported filename\n",
+    ).decode().strip()
+    git(repo, "update-ref", "refs/heads/main", target)
+    source = connector(repo)
+    delta = source.discover_delta(base)
+    assert delta.commit == target
+    assert delta.deletions == []
+    assert [item.path for item in delta.upserts if item.language != "commit"] == ["edit.md"]
+    assert {item.path for item in delta.upserts if item.language == "commit"} == {
+        f"commits/{middle}.txt", f"commits/{target}.txt",
+    }
+    assert "unsupported non-UTF-8 Git path" in caplog.text
+    assert all("asset-" not in item.path for item in source.discover())
+    assert all("asset-" not in path for paths in source.list_paths().values() for path in paths)
+
+
+def test_git_commit_message_delimiters_are_content_not_record_boundaries(repo: Path) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    body = "Body with field \x1f and record \x1e separators.\n\nMore text."
+    git(repo, "commit", "--allow-empty", "-m", "Delimited subject", "-m", body)
+    target = git(repo, "rev-parse", "HEAD")
+    source = connector(repo)
+    delta = source.discover_delta(base)
+    assert delta.commit == target
+    assert len(delta.upserts) == 1
+    assert delta.upserts[0].path == f"commits/{target}.txt"
+    assert body in delta.upserts[0].content
+    assert body in next(item for item in source.discover() if item.path == f"commits/{target}.txt").content
 
 
 def test_git_delta_pins_files_history_and_cursor_even_when_ref_moves(

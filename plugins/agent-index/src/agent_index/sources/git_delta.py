@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from agent_index.sources.delta import DeletedFile, SourceDelta
 from agent_index.sources.git_repo import _MAX_FILE_BYTES
+from agent_index.sources.git_records import decode_git_path
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -44,21 +45,24 @@ def discover_git_delta(
         "diff", "--raw", "--no-abbrev", "--no-renames", "--no-ext-diff", "--no-textconv",
         "-z", last_commit, target, "--",
     ])
-    records = raw.decode("utf-8").split("\0")
-    if records[-1] != "" or len(records) % 2 != 1:
+    records = raw.split(b"\0")
+    if records[-1] != b"" or len(records) % 2 != 1:
         raise ValueError("Incomplete Git delta path records")
     result = SourceDelta(commit=target)
     for offset in range(0, len(records) - 1, 2):
         if cancel_check:
             cancel_check()
-        header, path = records[offset:offset + 2]
-        fields = header.split()
+        header, raw_path = records[offset:offset + 2]
+        fields = header.decode("ascii").split()
         if (
             len(fields) != 5 or not fields[0].startswith(":")
-            or fields[4] not in {"A", "M", "D", "T"} or not path
+            or fields[4] not in {"A", "M", "D", "T"} or not raw_path
         ):
             raise ValueError("Invalid Git delta path record")
         _, mode, _, blob, status = fields
+        path = decode_git_path(raw_path)
+        if path is None:
+            continue
         if not connector._is_indexable_path(path):
             continue
         entry = None
