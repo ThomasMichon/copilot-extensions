@@ -129,3 +129,10 @@ registrar or production configuration to demonstrate these records.
   cover caught reservation reads, caught cold-resume exceptions and 31-day
   clock advancement with and without backoff. The full affected isolated cohort
   passed 896 controls, with the same 35 explicit platform/native skips.
+- A further causal-detail control retains explicit `__cause__` and visible
+  implicit `__context__` summaries before stack context. Bounded chain traversal
+  preserves wrapper/underlying errno details, marks cycles/limits and leaves
+  original exception links unchanged. Both configured-file and admitted pure
+  controls cover credential filtering in those chains. The affected isolated
+  cohort passed 898 controls with the same 35 explicit skips; structured JSON
+  errors also retain their selected benign cause.

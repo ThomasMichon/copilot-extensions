@@ -99,7 +99,7 @@ def test_entry_is_retained_before_blocking_stage_and_failure_has_no_success(sink
     assert [(e["stage"], e["outcome"]) for e in events[-2:]] == [
         ("reconcile", "error"), ("cycle", "error"),
     ]
-    assert events[-2]["error"] == "synthetic database busy"
+    assert events[-2]["error"] == "RuntimeError: synthetic database busy"
     assert events[1]["call_id"] == events[-2]["call_id"]
     assert events[-2]["elapsed_seconds"] >= 0
     assert len({e["cycle_id"] for e in events}) == 1
@@ -225,6 +225,29 @@ def test_internally_caught_cold_resume_traceback_keeps_cause_not_credential(sink
     assert "RuntimeError: resume allocation-a" in text
     assert "sensitive-fixture-value" not in text
     assert "sensitive-fixture-value" in str(error)
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_application_exception_keeps_sanitized_cause_chain(sink, monkeypatch, explicit) -> None:
+    monkeypatch.setenv("SYNTHETIC_API_TOKEN", "sensitive-fixture-value")
+    cause = PermissionError(13, "permission allocation-a sensitive-fixture-value")
+    wrapper = RuntimeError("companion command unavailable")
+    try:
+        try:
+            raise cause
+        except PermissionError:
+            if explicit:
+                raise wrapper from cause
+            raise wrapper
+    except RuntimeError:
+        logging.getLogger("agent-dispatch.worker").exception("lifecycle failed")
+    handler = logging.getLogger("agent-dispatch").handlers[0]
+    event = json.loads(handler.path.read_text(encoding="utf-8").splitlines()[-1])
+    assert "RuntimeError: companion command unavailable" in event["exception"]
+    assert "PermissionError: [Errno 13] permission allocation-a" in event["exception"]
+    assert "sensitive-fixture-value" not in json.dumps(event)
+    assert wrapper.__context__ is cause
+    assert wrapper.__cause__ is (cause if explicit else None)
 
 
 @pytest.mark.parametrize("backoff", [False, True])

@@ -7,7 +7,6 @@ import logging
 import os
 import sys
 import time
-import traceback
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -19,7 +18,7 @@ from process_telemetry.diagnostic_logs import (
 from single_instance_lease import OperationLock, OperationLockedError
 
 from . import __version__, install_paths
-from .spawn_diagnostics import current_inputs, diagnostic_text
+from .spawn_diagnostics import current_inputs, diagnostic_text, exception_detail
 
 COMPONENTS = ("coordinator", "supervisor")
 
@@ -73,10 +72,9 @@ class DiagnosticLog(SharedDiagnosticLog):
             filtered.exc_text = None
             filtered._dispatch_exception = None
             if record.exc_info:
-                kind, error, trace = record.exc_info
-                detail = "".join(traceback.format_exception_only(kind, error))
-                detail += "".join(traceback.format_tb(trace))
-                filtered._dispatch_exception = diagnostic_text(detail, secrets)
+                _kind, error, trace = record.exc_info
+                if error is not None:
+                    filtered._dispatch_exception = exception_detail(error, trace, secrets)
             for key in ("operation_id", "correlation_id", "generation"):
                 value = getattr(filtered, key, None)
                 if isinstance(value, str):

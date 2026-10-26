@@ -85,6 +85,20 @@ def test_causal_exception_is_same_object_without_false_return(diagnostics, monke
     for message in ("[Errno 13] Permission denied: example-file",
                     "[WinError 2] The system cannot find example-file"):
         assert module.diagnostic_text(message, {}) == message
+    for explicit in (False, True):
+        cause = PermissionError(13, "permission allocation-a synthetic-sensitive-value")
+        wrapper = RuntimeError("companion command unavailable")
+        wrapper.__cause__ = cause if explicit else None
+        wrapper.__context__ = None if explicit else cause
+        wrapper.__suppress_context__ = explicit
+        detail = module.exception_detail(wrapper, None, {})
+        assert "RuntimeError: companion command unavailable" in detail
+        assert "PermissionError: [Errno 13] permission allocation-a" in detail
+        assert "synthetic-sensitive-value" not in detail
+        assert ("caused by:" if explicit else "during handling:") in detail
+        assert wrapper.__cause__ is (cause if explicit else None)
+    wrapper.__cause__ = wrapper
+    assert "chain cycle or limit" in module.exception_detail(wrapper, None, {})
 
 
 def test_opaque_envelope_and_prompt_are_not_application_output(diagnostics) -> None:

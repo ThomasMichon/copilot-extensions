@@ -2068,8 +2068,8 @@
         "plugins/agent-bridge/src/agent_bridge/agent_registry_common.py": "73de7083d14afe3d31b96702efc137fb15f7a948bc97e3b915f5547a82898d40",
         "plugins/agent-bridge/src/agent_bridge/reader_admission.py": "3114cdb53c6f11f82f2c01e1cf4d46b4afaeebd28aa34e2d7f8459bb7fcc23c3",
         "plugins/agent-bridge/src/agent_bridge/agent_registry_namespace.py": "7a2aea050cddaffeb6bb6c58f78d12f30caed19e74c375df68171baddd78a41a",
-        "tools/promotion_unit_tests/test_dispatch_spawn_diagnostics.py": "ccfd085e4edec9c096e3d5209deca545984fa7327ff2b24509f9cd81b4b7076f",
-        "plugins/agent-dispatch/src/agent_dispatch/spawn_diagnostics.py": "6b328b7359ac0b35a206a5016ff6a136f23b6da418da308dcd77d828c0b05a13",
+        "tools/promotion_unit_tests/test_dispatch_spawn_diagnostics.py": "a584c930abfbef1768225c1fc40f6471721d111bb99e133a91789a2c8f855962",
+        "plugins/agent-dispatch/src/agent_dispatch/spawn_diagnostics.py": "370d3f57d33db75e42e98441426fe46ea56b8706db8bd8fbb1089b3efaac43aa",
         "libs/agent-procutil/src/agent_procutil/diagnostics.py": "c5e3c4e15f1e853c4da3a2916514dbc50b743272b54223780fae6262bd3dc113"
     },
     "coverage_targets": [

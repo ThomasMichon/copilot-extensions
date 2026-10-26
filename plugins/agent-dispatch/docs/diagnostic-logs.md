@@ -34,8 +34,10 @@ activation evidence. Call-site redaction/content restrictions still apply.
 The Dispatch adapter also filters known credentials and scoped caller inputs
 from legacy application messages and exception fields before handing a cloned
 LogRecord to the shared writer. It does not mutate the original record or
-exception. Causal exception text precedes bounded stack context so a long stack
-cannot displace the cause. This final filter is not a general private-data
+exception. Bounded explicit-cause and visible implicit-context summaries precede
+stack context so a long stack cannot displace the underlying cause. Suppressed
+contexts stay suppressed; cyclic or oversized chains have an explicit omission
+marker. This final filter is not a general private-data
 classifier or permission to log arbitrary task content.
 
 ### Spawn causal records
