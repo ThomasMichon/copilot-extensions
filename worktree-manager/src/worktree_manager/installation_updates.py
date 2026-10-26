@@ -64,6 +64,8 @@ def run_targeted_update(rest: list[str], *, trigger: str = "manual") -> int:
     parser.add_argument("--target", required=True)
     parser.add_argument("--project")
     parser.add_argument("--no-manager", action="store_true")
+    parser.add_argument("--no-anchor-sync", action="store_true")
+    parser.add_argument("--no-prune-pivots", action="store_true")
     args = parser.parse_args(forwarded)
     run = UpdateRun(trigger=trigger)
     try:
@@ -86,9 +88,12 @@ def run_targeted_update(rest: list[str], *, trigger: str = "manual") -> int:
         if not preflight_runtime_source(run):
             return run.finish(1)
         # Strictly parsed by the selected engine; an older provider rejects it.
-        rc = engine_client.run_engine_passthrough(
-            args.project, ["update", "--no-manager", "--target", args.target],
-        )
+        engine_args = ["update", "--no-manager", "--target", args.target]
+        if args.no_anchor_sync:
+            engine_args.append("--no-anchor-sync")
+        if args.no_prune_pivots:
+            engine_args.append("--no-prune-pivots")
+        rc = engine_client.run_engine_passthrough(args.project, engine_args)
         return run.finish(rc)
     except (engine_client.EngineError, OSError, ValueError) as error:
         run.say(str(error), state="failed")

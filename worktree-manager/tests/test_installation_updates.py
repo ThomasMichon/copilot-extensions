@@ -410,7 +410,12 @@ def test_explicit_headless_engine_submission_uses_canonical_no_window_flags(monk
 
 
 @pytest.mark.parametrize("target", ["guide", "worktree-manager"])
-def test_target_bypasses_bootstrap_and_suite_orchestration(inventory, monkeypatch, target):
+@pytest.mark.parametrize("compatibility_flags", [
+    [], ["--no-anchor-sync", "--no-prune-pivots"],
+])
+def test_target_bypasses_bootstrap_and_suite_orchestration(
+    inventory, monkeypatch, target, compatibility_flags,
+):
     from worktree_manager import update_bootstrap
 
     monkeypatch.setattr(update_bootstrap, "prepare_update", lambda *a: pytest.fail("target entered suite bootstrap"))
@@ -421,8 +426,10 @@ def test_target_bypasses_bootstrap_and_suite_orchestration(inventory, monkeypatc
     calls = []
     monkeypatch.setattr(ui.engine_client, "run_engine_passthrough", lambda project, args:
         calls.append((project, args)) or 0)
-    assert manager._cmd_update(["--target=" + target]) == 0
-    assert calls == ([] if target == "worktree-manager" else [(None, ["update", "--no-manager", "--target", "guide"])])
+    assert manager._cmd_update(["--target=" + target, *compatibility_flags]) == 0
+    assert calls == ([] if target == "worktree-manager" else [
+        (None, ["update", "--no-manager", "--target", "guide", *compatibility_flags]),
+    ])
 
 
 @pytest.mark.parametrize("cutover", [

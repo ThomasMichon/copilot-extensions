@@ -9,6 +9,7 @@ import sys
 import time
 
 from . import __version__
+from .automatic_updates_policy import atomic_json
 
 # Imported by the fixture main before its unchanged UpdateRun is constructed.
 if "WORKTREE_MANAGER_ROOT" in os.environ:
@@ -56,16 +57,18 @@ def execute() -> int:
         "pid": os.getpid(), "number": number,
     }
     try:
-        (directory / f"cycle-{number:03d}-begin.json").write_text(
-            json.dumps({**identity, "monotonic": time.monotonic()}), encoding="utf-8",
+        atomic_json(
+            directory / f"cycle-{number:03d}-begin.json",
+            {**identity, "monotonic": time.monotonic()},
         )
         deadline = time.monotonic() + 60
         while not (directory / "release").exists():
             if time.monotonic() >= deadline:
                 raise TimeoutError("finite qualification command was not released within 60 seconds")
             time.sleep(0.05)
-        (directory / f"cycle-{number:03d}-end.json").write_text(
-            json.dumps({**identity, "monotonic": time.monotonic()}), encoding="utf-8",
+        atomic_json(
+            directory / f"cycle-{number:03d}-end.json",
+            {**identity, "monotonic": time.monotonic()},
         )
         return 0
     finally:

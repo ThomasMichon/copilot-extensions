@@ -376,6 +376,7 @@ def test_windows_proof_requires_two_real_cycles_and_job_control(
         "windows_job_lifetime": {
             "inner_job_closed": True,
             "contained_control_exit_verified": control_exit,
+            "control_identity_verified": True,
             "daemon_kernel_handle_live_after_job_close": True,
             "authenticated_health_after_job_close": True,
             "registered_command_executed": True,
@@ -384,12 +385,19 @@ def test_windows_proof_requires_two_real_cycles_and_job_control(
         },
     }
     assert adapter.observation_passed(packet, handover) is expected
+    handover["windows_job_lifetime"].pop("control_identity_verified")
+    assert adapter.observation_passed(packet, handover) is False
 
 
 def test_windows_job_helper_executes_exact_command_and_contains_control(
     windows_probe: tuple, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     helper = importlib.import_module("windows_job")
+    from agent_procutil import _daemon_instance_identity
+
+    control = SimpleNamespace(pid=101, _handle=1001)
+    created_identity = Mock(return_value=(101, "windows:200"))
+    monkeypatch.setattr(_daemon_instance_identity, "created_process_identity", created_identity)
     monkeypatch.setattr(sys, "path", list(sys.path))
     root = tmp_path
     (root / "probe").mkdir()
@@ -398,7 +406,7 @@ def test_windows_job_helper_executes_exact_command_and_contains_control(
     pu = SimpleNamespace(
         __file__=str(library / "agent_procutil/__init__.py"),
         direct_python=Mock(return_value=("base-python.exe", {})),
-        spawn_daemon=Mock(return_value=SimpleNamespace(pid=101)),
+        spawn_daemon=Mock(return_value=control),
         no_window_kwargs=lambda: {"creationflags": 0x08000000},
     )
     monkeypatch.setitem(sys.modules, "agent_procutil", pu)
@@ -416,6 +424,8 @@ def test_windows_job_helper_executes_exact_command_and_contains_control(
     assert pu.spawn_daemon.call_args.kwargs["env"]["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
     assert "COPILOT_EXTENSIONS_TEST_CONTAINED" not in popen.call_args.kwargs["env"]
     assert result["executed_command_sha256"] == hashlib.sha256(exact.encode()).hexdigest()
+    assert result["control_birth"] == "windows:200"
+    created_identity.assert_called_once_with(control)
 
 
 @pytest.mark.parametrize("long_command", [False, True])
@@ -433,7 +443,7 @@ def test_windows_session_uses_strict_canonical_job_and_health_after_close(
         json.dumps({"entry": exact}), encoding="utf-8",
     )
     (root / "probe/job-launch.json").write_text(json.dumps({
-        "control_pid": 101, "gui_pid": 102, "gui_returncode": 0,
+        "control_pid": 101, "control_birth": "windows:200", "gui_pid": 102, "gui_returncode": 0,
         "registered_command_executed": True,
         "executed_command_sha256": hashlib.sha256(exact.encode()).hexdigest(),
     }), encoding="utf-8")
@@ -454,6 +464,10 @@ def test_windows_session_uses_strict_canonical_job_and_health_after_close(
     class Pin:
         def __init__(self, pid: int, **kwargs: object) -> None:
             self.pid = pid
+            if kwargs.get("terminate_control"):
+                assert kwargs.get("expected_birth") == "windows:200"
+            else:
+                assert kwargs.get("expected_birth") == "windows:300"
 
         def exited(self) -> bool:
             return self.pid == 101 and control.dead
@@ -479,8 +493,11 @@ def test_windows_session_uses_strict_canonical_job_and_health_after_close(
         assert kwargs["require_job"] is True and kwargs["allow_breakaway"] is True
         assert "COPILOT_EXTENSIONS_TEST_CONTAINED" not in kwargs["env"]
         health = SimpleNamespace(worker_status=lambda _: {"running": True, "worker_id": "fixture-worker"})
-        proof = session.verify_job_close({"pid": 103, "worker_id": "fixture-worker"}, health)
+        proof = session.verify_job_close({
+            "pid": 103, "birth": "windows:300", "worker_id": "fixture-worker",
+        }, health)
         assert proof["contained_control_exit_verified"] is True
+        assert proof["control_identity_verified"] is True
         assert proof["authenticated_health_after_job_close"] is True
         job.close.assert_called_once()
     finally:
@@ -634,6 +651,49 @@ def test_cycle_witness_uses_loaded_package_and_retained_runtime_not_file_depth(
     observed = json.loads((root / "probe/cycle-001-begin.json").read_text())
     assert observed["version"] == fixtures.NEW
     assert observed["runtime"] == str(slot.resolve())
+
+
+def test_cycle_events_are_complete_before_the_reader_can_observe_them(
+    windows_probe: tuple, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from worktree_manager import automatic_updates_policy
+
+    fixtures = importlib.import_module("fixtures")
+    identity = importlib.import_module("identity")
+    root = tmp_path / "fixture"
+    (root / "probe").mkdir(parents=True)
+    (root / "probe/release").touch()
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
+    monkeypatch.delenv("WORKTREE_MANAGER_AUTOMATIC_UPDATES_UNIT", raising=False)
+    monkeypatch.setattr(sys, "argv", ["worktree-manager", "qualification-cycle"])
+    spec = importlib.util.spec_from_file_location(
+        "worktree_manager._atomic_cycle_test", fixtures.HERE / "fixture_cycle.py",
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    paths = [root / "probe" / f"cycle-001-{stage}.json" for stage in ("begin", "end")]
+    observed = []
+    dump = automatic_updates_policy.json.dump
+
+    def partial_write(value, stream, **kwargs):
+        stream.write("{")
+        stream.flush()
+        destination = paths[len(observed)]
+        assert identity.read_event(destination) == {}
+        observed.append(destination)
+        stream.seek(0)
+        stream.truncate()
+        dump(value, stream, **kwargs)
+
+    monkeypatch.setattr(automatic_updates_policy.json, "dump", partial_write)
+    assert module.execute() == 0
+    assert observed == paths
+    for path in paths:
+        assert identity.read_event(path)["number"] == 1
+    paths[0].write_text("{", encoding="utf-8")
+    with pytest.raises(json.JSONDecodeError):
+        identity.read_event(paths[0])
 
 
 @pytest.mark.parametrize("valid", [True, False])

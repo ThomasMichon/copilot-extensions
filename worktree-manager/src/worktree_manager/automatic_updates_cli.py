@@ -96,6 +96,12 @@ def require_legacy_root_binding(root: Path) -> None:
             "automatic enrollment requires the standard user-local Manager root; "
             "alternate roots need a durable binding shared with legacy update controllers"
         )
+    for binding in ("COPILOT_EXTENSIONS_CONTEXT", "AGENT_HOME"):
+        if os.environ.get(binding):
+            raise PolicyError(
+                "automatic maintenance currently addresses the user-local legacy installation; "
+                f"{binding} requires a durable enrollment binding"
+            )
 
 
 def _result(args: argparse.Namespace, root: Path) -> dict[str, object]:
@@ -144,11 +150,6 @@ def _result(args: argparse.Namespace, root: Path) -> dict[str, object]:
     if not args.apply:
         return {"state": "planned", "requested": planned, "policy": asdict(current)}
     if owner != "disabled":
-        if os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
-            raise PolicyError(
-                "automatic maintenance currently addresses the user-local legacy installation; "
-                "an explicit marketplace installation context requires a durable enrollment binding"
-            )
         if owner == "manager":
             selected_slot(root)
             require_registered_project(args.project)
@@ -216,6 +217,10 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     root = (args.root or default_root()).expanduser().absolute()
     try:
+        if args.apply and args.action in ("enable", "enroll", "external") and (
+            args.action != "enroll" or not load_policy(root).user_disabled
+        ):
+            require_legacy_root_binding(root)
         if args.action == "run":
             from .automatic_updates_runtime import run_worker
 

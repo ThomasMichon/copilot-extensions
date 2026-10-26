@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from zdd.cutover_lock import CutoverLock, CutoverLockedError
@@ -23,6 +24,7 @@ def enrollment(tmp_path: Path, monkeypatch) -> Path:
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.delenv("AGENT_HOME", raising=False)
     monkeypatch.setattr(process, "selected_slot", lambda root: tmp_path / "selected")
     monkeypatch.setattr(legacy, "require_legacy_retired", lambda: None)
     monkeypatch.setattr(process, "worker_status", lambda root: {"running": False})
@@ -33,6 +35,38 @@ def enrollment(tmp_path: Path, monkeypatch) -> Path:
 def _enable(root: Path, *, harness: bool = False) -> list[str]:
     args = ["enroll", "--harness", "example"] if harness else ["enable"]
     return [*args, "--project", "example", "--root", str(root), "--apply", "--json"]
+
+
+@pytest.mark.parametrize("binding", ["AGENT_HOME", "COPILOT_EXTENSIONS_CONTEXT"])
+@pytest.mark.parametrize("harness", [False, True])
+def test_unpersisted_installation_binding_blocks_before_any_write(
+    enrollment: Path, monkeypatch: pytest.MonkeyPatch, capsys,
+    binding: str, harness: bool,
+) -> None:
+    monkeypatch.setenv(binding, str(enrollment.parent / "session-only"))
+    register, ensure = Mock(), Mock()
+    monkeypatch.setattr(startup, "register_autostart", register)
+    monkeypatch.setattr(process, "ensure_worker", ensure)
+    assert cli.main(_enable(enrollment, harness=harness)) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["state"] == "blocked"
+    assert binding in result["reason"] and "durable enrollment binding" in result["reason"]
+    assert not enrollment.exists()
+    register.assert_not_called()
+    ensure.assert_not_called()
+
+
+def test_user_disable_still_precedes_unsupported_setup_binding(
+    enrollment: Path, monkeypatch: pytest.MonkeyPatch, capsys,
+) -> None:
+    policy.configure(enrollment, owner="disabled", provenance="user")
+    monkeypatch.setenv("AGENT_HOME", str(enrollment.parent / "session-only"))
+    register = Mock()
+    monkeypatch.setattr(startup, "register_autostart", register)
+    assert cli.main(_enable(enrollment, harness=True)) == 0
+    assert json.loads(capsys.readouterr().out)["state"] == "user-disabled"
+    assert policy.load_policy(enrollment).user_disabled is True
+    register.assert_not_called()
 
 
 def test_enrollment_holds_inventory_and_consent_transaction(enrollment, monkeypatch, capsys) -> None:
