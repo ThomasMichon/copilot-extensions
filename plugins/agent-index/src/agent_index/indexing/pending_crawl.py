@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from collections.abc import Callable
 from contextlib import closing
 from dataclasses import asdict
@@ -12,12 +13,27 @@ from typing import Protocol
 from agent_index.indexing.manifest import CrawlManifest, CrawlStats
 from agent_index.indexing.path_index import PathIndex
 from agent_index.indexing.state import IndexState
-from agent_index.sources.base import FileEntry
+from agent_index.sources.base import FileEntry, SourceConnector
 from agent_index.sources.delta import DeletedFile, SourceDelta
 
 
 class ApplyManifest(Protocol):
     def __call__(self, *, manifest: CrawlManifest, full: bool) -> tuple[int, int, int]: ...
+
+
+def recovery_scope(config_scope: str, connector: SourceConnector) -> str:
+    """Bind stable account configuration to the same resolved connector used to crawl."""
+    identity = getattr(connector, "recovery_identity", None)
+    if identity is None:
+        if callable(getattr(connector, "discover_delta", None)):
+            raise ValueError("Delta connector must declare its effective recovery_identity")
+        identity = (connector.source_name,)
+    if not isinstance(identity, tuple) or not identity or any(
+        not isinstance(part, str) or not part for part in identity
+    ):
+        raise ValueError("Connector recovery identity must be a nonempty tuple of nonsecret strings")
+    value = (config_scope, connector.source_name, identity)
+    return hashlib.sha256(json.dumps(value).encode()).hexdigest()
 
 
 class PendingCrawls:

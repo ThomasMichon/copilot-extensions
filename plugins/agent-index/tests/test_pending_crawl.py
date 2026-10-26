@@ -14,7 +14,9 @@ from agent_index.indexing.path_index import PathIndex
 from agent_index.indexing.pending_crawl import PendingCrawls, recover_source
 from agent_index.indexing.state import IndexState
 from agent_index.sources.base import FileEntry
+from agent_index.sources.base import nonsecret_target
 from agent_index.sources.delta import SourceDelta
+from agent_index.sources.git_repo import GitRepoConnector
 
 
 def item(path: str, content: str) -> FileEntry:
@@ -49,7 +51,9 @@ def test_restart_replays_pinned_delta_before_newer_net_delta_can_omit_reverted_f
             entries.append(item("first.md", "original"))
         return SourceDelta(upserts=entries, commit="latest")
 
-    connector = SimpleNamespace(source_name="forge:repo", discover_delta=discover)
+    connector = SimpleNamespace(
+        source_name="forge:repo", discover_delta=discover, recovery_identity=("fixture-target",),
+    )
     monkeypatch.setattr("agent_index.sources.get_connector", lambda *a, **k: connector)
     monkeypatch.setattr(engine, "selected_layout", lambda: None)
     chunker = SimpleNamespace(
@@ -172,3 +176,64 @@ def test_failed_atomic_state_publication_preserves_prior_cursor(
     assert path.read_bytes() == before
     assert IndexState.load(path).sources["alias"].last_commit == "old"
     assert not list(tmp_path.glob(".state.json.*.tmp"))
+
+
+@pytest.mark.parametrize("via_environment", [False, True])
+def test_unchanged_spec_refuses_pending_replay_after_effective_git_target_changes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, via_environment: bool,
+) -> None:
+    paths = PathIndex(tmp_path / "paths.db")
+    config = SimpleNamespace(
+        model_profiles={}, stream_batch_size=2, state_file=tmp_path / "state.json",
+    )
+    state = IndexState()
+    source_spec = engine.SourceSpec("git")
+    monkeypatch.setattr(GitRepoConnector, "_derive_repo_name", lambda self: "sample")
+    monkeypatch.setattr(GitRepoConnector, "_git_quiet", lambda *a: "")
+    monkeypatch.setattr(
+        GitRepoConnector, "discover_delta",
+        lambda *a, **k: SourceDelta(
+            upserts=[FileEntry("one.md", "pending", "markdown", "git:sample")], commit="middle",
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "agent_index.sources.get_connector",
+        lambda source, **kwargs: GitRepoConnector(source, **kwargs),
+    )
+    monkeypatch.setattr(engine, "selected_layout", lambda: None)
+    attempts: list[str] = []
+
+    def chunk_fail(*args: object, **kwargs: object) -> list[object]:
+        attempts.append("chunk")
+        raise RuntimeError("fixture interruption")
+
+    monkeypatch.setattr(
+        "agent_index.chunking.get_chunker", lambda path: (SimpleNamespace(chunk=chunk_fail), "text"),
+    )
+
+    def run(target: str) -> None:
+        kwargs = {} if via_environment else {"repo_path": str(tmp_path / target)}
+        if via_environment:
+            monkeypatch.setenv("AGENT_INDEX_GIT_REPO", str(tmp_path / target))
+        engine._index_source(
+            source_spec.name, source_scope="unchanged-spec-and-account", config=config,
+            state=state, path_index=paths, multi_store=None, multi_clients={},
+            full=False, connector_kwargs=kwargs,
+        )
+
+    with pytest.raises(RuntimeError, match="interruption"):
+        run("old-target")
+    with pytest.raises(ValueError, match="configuration"):
+        run("new-target")
+    assert attempts == ["chunk"]
+    assert source_spec == engine.SourceSpec("git")
+    assert state.sources == {}
+
+
+def test_recovery_target_drops_url_credentials_but_refuses_ambiguous_semantics() -> None:
+    assert nonsecret_target("https://example:placeholder@example.test/repo.git") == (
+        "https://example.test/repo.git"
+    )
+    with pytest.raises(ValueError, match="ambiguous"):
+        nonsecret_target("https://example.test/repo.git?target=other")

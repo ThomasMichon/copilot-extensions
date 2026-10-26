@@ -137,6 +137,7 @@ def test_compatible_upsert_skips_chunker_engine_and_stale_cleanup(
     monkeypatch.setattr(engine, "selected_layout", lambda: None)
     connector = SimpleNamespace(
         source_name="forge:repo",
+        recovery_identity=("fixture-target",),
         discover_delta=lambda *a, **k: SourceDelta(upserts=[item], commit="next"),
     )
     monkeypatch.setattr("agent_index.sources.get_connector", lambda *a, **k: connector)

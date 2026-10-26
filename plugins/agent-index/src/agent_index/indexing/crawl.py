@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from agent_index.indexing.path_index import PathIndex
     from agent_index.indexing.runner import ProgressCallback
     from agent_index.indexing.state import IndexState
+    from agent_index.sources.base import SourceConnector
 
 
 def collect_source_changes(
@@ -22,11 +23,13 @@ def collect_source_changes(
     source_aware: bool,
     progress_cb: ProgressCallback | None = None,
     connector_kwargs: dict[str, object] | None = None,
+    connector: SourceConnector | None = None,
 ) -> CrawlManifest:
     """Prefer explicit deltas; retain full reconciliation for legacy providers."""
     from agent_index.sources import get_connector
 
-    connector = get_connector(source_name, **(connector_kwargs or {}))
+    if connector is None:
+        connector = get_connector(source_name, **(connector_kwargs or {}))
     canonical = connector.source_name if source_aware else None
     if source_aware and (not isinstance(canonical, str) or not canonical):
         raise RuntimeError("connector has no canonical stored family")

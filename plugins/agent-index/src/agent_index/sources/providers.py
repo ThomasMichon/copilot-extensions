@@ -332,6 +332,10 @@ class CliSourceConnector:
     def source_name(self) -> str:
         return self._source
 
+    @property
+    def recovery_identity(self) -> tuple[str, ...]:
+        return self._source, *self._manifest.command
+
     def _run(self, verb: str, *args: str) -> Any:
         cmd = [*self._manifest.command, verb, *args]
         try:

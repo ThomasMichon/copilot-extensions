@@ -67,7 +67,15 @@ JSON source cursor, then clears the journal and acquires fresh changes. This
 prevents a newer net delta from omitting an item partially written by an
 interrupted older delta (for example, a file changed and then reverted).
 Source/account configuration changes refuse replay rather than applying old
-work under a new scope. The journal is not another checkpoint authority.
+work under a new scope. The same constructed connector supplies both acquisition
+and its canonical/effective recovery identity: delta connectors declare a
+nonsecret `recovery_identity` tuple. Built-in Git binds the resolved checkout,
+remote target and selected ref, including environment/registry resolution;
+GitHub binds the API/repository target, and legacy CLI providers bind their
+registered command. Providers remain responsible for stable backend identity.
+Credential-bearing URL components are excluded; ambiguous query/fragment target
+semantics refuse recovery rather than silently selecting an identity.
+The journal is not another checkpoint authority.
 Pending work must finish through a journal-capable engine before rolling back
 to an older engine; old runtimes do not implement this recovery contract.
 

@@ -4,11 +4,24 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
+from urllib.parse import urlsplit, urlunsplit
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from agent_index.sources.delta import SourceDelta
+
+
+def nonsecret_target(url: str) -> str:
+    """Keep the transport target while excluding URL-carried credentials."""
+    if "://" not in url:
+        return url
+    parts = urlsplit(url)
+    if parts.query or parts.fragment:
+        raise ValueError("Recovery target URL must not have ambiguous query or fragment semantics")
+    return urlunsplit((
+        parts.scheme, parts.netloc.rsplit("@", 1)[-1], parts.path, "", "",
+    ))
 
 
 @dataclass(frozen=True)
@@ -91,6 +104,11 @@ class SourceConnector(Protocol):
 
 class DeltaSourceConnector(SourceConnector, Protocol):
     """Opt-in complete-delta acquisition; legacy connectors remain supported."""
+
+    @property
+    def recovery_identity(self) -> tuple[str, ...]:
+        """Stable nonsecret effective targets, distinct across source/account domains."""
+        ...
 
     def discover_delta(
         self,

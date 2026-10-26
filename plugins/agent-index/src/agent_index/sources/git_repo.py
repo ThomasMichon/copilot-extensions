@@ -34,7 +34,7 @@ from pathlib import Path
 
 from agent_procutil import no_window_kwargs
 
-from agent_index.sources.base import FileEntry
+from agent_index.sources.base import FileEntry, nonsecret_target
 from agent_index.sources.credentials import (
     SourceCredentialError,
     TokenProvider,
@@ -239,6 +239,12 @@ class GitRepoConnector:
     def source_name(self) -> str:
         """Unique source name for the repository's tracked files."""
         return self._file_source
+
+    @property
+    def recovery_identity(self) -> tuple[str, ...]:
+        """Effective local target/ref/remote without credentials or transient tokens."""
+        remote = self._git_quiet(["remote", "get-url", self._remote]).strip()
+        return str(self.repo_path), self._remote, self._ref, nonsecret_target(remote) or "local-only"
 
     # -- revision resolution -------------------------------------------------
 

@@ -27,7 +27,10 @@ def fail(*args: object, **kwargs: object) -> None:
 def setup_round(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     paths = PathIndex(tmp_path / "paths.db")
     state = IndexState(sources={"alias": SourceState(last_commit="old")})
-    connector = SimpleNamespace(source_name="forge:repo", delta=SourceDelta(commit="next"))
+    connector = SimpleNamespace(
+        source_name="forge:repo", recovery_identity=("fixture-target",),
+        delta=SourceDelta(commit="next"),
+    )
     connector.discover_delta = lambda *a, **k: connector.delta
     monkeypatch.setattr("agent_index.sources.get_connector", lambda *a, **k: connector)
     monkeypatch.setattr(engine, "selected_layout", lambda: None)

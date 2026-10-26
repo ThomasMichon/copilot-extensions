@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from agent_index.indexing.path_index import PathIndex
     from agent_index.indexing.runner import ProgressCallback
     from agent_index.indexing.state import IndexState
-    from agent_index.sources.base import FileEntry
+    from agent_index.sources.base import FileEntry, SourceConnector
     from agent_index.store.multi_model_store import MultiModelStore
 
 logger = logging.getLogger(__name__)
@@ -579,14 +579,17 @@ def _index_source(
     source_scope: str | None = None,
 ) -> tuple[int, int, int]:
     """Replay pinned partial acquisition before observing newer source changes."""
-    from agent_index.indexing.pending_crawl import recover_source
+    from agent_index.indexing.pending_crawl import recover_source, recovery_scope
+    from agent_index.sources import get_connector
 
+    connector = get_connector(source_name, **(connector_kwargs or {}))
     return recover_source(
-        source_name, scope=source_scope or source_name, state=state,
+        source_name, scope=recovery_scope(source_scope or source_name, connector), state=state,
         state_file=config.state_file, paths=path_index, full=full,
         acquire=partial(
             _crawl_source, source_name, config=config, state=state, path_index=path_index,
             full=full, progress_cb=progress_cb, connector_kwargs=connector_kwargs,
+            connector=connector,
         ),
         apply=partial(
             _apply_source_manifest, source_name, config=config, state=state,
@@ -719,6 +722,7 @@ def _crawl_source(
     full: bool,
     progress_cb: ProgressCallback | None = None,
     connector_kwargs: dict[str, object] | None = None,
+    connector: SourceConnector | None = None,
 ) -> CrawlManifest:
     """Compatibility entrypoint for the separately owned crawl phase."""
     from agent_index.indexing.crawl import collect_source_changes
@@ -729,6 +733,7 @@ def _crawl_source(
         source_name, state=state, path_index=path_index, full=full,
         source_aware=bool(selected_layout()), progress_cb=progress_cb,
         connector_kwargs=connector_kwargs,
+        connector=connector,
     )
 
 

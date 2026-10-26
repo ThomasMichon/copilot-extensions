@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-from agent_index.sources.base import FileEntry
+from agent_index.sources.base import FileEntry, nonsecret_target
 from agent_index.sources.credentials import TokenProvider, authorization, https_origin
 from agent_index.sources.good_citizen_http import (
     ApiResult as _ApiResult,
@@ -79,6 +79,10 @@ class GitHubConnector:
     def source_name(self) -> str:
         """Unique source family name for this repository."""
         return f"github:{self.owner}/{self.repo}"
+
+    @property
+    def recovery_identity(self) -> tuple[str, ...]:
+        return nonsecret_target(self.api_base), self.owner, self.repo
 
     def discover(self, cancel_check: Callable[[], None] | None = None) -> list[FileEntry]:
         """Discover all issues and pull requests."""
