@@ -130,8 +130,15 @@ def _safe_probe_diagnostic(text: str | bytes, limit: int = 2048) -> str:
     text = re.sub(
         r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))", "", text,
     )
-    text = "".join(char for char in text if char.isprintable() or char in "\n\t")
+    text = "".join(
+        char if char.isprintable() or char in "\n\t" else " " for char in text
+    )
     text = redact(text).strip()
+    # Partial writes may stop inside userinfo, before the redactor's closing @.
+    text = re.sub(
+        r"(?i)(\b[a-z][a-z0-9+.-]*://)[^/\s?#@]*:[^/\s?#@]*",
+        r"\1[redacted]", text,
+    )
     text = re.sub(r"(?i)(\bhttps?://[^\s?#]+)[?#][^\s]*", r"\1?[redacted]", text)
     lines = text.splitlines()
     detail = "\n".join(lines[-10:])

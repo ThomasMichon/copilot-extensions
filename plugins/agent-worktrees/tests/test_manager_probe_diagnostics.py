@@ -216,6 +216,45 @@ def test_controls_and_credentials_are_removed_before_line_and_character_limits(
     assert "\x00" not in diagnostic
 
 
+@pytest.mark.parametrize("separator", ["\r", "\xa0", "\v", "\x00"])
+@pytest.mark.parametrize("scheme", ["Bea" + "rer", "Ba" + "sic"])
+def test_control_normalization_preserves_credential_boundaries(
+    scheme: str, separator: str,
+) -> None:
+    credential = "fixture-token-1234"
+    message = scheme + separator + credential
+    assert credential in message
+    diagnostic = launch._safe_probe_diagnostic(message)
+    assert credential not in diagnostic
+    assert scheme in diagnostic
+    assert "***" in diagnostic
+
+
+@pytest.mark.parametrize("password", ["fixture-password", "1234"])
+def test_partial_timeout_url_userinfo_is_redacted_before_bounding(
+    provider: Provider, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    password: str,
+) -> None:
+    provider("pass")
+    calls = []
+
+    def failed(argv: list[str], **kwargs: object) -> NoReturn:
+        calls.append(argv)
+        timeout = kwargs["timeout"]
+        assert isinstance(timeout, (int, float))
+        partial = ("Fetching https://fixture-user:" + password).encode("utf-8")
+        raise subprocess.TimeoutExpired(argv, timeout, stderr=partial)
+
+    monkeypatch.setattr(launch.subprocess, "run", failed)
+    assert launch._usable_worktree_manager() is None
+    captured = capsys.readouterr()
+    assert len(calls) == 2
+    assert "Fetching https://" in captured.err
+    assert "fixture-user" not in captured.err
+    assert password not in captured.err
+    assert captured.out == ""
+
+
 def test_transient_probe_timeout_does_not_report_a_failure(
     provider: Provider, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
