@@ -87,9 +87,10 @@ and its diagnostics; successful consumption still checks the outer deadline.
 Select `bootstrap_file_guard` or `bootstrap_file_trust` in `agent-codespaces`
 through the bounded plugin runner. These repository-only helpers are not
 distributed or enabled by the existing bootstrap selector. Native tests use
-64-bit Windows PowerShell; the separate Core case checks explicit refusal,
-not positive parity. Linux runs the portable source contract with explicit
-native skips.
+64-bit Windows PowerShell and PowerShell Core for the file guard, and Windows
+PowerShell for WinTrust. The separate Core trust case checks explicit refusal,
+not positive signature parity. Linux runs the portable source contract with
+explicit native skips.
 
 The trust packet requires an existing official PSF-signed Python executable.
 Set `EVALUATOR_BOOTSTRAP_TEST_PYTHON` to that file if the test interpreter's base
@@ -101,13 +102,20 @@ windowless PowerShell child has a 20-second timeout within the runner's finite
 Job/process boundary. No compiler, interpreter acquisition, foreign DLL load,
 production registration or desktop positive control is part of this packet.
 
+The guard packet runs sharing, no-follow, identity and failure/release controls
+on both shell editions. Core-only final-path controls exercise the existing
+managed `char[]` wrapper on the exact retained file/directory handle with a
+bounded buffer. Synthetic native-error/length/termination controls test error
+propagation and zero output; they are not additional native-call qualification.
+Closing the exact handle in the same child must succeed before that host exits.
+
 ```text
 python tools/run-plugin-tests.py agent-codespaces -k bootstrap_file_trust --timeout 600 --plugin-timeout 600
 ```
 
 These controls do not establish the full prerequisite-to-helper admission,
-canonical path/drive/source closure, PowerShell Core support, production
-headlessness or any compiled-caller replacement.
+canonical path/drive/source closure, complete PowerShell Core prerequisite
+support, production headlessness or any compiled-caller replacement.
 
 ## Materialized source-owner SDK readiness
 

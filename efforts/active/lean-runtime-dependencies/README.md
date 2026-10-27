@@ -267,9 +267,10 @@ The private original-parent Windows Job primitive merged in #9170. It has
 native parent-loss and descendant-settlement evidence, but no compiled caller
 has switched and the interpreter admission boundary remains open.
 The unused stock-framework file guard merged in #9181, including native
-directory sharing and same-process refusal-cleanup controls. Continue the
-cached-only signer, path and complete-source admission boundary before any
-compiled bootstrap migration.
+directory sharing and same-process refusal-cleanup controls. The cached-only
+held-file signer merged in #9187. The next unused Core file/final-path adapter
+has bounded native qualification; Core WinTrust and complete path/source
+admission remain open before any compiled bootstrap migration.
 
 ### Current execution boundary
 
@@ -330,6 +331,31 @@ transfer without acceptance by a named tracked objective.
 
 ## Journal
 
+### 2026-10-26 - Core held-file and managed final-path adapter
+
+- Extended the unused file guard with a shape-checked CoreLib 10 adapter:
+  the existing managed `CreateFile` wrapper, the same `SafeFileHandle` passed
+  into file-information queries, and the qualified 52-byte identity layout.
+  Windows PowerShell retains its existing stock-framework adapter.
+- Added a Core-only fixed-buffer final-path operation through the existing
+  managed array-pin wrapper, with retained-handle lifetime and explicit native,
+  length and termination failures. The preliminary callability witness used
+  the same handle for a small and full buffer and closed it before host exit;
+  that witness was not file-guard or complete interpreter admission.
+- Extended the bounded native packet to both shell editions, with additional
+  Core final-path file/directory, same-handle and failure/release controls.
+  The combined native-host packet passed 58 tests with zero skips, including
+  the two portable source contracts, on Windows PowerShell 5.1 and Core 7.6.9.
+  It retained the existing held-file signer and explicit Core trust refusal.
+  Test time was 35.52 seconds, 52.25 seconds including canonical preparation
+  and cleanup. The isolated Linux source contract passed two portable tests
+  with 56 explicit native skips. All owned test handles, shell hosts and Job
+  processes settled; the source fixture remains retained for verification.
+- Core signature verification still refuses before native binding or library
+  load. Complete path/drive/ancestor/source admission and the compiled-caller
+  migration remain open; no production caller, synchronizer or installation
+  path enables these primitives. No aggregate Plan or Validation item closes.
+
 ### 2026-10-26 - Stock-framework held-file signer qualification
 - Added an unused, repository-only WinTrust adapter through the existing
   qualified Windows PowerShell bindings. It retains its own System32 library
@@ -357,6 +383,17 @@ transfer without acceptance by a named tracked objective.
   completed cleanup. The signed, unsigned, modified and mismatched path/handle
   controls retained their original expectations. Independent review and merge
   remain gates; neither complete admission nor Core parity is inferred.
+- #9187 merged as `f2580c7aa4999257047d3f7806b3f50b6aa66efd` after
+  exact-head Copilot review `5661216451` reported no open issues and all
+  required checks passed. The owner-authored clean-comment verdict satisfies
+  the repository's review policy; actual bounded Windows qualification
+  supplies execution evidence the reviewer environment could not run.
+  Both owning Plan/Validation Plans were re-read after merge and remain open.
+  Existing Core metadata now identifies a managed final-path wrapper with
+  safe-handle/character-array inputs and the stock by-reference WinTrust
+  interface. Next qualify their actual callability and lifetime before
+  enabling a Core adapter or changing any compiled caller. Metadata is not
+  parity or interpreter admission; no installed runtime changed.
 
 ### 2026-10-26 - Stock-framework file custody qualification
 - Added an unused, repository-only Windows PowerShell file-guard primitive

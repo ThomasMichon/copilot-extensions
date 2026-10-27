@@ -2942,26 +2942,39 @@ semantics select PowerShell before evaluation. Publication probes and installer
 selection remain on their existing paths. POSIX dispatch is unchanged.
 
 `libs/installer-engine/bootstrap-file-guard.ps1` is an **unused, repository-only**
-building block for the compiler-free migration. Its qualified stock .NET
-Framework/Windows PowerShell adapter opens a no-follow file or directory handle
+building block for the compiler-free migration. Its stock .NET
+Framework/Windows PowerShell and CoreLib 10/PowerShell Core adapters open a
+no-follow file or directory handle
 with read sharing only, queries the same retained handle's volume/file identity,
 and returns the `SafeFileHandle` to the caller for disposal. Directory guards
 include directory-list access: attribute-only opens do not enforce sharing
 exclusion. Native errors,
 unsupported binding shapes, reparse points and object-kind mismatches throw;
-none becomes an unavailable-interpreter result. PowerShell Core and 32-bit
-hosts refuse explicitly pending separate qualification. The file is not
+none becomes an unavailable-interpreter result. The Core adapter validates the
+existing managed `CreateFile` and file-information wrappers, their signatures,
+record layout, import and native-library search policy; it passes the exact
+`SafeFileHandle` to the identity query rather than substituting a raw handle.
+Unsupported assembly/binding shapes and 32-bit hosts refuse explicitly. The file is not
 distributed by the installer synchronizer and no runtime gate invokes it.
 
-This primitive does **not** establish canonical final paths, ordinary ancestors,
+The Core-only final-path operation calls an existing managed array-pin wrapper
+with the same retained handle and a fixed 32,768-character buffer. Native
+failure, overflow or invalid termination throws without returning a path;
+the temporary handle reference is always released. It returns the native path
+as data, not a canonical-path admission verdict. This operation is not
+qualified on Windows PowerShell.
+
+These primitives do **not** establish ordinary ancestors,
 drive mapping, publisher trust, complete Python/source closure or a safe helper
 handoff. Its native tests cover held-file write/rename/delete exclusion,
-directory rename/delete exclusion and release/error controls, not interpreter
-admission.
+directory rename/delete exclusion, same-handle final paths and release/error
+controls, not interpreter admission.
 
 The likewise **unused, repository-only**
 `libs/installer-engine/bootstrap-file-trust.ps1` composes that guard with
-qualified existing Windows PowerShell WinTrust bindings. It pins its own
+qualified existing Windows PowerShell WinTrust bindings. Core trust still
+refuses explicitly before resolving those bindings or loading a library;
+Core file-guard support does not qualify Core WinTrust. It pins its own
 System32 library reference, refuses an ambiguous or redirected loaded module,
 and supplies the retained file handle with no UI and cache-only URL retrieval.
 Publisher extraction uses the actual verified provider/signer state while
@@ -2976,7 +2989,8 @@ admit canonical paths, ancestors, drive mappings or the complete interpreter
 and helper closure. Native controls distinguish the held file from a different
 reported pathname, reject unsigned/modified input and exercise state/error
 cleanup. The [bounded test flow](../TESTING.md#optional-stock-windows-bootstrap-building-blocks)
-does not qualify PowerShell Core parity or enable either helper for callers.
+does not qualify complete PowerShell Core prerequisite parity or enable either
+helper for callers.
 The existing selector and its compiled verifier remain unchanged
 until the [compiler-free prerequisite gates](../efforts/active/lean-runtime-dependencies/compiler-free-execution.md#python-prerequisite-boundary)
 are satisfied.

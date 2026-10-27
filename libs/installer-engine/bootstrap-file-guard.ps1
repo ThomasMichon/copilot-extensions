@@ -1,9 +1,68 @@
 # Private prerequisite building block; not an interpreter admission decision.
+function Get-BootstrapCoreFileBindings {
+    $assembly = [object].Assembly
+    if ($assembly.FullName -cne 'System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e') {
+        throw 'Stock bootstrap Core file binding assembly identity is unsupported.'
+    }
+    $flags = [Reflection.BindingFlags]'Static,Public,NonPublic'
+    $native = $assembly.GetType('Interop+Kernel32', $true)
+    $record = $assembly.GetType('Interop+Kernel32+BY_HANDLE_FILE_INFORMATION', $true)
+    $open = $native.GetMethod('CreateFile', $flags, $null, [type[]]@(
+        [string], [int], [IO.FileShare], [IO.FileMode], [int]
+    ), $null)
+    $info = $native.GetMethod('GetFileInformationByHandle', $flags, $null, [type[]]@(
+        [Microsoft.Win32.SafeHandles.SafeFileHandle], $record.MakeByRefType()
+    ), $null)
+    $final = $assembly.GetType('System.IO.FileSystem', $true).GetMethod(
+        '<GetFinalLinkTarget>g__GetFinalPathNameByHandle|50_0', $flags, $null, [type[]]@(
+            [Microsoft.Win32.SafeHandles.SafeFileHandle], [char[]]
+        ), $null)
+    if ($null -eq $open -or $open.ReturnType -ne [Microsoft.Win32.SafeHandles.SafeFileHandle] -or
+        $null -eq $info -or $info.ReturnType -ne [bool] -or -not $info.GetParameters()[1].IsOut -or
+        $null -eq $final -or $final.ReturnType -ne [uint32] -or
+        -not $final.IsDefined([Runtime.CompilerServices.CompilerGeneratedAttribute], $false)) {
+        throw 'Stock bootstrap Core file binding signature is unsupported.'
+    }
+    foreach ($method in @($open, $info, $final)) {
+        if (-not $method.IsStatic -or -not $method.IsAssembly -or
+            ($method.Attributes -band [Reflection.MethodAttributes]::PinvokeImpl) -ne 0 -or
+            $null -eq $method.GetMethodBody() -or
+            $method.GetCustomAttributes([Runtime.InteropServices.DllImportAttribute], $false).Count -ne 0) {
+            throw 'Stock bootstrap Core file binding requires an existing managed wrapper.'
+        }
+    }
+    $imports = @($info.GetCustomAttributesData() | Where-Object {
+        $_.AttributeType.FullName -ceq 'System.Runtime.InteropServices.LibraryImportAttribute'
+    })
+    if ($imports.Count -ne 1 -or $imports[0].ConstructorArguments[0].Value -cne 'kernel32.dll') {
+        throw 'Stock bootstrap Core file information import is unsupported.'
+    }
+    $lastError = @($imports[0].NamedArguments | Where-Object {
+        $_.MemberName -ceq 'SetLastError' -and $_.TypedValue.Value -eq $true
+    })
+    $marshalling = @($info.ReturnParameter.GetCustomAttributes([Runtime.InteropServices.MarshalAsAttribute], $false))
+    $search = @($assembly.GetCustomAttributes([Runtime.InteropServices.DefaultDllImportSearchPathsAttribute], $false))
+    if ($lastError.Count -ne 1 -or $marshalling.Count -ne 1 -or
+        $marshalling[0].Value -ne [Runtime.InteropServices.UnmanagedType]::Bool -or
+        $search.Count -ne 1 -or [int]$search[0].Paths -ne 2050) {
+        throw 'Stock bootstrap Core file binding marshalling or library search is unsupported.'
+    }
+    return [pscustomobject]@{
+        Open = $open; Information = $info; RecordType = $record; Core = $true; FinalPath = $final
+        Fields = @{ FileAttributes = 'dwFileAttributes'; VolumeSerialNumber = 'dwVolumeSerialNumber'
+            FileIndexHigh = 'nFileIndexHigh'; FileIndexLow = 'nFileIndexLow' }
+    }
+}
+
 function Get-BootstrapStockFileBindings {
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or
-        $PSVersionTable.PSEdition -eq 'Core' -or
         [IntPtr]::Size -ne 8) {
         throw 'Stock bootstrap file guards require qualified 64-bit Windows PowerShell.'
+    }
+    if ($PSVersionTable.PSEdition -eq 'Core') {
+        $bindings = Get-BootstrapCoreFileBindings
+        Assert-BootstrapStockFileRecord -Bindings $bindings
+        return $bindings
     }
     $framework = [Diagnostics.Process].Assembly
     $automation = [Management.Automation.PSObject].Assembly
@@ -40,6 +99,18 @@ function Get-BootstrapStockFileBindings {
             [Runtime.InteropServices.CharSet]::Unicode) {
         throw 'Stock bootstrap file binding character encoding is unsupported.'
     }
+    $bindings = [pscustomobject]@{
+        Open = $open; Information = $info; RecordType = $recordType; Core = $false; FinalPath = $null
+        Fields = @{ FileAttributes = 'FileAttributes'; VolumeSerialNumber = 'VolumeSerialNumber'
+            FileIndexHigh = 'FileIndexHigh'; FileIndexLow = 'FileIndexLow' }
+    }
+    Assert-BootstrapStockFileRecord -Bindings $bindings
+    return $bindings
+}
+
+function Assert-BootstrapStockFileRecord {
+    param([Parameter(Mandatory)]$Bindings)
+    $recordType = $Bindings.RecordType
     # Select Type overloads explicitly: PowerShell otherwise marshals RuntimeType itself.
     $sizeOf = [Runtime.InteropServices.Marshal].GetMethod('SizeOf', [type[]]@([type]))
     $offsetOf = [Runtime.InteropServices.Marshal].GetMethod('OffsetOf', [type[]]@([type], [string]))
@@ -54,13 +125,13 @@ function Get-BootstrapStockFileBindings {
         FileIndexLow = 48
     }
     foreach ($name in $fields.Keys) {
-        $field = $recordType.GetField($name, [Reflection.BindingFlags]'Instance,Public,NonPublic')
+        $fieldName = $Bindings.Fields[$name]
+        $field = $recordType.GetField($fieldName, [Reflection.BindingFlags]'Instance,Public,NonPublic')
         if ($null -eq $field -or $field.FieldType -ne [uint32] -or
-            $offsetOf.Invoke($null, [object[]]@($recordType, $name)).ToInt64() -ne $fields[$name]) {
+            $offsetOf.Invoke($null, [object[]]@($recordType, $fieldName)).ToInt64() -ne $fields[$name]) {
             throw 'Stock bootstrap file identity field is unsupported.'
         }
     }
-    return [pscustomobject]@{ Open = $open; Information = $info; RecordType = $recordType }
 }
 
 function Get-BootstrapStockFileIdentity {
@@ -71,8 +142,9 @@ function Get-BootstrapStockFileIdentity {
     $retained = $false
     try {
         $Handle.DangerousAddRef([ref]$retained)
+        $nativeHandle = if ($Bindings.Core) { $Handle } else { $Handle.DangerousGetHandle() }
         $arguments = [object[]]@(
-            $Handle.DangerousGetHandle(), [Activator]::CreateInstance($Bindings.RecordType)
+            $nativeHandle, [Activator]::CreateInstance($Bindings.RecordType)
         )
         $ok = $Bindings.Information.Invoke($null, $arguments)
         $errorCode = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
@@ -82,11 +154,39 @@ function Get-BootstrapStockFileIdentity {
         $record = $arguments[1]
         $fieldFlags = [Reflection.BindingFlags]'Instance,Public,NonPublic'
         return [pscustomobject]@{
-            Attributes = [uint32]$Bindings.RecordType.GetField('FileAttributes', $fieldFlags).GetValue($record)
-            Volume = [uint32]$Bindings.RecordType.GetField('VolumeSerialNumber', $fieldFlags).GetValue($record)
-            IndexHigh = [uint32]$Bindings.RecordType.GetField('FileIndexHigh', $fieldFlags).GetValue($record)
-            IndexLow = [uint32]$Bindings.RecordType.GetField('FileIndexLow', $fieldFlags).GetValue($record)
+            Attributes = [uint32]$Bindings.RecordType.GetField($Bindings.Fields.FileAttributes, $fieldFlags).GetValue($record)
+            Volume = [uint32]$Bindings.RecordType.GetField($Bindings.Fields.VolumeSerialNumber, $fieldFlags).GetValue($record)
+            IndexHigh = [uint32]$Bindings.RecordType.GetField($Bindings.Fields.FileIndexHigh, $fieldFlags).GetValue($record)
+            IndexLow = [uint32]$Bindings.RecordType.GetField($Bindings.Fields.FileIndexLow, $fieldFlags).GetValue($record)
         }
+    } finally {
+        if ($retained) { $Handle.DangerousRelease() }
+    }
+}
+
+function Get-BootstrapStockFinalPath {
+    param(
+        [Parameter(Mandatory)][Microsoft.Win32.SafeHandles.SafeFileHandle]$Handle,
+        [Parameter(Mandatory)]$Bindings
+    )
+    if (-not $Bindings.Core -or $null -eq $Bindings.FinalPath) {
+        throw 'Stock bootstrap final-path binding requires qualified PowerShell Core.'
+    }
+    $retained = $false
+    try {
+        $Handle.DangerousAddRef([ref]$retained)
+        $buffer = [char[]]::new(32768)
+        $length = $Bindings.FinalPath.Invoke($null, [object[]]@($Handle, $buffer))
+        $errorCode = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        if ($length -eq 0) {
+            throw [ComponentModel.Win32Exception]::new($errorCode, 'Bootstrap final-path query failed.')
+        }
+        if ($length -ge $buffer.Length -or $buffer[$length] -ne [char]0) {
+            throw 'Bootstrap final-path query exceeds its bounded buffer.'
+        }
+        $path = [string]::new($buffer, 0, [int]$length)
+        if ($path.IndexOf([char]0) -ge 0) { throw 'Bootstrap final-path query returned an embedded terminator.' }
+        return $path
     } finally {
         if ($retained) { $Handle.DangerousRelease() }
     }
@@ -113,9 +213,12 @@ function Open-BootstrapStockFileGuard {
     # Attribute-only opens do not participate in sharing checks; include FILE_LIST_DIRECTORY.
     $access = if ($Directory) { 0x81 } else { -2147483648 }
     # Read sharing only: no write/delete sharing; do not follow a final reparse point.
-    $handle = $bindings.Open.Invoke($null, [object[]]@(
-        $Path, [int]$access, [int]1, [IntPtr]::Zero, [int]3, [int]0x02200000, [IntPtr]::Zero
-    ))
+    $arguments = if ($bindings.Core) {
+        [object[]]@($Path, [int]$access, [IO.FileShare]::Read, [IO.FileMode]::Open, [int]0x02200000)
+    } else {
+        [object[]]@($Path, [int]$access, [int]1, [IntPtr]::Zero, [int]3, [int]0x02200000, [IntPtr]::Zero)
+    }
+    $handle = $bindings.Open.Invoke($null, $arguments)
     $errorCode = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
     try {
         if ($null -eq $handle -or $handle.IsInvalid) {
