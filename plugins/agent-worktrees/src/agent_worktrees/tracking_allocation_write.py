@@ -5,7 +5,9 @@ from __future__ import annotations
 import copy
 import logging
 import secrets
+from contextlib import nullcontext
 from pathlib import Path
+from typing import Callable, ContextManager
 
 import yaml
 
@@ -21,7 +23,7 @@ def _input(operation: object, payload: object) -> dict:
         "reserve": ({"request_id", "target"},),
         "inspect": ({"token"}, {"request_id"}),
         "bind": ({"token"},), "confirm": ({"token"},),
-        "close": ({"token"},), "cancel": ({"token"},),
+        "close": ({"token"},), "cancel": ({"token"},), "reconcile": ({"token"},),
     }
     if not isinstance(operation, str) or operation not in fields:
         raise ValueError("unsupported worktree allocation operation")
@@ -117,7 +119,24 @@ def _already_done(operation: str, phase: str) -> bool:
         or operation == "bind" and phase in {"bound", "confirmed"}
         or operation == "confirm" and phase == "confirmed"
         or operation in {"close", "cancel"} and phase == "closed"
+        or operation == "reconcile" and phase == "closed"
     )
+
+
+def _reconcile(claim: tracking.ResourceClaim, proof: dict) -> bool:
+    metadata = claim.producer
+    if not allocation.verified_observation(proof, metadata):
+        raise ValueError("receiving allocation is unresolved; responsibility retained")
+    if allocation.verified_conclusion(proof, metadata):
+        _transition(claim, "close", proof)
+        return True
+    if metadata["phase"] == "pending":
+        _transition(claim, "bind", proof)
+        return True
+    if metadata["phase"] == "bound" and proof["status"] == "confirmed":
+        _transition(claim, "confirm", proof)
+        return True
+    return False
 
 
 def _transition(claim: tracking.ResourceClaim, operation: str, proof: dict) -> None:
@@ -141,7 +160,24 @@ def _transition(claim: tracking.ResourceClaim, operation: str, proof: dict) -> N
         claim.state = "released"
 
 
-def apply_worktree_allocation(args: dict) -> dict:
+def apply_worktree_allocation(
+    args: dict, *, authority_check: Callable[[], bool] | None = None,
+    context_lock: ContextManager | None = None,
+) -> dict:
+    result = _apply_worktree_allocation(
+        args, authority_check=authority_check, context_lock=context_lock,
+    )
+    if result.get("ok") and args["operation"] == "reserve" and result["phase"] != "closed":
+        from . import allocation_link_demand
+
+        allocation_link_demand.request(result["owner"])
+    return result
+
+
+def _apply_worktree_allocation(
+    args: dict, *, authority_check: Callable[[], bool] | None = None,
+    context_lock: ContextManager | None = None,
+) -> dict:
     """Reserve before effects; observe outside the lock and compare before commit."""
     try:
         fields = {"schema", "version", "operation", "input", "owner_ref", "yaml_path"}
@@ -157,7 +193,7 @@ def apply_worktree_allocation(args: dict) -> dict:
         path = Path(args["yaml_path"])
         snapshot, proof = None, None
         if operation not in {"reserve", "inspect"}:
-            with tracking._RecordLock(path, require_sidecar=True):
+            with context_lock or nullcontext(), tracking._RecordLock(path, require_sidecar=True):
                 record, _ = _owned_record(args, path, mutable=False)
                 claim = _matches(record, payload)
                 if _already_done(operation, claim.producer["phase"]):
@@ -173,8 +209,15 @@ def apply_worktree_allocation(args: dict) -> dict:
                     raise ValueError("worktree allocation phase does not permit this operation")
                 snapshot = copy.deepcopy(claim.producer)
             remote_operation = {"bind": "inspect", "close": "inspect"}.get(operation, operation)
-            proof = owned_worktree_remote.request(remote_operation, snapshot)
-        with tracking._RecordLock(path, require_sidecar=True):
+            if operation == "reconcile":
+                remote_operation = "confirm" if snapshot["phase"] == "bound" else "inspect"
+            if authority_check is not None and not authority_check():
+                raise ValueError("allocation reconciliation owner changed; responsibility retained")
+            proof = (
+                owned_worktree_remote.request(remote_operation, snapshot, context_lock=context_lock)
+                if context_lock is not None else owned_worktree_remote.request(remote_operation, snapshot)
+            )
+        with context_lock or nullcontext(), tracking._RecordLock(path, require_sidecar=True):
             record, owner = _owned_record(args, path, mutable=False)
             if operation == "reserve":
                 claim, changed = _reserve(record, owner, payload)
@@ -189,11 +232,17 @@ def apply_worktree_allocation(args: dict) -> dict:
                     raise ValueError("worktree allocation is reserved by a handoff")
                 if producer.canonical_json(claim.producer) != producer.canonical_json(snapshot):
                     raise ValueError("worktree allocation changed during receiving operation; inspect again")
-                _transition(claim, operation, proof)
+                if operation == "reconcile":
+                    if not _reconcile(claim, proof):
+                        return _response(record, claim)
+                else:
+                    _transition(claim, operation, proof)
                 if any(other is not claim and other.ref == claim.ref for other in record.resources):
                     raise ValueError("worktree allocation ref collides with an existing claim")
             if not allocation.valid_metadata(claim.producer):
                 raise ValueError("invalid worktree allocation transition; responsibility retained")
+            if authority_check is not None and not authority_check():
+                raise ValueError("allocation reconciliation owner changed; responsibility retained")
             with producer.transaction(path):
                 tracking.save_record(record, path)
         activity.log_event(

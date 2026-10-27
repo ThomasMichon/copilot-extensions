@@ -114,6 +114,28 @@ def test_bound_native_ref_confirm_and_exact_conclusion_are_distinct(owner, monke
     assert call(path, "confirm", handle)["error"]
 
 
+@pytest.mark.parametrize("conclusion", ["cancelled", "finalized", "archived"])
+def test_reconcile_only_observes_original_operation_and_retains_exact_closeout(owner, monkeypatch, conclusion):
+    path, _ = owner
+    pending = reserve(path)
+    seen = []
+
+    def receive(operation, metadata):
+        seen.append(operation)
+        return observation(metadata, conclusion)
+
+    monkeypatch.setattr(remote, "request", receive)
+    handle = {"token": pending["token"]}
+    first = call(path, "reconcile", handle)
+    assert first.get("ok"), first
+    closed = first if conclusion == "cancelled" else call(path, "reconcile", handle)
+    assert closed["phase"] == "closed"
+    assert seen == (["inspect"] if conclusion == "cancelled" else ["inspect", "confirm"])
+    assert closed["producer"]["closeout"]["status"] == conclusion
+    before = path.read_bytes()
+    assert call(path, "reconcile", handle) == closed and path.read_bytes() == before
+
+
 @pytest.mark.parametrize("changed", [
     {"schema": "other"}, {"version": True}, {"origin": "m/p/other"},
     {"request_id": "other"}, {"token": "b" * 32}, {"target": {**TARGET, "project": "other"}},

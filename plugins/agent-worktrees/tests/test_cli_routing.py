@@ -851,10 +851,13 @@ def test_bare_invocation_ignores_inherited_worktree_id(monkeypatch):
     # Context comes from CWD resolution (not the retired $WORKTREE_PROJECT).
     monkeypatch.setattr(m, "_resolve_active_project", lambda proj: ("demo", None))
     monkeypatch.setattr(m, "_is_headless_project", lambda: False)
-    monkeypatch.setattr(m, "cmd_launch", lambda argv: 0)
+    monkeypatch.setattr(m, "_bundled_picker_available", lambda: True)
+    launched = []
+    monkeypatch.setattr(m, "cmd_launch", lambda argv: launched.append(argv) or 0)
 
     rc = m.main([])
     assert rc == 0
+    assert launched == [[]]
     assert os.environ.get("WORKTREE_ID") == "keep-me"
 
 
@@ -1831,8 +1834,8 @@ def test_provider_stderr_is_redacted_before_bounding(monkeypatch, tmp_path, retu
     assert health.state == "failed"
     assert "fixture-secret" not in health.diagnostic
     assert "example.invalid" in health.diagnostic
-    assert len(health.diagnostic.split("stderr: ", 1)[1]) == 400
-    assert len(health.diagnostic) < 800
+    assert len(health.diagnostic.split("stderr: ", 1)[1]) <= 2048
+    assert len(health.diagnostic) < 2600
 
 
 def test_healthy_provider_stderr_is_not_reported(monkeypatch, tmp_path, capsys):

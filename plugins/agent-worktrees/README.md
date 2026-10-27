@@ -318,6 +318,17 @@ reached over a process boundary. The small `packaging` dependency is explicit
 so reconciliation preserves version ordering and downgrade protection without
 relying on UI dependencies.
 
+Manager version-probe failures retain bounded, credential-redacted startup
+details on stderr, including resolver, spawn and exhausted-timeout errors.
+Terminal controls and URL credentials are removed before bounding; useful
+stdout is retained when stderr is empty. Nonprinting separators retain word
+boundaries, and incomplete credential-looking URL authorities are masked
+conservatively. URL userinfo is masked before separator normalization; bounded
+source labels retain the provider and registration prefix. First-run onboarding,
+the absent/failed/ready health model, explicit provider selection, real bundled
+fallback and child exit status are unchanged. This reporting does not itself
+repair a dependency or interpreter-policy failure.
+
 ## Background Update Staging
 
 The launch path stages marketplace payload updates separately from runtime

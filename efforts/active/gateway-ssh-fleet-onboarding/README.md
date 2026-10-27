@@ -373,6 +373,9 @@ onboarded merely because its source is published.
   under #5839 before relying on remote qualification workers. Retain the
   originating claim and actual receiving identity across uncertainty; allocation
   remains distinct from agent launch.
+- [x] Land the protected origin/receiving provider foundation for that prerequisite.
+  Ordinary selectors, restart-safe asynchronous linkage, consumers and installed
+  qualification remain in the open allocation item above.
 
 ### Phase 2 - Driver and directional policy
 
@@ -503,6 +506,27 @@ setup/apply, enrollment, live rollout, lifecycle takeover or implementation
 completion is asserted.
 
 ## Journal
+
+### 2026-10-26 - Allocation provider foundation merged
+
+- #9186 merged to `dev` as `0050dd33e6fce80e21a7e6808fb6eca624c66c4c`.
+  Exact head `f99f11790c2d2706b16f2d433d55daae3105d44e` received current-head
+  Copilot approval with no open findings and passed required CI before managed
+  completion. The source worktree remains responsible for the open effort.
+- Re-read the parent Plan and Validation Plan. Close only the provider-source
+  milestone: protected origin responsibility, sessionless receiving creation,
+  exact original-operation recovery and retained actual lifecycle conclusion.
+  The [allocation slice](origin-owned-allocation.md#provider-source-boundary)
+  records the provider-only scope and remaining acceptance.
+- The final correction qualifies complete lifecycle/wire capacity, including
+  cancellation, finalized/archived closeout, escaped identity size and the
+  transport newline. Its isolated packet passed 140 cases, followed by 34
+  receiver/CLI checks after the cohesive helper extraction. The exact committed
+  no-effects packet passed 2,432 cases with production coverage recorded once.
+- Next implement ordinary destination selection and the responsible owner's
+  restart-safe asynchronous linker, then migrate the existing Bridge/Dispatch
+  allocation callers. No installed capability, worker replay or rollout is
+  inferred from this merge.
 
 ### 2026-10-26 - Non-blocking allocation claim linkage
 

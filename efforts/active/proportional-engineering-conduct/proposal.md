@@ -102,30 +102,35 @@ Not projected. Target: one short always-on reminder, same shape as the other
 ```markdown
 # Practical realization
 
-**Fallback policy `[owner: agent-conduct-guidance]`:** Solve the asked
-problem inside the architecture the owning repository already states. Do not
-invent a parallel design, test system, or safety layer because caution feels
-safer.
+**Fallback policy `[owner: agent-conduct-guidance]`:** Fix the bug, or scope
+the feature, inside the architecture the owning repository already states.
+Do not invent a parallel design because a larger change feels safer.
 
-- **Match altitude.** If the existing architecture can express the fix, change
-  the implementation. Do not open a design spike, a new framework, or a
-  multi-part harness.
-- **Extend only by acceptance.** If the ask cannot be expressed inside current
+- **Match the ask.** If the existing architecture can express the bug fix or
+  the feature, change the implementation. Do not open a design spike, a new
+  framework, or a second system for that work.
+- **Propose when it cannot.** If the ask cannot be expressed inside current
   invariants, stop building and propose the smallest architectural extension.
   Prefer a reviewable change. Do not build the extension until it is accepted.
 - **Use the repository's own engineering guidance.** Follow its stated test
   strategy, patterns, and invariants. Do not restate them. Do not invent a
-  parallel harness, or add chained receipts, exact-hash attestation,
-  ownership schemes, redundant downloads, or extra refreshes to routine
-  already-authorized work. A small check that fits the existing architecture
-  is allowed when a concrete failure justifies it and a simpler check cannot
-  meet that need. Do not remove a check the contract already requires.
+  parallel harness for a routine fix or feature. A small check that fits the
+  existing architecture is allowed when a concrete failure justifies it and
+  a simpler check cannot meet that need. Do not remove a check the contract
+  already requires.
 - **Say what you are doing.** Skip conversational filler. At a disposition or
   status seam, and when the plan changes, tell the operator in one or two
   plain sentences what you are doing and the one real concern. Then continue.
 - **Real gates stay.** Confirmation, elevation, publication, and
   destructive-action gates are unchanged.
 ```
+
+The subject is ordinary bug-fixing and feature scoping. A second test system,
+a design spike for an implementation bug, or a feature built before its
+extension is accepted are the failures. Receipts, hashes, ownership schemes,
+redundant downloads, and extra refreshes are examples of inventing a second
+system. They are not the subject. A comparison that only scores those
+examples does not test this kernel.
 
 _(agent-recommended)_ If scratch comparison shows agents still skip the
 altitude decision, add a paired skill that is a procedure, not a second copy
@@ -198,4 +203,9 @@ It used fewer model requests.
 Both sessions were told not to push and not to open a pull request, so this
 run does not show that the kernel preserves publication gates. It also does
 not show that the ambient file prevents installer bloat, because the control
-did not bloat either. No harm observed. Hold projection.
+did not bloat either. No harm observed.
+
+This run did not test general bug-fixing or feature scoping. It scored an
+installer-speed request against extra validation. That is not the objective.
+Do not treat it as evidence for or against the reframed kernel. Hold
+projection.
