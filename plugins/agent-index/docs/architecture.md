@@ -81,7 +81,9 @@ was discarded. Committed source state, path checkpoints and canonical data
 remain untouched, so the caller can separately request reconciliation from
 the unchanged checkpoint. A 404, stale item or exhausted budget never invokes
 discard automatically and never becomes a tombstone. Completed v1 manifests
-remain mandatory replay, not eligible for this operation.
+remain mandatory replay, not eligible for this operation. Expanded v3 completed
+manifests carrying polling-refresh generations are likewise mandatory replay,
+never eligible for acquisition discard; ordinary manifests retain v1 encoding.
 This adds no external-provider CLI flag;
 CLI delta-v1 providers retain their existing complete-result contract.
 
@@ -678,7 +680,75 @@ It must return a complete validated `SourceDelta` and preserve `last_commit`
 exactly, including `None`: targeted events do not prove coverage of intervening
 poll changes. An unchanged or changed polling cursor is not inferred from event
 IDs. Existing unadvertised workers still park hinted tasks after rollback.
-External CLI providers and Git ref-range hint acquisition remain unsupported.
+External CLI providers do not yet support hinted acquisition.
+
+Git implements ref-range hints with immutable full hexadecimal commit identities.
+It requires the exact configured source and an explicit nonsecret `hint_account`;
+configured gateway/relay Git credentials carry their existing account binding,
+and static configured accounts retain that binding even when token resolution
+temporarily fails. The separate `hint_credentials_available` flag then refuses
+hinted acquisition, while ordinary polling retains its nonfatal credential
+fallback and pending work can replay under the unchanged recovery identity.
+Direct connector users must supply that binding themselves. It is not inferred
+from the remote owner or credential bytes, nor is it a Git protocol principal
+probe. Bound accounts participate in recovery identity. Finish pending work
+before adding/changing this binding; old unbound polling cursors need explicit
+reconciliation under the new scope. Unbound legacy Git remains usable for
+ordinary discovery but refuses hints.
+
+Distinct event ranges are retained, each base must precede its target, and
+every event target must belong to the configured pinned ref's history. Missing,
+rewritten or foreign history requests explicit reconciliation, not fallback
+working-tree reads. The union of range diffs selects file candidates, read once
+at the current pinned configured ref with literal paths and bounded immutable
+blobs. Thus a stale delivery cannot restore stale bytes or delete a file restored
+later in canonical history. Only current-ref absence/nonindexability authorizes
+a candidate tombstone. Commit-history byproducts are deduplicated across the
+event ranges, not obtained from a whole-history scan. Work-item IDs and metadata
+revisions are refused; event IDs are annotations and require resolvable ranges.
+The polling cursor remains unchanged, including on an empty range. Acquired
+manifests use the existing pending-crawl replay before a retry observes newer
+canonical content. Ordinary ref resolution/fetch policy is unchanged: a pinned
+local remote-tracking ref is not proof of remote freshness.
+
+Git also declares `hint_poll_refresh = True`: hinted file and commit-history
+identities must remain candidates even after their pending manifest completes.
+Otherwise an unhinted revert can disappear from the next net polling diff, or a
+force-push can strand an indexed hinted commit while the polling cursor still
+precedes both branches. The existing pending-crawl owner therefore transactionally
+retains each hinted identity and a unique generation, keyed by source/kind/path
+in the same path database **before** indexing effects. An ordinary
+poll snapshots those candidates and unions them with its range diff, reading
+each identity once at its pinned ref even when the net diff is empty. The actual
+`discover_delta` callable advertises `poll_refresh_versions = (1,)` and accepts
+`refresh_paths` and `refresh_commits`; unsupported replacements refuse instead of dropping candidates.
+Hint preflight checks this support before opening stores/embedding clients.
+This connector requirement survives wrappers around `discover_hints`.
+
+Before acquiring polling content, Git verifies every retained history identity
+is a canonical immutable commit path reachable from the pinned target, even
+when the polling cursor equals that target. Missing or rewritten history
+requires explicit full reconciliation; polling neither advances nor invents
+tombstones. Empty commits retain the same obligation without file candidates.
+Reachable history already in the ordinary range is read only once; older
+retained commits outside the range use bounded one-commit reads, never a
+whole-history walk.
+
+The complete manifest records candidate generations. Only after canonical/
+vector writes and source-state publication does the journal atomically clear
+its pending manifest and the covered generations. A newer delivery's generation
+survives an older poll's completion; interrupted state/completion replays pinned
+work. Complete explicit reconciliation can cover the same candidates, including
+already-deleted identities. Aliases, account/ref changes and source retirement
+cannot bypass outstanding candidate ownership.
+
+This is neither another polling cursor nor a source lock. Old readers reject
+required v3 manifest metadata; v1 manifests without this metadata remain byte-
+compatible. The unreleased v3 metadata requires both file and history maps
+(either may be empty); its ledger distinguishes both kinds even if their path
+strings collide. Finish both pending acquisition **and** outstanding Git candidate
+refresh before rolling back to a reader that does not understand this expansion.
+No automatic discard, broad rebuild or unscoped ledger cleanup is introduced.
 
 GitHub implements targeted positive canonical decimal issue/PR numbers, unioned
 from `item_ids` and `metadata_revisions.item_id`. For this connector, metadata

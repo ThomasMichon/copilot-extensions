@@ -489,7 +489,10 @@ def test_configured_gateway_sources_never_use_ambient_gh_resolution(tmp_path, mo
         name="git:repo", auth_account="selected", auth_gateway=str(policy),
         repo_path=str(checkout), remote_url="https://example.test/owner/repo.git", ref="origin/dev",
     ))
-    assert kwargs == {"repo_path": str(checkout), "ref": "origin/dev", "token_provider": provider}
+    assert kwargs == {
+        "repo_path": str(checkout), "ref": "origin/dev", "token_provider": provider,
+        "hint_account": "selected",
+    }
     kwargs = engine._connector_kwargs(engine.SourceSpec(
         name="github:owner/repo", type="github", auth_account="selected", auth_gateway=str(policy),
     ))
