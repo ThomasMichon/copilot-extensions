@@ -1,0 +1,9 @@
+{
+  "comment": "Keep absent tombstones mutation-free and qualify native duplicate and active-round queue bursts.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
