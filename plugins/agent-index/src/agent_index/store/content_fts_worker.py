@@ -98,6 +98,11 @@ class _ContentFtsWorkerMixin(_ContentFtsCoverageMixin):
         silently went stale. So the incremental path lets ``optimize()``
         raise, causing the subprocess to exit non-zero and the caller's
         existing retry/backoff logic to treat it as a genuine failure.
+
+        Source-aware incremental builds instead append only the named FTS
+        index's delta through the native SDK. They do not compact data, prune
+        versions, consolidate scalar indices or prepare missing scalar coverage.
+        Full source-aware builds and the legacy path retain their behavior.
         """
         if not full and self.fts_current():
             return
@@ -106,9 +111,12 @@ class _ContentFtsWorkerMixin(_ContentFtsCoverageMixin):
                 code = (
                     "import sys,lancedb; "
                     "from agent_index.store.source_layout import child_fts_owner; "
+                    "from agent_index.store.fts_index_update import update_fts_index; "
                     "\nwith child_fts_owner(sys.argv[1],sys.argv[3]):"
-                    "\n t=lancedb.connect(sys.argv[1]).open_table(sys.argv[2]); t.optimize()"
-                    "\n if sys.argv[4]=='1': t.create_fts_index('content',replace=True)"
+                    "\n t=lancedb.connect(sys.argv[1]).open_table(sys.argv[2])"
+                    "\n if sys.argv[4]=='1':"
+                    "\n  t.optimize(); t.create_fts_index('content',replace=True)"
+                    "\n else: update_fts_index(t)"
                 )
                 proc = subprocess.run(
                     [sys.executable, "-I", "-B", "-c", code,

@@ -23,6 +23,10 @@ class ApplyManifest(Protocol):
     def __call__(self, *, manifest: CrawlManifest, full: bool) -> tuple[int, int, int]: ...
 
 
+class PrepareManifest(Protocol):
+    def __call__(self, *, manifest: CrawlManifest, full: bool) -> ApplyManifest: ...
+
+
 class PendingCrawlConflict(RuntimeError):
     """Acquired work must finish before another owner mutates or retires its data."""
 
@@ -309,19 +313,22 @@ def recover_source(
     paths: PathIndex, full: bool, acquire: Callable[[], CrawlManifest], apply: ApplyManifest,
     family: str | None = None,
     publication: Callable[[], AbstractContextManager[None]] | None = None,
+    prepare: PrepareManifest | None = None,
 ) -> tuple[int, int, int]:
     """Publish pinned work and its scope before admitting another scoped acquisition."""
     journal = PendingCrawls(paths)
     journal.assert_family_available(source, family or source)
     totals = (0, 0, 0)
 
-    def apply_and_save(manifest: CrawlManifest, *, full: bool) -> tuple[int, int, int]:
+    def apply_and_save(
+        manifest: CrawlManifest, *, full: bool, application: ApplyManifest,
+    ) -> tuple[int, int, int]:
         previous = state.sources.get(source)
         previous = replace(previous) if previous is not None else None
         previous_family = state.stored_families.get(source)
         previous_total = state.total_chunks
         try:
-            result = apply(manifest=manifest, full=full)
+            result = application(manifest=manifest, full=full)
             state.sources.setdefault(source, SourceState()).acquisition_scope = scope
             state.save(state_file)
         except BaseException:
@@ -338,8 +345,9 @@ def recover_source(
         return result
 
     def publish(manifest: CrawlManifest, *, full: bool, clear: bool) -> tuple[int, int, int]:
+        application = prepare(manifest=manifest, full=full) if prepare is not None else apply
         with publication() if publication is not None else nullcontext():
-            result = apply_and_save(manifest, full=full)
+            result = apply_and_save(manifest, full=full, application=application)
             if clear:
                 journal.clear(source, manifest=manifest, scope=scope)
             return result

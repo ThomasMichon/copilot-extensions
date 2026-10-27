@@ -436,7 +436,7 @@ def test_queued_source_identity_publishes_only_after_success(queued_source, monk
     def fail(*args, **kwargs):
         raise RuntimeError("fixture source failure")
 
-    for failure in ("current_commit", "discover", "chunk", "embed", "reconcile"):
+    for failure in ("current_commit", "discover", "chunk", "embed"):
         with monkeypatch.context() as patch:
             if failure in ("current_commit", "discover"):
                 original = sources.get_connector
@@ -456,8 +456,6 @@ def test_queued_source_identity_publishes_only_after_success(queued_source, monk
                 patch.setattr(chunking, "get_chunker", lambda path: (FailingChunker(), "markdown"))
             elif failure == "embed":
                 patch.setattr(EngineClient, "embed_texts", fail)
-            else:
-                patch.setattr(MultiModelStore, "reconcile_file_chunks", fail)
             code, task = run(full=True)
             assert code == 0 and task.status == "partial", failure
         assert IndexState.load(config.state_file).stored_families == {"git:alias": "git:old"}
@@ -471,6 +469,32 @@ def test_queued_source_identity_publishes_only_after_success(queued_source, monk
     # Empty/unchanged incremental success preserves the published canonical identity.
     assert run()[1].status == "complete"
     assert IndexState.load(config.state_file).stored_families == {"git:alias": "git:new"}
+
+
+def test_queued_partial_publication_keeps_identity_and_closes_native_serving(
+    queued_source, monkeypatch,
+):
+    from agent_index.indexing.path_index import PathIndex
+    from agent_index.indexing.pending_crawl import PendingCrawls
+    from agent_index.indexing.state import IndexState
+
+    repository, configure, run, config = queued_source
+    assert run(full=True)[1].status == "complete"
+    configure(repository("new"))
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("fixture uncertain publication")
+
+    monkeypatch.setattr(MultiModelStore, "reconcile_file_chunks", fail)
+    code, task = run(full=True)
+    assert code == 1 and task.status == "failed"
+    state = IndexState.load(config.state_file)
+    assert state.stored_families == {"git:alias": "git:old"}
+    assert PendingCrawls(PathIndex(config.data_dir / "path_index.db")).sources() == ["git:alias"]
+    receipt = json.loads((config.lance_dir / MARKER).read_text())
+    assert receipt["state"] == "dirty" and receipt["uncertain_effect"]
+    with pytest.raises(SourceLayoutError):
+        initialize_source_store(config)
 
 
 @pytest.mark.timeout(120)

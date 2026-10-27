@@ -36,8 +36,14 @@ Each successful source publication also reports one mutation summary from
 participating outer writer commits, after cursor save and pending-journal
 completion. Observation does not hold a store fence over embedding calls.
 Legacy counts remain unavailable, failed attempts emit no success summary,
-and replay counts only work performed in the current attempt. Transaction
-generations are unchanged; this is not atomic whole-delta publication.
+and replay counts only work performed in the current attempt.
+
+Native multi-model source application uses
+[durable prepared embeddings](prepared-application.md) subordinate to that
+same acquisition journal. Model calls finish outside the reader/writer fence,
+then one source-aware writer boundary publishes the delta with at most one
+logical-generation transition. Existing effect uncertainty and
+store-before-checkpoint ordering remain; this is not cross-store rollback.
 
 Participating source stores can explicitly prepare
 [bounded chunk-ID point reads](chunk-id-index.md). This additive Python path
@@ -682,6 +688,11 @@ Source-aware stores use their existing domain receipt and durable index;
 legacy stores use Lance's actual unindexed-row metadata. Unknown coverage keeps
 maintenance due. Explicit full builds still run, and new content versions remain
 eligible for incremental maintenance and the existing failure/retry path.
+The source-aware incremental child updates only the content FTS index through
+the native index-only SDK, appending delta segments without compaction, version
+cleanup or unrelated scalar-index consolidation. Full builds and legacy workers
+retain their existing path. Scalar preparation and amortized consolidation stay
+explicit; FTS freshness does not prove prepared point/file lookup coverage.
 
 Similarity clusters persist their coverage key and result counts in the same
 SQLite transaction as the artifact. The key covers refreshed versions of the

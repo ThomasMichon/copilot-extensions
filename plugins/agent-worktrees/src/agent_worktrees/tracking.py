@@ -348,15 +348,12 @@ class ProfileAssignment:
 
 @dataclass
 class PRRecord:
-    """Pull-request metadata nested under a worktree record (PR mode).
+    """One PR association, including an unpublished local creation attempt.
 
-    Present only when the worktree has entered the PR workflow.  ``state``
-    tracks the PR lifecycle; ``branch`` is the pushed feature branch.  A
-    worktree may carry several of these over its life (serial re-PRs) or at
-    once (parallel PRs) -- see ``WorktreeRecord.prs``.
+    Worktrees retain serial and parallel associations in ``WorktreeRecord.prs``.
     """
 
-    state: str = ""          # creating | open | merged | closed
+    state: str = ""          # creating | open | merged | closed | abandoned
     branch: str = ""
     base_sha: str = ""
     head_sha: str = ""
@@ -401,6 +398,7 @@ class PRRecord:
     pr_id: str = ""
     # Attribution and authority generation; durable corrections and frozen ties win.
     pr_revision: int = 0
+    creation: dict[str, str] = field(default_factory=dict)
     _loaded_authority: tuple | None = field(default=None, repr=False, compare=False)
 
 # PR lifecycle states that are still live (the PR can still receive pushes).
@@ -1328,6 +1326,8 @@ def _read_text_with_retry(path: Path, *, attempts: int = 20,
 
 def _parse_pr_mapping(raw: dict, default_repo: str) -> PRRecord:
     """Parse one PR mapping (from a ``prs:`` item or legacy ``pr:`` block)."""
+    from .pr_creation_state import parse
+
     num = raw.get("number")
     if num in (None, "", "null"):
         num_val: int | None = None
@@ -1362,6 +1362,7 @@ def _parse_pr_mapping(raw: dict, default_repo: str) -> PRRecord:
         **_parse_frozen_attribution_pair(raw),
         pr_id=pr_id_raw if isinstance(pr_id_raw, str) else "",
         pr_revision=pr_revision,
+        creation=parse(raw),
         rewrite_owner=str(raw.get("rewrite_owner", "") or ""),
         rewrite_identity=str(raw.get("rewrite_identity", "") or ""),
     )
@@ -1431,6 +1432,8 @@ def _pr_to_yaml_dict(pr: PRRecord) -> dict[str, object]:
         "head_sha": pr.head_sha,
         "url": pr.url,
     }
+    if pr.creation:
+        d["creation"] = dict(pr.creation)
     if pr.head_observed_at:
         d["head_observed_at"] = pr.head_observed_at
     if pr.head_observed_api_base:

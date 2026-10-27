@@ -19,6 +19,11 @@ provider wire capabilities. A consumer requiring these keywords must not fall
 back to its fork when an older engine rejects them. Keep the previous compatible
 consumer/engine pair available for an intentional rollback. Pending acquisition
 must finish under a journal-capable generation before rollback to older code.
+The [prepared application path](prepared-application.md) keeps embedding work
+outside the reader fence and stages exact vectors under that same journal.
+Journal-capable older engines can ignore these subordinate rows and replay the
+unchanged completed manifest; they do not inherit one-generation publication.
+Prepared bytes never authorize recovery of an uncertain source-aware store.
 
 ## Configuration and source ownership
 

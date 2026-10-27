@@ -74,14 +74,15 @@ def test_native_round_counts_noop_metadata_edit_and_tombstone(
     first, counts = run()
     assert first["chunks_total"] == counts["chunks_generated"] == 1
     assert counts["identities_scanned"] == counts["files_chunked"] == 1
-    assert counts["checkpoint_lookup_keys"] == counts["checkpoint_rows_written"] == 1
+    assert counts["checkpoint_lookup_keys"] == 2
+    assert counts["checkpoint_rows_written"] == 1
     assert counts["content_rows_upserted"] == 1
     assert counts["http"] is None
     mutations = counts["source_mutations"]["sample:repo"]
     assert len(mutations) == 1
     assert mutations[0]["available"] is selected
     if selected:
-        assert mutations[0]["logical_commits"] == 1 + model_count
+        assert mutations[0]["logical_commits"] == 1
         assert mutations[0]["tables"] == sorted(
             [config.content_table, *(profile.table_name for profile in profiles.values())],
         )
@@ -101,10 +102,11 @@ def test_native_round_counts_noop_metadata_edit_and_tombstone(
     repeated, counts = run()
     assert repeated["chunks_total"] == 0
     assert counts["upserts_acquired"] == counts["files_reused"] == 1
-    assert counts["checkpoint_rows_found"] == 1
+    assert counts["checkpoint_rows_found"] == 2
     assert counts["files_chunked"] == counts["checkpoint_rows_written"] == 0
     assert counts["content_rows_upserted"] == 0 and counts["models"] == {}
     if selected:
+        assert counts["source_mutations"]["sample:repo"][0]["write_commits"] == 0
         assert counts["source_mutations"]["sample:repo"][0]["logical_commits"] == 0
         assert counts["source_mutations"]["sample:repo"][0]["tables"] == []
 
@@ -161,7 +163,7 @@ def test_native_round_counts_noop_metadata_edit_and_tombstone(
     )
     assert failed["sources_failed"][0]["error"] == "fixture embed failure"
     counts = failed["work_counts"]
-    assert counts["content_rows_upserted"] == 1
+    assert counts["content_rows_upserted"] == 0
     assert counts["manifests_applied"] == counts["checkpoint_rows_written"] == 0
     assert counts["models"]["a"]["embed_calls"] == 1
     assert counts["models"]["a"]["chunks_embedded"] == 0
@@ -169,15 +171,17 @@ def test_native_round_counts_noop_metadata_edit_and_tombstone(
     assert counts["source_mutations"] == {}
     fail_embedding = False
     _, counts = run()
-    assert counts["content_rows_upserted"] == 0
+    assert counts["content_rows_upserted"] == 1
     assert counts["manifests_acquired"] == 1 and counts["manifests_applied"] == 2
     assert counts["files_chunked"] == counts["files_reused"] == 1
     assert counts["models"]["a"]["vector_rows_upserted"] == 1
     mutations = counts["source_mutations"]["sample:repo"]
     assert len(mutations) == 2  # Retained application, then the current acquisition.
     if selected:
-        assert mutations[0]["logical_commits"] == model_count
-        assert mutations[0]["tables"] == sorted(p.table_name for p in profiles.values())
+        assert mutations[0]["logical_commits"] == 1
+        assert mutations[0]["tables"] == sorted(
+            [config.content_table, *(p.table_name for p in profiles.values())],
+        )
         assert mutations[1]["logical_commits"] == 0
 
 
@@ -263,8 +267,8 @@ def test_one_source_result_covers_multiple_batches_without_locking_model_calls(t
     assert "sources_failed" not in result
     mutations = result["work_counts"]["source_mutations"]["sample:repo"]
     assert len(mutations) == 1
-    assert mutations[0]["logical_commits"] == 4
-    assert mutations[0]["generation"] == before + 4
+    assert mutations[0]["write_commits"] == mutations[0]["logical_commits"] == 1
+    assert mutations[0]["generation"] == before + 1
     assert mutations[0]["tables"] == ["chunks", "vectors_a"]
 
 

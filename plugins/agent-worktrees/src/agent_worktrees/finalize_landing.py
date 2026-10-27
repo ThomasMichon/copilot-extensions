@@ -41,7 +41,9 @@ def pr_base(record, repo) -> str:
     """The PR's base on the remote (:func:`remote_ref`) when the tracked PR targets
     a branch other than the configured default one (read from the provider); ""
     otherwise or unknown."""
-    from . import finalize_open_pr_gate as fopg
+    from . import finalize_open_pr_gate as fopg, pr_creation_state
+    if pr_creation_state.cancelled(getattr(record, "pr", None)):
+        return ""
     try:
         base = fopg.pr_base_ref(getattr(record, "pr", None), repo)
     except Exception:
