@@ -201,6 +201,58 @@ def _cleanup(payload: Path, root: Path, **arguments: Any) -> dict[str, Any]:
     return MODULE.cleanup(payload, "agent-bridge", root, HOST, **arguments)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Actual packaged POSIX removal")
+@pytest.mark.parametrize("plugin", ("agent-dispatch", "agent-index"))
+def test_materialized_shell_adopter_removes_runtime_without_repository_libraries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plugin: str,
+) -> None:
+    if not HOST:
+        pytest.skip("Native shell unavailable")
+    monkeypatch.syspath_prepend(str(REPO / "tools"))
+    spec = importlib.util.spec_from_file_location(
+        "packaged_removal_materializer", REPO / "tools" / "materialize_installer_engine.py",
+    )
+    assert spec is not None and spec.loader is not None
+    materializer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(materializer)
+    candidate = tmp_path / "release"
+    payload = candidate / "plugins" / plugin
+    shutil.copytree(
+        REPO / "plugins" / plugin, payload,
+        ignore=shutil.ignore_patterns("__pycache__", ".venv", "tests"),
+    )
+    (payload / "scripts" / "installer_engine_process.py").unlink(missing_ok=True)
+    materializer.materialize_refs(candidate, canonical_root=REPO)
+    assert not (candidate / "libs").exists()
+    home = tmp_path / "home"
+    root = home / ("." + plugin)
+    _seed(root, plugin)
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("AGENT_", "COPILOT_", "BUDGET_GUIDANCE_", "INDEX_"))
+    }
+    environment.update(
+        HOME=str(home), USERPROFILE=str(home), COPILOT_EXTENSIONS_TEST_CONTAINED="1",
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", str(payload / "scripts" / SOURCE.name),
+         "--payload-root", str(payload), "--plugin-id", plugin, "--root", str(root),
+         "--shell", HOST, "--remove-runtime"],
+        cwd=home, env=environment, capture_output=True, text=True, timeout=60, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout)["status"] == "removed"
+    assert not (root / "versions" / "1.0.0").exists()
+    assert not (root / "snapshots" / "1.0.0").exists()
+    assert not (root / "deploy-manifest.json").exists()
+    assert (root / "config.yaml").read_bytes() == b"configuration"
+    assert (root / "unknown").read_bytes() == b"\x00\xff"
+    assert (root / ".install.lock").read_bytes() == b"installer lock"
+    assert (payload / "scripts" / "installer_engine_process.py").read_bytes() == (
+        REPO / "libs" / "installer-engine" / "installer_engine_process.py"
+    ).read_bytes()
+
+
 @pytest.mark.parametrize(
     "mutation", ("broken-json", "non-object", "binding", "lifecycle", "source"),
 )

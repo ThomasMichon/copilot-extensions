@@ -2440,6 +2440,8 @@ redirect custody through selective native deletion. Its `--check` performs
 structural admission only; deletion repeats ownership, inventory, guards and
 current-user process attribution under custody. A matching deploy manifest is
 removed last and retained as retry proof on cleanup failure.
+Shell-only adopters also co-package `installer_engine_process.py`: POSIX finite
+deletion uses its bounded child owner even without the Python installer facade.
 Global command selection uses the co-packaged
 `installer_engine_commands.py` and exact current native-writer templates, not
 root/module strings in comments. Modified, foreign and unrecognized programs

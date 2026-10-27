@@ -35,6 +35,9 @@ ahead of eligible external interpreters, broken/aliased candidates and explicit
 no-external refusal across native metadata callers. The common finite-removal
 packet also checks that malformed deployment/binding/lifecycle/source records
 refuse before any cleanup and retain every recovery/state byte.
+Its Dispatch/Index packaged-removal controls run the materialized finite
+entrypoint with no repository library tree, including actual POSIX runtime
+deletion and preservation of configuration, unknown state and the lock inode.
 `tools/test_budget_packaged_installer.py` additionally starts the actual
 materialized standalone Budget status entrypoints without a repository library
 tree; this detects a packaged caller that still sources repository-only helpers.
