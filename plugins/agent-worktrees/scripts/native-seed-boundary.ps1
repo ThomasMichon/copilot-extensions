@@ -26,6 +26,7 @@ function Invoke-AwNativeSeedPhase {
     try {
         $info = [Diagnostics.ProcessStartInfo]::new($runtime.Python)
         $info.UseShellExecute = $false
+        $info.WorkingDirectory = $PWD.ProviderPath
         $info.CreateNoWindow = $true
         $info.RedirectStandardInput = $true
         $info.RedirectStandardOutput = $true
@@ -60,6 +61,49 @@ function Invoke-AwNativeSeedPhase {
     finally {
         if ($process) { $process.Dispose() }
     }
+}
+
+function Wait-AwNativeSeedBackend {
+    param([Diagnostics.Process]$Process, [object[]]$Transfers)
+    if (-not $Transfers -or -not $Transfers.Count) { $Process.WaitForExit(); return }
+    $childWait = [Threading.ManualResetEvent]::new($false)
+    $unusedEvent = $childWait.SafeWaitHandle
+    # Borrow the actual child handle; this wait must never close its owner's handle.
+    $childWait.SafeWaitHandle = [Microsoft.Win32.SafeHandles.SafeWaitHandle]::new($Process.Handle, $false)
+    $unusedEvent.Dispose()
+    try {
+        while (-not $Process.HasExited) {
+            $handles = [Collections.Generic.List[Threading.WaitHandle]]::new()
+            $active = @($Transfers | Where-Object { -not $_.Complete })
+            $handles.Add($childWait)
+            foreach ($transfer in $active) {
+                $handles.Add(([IAsyncResult]$transfer.Task).AsyncWaitHandle)
+            }
+            $ready = [Threading.WaitHandle]::WaitAny($handles.ToArray())
+            if ($ready -eq 0) { break }
+            $transfer = $active[$ready - 1]
+            if ($transfer.Task.IsFaulted) {
+                $null = $transfer.Task.Exception
+                if (-not $transfer.Draining) {
+                    $transfer.Draining = $true
+                    $transfer.Task = $transfer.Source.CopyToAsync([IO.Stream]::Null)
+                } else {
+                    $transfer.Source.Dispose()
+                    $transfer.Complete = $true
+                }
+            } else {
+                $transfer.Complete = $true
+            }
+        }
+        $Process.WaitForExit()
+        try {
+            $null = [Threading.Tasks.Task]::WaitAll(
+                [Threading.Tasks.Task[]]@($Transfers | ForEach-Object { $_.Task }), 1000
+            )
+        } catch {
+            # Transport loss must not suppress the actual exit and return callback.
+        }
+    } finally { $childWait.Dispose() }
 }
 
 function Invoke-AwNativeSeedBackend {
@@ -98,6 +142,7 @@ function Invoke-AwNativeSeedBackend {
     if ($prepared.parent_id) { $callbackArgs += @('--launch-parent-id', [string]$prepared.parent_id) }
     $info = [Diagnostics.ProcessStartInfo]::new([string]$prepared.argv[0])
     $info.UseShellExecute = $false
+    $info.WorkingDirectory = $PWD.ProviderPath
     try { $info.CreateNoWindow = [Console]::IsInputRedirected }
     catch { $info.CreateNoWindow = $true }
     $info.RedirectStandardOutput = [Console]::IsOutputRedirected
@@ -117,7 +162,7 @@ function Invoke-AwNativeSeedBackend {
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $info
     $receiptUncertain = $false
-    $outputCopies = [Collections.Generic.List[Threading.Tasks.Task]]::new()
+    $outputCopies = [Collections.Generic.List[object]]::new()
     try {
         try {
             if (-not $process.Start()) {
@@ -132,10 +177,18 @@ function Invoke-AwNativeSeedBackend {
         # Explicit output handles also preserve the original stdin handle in
         # consoleless children. Never pipe a real terminal's interactive streams.
         if ($info.RedirectStandardOutput) {
-            $outputCopies.Add($process.StandardOutput.BaseStream.CopyToAsync([Console]::OpenStandardOutput()))
+            $source = $process.StandardOutput.BaseStream
+            $outputCopies.Add([pscustomobject]@{
+                Source = $source; Task = $source.CopyToAsync([Console]::OpenStandardOutput())
+                Draining = $false; Complete = $false
+            })
         }
         if ($info.RedirectStandardError) {
-            $outputCopies.Add($process.StandardError.BaseStream.CopyToAsync([Console]::OpenStandardError()))
+            $source = $process.StandardError.BaseStream
+            $outputCopies.Add([pscustomobject]@{
+                Source = $source; Task = $source.CopyToAsync([Console]::OpenStandardError())
+                Draining = $false; Complete = $false
+            })
         }
         try {
             $birth = $process.StartTime.ToUniversalTime().ToFileTimeUtc().ToString(
@@ -148,11 +201,8 @@ function Invoke-AwNativeSeedBackend {
             $receiptUncertain = -not ($spawned -and $spawned.recorded -eq $true)
         } catch { $receiptUncertain = $true }
         # Keep the actual child handle until exit; detaching the mux is not exit.
-        $process.WaitForExit()
+        Wait-AwNativeSeedBackend $process $outputCopies.ToArray()
         $code = $process.ExitCode
-        if ($outputCopies.Count) {
-            $null = [Threading.Tasks.Task]::WaitAll($outputCopies.ToArray(), 1000)
-        }
         $returnedArgs = @('--phase', 'returned', '--exit-code', [string]$code) + $callbackArgs
         if ($receiptUncertain) { $returnedArgs += '--receipt-uncertain' }
         $null = Invoke-AwNativeSeedPhase $Root $returnedArgs

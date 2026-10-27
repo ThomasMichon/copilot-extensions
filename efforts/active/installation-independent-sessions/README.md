@@ -1013,3 +1013,15 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   callers, copied-asset integration, POSIX native adaptation, real terminal/
   Ctrl+C/Job acceptance, per-worktree mux-create fencing and both removal
   cycles remain open. No target installation or session changed.
+- Review found two concrete adapter defects: a failed redirected sink could
+  stop draining and block its child, and PowerShell's selected location could
+  differ from the inherited process directory. Finite callbacks and backend
+  start now set the selected filesystem location explicitly. Redirected streams
+  use event-driven child/task waits; a failed destination drains to null without
+  losing the actual exit and correlated return. No polling helper was added.
+- The expanded Windows packet passed nine tests, including actual closed
+  stdout and stderr sinks with output exceeding pipe capacity, and distinct
+  PowerShell/OS-directory controls for both finite and backend execution.
+  The launch-site census also classifies both adapter process starts as
+  caller-contained; its source guard passes. These corrections do not activate
+  callers or close native terminal/installation-survival acceptance.

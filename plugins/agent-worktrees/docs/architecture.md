@@ -595,7 +595,11 @@ The dormant Windows `scripts/native-seed-boundary.ps1` adapter is dot-sourced
 into an existing owner. It retains the actual child handle and wait, selecting
 the current completed runtime from the original root for each finite callback.
 Consoleless redirected output uses asynchronous byte forwarding with inherited
-stdin; a real terminal retains direct unredirected streams. Native terminal/
+stdin; a real terminal retains direct unredirected streams. Kernel child/task
+waits recover a failed output destination by draining its remaining pipe,
+without polling or suppressing the actual exit callback. Finite helpers and
+the backend use PowerShell's explicit filesystem location rather than inheriting
+a potentially different process directory. Native terminal/
 Ctrl+C, copied-asset/caller and POSIX integration remain separate acceptance.
 
 ### Current session, conclusion, and succession (the head pointer)

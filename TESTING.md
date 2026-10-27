@@ -17,6 +17,10 @@ literal argv, retained PID/birth, exit, OS start refusal, uncertain receipts,
 absent end and exact redirected stdin/stdout/stderr. It is not interactive TTY,
 Ctrl+C, pane-Job or installation-survival evidence; production callers and the
 POSIX native adapter remain unchanged.
+Closed stdout/stderr reader controls exceed pipe capacity and require both
+actual child completion and the correlated return. Separate native controls
+split PowerShell's selected location from the OS process directory and assert
+the finite helper's and backend's actual cwd.
 
 The optional native runtime-removal portfolio includes
 `tools/test_installer_engine_uninstall.py`,
