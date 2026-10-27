@@ -178,6 +178,63 @@ canonical mutation, pin retention, persist a cursor, select source/account/model
 scope, or authorize progress. A resumable backfill owner must supply those
 contracts and the pair writer's current-input checks before vector publication.
 
+### Explicit resumable model backfill
+
+`indexing.embedding_backfill.backfill_embedding_slice` processes one explicitly
+budgeted canonical offset range per call, without acquisition, chunking,
+canonical rewrites or source-checkpoint advancement. Its required inputs are a
+resolved `SourceSpec`, the actual connector, configured participating store and
+path database, all configured model clients, a positive integer `row_budget`
+and the pair writer's explicitly budgeted `after_store` preparation callback.
+Prepared canonical indices remain a prerequisite; the helper never hides a
+corpus-wide preparation step.
+
+Backfill intent lives in the existing path database, initialized with the
+`PendingCrawls` owner. It binds the accepted source/account configuration and
+canonical family from `IndexState`, effective embedding policies and routing/
+table mappings, immutable canonical snapshot and model-table versions. A
+missing or mismatched acquisition identity requests repair, including for an
+explicit restart. Backfill requires an explicit connector `recovery_identity`;
+ordinary indexing's legacy source-name fallback never grants backfill account
+or target authority. Only rows in the accepted colon-delimited family are embedded;
+other rows still consume the explicit global-offset budget and are reported
+separately. This is budgeted snapshot discovery, not a source-indexed point
+enumeration or an ordinary-round corpus scan.
+
+Ordinary indexing remains active between slices. Each slice uses existing
+source-domain writer exclusion during bounded pair work, then exits the clean
+writer before advancing progress under read exclusion. It checks source,
+profile, canonical and vector-version identity before engine work and progress.
+Verified actual pair coverage and proven vector versions are retained before
+the offset is acknowledged, so a failure after clean storage completion replays
+the same covered page without embedding again. Compare-before-save refuses a
+concurrent restart instead of overwriting its cursor.
+
+Changed canonical input, profile/account scope or previously covered vector
+versions fail visibly; there is **no automatic latest-snapshot restart**.
+`restart=True` explicitly resets only derived backfill discovery and reuses
+valid pair receipts. Uncertain store failures retain the existing source-domain
+dirty/repair disposition; restart does not clear it. Completed matching jobs
+return through metadata checks without another content read or embedding call.
+
+The existing GC guard refuses retirement while a backfill is unfinished, but
+ordinary crawl acquisition is not fenced for the job's lifetime. Ordinary
+`run_reindex` GC reports a nonfatal deferral while retaining that guard,
+so successful acquisition does not become a failed indexing round. Known
+pre-effect writer-admission refusals propagate only after a clean writer exit;
+effectful failures retain the normal uncertainty disposition.
+Retirement holds existing source-domain operation exclusion from pending-work
+admission through data and identity cleanup, preventing a backfill from entering
+between the guard and deletion without turning independently committed writes
+into an outer transaction.
+
+Explicit `discard_embedding_backfill` removes only an exactly matching derived intent
+under clean source-domain exclusion; it requires caller authorization and
+preserves canonical data, coverage and acquisition checkpoints. This also
+allows deliberate abandonment of a stale job before retirement. New guard
+behavior requires participating binaries with this API; it is not a lease or
+mixed-old-binary GC guarantee, and does not replace #4220/#4222/#8733/#5302.
+
 ## Qualification and limits
 
 `tests/test_chunk_id_index.py` exercises actual content/vector stores at 100,
