@@ -636,6 +636,12 @@ transaction execution from the existing recurring-maintenance assignment.
 - [x] Document the actual migrated entry points and remaining separately owned integrations; no partial slice is blanket installation-driver completion.
 
 ### Phase 5 - Prove assembled use and native Windows readiness
+- [x] **Agent-recommended bounded removal prerequisite:** land #9253's
+  producer-complete finite footprints and qualify its real macOS entrypoints
+  with original pipe capture and unchanged deadlines. The
+  [merged-source record](<journal/2026/10.27 native-runtime-removal.md>) does
+  not close whole-suite absence, original-session survival, protected
+  connectivity, native Windows adoption or maintenance standby.
 - [ ] Run the assembled runtime path in a fresh WSL-hosted clean-room container from a clean merged dev commit.
 - [x] Qualify every declared installer adopter against that exact merged commit with frozen scenario inputs, successful runner exit and source-independent installed command evidence; retain each adopter's separate report.
 - [ ] Exercise real commands and service interaction after source-checkout removal, including marketplace/runtime skew and non-deployment hooks.
