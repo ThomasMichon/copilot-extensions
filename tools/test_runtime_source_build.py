@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import time
+import zipfile
 from pathlib import Path
 from dataclasses import replace
 
@@ -244,6 +245,48 @@ def options(adopter, target, env):
         ),
         "deadline": time.monotonic() + 120,
     }
+
+
+def test_native_exact_source_wheels_reuse_across_fresh_retention_and_invalidate_body_edit(
+    adopter, configured_source, target, feeds, tmp_path, monkeypatch, record_property,
+):
+    project = source_with_process_owner(configured_source, build_only=True)
+    state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
+    packaging_feed(state)
+    build_only_feed(state)
+    env = environment(adopter, state, tmp_path)
+    monkeypatch.setattr(configuration, "_opaque_index_identity", lambda value: hashlib.sha256(value.encode()).hexdigest())
+    native_build = completion.build_wheel
+    built = []
+
+    def observed_build(*args, **kwargs):
+        built.append(args[0].name)
+        return native_build(*args, **kwargs)
+
+    monkeypatch.setattr(completion, "build_wheel", observed_build)
+    source_paths = []
+    elapsed = []
+    for iteration in range(3):
+        if iteration == 2:
+            (project / "src" / "agent_example" / "__init__.py").write_text('VALUE = "changed-body"\n')
+            select_source(configured_source)
+        started = time.monotonic()
+        with builds.retain_source_runtime_inputs(
+            plan(adopter), **options(adopter, target, env),
+        ) as selected:
+            source_paths.append(selected.payload)
+            assert len(built) == (2 if iteration < 2 else 4)
+            filename = next(
+                item["filename"] for item in selected.profile.record()["wheels"]
+                if item["name"] == "agent-example"
+            )
+            stream = selected.wheels.snapshot.archives[filename]
+            with zipfile.ZipFile(stream) as archive:
+                body = archive.read("agent_example/__init__.py")
+            assert (b"changed-body" in body) == (iteration == 2)
+        elapsed.append(time.monotonic() - started)
+    assert len(set(source_paths)) == 3
+    record_property("cold_warm_changed_source_seconds", json.dumps(elapsed))
 
 
 def test_authenticated_source_builds_and_reuses_independent_closed_environments(
