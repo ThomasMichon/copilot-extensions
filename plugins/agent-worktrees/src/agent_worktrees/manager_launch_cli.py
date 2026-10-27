@@ -133,6 +133,9 @@ def _safe_probe_diagnostic(
         r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))", "", text,
     )
     text = re.sub(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/@]*@", r"\1***@", text)
+    text = re.sub(
+        r"(?i)\b([a-z][a-z0-9+.-]*://)[^/@]*:[^/@]*\Z", r"\1[redacted]", text,
+    )
     text = "".join(
         char if char.isprintable() or char in "\n\t" else " " for char in text
     )

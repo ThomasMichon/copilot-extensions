@@ -230,7 +230,10 @@ def test_control_normalization_preserves_credential_boundaries(
     assert "***" in diagnostic
 
 
-@pytest.mark.parametrize("password", ["fixture-password", "1234"])
+@pytest.mark.parametrize("password", [
+    "fixture-password", "1234", "first-fragment\rsecond-fragment",
+    "first-fragment\xa0second-fragment", "first-fragment\x00second-fragment",
+])
 def test_partial_timeout_url_userinfo_is_redacted_before_bounding(
     provider: Provider, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
     password: str,
@@ -252,6 +255,8 @@ def test_partial_timeout_url_userinfo_is_redacted_before_bounding(
     assert "Fetching https://" in captured.err
     assert "fixture-user" not in captured.err
     assert password not in captured.err
+    assert "first-fragment" not in captured.err
+    assert "second-fragment" not in captured.err
     assert captured.out == ""
 
 
@@ -277,6 +282,16 @@ def test_long_registered_source_keeps_provider_and_registration_attribution(
     assert health.state == "failed"
     assert "'worktree-manager' via /registered/" in health.diagnostic
     assert len(health.diagnostic) < 500
+
+
+@pytest.mark.parametrize("control", [
+    "\x1b[2J", "\x1b[H", "\x1b[31", "\x1b]unfinished-title",
+    "\x90dcs\x9c", "\x9b2J", "\x1bPstatus\x1b\\",
+])
+def test_incomplete_or_alternate_terminal_controls_cannot_hide_the_cause(control: str) -> None:
+    diagnostic = launch._safe_probe_diagnostic(control + "\nfixture startup refused")
+    assert "fixture startup refused" in diagnostic
+    assert all(char.isprintable() or char in "\n\t" for char in diagnostic)
 
 
 def test_transient_probe_timeout_does_not_report_a_failure(
