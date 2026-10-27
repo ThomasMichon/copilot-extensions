@@ -75,9 +75,11 @@ def test_all_installers_deploy_every_py_hook():
         "nudge_status.py",
         "bind_nudge.py",
         "hook_runtime.py",
+        "hook_pre_relevance.py",
         "hook_lifecycle_runtime.py",
         "native_source_context.py",
         "terminal_probe.py",
+        "pretool_killswitch.py",
     }
     installers = {
         "install.ps1": _INSTALL_PS1.read_text("utf-8"),
@@ -144,3 +146,34 @@ def test_all_installers_deploy_platform_pane_wrapper():
         if wrapper not in manifest["files"]:
             missing.append(f"launch-wrapper-assets.json does not list {wrapper}")
     assert not missing, "\n".join(missing)
+
+
+@pytest.mark.guard
+def test_bootstrap_state_guards_are_deployed_before_every_bootstrap_caller():
+    import ast
+    sources = {
+        "install.ps1": _INSTALL_PS1.read_text("utf-8"),
+        "install.sh": _INSTALL_SH.read_text("utf-8"),
+    }
+    tree = ast.parse(_INSTALLER_PY.read_text("utf-8"))
+    owner = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                 and node.name == "deploy_wrappers")
+    inventory = next(node.iter for node in ast.walk(owner) if isinstance(node, ast.For)
+                     and isinstance(node.iter, ast.Tuple)
+                     and any(isinstance(item, ast.Constant) and item.value == "bootstrap-check.ps1"
+                             for item in node.iter.elts))
+    python_names = ast.literal_eval(inventory)
+    publication = ast.parse((_SCRIPTS / "runtime_install_publication.py").read_text("utf-8"))
+    publication_names = next(ast.literal_eval(node.value) for node in publication.body
+                             if isinstance(node, ast.Assign)
+                             and any(isinstance(target, ast.Name) and target.id == "HOOKS"
+                                     for target in node.targets))
+    for suffix in ("ps1", "sh"):
+        guard = f"bootstrap-killswitch-guard.{suffix}"
+        caller = f"bootstrap-check.{suffix}"
+        assert python_names.index(guard) < python_names.index(caller)
+        assert publication_names.index(guard) < publication_names.index(caller)
+        for name, source in sources.items():
+            lines = [line for line in source.splitlines() if guard in line and caller in line]
+            assert len(lines) == 1, name
+            assert lines[0].index(guard) < lines[0].index(caller), name

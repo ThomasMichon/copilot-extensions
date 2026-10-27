@@ -794,3 +794,33 @@ def test_powershell_lookup_preserves_selection_without_cmdlet_pipelines(tmp_path
         )
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == (str(tmp_path / expected) if expected else "")
+
+
+def test_hot_killswitch_restores_mention_guard(tmp_path, monkeypatch, capsys):
+    guard = _load_guard()
+    state = tmp_path / "pretool.json"
+    monkeypatch.setenv("PRETOOL_KILLSWITCH_STATE_FILE", str(state))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(guard, "current_repo_matches", lambda *a, **k: True)
+    payload = json.dumps({"toolName": "powershell", "toolArgs": {
+        "command": 'gh pr comment 42 -R ThomasMichon/copilot-extensions --body "@copilot review"',
+    }})
+    for active in (False, True, False):
+        state.write_text(json.dumps({"active": active}), encoding="utf-8")
+        monkeypatch.setattr(guard.sys, "stdin", io.StringIO(payload))
+        assert guard.main() == 0
+        output = capsys.readouterr().out
+        assert output == "" if active else json.loads(output)["permissionDecision"] == "deny"
+
+
+def test_active_killswitch_returns_before_reading_input(tmp_path, monkeypatch):
+    guard = _load_guard()
+    state = tmp_path / "pretool.json"
+    state.write_text('{"active": true}', encoding="utf-8")
+    monkeypatch.setenv("PRETOOL_KILLSWITCH_STATE_FILE", str(state))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    class Unreadable:
+        def read(self, *args):
+            pytest.fail("active switch reached guard input")
+    monkeypatch.setattr(guard.sys, "stdin", Unreadable())
+    assert guard.main() == 0

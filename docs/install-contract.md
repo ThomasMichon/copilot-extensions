@@ -4566,7 +4566,7 @@ this session (see `libs/bootstrap-killswitch/README.md`; amends the
 Every adopting plugin's `bootstrap-check.{ps1,sh}` checks its vendored
 `bootstrap-killswitch-guard.{ps1,sh}` as its very first step, before any
 version comparison below, against one shared, cross-plugin state file
-(`~/.copilot-extensions/bootstrap-killswitch.json`) -- an operator/agent hand-
+(`~/.copilot-extensions/killSwitches/bootstrap-killswitch.json`) -- an operator/agent hand-
 diagnosing a venv or install path directly sets this switch so a background
 reconcile can never race that diagnosis; it fails open to "reconcile proceeds
 normally" on a missing or malformed state file. This switch applies **only to

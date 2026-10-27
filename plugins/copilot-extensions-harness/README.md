@@ -189,3 +189,14 @@ contributing/diagnosing skills should contain, and how consumers adopt it.
 ## License
 
 [MIT](../../LICENSE)
+
+
+### Emergency pre-tool control
+
+The default installation supports `agent-machines pretool-killswitch on
+"<reason>"`, `status --json` and `off`. This explicitly pauses suite-owned
+preToolUse workflow guards, not native Copilot permissions or other hook events.
+For scope, hot-session delivery, installation-cell isolation and rollback, see
+[`libs/bootstrap-killswitch/README.md`](../../libs/bootstrap-killswitch/README.md#emergency-pre-tool-workflow-guard-switch).
+The control is inactive until explicitly enabled; a deployed release alone does
+not activate it.
