@@ -130,6 +130,34 @@ def _run(fixture, environment, host, *arguments):
     return result, reads
 
 
+def _refusal_snapshot(home):
+    snapshot = _snapshot(home)
+    # Even an empty Windows PowerShell host rewrites this CLR startup profile.
+    snapshot.pop(
+        "AppData/Local/Microsoft/Windows/PowerShell/StartupProfileData-NonInteractive",
+        None,
+    )
+    return snapshot
+
+
+@pytest.mark.parametrize("change", ("product-state", "unexpected-write"))
+def test_refusal_snapshot_preserves_every_other_home_entry(tmp_path, change):
+    profile = tmp_path / "AppData/Local/Microsoft/Windows/PowerShell/StartupProfileData-NonInteractive"
+    profile.parent.mkdir(parents=True)
+    profile.write_bytes(b"first runtime profile")
+    product = tmp_path / ".copilot-extensions/installation-mode.json"
+    product.parent.mkdir()
+    product.write_bytes(b"original product state")
+    before = _refusal_snapshot(tmp_path)
+    profile.write_bytes(b"second runtime profile")
+    assert _refusal_snapshot(tmp_path) == before
+    if change == "product-state":
+        product.write_bytes(b"changed product state")
+    else:
+        (tmp_path / "unexpected-write").write_bytes(b"new")
+    assert _refusal_snapshot(tmp_path) != before
+
+
 @pytest.mark.parametrize("namespaced", (False, True))
 def test_selected_evaluator_is_fresh_isolated_and_releases_before_runtime(
     binding_fixture, host, namespaced,
@@ -437,14 +465,14 @@ def test_actual_sdk_routes_preserve_complete_status_and_refusals(binding_fixture
     else:
         assert result.returncode == 126, result.stdout + result.stderr
         assert not resolution_path.exists()
-    before_refusal = _snapshot(binding_fixture["home"])
+    before_refusal = _refusal_snapshot(binding_fixture["home"])
     environment["TEST_ROUTE"] = "unavailable"
     result, reads = _run(binding_fixture, environment, host, "version")
     assert result.returncode == 126, result.stdout + result.stderr
     assert result.stdout == ""
     assert reads == []
     assert "Python 3.10+ must be available as python on PATH" in result.stderr
-    assert _snapshot(binding_fixture["home"]) == before_refusal
+    assert _refusal_snapshot(binding_fixture["home"]) == before_refusal
 
 
 @pytest.mark.portfolio_tier("T3")
