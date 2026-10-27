@@ -232,6 +232,10 @@ config and unchanged filename. Native profile matching and explicit overrides
 remain authoritative; every hop uses the selected configuration file.
 This adds one fresh local root query per profile-backed launch. Pure
 programmatic configurations retain their existing non-profile path.
+With an unchanged profile selection, explicit programmatic fields and proxy
+options remain overrides rather than cached file values. CLI selections take
+precedence; choosing another `-F` file does not resurrect the previous
+profile's programmatic overrides.
 The imported runtime advertises this bounded selected-client probe contract as
 `ssh_manager.proxy.WINDOWS_OWNED_PROBE_VERSION = 1`, independently of its package
 version. Older consumers retain their existing API; a new Windows probe caller

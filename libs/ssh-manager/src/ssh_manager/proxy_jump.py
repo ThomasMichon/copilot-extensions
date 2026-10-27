@@ -103,11 +103,21 @@ def prepare_jump_arguments(
     proxy: str | None = None
     config_file = config.config_file
     overrides: dict[str, str] = {}
+    explicit_options: set[str] = set()
     destination_seen = False
+
+    def record_destination(value: str) -> None:
+        if "@" in value:
+            explicit_options.add("user")
+        if value.startswith("ssh://") and urlsplit(value).port is not None:
+            explicit_options.add("port")
+
     index = 1
     while index < len(args):
         argument = args[index]
         if argument == "--":
+            if not destination_seen and index + 1 < len(args):
+                record_destination(args[index + 1])
             prepared.extend(args[index:])
             break
         if not argument.startswith("-") or argument == "-":
@@ -116,6 +126,7 @@ def prepare_jump_arguments(
                 break
             prepared.append(argument)
             destination_seen = True
+            record_destination(argument)
             index += 1
             continue
         for offset, option in enumerate(argument[1:], 1):
@@ -130,7 +141,7 @@ def prepare_jump_arguments(
                     raise ValueError(f"SSH option -{option} requires a value")
                 value = args[index]
             consumed = option == "J"
-            key, setting = {"p": "port", "l": "user"}.get(option, ""), value
+            key, setting = {"p": "port", "l": "user", "i": "identityfile"}.get(option, ""), value
             if option == "F":
                 config_file = value
             if option == "o":
@@ -144,6 +155,8 @@ def prepare_jump_arguments(
                     if jump is None and proxy is None:
                         proxy = setting.strip()
             normalized = key.strip().casefold()
+            if normalized:
+                explicit_options.add(normalized)
             if normalized in {"hostname", "port", "user"}:
                 overrides.setdefault(normalized, setting.strip())
             if consumed:
@@ -164,7 +177,20 @@ def prepare_jump_arguments(
             prepared.append(argument)
         index += 1
     if not apply_overrides:
-        return tuple(prepared), replace(config, config_file=config_file)
+        cli_proxy = proxy is not None or jump is not None
+        return tuple(prepared), replace(
+            config, config_file=config_file,
+            hostname=None if "hostname" in explicit_options else config.hostname,
+            user=None if "user" in explicit_options else config.user,
+            port=None if "port" in explicit_options else config.port,
+            identity_file=None if "identityfile" in explicit_options else config.identity_file,
+            proxy_command=None if cli_proxy else config.proxy_command,
+            extra_options={
+                key: value for key, value in config.extra_options.items()
+                if key.casefold() not in explicit_options
+                and not (cli_proxy and key.casefold() in {"proxycommand", "proxyjump"})
+            },
+        )
     if overrides or config_file != config.config_file:
         port = int(overrides["port"]) if "port" in overrides else config.port
         if port is not None and not 1 <= port <= 65535:
@@ -206,6 +232,7 @@ async def prepare_windows_launch(
 ) -> tuple[tuple[str, ...], SSHConfig]:
     prepared, selected = prepare_jump_arguments(args, config, apply_overrides=False)
     if config.effective_config or config.config_file or selected.config_file != config.config_file:
+        programmatic = selected if selected.config_file == config.config_file else None
         resolution_args = tuple(args[1:])
         if selected.config_file:
             resolution_args = ("-F", selected.config_file, *resolution_args)
@@ -216,6 +243,26 @@ async def prepare_windows_launch(
             process_env=environment, resolve_args=resolution_args,
         )
         selected = await asyncio.to_thread(source.get_ssh_config)
+        if programmatic is not None:
+            explicit_keys = {key.casefold() for key in programmatic.extra_options}
+            selected = replace(
+                selected, hostname=programmatic.hostname or selected.hostname,
+                user=programmatic.user or selected.user,
+                port=programmatic.port if programmatic.port is not None else selected.port,
+                identity_file=programmatic.identity_file or selected.identity_file,
+                extra_options={
+                    **{key: value for key, value in selected.extra_options.items()
+                       if key.casefold() not in explicit_keys},
+                    **programmatic.extra_options,
+                },
+            )
+            explicit = replace(programmatic, effective_config=())
+            command = explicit.proxy_command or ssh_option(explicit, "proxycommand")
+            jump = ssh_option(explicit, "proxyjump")
+            if command:
+                selected = _override_proxy(selected, command)
+            elif jump is not None:
+                selected = _override_jump(selected, jump)
         return prepared, selected
     return prepare_jump_arguments(args, config)
 

@@ -86,6 +86,8 @@ work. Run no desktop reproduction of an unqualified path.
 Each native parent also edits one controlled profile in place while retaining
 the original cached config. The real selected client's metadata must observe
 the new hostname and jump route without mutating that cache or dialing a host.
+The same real metadata boundary also preserves explicit programmatic proxy
+fields/options while allowing a CLI proxy selection to override them.
 
 Mocked route/probe contracts are available through the contained `ssh-manager`
 and `agent-ssh` targets. This lane establishes only its exact source/client/

@@ -13,6 +13,7 @@ import sys
 import sysconfig
 import time
 from ctypes import wintypes
+from dataclasses import replace
 from pathlib import Path
 
 
@@ -222,8 +223,16 @@ async def verify_cached_profile_refresh(root: Path, client: Path) -> dict:
         "  ProxyJump cache-first.invalid,cache-last.invalid\n" + common,
         encoding="utf-8",
     )
-    _args, refreshed = await prepare_windows_launch(
-        (str(client), "-F", str(profile), "cached-target.invalid"), cached, str(client),
+    arguments = (str(client), "-F", str(profile), "cached-target.invalid")
+    _args, refreshed = await prepare_windows_launch(arguments, cached, str(client))
+    command = "controlled-programmatic-proxy --stdio"
+    explicit = replace(cached, proxy_command=command)
+    _args, programmatic = await prepare_windows_launch(arguments, explicit, str(client))
+    _args, extra = await prepare_windows_launch(
+        arguments, replace(cached, extra_options={"ProxyCommand": command}), str(client),
+    )
+    _args, cli = await prepare_windows_launch(
+        (*arguments[:-1], "-oProxyCommand=none", arguments[-1]), explicit, str(client),
     )
     evidence = {
         "same_file": refreshed.config_file == cached.config_file == str(profile),
@@ -231,12 +240,18 @@ async def verify_cached_profile_refresh(root: Path, client: Path) -> dict:
         "cached_hostname": ssh_option(cached, "hostname"),
         "refreshed_hostname": ssh_option(refreshed, "hostname"),
         "refreshed_jump": ssh_option(refreshed, "proxyjump"),
+        "programmatic_proxy_preserved": programmatic.proxy_command == command,
+        "programmatic_proxy_option_preserved": extra.proxy_command == command,
+        "cli_proxy_override_preserved": ssh_option(cli, "proxycommand") == "none",
     }
     if not (
         evidence["same_file"] and evidence["source_cache_unchanged"]
         and evidence["cached_hostname"] == "cached-old.invalid"
         and evidence["refreshed_hostname"] == "cached-new.invalid"
         and evidence["refreshed_jump"] == "cache-first.invalid,cache-last.invalid"
+        and evidence["programmatic_proxy_preserved"]
+        and evidence["programmatic_proxy_option_preserved"]
+        and evidence["cli_proxy_override_preserved"]
     ):
         raise RuntimeError(f"Native cached-profile refresh failed: {evidence}")
     return evidence

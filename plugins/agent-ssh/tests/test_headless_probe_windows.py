@@ -54,7 +54,9 @@ def test_selected_client_jump_chain_is_headless_and_reaped(tmp_path, capsys, par
     assert evidence["cached_profile_refresh"] == {
         "same_file": True, "source_cache_unchanged": True,
         "cached_hostname": "cached-old.invalid", "refreshed_hostname": "cached-new.invalid",
-        "refreshed_jump": "cache-first.invalid,cache-last.invalid", "metadata_queries": 2,
+        "refreshed_jump": "cache-first.invalid,cache-last.invalid", "metadata_queries": 5,
+        "programmatic_proxy_preserved": True, "cli_proxy_override_preserved": True,
+        "programmatic_proxy_option_preserved": True,
     }
     expected_arch = os.environ["SSH_MANAGER_EXPECTED_PYTHON_ARCH"]
     assert evidence["parent_platform"] == {

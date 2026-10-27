@@ -412,6 +412,116 @@ async def test_profile_routing_refreshes_on_relaunch_with_the_same_cached_config
     assert [host for host, _options in calls] == ["target", "target", "gateway"]
 
 
+@pytest.mark.parametrize("command", ["owned-proxy --stdio", "none"])
+async def test_profile_refresh_preserves_explicit_programmatic_proxy(monkeypatch, command):
+    _profiles(monkeypatch, {"target": _profile("target", config_file="same.conf")})
+    prepared = AsyncMock(return_value=SimpleNamespace())
+    monkeypatch.setattr(proxy, "_is_windows", lambda: True)
+    monkeypatch.setattr(proxy, "_create_prepared_ssh", prepared)
+    await proxy.create_ssh_subprocess(
+        "ssh", "-F", "same.conf", "target",
+        config=SSHConfig("target", config_file="same.conf", proxy_command=command),
+    )
+    assert prepared.await_args.args[1].proxy_command == command
+    assert prepared.await_args.args[2] is None
+
+
+@pytest.mark.parametrize("jump", [False, True])
+async def test_cli_proxy_choice_beats_programmatic_proxy_after_refresh(monkeypatch, jump):
+    fresh = _profile("target", "gateway" if jump else None, config_file="same.conf")
+    if not jump:
+        fresh = SSHConfig("target", config_file="same.conf", proxy_command="none")
+    _profiles(monkeypatch, {"target": fresh, "gateway": _profile("gateway")})
+    prepared = AsyncMock(return_value=SimpleNamespace())
+    monkeypatch.setattr(proxy, "_is_windows", lambda: True)
+    monkeypatch.setattr(proxy, "_create_prepared_ssh", prepared)
+    option = "-Jgateway" if jump else "-oProxyCommand=none"
+    await proxy.create_ssh_subprocess(
+        "ssh", "-F", "same.conf", option, "target",
+        config=SSHConfig("target", config_file="same.conf", proxy_command="old-proxy"),
+    )
+    selected, route = prepared.await_args.args[1:3]
+    assert selected.proxy_command != "old-proxy"
+    assert (route is not None) is jump
+
+
+async def test_changed_file_does_not_restore_the_previous_programmatic_proxy(monkeypatch):
+    _profiles(monkeypatch, {
+        "target": _profile("target", "gateway", config_file="selected.conf"),
+        "gateway": _profile("gateway", config_file="selected.conf"),
+    })
+    prepared = AsyncMock(return_value=SimpleNamespace())
+    monkeypatch.setattr(proxy, "_is_windows", lambda: True)
+    monkeypatch.setattr(proxy, "_create_prepared_ssh", prepared)
+    await proxy.create_ssh_subprocess(
+        "ssh", "-Fselected.conf", "target",
+        config=SSHConfig("target", config_file="fallback.conf", proxy_command="old-proxy"),
+    )
+    selected, route = prepared.await_args.args[1:3]
+    assert selected.proxy_command is None
+    assert route is not None and route.argv[-1] == "gateway"
+
+
+@pytest.mark.parametrize("key,value,jump", [
+    ("ProxyCommand", "owned-proxy --stdio", False),
+    ("ProxyCommand", "none", False),
+    ("ProxyJump", "gateway", True),
+    ("ProxyJump", "none", False),
+])
+async def test_profile_refresh_preserves_explicit_programmatic_proxy_options(
+    monkeypatch, key, value, jump,
+):
+    _profiles(monkeypatch, {
+        "target": _profile("target", config_file="same.conf"),
+        "gateway": _profile("gateway", config_file="same.conf"),
+    })
+    prepared = AsyncMock(return_value=SimpleNamespace())
+    monkeypatch.setattr(proxy, "_is_windows", lambda: True)
+    monkeypatch.setattr(proxy, "_create_prepared_ssh", prepared)
+    await proxy.create_ssh_subprocess(
+        "ssh", "-Fsame.conf", "target",
+        config=SSHConfig("target", config_file="same.conf", extra_options={key: value}),
+    )
+    selected, route = prepared.await_args.args[1:3]
+    assert (route is not None) is jump
+    assert proxy_jump.ssh_option(selected, key) == value
+
+
+async def test_profile_refresh_preserves_explicit_fields_but_not_cli_replaced_values(monkeypatch):
+    fresh = SSHConfig("target", config_file="same.conf", effective_config=(
+        ("hostname", "target"), ("user", "cli-user"), ("port", "2300"),
+    ))
+    _profiles(monkeypatch, {"target": fresh})
+    original = SSHConfig(
+        "target", config_file="same.conf", hostname="programmatic.example",
+        user="old-user", port=2200, proxy_command="owned-proxy --stdio",
+        extra_options={"User": "old-user", "Port": "2200"},
+    )
+    _args, selected = await proxy_jump.prepare_windows_launch(
+        ("ssh", "-p2300", "cli-user@target"), original, "ssh",
+    )
+    assert selected.hostname == "programmatic.example"
+    assert proxy_jump._endpoint(selected)[1:] == ("cli-user", 2300)
+    assert "User" not in selected.extra_options and "Port" not in selected.extra_options
+    assert selected.proxy_command == "owned-proxy --stdio"
+
+
+@pytest.mark.parametrize("destination", [
+    ("ssh://cli-user@target:2300",), ("--", "ssh://cli-user@target:2300"),
+])
+async def test_uri_user_and_port_override_programmatic_fields_after_refresh(monkeypatch, destination):
+    _profiles(monkeypatch, {
+        "target": SSHConfig("target", config_file="same.conf", effective_config=(
+            ("hostname", "target"), ("user", "cli-user"), ("port", "2300"),
+        )),
+    })
+    _args, selected = await proxy_jump.prepare_windows_launch(
+        ("ssh", *destination),
+        SSHConfig("target", config_file="same.conf", user="old-user", port=2200), "ssh",
+    )
+    assert proxy_jump._endpoint(selected)[1:] == ("cli-user", 2300)
+
+
 @pytest.mark.parametrize("args", [
     ("ssh", "-J"), ("ssh", "-J", ""), ("ssh", "-o", ""),
     ("ssh", "-Jfirst", "-Jsecond", "target"),
