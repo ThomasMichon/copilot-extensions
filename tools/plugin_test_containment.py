@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import ctypes
 import os
-import shutil
+import shutil as shutil  # Retain the shared adapter seam for existing callers.
 import signal
 import subprocess
 import sys
@@ -23,8 +23,10 @@ from typing import Any, Mapping, Sequence, TypeVar
 
 if __package__:
     from .native_test_paths import native_test_path
+    from .plugin_test_containment_posix import _darwin_group_usage, _ps_group_usage
 else:
     from native_test_paths import native_test_path
+    from plugin_test_containment_posix import _darwin_group_usage, _ps_group_usage
 
 # Repository runners consume the canonical source without a plugin installation.
 _previous_path = sys.path.copy()
@@ -394,46 +396,15 @@ def _linux_group_usage(pgid: int, *, live_only: bool = False) -> tuple[int, int]
     return count, rss
 
 
-def _ps_group_usage(pgid: int, *, live_only: bool = False) -> tuple[int, int] | None:
-    ps = shutil.which("ps")
-    if not ps:
-        return None
-    result = subprocess.run(
-        [ps, "-eo", "pgid=,rss=,stat="],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=2,
-    )
-    if result.returncode != 0:
-        return None
-    count = 0
-    rss_kib = 0
-    for line in result.stdout.splitlines():
-        fields = line.split()
-        if len(fields) != 3:
-            if live_only and fields:
-                raise ValueError("Cannot parse POSIX process-group membership")
-            continue
-        if live_only and fields[2].startswith("Z"):
-            continue
-        try:
-            row_pgid, row_rss = map(int, fields[:2])
-        except ValueError:
-            if live_only:
-                raise
-            continue
-        if row_pgid == pgid:
-            count += 1
-            rss_kib += row_rss
-    return count, rss_kib * 1024
-
-
 def _posix_group_usage(pgid: int) -> tuple[int, int] | None:
+    if sys.platform == "darwin":
+        return _darwin_group_usage(pgid)
     return _linux_group_usage(pgid) or _ps_group_usage(pgid)
 
 
 def _posix_live_group_usage(pgid: int) -> tuple[int, int] | None:
+    if sys.platform == "darwin":
+        return _darwin_group_usage(pgid, live_only=True)
     return _linux_group_usage(pgid, live_only=True) or _ps_group_usage(pgid, live_only=True)
 
 

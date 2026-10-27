@@ -161,6 +161,7 @@ def test_actual_backend_packet_uses_verified_finite_containment(tmp_path, monkey
         assert limits.wall_seconds == 240
         assert command[:4] == [sys.executable, "-B", "-m", "pytest"]
         assert "tools/test_installer_engine_uninstall_darwin.py" in command
+        assert "tools/test_plugin_test_containment_darwin.py" in command
         assert "--timeout=30" in command and "--noconftest" in command
         assert "-p" in command and "pytest_portfolio_guard" in command
         if outcome == "unsettled":

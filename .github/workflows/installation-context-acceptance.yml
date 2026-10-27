@@ -206,7 +206,7 @@ jobs:
       - name: Prepare seasoned native-inspection tooling
         run: >-
           python tools/seasoned_uv.py --uv uv --registry-only --
-          --system pytest "pytest-timeout>=2.3,<3" psutil
+          --system pytest "pytest-timeout>=2.3,<3"
       - name: Prepare an isolated native qualification account
         run: |
           python - <<'PY'
@@ -301,7 +301,8 @@ jobs:
               [sys.executable, "-B", "-m", "pytest", "-q", "--noconftest",
                "-p", "pytest_portfolio_guard", "--timeout=30",
                f"--basetemp={sandbox / 'pytest'}",
-               "tools/test_installer_engine_uninstall_darwin.py"],
+               "tools/test_installer_engine_uninstall_darwin.py",
+               "tools/test_plugin_test_containment_darwin.py"],
               cwd=root, env=env, sandbox=sandbox, limits=Limits(wall_seconds=240),
           )
           shutil.rmtree(sandbox)
@@ -315,7 +316,7 @@ jobs:
             "UV_CACHE_DIR=$REMOVAL_HOME/.cache/uv" \
             "UV_PYTHON_INSTALL_DIR=$REMOVAL_HOME/.cache/python" \
             /bin/bash -c 'cd "$1" &&
-            printf "Native qualification controller pid=%s; sampler_setuid=" "$$" &&
+            printf "Native qualification controller pid=%s; system_ps_setuid=" "$$" &&
             if [[ -u "$(command -v ps)" ]]; then printf "1\n"; else printf "0\n"; fi &&
             exec "$2" -B tools/run-plugin-tests.py agent-worktrees \
             --test-file tests/test_native_uninstall_footprint.py \

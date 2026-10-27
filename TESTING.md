@@ -137,6 +137,14 @@ source copy, verifies its real/effective/saved credentials, and runs both packet
 under that account. The runner account's mixed-privilege services remain outside
 that census; production ownership refusals are unchanged. Elevated setup is
 limited to the disposable hosted VM, whose teardown reclaims the account/copy.
+Darwin resource polling uses the stdlib libproc sampler in
+`tools/plugin_test_containment_darwin.py`, not a spawning `ps` observer that
+can introduce a privileged candidate into the uninstall census. Unknown or
+partial observations still fail explicitly; memory/process limits and owned
+group cleanup remain enforced. Its focused controls include a real 32 MiB
+resident child, independent RSS comparison, and unreaped-zombie versus
+live-member accounting. Other POSIX adapters retain their existing behavior
+through `tools/plugin_test_containment_posix.py`.
 The native STOP packet derives daemon commands from actual unit writers,
 preserves original admission across service-stop/PID-reuse controls, and runs
 real Linux pidfd termination and birth-mismatch refusal against owned fixtures.
