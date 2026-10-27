@@ -951,6 +951,7 @@ jobs:
         run: >-
           python -m pytest -q
           tools/test_runtime_source_build.py
+          tools/test_runtime_source_wheel_cache.py
           -k "${{ matrix.expression }}"
       - name: Persisted Manager admission and fresh-process offline reuse
         if: ${{ matrix.suite == 'manager' }}
