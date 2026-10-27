@@ -521,8 +521,8 @@ class CliSourceConnector:
         if snapshot is not None:
             SnapshotPage(snapshot, cursor=cursor).validate(declaration.family)
         args = (
-            *(("--snapshot", snapshot) if snapshot is not None else ()),
-            *(("--cursor", cursor) if cursor is not None else ()),
+            *((f"--snapshot={snapshot}",) if snapshot is not None else ()),
+            *((f"--cursor={cursor}",) if cursor is not None else ()),
         )
         data = self._run(
             "content-discover", "--source", self._source, "--snapshot-version", "1",

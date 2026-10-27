@@ -176,7 +176,8 @@ package versions, and requires delta v1's existing scope contract. Omission,
 `[]` or supported-future-only snapshot versions retain the legacy full syntax;
 malformed declarations refuse negotiation. A capable new caller uses the existing
 `content-discover --source SOURCE --snapshot-version 1` verb and appends
-`--snapshot TOKEN --cursor CURSOR` on continuation. It does not send these flags
+`--snapshot=TOKEN --cursor=CURSOR` on continuation. Attached values preserve
+opaque tokens that begin with `-`. It does not send these flags
 to a provider that has not advertised support and never retries legacy syntax
 after a failed negotiated call.
 

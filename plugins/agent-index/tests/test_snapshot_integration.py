@@ -159,5 +159,6 @@ def test_external_snapshot_resumes_through_native_two_model_engine(
     assert paths.count() == 2
     assert IndexState.load(config.state_file).sources["alias"].last_commit == "snapshot-tip"
     assert PendingCrawls(paths).sources() == []
-    assert sum("--snapshot" not in call and "--snapshot-version" in call
+    assert sum(not any(arg.startswith("--snapshot=") for arg in call)
+               and "--snapshot-version" in call
                for call in receiver.calls()) == 1

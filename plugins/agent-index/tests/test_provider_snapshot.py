@@ -99,8 +99,17 @@ def test_ordinary_delta_does_not_invoke_advertised_full_snapshot(tmp_path):
     ]
 
 
-def test_complete_snapshot_restarts_at_acknowledged_page_without_store_effects(tmp_path):
+@pytest.mark.parametrize("snapshot,cursor", [
+    ("immutable-generation", "history"), ("-snapshot", "--cursor-value"),
+])
+def test_complete_snapshot_restarts_at_acknowledged_page_without_store_effects(
+    tmp_path, snapshot, cursor,
+):
     receiver = snapshot_receiver(tmp_path)
+    pages = receiver.config["snapshot_pages"]
+    pages["first"]["snapshot"] = snapshot
+    pages["first"]["cursor"] = cursor
+    pages[cursor] = {**pages.pop("history"), "snapshot": snapshot}
     receiver.config["fail_snapshot"] = True
     connector = receiver.connector()
     paths = PathIndex(tmp_path / "paths.db")
@@ -121,7 +130,7 @@ def test_complete_snapshot_restarts_at_acknowledged_page_without_store_effects(t
         collect(connector)
     scope = recovery_scope("alias", connector)
     pending = PendingCrawls(paths).read_payload("alias", scope)
-    assert json.loads(pending)["cursor"] == "history"
+    assert json.loads(pending)["cursor"] == cursor
     assert state.sources["alias"].last_commit == "base"
     assert paths.count() == 3
     receiver.config["fail_snapshot"] = False
@@ -142,10 +151,10 @@ def test_complete_snapshot_restarts_at_acknowledged_page_without_store_effects(t
         ["content-current-commit", "--source", "forge"],
         ["content-discover", "--source", "forge", "--snapshot-version", "1"],
         ["content-discover", "--source", "forge", "--snapshot-version", "1",
-         "--snapshot", "immutable-generation", "--cursor", "history"],
+         f"--snapshot={snapshot}", f"--cursor={cursor}"],
         ["content-current-commit", "--source", "forge"],
         ["content-discover", "--source", "forge", "--snapshot-version", "1",
-         "--snapshot", "immutable-generation", "--cursor", "history"],
+         f"--snapshot={snapshot}", f"--cursor={cursor}"],
     ]
 
 
