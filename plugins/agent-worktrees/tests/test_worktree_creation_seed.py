@@ -96,6 +96,11 @@ def test_create_worktree_core_with_no_seed_has_execution_admission_fence(
 
     result = m._create_worktree_core(config)
 
+    assert Path(result["launch"]["record_path"]) == (
+        tmp_path / "tracking" / f'{result["worktree"]["id"]}.yaml'
+    )
+    assert type(result["launch"]["pane_shell_version"]) is int
+    assert result["launch"]["pane_shell_version"] == 1
     assert "--interactive" not in result["launch"]["cmd"]
     assert "--admission-only" in result["launch"]["cmd"]
     assert result["launch"]["cmd"][-2:] == ["--", "copilot"]

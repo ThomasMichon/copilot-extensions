@@ -983,6 +983,8 @@ def _create_worktree_core(
         result["launch"] = {
             "action": "exec", "work_dir": worktree_path, "cmd": launch_cmd, "env": env,
             "worktree_id": worktree_id, "post_exit": True, "no_mux": no_mux,
+            "record_path": str(record.yaml_path),
+            "pane_shell_version": 1,
             "seed_claimed": False, "seed_pending": staged_seed is not None,
             "seed_id": staged_seed.seed_id if staged_seed else None,
             "seed_kind": staged_seed.kind if staged_seed else None,

@@ -11,7 +11,6 @@ The only sanctioned full walk of the state root is the explicit
 
 from __future__ import annotations
 
-import base64
 import json
 import os
 import platform
@@ -22,7 +21,7 @@ from pathlib import Path, PureWindowsPath
 import yaml
 
 from . import activity, mux_creation
-from .sessions_pane_args import cleanup_mux_pane_args, file_mux_pane_cmd
+from .sessions_pane_args import cleanup_mux_pane_args, file_mux_pane_cmd, prompt_controls
 from .sessions_pane_retire import (
     _mux_bin,
     _mux_last_window_guard,  # noqa: F401 -- re-export for tests
@@ -1683,8 +1682,6 @@ _IDENTITY_ENV_VARS = ("WORKTREE_PROJECT", "WORKTREE_ID")
 # CreateProcess, so the multi-word prompt travels as base64 to the pane wrapper.
 # A receipt token lets the parent verify that the wrapper decoded and appended
 # the real argument before declaring the successor seeded.
-_INITIAL_PROMPT_B64_FLAG = "--aw-prompt-b64"
-_INITIAL_PROMPT_RECEIPT_B64_FLAG = "--aw-prompt-receipt-b64"
 _LEGACY_RUNTIME_DIR = ".agent-worktrees"  # marketplace-isolation: allow legacy-compatibility
 _LEGACY_BIN_DIR = "~/.agent-worktrees/bin"  # marketplace-isolation: allow legacy-compatibility
 
@@ -1767,6 +1764,8 @@ def _mux_pane_cmd(
     pane_wrapper: str | None = None,
     initial_prompt: str | None = None,
     prompt_receipt: str | None = None,
+    mux_bin: str | None = None,
+    session_name: str | None = None,
 ) -> list[str]:
     """Build the in-pane command vector shared by new-window and new-session.
 
@@ -1780,29 +1779,27 @@ def _mux_pane_cmd(
     no safe place after psmux to reconstruct the multi-word prompt, so failing
     the spawn is safer than opening an unseeded successor.
     """
-    controls: list[str] = []
-    if initial_prompt is not None and not prompt_receipt:
-        raise RuntimeError("initial prompt transport requires a receipt token")
-    if prompt_receipt:
-        receipt_encoded = base64.b64encode(prompt_receipt.encode("utf-8")).decode("ascii")
-        controls += [_INITIAL_PROMPT_RECEIPT_B64_FLAG, receipt_encoded]
-    if initial_prompt is not None:
-        encoded = base64.b64encode(initial_prompt.encode("utf-8")).decode("ascii")
-        controls = [_INITIAL_PROMPT_B64_FLAG, encoded, *controls]
+    controls = prompt_controls(initial_prompt, prompt_receipt)
     wrapper = pane_wrapper
-    if wrapper is None and not is_tmux:
+    if wrapper is None:
         from .manager_launch_cli import _usable_worktree_manager_launcher_dir
 
         launch_dir = _usable_worktree_manager_launcher_dir()
         if launch_dir is not None and all(
             (launch_dir / name).is_file()
-            for name in ("pane-wrapper.ps1", "pane-launch.ps1")
+            for name in (("pane-wrapper.sh",) if is_tmux else ("pane-wrapper.ps1", "pane-launch.ps1"))
         ):
-            wrapper = str(launch_dir / "pane-wrapper.ps1")
+            wrapper = str(launch_dir / ("pane-wrapper.sh" if is_tmux else "pane-wrapper.ps1"))
     if wrapper is None:
         name = "pane-wrapper.sh" if is_tmux else "pane-wrapper.ps1"
         wrapper = os.path.expanduser(f"{_LEGACY_BIN_DIR}/{name}")
     if wrapper and os.path.isfile(wrapper) and os.access(wrapper, os.R_OK):
+        from .session_shell import prepare_for_mux
+
+        wrapper, boundary_controls = prepare_for_mux(
+            worktree_id, wrapper, is_tmux=is_tmux, mux_bin=mux_bin, session_name=session_name,
+        )
+        controls = [*boundary_controls, *controls]
         if is_tmux:
             clean: list[str] = ["env"]
             for var in _IDENTITY_ENV_VARS:
@@ -1866,6 +1863,8 @@ def build_mux_new_window_argv(
         pane_wrapper=pane_wrapper,
         initial_prompt=initial_prompt,
         prompt_receipt=prompt_receipt,
+        mux_bin=mux_bin,
+        session_name=session_name,
     )
 
     # No ``--`` separator: mux option parsing stops at the first non-option
@@ -1912,6 +1911,8 @@ def build_mux_new_session_argv(
         pane_wrapper=pane_wrapper,
         initial_prompt=initial_prompt,
         prompt_receipt=prompt_receipt,
+        mux_bin=mux_bin,
+        session_name=sess,
     )
     return argv
 

@@ -99,3 +99,8 @@ The operator selected the structured-form value:
 The option's full label was:
 
 > Authorize controlled closure and relaunch after backups and launcher qualification, preserving resumable session state
+## Operator - exact-set mux restoration and command entry points
+
+> Once you have the new Mux wrapper, it should be pretty straightforward to each existing Mux pane on the target machine and then replace it with the new wrapper process. You'll just need to note which worktrees are currently active you can restore that exact set, properly resuming back into their associated sessions.
+>
+> I'd like it if `<repo> worktrees copilot --worktree-id ____` was the straightforward "launch this terminal into the mux session for the target worktree, resuming or re-attaching as appropriate". And we need a command which can simply create/restore the mux session for a worktree without attaching the current terminal, so other systems can leverage it to resume work.

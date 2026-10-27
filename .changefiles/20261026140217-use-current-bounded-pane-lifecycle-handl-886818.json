@@ -1,0 +1,9 @@
+{
+  "comment": "Use current bounded pane lifecycle handlers with exact native exit fencing and defer optional picker discovery",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

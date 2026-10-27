@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 from agent_procutil import no_window_kwargs
 
-from worktree_manager import companion_runtime, mux_daemon, mux_daemon_cli, mux_mapping_registry
+from worktree_manager import companion_runtime, mux_daemon, mux_daemon_cli, mux_discovery, mux_mapping_registry
 from worktree_manager.__main__ import main
 
 from _manager_process_fixture import synthetic_runtime
@@ -101,6 +101,9 @@ def test_register_cli_pane_uses_native_identity(tmp_path, monkeypatch, capsys, p
     monkeypatch.setattr(mux_mapping_registry, "default_root", lambda: tmp_path)
     monkeypatch.setattr(mux_daemon, "ensure_daemon_running", lambda *args, **kwargs: True)
     monkeypatch.setattr(mux_daemon, "publish_live_observation", lambda *args, **kwargs: {"applied": True})
+    monkeypatch.setattr(mux_discovery, "run_mux_child", lambda *args, **kwargs: SimpleNamespace(
+        returncode=0, stdout=f"{pane}\t0\tmanaged\t$7:100\tworkspace\n",
+    ))
     assert main(["mux-daemon", "register", "--project=example", "--worktree-id=one",
                  "--mux-session=managed", "--mux-bin=tmux", "--mapping-revision=1",
                  "--worktree-path=workspace", "--session-incarnation=$7:100",
@@ -312,7 +315,7 @@ def test_posix_launcher_captures_cli_only_at_creation(tmp_path, created, expecte
 @pytest.mark.parametrize("case", [
     "same", "new-incarnation", "new-session", "new-path", "new-binary",
     "missing", "dead", "duplicate", "native-wrong-incarnation",
-    "unavailable", "ambiguous-incumbent", "no-incumbent", "missing-incarnation",
+    "unavailable", "multiple-incumbent", "no-incumbent", "missing-incarnation",
 ])
 def test_reconnect_preserves_only_proven_incumbent_cli(monkeypatch, case):
     payload = {
@@ -333,7 +336,7 @@ def test_reconnect_preserves_only_proven_incumbent_cli(monkeypatch, case):
         row += row
     elif case == "native-wrong-incarnation":
         row = row.replace("$7:100", "$8:200")
-    elif case == "ambiguous-incumbent":
+    elif case == "multiple-incumbent":
         incumbent["panes"].append({"pane_id": "%99", "role": "cli", "live": True})
     elif case == "missing-incarnation":
         payload["session_incarnation"] = ""
@@ -347,9 +350,11 @@ def test_reconnect_preserves_only_proven_incumbent_cli(monkeypatch, case):
         return SimpleNamespace(returncode=1 if case == "unavailable" else 0, stdout=row)
 
     monkeypatch.setattr(mux_daemon_cli, "run_mux_child", native)
-    assert mux_daemon_cli._reconnect_cli_panes(payload) == (
-        incumbent["panes"] if case in {"same", "unavailable", "duplicate"} else []
-    )
+    monkeypatch.setattr(mux_discovery, "run_mux_child", native)
+    expected = incumbent["panes"] if case in {"same", "unavailable", "duplicate"} else []
+    if case == "multiple-incumbent":
+        expected = incumbent["panes"][:1]
+    assert mux_daemon_cli._reconnect_cli_panes(payload) == expected
     if calls:
         command, kwargs = calls[0]
         assert command[1:5] == ["list-panes", "-s", "-t", "=managed"]
@@ -363,9 +368,11 @@ def test_register_reconnect_retains_cli_but_new_incarnation_clears_it(tmp_path, 
     monkeypatch.setattr(mux_mapping_registry, "default_root", lambda: tmp_path)
     monkeypatch.setattr(mux_daemon, "ensure_daemon_running", lambda *args, **kwargs: True)
     monkeypatch.setattr(mux_daemon, "publish_live_observation", lambda *args, **kwargs: {"applied": True})
-    monkeypatch.setattr(mux_daemon_cli, "run_mux_child", lambda *args, **kwargs: SimpleNamespace(
-        returncode=0, stdout="%42\t0\tmanaged\t$7:100\n",
-    ))
+    def native(command, **kwargs):
+        suffix = "\tworkspace" if "pane_current_path" in command[-1] else ""
+        return SimpleNamespace(returncode=0, stdout=f"%42\t0\tmanaged\t$7:100{suffix}\n")
+    monkeypatch.setattr(mux_daemon_cli, "run_mux_child", native)
+    monkeypatch.setattr(mux_discovery, "run_mux_child", native)
     base = ["mux-daemon", "register", "--project=example", "--worktree-id=one",
             "--worktree-path=workspace", "--mux-session=managed", "--mux-bin=psmux"]
     assert main([*base, "--session-incarnation=$7:100", "--cli-pane=%42"]) == 0

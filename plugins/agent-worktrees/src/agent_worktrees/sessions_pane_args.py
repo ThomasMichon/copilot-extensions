@@ -1,7 +1,8 @@
-"""One-shot file transport for Windows mux pane arguments."""
+"""Native prompt controls and one-shot Windows mux argument transport."""
 
 from __future__ import annotations
 
+import base64
 import json
 import tempfile
 import time
@@ -11,6 +12,19 @@ from . import config, output
 from ._installation_context_base import _is_link_or_junction
 
 PANE_ARGS_MAX_AGE = 24 * 60 * 60
+
+
+def prompt_controls(initial_prompt: str | None, prompt_receipt: str | None) -> list[str]:
+    if initial_prompt is not None and not prompt_receipt:
+        raise RuntimeError("initial prompt transport requires a receipt token")
+    controls = []
+    if prompt_receipt:
+        receipt_encoded = base64.b64encode(prompt_receipt.encode("utf-8")).decode("ascii")
+        controls += ["--aw-prompt-receipt-b64", receipt_encoded]
+    if initial_prompt is not None:
+        encoded = base64.b64encode(initial_prompt.encode("utf-8")).decode("ascii")
+        controls = ["--aw-prompt-b64", encoded, *controls]
+    return controls
 
 
 def sweep_mux_pane_args() -> None:
