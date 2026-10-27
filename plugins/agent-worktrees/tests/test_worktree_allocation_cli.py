@@ -94,7 +94,7 @@ def test_remote_named_inspect_and_ack_cross_real_finite_interpreter_boundary(rec
     monkeypatch.setattr(remote.cfg, "load_project_config", creator_project)
     monkeypatch.setattr(remote.cfg, "load_machines_yaml", creator_registry)
     monkeypatch.setattr(remote, "resolve_machine_selection", lambda *a: SimpleNamespace(
-        entry=SimpleNamespace(ssh_ready=True),
+        entry=SimpleNamespace(ssh_ready=True, key=admission.target["machine"]),
         target=SimpleNamespace(logical_machine=admission.target["machine"]),
     ))
     monkeypatch.setattr(remote, "resolve_ssh_target", lambda *a: ("receiving-alias", "bash"))

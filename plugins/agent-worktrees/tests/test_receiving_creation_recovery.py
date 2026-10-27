@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import json
+import sqlite3
 import sys
 import time
 from threading import Event
@@ -22,7 +24,10 @@ from test_worktree_allocation_receiver import request
 
 @pytest.mark.parametrize("operation", ["create", "inspect"])
 @pytest.mark.parametrize("no_pair", [True, False])
-def test_crash_after_first_save_recovers_same_child_and_nonce(receiver, monkeypatch, operation, no_pair):
+@pytest.mark.parametrize("expected_identity", [True, False])
+def test_crash_after_first_save_recovers_same_child_and_nonce(
+    receiver, monkeypatch, operation, no_pair, expected_identity,
+):
     config, admission, records = receiver
     admission.target["options"]["no_pair"] = no_pair
     original = tracking.create_new_record
@@ -42,7 +47,9 @@ def test_crash_after_first_save_recovers_same_child_and_nonce(receiver, monkeypa
         worktree_creation.git_ops, "create_worktree",
         lambda *a, **k: pytest.fail("recovery must not create another primary child"),
     )
-    recovered = receive(operation, request(receiver), config)
+    recovered = receive(
+        operation, request(receiver, saved[0].to_dict() if expected_identity else None), config,
+    )
     assert recovered["status"] == "allocated" and recovered["allocation_finished"] is True
     assert recovered["identity"] == saved[0].to_dict()
     assert creation_requests.inspect(config, admission.key)["status"] == "complete"
@@ -138,6 +145,58 @@ def test_absent_receipt_never_repairs_changed_identity(receiver, field, value):
     with pytest.raises(execution_spaces.ExecutionSpaceError):
         execution_spaces.require_record_mutation(record, config)
     assert not record.receiving_allocation_present
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_reverse_receipt_recovery_is_indexed_and_bounded_with_retained_history(receiver, monkeypatch, legacy):
+    config, admission, records = receiver
+    created = receive("create", request(receiver), config)
+    record = tracking.load_record(next(records.glob("*.yaml")))
+    record.receiving_allocation = None
+    record.receiving_allocation_present = False
+    path = records.parent / "workspace-creation.sqlite3"
+    with sqlite3.connect(path) as connection:
+        connection.executemany(
+            "INSERT INTO creations VALUES (?, 1, ?, 'complete', ?)",
+            (
+                (
+                    f"unrelated-{index}", json.dumps({"receiving_allocation": {"origin": f"other/p/{index}"}}),
+                    json.dumps({"creation_nonce": f"unrelated-{index}"}),
+                )
+                for index in range(10000)
+            ),
+        )
+        if legacy:
+            connection.execute(f"DROP INDEX {creation_requests.RECEIVING_IDENTITY_INDEX}")
+    assert receiving.recover_missing(record, records)
+    assert record.receiving_allocation["identity"] == created["identity"]
+    with sqlite3.connect(path) as connection:
+        plan = connection.execute(
+            "EXPLAIN QUERY PLAN SELECT key_digest, version, facts, status, worktree FROM creations "
+            "WHERE json_extract(facts, '$.receiving_allocation.origin')=? "
+            "AND json_extract(worktree, '$.creation_nonce')=?",
+            (admission.origin, record.creation_nonce),
+        ).fetchall()
+    assert any("SEARCH creations USING INDEX creations_receiving_identity" in row[3] for row in plan)
+    assert not any("SCAN" in row[3] for row in plan)
+    monkeypatch.setattr(
+        creation_requests, "_connection",
+        lambda *a, **k: pytest.fail("ordinary recovery must not reopen a journal schema writer"),
+    )
+    connect = sqlite3.connect
+    instructions = []
+
+    def measured_connect(*args, **kwargs):
+        connection = connect(*args, **kwargs)
+        connection.set_progress_handler(lambda: instructions.append(100) or 0, 100)
+        return connection
+
+    monkeypatch.setattr(receiving.sqlite3, "connect", measured_connect)
+    record.receiving_allocation = None
+    record.receiving_allocation_present = False
+    assert receiving.recover_missing(record, records)
+    assert sum(instructions) < 1000
+    assert record.receiving_allocation["identity"] == created["identity"]
 
 
 @pytest.mark.parametrize("status", ["finalized", "archived"])

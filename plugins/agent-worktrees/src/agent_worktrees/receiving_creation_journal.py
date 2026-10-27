@@ -90,6 +90,15 @@ def note_conclusion(record: tracking.WorktreeRecord, config: cfg.Config) -> None
                 }.items()
             ) or saved.get("creation_nonce") != record.creation_nonce:
                 raise ValueError("cannot retain conclusion for a different receiving incarnation")
+            retained = concluded_identity({
+                "facts": json.loads(row[1]), "status": row[2], "worktree": saved,
+            }, admission)
+            if retained is not None:
+                identity, status = retained
+                if identity != record_identity(record):
+                    raise ValueError("cannot retain conclusion for a different receiving incarnation")
+                if status == "archived" and record.status != "archived":
+                    raise ValueError("cannot downgrade retained archived receiving conclusion")
             receipt = {
                 **({} if row[2] == "pending" else saved),
                 "worktree": worktree, "creation_nonce": record.creation_nonce,

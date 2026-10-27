@@ -99,7 +99,7 @@ def receive(operation: str, payload: object, config: cfg.Config) -> dict:
     if operation not in {"create", "inspect", "confirm", "cancel"}:
         raise ValueError("unsupported receiving allocation operation")
     admission, expected = _request(payload, config)
-    options = _options(admission) if operation == "create" else {}
+    options = _options(admission) if operation == "create" and expected is None else {}
     if operation == "inspect" and creation_requests.inspect(config, admission.key) is None:
         return _response(admission, status="unknown", finished=False)
     digest = hashlib.sha256(admission.key.encode()).hexdigest()
@@ -121,7 +121,7 @@ def _receive(
         if expected is not None:
             raise ValueError("cannot cancel a bound receiving allocation")
         journal.cancel(config, admission)
-    if operation == "create" and exclusive:
+    if operation == "create" and expected is None and exclusive:
         retained = creation_requests.inspect(config, admission.key)
         if retained is not None and retained["status"] == "terminal" and retained["worktree"] == {"cancelled": True}:
             if producer.canonical_json(retained["facts"].get("receiving_allocation")) != producer.canonical_json(admission.to_fields()):

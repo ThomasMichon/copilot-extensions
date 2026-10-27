@@ -33,6 +33,8 @@ space and project; the origin's local configuration never supplies target paths.
 
 Remote origin operations select the protected creator's registered project and
 its machine registry, even when invoked outside a project or from another project.
+The protected machine must match the selected execution entry's exact registered
+key, including custom keys that differ from their physical host's name.
 
 ## Origin responsibility
 
@@ -89,7 +91,10 @@ An acknowledged request supplies `identity` with the exact returned `ref`,
 depends on creator and request ID, **not** token: changing a token conflicts with
 the same operation rather than allocating another child.
 
-Creation-only options are validated for `create`. Invalid options cannot prevent
+Creation-only options are validated for fresh `create`. A non-null expected
+identity restricts `create` to inspecting/recovering that original child: missing
+history is `unknown`, never permission for a replacement allocation.
+Invalid options cannot prevent
 exact-request inspection or safe cancellation before identity reservation.
 
 The core reserves the original ID, path, branch and nonce in the existing journal
@@ -128,6 +133,10 @@ creator, nonce, ID, path and branch. Generic saves preserve that recovered recei
 the journal also retains optional acknowledgement. A **present but malformed**
 receipt is not repaired or ignored. Changed identity or ambiguous evidence cannot
 grant foreign-parent mutation authority.
+Reverse receipt recovery uses an indexed creator/nonce lookup, not a scan of
+retained history on each ordinary save. Creation writers install the additive
+index; an older journal without it receives a one-time index upgrade before
+recovery. Subsequent recovery reads remain read-only.
 
 Actual saved `finalized` or `archived` child state is retained as a conclusion
 tombstone in the original creation journal. It can outlive removal of the child
@@ -139,11 +148,16 @@ is a receiving lifecycle conclusion.
 Retained conclusion also fences later record admission and generic saves:
 an older active snapshot cannot reopen a concluded child, and archived state
 cannot be downgraded to finalized, with or without a preserved receipt field.
+Conclusion transactions also enforce this ordering after taking the SQLite
+writer lock, so a delayed finalized observer cannot overwrite archived evidence.
 
 The current transport invokes only the named receiver over the existing selected
 SSH alias/shell with finite caller-owned process custody. It requires no reverse
 origin connection and accepts no arbitrary remote executable or caller-written
 conclusion. A future transport must preserve the same provider operation.
+Nonzero remote exits retain responsibility and report a bounded, credential-
+redacted receiver message, falling back to sanitized stderr when no usable
+structured message is available.
 
 ## Related
 

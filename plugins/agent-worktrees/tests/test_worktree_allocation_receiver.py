@@ -188,6 +188,69 @@ def test_read_only_unknown_inspection_does_not_create_journal(receiver):
     assert not (Path(records).parent / "workspace-creation.sqlite3").exists()
 
 
+def test_create_with_expected_identity_never_allocates_without_original_history(receiver, monkeypatch):
+    from agent_worktrees import worktree_creation
+
+    config, admission, records = receiver
+    identity = {
+        "ref": f"{admission.target['machine']}/{config.repo_name}/original-child",
+        "creation_nonce": "a1b2c3", "path": str(Path(config.srcroot) / "original-child"),
+        "branch": "worktree/original-child",
+    }
+    monkeypatch.setattr(
+        worktree_creation, "_create_worktree_core",
+        lambda *a, **k: pytest.fail("an expected original identity must never allocate"),
+    )
+    result = receive("create", request(receiver, identity), config)
+    assert result["status"] == "unknown" and not result["allocation_finished"]
+    assert not list(records.glob("*.yaml"))
+    assert not (Path(records).parent / "workspace-creation.sqlite3").exists()
+
+
+def test_create_with_expected_identity_only_inspects_original_even_with_invalid_creation_options(receiver, monkeypatch):
+    from agent_worktrees import worktree_creation
+
+    config, admission, _ = receiver
+    created = receive("create", request(receiver), config)
+    monkeypatch.setattr(
+        worktree_creation, "_create_worktree_core",
+        lambda *a, **k: pytest.fail("expected-identity replay must not enter allocation"),
+    )
+    assert receive("create", request(receiver, created["identity"]), config) == created
+    admission.target["options"] = {"unknown": True}
+    with pytest.raises(ValueError, match="original allocation facts"):
+        receive("create", request(receiver, created["identity"]), config)
+
+
+def test_delayed_finalized_inspector_cannot_downgrade_concurrent_archived_journal(receiver, monkeypatch):
+    config, admission, records = receiver
+    created = receive("create", request(receiver), config)
+    path = next(records.glob("*.yaml"))
+    finalized = tracking.load_record(path)
+    finalized.status = "finalized"
+    tracking.save_record(finalized, path)
+    original = creation_requests._connection
+    interleaved = []
+
+    def concurrent_archive(journal_path):
+        if not interleaved:
+            interleaved.append(True)
+            archived = tracking.load_record(path)
+            archived.status = "archived"
+            tracking.save_record(archived, path)
+        return original(journal_path)
+
+    # Interleave after the inspector validated finalized YAML but before its
+    # journal transaction; the concurrent writer commits archived first.
+    monkeypatch.setattr(creation_requests, "_connection", concurrent_archive)
+    with pytest.raises(ValueError, match="downgrade retained archived"):
+        journal.note_conclusion(finalized, config)
+    row = creation_requests.inspect(config, admission.key)
+    assert journal.concluded_identity(row, admission)[1] == "archived"
+    result = receive("inspect", request(receiver, created["identity"]), config)
+    assert result["status"] == "archived" and result["identity"] == created["identity"]
+
+
 @pytest.mark.parametrize("options", [{"no_pair": 1}, {"unknown": True}, {"kind": "unsupported"}])
 def test_invalid_creation_options_do_not_trap_pre_effect_responsibility(receiver, options):
     config, admission, records = receiver

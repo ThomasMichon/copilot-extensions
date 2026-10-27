@@ -153,6 +153,8 @@ def _require_retained_finality(
 
 def recover_missing(record: tracking.WorktreeRecord, records: Path) -> bool:
     """Old writers may omit a field, but cannot create journal-backed provenance."""
+    from . import creation_requests
+
     if record.receiving_allocation_present or not record.owner_ref or not record.creation_nonce:
         return False
     path = records.parent / "workspace-creation.sqlite3"
@@ -166,8 +168,17 @@ def recover_missing(record: tracking.WorktreeRecord, records: Path) -> bool:
     connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=5)
     try:
         try:
+            if not any(
+                row[1] == creation_requests.RECEIVING_IDENTITY_INDEX
+                for row in connection.execute("PRAGMA index_list(creations)")
+            ):
+                # Legacy journals are upgraded once, never scanned on every
+                # ordinary record save. New creation writers install the index.
+                upgrade = creation_requests._connection(path)
+                upgrade.close()
             rows = connection.execute(
                 "SELECT key_digest, version, facts, status, worktree FROM creations "
+                f"INDEXED BY {creation_requests.RECEIVING_IDENTITY_INDEX} "
                 "WHERE json_extract(facts, '$.receiving_allocation.origin')=? "
                 "AND json_extract(worktree, '$.creation_nonce')=?",
                 (record.owner_ref, record.creation_nonce),
@@ -178,8 +189,6 @@ def recover_missing(record: tracking.WorktreeRecord, records: Path) -> bool:
         connection.close()
     matches = []
     for digest, version, raw_facts, status, raw_saved in rows:
-        from . import creation_requests
-
         if version != creation_requests.SCHEMA_VERSION or status not in {"pending", "complete", "terminal"}:
             raise ValueError("unsupported receiving recovery operation")
         facts, saved = json.loads(raw_facts), json.loads(raw_saved)

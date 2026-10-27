@@ -13,6 +13,7 @@ import stat
 from . import config as cfg, creation_allocation, creation_replay, tracking
 
 SCHEMA_VERSION = 1
+RECEIVING_IDENTITY_INDEX = "creations_receiving_identity"
 
 
 class CreationRequestFailure(RuntimeError):
@@ -117,6 +118,11 @@ def _connection(path: Path) -> sqlite3.Connection:
         "CREATE TABLE IF NOT EXISTS creations ("
         "key_digest TEXT PRIMARY KEY, version INTEGER NOT NULL, facts TEXT NOT NULL, "
         "status TEXT NOT NULL, worktree TEXT)"
+    )
+    connection.execute(
+        f"CREATE INDEX IF NOT EXISTS {RECEIVING_IDENTITY_INDEX} ON creations ("
+        "json_extract(facts, '$.receiving_allocation.origin'), "
+        "json_extract(worktree, '$.creation_nonce'))"
     )
     connection.commit()
     return connection
