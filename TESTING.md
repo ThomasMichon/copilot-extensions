@@ -1315,6 +1315,12 @@ canonicalization controls live in `test_source_profile_derivation.py`; no
 machine certificate-store write or identity override is involved.
 The existing opt-in `wheel_inputs=true` Linux/Windows jobs include both suites;
 their six-minute budget and required unit-only CI roster are unchanged.
+Native acquisition controls additionally prove overlapping TLS transfers,
+selected-order evidence, shared inclusive request/redirect/metadata/wheel-byte
+budgets, and peer settlement plus private-input cleanup after a digest failure.
+Pure worker-ceiling, budget and orchestration controls live in
+`tools/promotion_unit_tests/test_wheel_acquisition_budget.py`; its executor
+boundary is synthetic and does not qualify real overlap or native settlement.
 Native deployment-reader cases also cover `downloadOrigins` parity. A real
 constructor timeout control proves the shared deadline settles its child and
 lease, removes partial inputs and preserves the selected healthy prior.

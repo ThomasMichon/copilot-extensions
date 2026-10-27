@@ -1,6 +1,24 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
+        "tools/promotion_unit_tests/test_wheel_acquisition_budget.py::test_worker_policy_keeps_serial_and_bounded_parallel_selection[1]",
+        "tools/promotion_unit_tests/test_wheel_acquisition_budget.py::test_worker_policy_keeps_serial_and_bounded_parallel_selection[4]",
+        "tools/promotion_unit_tests/test_wheel_acquisition_budget.py::test_worker_policy_keeps_serial_and_bounded_parallel_selection[8]",
+        "tools/promotion_unit_tests/test_wheel_acquisition_budget.py::test_worker_policy_refuses_noninteger_unbounded_or_empty_selection[0]",
+        "tools/promotion_unit_tests/test_wheel_acquisition_budget.py::test_worker_policy_refuses_noninteger_unbounded_or_empty_selection[-1]",
+        "tools/promotion_unit_tests/test_wheel_acquisition_budget.py::test_worker_policy_refuses_noninteger_unbounded_or_empty_selection[True]",
+        "tools/promotion_unit_tests/test_wheel_acquisition_budget.py::test_worker_policy_refuses_noninteger_unbounded_or_empty_selection[9]",
+        "tools/promotion_unit_tests/test_wheel_acquisition_budget.py::test_worker_policy_refuses_noninteger_unbounded_or_empty_selection[8]",
+        "tools/promotion_unit_tests/test_wheel_acquisition_budget.py::test_transfer_budgets_are_shared_inclusive_and_never_partially_reserved[requests-4]",
+        "tools/promotion_unit_tests/test_wheel_acquisition_budget.py::test_transfer_budgets_are_shared_inclusive_and_never_partially_reserved[redirects-2]",
+        "tools/promotion_unit_tests/test_wheel_acquisition_budget.py::test_transfer_budgets_are_shared_inclusive_and_never_partially_reserved[metadata_bytes-12]",
+        "tools/promotion_unit_tests/test_wheel_acquisition_budget.py::test_transfer_budgets_are_shared_inclusive_and_never_partially_reserved[wheel_bytes-13]",
+        "tools/promotion_unit_tests/test_wheel_acquisition_budget.py::test_peer_failure_cancels_further_reservations_without_replacing_the_cause",
+        "tools/promotion_unit_tests/test_wheel_acquisition_budget.py::test_peer_failure_while_waiting_for_budget_lock_cannot_admit_another_request",
+        "tools/promotion_unit_tests/test_wheel_acquisition_budget.py::test_download_orchestration_bounds_workers_and_preserves_input_order[1-3-False]",
+        "tools/promotion_unit_tests/test_wheel_acquisition_budget.py::test_download_orchestration_bounds_workers_and_preserves_input_order[8-1-False]",
+        "tools/promotion_unit_tests/test_wheel_acquisition_budget.py::test_download_orchestration_bounds_workers_and_preserves_input_order[8-3-True]",
+        "tools/promotion_unit_tests/test_wheel_acquisition_budget.py::test_download_reports_original_failure_only_after_pool_settlement",
         "tools/promotion_unit_tests/test_daemon_clock.py::test_domain_binds_boot_and_time_namespace_without_wall_time",
         "tools/promotion_unit_tests/test_daemon_clock.py::test_publication_and_observation_share_absolute_monotonic_bounds",
         "tools/promotion_unit_tests/test_daemon_clock.py::test_unknown_or_invalid_timing_never_falls_back_to_epoch[legacy]",
@@ -2506,6 +2524,7 @@
         "tools/promotion_unit_tests/test_owned_workspace.py::test_bridge_receiving_result_is_usable_while_linkage_is_pending_but_not_unknown_creation"
     ],
     "sources": {
+        "tools/promotion_unit_tests/test_wheel_acquisition_budget.py": "3b84b0f4dde389f1a31c1b8d684576a29fb62e53b9696064749cf20c37ca0cf6",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_clock.py": "6036e8400b8250d7c745907025dd48a99a2441e07e9ffebb8ee0f751c6a2c43c",
         "tools/promotion_unit_tests/test_daemon_clock.py": "8dd13337618d5bf7648124bbe20fba9a8c35e06c0b3fb5db6231859406f187f9",
         "plugins/agent-machines/src/agent_machines/gh_account_prerequisite.py": "d8bada832bbbb3b5bba1aa317efdadd9ab4e65c0fa8862ef25f75e8bcdec9d2f",
@@ -2574,7 +2593,7 @@
         "libs/installer-engine/installer_feed_policy.py": "529d45bd6d72cf36ac9b2c75dc56c98d63ad2b0364a26073ed8e355fd02b3c7d",
         "libs/installer-engine/installer_native_feed.py": "e7e6590d9f35fa7313d50ba685eafab793c7760fd78eb6ae6bc0afaaf9c294be",
         "libs/installer-engine/installer_packaging_seed.py": "1cdca7036d87411d2e30428d717b85dde62c265f69c24989a1a7b8e868266b74",
-        "libs/installer-engine/installer_wheel_acquisition.py": "799d62f5111bf1106429a07bccbb0ef9fa225df07f1a0ad0f4bd6ff9e428b4fb",
+        "libs/installer-engine/installer_wheel_acquisition.py": "7292db0e5d4331448e3ab94f80b7a5844813673be5cfea4e04a694f0d5ec7337",
         "libs/installer-engine/installer_wheel_inputs.py": "9bed756f0f00f61dce1d8745800c67eb79c49fcdf81e28cb7150b00200fd3070",
         "libs/installer-engine/installer_wheel_snapshot.py": "8fe0cb747a5e4f293c5b92e3abc5227cac82c9ceb69ea86c0e67049ed158b8a0",
         "libs/lazy-cli-dispatch/src/lazy_cli_dispatch/__init__.py": "3730c088eec04121051bdc6780ad833f5ca32d8142e1593d25e78f4028bf76d6",
@@ -2813,6 +2832,7 @@
         "tools/promotion_unit_tests/test_git_config_transaction.py": "d47c4b32c9ccbffdda2cc3813ae66871970a068be44fddcbde5449230db4da2b"
     },
     "coverage_targets": [
+        "libs/installer-engine/installer_wheel_acquisition.py",
         "libs/installer-engine/installer_native_feed.py",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_clock.py",
         "libs/ssh-manager/src/ssh_manager/config_sources.py",
