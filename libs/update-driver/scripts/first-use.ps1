@@ -4,6 +4,7 @@
 # Installation driver lifecycle contract: ssh-command-v1
 # Installation driver lifecycle contract: logger-command-v1
 # Installation driver lifecycle contract: bridge-command-v1
+# Installation driver lifecycle contract: dispatch-first-use-v1
 param(
     [Parameter(Mandatory)][string]$Root,
     [Parameter(Mandatory)][string]$Payload,
@@ -53,6 +54,7 @@ switch -CaseSensitive ($plugin) {
     'agent-codespaces' { $prefix = 'AGENT_CODESPACES' }
     'agent-logger' { $prefix = 'AGENT_LOGGER' }
     'agent-bridge' { $prefix = 'AGENT_BRIDGE' }
+    'agent-dispatch' { $prefix = 'AGENT_DISPATCH' }
     default { throw 'Owning payload does not declare the fixed first-use provision recipe.' }
 }
 if ($InstallerAction -ceq 'stamp-provision' -and $plugin -cne 'agent-ssh') {
@@ -71,7 +73,8 @@ if ($plugin -ceq 'agent-logger') {
         }
     }
 }
-if ($plugin -ceq 'agent-bridge') {
+if ($plugin -cin @('agent-bridge', 'agent-dispatch')) {
+    $label = if ($plugin -ceq 'agent-bridge') { 'Bridge' } else { 'Dispatch' }
     foreach ($helper in @(
         'installer-engine.ps1', 'installer-engine.sh',
         'installer_engine.py', 'installer_engine_process.py', 'runtime_launcher.py',
@@ -79,18 +82,34 @@ if ($plugin -ceq 'agent-bridge') {
         'installer_dependency_policy.py', 'installer_dependency_config.py',
         'installation-context\installation_context.py',
         'installation-context\installation-context.ps1', 'installation-context\installation-context.sh',
-        'install.ps1', 'install.sh', 'repair-scheduled-task.ps1',
+        'install.ps1', 'install.sh',
         'versioned_runtime_native.ps1', 'versioned_runtime.py',
         'versioned_runtime_construction.py', 'versioned_runtime_source.py',
         'versioned_runtime_publication.py', 'versioned_runtime_leases.py'
     )) {
         if (-not [IO.File]::Exists((Join-Path $Payload "scripts\$helper"))) {
-            throw 'Bridge first use requires its complete materialized installation helpers.'
+            throw "$label first use requires its complete materialized installation helpers."
+        }
+    }
+    $ownHelpers = if ($plugin -ceq 'agent-bridge') { @('repair-scheduled-task.ps1') } else {
+        @('installer-instance-reconcile.ps1', 'installer-instance-reconcile.sh',
+          'source-runtime.ps1', 'source-runtime.sh', 'supervisor-lifecycle.ps1', 'base-python.ps1',
+          'runtime-gate.ps1', 'runtime-gate.sh', 'resolve-runtime.ps1', 'resolve-runtime.sh')
+    }
+    foreach ($helper in $ownHelpers) {
+        if (-not [IO.File]::Exists((Join-Path $Payload "scripts\$helper"))) {
+            throw "$label first use requires its complete materialized installation helpers."
         }
     }
 }
-if ($plugin -cin @('agent-ssh', 'agent-codespaces', 'agent-logger', 'agent-bridge')) {
-    $label = @{ 'agent-ssh' = 'SSH'; 'agent-codespaces' = 'CodeSpaces'; 'agent-logger' = 'Logger'; 'agent-bridge' = 'Bridge' }[$plugin]
+if ($plugin -ceq 'agent-dispatch' -and (
+    $invocation.installerLifecycle -isnot [bool] -or -not $invocation.installerLifecycle -or
+    $invocation.windowsCatalogShim -isnot [string] -or $invocation.windowsCatalogShim -cne 'cmd'
+)) {
+    throw 'Dispatch first use requires its native lifecycle and CMD catalog declaration.'
+}
+if ($plugin -cin @('agent-ssh', 'agent-codespaces', 'agent-logger', 'agent-bridge', 'agent-dispatch')) {
+    $label = @{ 'agent-ssh' = 'SSH'; 'agent-codespaces' = 'CodeSpaces'; 'agent-logger' = 'Logger'; 'agent-bridge' = 'Bridge'; 'agent-dispatch' = 'Dispatch' }[$plugin]
     $sshDeclaration = @{
         legacyRuntimeRoot = '.' + $plugin
         payloadRootEnv = $prefix + '_PAYLOAD_ROOT'
@@ -111,7 +130,7 @@ if ($plugin -cin @('agent-ssh', 'agent-codespaces', 'agent-logger', 'agent-bridg
         throw "$label first use requires its declared native runtime gate."
     }
 }
-if ($plugin -cin @('agent-codespaces', 'agent-logger', 'agent-bridge') -and (
+if ($plugin -cin @('agent-codespaces', 'agent-logger', 'agent-bridge', 'agent-dispatch') -and (
     (Test-Path ("Env:" + $prefix + '_INSTALLATION_ID')) -or
     $RuntimeRoot -ine (Join-Path $env:USERPROFILE ('.' + $plugin)) -or
     -not (

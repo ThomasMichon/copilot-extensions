@@ -484,6 +484,42 @@ integer and macOS `seconds:microseconds` birth identities. The native
 companion-lifecycle node above exercises that same lock through concurrent
 creation recovery and launch, rather than replacing it with a test double.
 
+## Optional Dispatch fixed recipes
+
+The manual `installation-context-full.yml` portfolio `dispatch-recipes` qualifies
+only Dispatch's canonical installed payload and default legacy runtime root on
+native Windows and Ubuntu. Bounded independent packets cover Python/native
+no-write refusals, exact `stamp`/`provision` action custody, source replacement,
+deferred real stamping, and actual cold construction after the original caller's
+Job/group is closed. The original ordinary receipt must complete before any
+follower is submitted. Module/distribution identity and the real payload and
+ordinary installed help consumers are checked against the completed slot.
+Separate native packets cover equivalent concurrent callers, healthy immutable
+reuse, preservation across a failed new candidate, unavailable accepted source,
+and an explicitly tolerated supervisor-disable failure with visible diagnostics.
+Safe consumers retain unrelated failed/pending queue history.
+Source-loss qualification invokes the already-selected installed runtime
+directly; it does not claim that the unchanged primary publisher can resolve
+an unavailable legacy payload. Ordinary help fronts are checked while their
+own source remains available.
+
+Task/unit registration and the Windows installer's otherwise auto-starting
+health probe use explicitly synthetic, isolated effects. The source-only health
+adapter is applied before acceptance and construction, never to a completed
+slot; actual CLI help remains unchanged. Inspect S4U/startup coordinator
+registration and the label-free disabled supervisor on Windows, and the real
+generated user units plus intercepted systemctl operations on Linux. No host
+task, unit, registry entry, firewall rule or coordinator daemon is created.
+Linux retains native compilation tools but exposes no host Python or UV.
+Acknowledged owners, foundation, queue and kernel custody settle before cleanup.
+
+Retained Bridge recipe controls cover the common admission-helper loop.
+Existing 35-minute job, 900-second native case, 1080-second runner and 2 GiB
+temporary-storage bounds remain unchanged. Platform/explicit-native skips are
+not acceptance. This portfolio does not adopt Dispatch's ordinary cold command
+publishers, hooks, snapshots/copies, cells/custom roots, explicit installers,
+macOS, live serving or rollout.
+
 ## Optional Bridge selected-source snapshots
 
 The manual `installation-context-full.yml` portfolio `bridge-snapshots` qualifies

@@ -660,7 +660,7 @@ canonical queued request receipts.
 
 The additive `scripts/first-use.ps1` and `scripts/first-use.sh` front doors
 support the owning Agent Vault, Agent Pull Requests, Agent SSH, Agent CodeSpaces,
-Agent Logger and Agent Bridge payloads' existing legacy
+Agent Logger, Agent Bridge and Agent Dispatch payloads' existing legacy
 **direct `provision`** and **`stamp`** actions. Namespaced installation recipes refuse before
 queue or plugin mutation until separately qualified. Vault's cold payload command
 and generated primary command use this recipe; the latter delegates to its
@@ -684,6 +684,26 @@ actual materialized installation and installed CLI origin with isolated
 disabled config, native enabled/disabled/unknown registration adapters and
 caller loss. Adapter observations do not establish live host registration or
 serving readiness; no real CodeSpace or connection is needed.
+
+Dispatch's fixed `stamp`/`provision` prerequisite admits only its canonical
+installed payload and default legacy root, exact direct command/module and CMD
+catalog declarations, native installer lifecycle, and complete canonical
+Python/native helpers. No service override is added: `provision` performs the
+existing full native install on both Windows and Linux, including coordinator
+and label-gated supervisor reconciliation. `stamp` defers construction and
+native services. Its existing staging owner freezes the complete accepted
+source before executing; source/root/project/action and the ordinary result
+remain bound to the same request. Foreign execution/routing hints cannot select
+another operation, runtime, coordinator or configuration. Snapshot/copy sources,
+cells/custom roots, compound actions and nested submissions refuse before
+acquisition or queue/plugin writes.
+The manual `dispatch-recipes` portfolio qualifies real cold construction and
+installed module/distribution/help consumers, original caller Job/group loss,
+and synthetic isolated task/unit effects. The Windows source-only health
+protocol is adapted before acceptance, never after immutable completion;
+it does not prove live coordinator serving. Ordinary command/bootstrap
+publishers, selected snapshots, explicit installers, scoped publication,
+serving, deployment and rollout remain separate, unadopted surfaces.
 
 Bridge's fixed `stamp`/`provision`/`install` recipes admit its canonical
 installed payload and default legacy root, required direct command/module

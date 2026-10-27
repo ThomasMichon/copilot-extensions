@@ -29,6 +29,7 @@ on:
           - bridge-commands
           - bridge-contracts
           - bridge-binding
+          - dispatch-recipes
           - dispatch-binding
           - promotion-controls
           - pane-argv
@@ -39,6 +40,82 @@ permissions:
   contents: read
 
 jobs:
+  dispatch-recipes-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'dispatch-recipes'
+    name: Dispatch recipes (Ubuntu, ${{ matrix.packet.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        packet: &dispatch-recipe-packets
+          - name: python-refusals
+            file: test_first_use_dispatch.py
+            select: refusal and python-api
+          - name: native-policy-refusals
+            file: test_first_use_dispatch.py
+            select: refusal and native-front and (client-only or no-self or pinned or managed or malformed or custom-root or cell or nested or dispatcher or module)
+          - name: native-source-refusals
+            file: test_first_use_dispatch.py
+            select: refusal and native-front and not (client-only or no-self or pinned or managed or malformed or custom-root or cell or nested or dispatcher or module)
+          - name: recipe-controls
+            file: test_first_use_dispatch.py
+            select: not refusal and not actual
+          - name: deferred-stamp
+            file: test_first_use_dispatch.py
+            select: actual and stamp
+          - name: cold-original
+            file: test_first_use_dispatch.py
+            select: original_provision
+          - name: concurrent
+            file: test_first_use_dispatch.py
+            select: actual and concurrent
+          - name: reuse-failed-source
+            file: test_first_use_dispatch.py
+            select: reuse_failed
+          - name: tolerated-supervisor
+            file: test_first_use_dispatch.py
+            select: tolerated_supervisor
+          - name: bridge-python-refusals
+            file: test_first_use_bridge.py
+            select: refusal and False
+          - name: bridge-native-refusals
+            file: test_first_use_bridge.py
+            select: refusal and True
+          - name: bridge-recipe-controls
+            file: test_first_use_bridge.py
+            select: not refusal and not actual
+    env:
+      UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps: &dispatch-recipe-steps
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify one bounded Dispatch recipe packet
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/${{ matrix.packet.file }}
+          -k "${{ matrix.packet.select }}" --test-timeout 900 --timeout 1080
+  dispatch-recipes-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'dispatch-recipes'
+    name: Dispatch recipes (Windows, ${{ matrix.packet.name }})
+    runs-on: windows-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        packet: *dispatch-recipe-packets
+    env:
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps: *dispatch-recipe-steps
   bridge-commands-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'
     name: Bridge commands (Ubuntu, ${{ matrix.packet.name }})

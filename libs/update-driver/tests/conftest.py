@@ -94,6 +94,7 @@ def owning_context(area, monkeypatch):
         *provision.CODESPACES_CONTEXT_KEYS,
         *provision.LOGGER_CONTEXT_KEYS,
         *provision.BRIDGE_CONTEXT_KEYS,
+        *provision.DISPATCH_CONTEXT_KEYS,
         "AGENT_VAULT_VALIDATED_CONTEXT", "AGENT_PULL_REQUESTS_VALIDATED_CONTEXT",
         "AGENT_PULL_REQUESTS_ACTION", "AGENT_PULL_REQUESTS_FORCE",
         "AGENT_PULL_REQUESTS_INSTALL_DIR", "UPDATE_DRIVER_WITNESS",
@@ -106,6 +107,11 @@ def owning_context(area, monkeypatch):
         "AGENT_BRIDGE_VALIDATED_CONTEXT", "AGENT_BRIDGE_PAYLOAD_ROOT",
         "AGENT_BRIDGE_ACTION", "AGENT_BRIDGE_DRY_RUN", "AGENT_BRIDGE_FORCE",
         "AGENT_BRIDGE_CONFIG_DIR", "AGENT_BRIDGE_INSTALL_DIR",
+        "AGENT_DISPATCH_VALIDATED_CONTEXT", "AGENT_DISPATCH_PAYLOAD_ROOT",
+        "AGENT_DISPATCH_ACTION", "AGENT_DISPATCH_DRY_RUN", "AGENT_DISPATCH_FORCE",
+        "AGENT_DISPATCH_CONFIG_DIR", "AGENT_DISPATCH_INSTALL_DIR",
+        "AGENT_DISPATCH_ROUTING_DIR", "AGENT_DISPATCH_RUN_DIR",
+        "AGENT_DISPATCH_COMMAND_MODULE",
         "COPILOT_PROJECT_DIR", "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT",
     ):
         monkeypatch.delenv(key, raising=False)
@@ -293,6 +299,47 @@ def owning_bridge(owning_codespaces):
             ) / name
             shutil.copyfile(source, path)
     return payload, installation.with_name(".agent-bridge"), project
+
+
+@pytest.fixture
+def owning_dispatch(owning_codespaces):
+    payload, installation, project = owning_codespaces
+    payload = Path(shutil.copytree(payload, payload.with_name("agent-dispatch")))
+    for name in ("plugin.json", "pyproject.toml", "scripts/install.ps1", "scripts/install.sh"):
+        path = payload / name
+        path.write_text(path.read_text().replace(
+            "agent-codespaces", "agent-dispatch",
+        ).replace("agent_codespaces", "agent_dispatch").replace(
+            "AGENT_CODESPACES", "AGENT_DISPATCH",
+        ), encoding="utf-8")
+    controls = ("ACTION", "DRY_RUN", "FORCE", "PAYLOAD_ROOT", "VALIDATED_CONTEXT",
+                "CONFIG_DIR", "INSTALL_DIR", "ROUTING_DIR", "RUN_DIR", "COMMAND_MODULE")
+    windows = payload / "scripts/install.ps1"
+    windows.write_text(windows.read_text().replace(
+        "[IO.Directory]::CreateDirectory",
+        "if (" + " -or ".join("$env:AGENT_DISPATCH_" + key for key in controls) +
+        ") { exit 94 }\n[IO.Directory]::CreateDirectory", 1,
+    ), encoding="utf-8")
+    posix = payload / "scripts/install.sh"
+    posix.write_text(posix.read_text().replace(
+        "mkdir -p", "[[ " + " && ".join(
+            '-z "${AGENT_DISPATCH_' + key + ':-}"' for key in controls
+        ) + " ]]\nmkdir -p", 1,
+    ), encoding="utf-8")
+    repository = Path(__file__).resolve().parents[3]
+    shutil.copyfile(
+        repository / "plugins/agent-dispatch/payload-invocation.json",
+        payload / "payload-invocation.json",
+    )
+    for name in provision.DISPATCH_HELPERS:
+        path = payload / "scripts" / name
+        if not path.exists():
+            source = repository / (
+                "libs/installer-engine" if name in ("installer-engine.ps1", "installer-engine.sh")
+                else "plugins/agent-dispatch/scripts"
+            ) / name
+            shutil.copyfile(source, path)
+    return payload, installation.with_name(".agent-dispatch"), project
 
 
 @pytest.fixture
