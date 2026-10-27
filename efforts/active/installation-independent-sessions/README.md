@@ -883,3 +883,24 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   invocation allowed 600 seconds for preparation plus execution while retaining
   its 300-second test budget. It completed in 73.34 seconds, including cleanup.
   Python lint, module-size and whitespace checks passed.
+
+### 2026-10-26 - Complete native-removal prerequisite merged
+
+- #9143 merged as `883cdccb2cef63f131c371018aa2486aaf3e217a` after
+  exact-head Copilot Comment review without open or inline findings and
+  required green CI. All 21 review threads were resolved; the managed
+  Maintainer exception covered only the additional CODEOWNER vote.
+- The [qualification record](<../source-managed-runtime-installs/journal/2026/10.26 runtime-removal.md>)
+  records supported finite adapters, original process admission, actual native
+  writer forms, shared transaction custody, packaged closure, external Python
+  selection and safety-option refusal. These are source prerequisites, not
+  actual whole-suite installation absence or interactive survival.
+- Re-read the Plan and Validation Plan after merge. No complete acceptance
+  item changes. Return to the preserved original-session baseline through
+  supported native removal/reinstall from clean merged source, with backups,
+  exact original process identities and protected current/fresh transport
+  closure first. A plugin update or Main promotion is not required for that
+  direct source-driven attempt; actual effects still require applicable consent.
+- Launch-owned wrappers/current boundary handlers, native Windows survival,
+  maintenance-aware YAML standby and released installed acceptance remain
+  open. This effort stays Active.
