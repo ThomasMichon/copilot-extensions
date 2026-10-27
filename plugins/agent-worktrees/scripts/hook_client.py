@@ -714,10 +714,7 @@ def _external_update_driver_active(home: Path, python: Path) -> bool:
     try:
         recorded = lock.get("start_time")
         if recorded:
-            identity = _load_file(
-                Path(__file__).resolve().parents[1]
-                / "src" / "agent_worktrees" / "locks.py"
-            )
+            identity = _load_sibling("hook_process_identity.py")
             if identity is None:
                 return False
             current = identity.process_start_time(pid)
