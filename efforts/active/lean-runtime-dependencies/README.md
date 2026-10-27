@@ -368,7 +368,13 @@ transfer without acceptance by a named tracked objective.
   Core, covering PATH composition, absent prerequisites, discovery errors and
   actual caller failure routing. Both installed command names resolve to Core
   in that venue; this is not Windows PowerShell or Windows platform acceptance.
-  Native Windows qualification and review remain pending for this source slice.
+  The same source-frozen standalone packet also passed 24 cases with no skips
+  on actual Windows PowerShell 5.1 and PowerShell 7.6.9. Its original bounded
+  process owner drained all Jobs and disposed the controller wrapper. The
+  canonical sources were unchanged; no compiler, registry/DOS-map control,
+  installation or host-setting change was used. This qualifies the selector
+  and finite failure paths, not the remaining SDK or desktop acceptance.
+  Review remains pending for this source slice.
 - Installer-engine vendoring, the 13-plugin installation contract, documentation
   consistency and touched-Python lint passed. No installed payload, system PATH,
   service or provisioning policy changed. Phase 7 and both complete effort
