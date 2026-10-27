@@ -63,9 +63,14 @@ This effort composes with the
 [governed artifact effort](../governed-python-artifact-promotion/README.md)
 and the
 [Runtime Assembly vision](../../../visions/plugin-services/runtime-assembly/README.md).
-Public distribution remains first-party-only; third-party dependencies come
-from the installation's approved sources. Nothing here authorizes redistribution
-of a qualified third-party exception through a new public bundle.
+The existing public artifact publisher produces first-party artifacts; that
+implementation boundary is not a legal prohibition on third-party bundling.
+Aggregate bundles may include third-party components when their actual licenses
+and existing source/distribution authority permit it, preserving required
+notices, matching source access and replacement rights where applicable.
+Nothing here authorizes republishing a qualified private-source exception or
+treating a public download/SPDX label as redistribution approval. Keep this to
+actual obligations, not a separate licensing approval framework.
 
 ## Request
 

@@ -589,6 +589,12 @@ file must byte-match its static setuptools source path, the Python member set
 must be complete, and declared package data must be present. Generated console
 and extension entry points must exactly match the project declarations;
 top-level and license metadata are source-checked as well. This verification
+also requires a source project's existing `LICENSE` notice to survive byte for
+byte in the wheel's modern or legacy dist-info license location. Independently
+packaged repository MIT projects carry the existing repository notice in their
+own project roots; other/upstream notices are not replaced. This is source-data
+preservation, not a license classification or redistribution-approval service.
+This verification
 supports the repository's `src` package layouts and explicitly declared flat
 `py-modules`. Generated code, custom discovery/mapping and compiled outputs
 without a verified source-to-wheel mapping fail closed; they are not silently

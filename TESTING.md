@@ -1,5 +1,12 @@
 # Testing copilot-extensions
 
+`tools/promotion_unit_tests/test_artifact_license_notices.py` checks that the
+existing source-bound wheel verifier refuses omitted or changed source notices,
+accepts modern and legacy license locations, and preserves historical source
+layouts. The real artifact/native lane exercises ordinary backend inclusion
+from each independently packaged project's `LICENSE`; no package code or legal
+approval engine is added by the pure notice controls. copilot-extensions
+
 How to run the plugin test suites, explicit development checks, and the
 **opt-in end-to-end smoke tests** that require real infrastructure.
 

@@ -551,6 +551,14 @@ def validate_wheel_sources(
             expected_top = {name.split("/")[0].removesuffix(".py") for name in required_python}
             if set(bundle.read(top_name).decode("utf-8").split()) != expected_top:
                 raise PromotionArtifactError("wheel top-level modules differ from candidate source")
+        notice = source_dir / "LICENSE"
+        if (notice.exists() or notice.is_symlink()) and (
+            notice.is_symlink() or not notice.is_file() or notice.stat().st_size == 0
+            or not any(hashes.get(prefix + relative) == _digest(notice) for relative in (
+                "licenses/LICENSE", "LICENSE",
+            ))
+        ):
+            raise PromotionArtifactError("wheel omits or changes the source LICENSE notice")
         generated = {"WHEEL", "METADATA", "RECORD", "entry_points.txt", "top_level.txt"}
         for name in hashes:
             if not name.startswith(prefix) or name[len(prefix):] in generated:
