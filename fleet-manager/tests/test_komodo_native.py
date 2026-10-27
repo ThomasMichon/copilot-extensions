@@ -42,7 +42,8 @@ def _docker_protocol(args: list[str], directory: str) -> tuple[int, str]:
     if args[0] == "info":
         return 0, json.dumps({"id": "daemon-a", "os": "linux", "architecture": "aarch64"})
     if args[:2] == ["compose", "version"]:
-        return 0, "2.39.4"
+        version = root / "compose-version"
+        return 0, version.read_text() if version.exists() else "2.39.4"
     if args[:2] == ["image", "inspect"]:
         overrides = root / "image-digests.json"
         digests = json.loads(overrides.read_text()) if overrides.exists() else {}
@@ -260,14 +261,18 @@ def test_fixed_profile_uses_only_official_pinned_images_and_borrowed_secret_file
         material.docker_socket)
 
 
+@pytest.mark.parametrize("version", [
+    "2.39.4", "v2.39.4", "5.1.4", "v5.1.4", "5.1.4+vendor.1", "5.0.0", "5.10.12+vendor-build.001",
+])
 def test_native_prerequisites_use_actual_selected_daemon_images_and_scrub_ambient_controls(
-    native_rig: Any, monkeypatch: Any,
+    native_rig: Any, monkeypatch: Any, version: str,
 ) -> None:
     monkeypatch.setenv("DOCKER_HOST", "tcp://wrong-owner.invalid")
     monkeypatch.setenv("DOCKER_CONTEXT", "wrong-context")
     monkeypatch.setenv("DOCKER_AUTH_CONFIG", "private-ambient-material")
     monkeypatch.setenv("PATH", "/untrusted-client-tools")
     rig = native_rig
+    (rig["directory"] / "compose-version").write_text(version)
     images = rig["native"].prerequisites(rig["selected"], rig["material"], deadline=time.monotonic() + 10)
     assert {name: image.identity for name, image in images.items()} == {
         "core": "sha256:" + "a" * 64, "mongo": "sha256:" + "c" * 64,
@@ -285,6 +290,22 @@ def test_native_prerequisites_use_actual_selected_daemon_images_and_scrub_ambien
     other = KomodoNative(replace(rig["tooling"], daemon_id="other-daemon"))
     with pytest.raises(PlanError, match="physical host"):
         other.prerequisites(rig["selected"], rig["material"], deadline=time.monotonic() + 10)
+
+
+@pytest.mark.parametrize("version", [
+    "1.29.2", "3.0.0", "4.1.0", "6.0.0", "5.1", "5.1.4-rc.1", "5.1.4\n6.0.0", "unavailable",
+    "5.01.4", "5.1.04", "5.1.4+.", "5.1.4+vendor..1", "5.1.4+.vendor", "5.1.4+vendor.",
+])
+def test_native_prerequisites_refuse_unqualified_compose_before_image_or_effect(
+    native_rig: Any, version: str,
+) -> None:
+    rig = native_rig
+    (rig["directory"] / "compose-version").write_text(version)
+    with pytest.raises(PlanError, match="admitted Compose"):
+        rig["native"].prerequisites(rig["selected"], rig["material"], deadline=time.monotonic() + 10)
+    calls = [json.loads(line) for line in (rig["directory"] / "calls.jsonl").read_text().splitlines()]
+    assert len(calls) == 2 and calls[-1]["argv"][4:] == ["compose", "version", "--short"]
+    assert not (rig["directory"] / "effects").exists()
 
 
 def test_fixed_native_effect_executes_real_owned_child_without_build_pull_or_cleanup(native_rig: Any) -> None:
