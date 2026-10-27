@@ -71,9 +71,11 @@ An empty list/missing source means no successful source publication was observed
 not proof that no partial store work happened.
 
 Observation is execution-context-local and restricted to the same domain.
-It neither holds exclusion across model/network calls nor delays, combines or
-rewinds existing transaction generations. Several transactions can therefore
-advance a generation within one reported application. Interleaved writers in
+It does not itself hold exclusion or change generation policy. The shared
+engine's [prepared application](prepared-application.md) finishes model/network
+calls before entering one outer source-aware writer, so normal multi-batch
+source application reports at most one logical commit. Other callers can still
+perform several independent transactions within an observation. Interleaved writers in
 other contexts do not enter its counts; its generation is not a source-exclusive
 watermark. These results must never authorize cache reuse, source advancement
 or recovery. Existing witnessed projection/FTS coverage remains authoritative.
@@ -94,8 +96,12 @@ completion emits no successful mutation summary. Earlier completed source
 applications remain in a returned partial round. A retry reports only the writes
 it performs; compatible writes from an earlier failed attempt may be reused.
 This is not exactly-once lifetime accounting across crashes or transactional
-rollback of a whole source delta. One-generation-per-delta publication and
-whole-store physical I/O qualification remain separate work.
+rollback of a whole source delta. Preparation counts actual engine calls only
+in the attempt that makes them; replaying cached vectors does not invent new
+embedding calls. Pair candidate/reuse counts still describe application-time
+coverage selection, which preparation failure may never reach. File lookups
+include both preparation's selected checkpoint snapshot and the pre-writer
+freshness check. Whole-store physical I/O qualification remains separate work.
 
 `tests/test_work_counts.py` qualifies native single/two-model rounds in both
 storage layouts, unchanged/replayed content, metadata reuse, changed text,

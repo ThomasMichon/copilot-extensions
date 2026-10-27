@@ -36,8 +36,14 @@ Each successful source publication also reports one mutation summary from
 participating outer writer commits, after cursor save and pending-journal
 completion. Observation does not hold a store fence over embedding calls.
 Legacy counts remain unavailable, failed attempts emit no success summary,
-and replay counts only work performed in the current attempt. Transaction
-generations are unchanged; this is not atomic whole-delta publication.
+and replay counts only work performed in the current attempt.
+
+Native multi-model source application uses
+[durable prepared embeddings](prepared-application.md) subordinate to that
+same acquisition journal. Model calls finish outside the reader/writer fence,
+then one source-aware writer boundary publishes the delta with at most one
+logical-generation transition. Existing effect uncertainty and
+store-before-checkpoint ordering remain; this is not cross-store rollback.
 
 Participating source stores can explicitly prepare
 [bounded chunk-ID point reads](chunk-id-index.md). This additive Python path

@@ -10,6 +10,7 @@ from agent_index.indexing.work_counts import current_counts
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    import numpy as np
     from agent_index.chunking.base import Chunk
     from agent_index.engine.client import EngineClient
     from agent_index.index_config import ModelProfile
@@ -46,6 +47,7 @@ def embed_and_store_batch(
     force: bool = False,
     before_embed: Callable[[], None] | None = None,
     skip_identical_content: bool = False,
+    prepared_vectors: Callable[[str, list[Chunk]], np.ndarray] | None = None,
 ) -> int:
     from agent_index.store.content_mutations import coalesce_chunks
 
@@ -67,6 +69,7 @@ def embed_and_store_batch(
             sub, multi_store, multi_clients, model_profiles,
             stream_batch_size=stream_batch_size, coverage=coverage,
             force=force, before_embed=before_embed,
+            prepared_vectors=prepared_vectors,
         )
     return total
 
@@ -83,6 +86,7 @@ def embed_and_store_pairs(
     before_embed: Callable[[], None] | None = None,
     bounded: bool = False,
     after_store: Callable[[VectorTable, int], None] | None = None,
+    prepared_vectors: Callable[[str, list[Chunk]], np.ndarray] | None = None,
 ) -> int:
     """Write routed vector pairs without content writes; return rows upserted.
 
@@ -130,15 +134,18 @@ def embed_and_store_pairs(
                 continue
             model_texts = [c.content for c in model_chunks]
             try:
-                if before_embed:
+                if before_embed and prepared_vectors is None:
                     before_embed()
                 if coverage and table is not None and not bounded:
                     coverage.invalidate(table, model_chunks)
-                if model_counts is not None:
+                if model_counts is not None and prepared_vectors is None:
                     model_counts.embed_calls += 1
                     model_counts.chunks_submitted += len(model_chunks)
-                model_vectors = client.embed_texts(model_texts)
-                if model_counts is not None:
+                model_vectors = (
+                    prepared_vectors(model_id, model_chunks) if prepared_vectors is not None
+                    else client.embed_texts(model_texts)
+                )
+                if model_counts is not None and prepared_vectors is None:
                     model_counts.chunks_embedded += len(model_vectors)
                 if bounded:
                     written = multi_store.upsert_vectors(

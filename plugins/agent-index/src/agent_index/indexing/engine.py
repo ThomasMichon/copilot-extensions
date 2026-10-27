@@ -21,7 +21,7 @@ import json
 import logging
 import os
 import time
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -45,6 +45,8 @@ if TYPE_CHECKING:
     from agent_index.indexing.gc import SourceRetirementPolicy
     from agent_index.indexing.manifest import CrawlManifest
     from agent_index.indexing.path_index import PathIndex
+    from agent_index.indexing.pending_crawl import ApplyManifest
+    from agent_index.indexing.prepared_application import PreparedApplication
     from agent_index.indexing.runner import ProgressCallback
     from agent_index.indexing.state import IndexState
     from agent_index.sources.base import FileEntry, SourceConnector
@@ -634,11 +636,34 @@ def _index_source(
     from agent_index.indexing.pending_crawl import recover_source, recovery_scope
     from agent_index.indexing.source_mutations import source_publication
     from agent_index.sources import get_connector
+    from agent_index.store.multi_model_store import MultiModelStore
 
     if connector is None:
         connector = get_connector(source_name, **(connector_kwargs or {}))
+    scope = recovery_scope(source_scope or source_name, connector)
+    application = partial(
+        _apply_source_manifest, source_name, config=config, state=state,
+        path_index=path_index, multi_store=multi_store, multi_clients=multi_clients,
+        progress_cb=progress_cb, resume_since=resume_since, before_store=before_store,
+    )
+
+    def prepare(*, manifest: CrawlManifest, full: bool) -> ApplyManifest:
+        from agent_index.indexing.prepared_application import PreparedApplication
+
+        if manifest.is_empty:
+            return application
+        prepared = PreparedApplication(
+            manifest, scope=scope, config=config, paths=path_index, store=multi_store,
+            clients=multi_clients, full=full, resume_since=resume_since,
+            before_embed=before_store, progress_cb=progress_cb,
+        )
+        return partial(
+            _publish_prepared_manifest, application=application,
+            store=multi_store, prepared=prepared,
+        )
+
     return recover_source(
-        source_name, scope=recovery_scope(source_scope or source_name, connector), state=state,
+        source_name, scope=scope, state=state,
         state_file=config.state_file, paths=path_index, full=full, family=connector.source_name,
         publication=partial(source_publication, multi_store, source_name),
         acquire=partial(
@@ -646,12 +671,24 @@ def _index_source(
             full=full, progress_cb=progress_cb, connector_kwargs=connector_kwargs,
             connector=connector, source_scope=source_scope, change_hints=change_hints,
         ),
-        apply=partial(
-            _apply_source_manifest, source_name, config=config, state=state,
-            path_index=path_index, multi_store=multi_store, multi_clients=multi_clients,
-            progress_cb=progress_cb, resume_since=resume_since, before_store=before_store,
-        ),
+        apply=application,
+        prepare=prepare if isinstance(multi_store, MultiModelStore) else None,
     )
+
+
+def _publish_prepared_manifest(
+    *, manifest: CrawlManifest, full: bool, application: Callable[..., tuple[int, int, int]],
+    store: MultiModelStore, prepared: PreparedApplication,
+) -> tuple[int, int, int]:
+    from contextlib import nullcontext
+
+    domain = store._source_domain
+    with domain.operation(store.content_store.db) if domain is not None else nullcontext():
+        prepared.require_current_checkpoints()
+        if prepared.batch_count == 0 and not manifest.deletions:
+            return application(manifest=manifest, full=full, prepared=prepared)
+        with domain.write(store.content_store.db) if domain is not None else nullcontext():
+            return application(manifest=manifest, full=full, prepared=prepared)
 
 
 def _apply_source_manifest(
@@ -667,6 +704,7 @@ def _apply_source_manifest(
     progress_cb: ProgressCallback | None = None,
     resume_since: float | None = None,
     before_store: Callable[[], None] | None = None,
+    prepared: PreparedApplication | None = None,
 ) -> tuple[int, int, int]:
     """Index a single data source using the four-phase pipeline.
 
@@ -729,6 +767,7 @@ def _apply_source_manifest(
             force=full,
             before_store=before_store,
             chunker_revision=getattr(config, "chunker_revision", "1"),
+            prepared=prepared,
         )
 
     # ── Phase 3: Reconcile ──────────────────────────────────
@@ -822,6 +861,7 @@ def _embed_and_store_files(
     force: bool = False,
     before_store: Callable[[], None] | None = None,
     chunker_revision: str = "1",
+    prepared: PreparedApplication | None = None,
 ) -> tuple[int, set[tuple[str, str]]]:
     """Phase 2: Chunk files, embed via the engine, upsert to stores.
 
@@ -834,22 +874,15 @@ def _embed_and_store_files(
     set of ``(source, path)`` this run actually (re)stored — excluding skipped
     files, so Phase 3 stale-cleanup does not delete their still-valid chunks.
     """
-    from agent_index.chunking import get_chunker
     from agent_index.indexing.embedding_coverage import EmbeddingCoverage
-    from agent_index.indexing.fingerprints import file_fingerprint
-    from agent_index.store.content_mutations import coalesce_chunks
+    from agent_index.indexing.file_batches import file_batches
 
     coverage = EmbeddingCoverage(path_index)
     batch: list[Chunk] = []
     total_chunks = 0
     total_stored = 0
     stored_files: set[tuple[str, str]] = set()
-    skipped = 0
     counts = current_counts()
-    resume_index = path_index.get_entries([(entry.source, entry.path) for entry in files])
-    if counts is not None:
-        counts.checkpoint_lookup_keys += len(files)
-        counts.checkpoint_rows_found += len(resume_index)
     # Files whose chunks are in the current (not-yet-flushed) batch, with their
     # content hash + chunk count — checkpointed to path_index on each flush. A
     # file's chunks never straddle a flush (a whole file is added before the
@@ -865,7 +898,8 @@ def _embed_and_store_files(
             keep_ids = retained.get((source, path), set())
             reconcile_file(source, path, keep_ids)
             coverage.retain(source, path, keep_ids)
-        path_index.mark_indexed_batch(pending)
+        path_index.mark_indexed_batch([(source, path, digest, size)
+                                     for source, path, digest, size in pending])
         if counts is not None:
             counts.checkpoint_rows_written += len(pending)
         pending = []
@@ -880,60 +914,39 @@ def _embed_and_store_files(
         if progress_cb:
             progress_cb.check_cancelled()
         path_index.invalidate_batch([(s, p) for s, p, _h, _n in pending])
-        total_stored += _embed_and_store_batch(
-            batch, multi_store, multi_clients,
-            model_profiles,
-            stream_batch_size=stream_batch_size,
-            coverage=coverage, force=force, before_embed=before_store,
-            skip_identical_content=not force,
-        )
+        if prepared is None:
+            total_stored += _embed_and_store_batch(
+                batch, multi_store, multi_clients, model_profiles,
+                stream_batch_size=stream_batch_size, coverage=coverage,
+                force=force, before_embed=before_store, skip_identical_content=not force,
+            )
+        else:
+            from agent_index.indexing.embedding_batch import embed_and_store_batch
+
+            total_stored += embed_and_store_batch(
+                batch, multi_store, multi_clients, model_profiles,
+                stream_batch_size=stream_batch_size, coverage=coverage, force=force,
+                skip_identical_content=not force, prepared_vectors=prepared.vectors,
+            )
         if pending:
             _checkpoint()
         batch = []
         if progress_cb:
             progress_cb.batch_complete(total_stored, total_chunks)
 
-    for entry in files:
-        if progress_cb:
-            progress_cb.check_cancelled()
-
-        chash = file_fingerprint(entry, model_profiles, chunker_revision=chunker_revision)
-
-        prior = resume_index.get((entry.source, entry.path))
-        if prior is not None and prior[0] == chash and (
-            not force or (resume_since is not None and prior[1] >= resume_since)
-        ):
-            skipped += 1
-            if counts is not None:
-                counts.files_reused += 1
-            continue
-
-        chunker, _lang = get_chunker(entry.path)
-        try:
-            chunks = chunker.chunk(entry.content, entry.path, source=entry.source)
-        except Exception:
-            logger.warning("Failed to chunk %s", entry.path, exc_info=True)
-            raise
-
-        if getattr(entry, "metadata", None):
-            chunks = [replace(c, metadata=entry.metadata) for c in chunks]
-        chunks = coalesce_chunks(chunks)
-        if counts is not None:
-            counts.files_chunked += 1
-            counts.chunks_generated += len(chunks)
-
-        batch.extend(chunks)
-        total_chunks += len(chunks)
-        pending.append((entry.source, entry.path, chash, len(chunks)))
-        stored_files.add((entry.source, entry.path))
-
-        if len(batch) >= stream_batch_size:
-            _flush()
-
-    # Final partial batch
-    _flush()
+    batches = prepared.batches() if prepared is not None else file_batches(
+        files, path_index=path_index, model_profiles=model_profiles,
+        stream_batch_size=stream_batch_size, force=force, resume_since=resume_since,
+        chunker_revision=chunker_revision, progress_cb=progress_cb,
+    )
+    for planned in batches:
+        batch, pending = planned.chunks, planned.checkpoints
+        total_chunks += len(batch)
+        stored_files.update((source, path) for source, path, _hash, _count in pending)
+        _flush()
 
     msg = f"  Embedded: {total_chunks} chunks generated, {total_stored} stored"
+    skipped = len(files) - len(stored_files)
     if skipped:
         msg += f" ({skipped} compatible file checkpoints reused)"
     print(msg)
