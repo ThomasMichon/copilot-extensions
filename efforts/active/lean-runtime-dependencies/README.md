@@ -375,6 +375,20 @@ transfer without acceptance by a named tracked objective.
   installation or host-setting change was used. This qualifies the selector
   and finite failure paths, not the remaining SDK or desktop acceptance.
   Review remains pending for this source slice.
+- Review identified obsolete expectations in the shared Windows consumer
+  suite. Migrate its prerequisite, real-SDK, home fallback, argument and
+  generation controls rather than remove them. Invalid selector results now
+  retain their distinct error and finite compatibility-guard cleanup.
+  Include changefiles for all nine declared shared installer-engine consumers.
+- Independent empty-host controls on Desktop and Core reproduce their distinct
+  CLR startup-profile writes without executing product code. Refusal snapshots
+  exempt only those two exact runtime files; four focused controls retain
+  detection of product-state changes and neighboring unexpected writes.
+  Native consumer coverage now accounts for all 132 cases: 110 unchanged
+  passing cases retained across the bounded runs plus 22 final focused passes.
+  The standalone selector's 24 cases retain identical executable inputs,
+  yielding 156 cases of current bounded coverage, not a fresh full-suite rerun.
+  Every final Job drained and controller disposed; no host cache policy changed.
 - Installer-engine vendoring, the 13-plugin installation contract, documentation
   consistency and touched-Python lint passed. No installed payload, system PATH,
   service or provisioning policy changed. Phase 7 and both complete effort
