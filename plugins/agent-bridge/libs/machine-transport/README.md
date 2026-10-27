@@ -168,8 +168,8 @@ Consumers must separately prove the receiving project, namespace, ledger and
 retained allocation before writing or replaying. New naming facts do not
 authorize relabeling an admitted allocation, changing its references or
 transferring an incumbent owner. Consumer integration and installed acceptance
-remain tracked by the
-[local-first amendment](../../efforts/active/machine-alias-compatibility-and-locality/manifest-independent-local-identity.md).
+are recorded by the completed
+[local-first amendment](../../efforts/2026/10/26%20machine-alias-compatibility-and-locality/manifest-independent-local-identity.md).
 
 ### Contextual historical aliases
 
