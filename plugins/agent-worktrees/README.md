@@ -36,6 +36,10 @@ configured cells, use the [one-shot PR sweep](docs/pr-sweep.md). Configuration
 inspection is separate from execution, and unavailable cells never become
 empty successful inventories. This adds no watcher or deployment.
 
+The [origin-owned worktree allocation provider](docs/worktree-allocation.md)
+retains creator responsibility before receiving creation and separates optional
+claim acknowledgement from local child admission. It starts no agent.
+
 Resolved machine topology treats native Windows and WSL as independent logical
 machines, conventionally `host` and `host-wsl`. The shared machine owner
 projects legacy combined entries without editing topology or historical

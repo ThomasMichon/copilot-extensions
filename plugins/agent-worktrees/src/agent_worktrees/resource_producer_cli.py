@@ -11,6 +11,9 @@ from . import tracking, worktree_ops_cli
 
 def add_parsers(sub) -> None:
     """Register the producer ABI without provider imports or provisioning."""
+    from . import worktree_allocation_cli
+
+    worktree_allocation_cli.add_parsers(sub)
     parser = sub.add_parser("resource-producer", help="Reserve/fence/bind/inspect/verify-close disposable ownership; JSON stdin/stdout")
     parser.add_argument("operation", choices=("capabilities", "reserve", "begin", "complete", "bind", "inspect", "close"))
     parser.add_argument("--json", action="store_true", required=True)
@@ -43,6 +46,16 @@ def read_input(label: str = "producer") -> dict:
 
 def cmd_resource_relationship(args) -> int:
     from .resource_relationship_cli import cmd_resource_relationship as command
+    return command(args)
+
+
+def cmd_worktree_allocation(args) -> int:
+    from .worktree_allocation_cli import cmd_worktree_allocation as command
+    return command(args)
+
+
+def cmd_worktree_allocation_receive(args) -> int:
+    from .worktree_allocation_cli import cmd_worktree_allocation_receive as command
     return command(args)
 
 

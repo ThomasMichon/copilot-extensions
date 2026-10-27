@@ -21,6 +21,7 @@ _NO_PROJECT_COMMANDS = {
     "knowledge",
     "resource-producer",
     "resource-relationship",
+    "worktree-allocation",
     "reconcile-marketplaces",
     "launch-update",
     "picker",
@@ -71,6 +72,8 @@ def _is_no_project_invocation(args_list: list[str]) -> bool:
         return False
     command = args_list[0]
     if command in _NO_PROJECT_COMMANDS or command.startswith("-"):
+        return True
+    if args_list[:2] == ["worktree-allocation-receive", "capabilities"]:
         return True
     if command == "pr-watch" and len(args_list) > 1 and args_list[1] in (
         "snapshot", "status", "threads", "deliver",

@@ -39,8 +39,8 @@ and selected launch after durable receiving creation, clarifying:
 This supersedes confirmation-before-embodiment, not the pre-effect pending
 obligation, exact-request recovery or ordinary hosting/session/task admission.
 
-#9155 records the initial reviewed architectural intent, and #9169 reviewed the
-execution plan. This amendment specifies the ordered source and validation work
+#9155 records the initial reviewed architectural intent, #9169 reviewed the
+execution plan, and #9179 reviewed the non-blocking revision. This amendment specifies the ordered source and validation work
 before runtime implementation. The decomposition
 below is **agent-recommended realization**, not a new identity, transport,
 credential or lifecycle authority.
@@ -90,19 +90,19 @@ never a fallback to an unowned checkout.
 
 - [x] Land the initial execution/validation amendment before implementing new runtime
   semantics.
-- [ ] Review the operator-selected non-blocking linkage revision before
+- [x] Review the operator-selected non-blocking linkage revision before
   implementing its differing startup and reconciliation semantics.
-- [ ] Define strict, bounded JSON requests/results for origin reservation,
+- [x] Define strict, bounded JSON requests/results for origin reservation,
   receiving creation/inspection, ownership confirmation and original-operation
   recovery. Keep creator, destination, logical request, actual child and session
   identities distinct.
-- [ ] Reuse the origin's existing resource ledger and registered local write
+- [x] Reuse the origin's existing resource ledger and registered local write
   authority for a protected pending allocation. Make exact request replay
   idempotent and changed facts a conflict; no network I/O under its record lock.
-- [ ] Bind the private allocation epoch/capability and qualified receiving
+- [x] Bind the private allocation epoch/capability and qualified receiving
   identity through the existing creation journal. A lost response retains the
   same original operation; do not reinterpret a timeout as absence.
-- [ ] Add receiving record evidence sufficient for its normal lifecycle to
+- [x] Add receiving record evidence sufficient for its normal lifecycle to
   recognize the qualified foreign creator without opening a foreign registry,
   copying its records or weakening ordinary cross-space owner checks.
 - [ ] Permit ordinary embodiment once receiving creation and its original
@@ -134,16 +134,16 @@ never a fallback to an unowned checkout.
 
 ### C. Conclusion and recovery
 
-- [ ] Make pending/unknown allocations block parent conclusion and transfer.
+- [x] Make pending/unknown allocations block parent conclusion and transfer.
   Protect them from generic release, stale full-record saves, disabled gate modes
   and cleanup paths; only the named allocation authority changes their phase.
 - [ ] Preserve the target's normal child finalization/publication and paired
   knowledge requirements. Neither an empty directory nor a clean checkout proves
   the worktree concluded.
-- [ ] Reconcile the origin's obligation from exact receiving lifecycle evidence,
+- [x] Reconcile the origin's obligation from exact receiving lifecycle evidence,
   even when the child directory or process no longer exists. No mandatory
   target-to-origin connection, automatic deletion or age-based release.
-- [ ] Preserve explicit accepted ownership transfer or refuse an unsupported
+- [x] Preserve explicit accepted ownership transfer or refuse an unsupported
   transfer while retaining responsibility. Do not reuse disposable absence or
   retained-conversation retirement as a shortcut.
 - [ ] A previously failed legacy operation is inspected through its original
@@ -163,6 +163,27 @@ never a fallback to an unowned checkout.
 - [ ] Reconcile the preserved legacy attempt, then perform the separately bounded
   native installed-SDK qualification through the now-supported allocator.
   Journal actual resources and outcomes; the parent delivery gate stays open.
+
+## Provider source boundary
+
+The checked source items above are implemented by the
+[owned-worktree provider](../../../plugins/agent-worktrees/docs/worktree-allocation.md):
+protected origin transactions, first-save receiving receipts, original-operation
+recovery, sealed cancellation and retained actual child conclusion. Receiving
+creation is sessionless and local admission does not require claim acknowledgement.
+This is provider preparation, not installed or end-to-end remote allocation.
+
+Focused isolated tests cover the original first-save and ready-checkpoint crash
+boundaries, a live operation owner in another process, omitted versus malformed
+receipts, exact identity and reciprocal-pair refusals, and composition recovery
+without recarving. The required unit packet adds only pure custody/proof decisions
+with production coverage; actual receiving CLI and synthetic SSH/interpreter
+boundaries remain separately selected integration tests.
+
+Ordinary destination selectors, the origin's restart-safe asynchronous linker,
+Bridge/Dispatch migration, real outbound-only/native qualification and release/
+installed acceptance remain open. No source-only checkbox establishes those
+outcomes or closes #5839.
 
 ## Validation Plan
 

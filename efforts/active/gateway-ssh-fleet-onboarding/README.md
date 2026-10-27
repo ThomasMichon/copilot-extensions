@@ -518,9 +518,12 @@ completion is asserted.
   connection requirement.
 - #9169 merged the initial execution plan as
   `413f914f63d0ebde49585c482a09b2c042c7d270`, after current-head Copilot approval
-  and successful required checks. The non-blocking revision requires review
-  before its differing runtime semantics; implementation and qualification
-  remain open.
+  and successful required checks.
+- #9179 merged the non-blocking revision as
+  `1febeb58bb8bfa301e7528c9b9d0e443f4ad4386`, after current-head Copilot approval
+  with no open findings and successful required checks. Implementation,
+  restart-safe reconciliation, consumer integration and qualification remain
+  open; no installed runtime capability or agent launch is claimed.
 
 ### 2026-10-26 - Origin-owned remote allocation architecture and execution slice
 

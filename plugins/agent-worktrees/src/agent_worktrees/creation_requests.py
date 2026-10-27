@@ -13,6 +13,7 @@ import stat
 from . import config as cfg, creation_allocation, creation_replay, tracking
 
 SCHEMA_VERSION = 1
+RECEIVING_IDENTITY_INDEX = "creations_receiving_identity"
 
 
 class CreationRequestFailure(RuntimeError):
@@ -61,7 +62,10 @@ def allocation_facts(config: cfg.Config, **options) -> dict:
         "owner_ref": owner_ref,
         "name": options["name"] if kind == "system" else None,
         "bound_agent": (options["bound_agent"] or "").strip() or None,
-        "no_pair": options["no_pair"] or bool(os.environ.get("AGENT_WORKTREES_NO_PAIR")),
+        "no_pair": (
+            options["no_pair"] if options.get("receiving_allocation") is not None
+            else options["no_pair"] or bool(os.environ.get("AGENT_WORKTREES_NO_PAIR"))
+        ),
         "seed_sha256": hashlib.sha256((options["pending_seed"] or "").encode()).hexdigest(),
         "pending_seed_id": options.get("pending_seed_id"),
         "allocation": (
@@ -71,7 +75,42 @@ def allocation_facts(config: cfg.Config, **options) -> dict:
         # Attempt provenance is evidence about the original allocation, not a
         # logical revision authorizing another one.
         "dispatch_task_id": (options["dispatch_attempt"] or {}).get("task_id"),
+        **({"receiving_allocation": options["receiving_allocation"].to_fields()}
+           if options.get("receiving_allocation") is not None else {}),
     }
+
+
+def inspect(config: cfg.Config, key: str) -> dict | None:
+    """Read retained original-operation evidence without creating a missing journal."""
+    path = cfg.tracking_dir(config.repo_name).parent / "workspace-creation.sqlite3"
+    return inspect_journal(path, key)
+
+
+def inspect_journal(path: Path, key: str) -> dict | None:
+    """Read the exact journal beside an already-resolved child ledger."""
+    if not path.exists():
+        return None
+    digest = hashlib.sha256(key.encode()).hexdigest()
+    connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=5)
+    try:
+        row = connection.execute(
+            "SELECT version, facts, status, worktree FROM creations WHERE key_digest=?", (digest,),
+        ).fetchone()
+        if row is None:
+            return None
+        if row[0] != SCHEMA_VERSION:
+            raise CreationRequestFailure("unsupported", "Unsupported creation journal version")
+        facts = json.loads(row[1])
+        if not isinstance(facts, dict):
+            raise CreationRequestFailure("invalid", "Invalid retained creation facts")
+        return {
+            "facts": facts, "status": row[2],
+            "worktree": json.loads(row[3]) if row[3] is not None else None,
+        }
+    except sqlite3.DatabaseError as exc:
+        raise CreationRequestFailure("invalid", f"Cannot inspect creation journal: {exc}") from exc
+    finally:
+        connection.close()
 
 
 def _connection(path: Path) -> sqlite3.Connection:
@@ -82,6 +121,11 @@ def _connection(path: Path) -> sqlite3.Connection:
         "CREATE TABLE IF NOT EXISTS creations ("
         "key_digest TEXT PRIMARY KEY, version INTEGER NOT NULL, facts TEXT NOT NULL, "
         "status TEXT NOT NULL, worktree TEXT)"
+    )
+    connection.execute(
+        f"CREATE INDEX IF NOT EXISTS {RECEIVING_IDENTITY_INDEX} ON creations ("
+        "json_extract(facts, '$.receiving_allocation.origin'), "
+        "json_extract(worktree, '$.creation_nonce'))"
     )
     connection.commit()
     return connection

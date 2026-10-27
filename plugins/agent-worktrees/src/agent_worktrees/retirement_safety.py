@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -53,3 +55,31 @@ def same_pair(before: WorktreeRecord, after: WorktreeRecord) -> bool:
         after.pair_role,
         after.pair_ref,
     )
+
+
+def delete_retired_pair(
+    record: WorktreeRecord, sibling: WorktreeRecord, path: Path, sibling_path: Path | None,
+) -> bool:
+    """Keep both records until receiving conclusions survive their hard deletion."""
+    from . import paired_claims, receiving_allocation, tracking
+
+    try:
+        if sibling_path is None:
+            raise ValueError("paired retirement has no exact sibling record path")
+        receiving_allocation.recover_missing(record, path.parent)
+        receiving_allocation.recover_missing(sibling, sibling_path.parent)
+        if ref := paired_claims.paired_ref(record):
+            paired_claims.require_clearable(record, ref)
+        record.status = "archived" if record.status == "archived" else "finalized"
+        now = tracking._now_iso()
+        if record.completed_at is None:
+            record.completed_at = now
+        record.reaped_at = now
+        tracking.save_record(record, path=path)
+        receiving_allocation.persist_conclusion(sibling)
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Paired retirement deferred; records retained: %s", exc)
+        return False
+    sibling_path.unlink(missing_ok=True)
+    path.unlink(missing_ok=True)
+    return True

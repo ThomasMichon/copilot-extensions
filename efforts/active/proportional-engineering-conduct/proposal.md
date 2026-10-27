@@ -173,3 +173,29 @@ Destinations did not diverge. Process cost diverged only on the open-ended
 speed task. The guided condition was told to follow the kernel, so this is
 not evidence that an ambient file would produce the same bound. Hold
 projection until a session-injection comparison says otherwise.
+
+## Session-injection comparison
+
+Recorded 2026-10-26. This was an always-on instruction file in one scratch
+session, not a prompt that said to follow the kernel. The control session
+had no such file. Both used the same model and the same commit. The request
+was the open-ended installer-speed shape. It does not authorize projection.
+
+| | Guided | Control |
+|---|---|---|
+| Wall time | about 11 minutes | about 10 minutes |
+| Model requests | 34 | 42 |
+| Destination | Reused an existing fingerprint path: resolve each distinct parent once per call. Per-file checks stayed. Reported a hashing-stage improvement, not a whole-installer claim. | Reused the existing source-snapshot copy loop: bounded parallel copies for larger snapshots, serial for small ones. Existing verification stayed. Reported a source-freezing improvement, not a whole-installer claim. |
+| Unjustified machinery | None added. | None added. |
+| Gates | No push, no pull request, not mute. | Same. |
+
+Destinations diverged. Both stayed inside an existing installer path.
+Neither added a parallel validation layer, chained receipts, redundant
+downloads, or extra refreshes. Process cost did not diverge the way the
+prompt comparison did. The guided session was not faster on the wall clock.
+It used fewer model requests.
+
+Both sessions were told not to push and not to open a pull request, so this
+run does not show that the kernel preserves publication gates. It also does
+not show that the ambient file prevents installer bloat, because the control
+did not bloat either. No harm observed. Hold projection.
