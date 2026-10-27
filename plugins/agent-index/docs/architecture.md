@@ -640,7 +640,10 @@ indexed, explicitly budgeted slice input without changing that default.
 Its [witnessed bucket generations](bucket-item-reads.md#witnessed-bucket-generations)
 track qualified content/vector mutations and canonical tombstones under the same
 clean commit, with bounded sparse overrides and whole-table fallback for
-unqualified transitions. Partial cluster artifact publication is not yet wired.
+unqualified transitions. The additive
+[transactional cluster-slice storage seam](cluster-slices.md) can publish
+selected artifact rows with bounded receipts, but ordinary maintenance does not
+yet select or publish partial slices.
 
 ### Durable acquisition hints (queue contract v1)
 
