@@ -77,6 +77,20 @@ def test_native_round_counts_noop_metadata_edit_and_tombstone(
     assert counts["checkpoint_lookup_keys"] == counts["checkpoint_rows_written"] == 1
     assert counts["content_rows_upserted"] == 1
     assert counts["http"] is None
+    mutations = counts["source_mutations"]["sample:repo"]
+    assert len(mutations) == 1
+    assert mutations[0]["available"] is selected
+    if selected:
+        assert mutations[0]["logical_commits"] == 1 + model_count
+        assert mutations[0]["tables"] == sorted(
+            [config.content_table, *(profile.table_name for profile in profiles.values())],
+        )
+        assert mutations[0]["generation"] is not None
+    else:
+        assert mutations[0] == {
+            "available": False, "write_commits": None, "logical_commits": None,
+            "tables": None, "epoch": None, "generation": None,
+        }
     for model in profiles:
         assert counts["models"][model] == {
             "candidate_chunks": 1, "reused_chunks": 0, "embed_calls": 1,
@@ -90,6 +104,9 @@ def test_native_round_counts_noop_metadata_edit_and_tombstone(
     assert counts["checkpoint_rows_found"] == 1
     assert counts["files_chunked"] == counts["checkpoint_rows_written"] == 0
     assert counts["content_rows_upserted"] == 0 and counts["models"] == {}
+    if selected:
+        assert counts["source_mutations"]["sample:repo"][0]["logical_commits"] == 0
+        assert counts["source_mutations"]["sample:repo"][0]["tables"] == []
 
     delta = SourceDelta(commit="first")
     _, counts = run()
@@ -99,6 +116,8 @@ def test_native_round_counts_noop_metadata_edit_and_tombstone(
     assert counts["models"] == {}
 
     assert counts["cluster_pass_attempts"] == counts["fts_ensure_attempts"] == 0
+    if selected:
+        assert counts["source_mutations"]["sample:repo"][0]["write_commits"] == 0
 
     delta = SourceDelta(
         upserts=[replace(entries[0], metadata={"state": "closed"})], commit="metadata",
@@ -106,6 +125,9 @@ def test_native_round_counts_noop_metadata_edit_and_tombstone(
     metadata, counts = run()
     assert metadata["chunks_total"] == counts["chunks_generated"] == 1
     assert counts["content_rows_upserted"] == 1
+    if selected:
+        assert counts["source_mutations"]["sample:repo"][0]["logical_commits"] == 1
+        assert counts["source_mutations"]["sample:repo"][0]["tables"] == [config.content_table]
     for model in profiles:
         assert counts["models"][model]["reused_chunks"] == 1
         assert counts["models"][model]["embed_calls"] == 0
@@ -124,6 +146,11 @@ def test_native_round_counts_noop_metadata_edit_and_tombstone(
     assert counts["tombstones_acquired"] == counts["file_chunk_ids_deleted"] == 1
     assert counts["files_chunked"] == counts["content_rows_upserted"] == 0
     assert counts["models"] == {}
+    if selected:
+        assert counts["source_mutations"]["sample:repo"][0]["logical_commits"] == 1
+        assert counts["source_mutations"]["sample:repo"][0]["tables"] == sorted(
+            [config.content_table, *(profile.table_name for profile in profiles.values())],
+        )
 
     delta = SourceDelta(upserts=entries, commit="failed")
     fail_embedding = True
@@ -139,12 +166,19 @@ def test_native_round_counts_noop_metadata_edit_and_tombstone(
     assert counts["models"]["a"]["embed_calls"] == 1
     assert counts["models"]["a"]["chunks_embedded"] == 0
     assert counts["models"]["a"]["vector_rows_upserted"] == 0
+    assert counts["source_mutations"] == {}
     fail_embedding = False
     _, counts = run()
     assert counts["content_rows_upserted"] == 0
     assert counts["manifests_acquired"] == 1 and counts["manifests_applied"] == 2
     assert counts["files_chunked"] == counts["files_reused"] == 1
     assert counts["models"]["a"]["vector_rows_upserted"] == 1
+    mutations = counts["source_mutations"]["sample:repo"]
+    assert len(mutations) == 2  # Retained application, then the current acquisition.
+    if selected:
+        assert mutations[0]["logical_commits"] == model_count
+        assert mutations[0]["tables"] == sorted(p.table_name for p in profiles.values())
+        assert mutations[1]["logical_commits"] == 0
 
 
 def test_shared_http_counts_retries_payloads_not_modified_and_json(monkeypatch) -> None:
@@ -183,6 +217,55 @@ def test_shared_http_counts_retries_payloads_not_modified_and_json(monkeypatch) 
     finally:
         session.client.close()
     assert current_counts() is None
+
+
+def test_one_source_result_covers_multiple_batches_without_locking_model_calls(tmp_path, monkeypatch):
+    from agent_index.store.source_layout import initialize_source_store
+
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    config = IndexConfig(
+        data_dir=tmp_path, stream_batch_size=1, cluster_enabled=False,
+        model_profiles={"a": ModelProfile("a", "fixture", dim=2, table_name="vectors_a")},
+    )
+    store = initialize_source_store(config)
+    before = store._source_domain.receipt()["logical_projection"]["generation"]
+    entries = [
+        FileEntry(f"{name}.md", f"Useful {name} text.", "markdown", "sample:repo")
+        for name in ("first", "second")
+    ]
+
+    class Connector:
+        source_name = "sample:repo"
+        recovery_identity = ("fixture",)
+
+        def discover_delta(self, *_args, **_kwargs):
+            return SourceDelta(upserts=entries, commit="first")
+
+    class Client:
+        def embed_texts(self, texts):
+            assert not store._source_domain.writing
+            # A different thread must acquire the real participating reader fence.
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                executor.submit(store.projection_snapshot).result(timeout=5)
+            return np.array([[len(text), 1] for text in texts], dtype=np.float32)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("agent_index.sources.get_connector", lambda *_a, **_k: Connector())
+    runtime = EmbeddingRuntime(lambda _p: Client(), lambda *_a: None, lambda *_a: None,
+                               manage_engines=False)
+    result = engine.run_reindex(
+        source="sample:repo", config=config,
+        source_specs=[engine.SourceSpec("sample:repo", type="sample")],
+        embedding_runtime=runtime,
+    )
+    assert "sources_failed" not in result
+    mutations = result["work_counts"]["source_mutations"]["sample:repo"]
+    assert len(mutations) == 1
+    assert mutations[0]["logical_commits"] == 4
+    assert mutations[0]["generation"] == before + 4
+    assert mutations[0]["tables"] == ["chunks", "vectors_a"]
 
 
 def test_nested_concurrent_and_failed_scopes_do_not_leak() -> None:
