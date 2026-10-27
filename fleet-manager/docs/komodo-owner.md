@@ -154,6 +154,12 @@ custody. Partial failure retains which public keys actually existed; a later
 compatible fixed apply may create missing keys but cannot replace known ones.
 Short positive outfitting budgets remain valid, with proportionate time reserved
 for final native inspection.
+Failure-only reconciliation also accepts mixed updates when every service is
+either the exact retained pre-update incumbent or a strictly validated selected
+replacement. It retains the actual mixed fingerprints and candidate compatibility;
+success still requires the complete selected profile. Mixed native state never
+authorizes credentialed health probes to an unproved selected endpoint, including
+subsequent status calls over its retained failed receipt.
 
 A new admitted convergence can restore missing owned Core/Periphery from
 retained selected storage/configuration while Core is unavailable; native
@@ -178,6 +184,9 @@ released loopback port. Status reports health unavailable; original failure
 settlement treats stopped or incomplete native state as readiness failure.
 An interrupted ACCEPTED attempt retains its original deployment and native
 fingerprints rather than adopting changed bytes on retry.
+Missing or unsafe public identity evidence is an explicit health-blocking status
+drift, including complete-but-unstarted failures and adopted installations.
+Status preserves the failed candidate and does not probe HTTP without that evidence.
 
 Explicit `desired_state: absent` uses the same content-bound operation and
 requires a recorded installation, unchanged declaration apart from desired

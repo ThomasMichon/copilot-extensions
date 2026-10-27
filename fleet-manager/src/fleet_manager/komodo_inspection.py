@@ -41,7 +41,7 @@ def inspect_owner(owner: KomodoOwner, request: OperationIntent, permit: Permit) 
             project=selected.declaration.to_dict()["project"],
         ) as state:
             containers = owner.native.inspect(selected.declaration, selected.material, deadline=deadline)
-            record = owner._baseline(state, selected, containers)
+            record = owner._baseline(state, selected, containers, check_identity=False)
             path = state.root / "node.sqlite"
             receipt = None
             attempt = record["attempt"]
@@ -65,14 +65,27 @@ def inspect_owner(owner: KomodoOwner, request: OperationIntent, permit: Permit) 
             candidate = (accepted == "unknown" and attempt is not None
                          and attempt["request"] == request.to_dict()
                          and attempt["deployment"] == content and "before" in attempt)
+            identity = None
+            if set(containers) == set(SERVICES):
+                try:
+                    identity = identity_digest(selected.material)
+                except PlanError as error:
+                    blockers.append("retained-public-identity-unavailable")
+                    drift_error = str(error)
+                if (identity is not None and selected.adoption
+                        and identity != selected.adopted_public_identity):
+                    blockers.append("retained-storage-credentials-or-identity-changed")
+                    identity = None
             if retained is not None and all(
                 retained["native"].get(name) == value for name, value in fingerprints.items()
             ):
                 installed = set(containers) == set(SERVICES)
                 observed = retained["deployment"]
-                if installed:
+                if installed and retained.get("selected_native") is False:
+                    blockers.append("failed-native-candidate-incomplete-or-mixed")
+                elif installed and identity is not None:
                     if (retained["material"] != selected.material_evidence()
-                            or retained["public_identity"] != identity_digest(selected.material)):
+                            or retained["public_identity"] != identity):
                         blockers.append("retained-storage-credentials-or-identity-changed")
                     else:
                         observed_declaration = KomodoDeclaration.from_dict(
@@ -90,7 +103,8 @@ def inspect_owner(owner: KomodoOwner, request: OperationIntent, permit: Permit) 
                     drift_error = str(error)
                 else:
                     installed, observed = True, content
-                    observed_declaration = selected.declaration
+                    if identity is not None:
+                        observed_declaration = selected.declaration
             elif not containers:
                 installed = False
             else:
@@ -101,8 +115,7 @@ def inspect_owner(owner: KomodoOwner, request: OperationIntent, permit: Permit) 
                     selected, containers,
                     attempt["network_before"] if candidate else retained_network(record, selected),
                     created=bool(candidate and attempt["fixed_profile"]),
-                    pending=bool(retained is not None and "partial_public_keys" in retained
-                                 and installed is False))
+                    pending=bool(retained is not None and "partial_public_keys" in retained))
             except PlanError as error:
                 if owner.native.native_failure is not None:
                     raise

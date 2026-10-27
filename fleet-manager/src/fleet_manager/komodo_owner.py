@@ -103,6 +103,22 @@ def verify_candidate(containers: dict[str, dict[str, Any]], selected: KomodoSele
                   owned=attempt["fixed_profile"], ready=ready)
 
 
+def verify_failed_candidate(containers: dict[str, dict[str, Any]], selected: KomodoSelection,
+                            images: dict[str, KomodoImage], profile: bytes,
+                            attempt: dict[str, Any]) -> bool:
+    if not attempt["fixed_profile"]:
+        verify_candidate(containers, selected, images, profile, attempt, ready=False)
+        return True
+    replacements = {name: item for name, item in containers.items()
+                    if attempt["before"].get(name) != native_fingerprint(item)}
+    verify_native(replacements, selected, images, profile, owned=True, ready=False, complete=False)
+    try:
+        verify_native(containers, selected, images, profile, owned=True, ready=False)
+    except PlanError:
+        return False
+    return True
+
+
 class KomodoOwner:
     """Synchronous caller-owned work; async gateways use their existing settled worker."""
 
@@ -140,8 +156,8 @@ class KomodoOwner:
 
     @staticmethod
     def _baseline(state: KomodoState, selected: KomodoSelection,
-                  containers: dict[str, dict[str, Any]]) -> dict[str, Any]:
-        if (selected.adoption
+                  containers: dict[str, dict[str, Any]], *, check_identity: bool = True) -> dict[str, Any]:
+        if (check_identity and selected.adoption
                 and identity_digest(selected.material) != selected.adopted_public_identity):
             raise PlanError("Komodo adopted native identity changed")
         record = state.read()
@@ -400,13 +416,7 @@ class KomodoOwner:
                 self._preserved_material(record, selected, allow_new_identity=True)
                 profile = selected.profile()
                 complete = set(containers) == set(SERVICES)
-                if complete:
-                    verify_candidate(containers, selected, images, profile, attempt, ready=False)
-                else:
-                    if not attempt["fixed_profile"]:
-                        raise PlanError("Komodo partial failure lacks fixed-profile native custody")
-                    verify_native(containers, selected, images, profile,
-                                  owned=True, ready=False, complete=False)
+                selected_candidate = verify_failed_candidate(containers, selected, images, profile, attempt)
                 network = verify_network(self.native.network(
                     selected.declaration, selected.material, deadline=deadline),
                     selected, containers, attempt["network_before"],
@@ -422,7 +432,9 @@ class KomodoOwner:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise PlanError("Komodo failure inspection requires remaining native deadline")
-                if complete and containers["core"]["State"].get("Running") is True:
+                if selected_candidate and all(
+                    item["State"].get("Running") is True for item in containers.values()
+                ):
                     try:
                         asyncio.run(current_health(
                             selected.declaration, selected.material,
@@ -447,6 +459,7 @@ class KomodoOwner:
                     "reason": "authenticated-readiness-not-established",
                     "selection": selected.receipt_context(),
                     "network": network, "fixed_profile": attempt["fixed_profile"],
+                    "selected_native": selected_candidate,
                 }
                 if not complete or len(keys) != 2:
                     failed["partial_public_keys"] = {name: digest(value) for name, value in keys.items()}

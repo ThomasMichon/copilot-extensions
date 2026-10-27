@@ -161,6 +161,7 @@ def _docker_protocol(args: list[str], directory: str) -> tuple[int, str]:
             if (root / "corrupt-fixed").exists():
                 live["core"]["Config"]["Env"].append("UNSELECTED_SETTING=unexpected")
             if failure.get("fail"):
+                live.update({name: previous[name] for name in failure.get("retain", [])})
                 live = {name: item for name, item in live.items() if name in failure["services"]}
                 if failure.get("unstarted"):
                     for item in live.values():
