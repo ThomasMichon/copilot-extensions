@@ -107,10 +107,16 @@ def prepare_jump_arguments(
     destination_seen = False
 
     def record_destination(value: str) -> None:
-        if "@" in value:
+        user = value.rsplit("@", 1)[0] if "@" in value else None
+        port = None
+        if value.startswith("ssh://"):
+            _host, user, port = _parse_jump(value)
+        if user is not None:
             explicit_options.add("user")
-        if value.startswith("ssh://") and urlsplit(value).port is not None:
+            overrides.setdefault("user", user)
+        if port is not None:
             explicit_options.add("port")
+            overrides.setdefault("port", str(port))
 
     index = 1
     while index < len(args):

@@ -534,6 +534,32 @@ async def test_uri_user_and_port_override_programmatic_fields_after_refresh(monk
     assert proxy_jump._endpoint(selected)[1:] == ("cli-user", 2300)
 
 
+@pytest.mark.parametrize("arguments,user,port", [
+    (("ssh://cli-user@target:2300",), "cli-user", 2300),
+    (("--", "ssh://cli-user@target:2300"), "cli-user", 2300),
+    (("-p2400", "-lfirst-user", "ssh://cli-user@target:2300"), "first-user", 2400),
+    (("ssh://cli-user@target:2300", "-p2400", "-llater-user"), "cli-user", 2300),
+    (("-oPort=2400", "-oUser=first-user", "ssh://cli-user@target:2300"), "first-user", 2400),
+    (("ssh://cli-user@target:2300", "-oPort=2400", "-oUser=later-user"), "cli-user", 2300),
+    (("cli-user@target",), "cli-user", 2200),
+])
+async def test_programmatic_destination_identity_binds_owned_forward(
+    monkeypatch, arguments, user, port,
+):
+    _profiles(monkeypatch, {"jump": _profile("jump")})
+    original = SSHConfig(
+        "target", user="old-user", port=2200, extra_options={"ProxyJump": "jump"},
+    )
+    args, selected = await proxy_jump.prepare_windows_launch(
+        ("ssh", *arguments), original, "ssh",
+    )
+    route = await proxy_jump.resolve_jump_route(selected, "ssh")
+    assert args == ("ssh", *arguments)
+    assert proxy_jump._endpoint(selected)[1:] == (user, port)
+    assert route is not None and route.argv[-2] == f"target:{port}"
+    assert original.user == "old-user" and original.port == 2200
+
+
 @pytest.mark.parametrize("args", [
     ("ssh", "-J"), ("ssh", "-J", ""), ("ssh", "-o", ""),
     ("ssh", "-Jfirst", "-Jsecond", "target"),
