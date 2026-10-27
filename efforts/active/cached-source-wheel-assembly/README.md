@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent reviewed proposal and implementation slices
 - **Created:** 2026-10-27
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/plugin-services/runtime-assembly` features
   `one-verified-acquisition-path` and `complete-or-rejected-generations`
 - **Umbrella issue:** #9290
@@ -78,10 +78,15 @@ not additional operator requirements or authority to bypass admission.
 
 ### Phase 1 - Review the bounded contract
 
-- [ ] Review and merge this proposal before changing the constructor.
+- [x] Review and merge this proposal before changing the constructor.
+  #9291 merged after current-head Copilot approval and required checks.
 - [ ] Reconcile the exact common-helper edit boundary with #8949's owner.
-- [ ] Preserve the explicit-directory rebuild and stale requirements-cache
+- [x] Preserve the explicit-directory rebuild and stale requirements-cache
   negative controls in an isolated, synthetic, source-independent reproduction.
+  `tools/reproduce_source_wheel_cache.py` exercises actual UV offline with an
+  in-tree stdlib-only PEP517 backend and a private empty cache. Native Windows
+  execution observed two explicit builds, then cached requirements reuse and
+  stale source-body reuse. This is characterization, not cache acceptance.
 
 ### Phase 2 - Content-bound construction reuse
 
@@ -141,10 +146,37 @@ not additional operator requirements or authority to bypass admission.
 
 ## Proposal
 
-Pending review. No common constructor or production installer was changed by
-this proposal.
+Reviewed in #9291, merged as `582cd6effe2327e9abfb18726e225ad14e361be0`
+on 2026-10-27 at19:56:52 UTC. Copilot review5673424495 approved the exact
+candidate head and required checks passed. This accepts the plan, not an
+implemented cache, adopter qualification or rollout.
+
+The standalone reproduction requires explicit absolute UV/interpreter paths
+and an existing private scratch parent. It creates only disposable source,
+cache and venv directories and preserves raw output in the returned task folder:
+
+```text
+python tools/reproduce_source_wheel_cache.py --uv <absolute-uv> --python <absolute-python> --scratch-parent <private-scratch-parent>
+```
+
+It uses no package feed, external build backend, production installer or
+service operation. Its four cases report actual backend build counts and
+whether changed source reached the installed module. The stale-source outcome
+is evidence against the naive argument substitution, not a passing correctness
+claim for that substitution. Remove only the returned task folder after its
+evidence is no longer needed.
 
 ## Journal
+
+### 2026-10-27 - Proposal accepted; implementation boundary remains explicit
+
+#9291 merged after current-head approval and required checks; the source
+worktree synchronized onto that reviewed commit. The generic reproduction
+confirmed that requirements references can reuse a wheel while missing a
+source-body-only change, so the naive argument substitution remains rejected.
+A coordination comment on #8949 preserves the overlapping verification owner;
+no common-helper code has been edited. Continue the admitted-input identity
+and cache implementation slice without counting the proposal as completion.
 
 ### 2026-10-27 - Claimed the cache-safe source assembly slice
 
