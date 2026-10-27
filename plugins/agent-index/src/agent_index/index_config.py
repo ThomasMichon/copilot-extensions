@@ -318,6 +318,8 @@ class IndexConfig:
     )
     cluster_thresholds: dict[str, float] = field(default_factory=_default_cluster_thresholds)
     cluster_min_size: int = int(os.environ.get("AGENT_INDEX_CLUSTER_MIN_SIZE", "2"))
+    # Python-only opt-in; each changed bucket must fit this canonical-row budget.
+    cluster_slice_row_budget: int | None = None
 
     # Background-indexer host politeness (host-resource good citizen). The index
     # worker runs as a dedicated subprocess, so it lowers its OWN CPU/IO priority
