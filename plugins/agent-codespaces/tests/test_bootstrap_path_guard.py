@@ -136,7 +136,7 @@ if ($script:opened.Count -lt 2 -or
 @pytest.mark.parametrize("path", (
     "relative", r"\\server\share\file", r"C:\base\..\file", r"C:\base\file:stream",
     r"C:\base\file.", "C:\\base\\file ", "C:/base/file",
-    "C:\\" + "\\".join(["p"] * 129), "C:\\",
+    "C:\\" + "\\".join(["p"] * 129), "C:\\", "C:\\base\\file\\",
 ))
 def test_ancestor_guard_rejects_bad_path_and_depth_before_open(
     host: str, tmp_path: Path, path: str,
@@ -150,6 +150,61 @@ Open-BootstrapStockPathGuard -Path $env:FIXTURE_PATH
     assert "Bootstrap" in result.stderr
     if path.count("\\") == 129:
         assert "bounded component count" in result.stderr
+
+
+@pytest.mark.parametrize("directory", (False, True))
+@pytest.mark.parametrize("chain", (False, True))
+def test_guards_refuse_existing_nonroot_trailing_separator_before_open(
+    host: str, tmp_path: Path, directory: bool, chain: bool,
+) -> None:
+    path = tmp_path / "existing"
+    if directory:
+        path.mkdir()
+    else:
+        path.write_bytes(b"untouched")
+    result = _run(host, tmp_path, r"""
+function Get-BootstrapStockFileBindings { throw 'Trailing separator reached a native binding.' }
+$script:emitted=0
+$message=$null
+try {
+    if ($env:CHAIN -eq '1') {
+        Open-BootstrapStockPathGuard -Path $env:FIXTURE_PATH -Directory:($env:DIRECTORY -eq '1') |
+            ForEach-Object {$script:emitted++}
+    } else {
+        Open-BootstrapStockFileGuard -Path $env:FIXTURE_PATH -Directory:($env:DIRECTORY -eq '1') |
+            ForEach-Object {$script:emitted++}
+    }
+} catch { $message=$_.Exception.Message }
+if ($message -cne 'Bootstrap file guard requires an ordinary absolute normalized drive path.') {
+    throw 'Trailing separator refusal was lost or reached native admission.'
+}
+[pscustomobject]@{emitted=$script:emitted;message=$message} | ConvertTo-Json -Compress
+""", environment={
+        "FIXTURE_PATH": str(path) + "\\",
+        "DIRECTORY": str(int(directory)), "CHAIN": str(int(chain)),
+    })
+    assert result["emitted"] == 0
+    assert path.exists()
+    if not directory:
+        assert path.read_bytes() == b"untouched"
+        with path.open("r+b"):
+            pass
+
+
+def test_root_directory_remains_a_valid_single_entry_chain(host: str, tmp_path: Path) -> None:
+    result = _run(host, tmp_path, r"""
+$root=[IO.Path]::GetPathRoot($env:FIXTURE_PATH)
+$guard=Open-BootstrapStockPathGuard -Path $root -Directory
+try {
+    if ($guard.Entries.Count -ne 1 -or $guard.Path -cne $root -or $guard.Leaf.Path -cne $root -or
+        $guard.Leaf.Handle.IsClosed -or ($guard.Leaf.Identity.Attributes -band 0x10) -eq 0) {
+        throw 'Root-directory custody did not preserve the exact addressed root.'
+    }
+} finally { Close-BootstrapStockPathGuard -Guard $guard }
+[pscustomobject]@{closed=$guard.Leaf.Handle.IsClosed;count=$guard.Entries.Count} |
+    ConvertTo-Json -Compress
+""", environment={"FIXTURE_PATH": str(tmp_path)})
+    assert result == {"closed": True, "count": 1}
 
 
 def test_ancestor_guard_accepts_exact_component_bound_and_closes_leaf_first(

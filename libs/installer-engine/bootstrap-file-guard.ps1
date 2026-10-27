@@ -196,6 +196,7 @@ function Assert-BootstrapStockOrdinaryPath {
     param([Parameter(Mandatory)][string]$Path, [int]$MaximumComponents = 0)
     if ($Path -notmatch '^[A-Za-z]:\\' -or $Path.Substring(2).Contains(':') -or
         $Path.Contains('/') -or $Path.Length -gt 32767 -or
+        ($Path.Length -gt 3 -and $Path.EndsWith('\')) -or
         $Path -match '[\x00-\x1f]') {
         throw 'Bootstrap file guard requires an ordinary absolute normalized drive path.'
     }

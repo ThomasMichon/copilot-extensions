@@ -380,6 +380,17 @@ transfer without acceptance by a named tracked objective.
   signer packet. Monitored thresholds must not be reported as kernel caps.
   Independent review and merge remain gates, and complete canonical-path,
   interpreter/source admission and compiled-caller replacement remain open.
+- Review identified a file-mode trailing-separator path that composition could
+  silently shorten before opening. The shared validator now refuses non-root
+  trailing separators for both guard forms before binding or opening anything,
+  while preserving drive-root directory custody. Existing-file/directory,
+  zero-output/before-binding and root-directory regressions cover the class.
+  The earlier 155-control packet is historical evidence for the preceding
+  source; final-candidate native requalification remains pending.
+- The initial CI attempt also caught incomplete shared-library changefile
+  coverage. All eight declared installer-engine consumers now have release
+  entries in this contribution; no helper or caller behavior changed for that
+  metadata-only repair.
 
 ### 2026-10-26 - Core held-file signer candidate
 

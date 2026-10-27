@@ -188,8 +188,10 @@ The ancestor guard retains the drive-root directory and every addressed
 component, with a 128-component limit checked before opening anything. Its
 controls cover file/directory leaves, ancestor rename exclusion, junction
 refusal, reverse-order release and complete cleanup after an open or release
-failure. This is retained ancestor custody, not canonical-name, short-name,
-drive-mapping or source admission.
+failure. Both guard forms reject non-root trailing separators before native
+binding, including existing file/directory inputs; the drive root remains a
+valid directory leaf. This is retained ancestor custody, not canonical-name,
+short-name, drive-mapping or source admission.
 
 The current-drive query calls existing stock declarations without defining or
 removing a DOS mapping. Windows PowerShell uses the existing StringBuilder

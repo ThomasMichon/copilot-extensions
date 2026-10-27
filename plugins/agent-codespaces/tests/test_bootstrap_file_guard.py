@@ -180,7 +180,7 @@ if ($env:EXPECT_DIRECTORY -eq '1') {
 
 @pytest.mark.parametrize("path", (
     "relative", r"\\server\share\file", r"C:\base\..\file", r"C:\base\file:stream",
-    r"C:\base\file.", "C:\\base\\file ", "C:/base/file",
+    r"C:\base\file.", "C:\\base\\file ", "C:/base/file", "C:\\base\\file\\",
 ))
 def test_stock_guard_refuses_nonordinary_path_before_native_open(host, tmp_path, path):
     result = _run(host, tmp_path, r"""
