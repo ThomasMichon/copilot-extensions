@@ -246,7 +246,7 @@ class _Client:
             _check_deadline(self.deadline)
             location, origin = _url(location)
             if origin not in origins:
-                raise WheelError("wheel acquisition location is outside selected source trust")
+                raise WheelError(f"wheel acquisition location is outside selected source trust: {origin}")
             if self.requests >= self.limits.max_requests:
                 raise WheelError("wheel acquisition request budget exceeded")
             self.requests += 1

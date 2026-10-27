@@ -293,13 +293,51 @@ def _tls(network):
     return context
 
 
-def _machine_constraints(outer, settings, transaction, wheels):
+def _local_exclusions(value, transaction, wheels, selected):
+    """Admit only the held exact exclusion file selected by the composition owner."""
+    try:
+        if not isinstance(selected, tuple) or not 1 <= len(selected) <= 256:
+            raise NativeFeedError("native local exclusions need a bounded immutable selection")
+        names = tuple(sorted(_name(name) for name in selected))
+        if len(set(names)) != len(names) or wheels is None or any(
+            _name(wheel["name"]) in names for wheel in wheels
+        ):
+            raise NativeFeedError("native local exclusions conflict with the selected wheel set")
+        body = _body(value, "", "[", "]").strip()
+        path = Path(_string(_body(body, "Local", "(", ")").strip().rstrip(",")))
+        options = [Path(argument) for option, argument in dependencies._argument_pairs(transaction.argv[3:])
+                   if option in ("--constraint", "--constraints", "-c")]
+        if not path.is_absolute() or options != [path]:
+            raise NativeFeedError("native local exclusion input differs from retained arguments")
+        before = _ordinary(path)
+        root = Path(transaction.environment["UV_CONFIG_FILE"]).parent.resolve(strict=True)
+        if not path.resolve(strict=True).is_relative_to(root) or before.st_size > 1 << 20:
+            raise NativeFeedError("native local exclusion input is outside its bounded retained root")
+        with _open(path) as stream:
+            opened = _unchanged(path, before, stream)
+            content = stream.read((1 << 20) + 1)
+            _unchanged(path, before, stream, opened=opened)
+        if len(content) > 1 << 20 or content.decode("utf-8").splitlines() != [
+            name + "<0,>=0" for name in names
+        ]:
+            raise NativeFeedError("native constraints differ from the selected exact local exclusions")
+        return names
+    except (OSError, UnicodeError, ValueError, KeyError, TypeError):
+        raise NativeFeedError("native exact local exclusions cannot be captured") from None
+
+
+def _machine_constraints(outer, settings, transaction, wheels, *, excluded_local_packages=()):
+    exclusions = ()
+    if excluded_local_packages != ():
+        exclusions = _local_exclusions(
+            outer.get("constraints", ""), transaction, wheels, excluded_local_packages,
+        )
     for key in (
         "constraints", "overrides", "excludes", "build_constraints",
         "constraints_from_workspace", "overrides_from_workspace",
         "excludes_from_workspace", "build_constraints_from_workspace",
     ):
-        if outer.get(key) != "[]":
+        if outer.get(key) != "[]" and not (key == "constraints" and exclusions):
             raise AcquisitionUnavailable("native resolver-altering package constraints are not yet supported")
     metadata = _body(settings.get("dependency_metadata", ""), "DependencyMetadata", "(", ")").strip().rstrip(",")
     if metadata != "{}":
@@ -318,6 +356,7 @@ def _machine_constraints(outer, settings, transaction, wheels):
             choices = choices if isinstance(choices, list) else [choices]
             if any(isinstance(choice, dict) and "index" in choice for choice in choices):
                 raise AcquisitionUnavailable("native per-package index routing is not yet supported")
+    return exclusions
 
 
 def _seasoning_identity(settings):
@@ -351,6 +390,7 @@ def capture_native_feed_inputs(
     transaction, projection: str, original: str, profile, policy: dict, uv: str,
     deadline: float, *, wheels: list[dict] | None, profile_policy: str,
     opaque_identity: Callable[[str], str],
+    excluded_local_packages: tuple[str, ...] = (),
 ) -> NativeFeedInputs:
     """Capture held native settings; callers retain selection/admission authority.
 
@@ -372,7 +412,9 @@ def capture_native_feed_inputs(
         raise AcquisitionUnavailable("retained native proxy environment is not yet supported")
     outer = _projection(projection, "PipCompileSettings")
     settings = _fields(_body(outer.get("settings", ""), "PipSettings"))
-    _machine_constraints(outer, settings, transaction, wheels)
+    exclusions = _machine_constraints(
+        outer, settings, transaction, wheels, excluded_local_packages=excluded_local_packages,
+    )
     if settings.get("index_strategy") != "FirstIndex" or settings.get("keyring_provider") != "Disabled":
         raise AcquisitionUnavailable("native index strategy or credential provider is not yet supported")
     indexes = _fields(_body(settings.get("index_locations", ""), "IndexLocations"))
@@ -444,6 +486,7 @@ def capture_native_feed_inputs(
             )
         },
         "profile_policy": profile_policy,
+        **({"excluded_local_packages": exclusions} if exclusions else {}),
     }, sort_keys=True, separators=(",", ":")))
     proxies = {}
     for key in ("http_proxy", "https_proxy"):

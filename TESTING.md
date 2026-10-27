@@ -1221,6 +1221,16 @@ not an alternate caller-supplied destination. Changed source, altered/missing
 third-party lock inputs and dropped helper extras refuse. Unit-only graph and
 build-deadline controls live in
 `tools/promotion_unit_tests/test_source_profile_derivation.py`.
+That packet also covers explicitly opted-in native file matching against the
+recorded target's ordered tags, mandatory SHA-256 with valid auxiliary hashes,
+applicable package markers, tied-file refusal and unchanged strict defaults.
+Exact first-party exclusion controls admit only the independently selected
+retained constraint file; other constraints, overrides and workspace inputs
+still refuse. Compile spelling and extended Windows file-URI controls are pure
+regressions in the same packet. Native closed-wheel tests exercise long retained
+paths and installed-origin parity; acquisition controls expose only the refused
+origin, never its path or query. These controls do not enable a default consumer
+or approve a production feed.
 Built wheels must preserve the retained source's dependencies, extras and
 Python requirement. Native regressions alter actual wheel metadata, refuse
 nonordinary inputs before opening, bound compressed filename tags before

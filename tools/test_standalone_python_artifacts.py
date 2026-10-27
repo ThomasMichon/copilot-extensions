@@ -13,6 +13,7 @@ import build_python_artifacts as builder
 import promotion_python_artifacts as artifacts
 import publish_python_artifacts as publisher
 import standalone_python_artifacts as standalone
+from standalone_consumers import STANDALONE_CONSUMERS
 from test_promotion_python_artifacts import _wheel_bytes
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -24,10 +25,22 @@ LOCK = builder.ToolchainLock(Path("."), {
 })
 
 
+@pytest.mark.parametrize("component", [
+    "chat-service", "dispatch-service", "ssh-service", "worktree-manager",
+])
+def test_existing_core_standalone_roots_have_explicit_artifact_identities(component):
+    assert component in standalone.COMPONENTS
+    assert standalone.COMPONENTS[component] in STANDALONE_CONSUMERS
+
+
 def _source(root, component):
     source = root / standalone.COMPONENTS[component]
     source.mkdir(parents=True)
-    package = "fleet_manager" if component == "fleet-manager" else "agent_pull_requests_service"
+    package = {
+        "fleet-manager": "fleet_manager", "pr-service": "agent_pull_requests_service",
+        "chat-service": "agent_chat_service", "dispatch-service": "agent_dispatch_service",
+        "ssh-service": "agent_ssh_service", "worktree-manager": "worktree_manager",
+    }[component]
     (source / "src" / package).mkdir(parents=True)
     (source / "src" / package / "__init__.py").write_bytes(b"VALUE = 'first-party fixture'\n")
     (source / "pyproject.toml").write_text(
@@ -41,8 +54,10 @@ def _source(root, component):
         resource.mkdir(parents=True, exist_ok=True)
     helper = root / "libs" / "versioned-runtime" / "standalone_build.py"
     helper.write_bytes((ROOT / "libs" / "versioned-runtime" / "standalone_build.py").read_bytes())
-    if component == "fleet-manager":
-        (source / "setup.py").write_bytes((ROOT / "fleet-manager" / "setup.py").read_bytes())
+    if component in {"fleet-manager", "chat-service"}:
+        (source / "setup.py").write_bytes(
+            (ROOT / standalone.COMPONENTS[component] / "setup.py").read_bytes()
+        )
         for path in standalone.injected_resources(component, root).values():
             path.write_bytes(b"# controlled canonical runtime resource\n")
     return source
@@ -137,18 +152,19 @@ def test_standalone_changed_bytes_and_toolchain_refused(tmp_path, monkeypatch, m
         artifacts.validate_bundle(directory / entry["filename"], entry, candidate_root=tmp_path)
 
 
+@pytest.mark.parametrize("component", ["fleet-manager", "chat-service"])
 @pytest.mark.parametrize("mutation", ["setup", "helper", "alternate", "included"])
-def test_only_trusted_standalone_build_hook_is_admitted(tmp_path, mutation):
-    source = _source(tmp_path, "fleet-manager")
+def test_only_trusted_standalone_build_hook_is_admitted(tmp_path, mutation, component):
+    source = _source(tmp_path, component)
     target = {
         "setup": source / "setup.py",
         "helper": tmp_path / "libs" / "versioned-runtime" / "standalone_build.py",
         "alternate": source / "setup.cfg",
-        "included": source / "src" / "fleet_manager" / "_versioned_runtime.py",
+        "included": next((source / "src").iterdir()) / "_versioned_runtime.py",
     }[mutation]
     target.write_bytes(b"raise RuntimeError('candidate build code must not run')\n")
     with pytest.raises((builder.ArtifactBuildError, artifacts.PromotionArtifactError)):
-        standalone.validate_build(source, component="fleet-manager", root=tmp_path)
+        standalone.validate_build(source, component=component, root=tmp_path)
 
 
 def test_standalone_resource_substitution_refused_even_with_fresh_manifest(tmp_path, monkeypatch):

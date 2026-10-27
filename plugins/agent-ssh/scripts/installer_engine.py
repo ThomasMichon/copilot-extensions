@@ -22,7 +22,7 @@ import tomllib
 import versioned_runtime as runtime
 import versioned_runtime_source as runtime_source
 from installer_dependency_policy import (
-    DependencyPolicyError, RetainedUVInstall, _bundled_dbus_next, _contained, _native_retained_path,
+    DependencyPolicyError, RetainedUVInstall, _bundled_dbus_next, _contained, _file_uri, _native_retained_path,
     _private_retained_root, _select_uv_executable, _temporary_inputs,
     retain_closed_wheel_install, retain_uv_install,
 )
@@ -440,7 +440,7 @@ def _input_origins(inputs: FrozenInputs) -> dict[str, str]:
     if inputs.wheel_inputs is not None:
         return {
             name: (
-                inputs.wheel_inputs.snapshot.paths[filename].as_uri()
+                _file_uri(inputs.wheel_inputs.snapshot.paths[filename])
                 + "#sha256=" + digest.removeprefix("sha256:")
             )
             for name, _version, filename, digest in inputs.wheel_inputs.distributions

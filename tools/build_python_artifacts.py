@@ -374,7 +374,7 @@ def resolve_vendored_libs(consumer_dir: Path) -> list[tuple[str, Path]]:
         seen_dirs.add(current_r)
         if is_top_level:
             consumer_label = current_r.name
-            problems = uer.uv_editable_problems(consumer_label, current)
+            problems = uer.uv_editable_problems(consumer_label, current, repo=REPO)
             if problems:
                 raise ArtifactBuildError(
                     f"{current}: rejected by uv_editable_problems: "

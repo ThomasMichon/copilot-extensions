@@ -172,7 +172,8 @@ def test_closed_transaction_is_canonical_and_cleans_owned_inputs(tmp_path, execu
             requirement = Path(transaction.argv[-1])
             text = requirement.read_text(encoding="utf-8")
             wheel, = retained.paths.values()
-            assert wheel.as_uri() in text and "--hash=sha256:" in text
+            assert policy._file_uri(wheel) in text and "--hash=sha256:" in text
+            assert "file://%3F/" not in text
             assert transaction.cwd.is_dir()
         assert not requirement.exists() and not transaction.cwd.exists()
         retained.verify()

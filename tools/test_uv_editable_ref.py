@@ -160,7 +160,12 @@ def test_uv_editable_problems_rejects_a_symlinked_canonical_lib_root(tmp_path: P
     (real_lib / "src/shared_lib").mkdir(parents=True)
     (real_lib / "src/shared_lib/__init__.py").write_text("x = 1\n", encoding="utf-8")
     (repo / "libs").mkdir(parents=True)
-    (repo / "libs/shared-lib").symlink_to(real_lib, target_is_directory=True)
+    try:
+        (repo / "libs/shared-lib").symlink_to(real_lib, target_is_directory=True)
+    except OSError as error:
+        if sys.platform == "win32" and getattr(error, "winerror", None) == 1314:
+            pytest.skip("native directory symlink creation requires Windows privilege")
+        raise
     consumer = repo / "plugins/alpha"
     consumer.mkdir(parents=True)
     (consumer / "pyproject.toml").write_text(
@@ -190,7 +195,7 @@ def test_find_uv_editable_refs_editable_requires_exact_true(tmp_path: Path):
     assert refs == {"agent-a": False, "agent-b": False, "agent-c": True}
 
 
-def test_uv_editable_problems_rejects_a_symlinked_consumer_pyproject(tmp_path: Path):
+def test_uv_editable_problems_rejects_a_symlinked_consumer_pyproject(tmp_path: Path, native_file_symlink):
     # find_uv_editable_refs() fails closed on a symlinked pyproject.toml by
     # returning [] -- uv_editable_problems() must not let that look
     # identical to "nothing to validate"; it must surface the symlink
@@ -202,7 +207,7 @@ def test_uv_editable_problems_rejects_a_symlinked_consumer_pyproject(tmp_path: P
     )
     consumer = tmp_path / "plugins/alpha"
     consumer.mkdir(parents=True)
-    (consumer / "pyproject.toml").symlink_to(real)
+    native_file_symlink(consumer / "pyproject.toml", real)
 
     assert uer.find_uv_editable_refs(consumer) == []
     problems = uer.uv_editable_problems("alpha", consumer)
@@ -311,12 +316,12 @@ def test_find_uv_editable_refs_raises_manifest_unreadable_for_invalid_utf8(tmp_p
         uer.find_uv_editable_refs(consumer)
 
 
-def test_uv_editable_problems_rejects_a_nested_symlink_in_canonical(tmp_path: Path, monkeypatch):
+def test_uv_editable_problems_rejects_a_nested_symlink_in_canonical(tmp_path: Path, monkeypatch, native_file_symlink):
     repo = tmp_path / "repo"
     _lib(repo / "libs/shared-lib", content="value = 1\n", version="0.1.0")
     victim = tmp_path / "victim.py"
     victim.write_text("x = 1\n", encoding="utf-8")
-    (repo / "libs/shared-lib/src/sneaky.py").symlink_to(victim)
+    native_file_symlink(repo / "libs/shared-lib/src/sneaky.py", victim)
     consumer = repo / "plugins/alpha"
     consumer.mkdir(parents=True)
     (consumer / "pyproject.toml").write_text(

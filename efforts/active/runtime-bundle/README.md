@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent, bounded per-slice PRs
 - **Created:** 2026-10-26
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** advances Runtime Assembly's core/optional-environment release lock and one verified acquisition path
 - **Composes with:** #6937, #4876, #6234 and #6707; their inventory, artifact, admission, construction and lifecycle owners remain authoritative
 
@@ -81,10 +81,13 @@ The initial single-target milestone and reuse-first implementation sequence
 below are the agent-recommended realization of that accepted direction.
 They do not change the final cross-platform goal or any live-change authority.
 
+Comparison request (verbatim):
+> btw - can we test a build install vs a wheel install of one of these plugins / extensions? 9159 seems approved also. Do we need a wheel per OS and arch type - aka this should work for linux, mac, windows etc
+
 ## Plan
 
 ### Slice A - Reviewed composition contract
-- [ ] Clear review of this proposal before changing production composition.
+- [x] Clear review of this proposal before changing production composition: #9159 merged on 2026-10-26 as `f77a7c075b` after current-head approval and required green CI.
 - [ ] Derive core roots from canonical inventories, retaining selected extras,
   target/Python conditions and the separation of optional heavy environments.
 - [ ] Define the minimal core composition/selection binding using existing
@@ -94,17 +97,22 @@ They do not change the final cross-platform goal or any live-change authority.
   them. Preserve every selected dependency and its admitted origin.
 
 ### Slice B - First isolated artifact/CLI proof
-- [ ] Use the shared builder/toolchain to produce one first-party wheel per
-  selected canonical distribution; do not resolve runtime dependencies during
-  repeated per-package builds or select bytes by name/version alone.
-- [ ] Establish the exact permitted closure through existing release/profile/feed
+- [x] Prefer authenticated published first-party wheels; use the shared
+  builder/toolchain when a build is needed, producing one wheel per selected
+  canonical distribution. Do not resolve runtime dependencies during repeated
+  per-package builds or select bytes by name/version alone.
+- [x] Compare one real plugin's source-build and verified-wheel installations
+  using the same source/version, interpreter and exact runtime dependency
+  closure in fresh roots. Record cold/warm conditions and installed CLI health;
+  distinguish first-party build savings from runtime dependency acquisition.
+- [x] Establish the initial disposable target's exact permitted closure through existing release/profile/feed
   owners, or the same installation authority's independently verified source
   mode and explicit exact installation lock. Never invent an approval field.
-- [ ] Retain complete byte inspection and input custody through the existing
+- [x] Retain complete byte inspection and input custody through the existing
   numbered constructor and installed health, using a fresh disposable root.
-- [ ] Run a real selected CLI with isolated Python imports and compare installed
+- [x] Run a real selected CLI with isolated Python imports and compare installed
   module/distribution identity with the selected inputs.
-- [ ] Record actual source, artifact, target, closure and native constructor
+- [x] Record actual source, artifact, target, closure and native constructor
   identities, phase timings and explicit unavailable lanes. No serving
   registration or default-runtime pointer changes.
 
@@ -124,6 +132,9 @@ They do not change the final cross-platform goal or any live-change authority.
   changed wheel bytes, missing dependencies and unadmitted origins.
 - [ ] Preserve target markers, extras and Python ranges; the initial target's
   success must not qualify another target or the optional heavy environments.
+- [ ] Read actual wheel tags: reuse universal first-party wheels where valid,
+  while qualifying native dependencies per OS/architecture/Python target.
+  Packaging compatibility is not functional cross-platform acceptance.
 - [ ] Verify first-party build reuse and package constraints against the actual
   wheel metadata, not a copied roster or synthetic success record.
 - [ ] Exercise the complete retained-input -> numbered construction -> installed
@@ -149,3 +160,87 @@ choose the wheel path, not a reason to relax source identity.
   change is implemented by this proposal.
 - Workaround removal remains with #7606. The isolated first milestone neither
   removes it early nor claims native affected-feed qualification.
+
+### 2026-10-26 - Reviewed proposal and first authenticated member
+- Proposal #9159 merged after approval `5660349849`, required green CI and no
+  unresolved feedback. Implementation remains bounded by this Plan/Validation.
+- Reused the existing source-index, attestation and bundle validators to
+  authenticate the released Worktrees artifact set from development source
+  `42134b2b95042b842462366c38365afce66f0912`, bound through protected Main
+  `ebca5a60e21b7e9b0ba851c71b9abf64b2e7aaa4`. All sixteen first-party wheel
+  members, including the plugin, declare `py3-none-any`.
+- This proves artifact identity/bytes, not consumer-profile approval, runtime
+  dependency admission, construction or cross-platform execution. No new
+  provenance record, acquisition exception, runtime or live setting was created.
+
+### 2026-10-26 - Measured member comparison and complete core candidate inspection
+- Four fresh Windows Python 3.11 environments pass with identical final
+  twenty-one distribution versions and real installed CLI execution. Worktrees
+  plus fifteen library wheels take 9.041s cold / 9.469s warm versus source
+  38.044s / 31.185s. First-party installation alone takes 2.794s / 0.720s versus
+  31.396s / 23.228s; warm source still builds all sixteen distributions.
+- These are one-sample packaging measurements, excluding source export, lock
+  preparation and published-artifact acquisition/build. Build tooling differs:
+  released wheels record setuptools 84.2.0; the governed source path selects
+  84.0.0. Pinning the former on the consumer feed fails the unchanged seven-day
+  cutoff. No seasoning exception was used. The existing CLI banner has
+  placeholder build fields; installed distribution metadata supplies the actual
+  package version, not a runtime attestation.
+- Authenticated and source-bound all fifteen published component bundles from
+  the same protected source. They cover fifteen of nineteen core roots; Chat,
+  Dispatch service, SSH service and Worktree Manager lack root artifacts there.
+  Eighteen shared distributions have conflicting wheel identities across those
+  component sets. Name/version equality is not permission to choose one.
+- On Windows, complete source validation needs native long-path traversal for
+  the deeply exported tree. The unprefixed diagnostic omitted deep files and
+  produced a false hash mismatch; the same validator passes every manifest
+  with native path spelling and unchanged bytes. No hash was weakened.
+- The candidate-input owner's existing root selection yields forty-two
+  canonical first-party distributions for the initial native target, preserving
+  applicable extras and recording legacy source edges explicitly. This is a
+  candidate selection, not approval. An offline-only shared-toolchain attempt
+  cannot resolve setuptools metadata from the isolated comparison cache.
+  Complete core acquisition, exact-lock authority and numbered construction
+  remain open; no service, installation policy or default selector changed.
+
+### 2026-10-27 - Complete isolated native core and unchanged-generation reuse
+- Built forty-two canonical first-party distributions once through the existing
+  shared toolchain, including the registered standalone resource/setup adapters.
+  The existing native compiler selects seventy-four exact third-party wheels
+  for Windows/Python 3.11. The source experiment uses explicitly admitted
+  transport/origin policy and unchanged seasoning, not a production profile.
+- Both fresh numbered environments contain the same 116 exact distribution
+  versions. Installed Worktrees imports originate inside the selected
+  environment; Worktrees, Worktree Manager and dependency checks pass. Existing
+  byte inspection and retained-input contexts remain held through constructor
+  and installed health. No serving registration or default selector changes.
+- Cold resolve/acquire/construct/CLI health takes 248.968s and 241.063s in two
+  samples. Governed acquisition dominates at 186.687s / 179.796s; construction is
+  32.188s / 32.438s. These totals exclude first-party source export/build and are
+  not full-update or service-cutover throughput.
+- Same-policy unchanged core reuse takes 4.531s including independent current
+  source/profile validation, native policy recapture, real constructor reuse,
+  both CLIs and dependency health. Reuse itself is 1.141s. All 116 original
+  constructor-snapshot wheel paths are unavailable, and reconstruction is
+  instrumented to refuse; no resolver, acquisition or construction executes.
+  The completed marker and default selector remain unchanged.
+- The integration adds only opt-in recorded-target file matching to the
+  existing lock reader and independently selected exact local exclusions to the
+  existing feed capture owner. Strict defaults, mandatory SHA-256, tied-file
+  refusal and all other constraint/routing refusals remain. Native proof also
+  exercises corrected file/directory ACL grants and extended Windows snapshot
+  paths with canonical file URIs through their existing shared helpers.
+- Validation tiers: failing-first pure controls cover the new admission and
+  URI boundaries; actual native closed-wheel and full-core construction supply
+  the simple end-to-end lane. Fresh isolated homes/processes exercise first
+  key creation and immutable installation, not complete clean-room host
+  provisioning. Full admitted packet and available hosted native lanes remain
+  publication gates; Linux/macOS, production feed/closure qualification and
+  ordinary installer enabling are not inferred from this target.
+- An older experiment's receipt refuses policy recapture while its feed
+  identity still matches; its changed policy component is not proven because
+  that cold run did not retain component witnesses. The newer witnessed
+  cold/reuse pair passes without forcing an old identity. Preserve this
+  invalidation boundary and qualify the older refusal before ordinary adoption.
+  Changed-dependency updates, cache retention, publication and multi-platform
+  service migration remain open under the existing owners.

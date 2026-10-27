@@ -574,6 +574,7 @@ exec(compile(_configuration_path.read_bytes(), str(_configuration_path), "exec")
 RetainedInputCleanupError = _configuration.RetainedInputCleanupError
 _report_cleanup_error = _configuration.report_cleanup_error
 _native_retained_path = _configuration.native_retained_path
+_file_uri = _configuration.file_uri
 _temporary_inputs = _configuration.temporary_inputs
 tempfile = _configuration.tempfile
 _write_toml = partial(_configuration.write_toml, error_type=DependencyPolicyError)

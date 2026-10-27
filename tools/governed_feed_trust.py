@@ -263,21 +263,13 @@ def _restrict_file_to_owner(path: Path) -> None:
         return
     account_name, sid = _current_token_identity()
     icacls = _trusted_system32_tool("icacls")
+    grant = "(OI)(CI)F" if path.is_dir() else "F"
     result = subprocess.run(
         [
             icacls, str(path),
             "/inheritance:r",
-            # `(OI)(CI)` (object-inherit, container-inherit) are applied
-            # explicitly: combining `/inheritance:r` and `/grant:r` in a
-            # SINGLE `icacls` invocation (as here, rather than as two
-            # separate calls) does not reliably add an inheritable ACE
-            # for the explicitly granted principal on a DIRECTORY
-            # target: a file later created inside it (e.g. `uv venv`
-            # populating a hardened staging directory) could then be
-            # denied access despite the directory's own grant. Both
-            # flags are harmless no-ops on a FILE target (nothing to
-            # inherit to).
-            "/grant:r", f"*{sid}:(OI)(CI)F", f"*{_SYSTEM_ACCOUNT_SID}:(OI)(CI)F",
+            # Files need direct grants; only directories need inheritable ACEs.
+            "/grant:r", f"*{sid}:{grant}", f"*{_SYSTEM_ACCOUNT_SID}:{grant}",
         ],
         capture_output=True, text=True,
     )
