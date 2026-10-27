@@ -73,6 +73,14 @@ class ReceivingAllocation:
             **self.to_fields(), "identity": record_identity(record).to_dict(), "phase": "created",
         }
 
+    def require_planned_identity(
+        self, worktree_id: str, creation_nonce: str, path: str, branch: str,
+    ) -> None:
+        allocation.AllocationIdentity.from_dict({
+            "ref": f"{self.target['machine']}/{self.target['project']}/{worktree_id}",
+            "creation_nonce": creation_nonce, "path": path, "branch": branch,
+        })
+
 
 def record_identity(record: tracking.WorktreeRecord) -> allocation.AllocationIdentity:
     from . import tracking
