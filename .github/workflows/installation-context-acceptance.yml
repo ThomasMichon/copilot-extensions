@@ -316,6 +316,7 @@ jobs:
             "UV_CACHE_DIR=$REMOVAL_HOME/.cache/uv" \
             "UV_PYTHON_INSTALL_DIR=$REMOVAL_HOME/.cache/python" \
             "PYTEST_ADDOPTS=--maxfail=1 --tb=short" \
+            "COPILOT_EXTENSIONS_NATIVE_UNINSTALL_DIAGNOSTICS=1" \
             /bin/bash -c 'cd "$1" &&
             printf "Native qualification controller pid=%s; system_ps_setuid=" "$$" &&
             if [[ -u "$(command -v ps)" ]]; then printf "1\n"; else printf "0\n"; fi &&

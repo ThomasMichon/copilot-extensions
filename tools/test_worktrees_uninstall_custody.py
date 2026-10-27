@@ -1,6 +1,7 @@
 """Worktrees publication and finite removal share their native lifecycle lock."""
 from __future__ import annotations
 
+import ast
 import json
 import os
 import subprocess
@@ -12,6 +13,23 @@ import pytest
 
 
 REPO = Path(__file__).resolve().parents[1]
+
+
+def test_removal_profile_covers_every_published_hook_and_setup_helper() -> None:
+    scripts = REPO / "plugins/agent-worktrees/scripts"
+    profile = json.loads((scripts / "uninstall-profile.json").read_text("utf-8"))
+    publication = ast.parse((scripts / "runtime_install_publication.py").read_text("utf-8"))
+    for symbol, field in (("HOOKS", "bin_entries"), ("SETUP", "script_entries")):
+        declarations = [
+            node.value for node in publication.body
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == symbol for target in node.targets)
+        ]
+        assert len(declarations) == 1, f"Expected one literal publication list for {symbol}"
+        published = set(ast.literal_eval(declarations[0]))
+        assert published <= set(profile[field]), f"Unowned published {symbol}: {published - set(profile[field])}"
+
+
 WORKER = r"""
 import importlib.util,sys
 from pathlib import Path

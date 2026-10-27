@@ -7,10 +7,13 @@ import os
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import sys
+import uuid
 
 import pytest
 
+from agent_procutil import no_window_kwargs
 from native_shell_support import admit_native_bash, bash_path, run_headless
 from runtime_install_fixture import isolate_account_profile
 
@@ -18,6 +21,8 @@ PLUGIN = Path(__file__).resolve().parents[1]
 SCRIPTS = PLUGIN / "scripts"
 REPO = PLUGIN.parents[1]
 pytestmark = pytest.mark.guard
+_DIAGNOSTICS_ENV = "COPILOT_EXTENSIONS_NATIVE_UNINSTALL_DIAGNOSTICS"
+_DIAGNOSTIC_TAIL_BYTES = 8192
 
 
 def _load(path: Path):
@@ -40,7 +45,117 @@ def _host(shell: str) -> str:
     return executable
 
 
+def _redact_diagnostic_text(text: str, environment: dict[str, str]) -> str:
+    sensitive = re.compile(r"token|password|passwd|secret|credential|api_?key|private_?key", re.I)
+    values = {value for key, value in environment.items() if value and sensitive.search(key)}
+    for value in sorted(values, key=len, reverse=True):
+        text = text.replace(value, "<redacted>")
+    text = re.sub(
+        r"""(["'](?:token|password|passwd|secret|credential|api_?key|private_?key)["']\s*:\s*["'])[^"']*(["'])""",
+        lambda match: match[1] + "<redacted>" + match[2], text, flags=re.I,
+    )
+    text = re.sub(r"\{[^\n]*", "<structured metadata omitted>", text)
+    text = re.sub(
+        r"(\b[A-Z_]*(?:TOKEN|PASSWORD|SECRET|CREDENTIAL|COMMAND_LIFECYCLE)[A-Z_]*=)[^\n]*",
+        r"\1<redacted>", text,
+    )
+    return text.encode("utf-8")[-_DIAGNOSTIC_TAIL_BYTES:].decode("utf-8", errors="ignore")
+
+
+class _NativeDiagnosticPopen(subprocess.Popen):
+    """Keep normal communicate/PIPE lifetime, with partial Windows reader data."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        self._native_partial: dict[object, list[bytes]] = {}
+        super().__init__(*args, **kwargs)
+
+    def _readerthread(self, stream, buffer) -> None:
+        # Windows already uses these communicate reader threads. Read chunks
+        # rather than waiting for EOF before retaining the first output byte.
+        chunks = self._native_partial.setdefault(stream, [])
+        try:
+            while data := os.read(stream.fileno(), 8192):
+                chunks.append(data)
+            text = b"".join(chunks).decode(self.encoding or "utf-8", self.errors or "strict")
+            buffer.append(text.replace("\r\n", "\n").replace("\r", "\n"))
+        finally:
+            stream.close()
+
+    def diagnostic_output_tail(self, stream) -> tuple[int, bytes]:
+        # POSIX communicate retains each selector read here already.
+        chunks = self._native_partial.get(
+            stream, getattr(self, "_fileobj2output", {}).get(stream, []),
+        )
+        size = sum(len(chunk) for chunk in chunks)
+        remaining, tail = _DIAGNOSTIC_TAIL_BYTES, []
+        for chunk in reversed(chunks):
+            if remaining <= 0:
+                break
+            data = chunk[-remaining:]
+            tail.append(data)
+            remaining -= len(data)
+        return size, b"".join(reversed(tail))
+
+
+def _run_with_diagnostics(
+    arguments: list[str], home: Path, environment: dict[str, str], *,
+    input: str | None, timeout: float, cwd: Path | None,
+) -> subprocess.CompletedProcess[str]:
+    directory = home / ".native-uninstall-diagnostics" / uuid.uuid4().hex
+    directory.mkdir(parents=True)
+    if Path(arguments[0]).stem.lower() == "bash":
+        options = environment.get("SHELLOPTS", "").split(":")
+        environment["SHELLOPTS"] = ":".join(dict.fromkeys(option for option in (*options, "xtrace") if option))
+        environment["PS4"] = "+AW_NATIVE_TRACE pid=$$ line=$LINENO: "
+    with _NativeDiagnosticPopen(
+        arguments, cwd=home if cwd is None else cwd, env=environment,
+        stdin=subprocess.PIPE if input is not None else None,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
+        **no_window_kwargs(),
+    ) as process:
+        try:
+            stdout, stderr = process.communicate(input, timeout=timeout)
+        except BaseException as error:
+            try:
+                state = process.poll()
+                out_size, out_data = process.diagnostic_output_tail(process.stdout)
+                err_size, err_data = process.diagnostic_output_tail(process.stderr)
+                out_tail = _redact_diagnostic_text(
+                    out_data.decode("utf-8", errors="replace"), environment,
+                )
+                err_tail = _redact_diagnostic_text(
+                    err_data.decode("utf-8", errors="replace"), environment,
+                )
+                (directory / "stdout.log").write_bytes(out_tail.encode("utf-8"))
+                (directory / "stderr.log").write_bytes(err_tail.encode("utf-8"))
+                print("AW_NATIVE_UNINSTALL_DIAGNOSTIC " + json.dumps({
+                    "exception": type(error).__name__, "capture": directory.name,
+                    "executable": Path(arguments[0]).name,
+                    "captureMode": "pipes", "pid": process.pid,
+                    "poll": state, "returncode": process.returncode,
+                    "stdoutEOF": process.stdout.closed, "stderrEOF": process.stderr.closed,
+                    "stdoutBytes": out_size, "stderrBytes": err_size,
+                    "stdoutTail": out_tail, "stderrTail": err_tail,
+                }, sort_keys=True), file=sys.stderr, flush=True)
+            except Exception as diagnostic_error:
+                print(
+                    "AW_NATIVE_UNINSTALL_DIAGNOSTIC_FAILED " + type(diagnostic_error).__name__,
+                    file=sys.stderr, flush=True,
+                )
+            try:
+                if process.poll() is None:
+                    process.kill()  # Only this newly created, controller-contained child.
+            except OSError as cleanup_error:
+                print(
+                    "AW_NATIVE_UNINSTALL_CHILD_CLEANUP_FAILED " + type(cleanup_error).__name__,
+                    file=sys.stderr, flush=True,
+                )
+            raise
+        return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
+
+
 def _run(arguments, home, *, env=None, input=None, timeout=60, cwd=None):
+    diagnostics = (env or {}).get(_DIAGNOSTICS_ENV, os.environ.get(_DIAGNOSTICS_ENV)) == "1"
     environment = {
         key: value for key, value in os.environ.items()
         if not key.startswith(("COPILOT_PLUGIN_", "COPILOT_EXTENSIONS_", "AGENT_WORKTREES_"))
@@ -50,10 +165,217 @@ def _run(arguments, home, *, env=None, input=None, timeout=60, cwd=None):
         PYTHONDONTWRITEBYTECODE="1", COPILOT_EXTENSIONS_TEST_CONTAINED="1",
     )
     environment.update(env or {})
+    environment.pop(_DIAGNOSTICS_ENV, None)
+    if diagnostics:
+        return _run_with_diagnostics(
+            arguments, home, environment, input=input, timeout=timeout, cwd=cwd,
+        )
     return run_headless(
         arguments, cwd=home if cwd is None else cwd, env=environment, input=input,
         capture_output=True, text=True, encoding="utf-8", timeout=timeout,
     )
+
+
+def test_native_diagnostic_capture_preserves_completed_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(_DIAGNOSTICS_ENV, raising=False)
+    arguments = [
+        getattr(sys, "_base_executable", sys.executable), "-I", "-S", "-B", "-c",
+        "import os,sys;"
+        f"assert {_DIAGNOSTICS_ENV!r} not in os.environ;"
+        "sys.stdout.buffer.write(b'out\\r\\n');sys.stderr.buffer.write(b'err\\r\\n')",
+    ]
+    normal = _run(arguments, tmp_path)
+    assert not (tmp_path / ".native-uninstall-diagnostics").exists()
+    monkeypatch.setenv(_DIAGNOSTICS_ENV, "1")
+    diagnostic = _run(arguments, tmp_path)
+    assert (diagnostic.args, diagnostic.returncode, diagnostic.stdout, diagnostic.stderr) == (
+        normal.args, normal.returncode, normal.stdout, normal.stderr,
+    )
+    assert (diagnostic.stdout, diagnostic.stderr) == ("out\n", "err\n")
+
+
+def test_native_diagnostics_disabled_keep_original_capture_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(_DIAGNOSTICS_ENV, raising=False)
+    arguments = ["unchanged-child", "unchanged-argument"]
+    expected = subprocess.CompletedProcess(arguments, 3, "stdout", "stderr")
+
+    def run(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
+        assert argv is arguments
+        assert kwargs["capture_output"] is True
+        assert kwargs["timeout"] == 9
+        assert kwargs["input"] == "unchanged-input"
+        assert kwargs["cwd"] == tmp_path
+        assert kwargs["text"] is True and kwargs["encoding"] == "utf-8"
+        assert "stdout" not in kwargs and "stderr" not in kwargs
+        return expected
+
+    monkeypatch.setattr(sys.modules[__name__], "run_headless", run)
+    assert _run(arguments, tmp_path, input="unchanged-input", timeout=9) is expected
+    assert not (tmp_path / ".native-uninstall-diagnostics").exists()
+
+
+def test_native_diagnostics_omit_child_generated_authority_metadata() -> None:
+    trace = (
+        "+AW_NATIVE_TRACE pid=41 line=12: "
+        """ticket='{"nonce":"synthetic-nonce","owner":"synthetic-owner"}'\n"""
+        "+AW_NATIVE_TRACE pid=41 line=13: "
+        "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE=synthetic-ticket\n"
+        "+AW_NATIVE_TRACE pid=41 line=14: command_binding.py --check-lifecycle\n"
+    )
+    redacted = _redact_diagnostic_text(trace, {})
+    assert "synthetic-" not in redacted
+    assert "line=12" in redacted and "line=13" in redacted
+    assert "command_binding.py --check-lifecycle" in redacted
+
+
+def test_native_diagnostic_capture_keeps_argv_and_child_only_trace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(_DIAGNOSTICS_ENV, "1")
+    monkeypatch.setenv("SHELLOPTS", "nounset:pipefail")
+    arguments = ["bash", "unchanged-entry.sh", "uninstall", "--install-dir", "unchanged-root"]
+
+    class Process:
+        def __init__(self, argv, **kwargs):
+            assert argv is arguments
+            assert kwargs["stdout"] is subprocess.PIPE
+            assert kwargs["stderr"] is subprocess.PIPE
+            assert kwargs["env"]["SHELLOPTS"] == "nounset:pipefail:xtrace"
+            assert kwargs["env"]["PS4"] == "+AW_NATIVE_TRACE pid=$$ line=$LINENO: "
+            assert _DIAGNOSTICS_ENV not in kwargs["env"]
+            self.args, self.returncode = argv, 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def communicate(self, input, *, timeout):
+            assert timeout == 7
+            return "phase complete\n", "trace complete\n"
+
+    monkeypatch.setattr(sys.modules[__name__], "_NativeDiagnosticPopen", Process)
+    result = _run(arguments, tmp_path, timeout=7)
+    assert result.stdout == "phase complete\n"
+    assert result.stderr == "trace complete\n"
+    assert os.environ["SHELLOPTS"] == "nounset:pipefail"
+
+
+def test_native_diagnostics_dump_bounded_redacted_tails_and_reraise_base_exception(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
+) -> None:
+    class Interrupted(BaseException):
+        pass
+
+    failure = Interrupted()
+    import io
+
+    handles = []
+    monkeypatch.setenv(_DIAGNOSTICS_ENV, "1")
+    monkeypatch.setenv("NATIVE_TEST_PASSWORD", "synthetic-private-value")
+
+    class Process:
+        def __init__(self, argv, **kwargs):
+            self.args, self.pid, self.returncode = argv, 123, 0
+            self.stdout, self.stderr = io.BytesIO(), io.BytesIO()
+            handles.extend([self.stdout, self.stderr])
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.stdout.close()
+            self.stderr.close()
+            return False
+
+        def communicate(self, *args, **kwargs):
+            raise failure
+
+        def poll(self):
+            return self.returncode
+
+        def kill(self):
+            pytest.fail("The already-exited primary child must not be killed")
+
+        def diagnostic_output_tail(self, stream):
+            data = (b"x" * 32768 + b"stdout-phase\n" if stream is self.stdout else
+                    b'stderr-phase synthetic-private-value {"token":"synthetic-ticket-value"}\n')
+            return len(data), data[-_DIAGNOSTIC_TAIL_BYTES:]
+
+    monkeypatch.setattr(sys.modules[__name__], "_NativeDiagnosticPopen", Process)
+    with pytest.raises(Interrupted) as caught:
+        _run(["python", "unchanged.py"], tmp_path)
+    assert caught.value is failure
+    assert all(handle.closed for handle in handles)
+    output = capsys.readouterr().err
+    report = json.loads(output.removeprefix("AW_NATIVE_UNINSTALL_DIAGNOSTIC "))
+    assert report["exception"] == "Interrupted"
+    assert report["captureMode"] == "pipes"
+    assert report["poll"] == report["returncode"] == 0
+    assert report["stdoutEOF"] is report["stderrEOF"] is False
+    assert report["stdoutBytes"] > _DIAGNOSTIC_TAIL_BYTES
+    assert len(report["stdoutTail"].encode()) <= _DIAGNOSTIC_TAIL_BYTES
+    assert "stdout-phase" in report["stdoutTail"]
+    assert "stderr-phase" in report["stderrTail"]
+    assert "synthetic-private-value" not in output
+    assert "synthetic-ticket-value" not in output
+    directory = tmp_path / ".native-uninstall-diagnostics" / report["capture"]
+    assert (directory / "stdout.log").read_bytes().decode("utf-8") == report["stdoutTail"]
+    assert (directory / "stderr.log").read_bytes().decode("utf-8") == report["stderrTail"]
+
+
+def test_native_diagnostics_capture_partial_output_on_real_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
+) -> None:
+    monkeypatch.setenv(_DIAGNOSTICS_ENV, "1")
+    arguments = [
+        getattr(sys, "_base_executable", sys.executable), "-I", "-S", "-B", "-c",
+        "import sys,time; print('stdout-before-wait',flush=True);"
+        "print('stderr-before-wait',file=sys.stderr,flush=True);time.sleep(60)",
+    ]
+    with pytest.raises(subprocess.TimeoutExpired):
+        _run(arguments, tmp_path, timeout=2)
+    output = capsys.readouterr().err
+    assert "stdout-before-wait" in output
+    assert "stderr-before-wait" in output
+    assert '"exception": "TimeoutExpired"' in output
+
+
+def test_native_diagnostics_keep_descendant_pipe_eof_semantics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(_DIAGNOSTICS_ENV, "1")
+    program = """
+import os,subprocess,sys
+subprocess.Popen([sys.executable,'-I','-S','-B','-c',
+    "import sys,time;time.sleep(.4);print('descendant-out',flush=True);"
+    "print('descendant-err',file=sys.stderr,flush=True)"],
+    stdout=sys.stdout,stderr=sys.stderr,
+    creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+print('primary-exited',flush=True)
+"""
+    result = _run([
+        getattr(sys, "_base_executable", sys.executable), "-I", "-S", "-B", "-c", program,
+    ], tmp_path, timeout=5)
+    assert result.returncode == 0
+    assert result.stdout == "primary-exited\ndescendant-out\n"
+    assert result.stderr == "descendant-err\n"
+
+
+def test_native_diagnostics_trace_actual_bash_without_argv_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(_DIAGNOSTICS_ENV, "1")
+    arguments = [admit_native_bash(), "-c", "printf 'diagnostic-phase\\n'"]
+    result = _run(arguments, tmp_path, timeout=5)
+    assert result.args == arguments
+    assert result.stdout == "diagnostic-phase\n"
+    assert "AW_NATIVE_TRACE pid=" in result.stderr
 
 
 @pytest.fixture
