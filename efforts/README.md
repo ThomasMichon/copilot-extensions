@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Proportional Engineering Conduct](active/proportional-engineering-conduct/README.md) | Draft; plan only, no live guidance | #9188; scratch-worktree comparison before any instruction projection |
 | [Consolidated Core Runtime Bundle](active/runtime-bundle/README.md) | Draft; reviewed composition contract before isolated artifact/CLI proof | Core composition only; reuses #6937/#4876/#6234/#6707 owners, no new authority or rollout |
 | [Leased Daemon Instances](active/leased-daemon-instances/README.md) | Active; original custody source delivered, compiler-free Python amendment reviewed in #9120; replacement open | #8403; preserves identity, leases, descendant settlement and installer owners; no rollout |
 | [Instruction Source Resolution](active/instruction-source-resolution/README.md) | Draft; review the compatibility repair before implementation | #9097; effective enabled-source verification, exact generated output, unchanged trust/maintenance boundaries; no rollout |
