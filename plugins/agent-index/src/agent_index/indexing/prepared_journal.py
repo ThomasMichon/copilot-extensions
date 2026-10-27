@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from contextlib import closing
 from dataclasses import fields
 from typing import TYPE_CHECKING
@@ -33,23 +34,44 @@ class PreparedJournal:
                 "payload BLOB NOT NULL, digest TEXT NOT NULL, PRIMARY KEY(source, kind, key))",
             )
             conn.execute(
+                "CREATE TABLE IF NOT EXISTS prepared_crawl_parents "
+                "(source TEXT PRIMARY KEY, scope TEXT NOT NULL, generation TEXT NOT NULL)",
+            )
+            conn.execute(
                 "CREATE TRIGGER IF NOT EXISTS prepared_crawl_retire "
                 "AFTER DELETE ON pending_crawls BEGIN "
-                "DELETE FROM prepared_crawl_rows WHERE source = old.source; END",
+                "DELETE FROM prepared_crawl_rows WHERE source = old.source; "
+                "DELETE FROM prepared_crawl_parents WHERE source = old.source; END",
             )
             conn.execute(
                 "CREATE TRIGGER IF NOT EXISTS prepared_crawl_replace "
                 "AFTER UPDATE OF scope, payload ON pending_crawls "
                 "WHEN old.scope != new.scope OR old.payload != new.payload BEGIN "
-                "DELETE FROM prepared_crawl_rows WHERE source = old.source; END",
+                "DELETE FROM prepared_crawl_rows WHERE source = old.source; "
+                "DELETE FROM prepared_crawl_parents WHERE source = old.source; END",
             )
-            self._require_parent(conn)
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT scope, payload FROM pending_crawls WHERE source = ?", (source,),
+            ).fetchone()
+            if row is None or (row["scope"], row["payload"]) != (scope, payload):
+                raise PendingCrawlConflict("Prepared application no longer matches its pending crawl")
+            conn.execute(
+                "INSERT OR IGNORE INTO prepared_crawl_parents VALUES (?, ?, ?)",
+                (source, scope, uuid.uuid4().hex),
+            )
+            bound = conn.execute(
+                "SELECT scope, generation FROM prepared_crawl_parents WHERE source = ?", (source,),
+            ).fetchone()
+            if bound["scope"] != scope:
+                raise PendingCrawlConflict("Prepared cache belongs to a different account scope")
+            self.generation = bound["generation"]
 
     def _require_parent(self, conn: sqlite3.Connection) -> None:
         row = conn.execute(
-            "SELECT scope, payload FROM pending_crawls WHERE source = ?", (self.source,),
+            "SELECT scope, generation FROM prepared_crawl_parents WHERE source = ?", (self.source,),
         ).fetchone()
-        if row is None or (row["scope"], row["payload"]) != (self.scope, self.payload):
+        if row is None or (row["scope"], row["generation"]) != (self.scope, self.generation):
             raise PendingCrawlConflict("Prepared application no longer matches its pending crawl")
 
     def put(self, kind: str, values: list[tuple[str, bytes]]) -> None:

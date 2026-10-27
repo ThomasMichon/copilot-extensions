@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import closing
+import sqlite3
 
 import numpy as np
 import pytest
@@ -100,3 +101,47 @@ def test_prepared_pairs_are_scoped_by_parent_source(journal):
     second.put_vectors(["pair"], np.array([[0, 1]], dtype=np.float32), 2)
     np.testing.assert_array_equal(first.vectors(["pair"], 2)["pair"], [1, 0])
     np.testing.assert_array_equal(second.vectors(["pair"], 2)["pair"], [0, 1])
+
+
+def test_cache_access_does_not_read_the_full_parent_manifest(journal, monkeypatch):
+    paths, _pending, _manifest, prepared = journal
+    connect = paths._connect
+
+    def bounded_connection():
+        conn = connect()
+
+        def authorize(action, table, column, _database, _trigger):
+            if action == sqlite3.SQLITE_READ and table == "pending_crawls" and column == "payload":
+                return sqlite3.SQLITE_DENY
+            return sqlite3.SQLITE_OK
+
+        conn.set_authorizer(authorize)
+        return conn
+
+    monkeypatch.setattr(paths, "_connect", bounded_connection)
+    keys = [f"pair-{index}" for index in range(505)]
+    prepared.put_vectors(keys, np.array([[1, 0]] * len(keys), dtype=np.float32), 2)
+    assert len(prepared.vectors(keys, 2)) == len(keys)
+    prepared.reset_batches()
+    prepared.put_batch(0, FileBatch([], [("sample:repo", "empty.md", "fingerprint", 0)]))
+    assert len(list(prepared.batches(1))) == 1
+
+
+def test_parent_replacement_and_return_to_identical_payload_revokes_old_cache_binding(journal):
+    paths, pending, manifest, original = journal
+    pending.compare_and_save(
+        manifest.source, scope="account", payload=original.payload + " ",
+        expected=original.payload, family="sample:repo",
+    )
+    pending.compare_and_save(
+        manifest.source, scope="account", payload=original.payload,
+        expected=original.payload + " ", family="sample:repo",
+    )
+    current = PreparedJournal(paths, manifest.source, "account", original.payload)
+    assert current.generation != original.generation
+    current.put_vectors(["pair"], np.array([[1, 0]], dtype=np.float32), 2)
+    with pytest.raises(PendingCrawlConflict, match="no longer matches"):
+        original.vectors(["pair"], 2)
+    with pytest.raises(PendingCrawlConflict, match="no longer matches"):
+        original.put_vectors(["pair"], np.array([[0, 1]], dtype=np.float32), 2)
+    np.testing.assert_array_equal(current.vectors(["pair"], 2)["pair"], [1, 0])

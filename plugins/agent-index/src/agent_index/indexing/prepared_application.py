@@ -46,6 +46,7 @@ class PreparedApplication:
             raise PendingCrawlConflict("Prepared application requires its pending crawl")
         self.journal = PreparedJournal(paths, manifest.source, scope, payload)
         self.profiles = profiles
+        self.progress_cb = progress_cb
         self.identities = [(entry.source, entry.path) for entry in manifest.upserts]
         self.checkpoints = paths.get_entries(self.identities)
         self.batch_count = 0
@@ -69,6 +70,8 @@ class PreparedApplication:
                     )
             self.journal.put_batch(self.batch_count, batch)
             self.batch_count += 1
+        if progress_cb:
+            progress_cb.check_cancelled()
 
     def _keys(self, model: str, chunks: list[Chunk]) -> list[str]:
         profile = self.profiles[model]
@@ -120,6 +123,8 @@ class PreparedApplication:
 
     def require_current_checkpoints(self) -> None:
         """Check before writer entry; never invalidate a file during preparation."""
+        if self.progress_cb:
+            self.progress_cb.check_cancelled()
         current = self.journal.paths.get_entries(self.identities)
         counts = current_counts()
         if counts is not None:
@@ -128,6 +133,8 @@ class PreparedApplication:
         if current != self.checkpoints:
             raise PendingCrawlConflict("File checkpoints changed during application preparation")
         self.journal.get("batch", [])
+        if self.progress_cb:
+            self.progress_cb.check_cancelled()
 
     def batches(self) -> Iterator[FileBatch]:
         return self.journal.batches(self.batch_count)

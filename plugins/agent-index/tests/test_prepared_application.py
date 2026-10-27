@@ -286,13 +286,15 @@ def test_parent_scope_change_during_embedding_refuses_before_store_effects(appli
     assert_unpublished(f)
 
 
-def test_cancellation_between_prepared_models_never_invalidates_a_file(application):
+@pytest.mark.parametrize("when", ["first", "last"])
+def test_cancellation_during_prepared_models_never_invalidates_a_file(application, when):
     f = application
     cancelled = False
 
     def cancel_after_first_model(model, texts):
         nonlocal cancelled
-        cancelled = True
+        if when == "first" or (model == "b" and "second" in texts[0]):
+            cancelled = True
 
     def check():
         if cancelled:
@@ -302,7 +304,7 @@ def test_cancellation_between_prepared_models_never_invalidates_a_file(applicati
     f.hook = cancel_after_first_model
     with pytest.raises(IndexingCancelled, match="cancellation"):
         f.run()
-    assert len(f.calls) == 1
+    assert len(f.calls) == (1 if when == "first" else 4)
     assert_unpublished(f)
 
 

@@ -15,11 +15,15 @@ reuses existing vectors only after qualifying their embedding-coverage receipts
 and actual bytes. Missing vectors invoke the configured engine lazily.
 
 Prepared chunks, file fingerprints and vectors live in `prepared_crawl_rows`,
-a subordinate table in the existing path-index SQLite database. Every access
+a subordinate table in the existing path-index SQLite database. Construction
 compares the parent pending row's exact source, account scope and acquired
-payload. Parent retirement or replacement retires these rows in the same SQLite
-transaction, including when a journal-capable older caller clears the manifest.
-This table has no cursor, source lease, completion marker or repair authority.
+payload once, then binds a compact cache incarnation in `prepared_crawl_parents`.
+Each cache access checks that incarnation, not the full acquired content.
+Parent retirement or replacement invalidates the incarnation and cached rows
+in the same SQLite transaction, including when a journal-capable older caller
+clears the manifest. Returning to identical manifest bytes cannot revive an old
+binding. Neither table has a cursor, source lease, completion marker or repair
+authority.
 
 Vectors are keyed by model/table, canonical chunk ID and raw embedding-input
 identity, including the model revision and preprocessing policy. Stored float32
@@ -31,7 +35,9 @@ indexed-file checkpoint merely because embeddings were prepared.
 
 Before entering the writer, the engine rechecks the selected file-checkpoint
 snapshot under the existing domain exclusion. Changed checkpoints refuse before
-mutation. One outer `SourceDomain.write()` then contains all content/vector
+mutation. Cancellation is checked after the final preparation call and again
+around that pre-writer check, so a cancellation already observed before entry
+does not dirty the store. One outer `SourceDomain.write()` then contains all content/vector
 writes, stale-chunk cleanup and explicit tombstones for that application.
 Nested mutation methods retain their existing effect/coverage checks.
 Application reads prepared vectors, never invokes an embedding client, and
