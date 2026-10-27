@@ -31,6 +31,8 @@ class _StatusSegmentCache:
         self._observations: dict[tuple[str, str], _ObservationTicket] = {}
         self._project_scopes: dict[str, set[tuple[str, str]]] = {}
         self._closing_observations = False
+        self._cancellation: BaseException | None = None
+        self._invalidated: set[str] = set()
 
     @staticmethod
     def _key(path: str) -> str:
@@ -51,13 +53,17 @@ class _StatusSegmentCache:
         for ticket in self._observations.values():
             if ticket.project == project or ticket.key in keys:
                 return True
-            if target is not None and ticket.path:
-                try:
-                    common = os.path.commonpath((target, ticket.path))
-                    if common in (target, ticket.path):
-                        return True
-                except ValueError:
-                    pass
+            candidates = [ticket.path]
+            if ticket.key[0] == "anchor":
+                candidates.append(ticket.key[1])
+            for candidate in candidates:
+                if target is not None and candidate:
+                    try:
+                        common = os.path.commonpath((target, candidate))
+                        if common in (target, candidate):
+                            return True
+                    except ValueError:
+                        pass
         return False
 
     def observation_blocked(self, project: str, path: str | None = None) -> bool:
@@ -100,25 +106,31 @@ class _StatusSegmentCache:
                 ticket.cleanup = error
             elif ticket.cleanup is not error and all(item is not error for item in ticket.additional):
                 ticket.additional.append(error)
+            cause = getattr(error, "operation_error", None)
+            if self._cancellation is None and isinstance(cause, (KeyboardInterrupt, SystemExit)):
+                self._cancellation = cause
             ticket.revision += 1
             if ticket.path is None and getattr(error, "observation_path", None):
                 ticket.path = self._key(error.observation_path)
 
     def retain_unclaimed_cleanup(self, project, path, error):
-        with self._lock:
-            if getattr(error, "_settled", False):
-                return
-            for ticket in self._observations.values():
-                if ticket.cleanup is error or any(item is error for item in ticket.additional):
+        try:
+            with self._lock:
+                if getattr(error, "_settled", False):
                     return
-            ticket = next(
-                (item for item in self._observations.values() if item.project == project), None,
-            )
-            if ticket is None:
-                key = ("project", project)
-                ticket = _ObservationTicket(key, project, self._key(path) if path else None)
-                self._observations[key] = ticket
-            self.retain_cleanup(ticket, error)
+                for ticket in self._observations.values():
+                    if ticket.cleanup is error or any(item is error for item in ticket.additional):
+                        return
+                ticket = next(
+                    (item for item in self._observations.values() if item.project == project), None,
+                )
+                if ticket is None:
+                    key = ("project", project)
+                    ticket = _ObservationTicket(key, project, self._key(path) if path else None)
+                    self._observations[key] = ticket
+                self.retain_cleanup(ticket, error)
+        finally:
+            self._raise_pending_cancellation()
 
     def finish_observation(self, ticket):
         with self._lock:
@@ -133,11 +145,19 @@ class _StatusSegmentCache:
             return compute()
         except push_timeout.ObservationCleanupError as error:
             self.retain_cleanup(ticket, error)
+            self._raise_pending_cancellation()
             raise
         finally:
             self.finish_observation(ticket)
 
+    def _raise_pending_cancellation(self) -> None:
+        with self._lock:
+            if (self._cancellation is not None and not self._closing_observations
+                    and threading.current_thread() is threading.main_thread()):
+                raise self._cancellation
+
     def settle_pending_once(self) -> int:
+        self._raise_pending_cancellation()
         with self._lock:
             pending = list(self._observations.values())
         for ticket in pending:
@@ -229,6 +249,7 @@ class _StatusSegmentCache:
         with self._lock:
             if self.observation_blocked(project, path):
                 return self.pending_segment()
+            self._invalidate_keys(self._invalidated)
             now = time.monotonic()
             key = self._aliases.get(input_key, input_key)
             cached = self._entries.get(key)
@@ -240,6 +261,7 @@ class _StatusSegmentCache:
         with self._lock:
             if self.observation_blocked(project, target):
                 return self.pending_segment()
+            self._invalidate_keys(self._invalidated)
             cached = self._entries.get(key)
             if cached and time.monotonic() - cached[0] < self.ttl:
                 self._aliases[input_key] = key
@@ -270,39 +292,36 @@ class _StatusSegmentCache:
             self._entries[key] = (time.monotonic(), value)
         return value
 
+    def _invalidate_keys(self, keys: set[str]) -> None:
+        removed = set()
+        for key in set(keys):
+            if self.observation_blocked("", key):
+                self._invalidated.add(key)
+                continue
+            self._entries.pop(key, None)
+            self._invalidated.discard(key)
+            removed.add(key)
+        for alias, key in list(self._aliases.items()):
+            if key in removed:
+                self._aliases.pop(alias, None)
+
     def invalidate(self, cwd: str | None) -> None:
         if not cwd:
             return
         target = self._key(cwd)
         with self._lock:
-            removed = set()
-            for key in list(self._entries):
-                if self.observation_blocked("", key):
-                    continue
+            keys = set()
+            paths = [(key, key) for key in self._entries]
+            paths.extend(self._aliases.items())
+            for path, key in paths:
                 try:
-                    common = os.path.commonpath((target, key))
+                    common = os.path.commonpath((target, path))
                 except ValueError:
                     continue
-                if common in (key, target):
-                    self._entries.pop(key, None)
-                    removed.add(key)
-            for alias, key in list(self._aliases.items()):
-                if self.observation_blocked("", key):
-                    continue
-                try:
-                    common = os.path.commonpath((target, alias))
-                except ValueError:
-                    common = ""
-                if key in removed or common in (alias, target):
-                    self._aliases.pop(alias, None)
+                if common in (path, target):
+                    keys.add(key)
+            self._invalidate_keys(keys)
 
     def invalidate_all(self) -> None:
         with self._lock:
-            self._entries = {
-                key: value for key, value in self._entries.items()
-                if self.observation_blocked("", key)
-            }
-            self._aliases = {
-                alias: key for alias, key in self._aliases.items()
-                if self.observation_blocked("", key)
-            }
+            self._invalidate_keys(set(self._entries) | set(self._aliases.values()))

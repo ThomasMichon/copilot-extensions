@@ -361,3 +361,35 @@ non-contended work does not acquire extra per-tick IPC. No new cache, service,
 process census, production deadline or mutation/publication lock design was
 introduced. Linux and macOS ordinary behavior remains legacy; their new
 observation-containment work is still explicitly open under #7944.
+
+
+### 2026-10-27 second-round lifecycle and cancellation receipt
+
+The affected 13-file packet ran through `tools/run-plugin-tests.py` with native
+recovery opt-in: **548 passed, zero skipped**, 162.71 seconds pytest and 170.55
+seconds including the existing runner's preparation/cleanup. It includes the
+original deadline/held-pipe/caller-death cases and the new stored-cancellation,
+secondary-cancellation/native-lease and deferred-invalidation regressions.
+
+The native guarded cutover file alone passed **12 cases**, including a complete
+successful handoff. The real old process remains alive behind a mandatory
+cleanup barrier after accepting shutdown; the real adapter cannot finish until
+its retained native handle signals exit. Successor published/roster/repository
+readiness is observed before shutdown. Refused or unready promotion rolls back
+without old retirement. A live previous-only owner with a closed listener is
+refused before restart or cleanup effects for either prior-liveness hint.
+
+The canonical seven-file procutil/ZDD packet ran through `TestSandbox`,
+`isolated_environment` and `run_contained`: **359 passed, 15 skipped**, 33.72
+seconds. Files: procutil `test_windows_observation_spawn.py`,
+`test_job_teardown.py`, `test_caller_owned.py`; ZDD `test_cutover.py`,
+`test_cutover_refusal.py`, `test_cutover_pre_adoption.py`,
+`test_conditional_cutover.py`. Skips are native Linux pidfd/group/fork/fsync/flock
+and Darwin/POSIX preparation paths, unavailable on this Windows worker. No
+Linux container lane is available. The Windows injected creation fixture
+substitutes CRT handles, binary/inheritance constants and Win32 errors so its
+useful pure cases remain portable rather than being skipped on other hosts.
+
+These receipts do not substitute for the exact required promotion unit packet,
+current-head review/CI, a promoted release or separately authorized installed
+validation. No production service or original interactive session was a fixture.

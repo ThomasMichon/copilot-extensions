@@ -460,6 +460,7 @@ def test_served_snapshot_and_warm_roster_share_one_carrier(owner, monkeypatch, h
 @pytest.mark.parametrize("ignore_custody", [False, True])
 def test_actual_monitor_shutdown_retains_custody_and_negative_control(
     owner, monkeypatch, ignore_custody, operation="shutdown", recovery_directory=None,
+    cancellation=None,
 ):
     import shutil
     import single_instance_lease
@@ -474,6 +475,8 @@ def test_actual_monitor_shutdown_retains_custody_and_negative_control(
     settled = [False]
     attempts = []
     error = pt.ObservationCleanupError("shutdown")
+    if cancellation is not None:
+        error.operation_error = cancellation
 
     def step():
         attempts.append(1)
@@ -481,7 +484,13 @@ def test_actual_monitor_shutdown_retains_custody_and_negative_control(
         return settled[0]
 
     error.try_settle = step
-    pending(owner, error=error)
+    if cancellation is None:
+        pending(owner, error=error)
+    else:
+        worker = threading.Thread(target=lambda: pending(owner, error=error))
+        worker.start()
+        worker.join(5)
+        assert not worker.is_alive()
     if ignore_custody:
         monkeypatch.setattr(owner, "observation_counts", lambda: (0, 0))
 
@@ -589,7 +598,8 @@ def test_actual_monitor_shutdown_retains_custody_and_negative_control(
                     enter.set()
                     worker.join(15)
                 assert not worker.is_alive()
-            assert self.handle("shutdown", {})["shutdown"]
+            if operation != "cancellation":
+                assert self.handle("shutdown", {})["shutdown"]
 
         def current_read_count(self, *a):
             return 0
@@ -615,7 +625,9 @@ def test_actual_monitor_shutdown_retains_custody_and_negative_control(
     monkeypatch.setattr(core, "_load_hook_client_module", lambda: None)
     monkeypatch.setattr(core, "_ResidentHookPolicy", lambda client: SimpleNamespace(ready=lambda: False))
     monkeypatch.setattr(registry_paths, "installation_context", lambda: None)
-    monkeypatch.setattr(loop_governance, "LoopGovernance", lambda: object())
+    monkeypatch.setattr(loop_governance, "LoopGovernance", lambda: SimpleNamespace(
+        recheck=lambda *a, **k: pytest.fail("monitor continued after stored cancellation"),
+    ) if cancellation is not None else object())
     monkeypatch.setattr(session_catalog, "ResidentSessionReconciler", lambda **k: object())
     monkeypatch.setattr(pane_reaper, "ResidentPaneReconciler", lambda **k: object())
     monkeypatch.setattr(receipt_control, "for_runtime", lambda *a, **k: receipts)
@@ -649,7 +661,12 @@ def test_actual_monitor_shutdown_retains_custody_and_negative_control(
         with pytest.raises(AssertionError, match="early native"):
             monitor.cmd_status_monitor(args)
     else:
-        assert monitor.cmd_status_monitor(args) == 0
+        if cancellation is not None:
+            with pytest.raises(type(cancellation)) as caught:
+                monitor.cmd_status_monitor(args)
+            assert caught.value is cancellation
+        else:
+            assert monitor.cmd_status_monitor(args) == 0
         assert len(attempts) == 3 and owner.observation_counts() == (0, 0)
 
 

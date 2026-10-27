@@ -55,7 +55,7 @@ closed native root/readers, cwd/env/text output and ordinary binary input.
 
 These are source/native-fixture receipts, not source acceptance, installed
 qualification, a nominal CPU/process benchmark or broader campaign completion.
-Keep #8458 draft until current-head review and CI accept it; keep #7944/#7945
+Current-head review and required CI still gate #8458; keep #7944/#7945
 and the unadmitted R1b/R2/platform/integration work open. Earlier hold and
 fail-first journal entries below are historical and remain evidence, not the
 current implementation status.
@@ -385,3 +385,31 @@ review-gated platform slice, not disabling ordinary POSIX classification.
   15-case native wire file. This complements new-caller/old-provider refusal;
   it does not permit legacy fallback in guarded recovery. Source review,
   current-tip integration, required CI and installed qualification stay open.
+
+
+### 2026-10-27 - Second-round guarded lifecycle and continuation corrections
+
+- The next independent review identified seven remaining blockers. Added
+  fail-first coverage before correcting the portable injected Windows fixture,
+  live previous-owner/no-listener refusal, successor activation, actual native
+  predecessor retirement, stored cancellation, repeated updater cancellation,
+  and invalidations deferred by observation custody.
+- Guarded publication now uses the existing `on_published` seam: authenticate the
+  exact elected successor, promote it, verify published/ready/admitting health,
+  and retain transition demand before the existing verify-before-retire gate.
+  Passive preflight health is not serving readiness. No new ZDD API is added.
+- Guarded shutdown captures the existing identity-bound native exit reference
+  before control. A shutdown acknowledgement alone is not retirement; only
+  native exit within the same bounded budget produces a positive receipt.
+- Real isolated cutover now succeeds through installer, orchestrator, client,
+  parser and native exit. Promotion refusal/unready controls restore the old
+  owner without retirement. A cleanup barrier proves acknowledgement cannot
+  clear the breadcrumb or complete cutover while that owner is still alive.
+- The 13-file affected selection passed **548 tests, zero skips**. Canonical
+  procutil/ZDD selection passed **359 tests**, with **15 native POSIX-only
+  skips** on Windows. The injected creation fixture uses explicit OS/CRT shims,
+  not a platform skip. See [validation.md](validation.md).
+- Refreshed one already-admitted procutil source hash in the promotion packet;
+  its 2,407 nodes, 129 production targets, 300-second cap and effect prohibitions
+  are unchanged. Actual fixed-packet execution, fresh review and required CI
+  remain gates; no release, installed rollout or broader completion is claimed.

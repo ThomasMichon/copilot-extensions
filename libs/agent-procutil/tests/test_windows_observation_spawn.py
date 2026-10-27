@@ -2,6 +2,7 @@
 
 import ctypes
 import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -15,6 +16,12 @@ def launch(monkeypatch):
     clock = [100.0]
     calls, streams, attributes, jobs = [], [], {}, []
     original_fdopen = native.os.fdopen
+    monkeypatch.setattr(native, "os", SimpleNamespace(
+        **(vars(native.os) | {"O_BINARY": 0, "set_handle_inheritable": lambda *a: None}),
+    ))
+    monkeypatch.setitem(sys.modules, "msvcrt", SimpleNamespace(get_osfhandle=lambda fd: fd))
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 5, raising=False)
+    monkeypatch.setattr(ctypes, "WinError", lambda code: OSError(code, "injected native failure"), raising=False)
 
     class Job:
         closed = False

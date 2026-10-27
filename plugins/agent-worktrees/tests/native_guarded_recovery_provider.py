@@ -25,7 +25,10 @@ def serve(root: Path, mode: str):
     state_lock = threading.RLock()
     opened = 0
     health_calls = 0
-    draining = mode != "candidate"
+    candidate = mode.startswith("candidate")
+    draining = not candidate
+    published = not candidate
+    shutdown_requested = threading.Event()
     token = "isolated-recovery-fixture"
 
     def reopen():
@@ -42,7 +45,7 @@ def serve(root: Path, mode: str):
         draining = True
 
     def dispatch(action, payload):
-        nonlocal health_calls, draining
+        nonlocal health_calls, draining, published
         with state_lock:
             if action == "health":
                 health_calls += 1
@@ -50,8 +53,30 @@ def serve(root: Path, mode: str):
                     "pid": os.getpid(), "status": "draining" if draining else "ready",
                     "runtime_generation": "fixture-runtime", "opened": opened,
                     "health_calls": health_calls,
+                    "published": published,
+                    "worktrees": {"status": "ready" if published else "unready"},
+                    "repositories": {"admitting": published and not draining},
                     "capabilities": [] if mode == "old-provider" else [recovery.CAPABILITY],
                 }
+            if action == "promote":
+                (root / "promote-requested").touch()
+                if mode == "candidate-refuse":
+                    return {"adopted": False}
+                directory = Path((root / "route-root").read_text(encoding="utf-8"))
+                route = recovery.active_endpoint(directory)
+                if route.pid != os.getpid() or route.port != server.port:
+                    return {"adopted": False}
+                if mode != "candidate-unready":
+                    published, draining = True, False
+                return {"adopted": True}
+            if action == "shutdown":
+                route = recovery.active_endpoint(root)
+                health = (control.ControlClient(route.base_url, token=token).health()
+                          if route.pid != os.getpid() else {"status": "draining"})
+                (root / "successor-at-shutdown.json").write_text(json.dumps(health), encoding="utf-8")
+                (root / "shutdown-requested").touch()
+                shutdown_requested.set()
+                return {"shutdown": True}
             if action == "drain":
                 draining = True
                 return {"drained": True, "clean": True, "forced": False}
@@ -95,10 +120,22 @@ def serve(root: Path, mode: str):
         "pid": os.getpid(), "start": locks.process_start_time(os.getpid()),
         "port": server.port, "token": token,
     }), encoding="utf-8")
-    try:
-        wait_for(root / "stop", timeout=60)
-    finally:
+    closed = mode == "closed-listener"
+    if closed:
         server.close()
+        (root / "listener-closed").touch()
+    try:
+        deadline = time.monotonic() + 60
+        while not shutdown_requested.is_set() and not (root / "stop").exists():
+            if time.monotonic() >= deadline:
+                raise TimeoutError("fixture lifetime expired")
+            time.sleep(0.01)
+        if shutdown_requested.is_set() and mode == "retirement-gate":
+            wait_for(root / "release")
+    finally:
+        if not closed:
+            server.close()
+    (root / "retirement-settled").touch()
 
 
 if __name__ == "__main__":

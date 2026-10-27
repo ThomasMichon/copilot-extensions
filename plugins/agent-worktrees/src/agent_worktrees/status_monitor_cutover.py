@@ -439,7 +439,25 @@ class ControlClient:
         return self._request("undrain")
 
     def shutdown(self) -> dict:
-        return self._request("shutdown")
+        if self.guarded_predecessor is None:
+            return self._request("shutdown")
+        from zdd import process_exit
+
+        predecessor = self.guarded_predecessor
+        predecessor.require_target(self.base_url)
+        deadline = time.monotonic() + min(self.timeout, 30.0)
+        with process_exit.open_process(
+            predecessor.receiver.pid, predecessor.receiver.process_start_time,
+        ) as reference:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise guarded_recovery.RecoveryUnavailable("retirement-deadline-expired")
+            result = self._request("shutdown", read_timeout=remaining, total_timeout=remaining)
+            if not isinstance(result, dict) or result.get("shutdown") is not True:
+                raise guarded_recovery.RecoveryUnavailable("retirement-not-accepted")
+            if not reference.wait(max(0.0, deadline - time.monotonic())):
+                raise guarded_recovery.RecoveryUnavailable("retirement-exit-unconfirmed")
+        return {**result, "retired": True}
 
     def adopt_relay(self) -> dict:
         return self.promote()
@@ -743,6 +761,12 @@ def activate_after_update(
         return summary
     active_url = _monitor_control_url_from_route()
     if active_url is None:
+        if guarded:
+            summary.update(
+                action="refused", reason="guarded-recovery-no-control-listener",
+                result={"ok": False, "error": "Live monitor has no verifiable control listener"},
+            )
+            return summary
         if monitor_was_live:
             summary["action"] = "restart"
             summary["restart"] = smr._restart_status_monitor(**restart_arguments)
@@ -763,6 +787,7 @@ def activate_after_update(
     predecessor_health_check = _predecessor_health_check
     options = {}
     transition_started = not guarded
+    local_custody = ExitStack()
     if transition_custody is not None:
         def make_client(base_url: str) -> ControlClient:
             client = _make_client(base_url)
@@ -784,14 +809,47 @@ def activate_after_update(
             def make_client(base_url: str) -> ControlClient:
                 return ControlClient(
                     base_url, token=predecessor.token, config_dir=routing_dir(), timeout=65.0,
-                    transition_custody=transition_custody, guarded_predecessor=predecessor,
+                    transition_custody=transition_custody or local_custody,
+                    guarded_predecessor=predecessor,
                 )
 
-            health_check = lambda host, port: guarded_recovery.successor_healthy(host, port, make_client)
+            published_successor = None
+
+            def health_check(host, port):
+                return guarded_recovery.successor_healthy(
+                    host, port, make_client, expected=published_successor,
+                )
+
+            def activate_successor(endpoint):
+                nonlocal published_successor
+                if (
+                    guarded_recovery.active_endpoint(routing_dir()) != endpoint
+                    or locks.process_start_time(endpoint.pid) != endpoint.process_start_time
+                ):
+                    raise guarded_recovery.RecoveryUnavailable("successor-publication-changed")
+                client = make_client(endpoint.base_url)
+                health = client.health()
+                if type(health.get("pid")) is not int or health["pid"] != endpoint.pid:
+                    raise guarded_recovery.RecoveryUnavailable("successor-identity-changed")
+                published_successor = endpoint
+                promoted = client.promote()
+                if not isinstance(promoted, dict) or promoted.get("adopted") is not True:
+                    raise guarded_recovery.RecoveryUnavailable("successor-promotion-refused")
+                if (
+                    not health_check(endpoint.client_host, endpoint.port)
+                    or guarded_recovery.active_endpoint(routing_dir()) != endpoint
+                ):
+                    raise guarded_recovery.RecoveryUnavailable("successor-serving-unconfirmed")
+                from .runtime_monitor_demand import retain_transition_demand
+
+                (transition_custody or local_custody).enter_context(
+                    retain_transition_demand(routing_dir().parent, endpoint.pid),
+                )
+
             predecessor_health_check = lambda host, port: predecessor.predecessor_healthy(host, port, make_client)
             options = {
                 "expected_old": predecessor.route, "refuse_old": predecessor.refuse_old,
-                "drain_before_publish": True,
+                "drain_before_publish": True, "on_published": activate_successor,
             }
         transition_started = True
         if spawned_handles is not None:
@@ -842,8 +900,11 @@ def activate_after_update(
         summary["result"] = result.to_dict()
     finally:
         try:
-            if cutover_guard is None:
-                lease.release()
+            try:
+                local_custody.close()
+            finally:
+                if cutover_guard is None:
+                    lease.release()
         finally:
             # Legacy callers require the async backstop, even on an unexpected
             # exception escaping stale recovery, orchestration, or the
