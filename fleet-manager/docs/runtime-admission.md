@@ -69,7 +69,8 @@ the store's internal global cursor, unrelated row metadata or unselected fields.
 Broad query/pagination/subscriptions and protected wire cursors remain unimplemented.
 
 Immutable `OperationIntent` values support their original three commands and
-the fixed [`runner.converge`](arc-owner.md) operation. The verified
+the fixed [`runner.converge`](arc-owner.md) and
+[`manager.converge`](komodo-owner.md) operations. The verified
 principal/account and snapshot authority must match the
 original intent before operation-ID or result lookup. Target, command and
 generation require an exact `OperationGrant`; enrollment generations and
@@ -79,12 +80,14 @@ resource parameters, current source policy, routing/installation/offer binding,
 backend delegation, accepted-work fences and effect-side policy still belong to
 their existing owners. A permit is not permission to skip those checks.
 
-`runner.converge` additionally requires the fourth `OperationGrant` field,
-`request_digest`, to equal the complete original intent's canonical digest.
-Command/target/generation-only runner grants refuse. The request contains the
-exact prepared proposal and selected deployment digest, so changing an image,
-chart, resolved scope, support receipt, duration, operation ID or selected
-configuration cannot reuse the grant. The original three commands retain their
+Both fixed convergence commands additionally require the fourth
+`OperationGrant` field, `request_digest`, to equal the complete original
+intent's canonical digest. Command/target/generation-only grants refuse.
+The runner request binds its prepared proposal and selected deployment;
+the manager request binds its complete selected deployment through the single
+`deployment` parameter. Changing an image, resolved scope, duration,
+operation ID or selected configuration cannot reuse the grant.
+The original three commands retain their
 existing grant shape; supplying a digest for them is unsupported. The current
 policy owner must independently admit that exact deployment. A preparation
 review does not create such an enrollment/grant.

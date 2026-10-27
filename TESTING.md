@@ -3,6 +3,19 @@
 How to run the plugin test suites, explicit development checks, and the
 **opt-in end-to-end smoke tests** that require real infrastructure.
 
+Fleet-manager's `test_komodo_*` packet exercises strict declaration/current
+grant checks, real caller-owned synthetic Docker protocol processes, physical
+bridge and exact-container custody, preserving adoption versus managed fixed
+configuration, UNKNOWN/restart reconciliation, failed candidates, current
+authenticated loopback readiness and receipt-owned retirement/reinstallation.
+`test_komodo_gateway.py` traverses the actual TLS Gateway and original JWT/
+enrolled-PoP caller boundary without a service connector.
+`test_komodo_installed.py` installs a fresh noneditable SDK, denies checkout
+reads and invokes the public bootstrap with a real machine-key verification
+result. These are contained component/installed-SDK controls, not actual Docker,
+official-image, automatically constructed controller or production evidence.
+Native/network/build tests remain outside the required no-actor unit packet.
+
 Agent-worktrees' `test_launch_seed_native.py` covers the dormant finite backend
 provider: retained one-time seed claims, literal argv, existing prompt-free
 execution observations, PID/birth and incarnation refusals, definite-spawn

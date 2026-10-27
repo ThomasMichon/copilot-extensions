@@ -10,6 +10,7 @@ COMMAND_FIELDS = {
     "workspace.allocate": {"repository", "objective"},
     "prompt.deliver": {"session", "message_ref"},
     "runner.converge": {"preparation", "allocation", "deployment"},
+    "manager.converge": {"deployment"},
     "machine.enroll": {"enrollment"},
 }
 SCOPE = ("operation", "authority", "principal", "account", "target", "generation")
