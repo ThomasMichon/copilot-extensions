@@ -2,9 +2,11 @@
 
 The store exposes an **opt-in Python prerequisite** for slice-local clustering:
 read one canonical source bucket and only the requested model tables. It does
-not yet change ordinary clustering invalidation or artifact replacement.
+not change the default clustering invalidation or artifact replacement.
 The [covered maintenance owner](architecture.md#covered-derived-maintenance)
-still uses its conservative full pass after a real projection change.
+uses its conservative full pass by default; the
+[opt-in slice planner](cluster-slices.md#opt-in-maintenance) composes this reader
+with witnessed generations and transactional partial publication.
 
 ```python
 from agent_index.store.chunk_id_index import prepare_chunk_id_index
@@ -46,6 +48,10 @@ as full representations. All canonical chunks contribute to the item hash,
 even when the selected model covers only some chunks. Only selected registered
 model IDs are queried; missing vectors skip that model's centroid, not the
 canonical input. Duplicate model selections are coalesced.
+By default, items without selected centroids are omitted.
+`include_unembedded=True` also yields those canonical items, with an empty
+centroid map, so callers can count the complete bucket without querying
+unselected models.
 
 Missing/incompatible preparation, unindexed tails, invalid selections, incomplete
 or malformed canonical input, duplicate chunk IDs and backend failures propagate
@@ -88,9 +94,10 @@ whole-table invalidation rather than an invented partial proof.
 
 `bucket_generation` is an internal key helper for an already-current, physically
 witnessed logical projection. It is not a standalone freshness check. Existing
-global cluster coverage is unchanged and still observes every table generation;
-transactional partial artifact replacement and incremental bucket discovery are
-not yet wired.
+global cluster coverage is unchanged and still observes every table generation.
+The [opt-in slice planner](cluster-slices.md#opt-in-maintenance) validates the
+same optional states only after matching their physical witnesses; it refuses
+missing proof instead of silently turning an ordinary update into a full repair.
 
 ## Reproduction
 

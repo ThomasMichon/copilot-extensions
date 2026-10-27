@@ -21,6 +21,10 @@ def refresh_clusters(
 ) -> dict[str, int | float] | None:
     if not config.cluster_enabled:
         return None
+    if config.cluster_slice_row_budget is not None:
+        from agent_index.indexing.cluster_slice_pass import refresh_cluster_slices
+
+        return refresh_cluster_slices(multi_store, config, force=force)
     counts = current_counts()
     attempted = False
     try:

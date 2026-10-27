@@ -6,7 +6,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .logical_projection import current_projection, physical_table
 
@@ -43,8 +43,10 @@ class ClusterCoverage:
         }
 
 
-def projection_snapshot(store: MultiModelStore) -> dict[str, object]:
-    """Read only configured table metadata, refreshing handles used by readers."""
+def witnessed_projection(
+    store: MultiModelStore,
+) -> tuple[dict[str, object], dict[str, Any] | None]:
+    """Read configured table metadata and its current optional logical witness."""
     if "://" in str(store._db_path):
         raise ProjectionSnapshotUnavailable("Remote projection identity is not qualified")
     root = Path(store._db_path).resolve()
@@ -76,14 +78,24 @@ def projection_snapshot(store: MultiModelStore) -> dict[str, object]:
         "root": str(root), "tables": tables,
         "domain": receipt["domain"] if receipt is not None else None,
         "logical_epoch": logical["epoch"] if logical is not None else None,
-    }
+    }, logical
+
+
+def projection_snapshot(store: MultiModelStore) -> dict[str, object]:
+    """Read only configured table metadata, refreshing handles used by readers."""
+    return witnessed_projection(store)[0]
 
 
 def cluster_signature(store: MultiModelStore, config: IndexConfig) -> str:
     """Bind witnessed input generations and the clustering policy to one artifact."""
+    return cluster_projection_signature(store.projection_snapshot(), config)
+
+
+def cluster_projection_signature(snapshot: dict[str, object], config: IndexConfig) -> str:
+    """Apply the existing global signature format to an already witnessed snapshot."""
     payload = {
         "version": 1,
-        "projection": store.projection_snapshot(),
+        "projection": snapshot,
         "threshold_default": config.cluster_threshold_default,
         "thresholds": config.cluster_thresholds,
         "min_size": config.cluster_min_size,

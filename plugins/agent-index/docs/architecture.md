@@ -633,17 +633,18 @@ state.
 Legacy stores retain conservative physical-version coverage. These generations
 are derived-artifact reuse evidence, not source cursors, checkpoint advancement,
 new reader authority or locks. They describe committed store writes, not an
-atomic whole-source delta. A real change still invokes the global clustering
-pass; model/bucket-local maintenance remains separate work.
+atomic whole-source delta. By default a real change still invokes the global
+clustering pass.
 The opt-in [prepared bucket/model item reader](bucket-item-reads.md) supplies
 indexed, explicitly budgeted slice input without changing that default.
 Its [witnessed bucket generations](bucket-item-reads.md#witnessed-bucket-generations)
 track qualified content/vector mutations and canonical tombstones under the same
 clean commit, with bounded sparse overrides and whole-table fallback for
 unqualified transitions. The additive
-[transactional cluster-slice storage seam](cluster-slices.md) can publish
-selected artifact rows with bounded receipts, but ordinary maintenance does not
-yet select or publish partial slices.
+[opt-in cluster-slice planner and storage seam](cluster-slices.md) connects
+witnessed bucket keys, prepared selected-model input and transactional partial
+publication. Its Python-only row budget defaults off; missing proof or unsafe
+mixed-model totals request explicit repair, never an implicit global sweep.
 
 ### Durable acquisition hints (queue contract v1)
 

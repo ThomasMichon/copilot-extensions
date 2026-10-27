@@ -33,7 +33,8 @@ def mutation_buckets(sources: Iterable[str] | None) -> set[str] | None:
     return result
 
 
-def _tables(projection: dict[str, Any]) -> dict[str, Any]:
+def bucket_tables(projection: dict[str, Any]) -> dict[str, Any]:
+    """Return validated optional states; absence or invalidity requires coarse repair."""
     value = projection.get("bucket_generations")
     if value is None:
         return {}
@@ -70,7 +71,7 @@ def _tables(projection: dict[str, Any]) -> dict[str, Any]:
 def bucket_generation(projection: dict[str, Any], table: str, bucket: str) -> tuple[str, int, int]:
     """Use only with a current, physically witnessed logical projection."""
     validate_bucket(bucket)
-    state = _tables(projection).get(table)
+    state = bucket_tables(projection).get(table)
     generation = projection["tables"][table]
     return (
         projection["epoch"],
@@ -84,7 +85,7 @@ def commit_buckets(
     projection: dict[str, Any],
     scoped: dict[str, set[str]],
 ) -> None:
-    old = _tables(previous) if previous is not None else {}
+    old = bucket_tables(previous) if previous is not None else {}
     states: dict[str, Any] = {}
     for name, generation in projection["tables"].items():
         prior = previous["tables"].get(name) if previous is not None else None
