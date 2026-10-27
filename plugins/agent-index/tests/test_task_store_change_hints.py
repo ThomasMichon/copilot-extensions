@@ -125,6 +125,36 @@ def test_active_hints_are_immutable_and_trailing_deliveries_union(tmp_path):
             _sql(path, statement, args)
 
 
+@pytest.mark.parametrize("full_source", ["all", "git:sample"])
+def test_processing_full_task_preserves_hundred_delivery_trailing_union(tmp_path, full_source):
+    path = tmp_path / "tasks.db"
+    store = TaskStore(path)
+    full = store.enqueue(full_source, full=True)
+    processing = store.dequeue_next(accept_change_hints=True)
+    assert processing.id == full.id and processing.full
+    expected = _hints(item_ids=(), event_ids=())
+    trailing_ids = set()
+    for index in range(100):
+        value = _hints(
+            item_ids=(f"item-{index % 3}",), event_ids=(f"event-{index}",),
+            ref_ranges=(RefRange("base", f"target-{index % 2}"),),
+            metadata_revisions=(MetadataRevision(f"item-{index % 3}", str(index % 2)),),
+        )
+        expected = expected.union(value)
+        trailing_ids.add(_enqueue(store, value).id)
+    assert len(trailing_ids) == 1 and full.id not in trailing_ids
+    restarted = TaskStore(path)
+    assert restarted.get_task(full.id) == processing
+    assert restarted.get_pending_count() == 1
+    assert {task.id for task in restarted.get_queue()} == trailing_ids | {full.id}
+    assert restarted.get_task(next(iter(trailing_ids))).change_hints == expected
+    restarted.update_status(full.id, "complete")
+    claimed = restarted.dequeue_next(accept_change_hints=True)
+    assert claimed.id in trailing_ids and not claimed.full
+    assert claimed.change_hints == expected
+    assert TaskStore(path).get_task(claimed.id).change_hints == expected
+
+
 def test_restart_retry_cancel_and_recovery_preserve_payload(tmp_path):
     path = tmp_path / "tasks.db"
     store = TaskStore(path)

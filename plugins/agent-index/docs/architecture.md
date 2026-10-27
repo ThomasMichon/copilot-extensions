@@ -764,7 +764,9 @@ changed projection tables; nested content/vector writes share that commit.
 Per-table generations identify content and individual model changes.
 Changed-table counters use the monotonic commit generation, so removing and
 recreating a table cannot resurrect its old coverage key. Strict
-identical-content skips change neither physical nor logical versions. Explicitly
+identical-content skips and canonical tombstones matching no current rows change
+neither physical nor logical versions. A repeated tombstone therefore does not
+invalidate current FTS or cluster coverage. Explicitly
 annotated scalar-index preparation, FTS building and compaction preserve logical
 generations for their existing tables. Each operation records its own physical
 before/after transition under the existing writer; exemptions require a contiguous
