@@ -13,6 +13,10 @@ def render_registry(registry: ReposRegistry) -> str:
 
     header = "# ~/.agent-worktrees/repos.yaml"  # marketplace-isolation: allow legacy
     lines = [header, "# Registry of known repositories and source roots.", ""]
+    if registry.schema_version is not None:
+        if type(registry.schema_version) is not int or registry.schema_version < 1:
+            raise ValueError("Repository registry has an invalid schema version")
+        lines.extend([f"schema_version: {registry.schema_version}", ""])
     if registry.srcroot:
         lines.append("srcroot:")
         for plat in ("windows", "wsl", "linux"):

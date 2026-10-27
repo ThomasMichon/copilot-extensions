@@ -10,6 +10,7 @@ import threading
 
 from agent_procutil import no_window_kwargs
 import pytest
+import yaml
 
 from agent_worktrees import repos
 from agent_worktrees.repos_registry_transaction import RegistryConflictError, registry_lock
@@ -39,6 +40,40 @@ def test_writer_refreshes_own_baseline(registry_home):
         registry.account_map["example"] = value
         repos.write_registry(registry)
     assert repos.read_registry().account_map["example"] == "second"
+
+
+@pytest.mark.parametrize("populated", (False, True))
+def test_ordinary_write_retains_loaded_schema_stamp_and_existing_data(registry_home, populated):
+    path = repos._repos_yaml_path()
+    initial = {
+        "schema_version": 1,
+        "srcroot": {"linux": "/existing/source"},
+        "account_map": {"example": "existing-login"},
+        "repos": {
+            "sample": {"class": "reference", "agent": False, "linux": "/existing/sample"},
+        } if populated else {},
+    }
+    path.write_text(yaml.safe_dump(initial), encoding="utf-8")
+    registry = repos.read_registry(strict=True)
+    assert registry.schema_version == 1
+    for _ in range(2):
+        repos.write_registry(registry)
+        assert yaml.safe_load(path.read_text(encoding="utf-8")) == initial
+        registry = repos.read_registry(strict=True)
+
+
+@pytest.mark.parametrize("version", (None, True, "1", 0, -1))
+def test_invalid_schema_stamp_never_becomes_an_ordinary_write(registry_home, version):
+    path = repos._repos_yaml_path()
+    path.write_text(yaml.safe_dump({"schema_version": version, "repos": {}}), encoding="utf-8")
+    original = path.read_bytes()
+    with pytest.raises(repos.RepositoryResolutionError, match="schema version"):
+        repos.read_registry(strict=True)
+    if version is not None:
+        registry = repos.ReposRegistry(schema_version=version)
+        with pytest.raises(ValueError, match="schema version"):
+            repos.write_registry(registry)
+    assert path.read_bytes() == original
 
 
 def test_registry_writes_preserve_publication_authority_guard(registry_home, monkeypatch):

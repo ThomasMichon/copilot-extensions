@@ -2451,6 +2451,19 @@ redirect custody through selective native deletion. Its `--check` performs
 structural admission only; deletion repeats ownership, inventory, guards and
 current-user process attribution under custody. A matching deploy manifest is
 removed last and retained as retry proof on cleanup failure.
+An explicit `--check --check-consumers` additionally acquires that removal
+custody and checks consumers before a non-daemon caller's first mutation;
+ordinary daemon adapters retain their owned service-STOP ordering. Finite
+`bin_entries` and `script_entries` may name nested files: every path segment
+is validated, only declared immediate children and their own bytecode are
+selected, and unknown siblings are retained.
+Worktrees uses its existing whole-action command lifecycle and the standard
+self-stage/re-exec path. Its pre-stage admission returns early for a genuinely
+absent default footprint without creating a runtime. Staged ownership resolves
+at the original source only through the inherited live lifecycle. Process
+inspection recognizes that exact teardown owner, native caller and canonical
+staging watchdog, never arbitrary Python ancestors. A nonempty legacy Worktrees
+`lib` refuses until its ownership has an explicit migration path.
 Shell-only adopters also co-package `installer_engine_process.py`: POSIX finite
 deletion uses its bounded child owner even without the Python installer facade.
 Global command selection uses the co-packaged
@@ -2460,6 +2473,9 @@ remain. Cmd wrappers that delegate to PowerShell require their exact owned
 peer; independently executable MCP/Machines cmd programs are checked against
 their complete native templates. Index separately admits its exact installed
 and product-verified session-stamped lifecycle-gate forms at the default root.
+Source-bearing legacy commands may also match the installed deployment's
+recorded artifact path, rendered through the current trusted writer. That path
+is literal template data, never a source to execute or project-command ownership.
 
 Native Linux daemon STOP uses the separate co-packaged
 `installer_engine_stop.py`; the finite-removal helper still never stops a

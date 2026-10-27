@@ -199,8 +199,13 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
         $previousErrorAction = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         try {
-            $output = & $Candidate @Prefix -I -S -B -X utf8 -c `
-                'import json,sys; sys.exit(1) if sys.version_info < (3, 10) else print(json.dumps(sys.executable, ensure_ascii=True))' 2>$null
+            if ($Action -eq 'uninstall') {
+                $output = & $Candidate @Prefix -I -S -B -X utf8 `
+                    (Join-Path $PSScriptRoot 'uninstall-state.py') --probe-python $InstallDir 2>$null
+            } else {
+                $output = & $Candidate @Prefix -I -S -B -X utf8 -c `
+                    'import json,sys; sys.exit(1) if sys.version_info < (3, 10) else print(json.dumps(sys.executable, ensure_ascii=True))' 2>$null
+            }
             $code = $LASTEXITCODE
         } catch {
             return $null
@@ -238,7 +243,7 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
             throw 'The supplied bootstrap Python must be a working Python 3.10+ executable.'
         }
     }
-    $admissionLauncher = if (-not $admissionPython) {
+    $admissionLauncher = if (-not $admissionPython -and $Action -ne 'uninstall') {
         Get-Command py -CommandType Application -ErrorAction SilentlyContinue |
             Select-Object -First 1
     } else { $null }
@@ -724,6 +729,25 @@ if ($ContextualInstall) {
         [Console]::Error.Write($contextStderr.GetAwaiter().GetResult())
         Remove-Item -LiteralPath $contextStage -Recurse -Force -ErrorAction SilentlyContinue
         exit $contextExitCode
+    }
+}
+
+if ($Action -eq 'uninstall') {
+    $uninstallArgs = @('-I', '-S', '-B', '-X', 'utf8',
+        (Join-Path $PSScriptRoot 'uninstall-state.py'),
+        '--payload-root', $admissionPayload, '--plugin-id', 'agent-worktrees',
+        '--root', $InstallDir, '--shell', (Get-Process -Id $PID).Path,
+        '--profile', (Join-Path $PSScriptRoot 'uninstall-profile.json'))
+    if ($RemoveConfig) { $uninstallArgs += '--purge' }
+    $uninstallPreflight = @(& $admissionPython @uninstallArgs --check --check-consumers)
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $uninstallStatus = ($uninstallPreflight -join "`n") | ConvertFrom-Json -ErrorAction Stop
+    if ($uninstallStatus.status -notin @('absent', 'ready')) {
+        throw 'Finite uninstall returned an invalid admission decision.'
+    }
+    if ($uninstallStatus.status -eq 'absent' -and -not $RemoveConfig) {
+        Write-Output ($uninstallPreflight -join "`n")
+        exit 0
     }
 }
 
@@ -4180,8 +4204,10 @@ function Invoke-Stamp {
     Write-ServiceOk 'Stamped: agent-worktrees tool binstub on PATH; runtime provisions on first use.'
 }
 
-Initialize-SourceRuntime
-Assert-SourceRuntime
+if ($Action -ne 'uninstall') {
+    Initialize-SourceRuntime
+    Assert-SourceRuntime
+}
 
 if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision', 'stamp', 'uninstall', 'repair', 'dev', 'dev-release', 'publish-runtime-helpers')) {
     & $admissionPython @admissionArgs --check-lifecycle --lifecycle-operation $admissionOperation
@@ -4368,25 +4394,29 @@ switch ($Action) {
 
     'uninstall' {
         Write-ServiceHeader "Uninstalling $ServiceName"
+        & $admissionPython @uninstallArgs --check --check-consumers
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-        Remove-Binstub
-        Remove-LegacyBinstubs
+        if ($HasProject -and (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
+            $savedPayloadRoot = $env:AGENT_WORKTREES_PAYLOAD_ROOT
+            try {
+                $env:AGENT_WORKTREES_PAYLOAD_ROOT = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
+                    $env:COPILOT_PLUGIN_STAGED_FROM
+                } else { $PluginDir }
+                & $VenvPython -m agent_worktrees reconcile-binstubs --remove $ProjectName
+                if ($LASTEXITCODE -ne 0) {
+                    Write-ServiceWarn 'Project binstub preserved (ownership check failed)'
+                }
+            } finally { $env:AGENT_WORKTREES_PAYLOAD_ROOT = $savedPayloadRoot }
+        }
 
         # Remove Windows Terminal fragment
         $fragDir = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\AgentWorktrees'
-        if (Test-Path $fragDir) {
+        if ($RemoveConfig -and (Test-Path $fragDir)) {
             Remove-Item $fragDir -Recurse -Force
             Write-ServiceChanged "Removed Windows Terminal fragment: $fragDir"
         }
 
-        # Remove the deployed terminal scripts. ~/.psmux.conf is intentionally
-        # left alone: agent-worktrees no longer owns it (sessions are configured
-        # per-session at launch), so uninstall must not delete a file that may
-        # now be the user's own (or an opt-in apply-mux-keybinds.ps1 block).
-        foreach ($script in @('session-options.ps1', 'apply-mux-keybinds.ps1', 'psmux-passthrough.conf')) {
-            $sp = Join-Path $BinDir $script
-            if (Test-Path $sp) { Remove-Item $sp -Force; Write-ServiceChanged "Removed terminal script: $script" }
-        }
         $psmuxConf = Join-Path $env:USERPROFILE '.psmux.conf'
         if (Test-Path $psmuxConf) {
             Write-ServiceSkipped "Left ~/.psmux.conf in place (no longer managed by agent-worktrees)"
@@ -4394,43 +4424,18 @@ switch ($Action) {
 
         # Remove shortcuts
         $displayName = ($ProjectName -replace '-', ' ') -replace '(^| )(.)', { $_.Value.ToUpper() }
-        foreach ($lnk in @("$displayName.lnk", "$displayName (WSL).lnk")) {
-            $lnkPath = Join-Path $LocalBin $lnk
-            if (Test-Path $lnkPath) { Remove-Item $lnkPath -Force }
-        }
-        # Also remove distro-specific WSL shortcuts (e.g. "Test Chamber (WSL: Ubuntu).lnk")
-        Get-ChildItem -Path $LocalBin -Filter "$displayName (WSL: *).lnk" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
-        Write-ServiceChanged "Removed shortcuts"
-
-        # Remove Python runtime (venv + package). Versioned: the `.venv` link +
-        # the whole versions/ tree; otherwise the single real venv dir.
-        if ($VersionedRuntime) {
-            if ((Test-Path $LinkDir) -and ((Get-Item $LinkDir -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-                & cmd /c rmdir "$LinkDir" 2>$null
-            } elseif (Test-Path $LinkDir) {
-                Remove-Item $LinkDir -Recurse -Force -ErrorAction SilentlyContinue
+        if ($RemoveConfig) {
+            foreach ($lnk in @("$displayName.lnk", "$displayName (WSL).lnk")) {
+                $lnkPath = Join-Path $LocalBin $lnk
+                if (Test-Path $lnkPath) { Remove-Item $lnkPath -Force }
             }
-            $verRoot = Join-Path $InstallDir 'versions'
-            if (Test-Path $verRoot) { Remove-Item $verRoot -Recurse -Force -ErrorAction SilentlyContinue }
-            Write-ServiceChanged "Removed versioned venv (.venv link + versions/)"
-        } elseif (Test-Path $VenvDir) {
-            Remove-Item $VenvDir -Recurse -Force
-            Write-ServiceChanged "Removed venv: $VenvDir"
-        }
-        if (Test-Path $LibDir) {
-            Remove-Item $LibDir -Recurse -Force
-            Write-ServiceChanged "Removed package: $LibDir"
+            Get-ChildItem -Path $LocalBin -Filter "$displayName (WSL: *).lnk" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+            Write-ServiceChanged "Removed shortcuts"
         }
 
-        # Remove wrappers (legacy cleanup: earlier versions deployed the
-        # in-plugin mux launch scripts here; they are no longer deployed by
-        # this installer, but a stale copy from a pre-cutover version is
-        # still cleaned up on uninstall).
-        foreach ($wrapper in @('launch-session.cmd', 'launch-session.ps1', 'pane-wrapper.ps1')) {
-            $path = Join-Path $BinDir $wrapper
-            if (Test-Path $path) { Remove-Item $path -Force }
-        }
-        Write-ServiceChanged "Removed wrappers from $BinDir"
+        & $admissionPython @uninstallArgs --remove-runtime
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        Write-ServiceChanged 'Removed finite owned runtime content'
 
         if ($RemoveConfig) {
             if (Test-Path $ProjectDir) {
@@ -4442,10 +4447,6 @@ switch ($Action) {
                 Write-ServiceChanged "Removed runtime dir $InstallDir"
             }
         } else {
-            $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
-            if (Test-Path $manifestPath) {
-                Remove-Item $manifestPath -Force
-            }
             Write-ServiceSkipped "Config and session metadata preserved at $ProjectDir"
             Write-Host "    Use -RemoveConfig to delete everything"
         }

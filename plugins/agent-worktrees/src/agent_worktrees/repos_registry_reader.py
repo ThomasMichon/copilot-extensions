@@ -70,6 +70,9 @@ def read_registry(path: Path, *, strict: bool = False) -> ReposRegistry:
                 raise RepositoryResolutionError("repository registry must be a mapping")
             return ReposRegistry(_baseline=(str(path.resolve()), "invalid"))
         data = config_migrations.migrate_loaded(data, config_migrations.SCHEMA_REPOS)
+        schema_version = data.get("schema_version")
+        if "schema_version" in data and (type(schema_version) is not int or schema_version < 1):
+            raise RepositoryResolutionError("repository registry has an invalid schema version")
         srcroot = data.get("srcroot", {})
         if not isinstance(srcroot, dict):
             srcroot = {}
@@ -153,6 +156,7 @@ def read_registry(path: Path, *, strict: bool = False) -> ReposRegistry:
                 )
         return ReposRegistry(
             srcroot=srcroot, repos=repos, account_map=account_map, _baseline=baseline,
+            schema_version=schema_version,
         )
     except Exception as exc:
         if strict:

@@ -295,7 +295,8 @@ def _simple(payload: Path, root: Path, product: str, module: str) -> dict[str, t
     return result
 
 
-def _templates(payload: Path, root: Path, product: str) -> dict[str, tuple[str, ...]]:
+def _templates(payload: Path, root: Path, product: str, *,
+               publisher_root: Path | None = None) -> dict[str, tuple[str, ...]]:
     module = product.replace("-", "_")
     if product in _SIMPLE:
         return _simple(payload, root, product, module)
@@ -318,10 +319,11 @@ def _templates(payload: Path, root: Path, product: str) -> dict[str, tuple[str, 
     sh = _function(sh, sh_name)
     ps = _function(ps, ps_name, True)
     root_ps = str(root).replace("'", "''")
-    payload_ps = str(payload).replace("'", "''")
+    publisher = publisher_root or payload
+    payload_ps = str(publisher).replace("'", "''")
     if product == "agent-bridge":
         bash = tuple(_printf(sh, (r, p, qualified)) + _sh(sh, "STUB")
-                     for r in _shell_paths(root) for p in _shell_paths(payload)
+                     for r in _shell_paths(root) for p in _shell_paths(publisher)
                      for qualified in ("", "1"))
         power = tuple(_render_ps(ps, "ps1", {
             "__ROOT__": root_ps, "__SOURCE__": payload_ps,
@@ -332,7 +334,7 @@ def _templates(payload: Path, root: Path, product: str) -> dict[str, tuple[str, 
         })
     elif product == "agent-dispatch":
         bash = tuple(_printf(sh, (p, r + "/bin/runtime-gate.sh")) + _sh(sh, "STUBEOF")
-                     for r in _shell_paths(root) for p in _shell_paths(payload))
+                     for r in _shell_paths(root) for p in _shell_paths(publisher))
         power = (_render_ps(ps, "ps1Content", {
             "@INSTALL_DIR@": root_ps, "@PAYLOAD_ROOT@": payload_ps,
         }),)
@@ -344,13 +346,13 @@ def _templates(payload: Path, root: Path, product: str) -> dict[str, tuple[str, 
         cmd = _render_ps(ps, "stubContent")
     elif product == "agent-containers":
         bash = tuple(_printf(sh, (r, p, "", mode)) + _sh(sh, "STUBEOF")
-                     for r in _shell_paths(root) for p in _shell_paths(payload)
+                     for r in _shell_paths(root) for p in _shell_paths(publisher)
                      for mode in ("legacy", "unknown"))
         bash += tuple(_render_ps(ps, "stubContent", {
             "__ROOT__": _shell_literal(r, "containers"),
             "__SOURCE__": _shell_literal(p, "containers"),
             "__CONTEXT__": "''", "__MODE__": mode,
-        }) for r in _shell_paths(root) for p in _shell_paths(payload)
+        }) for r in _shell_paths(root) for p in _shell_paths(publisher)
             for mode in ("legacy", "unknown"))
         power = tuple(_render_ps(ps, "ps1Content", {
             "__ROOT__": root_ps, "__SOURCE__": payload_ps,
@@ -406,6 +408,7 @@ def _text(value: str) -> str:
 
 def owned_local_names(
     payload: Path, root: Path, module: str, contents: dict[str, str],
+    *, publisher_root: Path | None = None,
 ) -> tuple[str, ...]:
     """Return only exact current legacy command names owned by this installation.
 
@@ -413,7 +416,9 @@ def owned_local_names(
     Missing/malformed trusted sources raise when candidate commands exist.
     A custom-root uninstall never owns fixed-default-root wrappers. Writers
     that actually bind custom roots (Simple, Codespaces, Containers) are rendered
-    against that precise root; publisher-bearing forms also bind this payload.
+    against that precise root. Publisher-bearing forms also bind this payload
+    or the installed deployment's recorded artifact path. That path supplies
+    literal template data only, never executable code or project-command ownership.
     The caller remains responsible for physical-file and installation custody.
     """
     product = module.replace("_", "-")
@@ -432,6 +437,14 @@ def owned_local_names(
     if not isinstance(manifest, dict) or manifest.get("name") != product:
         raise ValueError(f"Command payload manifest does not identify {product}")
     templates = _templates(payload, root, product)
+    if publisher_root is not None and product in {
+        "agent-bridge", "agent-dispatch", "agent-containers",
+    }:
+        if (not publisher_root.is_absolute() or ".." in publisher_root.parts
+                or any(char in str(publisher_root) for char in "\r\n\0")):
+            raise ValueError("Installed command publisher must be an absolute non-traversing path")
+        installed = _templates(payload, root, product, publisher_root=publisher_root)
+        templates = {name: bodies + installed.get(name, ()) for name, bodies in templates.items()}
     if product in _DEFAULT_ONLY and root != Path.home() / ("." + product):
         return ()
     selected = {

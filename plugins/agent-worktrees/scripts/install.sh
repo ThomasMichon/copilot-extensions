@@ -42,6 +42,7 @@ context_governance_unchanged() {
 __aw_action="${1:-status}"
 __aw_install_dir_arg=""
 __aw_provision_missing_runtime=false
+__aw_remove_config=false
 __aw_args=("$@")
 for ((__aw_i = 1; __aw_i < ${#__aw_args[@]}; __aw_i++)); do
     if [[ "${__aw_args[$__aw_i]}" == "--provision-missing-runtime" ]]; then
@@ -64,7 +65,17 @@ for ((__aw_i = 1; __aw_i < ${#__aw_args[@]}; __aw_i++)); do
             "${__aw_args[$__aw_i]}" == --runtime-publication-plan ||
             "${__aw_args[$__aw_i]}" == --runtime-publication-digest ||
             "${__aw_args[$__aw_i]}" == --runtime-publication-python ]]; then
+        ((__aw_i + 1 < ${#__aw_args[@]})) || {
+            printf 'ERROR: %s requires a value\n' "${__aw_args[$__aw_i]}" >&2
+            exit 1
+        }
         ((__aw_i += 1))
+    elif [[ "$__aw_action" == uninstall ]]; then
+        case "${__aw_args[$__aw_i]}" in
+            --remove-config) __aw_remove_config=true ;;
+            --force|--zero-downtime) ;;
+            *) printf 'Unknown option: %s\n' "${__aw_args[$__aw_i]}" >&2; exit 1 ;;
+        esac
     fi
 done
 if $__aw_provision_missing_runtime && [[ "$__aw_action" != update ||
@@ -100,12 +111,23 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
             }
             __aw_admission_python=""
             while IFS= read -r __aw_candidate_path; do
+                case "${OSTYPE:-}" in
+                    msys*|cygwin*)
+                        if [[ "$__aw_candidate_path" != *.exe && -f "$__aw_candidate_path.exe" ]]; then
+                            __aw_candidate_path+=".exe"
+                        fi ;;
+                esac
                 [[ -f "$__aw_candidate_path" && -x "$__aw_candidate_path" ]] || continue
                 case "$__aw_candidate_path" in
                     */Microsoft/WindowsApps/*) continue ;;
                 esac
-                "$__aw_candidate_path" -I -S -B -c \
-                    'import sys; assert sys.version_info >= (3, 11)' >/dev/null 2>&1 || continue
+                if [[ "$__aw_action" == uninstall ]]; then
+                    "$__aw_candidate_path" -I -S -B "$SCRIPT_DIR/uninstall-state.py" \
+                        --probe-python "$__aw_admission_root" >/dev/null 2>&1 || continue
+                else
+                    "$__aw_candidate_path" -I -S -B -c \
+                        'import sys; assert sys.version_info >= (3, 11)' >/dev/null 2>&1 || continue
+                fi
                 __aw_admission_python="$(cd "$(dirname "$__aw_candidate_path")" && pwd -P)/$(basename "$__aw_candidate_path")"
                 break
             done < <(type -ap python3 python)
@@ -505,6 +527,26 @@ CONTEXT_INSTALL_WATCHDOG
         exec bash -c "$__aw_watchdog" bash \
             "$__aw_staged_payload/scripts/$(basename "${BASH_SOURCE[0]}")" \
             "$__aw_stage" "$__aw_deadline" "$__aw_install_root" "$@"
+    fi
+fi
+
+if [[ "$__aw_action" == uninstall ]]; then
+    __aw_uninstall_shell="$(type -P bash)" || exit 1
+    __aw_uninstall_shell="$(cd "$(dirname "$__aw_uninstall_shell")" && pwd -P)/$(basename "$__aw_uninstall_shell")"
+    __aw_uninstall_args=(
+        -I -S -B -X utf8 "$SCRIPT_DIR/uninstall-state.py"
+        --payload-root "$PLUGIN_DIR" --plugin-id agent-worktrees
+        --root "$__aw_admission_root" --shell "$__aw_uninstall_shell"
+        --profile "$SCRIPT_DIR/uninstall-profile.json"
+    )
+    if $__aw_remove_config; then __aw_uninstall_args+=(--purge); fi
+    __aw_uninstall_preflight="$("$__aw_admission_python" "${__aw_uninstall_args[@]}" --check --check-consumers)" || exit $?
+    __aw_uninstall_status="$("$__aw_admission_python" -I -S -B -c \
+        'import json,sys; status=json.loads(sys.argv[1])["status"]; assert status in ("absent","ready"); print(status)' \
+        "$__aw_uninstall_preflight")" || exit $?
+    if [[ "$__aw_uninstall_status" == absent ]] && ! $__aw_remove_config; then
+        printf '%s\n' "$__aw_uninstall_preflight"
+        exit 0
     fi
 fi
 
@@ -3296,8 +3338,10 @@ if [[ "$ACTION" == publish-runtime-helpers ]]; then
     esac
     _bootstrap_python() { printf '%s\n' "$RUNTIME_PUBLICATION_PYTHON"; }
 fi
-_initialize_source_runtime || exit 1
-_assert_source_runtime || exit 1
+if [[ "$ACTION" != uninstall ]]; then
+    _initialize_source_runtime || exit 1
+    _assert_source_runtime || exit 1
+fi
 
 if ! $CONTEXTUAL_INSTALL; then
     case "$ACTION" in
@@ -3484,6 +3528,7 @@ case "$ACTION" in
 
     uninstall)
         header "Uninstalling $SERVICE_NAME"
+        "$__aw_admission_python" "${__aw_uninstall_args[@]}" --check --check-consumers || exit $?
 
         # Remove Tabby profile (before venv removal -- needs Python)
         if $HAS_PROJECT; then
@@ -3499,50 +3544,8 @@ case "$ACTION" in
                 warn "Project binstub preserved (ownership check failed)"
         fi
 
-        # Remove tool binstubs
-        for stub in mark-session-complete agent-worktrees; do
-            stub_path="$LOCAL_BIN/$stub"
-            if [[ -f "$stub_path" ]]; then
-                rm -f "$stub_path"
-                changed "Removed binstub: $stub_path"
-            fi
-        done
-
-        for stub in agent-worktrees-update-entry.sh agent-worktrees-update-entry.ps1 agent-worktrees-update-json.awk; do
-            stub_src="$PLUGIN_DIR/bin/$stub"
-            [[ "$stub" != agent-worktrees-update-json.awk ]] || stub_src="$SCRIPT_DIR/installation-context/json-query.awk"
-            if [[ -f "$LOCAL_BIN/$stub" && ! -L "$LOCAL_BIN/$stub" ]] &&
-               cmp -s "$stub_src" "$LOCAL_BIN/$stub"; then
-                rm -f "$LOCAL_BIN/$stub"
-                changed "Removed owned update helper: $LOCAL_BIN/$stub"
-            fi
-        done
-        # Sweep any lingering legacy alias binstubs
-        remove_legacy_binstubs
-
-        # Remove Python runtime (venv + package). Versioned: the `.venv` link +
-        # the versions/ tree; otherwise the single real venv dir.
-        if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
-            [[ -L "$LINK_DIR" ]] && rm -f "$LINK_DIR"
-            [[ -d "$LINK_DIR" && ! -L "$LINK_DIR" ]] && rm -rf "$LINK_DIR"
-            [[ -d "$INSTALL_DIR/versions" ]] && rm -rf "$INSTALL_DIR/versions"
-            changed "Removed versioned venv (.venv link + versions/)"
-        elif [[ -d "$VENV_DIR" ]]; then
-            rm -rf "$VENV_DIR"
-            changed "Removed venv: $VENV_DIR"
-        fi
-        if [[ -d "$LIB_DIR" ]]; then
-            rm -rf "$LIB_DIR"
-            changed "Removed package: $LIB_DIR"
-        fi
-
-        # Remove wrappers + terminal-integration scripts
-        for wrapper in launch-session.cmd launch-session.sh pane-wrapper.sh \
-                       session-options.sh apply-mux-keybinds.sh; do
-            rm -f "$BIN_DIR/$wrapper"
-        done
-        remove_legacy_scripts
-        changed "Removed wrappers from $BIN_DIR"
+        "$__aw_admission_python" "${__aw_uninstall_args[@]}" --remove-runtime || exit $?
+        changed "Removed finite owned runtime content"
 
         # ~/.tmux.conf is intentionally left alone: agent-worktrees no longer
         # owns it (sessions are configured per-session at launch), so uninstall
@@ -3559,7 +3562,6 @@ case "$ACTION" in
             rm -rf "$INSTALL_DIR"
             changed "Removed runtime dir $INSTALL_DIR"
         else
-            rm -f "$INSTALL_DIR/deploy-manifest.json"
             if $HAS_PROJECT; then
                 skipped "Config and session metadata preserved at $PROJECT_DIR"
             fi
