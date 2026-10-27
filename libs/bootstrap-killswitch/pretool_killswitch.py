@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 MAX_STATE_BYTES = 16 * 1024
+CONTRACT = {"id": "copilot-extensions.pretool-killswitch", "version": 1,
+            "scope": "default-installation", "capabilities": ["pretool-stop-v1"]}
 
 
 def state_file() -> Path:
@@ -40,6 +42,11 @@ def read_state(path: Path) -> tuple[dict, str | None]:
         state = json.loads(raw.decode("utf-8-sig"))
         if not isinstance(state, dict) or type(state.get("active")) is not bool:
             raise ValueError("state must be an object with a boolean active field")
+        if "contract" in state:
+            contract = state["contract"]
+            if (not isinstance(contract, dict) or contract.get("id") != CONTRACT["id"]
+                    or type(contract.get("version")) is not int or contract["version"] != 1):
+                raise ValueError("unsupported pretool-killswitch state contract")
         return state, None
     except (UnicodeError, ValueError) as exc:
         return {"active": False}, str(exc)
@@ -61,7 +68,7 @@ def command(args: argparse.Namespace) -> int:
         path = state_file()
         verb = args.pretool_killswitch_command or "status"
         if verb == "on":
-            state = {"active": True, "reason": args.reason,
+            state = {"contract": CONTRACT, "active": True, "reason": args.reason,
                      "set_by": f"{getpass.getuser()}@{socket.gethostname()}",
                      "set_at": datetime.now(timezone.utc).isoformat()}
             raw = (json.dumps(state, indent=2) + "\n").encode("utf-8")
@@ -86,15 +93,15 @@ def command(args: argparse.Namespace) -> int:
                 raise ValueError(f"invalid state (guards remain enabled): {error}")
     except (OSError, ValueError) as exc:
         if args.json:
-            print(json.dumps({"ok": False, "error": str(exc)}))
+            print(json.dumps({"contract": CONTRACT, "ok": False, "error": str(exc)}))
         else:
             print(f"[pretool-killswitch] {exc}", file=sys.stderr)
         return 2
-    result = {**state, "ok": True, "path": str(path)}
+    result = {**state, "contract": CONTRACT, "ok": True, "path": str(path)}
     if args.json:
         print(json.dumps(result, indent=2))
     else:
-        print("ACTIVE -- suite preToolUse workflow guards are paused." if state["active"]
+        print("ACTIVE -- stop state set; only updated suite preToolUse guards are paused." if state["active"]
               else "inactive -- suite preToolUse workflow guards are enabled.")
         if state["active"]:
             print(f"  reason: {state.get('reason') or '(none)'}")

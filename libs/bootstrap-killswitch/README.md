@@ -154,3 +154,32 @@ verifying this control on the installed entrypoint; preserve unrelated disabled
 hooks and never set `disableAllHooks`. Clearing the native entry while leaving
 this switch active keeps the workflow guards paused. Clearing this switch while
 leaving the native entry disabled does **not** restore those guards.
+
+
+### Contract and mixed-version operation
+
+The selected executable's read-only `agent-machines pretool-killswitch status
+--json` advertises contract `copilot-extensions.pretool-killswitch`, version `1`,
+and capability `pretool-stop-v1`. Probe that actual selected executable, not a
+newer payload/version stamp. A legacy Machines parser rejects the unknown
+command before effects; do not treat it as supported or replay an effectful
+command through another form. Existing bootstrap commands and state are unchanged.
+
+New state writes include the same `contract` declaration. Readers also accept
+the minimal version-1 baseline `{ "active": true }` (or `false`) and ignore
+additive advisory fields. A declared foreign or unsupported contract leaves
+guards enabled with an explicit diagnostic. State and command versions are
+independent of package versions; no existing form is being retired.
+
+Expand by deploying the new helper and hook entrypoints first (the installer
+copies the dependency before its importer), then use the capable Machines
+controller and migrate operators to explicit activation. A newer controller
+with an older Worktrees/harness consumer can set a file but **cannot pause that
+older consumer**. Controller status proves its state, not fleet coverage or
+actual hook support. Validate each installed invocation before claiming relief.
+Older controllers with newer hooks retain normal behavior while the file is
+absent. For rollback, clear the switch using the capable selected controller
+before rolling it back; keep the state inactive while rolling consumers back.
+A retained flag cannot constrain an old consumer, and must not silently
+reactivate on a later upgrade. Native per-hook disables remain separate as
+explained above.

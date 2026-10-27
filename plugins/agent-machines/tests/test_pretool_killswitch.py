@@ -68,3 +68,33 @@ def test_write_failure_preserves_previous_state_and_cleans_temporary(
     assert state_path.read_bytes() == previous
     assert list(state_path.parent.iterdir()) == [state_path]
     assert "replacement refused" in capsys.readouterr().out
+
+
+def test_contract_discovery_uses_selected_cli_and_old_boolean_state_remains_valid(state_path, capsys):
+    assert cli.main(["pretool-killswitch", "status", "--json"]) == 0
+    declaration = json.loads(capsys.readouterr().out)["contract"]
+    assert declaration["id"] == "copilot-extensions.pretool-killswitch"
+    assert declaration["version"] == 1
+    assert declaration["capabilities"] == ["pretool-stop-v1"]
+    state_path.parent.mkdir()
+    state_path.write_text('{"active": true, "future_advisory": "ignored"}', encoding="utf-8")
+    assert switch.is_active()
+    assert cli.main(["pretool-killswitch", "on", "versioned"]) == 0
+    assert json.loads(state_path.read_text())["contract"]["version"] == 1
+
+
+@pytest.mark.parametrize("contract", [None, [], {"id": "other", "version": 1},
+                                       {"id": switch.CONTRACT["id"], "version": 2},
+                                       {"id": switch.CONTRACT["id"], "version": True}])
+def test_unsupported_contract_never_pauses_guards(state_path, capsys, contract):
+    state_path.parent.mkdir()
+    state_path.write_text(json.dumps({"active": True, "contract": contract}), encoding="utf-8")
+    assert not switch.is_active()
+    assert "unsupported" in capsys.readouterr().err
+
+
+def test_unknown_cli_syntax_is_rejected_without_state_effect(state_path):
+    with pytest.raises(SystemExit) as failure:
+        cli.main(["pretool-killswitch", "on", "--unknown-option"])
+    assert failure.value.code == 2
+    assert not state_path.exists()
