@@ -265,3 +265,45 @@ def test_ambient_global_selection_cannot_be_mistaken_for_convergence(tmp_path, m
     assert not result.ok and result.resource_results[0].status == "blocked"
     assert not result.resource_results[0].changed and calls == []
     assert not (tmp_path / ".gitconfig").exists()
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_windows_home_mismatch_refuses_before_preview_or_convergence(tmp_path, monkeypatch, dry_run):
+    from agent_machines import resource_git_config, resources
+
+    profile, git_home = tmp_path / "profile", tmp_path / "git-home"
+    profile.mkdir()
+    git_home.mkdir()
+    original = b"[user]\n\tname = Expected\n"
+    target = profile / ".gitconfig"
+    target.write_bytes(original)
+    monkeypatch.setenv("HOME", str(git_home))
+    monkeypatch.setenv("USERPROFILE", str(profile))
+    calls = []
+
+    def forbidden(*_args):
+        calls.append(True)
+        raise AssertionError("inactive global file reached preview")
+
+    monkeypatch.setattr(resource_git_config.transaction, "preview", forbidden)
+    pkg = package(tmp_path, entries=[{"key": "user.name", "values": ["Expected"]}])
+    ctx = resources.ResourceContext(profile, {}, "windows")
+    results = resources.apply_resources([pkg], "box-1", "windows", ctx, dry_run=dry_run)
+    assert results[0].status == "blocked" and not results[0].changed
+    assert calls == [] and target.read_bytes() == original
+    assert not (git_home / ".gitconfig").exists()
+
+
+def test_explicit_global_target_allows_distinct_windows_home_selection(tmp_path, monkeypatch):
+    from agent_machines import resources
+
+    profile, git_home = tmp_path / "profile", tmp_path / "git-home"
+    profile.mkdir()
+    git_home.mkdir()
+    monkeypatch.setenv("HOME", str(git_home))
+    monkeypatch.setenv("USERPROFILE", str(profile))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(profile / ".gitconfig"))
+    ctx = resources.ResourceContext(profile, {}, "windows")
+    result = resources.apply_resources([package(tmp_path)], "box-1", "windows", ctx)[0]
+    assert result.status == "changed" and result.change_plan
+    assert not (profile / ".gitconfig").exists()

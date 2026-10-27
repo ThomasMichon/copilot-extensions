@@ -97,6 +97,8 @@ are supplied.
 File resources cannot own the same file, a hardlink to it, or a portable case
 alias such as `.GitConfig`, even before either target exists. Case aliases are
 reserved conservatively on case-sensitive hosts too, without probing by writes.
+On Windows, differing `HOME` and `USERPROFILE` selections are refused before
+preview unless `GIT_CONFIG_GLOBAL` explicitly names this resource's target.
 
 Preview and apply through the existing restore owner:
 

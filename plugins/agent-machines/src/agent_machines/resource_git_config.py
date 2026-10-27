@@ -80,6 +80,18 @@ class GitConfigResourceHandler(ResourceHandler):
             result.action = "blocked"
             result.blocked_reason = "GIT_CONFIG_GLOBAL selects a different file; this resource cannot claim global convergence"
             return result
+        home, profile = os.environ.get("HOME"), os.environ.get("USERPROFILE")
+        if override is None and ctx.platform == "windows" and home is not None and (
+            not home or not profile
+            or os.path.normcase(os.path.abspath(home))
+            != os.path.normcase(os.path.abspath(profile))
+        ):
+            result.action = "blocked"
+            result.blocked_reason = (
+                "HOME and USERPROFILE select different global files; "
+                "an explicit GIT_CONFIG_GLOBAL must select the intended target"
+            )
+            return result
         try:
             change = transaction.preview(target, resolved.desired["entries"])
             result.change_plan = change.summary()
