@@ -191,18 +191,15 @@ above is requested; these implementation choices remain reviewable.
 ## Progress
 
 The bounded source owner merged in #9274 as
-`d7edf4a7a04c1c4a62c82ccec73b741c8bae74ad`, after current-head Copilot
-assessment with no open findings and required green checks. A failed public
-package-metadata transport check passed on one normal failed-job retry;
-no dependency-age or review gate was bypassed. The next host-toolchain slice
+`d7edf4a7a04c1c4a62c82ccec73b741c8bae74ad`. The host-toolchain contract
 supports stable Compose 5 alongside Compose 2 without installing or replacing
 a host plugin. Its contained native/owner packet passes 164 cases, including
 every owner scenario with both Compose 2.39.4 and 5.1.4 version responses,
 plus early refusal of unsupported versions. These are native-protocol fixtures,
 not actual Compose or official-image deployment qualification.
-The review correction tightens stable 5.x semantic-version syntax: numeric
-components have no leading zeroes and build identifiers are nonempty.
-All 54 native boundary cases pass after that correction, including the
+Stable 5.x semantic-version syntax requires numeric components without leading
+zeroes and nonempty build identifiers.
+All 54 native boundary cases pass, including the
 malformed examples and valid zero/build-identifier controls.
 Actual installed adopter composition and official-image
 acceptance remain the following delivery gates, not consequences of this merge.
@@ -227,3 +224,18 @@ publishing or reusing success; original key evidence survives uncertain retries.
 These are source/component qualifications.
 Actual adopter construction, native official-image acceptance and production
 delivery remain open; no deployment or incumbent adoption is claimed here.
+
+## Journal
+
+### 2026-10-27 - Bounded source owner and Compose compatibility
+
+- #9274 merged after current-head Copilot assessment with no open findings and
+  required green checks. A failed public package-metadata transport check passed
+  on one normal failed-job retry; no dependency-age or review gate was bypassed.
+- The Compose compatibility review identified malformed version acceptance.
+  The correction requires numeric components without leading zeroes and
+  nonempty dot-separated build identifiers; the 54-case native boundary packet
+  includes the reported malformed examples and valid controls.
+- The follow-up documentation review identified chronology in Progress.
+  Review history is retained here; current support and qualification boundaries
+  remain in Progress. Actual adopter and official-image acceptance stay open.
