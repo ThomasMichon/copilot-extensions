@@ -32,6 +32,12 @@ The shared engine exposes additive, round-local
 [work counts](work-counts.md) for measured acquisition, chunk/checkpoint,
 embedding, primary row-upsert and maintenance work. Unmeasured provider work
 remains explicitly unavailable; these counters are not coverage authorities.
+Each successful source publication also reports one mutation summary from
+participating outer writer commits, after cursor save and pending-journal
+completion. Observation does not hold a store fence over embedding calls.
+Legacy counts remain unavailable, failed attempts emit no success summary,
+and replay counts only work performed in the current attempt. Transaction
+generations are unchanged; this is not atomic whole-delta publication.
 
 Participating source stores can explicitly prepare
 [bounded chunk-ID point reads](chunk-id-index.md). This additive Python path

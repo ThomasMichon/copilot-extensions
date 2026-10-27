@@ -6,7 +6,7 @@ import json
 import hashlib
 import sqlite3
 from collections.abc import Callable
-from contextlib import closing
+from contextlib import AbstractContextManager, closing, nullcontext
 from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Protocol
@@ -308,13 +308,14 @@ def recover_source(
     source: str, *, scope: str, state: IndexState, state_file: Path,
     paths: PathIndex, full: bool, acquire: Callable[[], CrawlManifest], apply: ApplyManifest,
     family: str | None = None,
+    publication: Callable[[], AbstractContextManager[None]] | None = None,
 ) -> tuple[int, int, int]:
     """Publish pinned work and its scope before admitting another scoped acquisition."""
     journal = PendingCrawls(paths)
     journal.assert_family_available(source, family or source)
     totals = (0, 0, 0)
 
-    def publish(manifest: CrawlManifest, *, full: bool) -> tuple[int, int, int]:
+    def apply_and_save(manifest: CrawlManifest, *, full: bool) -> tuple[int, int, int]:
         previous = state.sources.get(source)
         previous = replace(previous) if previous is not None else None
         previous_family = state.stored_families.get(source)
@@ -336,11 +337,17 @@ def recover_source(
             raise
         return result
 
+    def publish(manifest: CrawlManifest, *, full: bool, clear: bool) -> tuple[int, int, int]:
+        with publication() if publication is not None else nullcontext():
+            result = apply_and_save(manifest, full=full)
+            if clear:
+                journal.clear(source, manifest=manifest, scope=scope)
+            return result
+
     pending = journal.load(source, scope)
     if pending is not None:
         manifest, pending_full = pending
-        totals = publish(manifest, full=pending_full)
-        journal.clear(source, manifest=manifest, scope=scope)
+        totals = publish(manifest, full=pending_full, clear=True)
 
     state.require_acquisition_scope(source, scope, full=full)
     manifest = acquire()
@@ -349,7 +356,8 @@ def recover_source(
         raise PendingCrawlConflict("Acquired manifest does not match pending publication")
     if acquired is None and (not manifest.is_empty or manifest.poll_refresh is not None):
         journal.save(manifest, scope=scope, full=full)
-    current = publish(manifest, full=full)
-    if acquired is not None or not manifest.is_empty or manifest.poll_refresh is not None:
-        journal.clear(source, manifest=manifest, scope=scope)
+    current = publish(
+        manifest, full=full,
+        clear=acquired is not None or not manifest.is_empty or manifest.poll_refresh is not None,
+    )
     return totals[0] + current[0], totals[1] + current[1], totals[2] + current[2]

@@ -7,6 +7,8 @@ from dataclasses import asdict, dataclass, field
 from functools import wraps
 from typing import Callable, ParamSpec
 
+from agent_index.store.mutation_result import MutationResult
+
 P = ParamSpec("P")
 
 
@@ -64,6 +66,7 @@ class WorkCounts:
     cluster_cache_hits: int = 0
     http: HttpCounts | None = None
     models: dict[str, ModelCounts] = field(default_factory=dict)
+    source_mutations: dict[str, list[MutationResult]] = field(default_factory=dict)
 
     def model(self, model_id: str) -> ModelCounts:
         return self.models.setdefault(model_id, ModelCounts())

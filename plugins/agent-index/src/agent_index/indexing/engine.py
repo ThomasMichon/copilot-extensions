@@ -632,6 +632,7 @@ def _index_source(
 ) -> tuple[int, int, int]:
     """Replay pinned partial acquisition before observing newer source changes."""
     from agent_index.indexing.pending_crawl import recover_source, recovery_scope
+    from agent_index.indexing.source_mutations import source_publication
     from agent_index.sources import get_connector
 
     if connector is None:
@@ -639,6 +640,7 @@ def _index_source(
     return recover_source(
         source_name, scope=recovery_scope(source_scope or source_name, connector), state=state,
         state_file=config.state_file, paths=path_index, full=full, family=connector.source_name,
+        publication=partial(source_publication, multi_store, source_name),
         acquire=partial(
             _crawl_source, source_name, config=config, state=state, path_index=path_index,
             full=full, progress_cb=progress_cb, connector_kwargs=connector_kwargs,

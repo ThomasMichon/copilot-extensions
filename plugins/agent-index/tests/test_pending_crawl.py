@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
@@ -150,6 +151,67 @@ def test_journal_survives_state_save_failure_before_fresh_acquisition(
     )
     assert order == ["apply", "apply", "acquire", "apply"]
     assert IndexState.load(state_file).sources["alias"].last_commit == "latest"
+
+
+@pytest.mark.parametrize("failure", ["apply", "save", "clear", None])
+def test_publication_observer_finishes_only_after_existing_cursor_and_journal(
+    tmp_path, monkeypatch, failure,
+):
+    paths = PathIndex(tmp_path / "paths.db")
+    state = IndexState()
+    state_file = tmp_path / "state.json"
+    events = []
+    manifest = CrawlManifest(
+        source="alias", accounting_family="forge:repo",
+        upserts=[item("one.md", "old")], commit="middle",
+    )
+    save, clear = state.save, PendingCrawls.clear
+
+    @contextmanager
+    def publication():
+        events.append("begin")
+        yield
+        assert IndexState.load(state_file).sources["alias"].last_commit == "middle"
+        assert PendingCrawls(paths).load("alias", "scope") is None
+        events.append("published")
+
+    def apply(**kwargs):
+        events.append("apply")
+        if failure == "apply":
+            raise RuntimeError("fixture apply failure")
+        state.mark_source_indexed("alias", "middle", 1)
+        return 1, 0, 1
+
+    def save_cursor(path):
+        events.append("save")
+        if failure == "save":
+            raise RuntimeError("fixture save failure")
+        save(path)
+
+    def clear_journal(self, *args, **kwargs):
+        events.append("clear")
+        if failure == "clear":
+            raise RuntimeError("fixture clear failure")
+        clear(self, *args, **kwargs)
+
+    monkeypatch.setattr(state, "save", save_cursor)
+    monkeypatch.setattr(PendingCrawls, "clear", clear_journal)
+
+    def run():
+        return recover_source(
+            "alias", scope="scope", state=state, state_file=state_file,
+            paths=paths, full=False, acquire=lambda: manifest, apply=apply,
+            publication=publication,
+        )
+
+    if failure is not None:
+        with pytest.raises(RuntimeError, match=f"fixture {failure} failure"):
+            run()
+        assert "published" not in events
+        assert PendingCrawls(paths).load("alias", "scope") == (manifest, False)
+    else:
+        assert run() == (1, 0, 1)
+        assert events == ["begin", "apply", "save", "clear", "published"]
 
 
 def test_journal_scope_or_corruption_refuses_before_effects(tmp_path: Path) -> None:
