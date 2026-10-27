@@ -488,6 +488,16 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+- #9167 merged credential-free fixture preparation as
+  `f8fb176c02e554633675ad137d395f99033eb45a` after exact-head Copilot approval,
+  resolved explicit-CWD launch feedback and all required checks. The bounded
+  selectors passed 63 controls, including actual temporary Git/config-loader
+  and real Bridge launch-resolution/parser controls. Re-read this complete
+  Plan and Validation Plan; no image, guest, dependency-closure, service,
+  persistence/fault, native START or running acceptance closes. Continue
+  bounded runtime-origin observations and actual service/peer lifecycle through
+  existing owners, without new installation/readiness or replay protocols.
+  Resource creation and lifecycle actions remain separately approved.
 - #9161 merged image/runtime preparation source as
   `f9f9651997c63e5bd3e3acefa28895572f5a1f9f` after exact-head Copilot approval,
   resolved permission/symlink feedback and all required checks. The bounded

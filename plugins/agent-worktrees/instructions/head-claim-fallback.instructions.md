@@ -77,3 +77,13 @@ content remains subject to the separate finalization checks.
   its unmerged commits, or abandoning it -- never your own judgment:
   `finalize --abandon --handoff-to <recipient>`, on explicit instruction
   only, never inferred from "stuck" or "CI's red".
+
+## WIP disposition is not archival
+
+Commit and deliver useful WIP, or explicitly abandon superseded/rejected work
+with operator approval for the exact reset/discard. An archive or recovery ref
+is not completion. Only selected planning/prototype material may become a named
+canonical-effort artifact with purpose, owner and remaining gates retained.
+Completed-effort/history archival remains valid. Existing live-owner, PR,
+claim and objective gates still apply; use `worktree`'s
+`references/cleanup-details.md` before destructive action.
