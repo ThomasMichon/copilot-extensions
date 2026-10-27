@@ -3458,6 +3458,14 @@ entrypoint. Existing source selection and subsequent governed acquisition own
 those decisions; the private candidate's installation policy is not a public
 release record.
 
+The internal native wheel-lock parser keeps its single-file, SHA-256-only
+default. A composition owner may explicitly request file matching by the
+already-recorded target tag order: every filename must match its package and
+version, SHA-256 remains mandatory, known auxiliary hashes must be well formed,
+and package markers must apply to the selected environment. The unique
+best-ranked compatible file is retained; ties refuse. This is not a second
+resolver or permission to acquire from any recorded URL.
+
 Retain complete admitted projects before merging their declared build-resource
 directories. A resource may be a package subdirectory of another admitted
 project; its presence must not make that parent look fully copied while its
@@ -3746,6 +3754,15 @@ rejection policy is shared with the existing build-tool trust owner through
 `installer_feed_policy.py`, without importing network acquisition into that
 owner. Canonical installer synchronization ships both helpers with each Python
 adopter. Their presence does not enable artifact/profile consumption.
+
+An owner may supply its independently selected first-party package tuple to
+native capture. The only admitted constraint exception is the single ordinary
+file retained under that transaction's configuration root, named by its exact
+arguments, containing precisely those sorted canonical names with impossible
+`<0,>=0` bounds. The selected registry wheels must exclude those names. The
+names enter the native policy identity; all other constraints, overrides,
+workspace constraints and package routing remain unsupported. Native compile
+uses `--constraints`, while installation retains its existing option spelling.
 
 The inert shared `installer_packaging_seed.retain_packaging_seed` supplies the
 admission toolkit's restricted `packaging>=23` bootstrap. It inherits the actual

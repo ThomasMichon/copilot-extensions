@@ -18,6 +18,7 @@ import sys
 import time
 from urllib.parse import unquote, urlsplit
 
+from packaging.markers import InvalidMarker, Marker
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
@@ -117,9 +118,13 @@ def _pins(content: bytes, environment: dict, deadline: float) -> list[dict]:
         raise ProfileError("source candidate output is not an exact hashed lock") from exc
 
 
-def _wheel_pins(content: bytes, target: dict, deadline: float) -> list[dict]:
-    """Accept only unambiguous native files; do not implement wheel ranking."""
+def _wheel_pins(
+    content: bytes, target: dict, deadline: float, *, prefer_target_tags: bool = False,
+) -> list[dict]:
+    """Keep exact-file defaults; opt in to unique recorded-target tag preference."""
     _check_deadline(deadline)
+    if type(prefer_target_tags) is not bool:
+        raise ProfileError("native source wheel matching needs an explicit boolean")
     try:
         document = dependencies._toml_parser().loads(content.decode("utf-8"))
         if (
@@ -132,48 +137,82 @@ def _wheel_pins(content: bytes, target: dict, deadline: float) -> list[dict]:
             or not isinstance(document.get("packages", []), list)
         ):
             raise ProfileError("unsupported native source wheel-lock document")
-        compatible = {tag for text in target["tags"] for tag in _tag(text, 10_000, deadline)}
+        priority = {}
+        for index, text in enumerate(target["tags"]):
+            for tag in _tag(text, 10_000, deadline):
+                priority.setdefault(tag, index)
+        hash_lengths = {"md5": 32, "sha1": 40, "sha224": 56, "sha256": 64,
+                        "sha384": 96, "sha512": 128}
         result = []
         names = set()
         for package in document.get("packages", []):
             _check_deadline(deadline)
             if (
-                not isinstance(package, dict) or package.keys() != {"name", "version", "wheels"}
+                not isinstance(package, dict)
+                or not {"name", "version", "wheels"} <= package.keys()
+                or set(package) - (
+                    {"name", "version", "wheels", "marker"} if prefer_target_tags
+                    else {"name", "version", "wheels"}
+                )
                 or not isinstance(package["name"], str) or not isinstance(package["version"], str)
-                or not isinstance(package["wheels"], list) or len(package["wheels"]) != 1
+                or not isinstance(package["wheels"], list) or not package["wheels"]
+                or (not prefer_target_tags and len(package["wheels"]) != 1)
             ):
                 raise ProfileError("native source wheel-lock needs one exact wheel per package")
+            if "marker" in package and (
+                not isinstance(package["marker"], str)
+                or not Marker(package["marker"]).evaluate({**target["environment"], "extra": ""})
+            ):
+                raise ProfileError("native source wheel-lock package does not apply to the selected target")
             name = canonicalize_name(package["name"], validate=True)
             version = Version(package["version"])
-            wheel = package["wheels"][0]
-            if (
-                name in names or not isinstance(wheel, dict)
-                or set(wheel) - {"url", "hashes", "size", "upload-time"}
-                or not isinstance(wheel.get("url"), str)
-                or not isinstance(wheel.get("hashes"), dict)
-                or wheel["hashes"].keys() != {"sha256"}
-                or not isinstance(wheel["hashes"]["sha256"], str)
-                or re.fullmatch(r"[0-9a-f]{64}", wheel["hashes"]["sha256"]) is None
-            ):
+            if name in names:
                 raise ProfileError("unsupported native source wheel witness")
-            url = urlsplit(wheel["url"])
-            filename = unquote(url.path.rsplit("/", 1)[-1])
-            if (
-                url.scheme not in ("http", "https") or not url.hostname
-                or not filename.endswith(".whl") or "/" in filename or "\\" in filename
-            ):
-                raise ProfileError("native source wheel witness has no exact wheel filename")
-            wheel_name, wheel_version, _, tags = _wheel_filename(filename, 10_000, deadline)
-            if wheel_name != name or wheel_version != version or not tags & compatible:
+            candidates = []
+            for wheel in package["wheels"]:
+                _check_deadline(deadline)
+                if (
+                    not isinstance(wheel, dict)
+                    or set(wheel) - {"url", "hashes", "size", "upload-time"}
+                    or not isinstance(wheel.get("url"), str)
+                    or not isinstance(wheel.get("hashes"), dict)
+                    or "sha256" not in wheel["hashes"]
+                    or (not prefer_target_tags and wheel["hashes"].keys() != {"sha256"})
+                    or any(
+                        algorithm not in hash_lengths or not isinstance(digest, str)
+                        or re.fullmatch(r"[0-9a-f]{" + str(hash_lengths[algorithm]) + "}", digest) is None
+                        for algorithm, digest in wheel["hashes"].items()
+                    )
+                ):
+                    raise ProfileError("unsupported native source wheel witness")
+                url = urlsplit(wheel["url"])
+                filename = unquote(url.path.rsplit("/", 1)[-1])
+                if (
+                    url.scheme not in ("http", "https") or not url.hostname
+                    or not filename.endswith(".whl") or "/" in filename or "\\" in filename
+                ):
+                    raise ProfileError("native source wheel witness has no exact wheel filename")
+                wheel_name, wheel_version, _, tags = _wheel_filename(filename, 10_000, deadline)
+                if wheel_name != name or wheel_version != version:
+                    raise ProfileError("native source wheel witness differs from the selected target")
+                ranks = [priority[tag] for tag in tags if tag in priority]
+                if ranks:
+                    candidates.append((min(ranks), filename, wheel["hashes"]["sha256"]))
+            if not candidates:
                 raise ProfileError("native source wheel witness differs from the selected target")
+            best = min(item[0] for item in candidates)
+            selected = [item for item in candidates if item[0] == best]
+            if len(selected) != 1:
+                raise ProfileError("native source wheel-lock has tied target file candidates")
+            _, filename, digest = selected[0]
             names.add(name)
             result.append({
                 "name": name, "version": str(version), "filename": filename,
-                "sha256": "sha256:" + wheel["hashes"]["sha256"],
+                "sha256": "sha256:" + digest,
             })
         _check_deadline(deadline)
         return sorted(result, key=lambda item: item["name"])
-    except (ValueError, TypeError, KeyError) as exc:
+    except (ValueError, TypeError, KeyError, InvalidMarker) as exc:
         if isinstance(exc, ProfileError):
             raise
         raise ProfileError("invalid native source wheel-lock output") from exc

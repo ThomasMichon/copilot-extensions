@@ -2008,7 +2008,7 @@ def test_provenance_key_hardens_acl_on_windows(
     grant_cmd = seen_cmds[0]
     assert grant_cmd[0] == _ICACLS_PATH
     assert "/inheritance:r" in grant_cmd
-    assert f"*{_FAKE_TOKEN_SID}:(OI)(CI)F" in grant_cmd
+    assert f"*{_FAKE_TOKEN_SID}:F" in grant_cmd
 
 
 def test_provenance_key_concurrent_callers_converge_on_one_key(
@@ -3625,13 +3625,18 @@ def test_restrict_file_to_owner_is_noop_on_posix(
     assert calls == []
 
 
+@pytest.mark.parametrize("directory", [False, True])
 def test_restrict_file_to_owner_invokes_icacls_on_windows(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, directory: bool,
 ):
     monkeypatch.setattr(btl.sys, "platform", "win32")
     monkeypatch.setattr(gft, "_verify_restricted_acl", _REAL_VERIFY_RESTRICTED_ACL)
     monkeypatch.setattr(gft, "_well_known_sid_display_name", lambda sid: _FAKE_SYSTEM_NAME)  # noqa: ARG005
     target = tmp_path / "secret.toml"
+    if directory:
+        target.mkdir()
+    else:
+        target.touch()
     seen_cmds: list[list[str]] = []
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
@@ -3657,8 +3662,9 @@ def test_restrict_file_to_owner_invokes_icacls_on_windows(
     assert grant_cmd[0] == _ICACLS_PATH
     assert grant_cmd[1] == str(target)
     assert "/inheritance:r" in grant_cmd
-    assert f"*{_FAKE_TOKEN_SID}:(OI)(CI)F" in grant_cmd
-    assert f"*{gft._SYSTEM_ACCOUNT_SID}:(OI)(CI)F" in grant_cmd
+    flags = "(OI)(CI)F" if directory else "F"
+    assert f"*{_FAKE_TOKEN_SID}:{flags}" in grant_cmd
+    assert f"*{gft._SYSTEM_ACCOUNT_SID}:{flags}" in grant_cmd
     assert remove_cmd[:3] == [_ICACLS_PATH, str(target), "/remove:g"]
     # Regression: a directory (e.g. the staging venv dir)
     # inherits `OWNER RIGHTS` by default on this repo's own machines --
@@ -3690,7 +3696,7 @@ def test_restrict_file_to_owner_ignores_forged_environment_variables(
     btl._restrict_file_to_owner(target)
 
     grant_cmd = seen_cmds[0]
-    assert f"*{_FAKE_TOKEN_SID}:(OI)(CI)F" in grant_cmd
+    assert f"*{_FAKE_TOKEN_SID}:F" in grant_cmd
     assert not any("attacker" in str(arg).lower() for arg in grant_cmd)
 
 

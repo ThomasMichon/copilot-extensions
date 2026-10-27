@@ -345,6 +345,9 @@ def open_wheel_snapshot(
     extraction, cache population, resolution or backend execution occurs here.
     All limits and the one deadline come from the caller, not runtime defaults.
     """
+    from installer_dependency_config import native_retained_path
+
+    root = Path(native_retained_path(root))
     _check_deadline(deadline)
     if any(type(value) is not int or value <= 0 for value in (
         max_wheels, max_archive_bytes, max_total_bytes, max_snapshot_bytes,

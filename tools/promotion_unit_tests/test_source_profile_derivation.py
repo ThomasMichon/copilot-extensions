@@ -4,7 +4,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import subprocess
 import time
 from types import SimpleNamespace
@@ -18,6 +18,227 @@ from promotion_unit_tests.test_runtime_profile_wheels import _ENVIRONMENT
 @pytest.fixture(autouse=True)
 def _synthetic_host_defaults(monkeypatch):
     monkeypatch.setattr("packaging.markers.default_environment", lambda: dict(_ENVIRONMENT))
+
+
+def _native_file_lock(files):
+    return (
+        'lock-version="1.0"\ncreated-by="uv"\nrequires-python=">=3.11"\n'
+        '[[packages]]\nname="app"\nversion="1.0"\n'
+        + "".join(
+            '[[packages.wheels]]\nurl="https://example.invalid/' + filename
+            + '"\n[packages.wheels.hashes]\n'
+            + "".join(key + '="' + value + '"\n' for key, value in hashes.items())
+            for filename, hashes in files
+        )
+    ).encode()
+
+
+@pytest.mark.parametrize("reverse_files", [False, True])
+@pytest.mark.parametrize("reverse_tags", [False, True])
+def test_native_file_matching_uses_recorded_target_priority(reverse_files, reverse_tags):
+    from runtime_source_lock import _wheel_pins
+
+    tags = ["cp311-cp311-win_amd64", "py3-none-any"]
+    files = [("app-1.0-" + tag + ".whl", {"sha256": str(index + 1) * 64})
+             for index, tag in enumerate(tags)]
+    if reverse_files:
+        files.reverse()
+    if reverse_tags:
+        tags.reverse()
+    target = {"environment": dict(_ENVIRONMENT), "tags": tags}
+    pins = _wheel_pins(
+        _native_file_lock(files), target, time.monotonic() + 5, prefer_target_tags=True,
+    )
+    assert pins == [{
+        "name": "app", "version": "1.0", "filename": "app-1.0-" + tags[0] + ".whl",
+        "sha256": "sha256:" + ("2" if reverse_tags else "1") * 64,
+    }]
+
+
+@pytest.mark.parametrize("fault", ["tie", "incompatible", "name", "version"])
+def test_native_file_matching_refuses_ambiguous_or_mismatched_files(fault):
+    from runtime_source_lock import _wheel_pins
+
+    filenames = {
+        "tie": ["app-1.0-1-py3-none-any.whl", "app-1.0-2-py3-none-any.whl"],
+        "incompatible": ["app-1.0-cp311-cp311-manylinux_2_17_x86_64.whl"],
+        "name": ["other-1.0-py3-none-any.whl"],
+        "version": ["app-2.0-py3-none-any.whl"],
+    }[fault]
+    with pytest.raises(source.ProfileError):
+        _wheel_pins(
+            _native_file_lock([(name, {"sha256": "1" * 64}) for name in filenames]),
+            {"environment": dict(_ENVIRONMENT), "tags": ["py3-none-any"]},
+            time.monotonic() + 5, prefer_target_tags=True,
+        )
+
+
+@pytest.mark.parametrize("hashes,admitted", [
+    ({"sha256": "1" * 64, "md5": "2" * 32}, True),
+    ({"md5": "2" * 32}, False),
+    ({"sha256": "invalid", "md5": "2" * 32}, False),
+    ({"sha256": "1" * 64, "md5": "invalid"}, False),
+    ({"sha256": "1" * 64, "unknown": "2" * 32}, False),
+], ids=["strong-plus-md5", "md5-only", "malformed-sha256", "malformed-md5", "unknown-algorithm"])
+def test_native_file_matching_requires_strong_hash_and_valid_auxiliary_metadata(hashes, admitted):
+    from runtime_source_lock import _wheel_pins
+
+    content = _native_file_lock([("app-1.0-py3-none-any.whl", hashes)])
+    target = {"environment": dict(_ENVIRONMENT), "tags": ["py3-none-any"]}
+    if admitted:
+        assert _wheel_pins(
+            content, target, time.monotonic() + 5, prefer_target_tags=True,
+        )[0]["sha256"] == "sha256:" + "1" * 64
+    else:
+        with pytest.raises(source.ProfileError):
+            _wheel_pins(content, target, time.monotonic() + 5, prefer_target_tags=True)
+
+
+@pytest.mark.parametrize("multiple", [False, True])
+def test_native_file_matching_default_remains_strict(multiple):
+    from runtime_source_lock import _wheel_pins
+
+    files = [("app-1.0-py3-none-any.whl", {"sha256": "1" * 64, "md5": "2" * 32})]
+    if multiple:
+        files = [(name, {"sha256": "1" * 64}) for name in
+                 ("app-1.0-py3-none-any.whl", "app-1.0-cp311-cp311-win_amd64.whl")]
+    with pytest.raises(source.ProfileError):
+        _wheel_pins(
+            _native_file_lock(files),
+            {"environment": dict(_ENVIRONMENT), "tags": ["cp311-cp311-win_amd64", "py3-none-any"]},
+            time.monotonic() + 5,
+        )
+
+
+@pytest.mark.parametrize("marker,admitted", [
+    ('"sys_platform == \'win32\'"', True),
+    ('"sys_platform == \'linux\'"', False),
+    ('"not a marker"', False),
+    ("42", False),
+], ids=["applicable", "inapplicable", "malformed", "non-string"])
+def test_native_file_matching_requires_package_marker_to_apply(marker, admitted):
+    from runtime_source_lock import _wheel_pins
+
+    content = _native_file_lock([("app-1.0-py3-none-any.whl", {"sha256": "1" * 64})])
+    content = content.replace(b'\nversion="1.0"\n', b'\nversion="1.0"\nmarker=' + marker.encode() + b"\n")
+    target = {"environment": dict(_ENVIRONMENT), "tags": ["py3-none-any"]}
+    if admitted:
+        assert _wheel_pins(
+            content, target, time.monotonic() + 5, prefer_target_tags=True,
+        )[0]["name"] == "app"
+    else:
+        with pytest.raises(source.ProfileError):
+            _wheel_pins(content, target, time.monotonic() + 5, prefer_target_tags=True)
+    with pytest.raises(source.ProfileError):
+        _wheel_pins(content, target, time.monotonic() + 5)
+
+
+def _native_exclusion_inputs(tmp_path):
+    root = tmp_path / "retained"
+    root.mkdir()
+    config = root / "uv.toml"
+    config.write_text("")
+    constraints = root / "exclusions.txt"
+    constraints.write_text("app<0,>=0\n")
+    outer = {key: "[]" for key in (
+        "constraints", "overrides", "excludes", "build_constraints",
+        "constraints_from_workspace", "overrides_from_workspace",
+        "excludes_from_workspace", "build_constraints_from_workspace",
+    )}
+    outer["constraints"] = "[Local(" + json.dumps(str(constraints)) + ",),]"
+    settings = {
+        "dependency_metadata": "DependencyMetadata({})",
+        "build_options": "BuildOptions { no_binary: None }",
+    }
+    transaction = SimpleNamespace(
+        argv=("uv", "pip", "compile", "--constraints", str(constraints)),
+        environment={"UV_CONFIG_FILE": str(config)}, sources={},
+    )
+    return outer, settings, transaction, constraints
+
+
+def test_native_feed_accepts_only_independently_selected_exact_exclusions(tmp_path):
+    import installer_native_feed as native
+
+    outer, settings, transaction, _path = _native_exclusion_inputs(tmp_path)
+    wheels = [{"name": "external"}]
+    with pytest.raises(native.AcquisitionUnavailable):
+        native._machine_constraints(outer, settings, transaction, wheels)
+    assert native._machine_constraints(
+        outer, settings, transaction, wheels, excluded_local_packages=("App",),
+    ) == ("app",)
+
+
+@pytest.mark.parametrize("fault", [
+    "version", "marker", "direct", "missing", "extra", "duplicate", "wrong-argv",
+    "outside", "remote", "selected", "unselected-wheels", "override", "workspace",
+])
+def test_native_feed_exact_exclusions_never_relax_other_constraints(tmp_path, fault):
+    import installer_native_feed as native
+
+    outer, settings, transaction, path = _native_exclusion_inputs(tmp_path)
+    wheels = [{"name": "external"}]
+    if fault in ("version", "marker", "direct", "missing", "extra", "duplicate"):
+        path.write_text({
+            "version": "app<1\n", "marker": "app<0,>=0; sys_platform == 'win32'\n",
+            "direct": "app @ https://example.invalid/app.whl\n", "missing": "",
+            "extra": "app<0,>=0\nexternal<0,>=0\n", "duplicate": "app<0,>=0\napp<0,>=0\n",
+        }[fault])
+    elif fault == "wrong-argv":
+        transaction.argv = ("uv", "pip", "compile")
+    elif fault == "outside":
+        outside = tmp_path / "outside.txt"
+        outside.write_text(path.read_text())
+        outer["constraints"] = "[Local(" + json.dumps(str(outside)) + ",),]"
+        transaction.argv = ("uv", "pip", "compile", "--constraints", str(outside))
+    elif fault == "remote":
+        outer["constraints"] = '[Remote("https://example.invalid/constraints.txt"),]'
+    elif fault == "selected":
+        wheels = [{"name": "APP"}]
+    elif fault == "unselected-wheels":
+        wheels = None
+    elif fault == "override":
+        outer["overrides"] = outer["constraints"]
+    else:
+        outer["constraints_from_workspace"] = outer["constraints"]
+    with pytest.raises((native.NativeFeedError, native.AcquisitionUnavailable)):
+        native._machine_constraints(
+            outer, settings, transaction, wheels, excluded_local_packages=("app",),
+        )
+
+
+@pytest.mark.parametrize("operation", ["compile", "source-compile"])
+def test_native_compile_generated_exclusions_use_supported_constraint_spelling(tmp_path, monkeypatch, operation):
+    import installer_dependency_config as configuration
+
+    @contextmanager
+    def temporary(_parent):
+        yield str(tmp_path)
+
+    @contextmanager
+    def retain(_uv, arguments, **options):
+        assert arguments[0] == "--constraints"
+        assert options["_generated_constraints"] == (Path(arguments[1]),)
+        assert Path(arguments[1]).read_text() == "app<0,>=0\n"
+        yield object()
+
+    monkeypatch.setattr(configuration, "temporary_inputs", temporary)
+    with configuration.retain_local_exclusions(
+        retain, "uv", [], excluded_local_packages=("App",), error_type=ValueError,
+        _operation=operation,
+    ):
+        pass
+
+
+@pytest.mark.parametrize("path,uri", [
+    (r"\\?\C:\held wheels\demo#1.whl", "file:///C:/held%20wheels/demo%231.whl"),
+    (r"\\?\UNC\server\share\demo.whl", "file://server/share/demo.whl"),
+    (r"C:\held wheels\demo.whl", "file:///C:/held%20wheels/demo.whl"),
+], ids=["extended-drive", "extended-unc", "ordinary-drive"])
+def test_closed_wheel_file_uri_never_emits_an_extended_path_authority(path, uri):
+    from installer_dependency_config import file_uri
+
+    assert file_uri(PureWindowsPath(path)) == uri
 
 
 def test_source_closure_propagates_transitive_extras_and_marker_cycles():
