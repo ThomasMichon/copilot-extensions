@@ -354,6 +354,20 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
 
 ## Journal
 
+### 2026-10-27 - Literal POSIX preparation transport prerequisite
+
+- Added a provider-first NUL-delimited preparation reply to the existing finite
+  seed owner, with runtime-local read-only capability discovery and unchanged
+  default JSON. The [architecture contract](../../../plugins/agent-worktrees/docs/architecture.md)
+  owns field order, completion, environment replacement and unknown-outcome
+  semantics; the provider never starts or waits for a backend.
+- Focused controls cover literal fields and a real Bash reader without `eval`,
+  invalid-format/callback refusal before effects, and retained seed custody
+  after an unrepresentable reply. This prerequisite does not activate a copied
+  POSIX setup or remove either production Python waiter. Native POSIX process,
+  terminal, installer-removal and same-process acceptance remain open, as do
+  #5579's separately owned forwarding and whole-chain process-count outcomes.
+
 ### 2026-10-27 - Finite native prerequisite merged; live survival stays open
 
 - #9253 merged as `484cdc64bf2dcac44d16d463c31517b00fb6d71c`.

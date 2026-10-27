@@ -23,6 +23,13 @@ failure restoration, uncertain cleanup and terminal no-replay behavior.
 These controls do not qualify terminal/Job/install-removal behavior. Setup
 controls retain the existing host's PID/birth, keep the prompt unclaimed until
 backend dispatch and release admission-only preparation before the child lifetime.
+The same packet checks default JSON compatibility, the finite provider's
+read-only contract declaration, counted NUL preparation replies, literal
+argument/environment fidelity, invalid-format/callback refusal before effects
+and held-seed/unknown handling for an unrepresentable reply. A real Bash reader
+control decodes the NUL fields without evaluating injected shell text. Git Bash
+execution is a framing control, not native Linux/macOS, terminal or production
+POSIX launch qualification; production POSIX consumer activation remains open.
 The real PowerShell
 seed-delivery consumer uses the existing finite process-tree owner so a timeout
 settles descendants rather than blocking on inherited capture pipes.

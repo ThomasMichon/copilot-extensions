@@ -1,0 +1,9 @@
+{
+  "comment": "Add literal NUL-delimited finite launch preparation replies with runtime-local capability discovery.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

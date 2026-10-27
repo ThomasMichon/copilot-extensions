@@ -589,6 +589,40 @@ owner must retain its actual child handle across the PID/birth observation.
 Only definite spawn failure restores a claim. Actual spawn finishes it, while
 terminal or unknown outcomes never authorize automatic replay. Return records
 the actual child code separately from uncertain bookkeeping.
+
+The provider's read-only `--describe-contract` reports
+`agent-worktrees.native-seed` version 1 and its supported preparation output
+formats from the executing runtime. JSON remains the default, with unchanged
+fields and effects. The additive `--output-format nul` is available only for
+`prepare` and `setup`; callback phases reject it before runtime selection or
+receipt mutation. It is provider-first groundwork, not an activated POSIX
+consumer. A future caller must discover support from the selected current
+runtime before sending new syntax, retain a supported legacy path for older
+providers or rollback, and never retry an uncertain preparation using another
+format. Existing JSON callers need no capability probe or migration.
+
+The NUL reply is one fully encoded UTF-8 byte sequence, with a NUL after every
+field, in this order:
+
+1. `agent-worktrees.native-seed-reply.v1`.
+2. Attempt, resolution and operation IDs, then parent ID and setup seed ID;
+   each absent optional ID is an empty field.
+3. Decimal environment-entry count, or `-1` for inherited environment. Zero
+   means an explicitly empty replacement environment. Each entry contributes
+   its literal name followed by its literal value, not shell assignment syntax.
+4. Positive decimal argument count, followed by that many literal arguments.
+5. `complete`, then EOF.
+
+Empty fields, quotes, metacharacters, Unicode and embedded/trailing newlines
+remain literal. Unrepresentable NUL/UTF-8 values are refused without partial
+output; a seed already claimed during preparation remains held and the
+execution becomes unknown, never automatically restored or replayed. A reader
+must validate the complete frame and successful finite producer exit before
+dispatch. It must not use command substitution (which drops NULs), `eval`,
+word splitting, or source the fields as shell code. The provider does not
+spawn a backend or retain a parser to wait for one; prompt-bearing reply bytes
+remain on the private preparation pipe, outside execution receipts and logs.
+
 On Windows, a current engine recognizes its canonical normalized setup's
 `native-setup-owner-v1` marker, a PowerShell 7 host and the selected canonical
 pane wrapper's `native-console-owner-v1` capability. It copies setup, the

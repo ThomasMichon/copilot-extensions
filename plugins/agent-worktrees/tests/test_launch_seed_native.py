@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
 from uuid import uuid4
 
@@ -380,3 +381,197 @@ def test_setup_refuses_unconfirmed_owner_before_any_receipt(record):
             pid=os.getpid(), process_start_time="0",
         )
     assert not list((record.parent / "launch-attempts").glob("*/*.execution.json"))
+
+
+@pytest.mark.parametrize("environment", [None, {}, {"ODD-NAME": "value=\n'\u03a9", "EMPTY": ""}])
+def test_nul_reply_preserves_literal_fields_and_distinguishes_environment(environment):
+    argv = ["copilot", "", "quotes ' \"", "$(not-a-command); *", "line\nnext\n", "\u03a9", "--"]
+    reply = {
+        "version": 1, "attempt_id": "a" * 32, "resolution_id": "b" * 32,
+        "operation_id": "c" * 32, "parent_id": "d" * 32,
+        "setup_seed_id": "e" * 32, "environment": environment, "argv": argv,
+    }
+    encoded = native.nul_reply(reply)
+    fields = encoded.decode("utf-8").split("\0")
+    assert fields[:7] == [
+        "agent-worktrees.native-seed-reply.v1", "a" * 32, "b" * 32, "c" * 32,
+        "d" * 32, "e" * 32, str(len(environment)) if environment is not None else "-1",
+    ]
+    offset = 7
+    decoded_environment = None if fields[6] == "-1" else {}
+    if decoded_environment is not None:
+        for _ in range(int(fields[6])):
+            decoded_environment[fields[offset]] = fields[offset + 1]
+            offset += 2
+    assert decoded_environment == environment
+    assert int(fields[offset]) == len(argv)
+    assert fields[offset + 1:] == [*argv, "complete", ""]
+
+
+@pytest.mark.parametrize("field,value", [
+    ("argv", ["copilot", "invalid\0field"]),
+    ("argv", ["copilot", "\udcff"]),
+    ("environment", {"BAD=NAME": "value"}),
+    ("environment", {"": "value"}),
+    ("environment", {"NAME": "invalid\0value"}),
+])
+def test_nul_reply_refuses_unrepresentable_fields_without_partial_output(field, value):
+    reply = {
+        "version": 1, "attempt_id": "a" * 32, "resolution_id": "b" * 32,
+        "operation_id": "c" * 32, "parent_id": None, "environment": None, "argv": ["copilot"],
+        field: value,
+    }
+    with pytest.raises(ValueError):
+        native.nul_reply(reply)
+
+
+@pytest.mark.parametrize("output_format", ["json", "nul"])
+def test_cli_preparation_output_formats_keep_actual_seed_custody(
+    record, monkeypatch, capsysbinary, output_format,
+):
+    seed = seeds.stage(record, kind="new", text="private fixture\nquotes ' \" \u03a9")
+    monkeypatch.setattr(native, "require_current_runtime", lambda root: None)
+    monkeypatch.setattr(sys, "argv", [
+        "launch_seed_native", "--contract-version", "1",
+        "--root", str(cfg.install_dir()), "--record", str(record),
+        "--phase", "prepare", "--output-format", output_format,
+        "--seed-id", seed.seed_id, "--", "copilot", "", "--", "literal",
+    ])
+    assert native.main() == 0
+    captured = capsysbinary.readouterr()
+    assert not captured.err
+    held = seeds.peek(record)
+    assert held.seed_id == seed.seed_id and held.handoff_id
+    if output_format == "json":
+        reply = json.loads(captured.out)
+        assert reply["version"] == 1
+        assert reply["argv"] == ["copilot", "", "--interactive", seed.text, "--", "literal"]
+        operation_id = reply["operation_id"]
+        attempt_id = reply["attempt_id"]
+    else:
+        fields = captured.out.decode("utf-8").split("\0")
+        assert fields[0] == "agent-worktrees.native-seed-reply.v1"
+        assert fields[4:6] == ["", ""]
+        assert fields[-2:] == ["complete", ""]
+        offset = 7 + max(0, int(fields[6])) * 2
+        assert fields[offset:] == [
+            "6", "copilot", "", "--interactive", seed.text, "--", "literal", "complete", "",
+        ]
+        attempt_id, operation_id = fields[1], fields[3]
+    saved = audit.read(record.parent, attempt_id, operation_id)
+    assert [event["phase"] for event in saved["events"]] == ["execution-requested", "seed-claimed"]
+    assert seed.text not in json.dumps(saved)
+
+
+def test_nul_callback_request_is_rejected_before_runtime_or_receipt_mutation(record, monkeypatch, capsys):
+    def forbidden(*args, **kwargs):
+        pytest.fail("A callback output-format error must precede runtime selection and mutation")
+    monkeypatch.setattr(native, "require_current_runtime", forbidden)
+    monkeypatch.setattr(native, "returned", forbidden)
+    monkeypatch.setattr(sys, "argv", [
+        "launch_seed_native", "--contract-version", "1",
+        "--root", str(cfg.install_dir()), "--record", str(record),
+        "--phase", "returned", "--output-format", "nul", "--exit-code", "0",
+    ])
+    assert native.main() == 3
+    captured = capsys.readouterr()
+    assert not captured.out and "do not automatically retry" in captured.err
+    assert not list((record.parent / "launch-attempts").glob("*/*.execution.json"))
+
+
+def test_unrepresentable_prepared_prompt_remains_held_with_unknown_outcome(record, monkeypatch, capsysbinary):
+    seed = seeds.stage(record, kind="new", text="invalid\0prompt")
+    correlation = audit.Correlation(uuid4().hex, uuid4().hex)
+    monkeypatch.setattr(native, "require_current_runtime", lambda root: None)
+    monkeypatch.setattr(sys, "argv", [
+        "launch_seed_native", "--contract-version", "1",
+        "--root", str(cfg.install_dir()), "--record", str(record),
+        "--phase", "prepare", "--output-format", "nul", "--seed-id", seed.seed_id,
+        *correlation.options(), "--", "copilot",
+    ])
+    assert native.main() == 3
+    captured = capsysbinary.readouterr()
+    assert not captured.out and b"do not automatically retry" in captured.err
+    assert b"invalid" not in captured.err
+    held = seeds.peek(record)
+    assert held.seed_id == seed.seed_id and held.handoff_id
+    saved, = (record.parent / "launch-attempts" / correlation.attempt_id).glob("*.execution.json")
+    assert audit.read(record.parent, correlation.attempt_id, saved.name.split(".")[0])[
+        "events"
+    ][-1]["phase"] == "unknown"
+
+
+def test_bash_reads_counted_nul_reply_without_evaluating_literal_arguments(tmp_path):
+    git_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
+    bash = str(git_bash) if os.name == "nt" and git_bash.is_file() else (
+        shutil.which("bash") if os.name != "nt" else None
+    )
+    if not bash:
+        pytest.skip("Bash is unavailable")
+    unexpected = tmp_path / "must-not-execute"
+    argv = ["copilot", "", f"$(touch '{unexpected.as_posix()}')", "' \" ; *", "\u03a9\n"]
+    environment = {"LITERAL": "quotes ' \"\n\u03a9", "EMPTY": ""}
+    reply = {
+        "version": 1, "attempt_id": "a" * 32, "resolution_id": "b" * 32,
+        "operation_id": "c" * 32, "parent_id": None, "environment": environment, "argv": argv,
+    }
+    script = r"""
+set -euo pipefail
+for ((index=0; index<7; index++)); do IFS= read -r -d '' value; header[index]=$value; done
+[[ ${header[0]} == agent-worktrees.native-seed-reply.v1 ]]
+for ((index=0; index<header[6]; index++)); do
+    IFS= read -r -d '' name
+    IFS= read -r -d '' value
+    export "$name=$value"
+done
+IFS= read -r -d '' count
+argv=()
+for ((index=0; index<count; index++)); do
+    IFS= read -r -d '' value
+    argv+=("$value")
+done
+IFS= read -r -d '' complete
+[[ $complete == complete ]]
+if IFS= read -r -d '' unexpected; then exit 3; fi
+printf '%s\0' "$LITERAL" "$EMPTY" "${argv[@]}"
+"""
+    result = run_caller_owned(
+        [bash, "--noprofile", "--norc", "-c", script],
+        input_text=native.nul_reply(reply).decode("utf-8"),
+        timeout=15, max_stdout_bytes=4096, max_stderr_bytes=4096,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.split("\0") == [*environment.values(), *argv, ""]
+    assert not unexpected.exists()
+
+
+def test_selected_runtime_describes_literal_output_support_without_preparation():
+    result = run_caller_owned(
+        [sys.executable, "-I", "-B", "-m", "agent_worktrees.launch_seed_native", "--describe-contract"],
+        timeout=15, max_stdout_bytes=4096, max_stderr_bytes=4096,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "contract": "agent-worktrees.native-seed", "version": 1,
+        "preparation_output_formats": ["json", "nul"],
+        "nul_reply_schema": "agent-worktrees.native-seed-reply.v1",
+    }
+    assert not result.stderr
+
+
+def test_unknown_output_format_refuses_before_preparation(record, monkeypatch, capsys):
+    seed = seeds.stage(record, kind="new", text="must not be claimed")
+    def forbidden(*args, **kwargs):
+        pytest.fail("Unknown output syntax must not enter runtime selection")
+    monkeypatch.setattr(native, "require_current_runtime", forbidden)
+    monkeypatch.setattr(sys, "argv", [
+        "launch_seed_native", "--contract-version", "1",
+        "--root", str(cfg.install_dir()), "--record", str(record),
+        "--phase", "prepare", "--output-format", "unknown", "--", "copilot",
+    ])
+    with pytest.raises(SystemExit) as stopped:
+        native.main()
+    assert stopped.value.code == 2
+    captured = capsys.readouterr()
+    assert not captured.out and "invalid choice" in captured.err
+    assert seeds.peek(record) == seed
