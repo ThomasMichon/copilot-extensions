@@ -10,13 +10,16 @@ import secrets
 from collections.abc import Callable
 from pathlib import Path
 
-from machine_transport import resolve_machine_selection
+from machine_transport import (
+    known_environment_label, resolve_machine_selection, resolve_ssh_target, split_machine_environment,
+)
 
 from . import allocation_creation_result, allocation_link_demand, claims_cli, config as cfg
 from . import execution_spaces, invocation_project, owned_worktree as allocation
 from . import owned_worktree_remote as remote, resource_producer as producer
 from . import tracking, tracking_write, worktree_identity
 from .creation_requests import CreationRequestFailure
+from .resource_relationship import valid_request_id
 
 _LOG = logging.getLogger(__name__)
 
@@ -26,8 +29,10 @@ class DestinationCreationFailure(CreationRequestFailure):
 
     def __init__(self, status: str, message: str, recovery: dict) -> None:
         super().__init__(
-            status, f"{message}; original creation key {recovery['creation_key']!r}, "
-            f"request {recovery['request_id']} (never retry with a new key)",
+            status, f"{message}; recover original request with --creation-request-id "
+            f"{recovery['request_id']}"
+            + (f" or creation key {recovery['creation_key']!r}" if recovery["creation_key"] is not None else "")
+            + " (never retry with a new key)",
         )
         self.recovery = recovery
 
@@ -65,6 +70,10 @@ def _origin(
         else:
             from .worktree_ops_cli import _resolve_anchor_owner_ref
 
+            if worktree_identity._worktree_id_from_git(cwd, isolated_repository=True) is not None:
+                raise ValueError(
+                    "original linked worktree owner is untracked; adopt it or explicitly select --no-owner",
+                )
             owner_ref = _resolve_anchor_owner_ref(config, cwd=cwd, project=project)
     return project, config, owner_ref
 
@@ -89,7 +98,8 @@ def _creator(owner_ref: str | None) -> tuple[str, Path]:
 
 
 def _target(config: cfg.Config, machine: str | None, project: str) -> dict:
-    current = execution_spaces.current_execution_context(config).execution_machine
+    context = execution_spaces.current_execution_context(config)
+    current = context.execution_machine
     if machine is None:
         key = current
     else:
@@ -97,7 +107,24 @@ def _target(config: cfg.Config, machine: str | None, project: str) -> dict:
         selected = resolve_machine_selection(entries, machine)
         if selected.entry is None:
             raise ValueError("creation destination must resolve to one registered execution space")
-        key = selected.entry.key
+        entry = selected.entry
+        key = entry.key
+        wanted = selected.target.environment
+        if wanted:
+            declared = (
+                entry.execution_platform or split_machine_environment(entry.key).environment
+                or known_environment_label(entry.environment)
+            )
+            if (declared and declared != wanted) or (key == current and context.environment != wanted):
+                raise ValueError("creation destination conflicts with the requested execution environment")
+            if key != current:
+                alias, _ = resolve_ssh_target(entry)
+                routed = {
+                    known_environment_label(profile.name)
+                    for profile in entry.ssh_environments if profile.alias == alias
+                }
+                if routed != {wanted}:
+                    raise ValueError("selected SSH route does not prove the requested execution environment")
     target = {"machine": key, "project": project}
     if not allocation.valid_target(target):
         raise ValueError("invalid creation destination machine or repository")
@@ -175,9 +202,17 @@ def _remote_create(
     creator, path = _creator(owner_ref)
     target = {**target, "options": _remote_options(args, dispatch_attempt)}
     key = getattr(args, "creation_key", None)
-    if key is None:
-        key = secrets.token_urlsafe(24)
-    request_id = creation_request_id(key)
+    request_id = getattr(args, "creation_request_id", None)
+    recovering = request_id is not None
+    if recovering:
+        if not valid_request_id(request_id):
+            raise ValueError("invalid original creation request ID")
+        if key is not None and creation_request_id(key) != request_id:
+            raise ValueError("creation key conflicts with the original request ID")
+    else:
+        if key is None:
+            key = secrets.token_urlsafe(24)
+        request_id = creation_request_id(key)
     recovery = {
         "version": 1, "creator": creator, "creation_key": key, "request_id": request_id,
         "target": target, "linkage": "unreserved",
@@ -187,12 +222,25 @@ def _remote_create(
     tracking_write._ensure_verb_modules_loaded()
     if "worktree_allocation" not in tracking_write.registered_verbs():
         raise ValueError("origin writer lacks protected worktree allocation")
+    metadata = None
+    if recovering:
+        try:
+            metadata = _origin_operation(creator, path, "inspect", {"request_id": request_id})
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise DestinationCreationFailure("pending", str(exc), {
+                **recovery, "linkage": "unknown",
+            }) from exc
+        if producer.canonical_json(metadata["recovery"]) != producer.canonical_json(target):
+            raise DestinationCreationFailure(
+                "conflict", "recovery destination/options differ from the original allocation", recovery,
+            )
     allocation_link_demand.require_capability(creator)
     _receiver_capabilities(creator, target)
     try:
-        metadata = _origin_operation(creator, path, "reserve", {
-            "request_id": request_id, "target": target,
-        })
+        if metadata is None:
+            metadata = _origin_operation(creator, path, "reserve", {
+                "request_id": request_id, "target": target,
+            })
     except (OSError, ValueError, RuntimeError) as exc:
         raise DestinationCreationFailure("pending", str(exc), {
             **recovery, "linkage": "unknown",
@@ -249,6 +297,8 @@ def create(
     current = execution_spaces.current_execution_context(origin_config).execution_machine
     if target["machine"] != current:
         return _remote_create(args, origin_owner, target, dispatch_attempt)
+    if getattr(args, "creation_request_id", None) is not None:
+        raise ValueError("request-ID recovery requires the original remote --machine destination")
     previous = cfg.active_project()
     cfg.set_active_project(destination_project)
     try:

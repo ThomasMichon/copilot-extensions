@@ -5,10 +5,12 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from machine_transport.registry import MachineEntry, SSHEnvironment
 
 from agent_worktrees import allocation_creation_result, allocation_link_demand, config as cfg
 from agent_worktrees import create_destination as destination, finalize, output, tracking
@@ -134,6 +136,42 @@ def test_generated_retry_key_survives_unknown_outcome(coordinator, monkeypatch):
     monkeypatch.setattr(remote, "request", transport)
     result = create_remote(args(creation_key=recovery["creation_key"]))
     assert result["allocation"]["request_id"] == recovery["request_id"]
+
+
+def test_generated_operation_recovers_by_retained_request_id_after_no_output(coordinator, monkeypatch):
+    path, _, effects, transport = coordinator
+
+    def interrupted(operation, metadata):
+        response = transport(operation, metadata)
+        if operation == "create":
+            raise SystemExit("caller disappeared before output")
+        return response
+
+    monkeypatch.setattr(remote, "request", interrupted)
+    with pytest.raises(SystemExit):
+        create_remote(args(creation_key=None))
+    retained = tracking.load_record(path).resources[0].producer
+    monkeypatch.setattr(remote, "request", transport)
+    result = create_remote(args(creation_key=None, creation_request_id=retained["request_id"]))
+    assert result["allocation"]["request_id"] == retained["request_id"]
+    assert result["allocation"]["creation_key"] is None
+    assert len(effects) == 1 and len(tracking.load_record(path).resources) == 1
+
+
+def test_request_id_recovery_never_reserves_a_missing_or_changed_operation(coordinator):
+    path, operations, effects, _ = coordinator
+    with pytest.raises(destination.DestinationCreationFailure, match="missing"):
+        create_remote(args(creation_key=None, creation_request_id="unrecorded"))
+    assert not tracking.load_record(path).resources and not operations and not effects
+    result = create_remote(args())
+    operations.clear()
+    before = path.read_bytes()
+    with pytest.raises(destination.DestinationCreationFailure, match="differ"):
+        destination._remote_create(
+            args(creation_key=None, creation_request_id=result["allocation"]["request_id"]),
+            "m/p/owner", {"machine": "remote", "project": "other"}, None,
+        )
+    assert path.read_bytes() == before and not operations
 
 
 def test_existing_bound_identity_only_reads_original_result(coordinator):
@@ -293,6 +331,55 @@ def test_explicit_owner_controls_authority_but_not_default_destination_repositor
         Path("/original/cwd"), "m/p/owner#session", standalone=False,
     )
     assert selected == ["p"] and project == "cwd-project" and owner_ref == "m/p/owner#session"
+
+
+def test_untracked_linked_origin_is_refused_before_local_child_unless_explicit_standalone(owner, monkeypatch):
+    _, config = owner
+    monkeypatch.setattr(destination, "_cwd_project", lambda cwd: "p")
+    monkeypatch.setattr(destination.worktree_identity, "tracked_invocation_record", lambda *a, **k: None)
+    monkeypatch.setattr(destination.worktree_identity, "_worktree_id_from_git", lambda *a, **k: "external")
+    with pytest.raises(ValueError, match="linked worktree owner is untracked"):
+        destination.create(
+            args(machine=None, repo="p"), owner_ref=None, dispatch_attempt=None,
+            invocation_cwd=Path("/external/linked"), create_local=lambda *a, **k: pytest.fail("child created"),
+        )
+    project, selected, owner_ref = destination._origin(
+        Path("/external/linked"), None, standalone=True,
+    )
+    assert project == "p" and selected is config and owner_ref is None
+
+
+@pytest.mark.parametrize("local", [False, True])
+def test_legacy_label_cannot_discard_requested_windows_environment(owner, monkeypatch, local):
+    _, config = owner
+    monkeypatch.setattr(destination.execution_spaces, "current_execution_context", lambda c: SimpleNamespace(
+        execution_machine="box" if local else "m", environment="linux",
+    ))
+    entry = MachineEntry(
+        key="box", display_name="Box", environment="Linux", ssh_ready=True,
+        ssh_environments=[SSHEnvironment(name="Linux", alias="box-linux", shell="bash")],
+    )
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda *a, **k: {"box": entry})
+    with pytest.raises(ValueError, match="environment"):
+        destination._target(config, "box (Windows)", "target")
+
+
+def test_exact_execution_key_precedes_suffix_spelling_and_requires_matching_route(owner, monkeypatch):
+    _, config = owner
+    monkeypatch.setattr(destination.execution_spaces, "current_execution_context", lambda c: SimpleNamespace(
+        execution_machine="m", environment="linux",
+    ))
+    entry = MachineEntry(
+        key="box-win", display_name="Linux logical space", execution_platform="linux", ssh_ready=True,
+        ssh_environments=[SSHEnvironment(name="Linux", alias="box-linux", shell="bash")],
+    )
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda *a, **k: {entry.key: entry})
+    assert destination._target(config, "box-win", "target") == {"machine": "box-win", "project": "target"}
+    entry = replace(entry, ssh_environments=[
+        SSHEnvironment(name="Windows", alias="box-win", shell="powershell"),
+    ])
+    with pytest.raises(ValueError):
+        destination._target(config, "box-win", "target")
 
 
 def test_destination_parser_keeps_unknown_argument_refusal():

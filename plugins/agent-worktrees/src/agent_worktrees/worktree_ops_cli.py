@@ -85,6 +85,10 @@ def add_parsers(sub) -> None:
     p.add_argument("--machine", default=None, help="Destination registered execution space (default: local)")
     p.add_argument("--repo", default=None, help="Destination repository (default: original CWD repository)")
     p.add_argument(
+        "--creation-request-id", default=None,
+        help="Recover an existing remote allocation by its retained origin request ID; never reserve a new one",
+    )
+    p.add_argument(
         "--system",
         action="store_true",
         help="Create a daemon-owned worktree (hidden from Picker, "
@@ -359,7 +363,7 @@ def cmd_create(args: argparse.Namespace) -> int:
             if project_state.namespaced():
                 project_state.ensure_project_state(cfg.project_name())
             config = cfg.load_config()
-            if getattr(args, "machine", None) is not None or getattr(args, "repo", None) is not None:
+            if any(getattr(args, field, None) is not None for field in ("machine", "repo", "creation_request_id")):
                 from . import create_destination
 
                 result = create_destination.create(
@@ -417,7 +421,9 @@ def cmd_create(args: argparse.Namespace) -> int:
     print(f"   Branch: {wt['branch']}")
     if "allocation" in result:
         print(f"   Origin linkage: {result['allocation']['linkage']}")
-        print(f"   Retry creation key: {result['allocation']['creation_key']!r}")
+        if result["allocation"]["creation_key"] is not None:
+            print(f"   Retry creation key: {result['allocation']['creation_key']!r}")
+        print(f"   Recovery request ID: {result['allocation']['request_id']}")
     return 0
 
 

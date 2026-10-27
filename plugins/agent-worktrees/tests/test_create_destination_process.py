@@ -109,7 +109,6 @@ def test_ordinary_cli_returns_actual_child_from_finite_receiver_before_claim_ack
     command = [
         "--project", "parent", "create", "--machine=test",
         *([] if same_repository else [f"--repo={receiving_config.repo_name}"]),
-        "--creation-key=ordinary-process",
         "--no-pair", "--json",
     ]
     with output.capture_json_output() as captured:
@@ -127,8 +126,12 @@ def test_ordinary_cli_returns_actual_child_from_finite_receiver_before_claim_ack
     assert result["allocation"]["target"]["project"] == receiving_config.repo_name
     assert child.receiving_allocation["token"] not in captured.getvalue()
     assert operations == ["capabilities", "create", "result"]
+    recovery_command = [*command, f"--creation-request-id={result['allocation']['request_id']}"]
     with output.capture_json_output() as captured:
-        assert main.main(command) == 0
-    assert json.loads(captured.getvalue())["worktree"] == result["worktree"]
+        code = main.main(recovery_command)
+    assert code == 0, captured.getvalue()
+    recovered = json.loads(captured.getvalue())
+    assert recovered["worktree"] == result["worktree"]
+    assert recovered["allocation"]["creation_key"] is None
     assert len(list(receiving_records.glob("*.yaml"))) == 1
     assert len(tracking.load_record(origin_records / "creator.yaml").resources) == 1

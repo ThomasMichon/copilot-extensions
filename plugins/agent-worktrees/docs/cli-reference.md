@@ -32,6 +32,7 @@ cannot be settled through generic release, at-rest, sweep or abandon commands.
 ## Source-only destination allocation
 
 `create [--machine EXECUTION_SPACE] [--repo REPOSITORY] [--creation-key KEY]
+[--creation-request-id EXISTING_REQUEST]
 --json` selects a destination while preserving the original CWD creator.
 It launches no agent. Remote results distinguish durable receiving creation
 from asynchronous origin linkage and retain the original retry key on uncertain

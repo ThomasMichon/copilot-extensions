@@ -23,11 +23,17 @@ for destination selection without replacing the creator. Explicit `--owner-ref`
 takes precedence over the existing owner environment fallback and CWD owner.
 Remote allocation normalizes a session-qualified owner through its actual
 local worktree ledger. An anchor is never invented as a remote creator.
+An unresolved linked-worktree CWD is refused before local or remote effects
+unless standalone policy is explicitly selected; missing tracking is not
+permission to silently omit the reciprocal owner. Environment labels must agree
+with the actual local execution context or selected SSH profile. Exact
+registered execution keys retain precedence over suffix-like spelling.
 Composing clients discover support from the selected origin executable's
 `worktree-allocation capabilities --json`: `ordinary_create.version: 1`
 declares the two destination selectors, `opaque-v1` creation keys,
-`ordinary-worktree+allocation-v1` results and non-blocking linkage without agent
-launch. An origin lacking that declaration does not support this invocation;
+`recovery_request_id: true`, `ordinary-worktree+allocation-v1` results and
+non-blocking linkage without agent launch. An origin lacking that declaration
+does not support this invocation;
 do not try new arguments against it or fall back to unowned receiving creation.
 
 Omitting both selectors retains the ordinary local path. Local repository
@@ -61,6 +67,22 @@ A lost response reuses the same protected token and receiving operation; it
 never authorizes a fresh key, replacement child or automatic cancellation.
 An unfinished or concluded receiving operation supplies no usable worktree.
 Pending and unknown origin responsibility continue to block parent conclusion.
+If the caller disappears before the generated key reaches stdout, the existing
+origin resource ledger still retains the original request ID. Recover it through
+the normal claim inspection surface, then use:
+
+```text
+agent-worktrees create --machine original-target --repo original-destination --creation-request-id retained-request-id --json
+```
+
+Keep the original creation options as well. This mode only inspects an existing
+origin reservation; a missing request or changed target/options cannot reserve
+another allocation. It does not hash the retained ID again. A supplied
+`--creation-key` must agree with it. Recovery may return `creation_key: null`
+because the opaque original key is not reconstructed; the retained request ID
+remains the recovery handle. Request-ID recovery without the original remote
+destination is refused rather than silently performing local creation.
+
 When composed through `run`, its temporary pending wrapper is settled only
 after verifying this same protected responsibility in the actual origin ledger.
 The wrapper does not add a competing plain child claim while linkage is pending.

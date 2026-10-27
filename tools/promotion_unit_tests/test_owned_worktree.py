@@ -224,6 +224,9 @@ def test_reconcile_preserves_active_claim_until_exact_conclusion(api):
 def destination(api, monkeypatch):
     transport = ModuleType("machine_transport")
     transport.resolve_machine_selection = None
+    transport.resolve_ssh_target = None
+    transport.split_machine_environment = None
+    transport.known_environment_label = None
     monkeypatch.setitem(sys.modules, transport.__name__, transport)
     for child in ("config", "allocation_link_demand", "claims_cli", "invocation_project", "worktree_identity"):
         api.stub(child)
