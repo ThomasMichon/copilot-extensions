@@ -106,6 +106,46 @@ async def test_profile_derived_nested_jump_is_owned(monkeypatch):
     assert route.upstream.config.host_alias == "inner"
 
 
+@pytest.mark.parametrize("specification,host,user", [
+    ("%r@jump-%h-%n-%p", "jump-endpoint.example-target-2200", "alice"),
+    ("ssh://alice%40realm@jump-%25h:2300", "jump-endpoint.example", "alice@realm"),
+    ("jump-%%n", "jump-%n", None),
+])
+async def test_jump_tokens_expand_against_destination_identity(
+    monkeypatch, specification, host, user,
+):
+    calls = _profiles(monkeypatch, {host: _profile(host)})
+    route = await proxy_jump.resolve_jump_route(
+        _profile("target", specification, hostname="endpoint.example", user="alice", port=2200),
+        "ssh",
+    )
+    assert route is not None and route.argv[-1] == host
+    assert calls[0][1]["user"] == user
+    assert route.argv[-2] == "endpoint.example:2200"
+
+
+async def test_jump_chain_tokens_expand_before_passing_earlier_hops(monkeypatch):
+    calls = _profiles(monkeypatch, {
+        "last-endpoint.example": _profile("last-endpoint.example"),
+        "first-endpoint.example": _profile("first-endpoint.example"),
+    })
+    route = await proxy_jump.resolve_jump_route(
+        _profile("target", "first-%h,last-%h", hostname="endpoint.example"), "ssh",
+    )
+    assert route is not None and route.upstream is not None
+    assert [host for host, _options in calls] == [
+        "last-endpoint.example", "first-endpoint.example",
+    ]
+
+
+@pytest.mark.parametrize("value", ["jump-%Z", "jump-%"])
+async def test_unsupported_jump_tokens_refuse_before_metadata_lookup(monkeypatch, value):
+    calls = _profiles(monkeypatch, {})
+    with pytest.raises(ValueError, match="Unsupported SSH proxy token"):
+        await proxy_jump.resolve_jump_route(_profile("target", value), "ssh")
+    assert calls == []
+
+
 async def test_distinct_aliases_sharing_an_endpoint_are_not_a_cycle(monkeypatch):
     endpoint = "192.0.2.1"
     _profiles(monkeypatch, {

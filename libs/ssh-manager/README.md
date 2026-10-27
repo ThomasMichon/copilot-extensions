@@ -226,6 +226,10 @@ remain intact. Destination overrides retain SSH's first-value precedence and
 but before the remote command. Cycle identity uses declared aliases, not resolved addresses,
 so different network scopes may legitimately reuse an endpoint.
 CLI `ProxyCommand`/`ProxyJump` selection retains its first-selected precedence.
+Jump host/user tokens share the proxy token expander: `%%`, `%h`, `%n`, `%p`
+and `%r` use the destination identity before hop-profile lookup. URI components
+are decoded before token expansion, and earlier comma-separated hops receive
+the same destination context before passing to the next stage.
 Every Windows launch resolves its effective root through the existing
 bounded selected-client resolver using the original argv, even with a cached
 config and unchanged filename, or a plain programmatic configuration without

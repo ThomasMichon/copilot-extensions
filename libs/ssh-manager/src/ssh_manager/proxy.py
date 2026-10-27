@@ -5,11 +5,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import ctypes
-import getpass
 import hmac
 import logging
 import os
-import re
 import secrets
 import shlex
 import shutil
@@ -37,6 +35,7 @@ from .process import (
     terminate_ssh_process_tree,
 )
 from .proxy_jump import JumpRoute, prepare_windows_launch, resolve_jump_route
+from .proxy_jump import expand_proxy_tokens as _expand_tokens
 
 log = logging.getLogger("ssh-manager.proxy")
 _DRAIN_TIMEOUT = 2.0
@@ -66,24 +65,6 @@ def _split_windows_command(command: str) -> list[str]:
         return [argv[index] for index in range(count.value)]
     finally:
         kernel.LocalFree(argv)
-
-
-def _expand_tokens(value: str, config: SSHConfig) -> str:
-    tokens = {
-        "%": "%",
-        "h": config.hostname or _option(config, "hostname") or config.host_alias,
-        "n": config.host_alias,
-        "p": str(config.port or _option(config, "port") or 22),
-        "r": config.user or _option(config, "user") or getpass.getuser(),
-    }
-
-    def expand(match: re.Match[str]) -> str:
-        token = match.group(1)
-        if token not in tokens:
-            raise ValueError(f"Unsupported SSH proxy token %{token}")
-        return tokens[token]
-
-    return re.sub(r"%(.)", expand, value)
 
 
 @lru_cache(maxsize=8)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import getpass
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -57,6 +58,36 @@ def _parse_jump(value: str) -> tuple[str, str | None, int | None]:
     ):
         raise ValueError("Invalid SSH jump identity")
     return host, user, port
+
+
+def expand_proxy_tokens(value: str, config: SSHConfig) -> str:
+    tokens = {
+        "%": "%",
+        "h": config.hostname or ssh_option(config, "hostname") or config.host_alias,
+        "n": config.host_alias,
+        "p": str(config.port or ssh_option(config, "port") or 22),
+        "r": config.user or ssh_option(config, "user") or getpass.getuser(),
+    }
+
+    def expand(match: re.Match[str]) -> str:
+        token = match.group(1)
+        if token not in tokens:
+            raise ValueError(f"Unsupported SSH proxy token %{token or ''}")
+        return tokens[token]
+
+    return re.sub(r"%(.)|%$", expand, value)
+
+
+def _expand_jump(value: str, config: SSHConfig) -> str:
+    host, user, port = _parse_jump(value)
+    host = expand_proxy_tokens(host, config)
+    if ":" in host:
+        host = "[" + host + "]"
+    if user is not None:
+        host = expand_proxy_tokens(user, config) + "@" + host
+    if port is not None:
+        host += ":" + str(port)
+    return host
 
 
 def _override_jump(config: SSHConfig, value: str) -> SSHConfig:
@@ -292,6 +323,7 @@ async def resolve_jump_route(
     jumps = value.split(",")
     if len(jumps) > _MAX_JUMPS or any(not item for item in jumps):
         raise ValueError("Invalid or over-budget SSH jump chain")
+    jumps = [_expand_jump(item, config) for item in jumps]
     host, user, port = _parse_jump(jumps[-1])
     source = SSHProfileSource(
         host, user=user, port=port, config_file=config.config_file,
