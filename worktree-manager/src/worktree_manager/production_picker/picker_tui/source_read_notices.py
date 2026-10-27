@@ -23,8 +23,12 @@ def failed_worktree_reads(engine):
             reason = None
         if state == "ready" and not reason:
             continue
+        read_identity = (
+            f"local execution (no SSH) / {identity or 'resident current-roster'}"
+            if tab.get("local") else identity
+        )
         notices.append((
-            tab.get("source_label") or label, identity,
+            tab.get("source_label") or label, read_identity,
             str(reason or "No current source snapshot was obtained.").strip()[:240],
         ))
     return notices

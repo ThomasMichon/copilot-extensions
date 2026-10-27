@@ -224,7 +224,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         if passive_mode:
             return False
         d = _locks.read_lock(lock)
-        if not (_locks.lock_is_live(d) and isinstance(d, dict)):
+        if not (_locks.lock_is_running(d) and isinstance(d, dict)):
             return False
         if d.get("pid") == os.getpid():
             return False
