@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from pathlib import Path
 
@@ -20,6 +21,17 @@ def pairing_facts(config: cfg.Config) -> dict:
         "source": resolved.source, "requires_external": resolved.requires_external,
         "bound": resolved.bound,
     }
+
+
+def original_no_pair(config: cfg.Config, key: str, requested: bool) -> bool:
+    """Replay the original effective option, not a later process environment."""
+    row = creation_requests.inspect(config, key)
+    if row is None:
+        return requested or bool(os.environ.get("AGENT_WORKTREES_NO_PAIR"))
+    value = row["facts"].get("no_pair")
+    if type(value) is not bool:
+        raise ValueError("receiving allocation has no valid original pairing option")
+    return value
 
 
 def requires_pair(record: tracking.WorktreeRecord, config: cfg.Config) -> bool:

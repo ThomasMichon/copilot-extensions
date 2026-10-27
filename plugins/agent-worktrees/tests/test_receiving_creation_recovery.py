@@ -120,6 +120,10 @@ def test_required_companion_skip_stays_pending_and_recovers_original_child(recei
     assert row["facts"]["no_pair"] is False
     record = tracking.load_record(next(records.glob("*.yaml")))
     assert not record.pair_id and not record.pair_ref
+    if failure != "lookup":
+        with pytest.raises(RuntimeError, match="pairing remains incomplete"):
+            receive("create", request(receiver), config)
+        assert creation_requests.inspect(config, admission.key)["status"] == "pending"
     monkeypatch.setattr(state_root, "resolve_state_root", lambda *a, **k: original_root)
     monkeypatch.setattr(tracking, "create_new_record", original)
     monkeypatch.delenv("AGENT_WORKTREES_NO_PAIR", raising=False)
@@ -153,7 +157,47 @@ def test_original_no_pair_environment_remains_intentional_after_override_disappe
     row = creation_requests.inspect(config, admission.key)
     assert row["facts"]["no_pair"] is True
     monkeypatch.delenv("AGENT_WORKTREES_NO_PAIR")
+    assert receive("create", request(receiver), config) == created
     assert receive("inspect", request(receiver, created["identity"]), config) == created
+
+
+@pytest.mark.parametrize("initial_override", [False, True])
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_identical_create_retries_keep_original_effective_options_across_environment_change(
+    receiver, monkeypatch, initial_override, interrupted,
+):
+    config, admission, records = receiver
+    admission.target["options"]["no_pair"] = False
+    if initial_override:
+        monkeypatch.setenv("AGENT_WORKTREES_NO_PAIR", "1")
+    else:
+        monkeypatch.delenv("AGENT_WORKTREES_NO_PAIR", raising=False)
+    original = tracking.create_new_record
+    if interrupted:
+        def first_save(**kwargs):
+            original(**kwargs)
+            raise OSError("response interrupted after first save")
+        monkeypatch.setattr(tracking, "create_new_record", first_save)
+        with pytest.raises(OSError, match="response interrupted"):
+            receive("create", request(receiver), config)
+    else:
+        receive("create", request(receiver), config)
+    record = tracking.load_record(next(records.glob("*.yaml")))
+    identity = receiving.record_identity(record).to_dict()
+    assert creation_requests.inspect(config, admission.key)["facts"]["no_pair"] is initial_override
+    monkeypatch.setattr(tracking, "create_new_record", original)
+    if initial_override:
+        monkeypatch.delenv("AGENT_WORKTREES_NO_PAIR")
+    else:
+        monkeypatch.setenv("AGENT_WORKTREES_NO_PAIR", "1")
+    monkeypatch.setattr(
+        worktree_creation.git_ops, "create_worktree",
+        lambda *a, **k: pytest.fail("identical retry must never allocate another primary child"),
+    )
+    recovered = receive("create", request(receiver), config)
+    assert recovered["status"] == "allocated" and recovered["identity"] == identity
+    assert creation_requests.inspect(config, admission.key)["facts"]["no_pair"] is initial_override
+    assert len(list(records.glob("*.yaml"))) == 1
 
 
 def test_live_creator_is_not_overtaken_after_its_first_save(receiver, monkeypatch):

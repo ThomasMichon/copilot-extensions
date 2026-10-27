@@ -129,6 +129,9 @@ to allocate another pair.
 The original journaled external-companion requirement remains authoritative if a
 later state-root lookup fails or a no-pair environment override appears. A skipped
 required carve or composition stays pending and cannot earn a ready checkpoint.
+Identical create retries reuse the original effective pairing option even if the
+process's no-pair environment override changes, while still comparing the exact
+request/target and current source configuration against the original journal.
 
 If an older generic writer omits the new top-level receiving receipt, the
 receiver can reconstruct it only from the exact retained original local journal,

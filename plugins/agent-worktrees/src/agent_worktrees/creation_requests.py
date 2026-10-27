@@ -62,7 +62,10 @@ def allocation_facts(config: cfg.Config, **options) -> dict:
         "owner_ref": owner_ref,
         "name": options["name"] if kind == "system" else None,
         "bound_agent": (options["bound_agent"] or "").strip() or None,
-        "no_pair": options["no_pair"] or bool(os.environ.get("AGENT_WORKTREES_NO_PAIR")),
+        "no_pair": (
+            options["no_pair"] if options.get("receiving_allocation") is not None
+            else options["no_pair"] or bool(os.environ.get("AGENT_WORKTREES_NO_PAIR"))
+        ),
         "seed_sha256": hashlib.sha256((options["pending_seed"] or "").encode()).hexdigest(),
         "pending_seed_id": options.get("pending_seed_id"),
         "allocation": (

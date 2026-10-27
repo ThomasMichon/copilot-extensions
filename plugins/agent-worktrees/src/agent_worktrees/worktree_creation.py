@@ -585,7 +585,9 @@ def _create_worktree_core(
         from . import creation_replay, creation_requests
 
         if receiving_allocation is not None:
-            no_pair = no_pair or bool(os.environ.get("AGENT_WORKTREES_NO_PAIR"))
+            from .receiving_creation_recovery import original_no_pair
+
+            no_pair = original_no_pair(config, creation_key, no_pair)
         options = {
             "profile": profile, "profile_is_explicit": profile_is_explicit,
             "no_mux": no_mux, "kind": kind, "owner": owner, "interface": interface,
