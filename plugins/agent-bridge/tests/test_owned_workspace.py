@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -291,3 +292,58 @@ async def test_interrupted_allocation_recovery_never_retries_an_unknown_native_l
     with pytest.raises(RuntimeError, match="no ACP session ID"):
         await session_manager.resume_session(session.session_id, allow_recreate=recreate)
     assert _patch_spawn.await_count == 1 and len(calls) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lost_capture", [False, True])
+async def test_stop_and_resume_wait_for_original_delayed_allocation_start_to_settle(
+    session_manager, tmp_db, monkeypatch, _patch_spawn, _patch_acp, lost_capture,
+):
+    monkeypatch.setattr("agent_bridge.hosting_policy.require_target_hosting", AsyncMock())
+    entered, finish, stopping = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    keys = []
+    request_stop = tmp_db.request_cold_recovery_stop
+
+    def stop_requested(session_id):
+        result = request_stop(session_id)
+        stopping.set()
+        return result
+
+    monkeypatch.setattr(tmp_db, "request_cold_recovery_stop", stop_requested)
+
+    async def command(args, project, **kwargs):
+        if args[0] == "worktree-allocation":
+            return capabilities()
+        key = args[args.index("--creation-key") + 1]
+        keys.append(key)
+        if len(keys) == 1:
+            entered.set()
+            await finish.wait()
+            if lost_capture:
+                raise AcquisitionRefused("owner_operation_pending", "original capture lost")
+        return result(key)
+
+    monkeypatch.setattr(owned, "worktree_command", command)
+    tasks = [asyncio.create_task(session_manager.start_session(target()))]
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        session = session_manager.list_sessions()[0]
+        tasks.append(asyncio.create_task(session_manager.stop_session(session.session_id)))
+        await asyncio.wait_for(stopping.wait(), 5)
+        tasks.append(asyncio.create_task(session_manager.resume_session(session.session_id)))
+        await asyncio.sleep(0)
+        assert session.status == SessionStatus.STARTING
+        assert session._lifecycle_lock.locked()
+        assert not tasks[1].done() and not tasks[2].done()
+        _patch_spawn.assert_not_called()
+        finish.set()
+        await asyncio.wait_for(asyncio.gather(*tasks), 5)
+        assert session.status == SessionStatus.IDLE
+        assert session.target.worktree_id == "actual-child"
+        assert len(set(keys)) == 1 and len(keys) == (2 if lost_capture else 1)
+        assert _patch_acp.return_value.new_session.await_count == 1
+        assert _patch_acp.return_value.load_session.await_count == (0 if lost_capture else 1)
+        assert _patch_spawn.await_count == (1 if lost_capture else 2)
+    finally:
+        finish.set()
+        await asyncio.gather(*tasks, return_exceptions=True)

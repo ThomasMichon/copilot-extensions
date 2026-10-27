@@ -361,6 +361,11 @@ class _SessionStartMixin:
                 agent_proc.alive,
             )
 
+        from .owned_workspace import selects_new_owned_ssh
+
+        owned_start = selects_new_owned_ssh(target)
+        if owned_start:
+            await session._lifecycle_lock.acquire()
         try:
             cs_target = None
             # Prefer the structured provider metadata (#177); fall back to
@@ -890,6 +895,9 @@ class _SessionStartMixin:
             self._mark_session_failed(session, trigger="start_exception")
             session.event_log.append("error", {"message": str(exc)})
             log.error("Failed to start session %s: %s", session_id, exc, exc_info=True)
+        finally:
+            if owned_start:
+                session._lifecycle_lock.release()
 
         session.touch()
         return session

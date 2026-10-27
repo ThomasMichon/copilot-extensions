@@ -36,6 +36,10 @@ without a native identity requires explicit original-operation reconciliation;
 it is not evidence that native launch never started. That retained fence also
 rejects automatic recreation requested by ordinary send, including after a
 Bridge restart.
+Initial owned SSH startup holds the existing session lifecycle lock through
+allocation and native registration or failure. Stop and resume wait for that
+startup to settle; they cannot overlap a delayed allocation with a second
+native-creation path or race its terminal state publication.
 
 ## Supported boundary
 
