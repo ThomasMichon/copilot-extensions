@@ -20,7 +20,7 @@ def parse(raw: object) -> dict[str, str]:
     revision, number = raw.get("pr_revision", 0), raw.get("number")
     if type(revision) is not int or not 0 <= revision <= tracking.MAX_PERSISTED_COUNTER:
         return {}
-    if number not in (None, "", "null") and (type(number) is not int or number <= 0):
+    if number is not None and (type(number) is not int or number <= 0):
         return {}
     receipt = raw.get("creation")
     if not isinstance(receipt, dict) or any(

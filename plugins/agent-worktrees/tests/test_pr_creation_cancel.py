@@ -31,7 +31,11 @@ def reservation(pr_repo, monkeypatch):
     })
     monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
     monkeypatch.setattr(git_ops, "remote_slug", lambda *a, **k: "example/repo")
-    monkeypatch.setattr(pr_publish, "push_identity", lambda *a, **k: "github.com/example/repo")
+    snapshot = pr_publish._remote_snapshot
+    def synthetic_destination(remote, *, cwd):
+        fetch, urls, _destination = snapshot(remote, cwd=cwd)
+        return fetch, urls, pr_publish.PushTarget(remote, "example/repo", "github.com/example/repo")
+    monkeypatch.setattr(pr_publish, "_remote_snapshot", synthetic_destination)
     real_rebase = git_ops.rebase
     monkeypatch.setattr(git_ops, "rebase", lambda *a, **k: False)
     failed = pr_ops.create_pr(wid, config, title="Example contribution", open_pr=False)
@@ -237,6 +241,41 @@ def test_local_head_or_repointed_remote_is_not_absence(reservation, monkeypatch)
     assert not cancel(reservation)["success"]
 
 
+@pytest.mark.parametrize("existing", ["local", "remote"])
+def test_inherited_git_context_cannot_hide_actual_head(reservation, monkeypatch, tmp_path, existing):
+    _config, _wid, wt, _remote, path, record, _provider = reservation
+    foreign = tmp_path / "foreign.git"
+    git_ops.git("init", "--bare", str(foreign), cwd=str(wt), isolated_repository=True)
+    git_ops.git(
+        "--git-dir", str(foreign), "config", "remote.origin.url", str(foreign),
+        cwd=str(wt), isolated_repository=True,
+    )
+    if existing == "local":
+        git_ops.git("branch", record.pr.branch, cwd=str(wt), isolated_repository=True)
+    else:
+        git_ops.git(
+            "push", "origin", f"HEAD:refs/heads/{record.pr.branch}",
+            cwd=str(wt), isolated_repository=True,
+        )
+    before = path.read_bytes()
+    monkeypatch.setenv("GIT_DIR", str(foreign))
+    monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path / "foreign-working-tree"))
+    result = cancel(reservation)
+    assert not result["success"], result
+    assert path.read_bytes() == before
+
+
+def test_unavailable_git_credentials_are_a_structured_refusal(reservation, monkeypatch):
+    path = reservation[4]
+    before = path.read_bytes()
+    def unavailable(*a, **k):
+        raise git_ops.GitError(["git-auth"], 1, "repository account unavailable")
+    monkeypatch.setattr(git_ops, "_auth_config_args_for_url", unavailable)
+    result = cancel(reservation)
+    assert not result["success"] and "repository account unavailable" in result["error"]
+    assert path.read_bytes() == before
+
+
 @pytest.mark.parametrize("case", ["missing-revision", "repo-override", "numbered-live", "numbered-missing-head"])
 def test_invalid_or_external_selection_never_enters_local_absence(reservation, monkeypatch, case):
     path = reservation[4]
@@ -296,6 +335,7 @@ def test_malformed_cancellation_receipt_is_not_finality_proof(reservation, key, 
 
 @pytest.mark.parametrize("field,value", [
     ("number", "unknown"), ("number", True), ("number", {}),
+    ("number", ""), ("number", "null"),
     ("pr_revision", "unknown"), ("pr_revision", True), ("pr_revision", -1),
     ("pr_revision", tracking.MAX_PERSISTED_COUNTER + 1),
 ])

@@ -20,6 +20,8 @@ def _result(base: dict, pr: tracking.PRRecord, *, already: bool) -> dict:
 
 
 def _absence(record, pr, config) -> None:
+    from .git_push_transport import pinned_destination
+
     prcfg = config.default_repo.pr
     if pr.provider != prcfg.provider:
         raise ValueError("Creation provider changed; cancellation is not qualified.")
@@ -36,12 +38,20 @@ def _absence(record, pr, config) -> None:
         raise ValueError("Provider cannot authoritatively confirm PR-head absence for this cancellation contract.")
     remote = pr.creation["remote"]
     cwd = record.worktree_path
-    if pr_publish.push_identity(remote, cwd=cwd) != pr.creation["identity"]:
-        raise ValueError("Creation remote destination changed or is unreadable; cancellation refused.")
-    local = git_ops.git("show-ref", "--verify", "--quiet", f"refs/heads/{pr.branch}", cwd=cwd, check=False)
+    with pr_publish.publish_lock(cwd):
+        fetch, urls, destination = pr_publish._remote_snapshot(remote, cwd=cwd)
+        if destination.head_identity != pr.creation["identity"]:
+            raise ValueError("Creation remote destination changed or is unreadable; cancellation refused.")
+        destinations = tuple(urls.stdout.splitlines())
+        settings = pr_publish._transport_settings(remote, cwd=cwd)
+    local = git_ops.git(
+        "show-ref", "--verify", "--quiet", f"refs/heads/{pr.branch}",
+        cwd=cwd, check=False, isolated_repository=True,
+    )
     if local.returncode != 1:
         raise ValueError("Local PR-head absence is not confirmed; cancellation refused.")
-    tip = pr_publish._tip(remote, pr.branch, cwd)
+    with pinned_destination(remote, destinations, settings, fetch_url=fetch.stdout.rstrip("\r\n")):
+        tip = pr_publish._tip(remote, pr.branch, cwd)
     if tip is None:
         raise ValueError("Cannot confirm remote head absence; cancellation refused.")
     if tip:
@@ -119,5 +129,6 @@ def cancel_creation(worktree_id, config, *, creation_id, expected_revision, reas
                 if pr_publish.push_identity(pr.creation["remote"], cwd=record.worktree_path) != pr.creation["identity"]:
                     raise ValueError("Creation destination changed during observation; cancellation refused.")
                 return _settle(base, path, record, pr, expected_revision, reason)
-    except (OSError, ValueError, TimeoutError, yaml.YAMLError, providers.ProviderError) as exc:
-        return {**base, "error": f"Local creation cancellation refused: {exc}"}
+    except (OSError, ValueError, TimeoutError, yaml.YAMLError, providers.ProviderError, git_ops.GitError) as exc:
+        detail = exc.stderr if isinstance(exc, git_ops.GitError) else str(exc)
+        return {**base, "error": f"Local creation cancellation refused: {detail}"}
