@@ -101,3 +101,56 @@ it, when, and why, so a forgotten switch is discoverable rather than silent.
   theoretically race one of those three plugins' own in-flight reconcile;
   when in doubt, wait a few seconds after activating the switch (most
   reconciles are brief) before treating any plugin's venv as settled.
+
+
+## Emergency pre-tool workflow-guard switch
+
+`agent-machines pretool-killswitch` is a separate, default-inactive control:
+
+```console
+agent-machines pretool-killswitch on "temporary latency diagnosis"
+agent-machines pretool-killswitch status --json
+agent-machines pretool-killswitch off
+```
+
+It pauses the suite-owned **preToolUse workflow guards**, not Copilot's native
+permissions or all hooks: agent-worktrees' resident policy request and local
+statelessness, cross-repository, anchor-write and PR-supersession guards, plus
+copilot-extensions-harness' Copilot-mention guard. Operators temporarily lose
+those automatic workflow checks and must continue following their repository
+policy. No process is killed. postToolUse, prompt hooks, session lifecycle and
+bootstrap reconciliation remain unchanged. The bootstrap switch above remains
+independent and does not stop these pre-tool guards.
+
+The state is `~/.copilot-extensions/pretool-killswitch.json` with `active`,
+`reason`, `set_by` and `set_at`. There is no automatic expiry. `off` removes
+only this state file and restores normal guard evaluation on the next call.
+Missing, corrupt or non-boolean state leaves guards enabled; corrupt state is
+reported on stderr and `status` fails visibly. `PRETOOL_KILLSWITCH_STATE_FILE`
+selects an explicit alternative state path, principally for isolated testing.
+Namespaced `COPILOT_EXTENSIONS_CONTEXT` cells never consult this default-install
+flag, even with an override; the management command refuses in a cell.
+
+The canonical stdlib-only `pretool_killswitch.py` is vendored byte-identically
+into each adopting payload (and the agent-machines package). Run the existing
+`tools/sync-bootstrap-killswitch.py` / `--check` to synchronize/audit both
+controls. Agent-worktrees' installers publish the helper before its importing
+hook. No sibling plugin's runtime is required to evaluate the flag.
+
+**Delivery is not activation.** First merge, promote and deploy the release
+through the normal owner update on each intended machine. Updating hooks.json
+alone cannot relieve already-running sessions: hosts cache its command text.
+The existing commands invoke the deployed hook script, which reads this flag
+on **every invocation before stdin, IPC or fallback evaluation**, so current
+sessions do not need a restart once those invoked files are updated. An
+already-running hook invocation is not canceled. Activate separately on each
+intended default installation and retain status/rollback evidence; unavailable
+machines are not covered by another machine's switch.
+
+A native per-hook `disabledHooks` entry is a distinct emergency escape hatch,
+not this switch's backing store. If one was used while awaiting deployment,
+restore only that exact entry through the native host's hook reload after
+verifying this control on the installed entrypoint; preserve unrelated disabled
+hooks and never set `disableAllHooks`. Clearing the native entry while leaving
+this switch active keeps the workflow guards paused. Clearing this switch while
+leaving the native entry disabled does **not** restore those guards.

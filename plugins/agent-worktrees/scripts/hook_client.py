@@ -577,21 +577,10 @@ def _bootstrap_first_install(payload: dict) -> dict:
                 f"[agent-worktrees] Bootstrap stamp failed (exit {completed.returncode}).\n"
             )
         return {"_stderr": diagnostic} if diagnostic else {}
-    result: dict = {}
-    stdout = (completed.stdout or "").strip()
-    if stdout:
-        try:
-            value = json.loads(stdout)
-        except (TypeError, ValueError):
-            result["additionalContext"] = stdout
-        else:
-            if isinstance(value, dict):
-                result.update(value)
-            else:
-                result["additionalContext"] = stdout
-    if completed.stderr:
-        result["_stderr"] = completed.stderr
-    return result
+    helper = _load_sibling("hook_lifecycle_runtime.py")
+    if helper is None:
+        return {"_stderr": "[agent-worktrees] Bootstrap result helper unavailable.\n"}
+    return helper.bootstrap_result(completed)
 
 
 def _fallback_legacy_session_start(payload: dict, *, skip_reconcile: bool = False) -> dict:
@@ -954,6 +943,12 @@ def main(argv: list[str] | None = None) -> int:
     kind = argv[0] if argv else ""
     if kind not in {"preToolUse", "postToolUse", "sessionStart", "sessionEnd"}:
         return 0
+    if kind == "preToolUse":
+        switch = _load_sibling("pretool_killswitch.py")
+        if switch is None:
+            print("[pretool-killswitch] helper unavailable; guards remain enabled", file=sys.stderr)
+        elif switch.is_active():
+            return 0
     try:
         raw = sys.stdin.read()
         payload = json.loads(raw) if raw.strip() else {}

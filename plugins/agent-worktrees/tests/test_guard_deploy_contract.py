@@ -78,6 +78,7 @@ def test_all_installers_deploy_every_py_hook():
         "hook_lifecycle_runtime.py",
         "native_source_context.py",
         "terminal_probe.py",
+        "pretool_killswitch.py",
     }
     installers = {
         "install.ps1": _INSTALL_PS1.read_text("utf-8"),
