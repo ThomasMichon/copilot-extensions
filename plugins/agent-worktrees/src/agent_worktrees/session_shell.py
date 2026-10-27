@@ -68,6 +68,10 @@ def prepare(
             "default-setup.ps1", "launch-command.ps1",
             "native-seed-boundary.ps1", "reconcile-machine-settings.ps1",
         ),
+        "default-setup.sh": (
+            "default-setup.sh", "launch-command.sh",
+            "native-seed-reply.sh", "reconcile-machine-settings.sh",
+        ),
     }.get(wrapper.name)
     if names is None:
         raise ValueError("Unsupported session shell asset")

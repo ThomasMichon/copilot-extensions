@@ -76,6 +76,15 @@ and held-seed/unknown handling for an unrepresentable reply. A real Bash reader
 control decodes the NUL fields without evaluating injected shell text. Git Bash
 execution is a framing control, not native Linux/macOS, terminal or production
 POSIX launch qualification; production POSIX consumer activation remains open.
+`test_native_seed_reply_shell.py` executes the shipped dormant Bash reader,
+checking literal arrays without environment mutation or command evaluation,
+inherited versus empty replacement environment, malformed/truncated/trailing
+frames, stale-output clearing and prompt-free failures. The malformed cases
+share one Bash process. `test_session_shell.py` checks complete copied POSIX
+setup assets and refusal before partial publication when the reader is absent.
+The existing callback inventory/publication controls cover its installer-owned
+copy scope. These are framing/copy controls, not finite callback execution,
+foreground terminal, PID/birth or native installation-survival qualification.
 The real PowerShell
 seed-delivery consumer uses the existing finite process-tree owner so a timeout
 settles descendants rather than blocking on inherited capture pipes.

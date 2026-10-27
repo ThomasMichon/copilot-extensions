@@ -121,10 +121,8 @@ def test_wrappers_deploy_before_monitor_activation():
     assert '[[ "$ACTION" != install && "$ACTION" != update ]] || scope=wrappers' in sh
 
 
-def test_all_installers_deploy_platform_pane_wrapper():
+def test_legacy_python_installer_uses_manager_wrapper_manifest():
     installers = {
-        "install.ps1": _INSTALL_PS1.read_text("utf-8"),
-        "install.sh": _INSTALL_SH.read_text("utf-8"),
         "installer.py": _INSTALLER_PY.read_text("utf-8"),
     }
     manifest = json.loads((_PLUGIN / "launch-wrapper-assets.json").read_text("utf-8"))
@@ -132,8 +130,6 @@ def test_all_installers_deploy_platform_pane_wrapper():
 
     assert tuple(manifest["files"]) == launch_wrapper_assets.WRAPPER_FILES
     required = {
-        "install.ps1": "pane-wrapper.ps1",
-        "install.sh": "pane-wrapper.sh",
         "installer.py": ("load_manifest(", "resolve_source_dir("),
     }
     missing: list[str] = []

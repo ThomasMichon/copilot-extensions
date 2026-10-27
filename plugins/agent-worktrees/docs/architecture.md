@@ -646,6 +646,23 @@ word splitting, or source the fields as shell code. The provider does not
 spawn a backend or retain a parser to wait for one; prompt-bearing reply bytes
 remain on the private preparation pipe, outside execution receipts and logs.
 
+`scripts/native-seed-reply.sh` is a dormant Bash reader for this frame.
+Dot-sourcing it only defines functions. `aw_native_seed_read_reply` consumes
+stdin through EOF, clears previous output, validates framing and correlation,
+and then publishes literal `AW_NATIVE_SEED_ARGV` / `AW_NATIVE_SEED_ENV` arrays
+and the correlation fields. It neither exports environment entries nor executes
+arguments; an environment count of `-1` stays distinct from empty replacement.
+Invalid or truncated input returns 3 with a prompt-free diagnostic and no
+partially published reply. Counts use canonical decimal with at most nine
+digits, never provider text evaluated as arithmetic.
+The existing installers, publication inventory and uninstall profile own this
+asset; `session_shell.prepare` can copy it with the POSIX normalized setup,
+launch-command and reconciliation scripts outside the removable roots.
+No production POSIX caller selects that setup path yet. A future caller must
+also verify successful, bounded producer exit before using these arrays;
+the reader alone does not establish a successful callback, child custody,
+terminal ownership or removal of either runtime-Python waiter.
+
 On Windows, a current engine recognizes its canonical normalized setup's
 `native-setup-owner-v1` marker, a PowerShell 7 host and the selected canonical
 pane wrapper's `native-console-owner-v1` capability. It copies setup, the

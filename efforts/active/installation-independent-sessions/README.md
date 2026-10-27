@@ -202,6 +202,10 @@ and [repair register](reconstruction-findings.md) retain the evidence and limits
 - [x] Activate and qualify the normalized Windows/PowerShell 7 copied consumer
   for executable and same-host-script backends (#9288), including interrupted
   waits and normal script return without an explicit exit.
+- [x] Land provider-first literal preparation transport and selected-runtime
+  contract discovery (#9318), without activating a POSIX lifetime owner.
+- [ ] Land the dormant Bash frame reader and copied POSIX setup assets;
+  keep bounded callback execution and native lifetime activation separate.
 - [ ] Remove both deferred-setup and final-backend runtime-Python waiters.
   Reuse finite seed preparation, existing seed custody and execution receipts;
   the native shell owns the actual child handle and wait. The normalized
@@ -448,8 +452,31 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   witness before counting any further removal/reconstruction as session
   survival evidence; retain the existing maintenance and implementation owners.
 
+### 2026-10-27 - Dormant copied POSIX reply reader
+
+- Added the source-owned Bash frame reader and its normal installer,
+  publication and uninstall inventory entries. The launch-owned asset copier
+  now supports the complete POSIX normalized setup set without activating it.
+  The [architecture contract](../../../plugins/agent-worktrees/docs/architecture.md)
+  owns the reader's outputs and refusal behavior; no environment is applied
+  and no backend is launched merely by reading a frame.
+- Real Bash controls exercise literal data, empty replacement versus inherited
+  environment, malformed frames, stale-output clearing and prompt-free
+  diagnostics. Copy controls preserve the complete asset set outside removable
+  roots and refuse missing-reader publication. Git Bash framing is not native
+  POSIX terminal or installation-survival evidence.
+- Continue with bounded current-runtime callback execution, exact process
+  birth and foreground terminal custody before activating setup/backend
+  lifetime ownership. Both production POSIX Python waiters, #5579 forwarding
+  ownership and the parent live acceptance remain open.
+
 ### 2026-10-27 - Literal POSIX preparation transport prerequisite
 
+- #9318 merged as `b4d1c753b6f7645f225a3c57f0af8caae24c50b3` after
+  exact-head Copilot approval with no findings and required green CI.
+  The combined finite-provider/native-adapter packet passed 59 controls;
+  the required unit packet passed 2,521 with 12 deselected and coverage once.
+  This is merged source, not a released or installed capability claim.
 - Added a provider-first NUL-delimited preparation reply to the existing finite
   seed owner, with runtime-local read-only capability discovery and unchanged
   default JSON. The [architecture contract](../../../plugins/agent-worktrees/docs/architecture.md)
@@ -461,6 +488,11 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   POSIX setup or remove either production Python waiter. Native POSIX process,
   terminal, installer-removal and same-process acceptance remain open, as do
   #5579's separately owned forwarding and whole-chain process-count outcomes.
+- Re-read this effort's Plan and Validation Plan after merge. The next stretch
+  is the copied POSIX setup/native callback consumer, preserving real child
+  custody, foreground terminal signals, stdin, one-time seed effects and quiet
+  current-runtime return handling. No live removal is admitted by this source
+  prerequisite or by an expired maintenance grant; the effort remains Active.
 
 ### 2026-10-27 - Finite native prerequisite merged; live survival stays open
 

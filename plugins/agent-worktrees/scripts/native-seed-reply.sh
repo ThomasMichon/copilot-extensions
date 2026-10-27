@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# agent-worktrees:native-seed-reply-v1
+# Dot-source only. Reading a reply neither launches a child nor applies its env.
+
+_aw_native_seed_read_reply() {
+    local field count index name value extra
+    local -a header=() environment=() argv=()
+    for ((index=0; index<7; index++)); do
+        IFS= read -r -d '' field || return 3
+        header[index]="$field"
+    done
+    [[ "${header[0]}" == agent-worktrees.native-seed-reply.v1 ]] || return 3
+    for index in 1 2 3; do
+        [[ "${header[index]}" =~ ^[0-9a-f]{32}$ ]] || return 3
+    done
+    [[ -z "${header[4]}" || "${header[4]}" =~ ^[0-9a-f]{32}$ ]] || return 3
+    count="${header[6]}"
+    # Canonical decimal only: never put provider text into shell arithmetic.
+    [[ "$count" == -1 || "$count" =~ ^(0|[1-9][0-9]{0,8})$ ]] || return 3
+    for ((index=0; index<count; index++)); do
+        IFS= read -r -d '' name || return 3
+        IFS= read -r -d '' value || return 3
+        [[ -n "$name" && "$name" != *=* ]] || return 3
+        environment+=("$name=$value")
+    done
+    IFS= read -r -d '' count || return 3
+    [[ "$count" =~ ^[1-9][0-9]{0,8}$ ]] || return 3
+    for ((index=0; index<count; index++)); do
+        IFS= read -r -d '' value || return 3
+        argv+=("$value")
+    done
+    [[ -n "${argv[0]}" ]] || return 3
+    IFS= read -r -d '' field || return 3
+    [[ "$field" == complete ]] || return 3
+    if IFS= read -r -d '' extra || [[ -n "$extra" ]]; then return 3; fi
+    AW_NATIVE_SEED_ATTEMPT="${header[1]}"
+    AW_NATIVE_SEED_RESOLUTION="${header[2]}"
+    AW_NATIVE_SEED_OPERATION="${header[3]}"
+    AW_NATIVE_SEED_PARENT="${header[4]}"
+    AW_NATIVE_SEED_SETUP_ID="${header[5]}"
+    AW_NATIVE_SEED_ENV_COUNT="${header[6]}"
+    AW_NATIVE_SEED_ENV=(${environment[@]+"${environment[@]}"})
+    AW_NATIVE_SEED_ARGV=("${argv[@]}")
+}
+
+aw_native_seed_read_reply() {
+    AW_NATIVE_SEED_ATTEMPT=""
+    AW_NATIVE_SEED_RESOLUTION=""
+    AW_NATIVE_SEED_OPERATION=""
+    AW_NATIVE_SEED_PARENT=""
+    AW_NATIVE_SEED_SETUP_ID=""
+    AW_NATIVE_SEED_ENV_COUNT=""
+    AW_NATIVE_SEED_ENV=()
+    AW_NATIVE_SEED_ARGV=()
+    if ! _aw_native_seed_read_reply; then
+        printf 'Native preparation reply is invalid; no backend started.\n' >&2
+        return 3
+    fi
+}
