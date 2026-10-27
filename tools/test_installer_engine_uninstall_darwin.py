@@ -4,6 +4,7 @@ from __future__ import annotations
 import ctypes
 import errno
 import importlib.util
+import json
 import os
 from pathlib import Path
 import select
@@ -522,8 +523,137 @@ def test_native_environment_buffer_is_cleared(kernel, monkeypatch, malformed):
     assert buffers[-1].raw == b"\0" * native.arg_bytes
 
 
+class _ShortBSDInfo(ctypes.Structure):
+    # Apple's proc_info.h: PROC_PIDT_SHORTBSDINFO (13), independent UID offsets.
+    _fields_ = [
+        *((name, ctypes.c_uint32) for name in ("pid", "ppid", "pgid", "status")),
+        ("comm", ctypes.c_char * 16),
+        *((name, ctypes.c_uint32) for name in (
+            "flags", "uid", "gid", "ruid", "rgid", "svuid", "svgid", "reserved",
+        )),
+    ]
+
+
+def _credential_metadata(bsd):
+    return {name: int(getattr(bsd, name))
+            for name in ("uid", "ruid", "svuid", "flags", "status")}
+
+
+def _observe_ownership_refusal(native, observations):
+    """Capture only the exact credential record the production guard will read."""
+    original = native.pidinfo
+    def observe(pid, flavor, arg, pointer, size):
+        returned = original(pid, flavor, arg, pointer, size)
+        if flavor == 18 and returned == size == ctypes.sizeof(darwin._Info):
+            data = ctypes.cast(pointer, ctypes.POINTER(darwin._Info)).contents
+            metadata = _credential_metadata(data.bsd)
+            if (data.bsd.pid == pid and len(observations) < 1
+                    and (data.bsd.uid, data.bsd.ruid, data.bsd.svuid) != (native.uid,) * 3):
+                observations.append((native, pid, metadata, darwin._identity(data)))
+        return returned
+    native.pidinfo = observe
+
+
+def _ownership_diagnostic(native, pid, guard_metadata, guard_identity):
+    """Six bounded identity-only reads; never call argv/image or decode names."""
+    result = {"expected_uid": native.uid, "guard": guard_metadata}
+    for scope, target in (("candidate", pid), ("inspector", darwin.os.getpid())):
+        rows = []
+        for flavor, structure in ((18, darwin._Info), (3, darwin._BSDInfo),
+                                  (13, _ShortBSDInfo)):
+            data = structure()
+            ctypes.set_errno(0)
+            returned = native.pidinfo(target, flavor, 0, ctypes.byref(data),
+                                      ctypes.sizeof(data))
+            row = {"flavor": flavor, "returned_bytes": returned,
+                   "errno": ctypes.get_errno()}
+            bsd = data.bsd if flavor == 18 else data
+            valid = returned == ctypes.sizeof(data) and bsd.pid == target
+            row["valid"] = valid
+            if valid:
+                row.update(_credential_metadata(bsd))
+                if scope == "candidate" and flavor == 18:
+                    row["guard_identity_matches"] = darwin._identity(data) == guard_identity
+            rows.append(row)
+        result[scope] = rows
+    return result
+
+
+def test_diagnostic_short_bsd_abi():
+    assert ctypes.sizeof(_ShortBSDInfo) == 64
+    assert _ShortBSDInfo.uid.offset == 36
+    assert _ShortBSDInfo.ruid.offset == 44
+    assert _ShortBSDInfo.svuid.offset == 52
+    assert darwin._BSDInfo.uid.offset == 20
+    assert darwin._BSDInfo.ruid.offset == 28
+    assert darwin._BSDInfo.svuid.offset == 36
+
+
+def test_diagnostic_preserves_mixed_privilege_refusal_and_exact_record(kernel):
+    native = darwin._Native()
+    observations = []
+    _observe_ownership_refusal(native, observations)
+    kernel.info_hook = lambda pid, call, data: setattr(data.bsd, "svuid", 0)
+    with pytest.raises(RuntimeError, match="unverified current-user ownership"):
+        native.info(kernel.self_pid)
+    assert len(observations) == 1
+    assert observations[0][2] == {
+        "uid": 1000, "ruid": 1000, "svuid": 0, "flags": 16, "status": 2,
+    }
+
+
+@pytest.mark.parametrize("returned", [0, 1, 135, 191])
+def test_diagnostic_does_not_decode_partial_identity(kernel, returned):
+    native = darwin._Native()
+    calls = []
+    def partial(pid, flavor, arg, pointer, size):
+        calls.append((pid, flavor, size))
+        ctypes.set_errno(errno.EPERM)
+        return returned
+    native.pidinfo = partial
+    result = _ownership_diagnostic(native, 90001, {}, ())
+    assert len(calls) == 6
+    assert all(not row["valid"] for scope in ("candidate", "inspector")
+               for row in result[scope])
+    assert "svuid" not in json.dumps(result)
+
+
+def test_diagnostic_is_bounded_and_exposes_only_credential_allowlist(kernel):
+    native = darwin._Native()
+    calls = []
+    def credentials(pid, flavor, arg, pointer, size):
+        calls.append((pid, flavor))
+        structure = {18: darwin._Info, 3: darwin._BSDInfo, 13: _ShortBSDInfo}[flavor]
+        data = structure()
+        bsd = data.bsd if flavor == 18 else data
+        bsd.pid = pid
+        bsd.uid = bsd.ruid = 1000
+        bsd.svuid = 0 if pid == 90001 else 1000
+        bsd.flags, bsd.status = 16, 2
+        bsd.comm = b"PRIVATE_NAME"
+        ctypes.memmove(pointer, ctypes.byref(data), size)
+        return size
+    native.pidinfo = credentials
+    result = _ownership_diagnostic(native, 90001, {}, ())
+    assert len(calls) == 6
+    assert all(row["svuid"] == 0 for row in result["candidate"])
+    assert all(row["svuid"] == 1000 for row in result["inspector"])
+    permitted = {"flavor", "returned_bytes", "errno", "valid", "uid", "ruid",
+                 "svuid", "flags", "status", "guard_identity_matches"}
+    assert all(set(row) <= permitted for scope in ("candidate", "inspector")
+               for row in result[scope])
+    assert "PRIVATE_NAME" not in json.dumps(result)
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="requires actual macOS libproc/sysctl")
-def test_native_darwin_self_and_owned_live_process():
+def test_native_darwin_self_and_owned_live_process(monkeypatch):
+    observations = []
+    original_native = darwin._Native
+    def diagnostic_native():
+        native = original_native()
+        _observe_ownership_refusal(native, observations)
+        return native
+    monkeypatch.setattr(darwin, "_Native", diagnostic_native)
     argv = [sys.executable, "-c",
             "import sys; sys.stdout.write('R'); sys.stdout.flush(); sys.stdin.read(1)",
             "space within", "apostrophe's", "", "--literal"]
@@ -533,7 +663,13 @@ def test_native_darwin_self_and_owned_live_process():
     try:
         assert select.select([child.stdout], [], [], 5)[0]
         assert child.stdout.read(1) == b"R"
-        rows = {row["pid"]: row for row in darwin.inspect_processes()}
+        try:
+            rows = {row["pid"]: row for row in darwin.inspect_processes()}
+        except RuntimeError:
+            if observations:
+                report = _ownership_diagnostic(*observations[0])
+                print("DARWIN_OWNERSHIP_DIAGNOSTIC " + json.dumps(report, sort_keys=True))
+            raise
         assert os.getpid() in rows
         assert rows[child.pid]["ppid"] == os.getpid()
         assert rows[child.pid]["argv"][1:] == argv[1:]
