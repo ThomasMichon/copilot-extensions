@@ -102,6 +102,10 @@ def _docker_protocol(args: list[str], directory: str) -> tuple[int, str]:
             import hashlib
 
             profile = json.loads(Path(args[args.index("--file") + 1]).read_text())
+            failure = json.loads((root / "fail-create.json").read_text()) if (root / "fail-create.json").exists() else {}
+            if failure.get("fail") and failure.get("before_network"):
+                (root / "live.json").write_text("{}")
+                return 7, "settled-before-network-creation"
             network_config = profile["networks"]["default"]
             if not (root / "network.json").exists():
                 if network_config.get("external"):
@@ -156,7 +160,21 @@ def _docker_protocol(args: list[str], directory: str) -> tuple[int, str]:
                 }
             if (root / "corrupt-fixed").exists():
                 live["core"]["Config"]["Env"].append("UNSELECTED_SETTING=unexpected")
+            if failure.get("fail"):
+                live = {name: item for name, item in live.items() if name in failure["services"]}
+                if failure.get("unstarted"):
+                    for item in live.values():
+                        item["State"] = {"Status": "created", "Running": False}
+                        item["NetworkSettings"]["Networks"][network["Name"]]["NetworkID"] = ""
+            for name in ("core", "periphery"):
+                if name in live and live[name]["State"]["Running"]:
+                    key_root = Path(profile["services"][name]["volumes"][0]["source"])
+                    key = key_root / (name + ".pub")
+                    if not key.exists():
+                        key.write_text("fixture-public-key-" + name)
             (root / "live.json").write_text(json.dumps(live))
+            if failure.get("fail"):
+                return 7, "settled-container-creation-failure"
             if (root / "lost-reply").exists():
                 return 7, "lost-reply-after-native-create"
         return 0, ""

@@ -147,6 +147,13 @@ original-operation decision after exact settled native evidence and actual
 readiness failure; it retains the failed selection and compatibility decision.
 It does not restore code, database or credentials. A subsequent recovery must
 be independently admitted and data-compatible with that failed candidate.
+An original settled fixed-profile attempt can also classify positively absent
+or strictly attributable partial native results as failed, without replay.
+Every present container still needs its exact fixed configuration and network
+custody. Partial failure retains which public keys actually existed; a later
+compatible fixed apply may create missing keys but cannot replace known ones.
+Short positive outfitting budgets remain valid, with proportionate time reserved
+for final native inspection.
 
 A new admitted convergence can restore missing owned Core/Periphery from
 retained selected storage/configuration while Core is unavailable; native
@@ -166,6 +173,11 @@ Unresolved effects also reflect the retained original attempt's journal
 receipt, even when the admitted status request has a new operation ID and no
 receipt of its own. That resource fence prevents convergence without allowing
 the new request to validate or reconcile the original candidate.
+Stopped Core containers never authorize credentialed HTTP probes to their
+released loopback port. Status reports health unavailable; original failure
+settlement treats stopped or incomplete native state as readiness failure.
+An interrupted ACCEPTED attempt retains its original deployment and native
+fingerprints rather than adopting changed bytes on retry.
 
 Explicit `desired_state: absent` uses the same content-bound operation and
 requires a recorded installation, unchanged declaration apart from desired

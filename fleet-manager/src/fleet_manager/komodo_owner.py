@@ -9,7 +9,7 @@ import time
 from typing import Any
 
 from .komodo_declaration import SERVICES
-from .komodo_health import current_health, identity_digest
+from .komodo_health import current_health, identity_digest, public_key_fingerprints, public_keys
 from .komodo_native import KomodoImage, KomodoNative
 from .komodo_network import retained_network, verify_network
 from .komodo_selection import KomodoSelection
@@ -38,16 +38,18 @@ def _environment(raw: list[str] | tuple[str, ...]) -> dict[str, str]:
 
 def verify_native(containers: dict[str, dict[str, Any]], selected: KomodoSelection,
                   images: dict[str, KomodoImage], profile: bytes, *,
-                  owned: bool, ready: bool = True) -> None:
-    if set(containers) != set(SERVICES):
+                  owned: bool, ready: bool = True, complete: bool = True) -> None:
+    if not set(containers) <= set(SERVICES) or (complete and set(containers) != set(SERVICES)):
         raise PlanError("Komodo native substrate is incomplete")
+    if not complete and (not owned or ready):
+        raise PlanError("Komodo partial evidence requires fixed-profile failure inspection")
     desired = decode(profile)["services"]
-    for name in SERVICES:
+    for name in containers:
         item, expected, image = containers[name], desired[name], images[name]
         config, host = item["Config"], item["HostConfig"]
         if (item.get("Image") != image.identity
                 or (ready and item["State"].get("Running") is not True)
-                or item["State"].get("Status") not in ("running", "exited", "restarting")
+                or item["State"].get("Status") not in ("created", "running", "exited", "restarting")
                 or config.get("User", "") != image.user
                 or host.get("Privileged") is not False or host.get("CapAdd") not in (None, [])
                 or host.get("PidMode", "") != "" or host.get("NetworkMode") != (
@@ -179,14 +181,22 @@ class KomodoOwner:
             raise PlanError("Komodo selected update lacks current database compatibility")
 
     @staticmethod
-    def _preserved_material(record: dict[str, Any], selected: KomodoSelection) -> None:
+    def _preserved_material(record: dict[str, Any], selected: KomodoSelection, *,
+                            allow_new_identity: bool = False) -> None:
         if (selected.adoption
                 and identity_digest(selected.material) != selected.adopted_public_identity):
             raise PlanError("Komodo adopted native identity changed")
         retained = record["failed"] or record["good"]
+        if retained is not None and "partial_public_keys" in retained:
+            before, actual = retained["partial_public_keys"], public_key_fingerprints(selected.material)
+            identity_changed = (any(actual.get(name) != value for name, value in before.items())
+                                if allow_new_identity else before != actual)
+        else:
+            identity_changed = retained is not None and (
+                retained["public_identity"] != identity_digest(selected.material))
         if retained is not None and (
             retained["material"] != selected.material_evidence()
-            or retained["public_identity"] != identity_digest(selected.material)
+            or identity_changed
             or any(retained["selection"][key] != selected.receipt_context()[key]
                    for key in ("adoption", "adopted_public_identity", "adopted_network"))
         ):
@@ -228,6 +238,8 @@ class KomodoOwner:
                 images = self.native.prerequisites(selected.declaration, selected.material, deadline=deadline)
                 containers = self.native.inspect(selected.declaration, selected.material, deadline=deadline)
                 record = self._baseline(state, selected, containers)
+                pending = bool(record["failed"] is not None
+                               and "partial_public_keys" in record["failed"])
                 network = self.native.network(selected.declaration, selected.material, deadline=deadline)
                 path = state.root / "node.sqlite"
                 if not path.exists():
@@ -241,13 +253,15 @@ class KomodoOwner:
                 prior = journal.inspect(request)
                 if prior is None or prior.to_dict()["status"] == "accepted":
                     self._preserved(record, selected, containers)
-                    verify_network(network, selected, containers, retained_network(record, selected))
+                    verify_network(network, selected, containers,
+                                   retained_network(record, selected), pending=pending)
                 receipt = journal.accept_named_external(request, resource=selected.resource)
                 status = receipt.to_dict()["status"]
                 profile = selected.profile()
                 if status in ("succeeded", "failed"):
                     self._preserved(record, selected, containers)
-                    verify_network(network, selected, containers, retained_network(record, selected))
+                    verify_network(network, selected, containers,
+                                   retained_network(record, selected), pending=pending)
                     if status == "succeeded":
                         verify_native(containers, selected, images, profile,
                                       owned=record["good"]["fixed_profile"])
@@ -262,6 +276,12 @@ class KomodoOwner:
                     attempt = record["attempt"]
                     if attempt is not None and attempt["request"] != request.to_dict():
                         raise PlanError("Komodo retained attempt requires original-operation reconciliation")
+                    if attempt is not None:
+                        if (attempt.get("deployment") != content or attempt.get("before") != {
+                                name: native_fingerprint(item) for name, item in containers.items()}):
+                            raise PlanError("Komodo accepted native attempt was replaced or changed")
+                        verify_network(network, selected, containers,
+                                       attempt["network_before"], pending=pending)
                     slot = state.profile(profile)
                     needs_apply = (not containers or record["good"] is not None and (
                         record["good"]["deployment"] != content or set(containers) != set(SERVICES)
@@ -272,7 +292,8 @@ class KomodoOwner:
                                          "profile": str(slot),
                                          "native_settled": False,
                                          "network_before": verify_network(
-                                             network, selected, containers, retained_network(record, selected)),
+                                             network, selected, containers,
+                                             retained_network(record, selected), pending=pending),
                                          "fixed_profile": bool(needs_apply or retained and retained["fixed_profile"]),
                                          "before": {name: native_fingerprint(item)
                                                     for name, item in containers.items()}}
@@ -285,7 +306,7 @@ class KomodoOwner:
                     self.admission.complete(permit, request)
                     verify_network(self.native.network(
                         selected.declaration, selected.material, deadline=deadline),
-                        selected, containers, record["attempt"]["network_before"])
+                        selected, containers, record["attempt"]["network_before"], pending=pending)
                     if needs_apply:
                         try:
                             self.native._apply(selected.declaration, selected.material, profile=slot,
@@ -306,7 +327,7 @@ class KomodoOwner:
                     if attempt["native_settled"] is not True:
                         raise PlanError("Komodo original native process custody remains unsettled")
                 containers = self.native.inspect(selected.declaration, selected.material, deadline=deadline)
-                self._preserved_material(record, selected)
+                self._preserved_material(record, selected, allow_new_identity=True)
                 attempt = record["attempt"]
                 network = verify_network(self.native.network(
                     selected.declaration, selected.material, deadline=deadline),
@@ -376,12 +397,20 @@ class KomodoOwner:
                 images = self.native.prerequisites(selected.declaration, selected.material, deadline=deadline)
                 containers = self.native.inspect(selected.declaration, selected.material, deadline=deadline)
                 record = self._baseline(state, selected, containers)
-                self._preserved_material(record, selected)
+                self._preserved_material(record, selected, allow_new_identity=True)
                 profile = selected.profile()
-                verify_candidate(containers, selected, images, profile, attempt, ready=False)
+                complete = set(containers) == set(SERVICES)
+                if complete:
+                    verify_candidate(containers, selected, images, profile, attempt, ready=False)
+                else:
+                    if not attempt["fixed_profile"]:
+                        raise PlanError("Komodo partial failure lacks fixed-profile native custody")
+                    verify_native(containers, selected, images, profile,
+                                  owned=True, ready=False, complete=False)
                 network = verify_network(self.native.network(
                     selected.declaration, selected.material, deadline=deadline),
-                    selected, containers, attempt["network_before"], created=attempt["fixed_profile"])
+                    selected, containers, attempt["network_before"],
+                    created=attempt["fixed_profile"], pending=True)
                 journal = NodeJournal(
                     state.root / "node.sqlite", authority=self.authority, installation=selected.installation,
                     target=selected.declaration.to_dict()["target"])
@@ -391,30 +420,36 @@ class KomodoOwner:
                 permit = self.admission.revalidate(permit, request)
                 self.admission.complete(permit, request)
                 remaining = deadline - time.monotonic()
-                if remaining < 2:
+                if remaining <= 0:
                     raise PlanError("Komodo failure inspection requires remaining native deadline")
-                try:
-                    asyncio.run(current_health(
-                        selected.declaration, selected.material,
-                        deadline=deadline - min(2, remaining / 3)))
-                except PlanError:
-                    self._selected(request, content)
-                else:
-                    raise PlanError("Komodo candidate is currently healthy; reconcile success instead")
+                if complete and containers["core"]["State"].get("Running") is True:
+                    try:
+                        asyncio.run(current_health(
+                            selected.declaration, selected.material,
+                            deadline=deadline - min(2, remaining / 3)))
+                    except PlanError:
+                        self._selected(request, content)
+                    else:
+                        raise PlanError("Komodo candidate is currently healthy; reconcile success instead")
                 after = self.native.inspect(selected.declaration, selected.material, deadline=deadline)
                 verify_network(self.native.network(
-                    selected.declaration, selected.material, deadline=deadline), selected, after, network)
+                    selected.declaration, selected.material, deadline=deadline),
+                    selected, after, network, pending=True)
                 if ({name: native_fingerprint(item) for name, item in containers.items()}
                         != {name: native_fingerprint(item) for name, item in after.items()}):
                     raise PlanError("Komodo failed native candidate changed during reconciliation")
+                keys = public_keys(selected.material, missing_ok=True)
                 failed = {
                     "deployment": content, "profile": attempt["profile"],
-                    "material": selected.material_evidence(), "public_identity": identity_digest(selected.material),
+                    "material": selected.material_evidence(),
+                    "public_identity": digest(keys) if len(keys) == 2 else None,
                     "native": {name: native_fingerprint(item) for name, item in containers.items()},
                     "reason": "authenticated-readiness-not-established",
                     "selection": selected.receipt_context(),
                     "network": network, "fixed_profile": attempt["fixed_profile"],
                 }
+                if not complete or len(keys) != 2:
+                    failed["partial_public_keys"] = {name: digest(value) for name, value in keys.items()}
                 record["failed"] = failed
                 result_ref = state.retain(failed)
                 state.save(record)

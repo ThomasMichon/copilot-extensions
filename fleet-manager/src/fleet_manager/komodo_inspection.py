@@ -100,7 +100,9 @@ def inspect_owner(owner: KomodoOwner, request: OperationIntent, permit: Permit) 
                     selected.declaration, selected.material, deadline=deadline),
                     selected, containers,
                     attempt["network_before"] if candidate else retained_network(record, selected),
-                    created=bool(candidate and attempt["fixed_profile"]))
+                    created=bool(candidate and attempt["fixed_profile"]),
+                    pending=bool(retained is not None and "partial_public_keys" in retained
+                                 and installed is False))
             except PlanError as error:
                 if owner.native.native_failure is not None:
                     raise
@@ -111,7 +113,9 @@ def inspect_owner(owner: KomodoOwner, request: OperationIntent, permit: Permit) 
             absent = selected.declaration.to_dict().get("desired_state", "present") == "absent"
             if installed is False and not absent:
                 blockers.append("owned-substrate-resources-absent-or-incomplete")
-            if observed_declaration is not None:
+            if observed_declaration is not None and containers["core"]["State"].get("Running") is not True:
+                blockers.append("owned-core-not-running")
+            elif observed_declaration is not None:
                 try:
                     asyncio.run(current_health(observed_declaration, selected.material, deadline=deadline))
                 except PlanError as error:

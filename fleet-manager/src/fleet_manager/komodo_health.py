@@ -20,19 +20,31 @@ class _Starting(Exception):
     pass
 
 
-def public_keys(material: KomodoMaterialization) -> dict[str, str]:
+def public_keys(material: KomodoMaterialization, *, missing_ok: bool = False) -> dict[str, str]:
     result = {}
+    try:
+        ordinary_path(material.keys)
+    except OSError:
+        raise PlanError("Komodo retained public identity is unavailable") from None
     for name in ("core", "periphery"):
         path = material.keys / (name + ".pub")
         try:
             ordinary_path(path)
             value = _bytes(path, 4096).decode("utf-8").strip()
+        except FileNotFoundError:
+            if missing_ok:
+                continue
+            raise PlanError("Komodo retained public identity is unavailable") from None
         except (OSError, UnicodeError):
             raise PlanError("Komodo retained public identity is unavailable") from None
         if not value:
             raise PlanError("Komodo retained public identity is unavailable")
         result[name] = value
     return result
+
+
+def public_key_fingerprints(material: KomodoMaterialization) -> dict[str, str]:
+    return {name: digest(value) for name, value in public_keys(material, missing_ok=True).items()}
 
 
 def identity_digest(material: KomodoMaterialization) -> str:

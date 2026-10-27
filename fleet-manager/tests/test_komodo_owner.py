@@ -36,6 +36,10 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux host subs
     "credential-drift", "native-drift", "network-drift", "foreign-endpoint",
     "foreign-network", "adoption-drift", "adoption-update", "adoption-update-corrupt", "adoption-failed-drift",
     "retire-reinstall", "retire-lost-reply", "retire-partial",
+    "adoption-accepted-retry", "adoption-accepted-env", "adoption-accepted-command",
+    "first-empty", "first-partial", "first-partial-core", "first-partial-created", "first-partial-foreign",
+    "first-empty-no-network", "first-partial-key-drift", "first-partial-created-foreign",
+    "stopped-core", "failed-short-1", "failed-short-2",
 ])
 def test_composed_owner_preserves_original_operation_and_real_native_custody(
     native_rig: Any, keys: Any, scenario: str, monkeypatch: Any,
@@ -45,7 +49,8 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
     runtime = rig["root"] / "host-runtime"
     runtime.mkdir(mode=0o700)
     for name in ("core", "periphery"):
-        (rig["material"].keys / (name + ".pub")).write_text("fixture-public-key-" + name)
+        if not scenario.startswith("first-"):
+            (rig["material"].keys / (name + ".pub")).write_text("fixture-public-key-" + name)
 
     def live() -> dict:
         return json.loads((rig["directory"] / "live.json").read_text())
@@ -57,9 +62,11 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
     async def exercise() -> None:
         current = []
         health_failure = [False]
+        health_requests = []
         token = "local-owner-fixture-token"
 
         async def handler(request: web.Request) -> web.Response:
+            health_requests.append(request.path)
             if not (rig["directory"] / "live.json").exists() or set(live()) != {"core", "mongo", "periphery"}:
                 return web.json_response({"error": "starting"}, status=503)
             body = await request.json()
@@ -93,6 +100,8 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
         async with TestServer(app, host="127.0.0.1") as server:
             desired = rig["selected"].to_dict()
             desired.update(core_port=server.port, outfitting_seconds=5)
+            if scenario.startswith("failed-short-"):
+                desired["outfitting_seconds"] = int(scenario[-1])
             selected = KomodoSelection(
                 KomodoDeclaration.from_dict(desired), "fleet-a", "install-a", 1, "policy-1",
                 1900001000, "e" * 64, runtime, rig["tooling"], rig["material"],
@@ -148,6 +157,37 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                     adopted_public_identity=identity_digest(selected.material),
                     adopted_network=network_fingerprint(json.loads(
                         (rig["directory"] / "network.json").read_text())))
+                if scenario.startswith("adoption-accepted-"):
+                    from fleet_manager.node_journal import NodeJournal
+
+                    begin = NodeJournal.begin_external
+
+                    def interrupted(journal: Any, operation: Any) -> Any:
+                        raise PlanError("fixture-interrupted-before-UNKNOWN")
+
+                    monkeypatch.setattr(NodeJournal, "begin_external", interrupted)
+                    original = request()
+                    with pytest.raises(PlanError, match="fixture-interrupted"):
+                        await invoke(owner(), original)
+                    monkeypatch.setattr(NodeJournal, "begin_external", begin)
+                    with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
+                        before = state.read()["attempt"]
+                    if scenario == "adoption-accepted-retry":
+                        assert (await invoke(owner(), original)).to_dict()["status"] == "succeeded"
+                    else:
+                        changed = live()
+                        if scenario.endswith("env"):
+                            changed["core"]["Config"]["Env"].append("UNAPPROVED=changed")
+                        else:
+                            changed["core"]["Config"]["Cmd"].append("--unapproved")
+                        (rig["directory"] / "live.json").write_text(json.dumps(changed))
+                        with pytest.raises(PlanError, match="accepted native attempt"):
+                            await invoke(owner(), original)
+                        with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
+                            assert state.read()["attempt"] == before
+                        assert not health_requests
+                    assert effects() == 1
+                    return
                 if scenario == "adoption-failed-drift":
                     health_failure[0] = True
                     original = request()
@@ -163,6 +203,88 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                             await invoke(owner(), original, failed=failed)
                     assert effects() == 1
                     return
+            if scenario.startswith("first-"):
+                marker = rig["directory"] / "fail-create.json"
+                services = ([] if scenario.startswith("first-empty") else ["core", "mongo"]
+                            if scenario in ("first-partial-core", "first-partial-key-drift") else ["mongo"])
+                marker.write_text(json.dumps({
+                    "fail": True, "services": services,
+                    "unstarted": scenario.startswith("first-partial-created"),
+                    "before_network": scenario == "first-empty-no-network",
+                }))
+                original = request()
+                with pytest.raises(PlanError, match="uncertain"):
+                    await invoke(owner(), original)
+                assert effects() == 1 and not health_requests
+                if scenario == "first-partial-foreign":
+                    changed = live()
+                    changed["mongo"]["Config"]["Env"].append("UNAPPROVED=changed")
+                    (rig["directory"] / "live.json").write_text(json.dumps(changed))
+                    with pytest.raises(PlanError, match="fixed configuration"):
+                        await invoke(owner(), original, failed=True)
+                    assert effects() == 1 and not health_requests
+                    return
+                if scenario == "first-partial-created-foreign":
+                    changed = live()
+                    changed["mongo"]["NetworkSettings"]["Networks"][desired["project"] + "_default"][
+                        "NetworkID"] = "9" * 64
+                    (rig["directory"] / "live.json").write_text(json.dumps(changed))
+                    with pytest.raises(PlanError, match="network attachment"):
+                        await invoke(owner(), original, failed=True)
+                    assert effects() == 1 and not health_requests
+                    return
+                failed = await invoke(owner(), original, failed=True)
+                assert failed.to_dict()["status"] == "failed"
+                assert await invoke(owner(), original) == failed
+                status = await invoke(owner(), original, status=True)
+                assert status["accepted"] == "failed" and status["installed"] is False
+                assert status["currently_healthy"] is None and not status["unresolved_effects"]
+                assert status["blockers"] == ["owned-substrate-resources-absent-or-incomplete"]
+                assert effects() == 1 and not health_requests
+                with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
+                    retained = state.read()["failed"]
+                    assert set(retained["native"]) == set(services)
+                    assert set(retained["partial_public_keys"]) == (
+                        {"core"} if scenario in ("first-partial-core", "first-partial-key-drift")
+                        else set())
+                if scenario == "first-partial-key-drift":
+                    (rig["material"].keys / "core.pub").write_text("unapproved-replacement-key")
+                    with pytest.raises(PlanError, match="storage, credentials or identity"):
+                        await invoke(owner(), original)
+                    assert effects() == 1 and not health_requests
+                    return
+                repair = current[0].declaration.to_dict()
+                repair["revision"] = "repair-2"
+                current[0] = replace(
+                    current[0], generation=2, declaration=KomodoDeclaration.from_dict(repair))
+                with pytest.raises(PlanError, match="database compatibility"):
+                    await invoke(owner(), request("repair-without-compatibility"))
+                assert effects() == 1
+                current[0] = replace(current[0], compatible_with=(retained["deployment"],))
+                marker.write_text('{"fail":false}')
+                repaired = await invoke(owner(), request("compatible-first-install-repair"))
+                assert repaired.to_dict()["status"] == "succeeded" and effects() == 2
+                return
+            if scenario == "stopped-core" or scenario.startswith("failed-short-"):
+                health_failure[0] = True
+                original = request()
+                with pytest.raises(PlanError, match="current Core version"):
+                    await invoke(owner(), original)
+                if scenario == "stopped-core":
+                    changed = live()
+                    changed["core"]["State"] = {"Status": "exited", "Running": False}
+                    (rig["directory"] / "live.json").write_text(json.dumps(changed))
+                    before_http = len(health_requests)
+                    status = await invoke(owner(), original, status=True)
+                    assert status["currently_healthy"] is None and not status["converged"]
+                    assert "owned-core-not-running" in status["blockers"]
+                    assert len(health_requests) == before_http
+                before_http = len(health_requests)
+                failed = await invoke(owner(), original, failed=True)
+                assert failed.to_dict()["status"] == "failed" and effects() == 1
+                if scenario == "stopped-core":
+                    assert len(health_requests) == before_http
+                return
             if scenario in ("lost-reply", "unsettled-restart"):
                 (rig["directory"] / "lost-reply").touch()
                 original = request()
@@ -294,9 +416,13 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                     assert len((rig["directory"] / "retire-effects").read_text().splitlines()) == (
                         2 if scenario == "retire-lost-reply" else 1)
                     if scenario == "retire-partial":
+                        before_http = len(health_requests)
                         status = await invoke(owner(), request("inspect-partial-retirement"), status=True)
                         assert status["accepted"] is None and status["unresolved_effects"] is True
                         assert status["state"] == "unresolved" and status["converged"] is False
+                        assert status["currently_healthy"] is None
+                        assert "owned-core-not-running" in status["blockers"]
+                        assert len(health_requests) == before_http
                         assert status["native_mutations_performed"] is False
                         with pytest.raises(PlanError, match="unresolved"):
                             await invoke(owner(), absent)
