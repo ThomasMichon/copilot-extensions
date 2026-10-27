@@ -2972,9 +2972,11 @@ controls, not interpreter admission.
 
 The likewise **unused, repository-only**
 `libs/installer-engine/bootstrap-file-trust.ps1` composes that guard with
-qualified existing Windows PowerShell WinTrust bindings. Core trust still
-refuses explicitly before resolving those bindings or loading a library;
-Core file-guard support does not qualify Core WinTrust. It pins its own
+existing Windows PowerShell or Core WinTrust bindings. Unsupported assembly,
+method and record shapes refuse before loading a library. The Core adapter
+constructs the stock by-reference record with existing Marshal APIs, not
+typed pointer assignment or emitted interop, and preserves the actual returned
+provider-state handle even when invocation throws after verification. It pins its own
 System32 library reference, refuses an ambiguous or redirected loaded module,
 and supplies the retained file handle with no UI and cache-only URL retrieval.
 Publisher extraction uses the actual verified provider/signer state while
@@ -2982,6 +2984,29 @@ that state and the caller's file guard remain alive. Provider state closes
 before its inputs and the library reference are released; cleanup failures
 throw, and no trust result is returned before cleanup completes. Neither
 helper compiles or emits interop code.
+
+The Core loader uses the existing CoreLib managed `LoadLibraryEx` and
+`FreeLibrary` wrappers. Their exact signatures, LibraryImport exports,
+UTF-16 input, last-error preservation and BOOL return marshalling are checked
+before invocation. The load passes the absolute System32 path, a null reserved
+argument and the original `0x800` dependency-search flags directly.
+
+The public three-argument `NativeLibrary.Load` alternative was rejected:
+an absolute path does not preserve the requested dependency-search flags
+on its first attempt.
+[CoreCLR](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/vm/nativelibrary.cpp)
+uses altered-search-path loading there. A matching module path is not a
+substitute for the explicit System32-only loader contract. Neither public
+NativeLibrary load nor free replaces the checked stock wrappers in this helper.
+
+Both adapters parse the x64 Windows
+[provider signer](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-crypt_provider_sgnr)
+and [provider certificate](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-crypt_provider_cert)
+ABI while the verified state remains alive. Windows PowerShell also exposes
+managed provider records whose layouts are checked; Core does not expose those
+records in its inspected WinTrust scope. Header definitions and a managed
+record roundtrip alone do not qualify Core provider calls: the native packet
+must exercise actual verified signer/certificate extraction and state cleanup.
 
 The signer primitive reports native verification status and the verified leaf's
 publisher; it does not select or execute Python, enforce a publisher policy, or

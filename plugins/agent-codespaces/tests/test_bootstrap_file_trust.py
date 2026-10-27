@@ -19,6 +19,36 @@ GUARD = ROOT / "libs/installer-engine/bootstrap-file-guard.ps1"
 _OBSERVE = r"""
 $script:bindings=Get-BootstrapStockTrustBindings
 $script:verify=$script:bindings.Verify
+$script:load=$script:bindings.Load
+$script:free=$script:bindings.Free
+$script:loads=0
+$script:frees=0
+$script:ownedModule=[IntPtr]::Zero
+$loader=[pscustomobject]@{}
+$loader | Add-Member ScriptMethod Invoke {
+    param($target, $arguments)
+    $expected=[IO.Path]::Combine([Environment]::GetFolderPath([Environment+SpecialFolder]::System),'wintrust.dll')
+    if ($arguments.Count -ne 3 -or $arguments[0] -cne $expected -or
+        $arguments[1] -ne [IntPtr]::Zero -or $arguments[2] -ne 0x800 -or
+        ($script:bindings.Core -and $arguments[2] -isnot [int]) -or
+        (-not $script:bindings.Core -and $arguments[2] -isnot [uint32])) {
+        throw 'Loader did not receive the exact System32 path and explicit dependency-search flags.'
+    }
+    $script:loads++
+    $script:ownedModule=$script:load.Invoke($target,$arguments)
+    return $script:ownedModule
+}
+$freer=[pscustomobject]@{}
+$freer | Add-Member ScriptMethod Invoke {
+    param($target, $arguments)
+    if ($arguments.Count -ne 1 -or $arguments[0] -ne $script:ownedModule -or
+        $script:ownedModule -eq [IntPtr]::Zero) { throw 'Free did not receive the owned library reference.' }
+    $result=$script:free.Invoke($target,$arguments)
+    if ($result) { $script:frees++; $script:ownedModule=[IntPtr]::Zero }
+    return $result
+}
+$script:bindings.Load=$loader
+$script:bindings.Free=$freer
 $script:observed=[Collections.Generic.List[object]]::new()
 $script:releases=0
 $script:closedWhileGuardOpen=$false
@@ -28,11 +58,22 @@ function Close-BootstrapStockTrustLibrary {
     & $script:closeLibrary -Bindings $Bindings -Module $Module
     $script:releases++
     $script:closedWhileGuardOpen=-not $script:guard.Handle.IsClosed
+    if ($env:SYNTHETIC_LIBRARY_FREE_FAILURE -eq '1') { throw 'synthetic library release failure' }
 }
 $proxy=[pscustomobject]@{}
 $proxy | Add-Member ScriptMethod Invoke {
     param($target, $arguments)
-    $data=$arguments[2]
+    $owned=[IntPtr]::Zero
+    if ($script:bindings.Core) {
+        $owned=[Runtime.InteropServices.Marshal]::AllocHGlobal(80)
+        $marshal=[Runtime.InteropServices.Marshal].GetMethod('StructureToPtr',
+            [type[]]@([object],[IntPtr],[bool]))
+        $data=$owned
+    } else { $data=$arguments[2] }
+    try {
+    if ($owned -ne [IntPtr]::Zero) {
+        $null=$marshal.Invoke($null,[object[]]@($arguments[2],$data,$false))
+    }
     $file=[Runtime.InteropServices.Marshal]::ReadIntPtr($data,40)
     $observation=[pscustomobject]@{
         action=[Runtime.InteropServices.Marshal]::ReadInt32($data,48)
@@ -46,10 +87,19 @@ $proxy | Add-Member ScriptMethod Invoke {
     }
     $script:observed.Add($observation)
     $result=$script:verify.Invoke($target,$arguments)
+    if ($owned -ne [IntPtr]::Zero) {
+        $null=$marshal.Invoke($null,[object[]]@($arguments[2],$data,$false))
+    }
     $observation.stateAllocated=[Runtime.InteropServices.Marshal]::ReadIntPtr($data,56) -ne [IntPtr]::Zero
+    if ($env:SYNTHETIC_VERIFY_FAILURE -eq '1' -and $observation.action -eq 1) {
+        throw 'synthetic failure after native verification'
+    }
     if ($env:SYNTHETIC_CLOSE_FAILURE -eq '1' -and
         [Runtime.InteropServices.Marshal]::ReadInt32($data,48) -eq 2) { return [uint32]5 }
     return $result
+    } finally {
+        if ($owned -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::FreeHGlobal($owned) }
+    }
 }
 $script:bindings.Verify=$proxy
 function Get-BootstrapStockTrustBindings { return $script:bindings }
@@ -58,7 +108,10 @@ function Get-BootstrapStockTrustBindings { return $script:bindings }
 
 def test_trust_is_not_an_enabled_bootstrap_or_compilation_path():
     text = HELPER.read_text(encoding="utf-8")
-    for forbidden in ("Add-Type", "Reflection.Emit", "GetDelegateForFunctionPointer", "Process.Start"):
+    for forbidden in (
+        "Add-Type", "Reflection.Emit", "GetDelegateForFunctionPointer", "Process.Start",
+        "NativeLibrary]::Load",
+    ):
         assert forbidden not in text
     assert "Resolve-EvaluatorBootstrapPython" not in text
     for plugin in ("agent-codespaces", "agent-containers"):
@@ -66,13 +119,13 @@ def test_trust_is_not_an_enabled_bootstrap_or_compilation_path():
         assert HELPER.name not in caller.read_text(encoding="utf-8")
 
 
-@pytest.fixture
-def host():
+@pytest.fixture(params=("powershell", "pwsh"))
+def host(request: pytest.FixtureRequest) -> str:
     if os.name != "nt":
         pytest.skip("native Windows stock WinTrust")
-    executable = shutil.which("powershell")
+    executable = shutil.which(request.param)
     if not executable:
-        pytest.skip("Windows PowerShell is unavailable")
+        pytest.skip(f"{request.param} is unavailable")
     return executable
 
 
@@ -138,6 +191,7 @@ try {
         calls=@($script:observed.ToArray());expectedHandle=$expected
         releases=$script:releases;closedWhileGuardOpen=$script:closedWhileGuardOpen
         guardClosed=$script:guard.Handle.IsClosed
+        loads=$script:loads;frees=$script:frees;ownedModule=$script:ownedModule.ToInt64()
     } | ConvertTo-Json -Depth 5 -Compress
 } finally { $script:guard.Handle.Dispose() }
 if (-not $script:guard.Handle.IsClosed) { throw 'Caller guard did not close.' }
@@ -169,11 +223,13 @@ if (-not $script:guard.Handle.IsClosed) { throw 'Caller guard did not close.' }
     assert result["releases"] == repeats
     assert result["closedWhileGuardOpen"] is True
     assert result["guardClosed"] is False
+    assert result["loads"] == result["frees"] == repeats
+    assert result["ownedModule"] == 0
     with path.open("r+b"):
         pass
 
 
-@pytest.mark.parametrize("failure", ("provider", "close"))
+@pytest.mark.parametrize("failure", ("provider", "close", "verify", "library"))
 def test_provider_failure_still_closes_state_and_library_before_return(
     host, tmp_path, signed_file, failure,
 ):
@@ -195,21 +251,31 @@ try {
         releases=$script:releases;closedWhileGuardOpen=$script:closedWhileGuardOpen
         guardClosed=$script:guard.Handle.IsClosed
         emitted=$script:emitted
+        loads=$script:loads;frees=$script:frees;ownedModule=$script:ownedModule.ToInt64()
     } | ConvertTo-Json -Depth 5 -Compress
 } finally { $script:guard.Handle.Dispose() }
+if (-not $script:guard.Handle.IsClosed) { throw 'Failure path retained the caller guard reference.' }
 """, environment={
         "FILE_PATH": str(signed_file), "FAILURE": failure,
         "SYNTHETIC_CLOSE_FAILURE": str(int(failure == "close")),
+        "SYNTHETIC_VERIFY_FAILURE": str(int(failure == "verify")),
+        "SYNTHETIC_LIBRARY_FREE_FAILURE": str(int(failure == "library")),
     })
     if failure == "provider":
         assert "synthetic provider inspection failure" in result["message"]
-    else:
+    elif failure == "close":
         assert "Bootstrap signer state close failed: 0x00000005." in result["message"]
+    elif failure == "verify":
+        assert "synthetic failure after native verification" in result["message"]
+    else:
+        assert "synthetic library release failure" in result["message"]
     assert [call["action"] for call in result["calls"]] == [1, 2]
     assert result["releases"] == 1
     assert result["closedWhileGuardOpen"] is True
     assert result["guardClosed"] is False
     assert result["emitted"] == 0
+    assert result["loads"] == result["frees"] == 1
+    assert result["ownedModule"] == 0
 
 
 @pytest.mark.parametrize("kind", ("closed", "directory"))
@@ -256,7 +322,7 @@ try {
     assert result == {"refused": True, "ownedReferenceStillValid": True}
 
 
-def test_unqualified_core_host_refuses_before_loading_library(tmp_path):
+def test_unsupported_core_bindings_refuse_before_loading_library(tmp_path: Path) -> None:
     if os.name != "nt":
         pytest.skip("native PowerShell Core refusal")
     host = shutil.which("pwsh")
@@ -264,8 +330,9 @@ def test_unqualified_core_host_refuses_before_loading_library(tmp_path):
         pytest.skip("PowerShell Core is unavailable")
     result = _run(host, tmp_path, r"""
 function Open-BootstrapStockTrustLibrary { throw 'Unqualified host reached native load.' }
+function Get-BootstrapCoreTrustBindings { throw 'unsupported Core trust layout' }
 Get-BootstrapStockFileTrust -Guard ([pscustomobject]@{})
 """, success=False)
     assert result.returncode != 0
     assert "Unqualified host reached native load" not in result.stderr
-    assert "qualified 64-bit Windows PowerShell" in result.stderr
+    assert "unsupported Core trust layout" in result.stderr

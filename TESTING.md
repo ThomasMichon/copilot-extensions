@@ -87,9 +87,9 @@ and its diagnostics; successful consumption still checks the outer deadline.
 Select `bootstrap_file_guard` or `bootstrap_file_trust` in `agent-codespaces`
 through the bounded plugin runner. These repository-only helpers are not
 distributed or enabled by the existing bootstrap selector. Native tests use
-64-bit Windows PowerShell and PowerShell Core for the file guard, and Windows
-PowerShell for WinTrust. The separate Core trust case checks explicit refusal,
-not positive signature parity. Linux runs the portable source contract with
+64-bit Windows PowerShell and PowerShell Core for the file guard and WinTrust.
+Unsupported Core binding shapes must refuse before native library loading.
+Linux runs the portable source contract with
 explicit native skips.
 
 The trust packet requires an existing official PSF-signed Python executable.
@@ -101,6 +101,20 @@ closure, error cleanup and native-module identity refusals. Each captured,
 windowless PowerShell child has a 20-second timeout within the runner's finite
 Job/process boundary. No compiler, interpreter acquisition, foreign DLL load,
 production registration or desktop positive control is part of this packet.
+
+Core trust controls observe the actual typed record passed to the existing
+by-reference WinTrust method. The native output's state handle must reach
+cleanup even when a test proxy throws after the real verification call.
+Additional release-error controls throw only after the actual owned library
+reference is freed. Both cases must emit zero success objects and release
+their temporary guard references before the shell exits.
+Signer/provider success does not establish native dependency-search policy.
+The loader controls pass through to the actual stock wrappers while checking
+the System32 path, null reserved argument, `0x800` value and edition-specific
+integer type. Free must receive that exact owned module reference; completed
+load/free counts must agree before the consumer observes success.
+The public NativeLibrary load API is not a supported replacement for the
+flag-preserving CoreLib wrapper.
 
 The guard packet runs sharing, no-follow, identity and failure/release controls
 on both shell editions. Core-only final-path controls exercise the existing
