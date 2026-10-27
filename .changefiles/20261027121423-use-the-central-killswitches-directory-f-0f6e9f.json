@@ -1,0 +1,9 @@
+{
+  "comment": "Use the central killSwitches directory for bootstrap state, retain legacy read compatibility, and clear retained shadows on explicit off.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

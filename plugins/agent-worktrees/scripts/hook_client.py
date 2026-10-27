@@ -526,8 +526,10 @@ def _bootstrap_first_install(payload: dict) -> dict:
         if shell and installer.is_file() and binding.is_file():
             state_path = Path(
                 os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE")
-                or Path.home() / ".copilot-extensions" / "bootstrap-killswitch.json"
+                or Path.home() / ".copilot-extensions" / "killSwitches" / "bootstrap-killswitch.json"
             )
+            if not os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE") and not state_path.exists():
+                state_path = Path.home() / ".copilot-extensions" / "bootstrap-killswitch.json"
             try:
                 state = json.loads(state_path.read_text(encoding="utf-8-sig"))
             except (OSError, UnicodeError, ValueError):

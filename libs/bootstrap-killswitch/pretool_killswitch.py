@@ -29,7 +29,7 @@ def state_file() -> Path:
         if not path.is_absolute():
             raise ValueError("PRETOOL_KILLSWITCH_STATE_FILE must be an absolute path")
         return path
-    return Path.home() / ".copilot-extensions" / "pretool-killswitch.json"
+    return Path.home() / ".copilot-extensions" / "killSwitches" / "pretool-killswitch.json"
 
 
 def read_state(path: Path) -> tuple[dict, str | None]:

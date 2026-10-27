@@ -30,7 +30,7 @@ other plugins' hooks that fire on the exact same session starts.
   `tools/sync-bootstrap-killswitch.py`. Never edit a vendored copy directly --
   edit here and re-run the sync tool.
 - **Shared state**: one JSON file, not per-plugin --
-  `~/.copilot-extensions/bootstrap-killswitch.json`
+  `~/.copilot-extensions/killSwitches/bootstrap-killswitch.json`
   (`{"active": true, "reason": "...", "set_by": "...", "set_at": "..."}`).
   One on/off affects every plugin's hook uniformly, because they all read
   the same file.
@@ -122,7 +122,7 @@ policy. No process is killed. postToolUse, prompt hooks, session lifecycle and
 bootstrap reconciliation remain unchanged. The bootstrap switch above remains
 independent and does not stop these pre-tool guards.
 
-The state is `~/.copilot-extensions/pretool-killswitch.json` with `active`,
+The state is `~/.copilot-extensions/killSwitches/pretool-killswitch.json` with `active`,
 `reason`, `set_by` and `set_at`. There is no automatic expiry. `off` removes
 only this state file and restores normal guard evaluation on the next call.
 Missing, corrupt or non-boolean state leaves guards enabled; corrupt state is
@@ -186,3 +186,35 @@ before rolling it back; keep the state inactive while rolling consumers back.
 A retained flag cannot constrain an old consumer, and must not silently
 reactivate on a later upgrade. Native per-hook disables remain separate as
 explained above.
+
+
+## Central namespace migration
+
+Suite switch state belongs under `~/.copilot-extensions/killSwitches/`, not a
+project folder. Bootstrap and pre-tool state retain their distinct file names
+and semantics. Before updating consumers, inventory each intended installation
+and copy any existing legacy bootstrap flag byte-for-byte to the central path;
+preserve its active value, reason, actor and timestamp. Refuse conflicting
+existing destination state rather than overwriting it. Retain active legacy
+copies while older readers still need them, so migration never accidentally
+resumes automatic reconciliation. Unreachable installations remain explicit
+pending migration obligations, not evidence that their state is absent.
+
+New bootstrap readers use the central file when it exists and otherwise honor
+`~/.copilot-extensions/bootstrap-killswitch.json`. An existing central file is
+authoritative, including an explicit inactive value; malformed central state
+keeps the existing fail-open behavior rather than reviving a stale shadow.
+New `on` writes only the central path. Default-installation `off` clears both
+central and legacy bootstrap copies so a retained shadow cannot reactivate it.
+An explicit `BOOTSTRAP_KILLSWITCH_STATE_FILE` remains isolated: reads/writes/off
+touch only that override, never either default file.
+
+Upgrade the selected controller and actual consumers before using the migrated
+control. An old controller does not know the new directory; do not use its
+`off` or status as proof that a migrated flag is cleared. Remove legacy copies
+only after the owning readers are qualified on the new namespace. For a
+controller/consumer rollback, clear both paths with the capable controller
+first, or explicitly restore the retained original flag at the legacy path
+before selecting the old reader. Do not lose a paused state across rollback.
+The pre-tool control is new in this release; its canonical default starts in
+the central directory and remains inactive until explicitly activated.

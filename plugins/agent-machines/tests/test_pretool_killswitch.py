@@ -133,3 +133,15 @@ def test_absolute_override_is_shared_by_cli_and_hook_despite_different_cwd(
     assert cli.main(["pretool-killswitch", "off"]) == 0
     monkeypatch.chdir(project)
     assert not switch.is_active()
+
+
+def test_default_pretool_state_is_central_not_project_relative(tmp_path, monkeypatch):
+    monkeypatch.delenv("PRETOOL_KILLSWITCH_STATE_FILE", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(switch.Path, "home", classmethod(lambda cls: tmp_path))
+    expected = tmp_path / ".copilot-extensions" / "killSwitches" / "pretool-killswitch.json"
+    assert switch.state_file() == expected
+    assert cli.main(["pretool-killswitch", "on", "central"]) == 0
+    assert expected.is_file()
+    assert not (tmp_path / ".copilot-extensions/pretool-killswitch.json").exists()
+    assert cli.main(["pretool-killswitch", "off"]) == 0

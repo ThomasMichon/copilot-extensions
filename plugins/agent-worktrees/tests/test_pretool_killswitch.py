@@ -174,3 +174,63 @@ def test_relative_override_diagnostic_does_not_skip_normal_guard_evaluation(monk
     assert calls == ["preToolUse"]
     assert json.loads(result.out)["permissionDecision"] == "deny"
     assert "absolute path" in result.err
+
+
+@pytest.mark.parametrize("selected", ["central", "legacy", "override"])
+def test_first_install_honors_each_bootstrap_namespace_before_stamp(
+    tmp_path, monkeypatch, selected,
+):
+    from types import SimpleNamespace
+    client = load_client()
+    scripts = tmp_path / "payload/scripts"
+    scripts.mkdir(parents=True)
+    for name in ("bootstrap-check.ps1", "install.ps1", "command_binding.py"):
+        (scripts / name).touch()
+    home = tmp_path / "home"
+    home.mkdir()
+    primary = home / ".copilot-extensions/killSwitches/bootstrap-killswitch.json"
+    legacy = home / ".copilot-extensions/bootstrap-killswitch.json"
+    explicit = tmp_path / "explicit.json"
+    chosen = {"central": primary, "legacy": legacy, "override": explicit}[selected]
+    chosen.parent.mkdir(parents=True, exist_ok=True)
+    chosen.write_text(json.dumps({"active": True, "reason": selected + " pause"}), encoding="utf-8")
+    environment = dict(os.environ)
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    environment.pop("BOOTSTRAP_KILLSWITCH_STATE_FILE", None)
+    if selected == "override":
+        environment["BOOTSTRAP_KILLSWITCH_STATE_FILE"] = str(explicit)
+    monkeypatch.setattr(client, "os", SimpleNamespace(name="nt", environ=environment))
+    monkeypatch.setattr(client, "__file__", str(scripts / "hook_client.py"))
+    monkeypatch.setattr(client.Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(client.shutil, "which", lambda name: str(tmp_path / "powershell.exe"))
+    monkeypatch.setattr(client.subprocess, "run", lambda *a, **k: pytest.fail("paused bootstrap reached stamp"))
+    result = client._bootstrap_first_install({"sessionId": "namespace-control"})
+    assert selected + " pause" in result["_stderr"]
+
+
+def test_first_install_central_inactive_does_not_revive_legacy_pause(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    client = load_client()
+    scripts = tmp_path / "payload/scripts"
+    scripts.mkdir(parents=True)
+    for name in ("bootstrap-check.ps1", "install.ps1", "command_binding.py"):
+        (scripts / name).touch()
+    home = tmp_path / "home"
+    primary = home / ".copilot-extensions/killSwitches/bootstrap-killswitch.json"
+    primary.parent.mkdir(parents=True)
+    primary.write_text('{"active":false}', encoding="utf-8")
+    primary.parent.parent.joinpath("bootstrap-killswitch.json").write_text('{"active":true}', encoding="utf-8")
+    environment = dict(os.environ)
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    environment.pop("BOOTSTRAP_KILLSWITCH_STATE_FILE", None)
+    monkeypatch.setattr(client, "os", SimpleNamespace(name="nt", environ=environment))
+    monkeypatch.setattr(client, "__file__", str(scripts / "hook_client.py"))
+    monkeypatch.setattr(client.Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(client.shutil, "which", lambda name: str(tmp_path / "powershell.exe"))
+    calls = []
+    monkeypatch.setattr(client.subprocess, "run", lambda *a, **k: calls.append(a[0]) or SimpleNamespace(
+        returncode=0, stdout="", stderr="",
+    ))
+    assert client._bootstrap_first_install({"sessionId": "namespace-off"}) == {}
+    assert len(calls) == 1
+    assert "--run-lifecycle" in calls[0]
