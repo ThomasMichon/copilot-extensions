@@ -96,6 +96,24 @@ def test_tombstone_advances_content_and_affected_model_generations(corpus):
     assert engine._refresh_clusters(store, config)["clusters"] == 0
 
 
+@pytest.mark.parametrize("replayed", [False, True], ids=["absent", "already-deleted"])
+def test_absent_tombstone_preserves_physical_and_logical_projections(corpus, replayed):
+    config, store = corpus
+    if replayed:
+        assert store.delete_by_file("git:sample", "one.md") == [item().chunk_id]
+    store.ensure_fts_index()
+    before = store._source_domain.receipt()
+    signature = cluster_signature(store, config)
+    owners = [store.content_store, *store._vector_tables.values()]
+    versions = [owner._get_or_create_table().version for owner in owners]
+    assert store.delete_by_file("git:sample", "one.md" if replayed else "missing.md") == []
+    assert store._source_domain.receipt() == before
+    assert [owner._get_or_create_table().version for owner in owners] == versions
+    assert cluster_signature(store, config) == signature
+    assert store.content_store.fts_current()
+    assert store.content_store.get_by_ids([item("two.md").chunk_id])
+
+
 def test_scalar_preparation_preserves_logical_cluster_coverage_after_restart(corpus, monkeypatch):
     config, store = corpus
     assert engine._refresh_clusters(store, config)["clusters"] == 2

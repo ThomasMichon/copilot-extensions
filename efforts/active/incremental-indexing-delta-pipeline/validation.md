@@ -80,6 +80,32 @@ The test covers the first two slices, not completion of a whole-corpus sweep.
 These controls measure Linux process I/O and native query plans, not physical
 disk traffic, whole-operation CPU/memory, Windows behavior or consumer rollout.
 
+The opt-in native queue control composes the actual durable queue, worker and
+shared engine at the same three corpus sizes, in both layouts with one or two
+injected models:
+
+```bash
+python tools/run-plugin-tests.py agent-index --allow-explicit-tiers \
+  --test-file tests/test_native_queue_matrix.py
+```
+
+It unions 100 deliveries, reopens the queue before and after claim, applies two
+upserts and an explicit tombstone, and replays the same union. A later round
+enqueues another 100 deliveries from inside embedding: the processing payload
+must remain immutable and one durable trailing union must survive reopening,
+execute once per unique identity and replay without embedding or projection
+maintenance. The synthetic connector observes exact IDs, event IDs, ref pairs,
+metadata revisions and the unchanged polling cursor. It is not an HTTP or
+hosted-pagination measurement; existing connector controls own those boundaries.
+Every changed projection is compared with a clean rebuild, including complete
+vector ID sets, removed hits and unchanged sentinels. Stage counts must match
+across sizes, native scans and read I/Os stay below 64, process read growth stays
+below 2 MiB per acquired identity and write growth below 512 KiB. Setup and
+reference rebuilds are outside the measurement. The process-byte allowance
+includes metadata and queue traffic, not a physical-disk or whole-CPU claim.
+Focused queue controls separately require a processing exact-source or
+all-source full task to preserve the same 100-delivery trailing hint union.
+
 Qualify both a standalone single-model engine and a generic injected two-model
 consumer. A downstream adopts only a reviewed/published compatible engine
 revision, records its consumed provenance, and repeats the same count assertions

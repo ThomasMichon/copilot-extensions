@@ -63,10 +63,11 @@ def delete_canonical(content, predicate: str, *, return_ids: bool = False):
                     vector.delete(f"chunk_id IN ({sql})")
     finally:
         reader.close()
-    with domain.bucket_mutation(
-        content._table_name, f"canonical-delete:{content._table_name}", sources,
-    ):
-        table.delete(predicate)
+    if total:
+        with domain.bucket_mutation(
+            content._table_name, f"canonical-delete:{content._table_name}", sources,
+        ):
+            table.delete(predicate)
     return selected if return_ids else total
 
 
