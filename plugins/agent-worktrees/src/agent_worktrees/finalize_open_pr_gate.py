@@ -386,6 +386,9 @@ def _pr_entry_merge_status(pr, repo) -> bool | None:
     unmerged would let a tree-only upstream match certify and prune a
     record whose merge boundary genuinely can't be checked.
     """
+    from . import pr_creation_state
+    if pr_creation_state.cancelled(pr):
+        return False
     head_sha = (getattr(pr, "head_sha", "") or "").strip()
     if getattr(pr, "state", "") == "merged" and head_sha:
         return True

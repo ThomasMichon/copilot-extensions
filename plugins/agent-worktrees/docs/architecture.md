@@ -18,11 +18,11 @@ checks; this is not authority to rewrite an existing remote head.
 Different requested branches retain separate entries. Published or partially
 published attempts retain the existing lease and ambiguity guards. If an older
 version already left a duplicate, inspect `pr-status --all --no-live --json`
-before correction. `set-pr --select-branch <branch> --state closed` selects the
-first matching entry: use it only after confirming that entry is the empty,
-unnumbered failed attempt, then verify the numbered PR remains open. It closes
-tracking for the failed attempt, not the provider PR. Never edit the ledger or
-close a numbered association merely to satisfy publication ownership.
+before correction. Empty fields alone do not prove an attempt never published.
+The [local creation cancellation owner](pr-creation-cancellation.md) admits only
+an exact, durably qualified reservation and retains ambiguous legacy attempts.
+Never edit the ledger or close a numbered association merely to satisfy
+publication ownership.
 
 ### Transport boundaries
 
