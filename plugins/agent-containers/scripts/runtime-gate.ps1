@@ -59,12 +59,16 @@ if (-not (Test-Path -LiteralPath $bootstrapHelper -PathType Leaf) -or
 }
 . $bootstrapHelper
 $bootstrap = Resolve-EvaluatorBootstrapPython
-if ($bootstrap.Status -cne 'selected') {
+if ($bootstrap.Status -ceq 'unavailable') {
     [Console]::Error.WriteLine(
         '[agent-containers] Python 3.10+ must be available as python on PATH. ' +
         'Run the harness Python prerequisite setup, or install the standalone prerequisite, then retry.'
     )
     exit 126
+}
+if ($bootstrap.Status -cne 'selected') {
+    if ($null -ne $bootstrap.Guard) { $bootstrap.Guard.Dispose() }
+    throw 'Evaluator bootstrap returned an invalid selection status.'
 }
 $nativePathSemantics = @($legacyRoot, $durableHome) | Where-Object {
     $_.Contains('%') -or
