@@ -598,9 +598,32 @@ Unqualified remote storage logs the limitation and runs an uncached pass.
 Cluster construction uses complete, failure-propagating item/chunk/vector reads;
 an unsuccessful read cannot publish partial output as covered input.
 
-This is conservative physical-version reuse, not a logical mutation generation,
-source cursor, new reader authority or lock. A real change still invokes the
-global clustering pass; model/bucket-local maintenance remains separate work.
+Participating source-aware writers also publish optional
+`logical_projection` version-1 metadata in the **existing** clean source-layout
+receipt. A logical generation advances once per outer committed write with
+changed projection tables; nested content/vector writes share that commit.
+Per-table generations identify content and individual model changes. Strict
+identical-content skips change neither physical nor logical versions. Explicitly
+annotated scalar-index preparation, FTS building and compaction preserve logical
+generations for their existing tables. Other effects conservatively count changed
+tables as logical changes, even when physical-only maintenance also occurs.
+
+Logical keys are reusable only while their physical table versions and local
+directory identities match the receipt's witness. Missing, invalid, oversized or
+stale optional metadata falls back to the physical key. A subsequent participating
+commit starts a new epoch if an older writer retained a now-stale witness.
+Unknown writers therefore cannot preserve an obsolete logical cache merely by
+updating the source receipt's physical versions. An interrupted writer remains
+dirty/uncertain under the existing recovery rules; no generation is published
+before its successful clean commit. Receipt work scales with table count, not
+stored items, and adds no source enumeration, row reads, processes or network
+requests.
+
+Legacy stores retain conservative physical-version coverage. These generations
+are derived-artifact reuse evidence, not source cursors, checkpoint advancement,
+new reader authority or locks. They describe committed store writes, not an
+atomic whole-source delta. A real change still invokes the global clustering
+pass; model/bucket-local maintenance remains separate work.
 
 ### Durable acquisition hints (queue contract v1)
 

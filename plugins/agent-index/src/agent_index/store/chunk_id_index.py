@@ -110,7 +110,7 @@ def prepare_chunk_id_index(
             if state.prepared and state.physical_unindexed_rows == 0:
                 return state
             covered_fts = domain.receipt().get("fts_coverage", {}).get(owner._table_name) == state.version
-            domain.effect("scalar-index:" + owner._table_name)
+            domain.effect("scalar-index:" + owner._table_name, physical_only=owner._table_name)
             if state.prepared:
                 dataset.optimize.optimize_indices(
                     index_names=[INDEX_NAME], num_indices_to_merge=0, retrain=False,

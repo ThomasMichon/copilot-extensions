@@ -210,10 +210,14 @@ class SourceDomain:
             finally:
                 self._local.reading = False
 
-    def effect(self, operation: str) -> None:
+    def effect(self, operation: str, *, physical_only: str | None = None) -> None:
         """Persist before an irreversible step; surviving rows cannot prove no lost members."""
         if not self.writing:
             raise SourceLayoutError("effect requires participating writer ownership")
+        if physical_only is None:
+            self._local.logical_effect = True
+        else:
+            self._local.physical_only.add(physical_only)
         value = self.receipt()
         kind, _, table = operation.partition(":")
         if kind in ("content-upsert", "canonical-delete", "content-compact"):
@@ -244,9 +248,9 @@ class SourceDomain:
         return True
 
     @contextmanager
-    def fts_handoff(self):
+    def fts_handoff(self, *, table_name: str | None = None):
         """Pending intent closes the pre-spawn gap; child guard closes parent-death gap."""
-        self.effect("fts-builder")
+        self.effect("fts-builder", physical_only=table_name)
         nonce = uuid.uuid4().hex
         value = self.receipt()
         value["fts_pending"] = nonce
@@ -269,12 +273,18 @@ class SourceDomain:
             return
         with self.exclusion():
             value = self.receipt()
+            versions = _versions(db)
             if (value.get("fts_pending") or value.get("state") != "clean"
-                    or value["versions"] != _versions(db)):
+                    or value["versions"] != versions):
                 raise SourceLayoutError("source projection requires explicit recovery")
+            from .logical_projection import commit_projection, physical_tables
+
+            before = physical_tables(self.path, versions)
             value["state"] = "dirty"
             self.save(value)
             self._local.depth = 1
+            self._local.logical_effect = False
+            self._local.physical_only = set()
             try:
                 yield
                 if self.receipt().get("fts_pending"):
@@ -284,9 +294,15 @@ class SourceDomain:
                 value["state"] = "clean"
                 value.pop("uncertain_effect", None)
                 value.pop("operation", None)
+                commit_projection(
+                    value, before, physical_tables(self.path, value["versions"]),
+                    physical_only=set() if self._local.logical_effect else self._local.physical_only,
+                )
                 self.save(value)
             finally:
                 self._local.depth = 0
+                self._local.logical_effect = False
+                self._local.physical_only = set()
 
 
 def domain_for(path: str | Path) -> SourceDomain | None:

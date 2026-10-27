@@ -97,7 +97,7 @@ After the reviewed proposal, the operator admitted execution:
 - [ ] Specify an additive, versioned change-set: canonical source/account scope,
   base/target revision or cursor, changed identities, explicit tombstones,
   provider metadata revisions and snapshot-completeness evidence.
-- [ ] Distinguish event deltas, bounded polling and complete reconciliation.
+- [x] Distinguish event deltas, bounded polling and complete reconciliation.
   Incomplete/truncated pages must never authorize deletion of unseen items.
 - [x] Specify lossless queued unions and trailing deltas for changes received
   during active work. Preserve existing full-task sequencing guarantees.

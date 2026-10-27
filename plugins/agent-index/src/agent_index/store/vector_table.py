@@ -358,7 +358,9 @@ class VectorTable:
         try:
             cutoff = datetime.timedelta(days=older_than_days)
             if self._source_domain is not None:
-                self._source_domain.effect(f"vector-compact:{self._table_name}")
+                self._source_domain.effect(
+                    f"vector-compact:{self._table_name}", physical_only=self._table_name,
+                )
             table.optimize(cleanup_older_than=cutoff)
             logger.info(
                 "Optimized table %s (cleanup older than %d days)",
