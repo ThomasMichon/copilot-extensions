@@ -93,6 +93,8 @@ def native_install(tmp_path, tmp_path_factory, request):
         },
     }), encoding="utf-8")
     root = home / ".agent-worktrees"
+    if parameter == "cold-home":
+        return home, payload, root, [], {}
     root.mkdir()
     binding = [
         sys.executable, "-I", "-S", "-B", str(payload / "scripts/command_binding.py"),
@@ -266,6 +268,21 @@ def test_native_uninstall_no_provision_and_unknown_retry(native_install, shell, 
             assert not root.exists()
         assert sorted(staging.iterdir()) == staged
         _preserved(durable)
+
+
+@pytest.mark.parametrize("native_install", ["cold-home"], indirect=True)
+@pytest.mark.parametrize("shell", ["bash", "powershell", "pwsh"])
+def test_cold_default_uninstall_never_creates_runtime(native_install, shell: str) -> None:
+    home, payload, root, _, _ = native_install
+    before = _snapshot(home / ".copilot")
+    for _ in range(2):
+        result = _run(_native_arguments(shell, _host(shell), payload, root), home)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert json.loads(result.stdout)["status"] == "absent"
+        assert not root.exists()
+        assert not (home / ".local").exists()
+        _unchanged(before, {})
+        assert _snapshot(home / ".copilot") == before
 
 
 def test_cold_uninstall_rejects_unknown_arguments_before_absent_return(native_install):

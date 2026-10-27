@@ -551,7 +551,7 @@ if [[ "$__aw_action" == uninstall ]]; then
     if $__aw_remove_config; then __aw_uninstall_args+=(--purge); fi
     __aw_uninstall_preflight="$("$__aw_admission_python" "${__aw_uninstall_args[@]}" --check --check-consumers)" || exit $?
     __aw_uninstall_status="$("$__aw_admission_python" -I -S -B -c \
-        'import json,sys; status=json.loads(sys.argv[1])["status"]; assert status in ("absent","ready"); print(status)' \
+        'import json,sys; status=json.loads(sys.argv[1])["status"]; assert status in ("absent","ready"); sys.stdout.write(status)' \
         "$__aw_uninstall_preflight")" || exit $?
     if [[ "$__aw_uninstall_status" == absent ]] && ! $__aw_remove_config; then
         printf '%s\n' "$__aw_uninstall_preflight"
