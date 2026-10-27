@@ -155,7 +155,7 @@ above is requested; these implementation choices remain reviewable.
 ## Plan
 
 - [x] Review this source appointment and lifecycle contract (#8872).
-- [ ] Implement strict declaration/resolution, fixed native substrate owner,
+- [x] Implement strict declaration/resolution, fixed native substrate owner,
   operation custody and installed-package entry seam, with focused tests.
 - [ ] Bind the actual adopter install/update composition and versioned desired
   configuration; retire the manual-only dependency without a parallel writer.
@@ -167,13 +167,13 @@ above is requested; these implementation choices remain reviewable.
 
 ## Validation Plan
 
-- [ ] Unit tests cover strict input, immutable images, malformed/secret-shaped
+- [x] Unit tests cover strict input, immutable images, malformed/secret-shaped
   declarations, exact instance/host/storage binding, foreign resources,
   credential drift, supported database transitions and no raw command surface.
-- [ ] Component tests use actual contained subprocesses and existing journals
+- [x] Component tests use actual contained subprocesses and existing journals
   for exact repeat, competing owners, crash before/after mutation, lost replies,
   cleanup uncertainty and restart reconciliation without duplicate effects.
-- [ ] Installed-package tests execute the public owner seam outside its source
+- [x] Installed-package tests execute the public owner seam outside its source
   tree. Default client/planner commands perform no Docker or credential effects.
 - [ ] A fresh isolated Linux host/project with official immutable images reaches
   authenticated Core and native Periphery readiness without a web/manual step.
@@ -196,6 +196,8 @@ the bounded declaration, native effect boundary, same-journal admission,
 status/withdrawal and installed-package entry seam. Component qualification
 uses synthetic native subprocess and authenticated HTTP fixtures; it does not
 qualify official images or activate the ordinary installed controller.
-Implementation and operating evidence are still under review. Actual adopter
-construction, native official-image acceptance and production delivery remain
-open; no deployment or incumbent adoption is claimed here.
+The complete contained Fleet packet passes 3115 tests with nine explicit
+platform/prerequisite skips; the required no-actor unit packet passes all 2443
+admitted cases without skips. These are source/component qualifications.
+Actual adopter construction, native official-image acceptance and production
+delivery remain open; no deployment or incumbent adoption is claimed here.
