@@ -323,27 +323,13 @@ def _guard_project_scope(project_override: str | None, command: str | None) -> N
 
 def _reverse_lookup_project(anchor: Path) -> str | None:
     """Map an anchor checkout path back to its adopted project name, or ``None``."""
-    target = git_ops._normalize_wt_path(str(anchor))
-    try:
-        projects = inst.read_projects_registry().get("projects", {})
-    except Exception:
-        projects = {}
-    for name, entry in projects.items():
-        a = entry.get("anchor") if isinstance(entry, dict) else None
-        if a and git_ops._normalize_wt_path(str(Path(a))) == target:
-            return name
-    try:
-        from . import repos as _repos
+    from . import projects_registry, repos
 
-        registry = _repos.read_registry()
-        plat = cfg.detect_platform()
-        for name in registry.repos:
-            a = registry.repos[name].local_path(plat)
-            if a and git_ops._normalize_wt_path(str(Path(a))) == target:
-                return name
-    except Exception:
-        pass
-    return None
+    return projects_registry.project_for_anchor(
+        anchor, read_projects=inst.read_projects_registry,
+        read_repos=repos.read_registry, platform=cfg.detect_platform,
+        normalize=git_ops._normalize_wt_path,
+    )
 
 
 def cmd_help_unrouted(requested: str | None = None) -> int:

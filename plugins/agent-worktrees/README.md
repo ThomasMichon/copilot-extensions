@@ -951,3 +951,33 @@ workspace has been removed. Missing legacy receipts retain the older
 installation-local frozen-origin check; malformed or conflicting evidence
 requires explicit repair. Long interpreter paths are launched with an explicit
 application path, not inferred from the command-line token.
+
+## Read-only state-root request API
+
+`agent_worktrees.state_root_request.resolve()` returns the existing `StateRoot`
+result using normal cwd/project discovery, layered configuration and state-root
+semantics. It is intended for a bounded read in an already selected owning
+runtime; it neither provisions a runtime nor changes installation admission.
+Project discovery starts fresh for each call and restores its caller's
+in-process project selection afterward, including on failure.
+
+Inside that one synchronous request, coupled-registry and project-state reads
+reuse one canonically validated installation binding. The owner freshly
+revalidates the binding before returning the result. Routing changes or changed
+source, namespace, receipt or generation evidence reject the request. The value
+is discarded on success or failure; ordinary registry readers outside this API
+retain their existing fresh-validation behavior. There is no persistent or
+process-wide authority cache.
+Authority failures raise `StateRootRequestRefused`; configuration-read failures
+retain their normal error behavior. The snapshot adapter maps an authority
+refusal separately from an unavailable older API.
+
+The SSH snapshot consumer uses this API instead of independently composing the
+same reads and repeatedly validating an identical binding. Its existing
+dispatch validation, descendant ownership and five-second aggregate optional
+read deadline are unchanged. An older optional runtime without this API is
+unavailable, never silently replaced by another runtime or installation cell.
+
+Focused controls live in `tests/test_state_root_request.py`; the actual
+namespaced native consumer is exercised by agent-ssh's
+`tests/test_snapshot_runtime.py`.

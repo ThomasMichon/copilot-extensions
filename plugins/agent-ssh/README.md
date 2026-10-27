@@ -476,6 +476,62 @@ OpenSSH drop-ins are never parsed or changed. Cleanup is intentionally
 report-only because agent-ssh does not have a receipt ledger that could prove
 safe deletion.
 
+### Exact-session snapshots
+
+Session guidance invokes a thin native snapshot launcher instead of nesting
+the interactive shell dispatchers. Installation decisions still belong to the
+packaged installation-context APIs; completed interpreters are selected by the
+owning payload's versioned-runtime API. Explicit contexts retain active
+namespace, receipt, source, generation and same-cell checks, including a fresh
+authority check before execution. Nothing provisions a missing runtime.
+The selected interpreter's resolved parent directory must remain in the owning
+versions root and selected completed slot; the interpreter leaf is not resolved,
+so ordinary POSIX venv links to a base Python remain supported. Snapshot dispatch
+calls the qualified runtime's existing `capture()` and `guidance()` APIs rather
+than requiring an executable module tail, including last-known-good selection
+of an older completed runtime.
+
+The optional Worktrees read runs its existing cwd/project discovery,
+configuration and state-root semantics through its owning
+`state_root_request.resolve()` API inside its own validated runtime. A single
+request shares a canonical binding and revalidates before returning; no
+authority survives between callbacks. Older peers missing the API are
+unavailable. Legacy
+lookup uses the existing qualified installed-inventory API; no `payload-dir`
+marker is required for an already completed runtime. Legacy source/snapshot
+payloads without native inventory qualify their recorded payload against the
+caller's canonical source. Neither path substitutes another source after refusal.
+Absent or incompatible peers remain unavailable. A missing completed legacy
+Worktrees runtime also remains unavailable, so independent local profile
+inspection still runs. A present but incomplete explicit same-cell installation
+remains a refusal. An unresolved owning payload never selects a PATH substitute.
+
+The contributor deadline remains **10 seconds**. Optional-peer resolution and
+execution share the original **5-second** budget inside one interruptible
+caller-owned worker, including inventory, receipt and filesystem resolution.
+Captured caller metadata only restricts fresh canonical validation in that
+worker; it cannot grant authority or select another owner. Both process boundaries
+retain caller-owned descendant cleanup. Snapshots perform no connection probes,
+OpenSSH evaluation, installation or profile writes; unavailable/refused evidence
+is not an empty or available topology.
+
+Focused validation:
+`python tools/run-plugin-tests.py agent-ssh --test-file tests/test_snapshot_runtime.py --test-file tests/test_session_snapshot.py --test-file tests/test_write_session_guidance.py`.
+The opt-in `AGENT_SSH_NATIVE_CALLER` test requires an absolute, registered caller
+with an existing external-state binding and the runner's
+`--allow-explicit-tiers --allow-host-state` flags. It uses disposable runtimes
+and reads the configured state through Worktrees' existing `AGENT_HOME`
+configuration-root contract; it does not modify the host installation. The
+disposable peer preserves the installed interpreter ABI and dependencies but
+overlays the candidate Worktrees package, so this is source-consumer validation,
+not proof of an installed release. Namespaced fixtures install their registries
+and repository identity through the canonical owner APIs and remove legacy
+duplicates before the positive read.
+Fixture package locations are queried through the selected interpreter's
+`sysconfig` API rather than inferred from the test runner's Python minor version.
+Fresh/resumed delivery measurements do not qualify the composed two-second
+startup gate, cold-cache behavior or latency tails.
+
 ## Layout
 
 ```

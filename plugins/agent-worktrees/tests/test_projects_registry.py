@@ -67,6 +67,15 @@ def test_projects_schema_registered_at_v2():
 
 def _patch_registry_path(monkeypatch, tmp_path: Path) -> Path:
     target = tmp_path / "projects.yaml"
+    checkout = tmp_path / "repository"
+    checkout.mkdir(exist_ok=True)
+    monkeypatch.setattr(
+        repos, "find_repo",
+        lambda name: repos.RepoEntry(
+            name=name, repo_class="worktree",
+            paths={platform: str(checkout) for platform in ("windows", "linux", "macos")},
+        ),
+    )
     monkeypatch.setattr(installer, "projects_yaml_path", lambda: target)
     monkeypatch.setattr(installer.output, "ok", lambda *_a, **_k: None)
     return target
@@ -136,7 +145,7 @@ def test_last_registry_entries_roundtrip_to_command_and_profile_reconciliation(
 def test_register_project_writes_lean(monkeypatch, tmp_path: Path):
     target = _patch_registry_path(monkeypatch, tmp_path)
     installer.register_project(
-        "myproj", repo_dir="D:/Src/myproj", expose_agent=True,
+        "myproj", repo_dir=str(tmp_path / "repository"), expose_agent=True,
     )
     text = target.read_text(encoding="utf-8")
     assert "schema_version: 2" in text
@@ -226,6 +235,9 @@ def test_subcommand_resolves_expose_agent_from_repos(monkeypatch, tmp_path: Path
 
     class _Entry:
         agent = False
+
+        def local_path(self, platform=None):
+            return str(tmp_path / "repository")
 
     monkeypatch.setattr(m, "inst", installer)
     monkeypatch.setattr(
@@ -352,6 +364,7 @@ def test_subcommand_skips_local_presence_without_repo_dir(monkeypatch, tmp_path:
     """No repo_dir (a context-less re-registration) -- there's no cwd to
     resolve a knowledge-repo-relative state root from, so this is a no-op
     rather than guessing a machine/cwd."""
+    _patch_registry_path(monkeypatch, tmp_path)
     monkeypatch.setattr(installer, "register_project", lambda *a, **k: None)
     called = []
     monkeypatch.setattr(

@@ -1447,9 +1447,9 @@ def _resolve_adoption_defaults_from_registry(
     except Exception:
         pass
     try:
-        from . import installer
+        from .projects_registry import read_projects_registry
 
-        proj = (installer.read_projects_registry().get("projects") or {}).get(name)
+        proj = (read_projects_registry(registry_paths.registry_path("projects.yaml", legacy_root=install_dir())).get("projects") or {}).get(name)
         if isinstance(proj, dict):
             if "default_branch" not in out and proj.get("default_branch"):
                 out["default_branch"] = str(proj["default_branch"])

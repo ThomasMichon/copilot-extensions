@@ -2553,7 +2553,7 @@ class TestDetectMachine:
 
 def test_adoption_defaults_resolved_from_registries(monkeypatch):
     """default_branch from repos.yaml, base_repo from projects.yaml."""
-    from agent_worktrees import installer
+    from agent_worktrees import projects_registry
     from agent_worktrees import repos as repos_mod
 
     entry = repos_mod.RepoEntry(
@@ -2565,8 +2565,8 @@ def test_adoption_defaults_resolved_from_registries(monkeypatch):
         lambda: repos_mod.ReposRegistry(repos={"proj": entry}),
     )
     monkeypatch.setattr(
-        installer, "read_projects_registry",
-        lambda: {"projects": {"proj": {"base_repo": True}}},
+        projects_registry, "read_projects_registry",
+        lambda *_: {"projects": {"proj": {"base_repo": True}}},
     )
     out = cfg._resolve_adoption_defaults_from_registry("proj", "linux")
     assert out == {"default_branch": "main", "base_repo": True}
@@ -2615,7 +2615,7 @@ def test_load_config_fills_branch_and_base_repo_from_registry(
 ):
     """A minimal overlay (no anchor/branch/base_repo) still resolves them from
     the registries -- so restating them in the overlay is redundant."""
-    from agent_worktrees import installer
+    from agent_worktrees import projects_registry
     from agent_worktrees import repos as repos_mod
 
     anchor = tmp_path / "proj"
@@ -2629,8 +2629,8 @@ def test_load_config_fills_branch_and_base_repo_from_registry(
         lambda: repos_mod.ReposRegistry(repos={"proj": entry}),
     )
     monkeypatch.setattr(
-        installer, "read_projects_registry",
-        lambda: {"projects": {"proj": {"base_repo": True}}},
+        projects_registry, "read_projects_registry",
+        lambda *_: {"projects": {"proj": {"base_repo": True}}},
     )
     monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
 
@@ -2650,7 +2650,7 @@ def test_overlay_branch_overrides_registry_fallback(
     tmp_path: Path, monkeypatch
 ):
     """An explicit overlay default_branch still wins over the registry."""
-    from agent_worktrees import installer
+    from agent_worktrees import projects_registry
     from agent_worktrees import repos as repos_mod
 
     anchor = tmp_path / "proj"
@@ -2664,7 +2664,7 @@ def test_overlay_branch_overrides_registry_fallback(
         lambda: repos_mod.ReposRegistry(repos={"proj": entry}),
     )
     monkeypatch.setattr(
-        installer, "read_projects_registry", lambda: {"projects": {}},
+        projects_registry, "read_projects_registry", lambda *_: {"projects": {}},
     )
     monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
 

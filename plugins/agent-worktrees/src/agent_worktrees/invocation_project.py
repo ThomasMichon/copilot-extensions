@@ -152,17 +152,18 @@ def _cwd_is_inside_project(anchor):
     )
 
 
-def _resolve_active_project(project_override):
+def _resolve_active_project(project_override, *, reverse_lookup=None):
     override = _override("_resolve_active_project", _resolve_active_project)
     if override is not _resolve_active_project:
         return override(project_override)
     if project_override:
         return project_override, _anchor_for_project(project_override)
-    from .front_door_cli import _reverse_lookup_project
+    if reverse_lookup is None:
+        from .front_door_cli import _reverse_lookup_project as reverse_lookup
 
     anchor = _git_toplevel(_safe_cwd())
     if anchor is not None:
-        name = _reverse_lookup_project(anchor)
+        name = reverse_lookup(anchor)
         if name:
             return name, None
     return None, None
