@@ -52,24 +52,27 @@ if ($env:COPILOT_EXTENSIONS_CONTEXT) {
     $durableHome = $env:COPILOT_EXTENSIONS_CONTEXT
     1..5 | ForEach-Object { $durableHome = Split-Path -Parent $durableHome }
 }
-$bootstrap = [pscustomobject]@{
-    Status = 'unavailable'; Reason = 'payload-bootstrap-unavailable'; Python = $null; Guard = $null
+if (-not (Test-Path -LiteralPath $bootstrapHelper -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $portableModeRunner -PathType Leaf)) {
+    [Console]::Error.WriteLine('[agent-containers] payload Python evaluator is unavailable; update the owning plugin.')
+    exit 126
+}
+. $bootstrapHelper
+$bootstrap = Resolve-EvaluatorBootstrapPython
+if ($bootstrap.Status -ceq 'unavailable') {
+    [Console]::Error.WriteLine(
+        '[agent-containers] Python 3.10+ must be available as python on PATH. ' +
+        'Run the harness Python prerequisite setup, or install the standalone prerequisite, then retry.'
+    )
+    exit 126
+}
+if ($bootstrap.Status -cne 'selected') {
+    if ($null -ne $bootstrap.Guard) { $bootstrap.Guard.Dispose() }
+    throw 'Evaluator bootstrap returned an invalid selection status.'
 }
 $nativePathSemantics = @($legacyRoot, $durableHome) | Where-Object {
     $_.Contains('%') -or
     ($_ -match '^[A-Za-z]:(?![\\/])') -or ($_ -match '^[\\/](?![\\/])')
-}
-if ($nativePathSemantics) {
-    $bootstrap.Reason = 'native-path-semantics'
-} elseif ((Test-Path -LiteralPath $bootstrapHelper -PathType Leaf) -and
-    (Test-Path -LiteralPath $portableModeRunner -PathType Leaf)) {
-    . $bootstrapHelper
-    # Only exclusion paths are normalized; SDK arguments retain their original semantics.
-    $evaluationDirectory = (Get-Location).ProviderPath
-    $bootstrap = Resolve-EvaluatorBootstrapPython -ExcludedRoots @(
-        [IO.Path]::GetFullPath([IO.Path]::Combine($evaluationDirectory, $legacyRoot)),
-        [IO.Path]::GetFullPath([IO.Path]::Combine($evaluationDirectory, (Join-Path $durableHome 'marketplaces')))
-    )
 }
 
 function Invoke-ContextRead {
@@ -78,12 +81,10 @@ function Invoke-ContextRead {
     $ErrorActionPreference = 'Continue'
     try {
         $global:LASTEXITCODE = 126
-        if ($bootstrap.Status -ceq 'selected') {
-            & $bootstrap.Python -I -S -B -X utf8 $portableModeRunner @PortableArguments
-        } elseif ($bootstrap.Status -ceq 'unavailable') {
+        if ($nativePathSemantics) {
             & $hostExe @NativeArguments
         } else {
-            throw 'Evaluator bootstrap returned an invalid selection status.'
+            & $bootstrap.Python -I -S -B -X utf8 $portableModeRunner @PortableArguments
         }
         $script:ContextReadCode = $LASTEXITCODE
     } finally {

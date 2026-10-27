@@ -354,8 +354,60 @@ transfer without acceptance by a named tracked objective.
 
 ## Journal
 
+### 2026-10-27 - Implement the PATH selector
+
+- Replace the compiled evaluator selector with application-only PATH lookup.
+  Selection preserves the first PATH match and performs no candidate execution,
+  registry/signature/PE inspection or interpreter-file custody. The previous
+  exclusion argument and result fields remain compatible without an allowlist.
+- Update both declared Windows adopters. Missing Python or payload evaluator
+  support now refuses explicitly; interpreter/SDK failure never selects another
+  evaluator. Existing native SDK handling for environment/drive-relative path
+  inputs remains a separately tracked compiler-free migration item.
+- The standalone bounded PowerShell packet passed 24 cases on Linux PowerShell
+  Core, covering PATH composition, absent prerequisites, discovery errors and
+  actual caller failure routing. Both installed command names resolve to Core
+  in that venue; this is not Windows PowerShell or Windows platform acceptance.
+  The same source-frozen standalone packet also passed 24 cases with no skips
+  on actual Windows PowerShell 5.1 and PowerShell 7.6.9. Its original bounded
+  process owner drained all Jobs and disposed the controller wrapper. The
+  canonical sources were unchanged; no compiler, registry/DOS-map control,
+  installation or host-setting change was used. This qualifies the selector
+  and finite failure paths, not the remaining SDK or desktop acceptance.
+  Review remains pending for this source slice.
+- Review identified obsolete expectations in the shared Windows consumer
+  suite. Migrate its prerequisite, real-SDK, home fallback, argument and
+  generation controls rather than remove them. Invalid selector results now
+  retain their distinct error and finite compatibility-guard cleanup.
+  Include changefiles for all nine declared shared installer-engine consumers.
+- Independent empty-host controls on Desktop and Core reproduce their distinct
+  CLR startup-profile writes without executing product code. Refusal snapshots
+  exempt only those two exact runtime files; four focused controls retain
+  detection of product-state changes and neighboring unexpected writes.
+  Native consumer coverage now accounts for all 132 cases: 110 unchanged
+  passing cases retained across the bounded runs plus 22 final focused passes.
+  The standalone selector's 24 cases retain identical executable inputs,
+  yielding 156 cases of current bounded coverage, not a fresh full-suite rerun.
+  Every final Job drained and controller disposed; no host cache policy changed.
+- Installer-engine vendoring, the 13-plugin installation contract, documentation
+  consistency and touched-Python lint passed. No installed payload, system PATH,
+  service or provisioning policy changed. Phase 7 and both complete effort
+  validation plans remain open.
+
 ### 2026-10-27 - Trust setup-provided PATH Python
 
+- #9258 merged as `ef670dcf5d7ef3bb6de0572517b8588552e28f36`
+  after current-head Copilot approval, no open or inline findings and
+  successful required CI. The complete bounded source-bound packet passed
+  2,443 units, in addition to the nine focused loader/vendoring controls.
+  The unit manifest now binds the changed canonical loader without changing
+  the packet inventory, evidence rules or budget.
+- Re-read both entire owning effort READMEs and their Plan/Validation Plans
+  after merge. The revised prerequisite intent is reviewed, not implemented:
+  next replace the shared compiled evaluator selector with normal PATH
+  invocation, update its declared adopters and refusal/compatibility tests,
+  then continue the remaining compiled helper and installer migration.
+  No aggregate compiler-free or native acceptance item closes from this merge.
 - Captured the operator's explicit removal of interpreter signature and related
   attestation machinery in Request, the service-model vision and the canonical
   compiler-free amendment. Supported Python and durable PATH hygiene belong to

@@ -126,6 +126,41 @@ canonical/vector sentinel remains unchanged. Stage counts match across sizes;
 process read/write growth stays below 2 MiB/512 KiB. No-op/replay uses current
 coverage with zero embedding, row writes or cluster/FTS passes.
 
+The built-in GitHub polling/native-engine control is also opt-in:
+
+```bash
+python tools/run-plugin-tests.py agent-index --allow-explicit-tiers \
+  --test-file tests/test_native_github_poll_matrix.py
+```
+
+It uses the actual connector over a synthetic HTTP transport, normal Markdown
+chunking, the shared engine and native stores in both layouts with one or two
+models. The same ten rounds run beside 100/10,000/100,000 unrelated items:
+empty polling, overlap replay, equal-timestamp editing, an item response newer
+than its listing, watermark catch-up, a 30-second skew inside the overlap,
+interrupted comments, foreign-account refusal, resumed acquisition and a
+truncated identity window. Exact HTTP sequences include paginated comments;
+resumption reopens the pending journal and connector without relisting or
+refetching the completed item. A newer response never advances beyond the
+listing's pinned target, and failure preserves the committed checkpoint,
+projection versions, logical receipt and current FTS coverage.
+
+Stage counts and native query/row/read-I/O counts must match across corpus
+sizes. Native rows and read I/Os stay below 32 per generated chunk; process read
+growth stays below 1 MiB per generated chunk and write growth below 512 KiB,
+using a one-chunk floor for empty/reused/refused rounds. The issue produces five
+real chunks and the pull request two, so these are input-chunk budgets rather
+than one-row-per-item assumptions. Reference rebuilds, explicit corpus/index
+preparation and sentinel checks are outside measurement. Full path enumeration
+is forbidden in measured rounds. Complete changed chunk/vector ID sets and
+metadata match a clean small shared-engine rebuild, and unrelated sentinels
+remain intact. Every model's total row count must equal the complete fixture
+inventory, and every observed superseded chunk ID must be absent from vectors;
+checking only current content IDs would miss orphaned vector rows.
+Replay/catch-up/refusal has zero embedding, projection writes,
+FTS/cluster passes and native queries. This is not live-provider, arbitrary
+clock-skew, immutable full-snapshot, whole-memory/CPU or rollout qualification.
+
 Qualify both a standalone single-model engine and a generic injected two-model
 consumer. A downstream adopts only a reviewed/published compatible engine
 revision, records its consumed provenance, and repeats the same count assertions
