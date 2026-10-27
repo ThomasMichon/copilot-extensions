@@ -129,6 +129,11 @@ The manual `installation-context-acceptance.yml` `runtime_removal` selection
 runs that backend and the complete Worktrees entrypoint/project-command packets
 on macOS at the dispatch SHA, under finite process containment. Mocked native
 API controls on another OS are not native macOS qualification.
+The hosted lane creates an ephemeral unprivileged account and an exact tracked
+source copy, verifies its real/effective/saved credentials, and runs both packets
+under that account. The runner account's mixed-privilege services remain outside
+that census; production ownership refusals are unchanged. Elevated setup is
+limited to the disposable hosted VM, whose teardown reclaims the account/copy.
 The native STOP packet derives daemon commands from actual unit writers,
 preserves original admission across service-stop/PID-reuse controls, and runs
 real Linux pidfd termination and birth-mismatch refusal against owned fixtures.
