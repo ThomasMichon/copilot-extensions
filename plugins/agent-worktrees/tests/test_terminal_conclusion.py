@@ -188,8 +188,12 @@ def _conclude(record_path: Path, repo, **over):
     )
 
 
-def test_live_session_is_preserved(tmp_path, monkeypatch, _worker_seed):
+@pytest.mark.parametrize("interface", ["cli", "acp", None])
+def test_live_session_is_preserved(tmp_path, monkeypatch, _worker_seed, interface):
     repo, record_path, worktree = _worker(tmp_path, monkeypatch, _worker_seed)
+    record = tracking.load_record(record_path)
+    record.interface = interface
+    tracking.save_record(record, record_path)
     monkeypatch.setattr(sessions, "has_mux_session", lambda _worktree: True)
     (worktree / "valuable.txt").write_text("keep\n", encoding="utf-8")
 
@@ -272,17 +276,32 @@ def test_open_pr_preserves_session_and_worktree(tmp_path, monkeypatch, _worker_s
     assert record.session_entry("session-exact").state == "active"
 
 
-def test_non_cli_worktree_preserves_session(tmp_path, monkeypatch, _worker_seed):
+@pytest.mark.parametrize(
+    ("interface", "kind"),
+    [("cli", "session"), ("acp", "session"), (None, "session"), (None, "bridge")],
+)
+def test_interface_does_not_control_terminal_conclusion(
+    tmp_path, monkeypatch, _worker_seed, interface, kind,
+):
     repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     record = tracking.load_record(record_path)
-    record.interface = "acp"
+    record.interface = interface
+    record.kind = kind
+    expected_interface = record.resolved_interface
     tracking.save_record(record, record_path)
 
     result = _conclude(record_path, repo)
 
     record = tracking.load_record(record_path)
-    assert result["reason"] == "not-cli-worktree"
-    assert record.session_entry("session-exact").state == "active"
+    assert result["action"] == "primed"
+    assert result["managed_gc_eligible"] is True
+    assert record.resolved_interface == expected_interface
+    assert record.session_entry("session-exact").state == "concluded"
+
+    repeated = _conclude(record_path, repo)
+
+    assert repeated["action"] == "already-primed"
+    assert tracking.load_record(record_path).resolved_interface == expected_interface
 
 
 def test_mismatched_worktree_path_is_preserved(tmp_path, monkeypatch, _worker_seed):
@@ -588,14 +607,16 @@ def test_dispatch_attempt_policy_does_not_release_claim_on_reservation_mismatch(
     assert record.live_resources  # untouched
 
 
+@pytest.mark.parametrize("interface", ["cli", "acp", None])
 def test_disposable_cli_policy_does_not_release_session_claims(
-    tmp_path, monkeypatch, _worker_seed
+    tmp_path, monkeypatch, _worker_seed, interface,
 ):
     """The self-release path is scoped to dispatch-attempt conclusions only
     -- an ordinary disposable-cli sweep carries no such authoritative
     per-attempt provenance to release someone else's session claim on."""
     repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     record = tracking.load_record(record_path)
+    record.interface = interface
     session_ref = tracking.format_claim_ref(
         record.machine, "demo", record.worktree_id, session="session-exact",
     )
@@ -802,8 +823,12 @@ def test_behind_branch_is_primed_without_rewriting_head(
     assert record_path.exists()
 
 
-def test_dirty_author_work_is_preserved(tmp_path, monkeypatch, _worker_seed):
+@pytest.mark.parametrize("interface", ["cli", "acp", None])
+def test_dirty_author_work_is_preserved(tmp_path, monkeypatch, _worker_seed, interface):
     repo, record_path, worktree = _worker(tmp_path, monkeypatch, _worker_seed)
+    record = tracking.load_record(record_path)
+    record.interface = interface
+    tracking.save_record(record, record_path)
     (worktree / "valuable.txt").write_text("keep\n", encoding="utf-8")
 
     result = _conclude(record_path, repo)
@@ -944,8 +969,14 @@ def test_terminal_managed_record_rejects_new_session_activation(
         )
 
 
-def test_managed_gc_can_later_remove_primed_tree(tmp_path, monkeypatch, _worker_seed):
+@pytest.mark.parametrize("interface", ["cli", "acp", None])
+def test_managed_gc_can_later_remove_primed_tree(
+    tmp_path, monkeypatch, _worker_seed, interface,
+):
     repo, record_path, worktree = _worker(tmp_path, monkeypatch, _worker_seed)
+    record = tracking.load_record(record_path)
+    record.interface = interface
+    tracking.save_record(record, record_path)
     _conclude(record_path, repo)
     config = cli.cfg.Config(
         srcroot=str(tmp_path), machine="host", platform="linux", repo_name="demo",

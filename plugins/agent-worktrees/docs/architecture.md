@@ -888,7 +888,7 @@ token through `bind-session`; `link-succession` remains the explicit form for a
 caller that already holds both ids.
 
 **Safe terminal worker interface — `conclude-disposable`.** A higher layer that
-explicitly owns a disposable CLI worker class can conclude the exact recorded
+explicitly owns a disposable worker class can conclude the exact recorded
 allocation and optionally request exact-id managed teardown:
 
 ```bash
@@ -901,8 +901,11 @@ agent-worktrees conclude-disposable \
     --json
 ```
 
-The command accepts only an exact worktree id and the explicit
-`disposable-cli` policy. It first preserves any live mux or bound Copilot
+The command accepts only an exact worktree id and an explicit policy.
+`disposable-cli` retains its historical wire spelling but is interface-neutral:
+CLI/ACP metadata neither grants nor vetoes conclusion. The distinct
+`dispatch-attempt` policy requires exact allocation provenance. The operation
+first preserves any live mux or bound Copilot
 session. Once the worker is gone, it requires the supplied session to match the
 worktree's asserted lifecycle head when one exists. Preservation gates run
 before that exact session is concluded, so a skipped worktree remains fully
@@ -919,7 +922,9 @@ unknown repository is held. If the checkout directory is
 already absent, any surviving local branch is still compared with its configured
 upstream and preserved when it contains unique commits.
 
-A successful conclusion converts the record to a managed, final CLI worker.
+A successful conclusion converts the record to a managed, final worker while
+preserving its effective interface. An unstamped legacy record retains its
+previously derived interface through an explicit stamp before its kind changes.
 Without `--remove`, it returns for a later managed-GC pass. With `--remove`, it
 invokes that same managed-worktree sweep for only the exact id with zero idle
 grace. The sweep independently re-checks final/unused state, live

@@ -187,6 +187,18 @@ capability leaves the worktree in place with a visible reason.
 
 ## Journal
 
+### 2026-10-27 - Interface-neutral terminal conclusion
+
+- Reviewed the bounded [contract](interface-neutral-conclusion.md) in #9305
+  before implementation.
+- Corrected the existing ground operation rather than adding a Stop RPC or
+  alternate cleanup policy. CLI/ACP remains descriptive metadata.
+- Qualified existing Bridge-owned terminal shutdown, Dispatch's exact identity
+  checkpoint and stop-before-conclude ordering, and interface-neutral ground
+  conclusion/removal with independent preservation gates.
+- Source publication, historical adoption and operational activation remain
+  distinct; this slice does not close the broader effort.
+
 ### 2026-08-31 — Kickoff
 - Captured the allocator-owns-reclamation boundary in the agent-dispatch vision.
 - Opened #1488 as the public coordination token.
