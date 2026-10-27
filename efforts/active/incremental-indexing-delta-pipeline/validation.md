@@ -106,6 +106,26 @@ includes metadata and queue traffic, not a physical-disk or whole-CPU claim.
 Focused queue controls separately require a processing exact-source or
 all-source full task to preserve the same 100-delivery trailing hint union.
 
+The native cluster-enabled engine control uses a separately bounded invocation:
+
+```bash
+python tools/run-plugin-tests.py agent-index --allow-explicit-tiers \
+  --test-file tests/test_native_cluster_matrix.py
+```
+
+Its participating two-model store contains two selected items and
+100/10,000/100,000 unrelated items. A known identical-vector large component is
+constructed directly outside measurement; this deliberately excludes the
+global quadratic full-seed algorithm. Ordinary engine no-op, text edit,
+metadata edit, replay and deletion run with the existing two-row slice budget.
+The test forbids global representation reads and whole-artifact replacement,
+requires only the changed bucket's complete one/two-item input, bounds SQLite
+steps and native rows/read I/Os, and compares selected membership/scores against
+a clean small full recomputation. Every unrelated cluster/member row and
+canonical/vector sentinel remains unchanged. Stage counts match across sizes;
+process read/write growth stays below 2 MiB/512 KiB. No-op/replay uses current
+coverage with zero embedding, row writes or cluster/FTS passes.
+
 Qualify both a standalone single-model engine and a generic injected two-model
 consumer. A downstream adopts only a reviewed/published compatible engine
 revision, records its consumed provenance, and repeats the same count assertions

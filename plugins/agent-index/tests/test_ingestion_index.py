@@ -10,8 +10,9 @@ import pytest
 
 from agent_index.chunking.base import Chunk
 from agent_index.index_config import IndexConfig, ModelProfile
-from agent_index.store.ingestion_index import prepare_ingestion_indices
+from agent_index.store.ingestion_index import consolidate_ingestion_indices, prepare_ingestion_indices
 from agent_index.store.scalar_index import ScalarIndexPreparationRequired, inspect_index
+from agent_index.store.source_bucket_index import prepare_source_index
 from agent_index.store.source_layout import LAYOUT, initialize_source_store
 
 pytestmark = [pytest.mark.portfolio_tier("T3"), pytest.mark.effect("filesystem")]
@@ -44,6 +45,33 @@ def test_empty_preparation_and_finite_tail_preserve_logical_generation(store) ->
         for column in columns:
             state, _ = inspect_index(owner._get_or_create_table(), column=column)
             assert state.prepared and state.physical_unindexed_rows == 0
+    state, _ = inspect_index(store.content_store._get_or_create_table(), column="source")
+    assert not state.prepared
+
+
+def test_explicit_source_index_shares_finite_tail_and_consolidation_owner(store) -> None:
+    prepare_ingestion_indices(store, max_rows=0)
+    prepare_source_index(store.content_store, max_rows=0)
+    for iteration in range(2):
+        chunk = Chunk(
+            f"Useful content {iteration}.", f"{iteration}.md", "text", "markdown", 1, 1, "sample:repo",
+        )
+        store.upsert_content([chunk])
+        before = store.projection_snapshot()
+        prepare_ingestion_indices(store, max_rows=1)
+        assert store.projection_snapshot() == before
+        state, _ = inspect_index(store.content_store._get_or_create_table(), column="source")
+        assert state.prepared and state.physical_unindexed_rows == 0
+    assert state.segments == 2
+    before = store._source_domain.receipt()
+    with pytest.raises(ScalarIndexPreparationRequired, match="consolidation budget"):
+        consolidate_ingestion_indices(store, max_rows=1)
+    assert store._source_domain.receipt() == before
+    snapshot = store.projection_snapshot()
+    consolidate_ingestion_indices(store, max_rows=2)
+    assert store.projection_snapshot() == snapshot
+    state, _ = inspect_index(store.content_store._get_or_create_table(), column="source")
+    assert state.prepared and state.physical_unindexed_rows == 0 and state.segments == 1
 
 
 def test_unprepared_nonempty_store_refuses_before_changing_any_index(store) -> None:
@@ -56,16 +84,20 @@ def test_unprepared_nonempty_store_refuses_before_changing_any_index(store) -> N
     assert not store.content_store._get_or_create_table().list_indices()
 
 
-def test_segment_refusal_preflights_every_table_without_writes(store, monkeypatch) -> None:
+@pytest.mark.parametrize("index_at_limit", ["vector", "source"])
+def test_segment_refusal_preflights_every_table_without_writes(store, monkeypatch, index_at_limit) -> None:
     from agent_index.store import ingestion_index
 
     prepare_ingestion_indices(store, max_rows=0)
+    if index_at_limit == "source":
+        prepare_source_index(store.content_store, max_rows=0)
     before = store._source_domain.receipt()
     original = ingestion_index.inspect_index
 
     def at_limit(table, *, column):
         state, dataset = original(table, column=column)
-        if table.name == store.get_vector_table("b")._table_name:
+        if ((index_at_limit == "vector" and table.name == store.get_vector_table("b")._table_name)
+                or (index_at_limit == "source" and column == "source")):
             state = replace(state, segments=ingestion_index.MAX_SEGMENTS)
         return state, dataset
 

@@ -1,4 +1,4 @@
-"""Point/file index upkeep within the existing source publication owner."""
+"""Point/file and already-prepared bucket upkeep under the source publication owner."""
 
 from __future__ import annotations
 
@@ -24,6 +24,11 @@ def _owners(store: MultiModelStore) -> list[tuple[ContentStore | VectorTable, st
     owners: list[tuple[ContentStore | VectorTable, str]] = [
         (store.content_store, "chunk_id"), (store.content_store, "file_path"),
     ]
+    source_state, _ = inspect_index(
+        store.content_store._get_or_create_table(), column="source",
+    )
+    if source_state.prepared:
+        owners.append((store.content_store, "source"))
     owners.extend((store.get_vector_table(model), "chunk_id") for model in store.model_ids)
     return owners
 
