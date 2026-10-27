@@ -104,7 +104,12 @@ the gate. If its source pointer or retained gate is unavailable, it refuses
 rather than running that cell as legacy. A healthy known-legacy runtime can
 still use its co-deployed readiness resolver; cold provisioning and
 explicit-context fallback refuse.
-On POSIX systems without `flock`, stale PID-link recovery serializes reapers
+The POSIX installer's whole-action gate uses native `flock` or an existing
+Python's `fcntl.flock` on the same persistent install-lock descriptor, including
+legacy removal. Missing both refuses without provisioning. Old install PID or
+reaper receipts are retained and require explicit settlement, never automatic
+reclamation by the new gate.
+First-use provisioning's separate stale PID-link recovery serializes reapers
 and only cleans up its own mutex. An unknown/abandoned reaper mutex is not
 deleted: after 30 one-second retries the command refuses with exit 126 and an
 explicit repair diagnostic. Live provisioning owners retain their separate wait.

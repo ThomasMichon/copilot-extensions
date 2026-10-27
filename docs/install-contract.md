@@ -2332,9 +2332,20 @@ reconcile, `update`, a session-start bootstrap, and a binstub's first-use
 lock on `<install-dir>/.install.lock` for every mutating action
 (`stamp`/`install`/`update`/`provision`, plus `uninstall` where provided) across its whole
 build + publish transaction (Windows: a `FileShare.None` handle; POSIX: `flock` on
-fd 8 (fd 7 for `agent-ssh`), or a PID-bearing fallback entry
-`<install-dir>/.install.lock.pid` where `flock` is unavailable). In the matching
-agent-vault, agent-mcp, agent-containers and agent-ssh fallback blocks, every
+fd 8 (fd 7 for `agent-ssh`), or the product's fallback below).
+Machines and Containers share their persistent fd-8 transaction gate between
+publishers and legacy removal. Native `flock` and an existing Python's
+`fcntl.flock` acquire the same open file description, never an independent PID
+lock. The parent retains custody after the finite Python acquisition returns;
+closing the final inherited descriptor releases custody without replacing or
+truncating the inode. Neither capability means explicit refusal without
+provisioning. Historical `.install.lock.pid` and `.install.lock.pid.reap`
+receipts refuse unchanged until explicitly settled; their presence does not
+authorize stale-owner deletion.
+
+The PID-bearing fallback entry `<install-dir>/.install.lock.pid` remains for
+other adopters without `flock`. In the matching
+agent-vault, agent-mcp and agent-ssh fallback blocks, every
 acquisition and stale-owner cleanup holds the short, PID-bearing
 `.install.lock.pid.reap` admission mutex. The owner is read and checked while
 that mutex is held, and a confirmed stale link is removed and replaced before
@@ -2344,7 +2355,7 @@ This prevents a delayed reaper from removing a newly admitted live owner.
 A `.reap` link left by a process that died during admission is deliberately
 never reclaimed automatically, even when the main PID link is absent: runs
 fail closed at their deadline until the stale mutex is explicitly repaired.
-The four matching fallback bodies retain one identical protocol. Creation uses
+The three matching fallback bodies retain one identical protocol. Creation uses
 the POSIX `link` utility with a privately staged regular receipt, never bare
 `ln -s` at either shared lock pathname. `link` calls `link(2)` for the exact
 destination: an existing directory or directory symlink fails rather than
@@ -2482,6 +2493,8 @@ checks and enumerate all available PATH candidates. An activated removable
 venv, broken first executable or physical alias cannot hide a later eligible
 external interpreter. Windows legacy adapters enumerate installed launcher
 targets without asking the launcher to provision one.
+Windows finite selectors require Python 3.10+ and treat a candidate launch
+failure as rejection of that candidate, not an abort of the remaining search.
 
 CodeSpaces' native POSIX whole-action transaction can use an existing `flock`
 capability on the same persistent install inode without Python, including cold

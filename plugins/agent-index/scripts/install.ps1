@@ -78,28 +78,72 @@ function Copy-InstallerStageDirectory {
 # === end install-contract:v4 payload-copy ===
 . (Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer-engine.ps1')
 
+function Get-FiniteUninstallPython {
+    param([Parameter(Mandatory)][string]$InstallRoot)
+    $probe = @'
+import sys
+assert sys.version_info >= (3, 10)
+from pathlib import Path
+root = Path(sys.argv[1]).absolute()
+assert ".." not in root.parts
+roots = (root, root.resolve())
+paths = (sys.argv[2], sys.executable, sys.prefix, sys.base_prefix,
+         getattr(sys, "_base_executable", sys.executable))
+for value in paths:
+    path = Path(value).absolute()
+    for actual in (path, path.resolve(strict=True)):
+        assert all(not actual.is_relative_to(boundary) for boundary in roots)
+print(Path(sys.executable).resolve(strict=True))
+'@
+    $candidates = @()
+    foreach ($name in @('python3', 'python')) {
+        $candidates += @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue |
+            Where-Object { $_.Source -notmatch 'WindowsApps' } | ForEach-Object { $_.Source })
+    }
+    foreach ($launcher in @(Get-Command py -All -CommandType Application -ErrorAction SilentlyContinue |
+            Where-Object { $_.Source -notmatch 'WindowsApps' })) {
+        try {
+            $nativeError = ''
+            $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError)
+            if ($LASTEXITCODE -eq 0) {
+                foreach ($match in [regex]::Matches("$listed", '(?m)([A-Za-z]:[\\/].*python(?:[0-9.]*)?\.exe)"?\s*$')) {
+                    $candidates += $match.Groups[1].Value
+                }
+            }
+        } catch { }
+    }
+    foreach ($candidate in @($candidates | Select-Object -Unique)) {
+        try {
+            $nativeError = ''
+            $selected = Invoke-Hidden -FilePath $candidate -ArgList @(
+                '-I', '-B', '-c', $probe, $InstallRoot, $candidate
+            ) -ErrorOutput ([ref]$nativeError)
+            if ($LASTEXITCODE -eq 0 -and $selected -and [IO.File]::Exists($selected.Trim())) {
+                return $selected.Trim()
+            }
+        } catch { }
+    }
+    return $null
+}
+
 function Invoke-IndexFiniteUninstall {
     param([string]$Root, [string]$Mode)
-    $python = $null
-    foreach ($name in @('python3', 'python')) {
-        foreach ($command in @(Get-Command $name -CommandType Application -All -ErrorAction SilentlyContinue)) {
-            if ($command.Source -match '[\\/]WindowsApps[\\/]') { continue }
-            if (-not $command.Source.StartsWith(
-                $Root.TrimEnd('/\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
-                $python = $command.Source
-                break
-            }
-        }
-        if ($python) { break }
-    }
-    if (-not $python) { throw 'Index uninstall requires an external metadata Python' }
+    # This admission also runs before the installer's normal native-helper import.
+    . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+    $python = Get-FiniteUninstallPython -InstallRoot $Root
+    if (-not $python) { throw 'Index uninstall requires an existing external Python 3.10+ outside runtime and prefix closure' }
     $helper = Join-Path $PSScriptRoot 'installer_engine_uninstall.py'
     if (-not (Test-Path -LiteralPath $helper -PathType Leaf)) {
         $helper = Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer_engine_uninstall.py'
     }
-    & $python -I -B $helper --payload-root (Split-Path $PSScriptRoot) --plugin-id agent-index `
-        --root $Root --shell (Get-Process -Id $PID).Path $Mode
-    if ($LASTEXITCODE -ne 0) { throw 'Index finite runtime uninstall refused' }
+    $nativeError = ''
+    $output = Invoke-Hidden -FilePath $python -ArgList @(
+        '-I', '-B', $helper, '--payload-root', (Split-Path $PSScriptRoot),
+        '--plugin-id', 'agent-index', '--root', $Root,
+        '--shell', (Get-Process -Id $PID).Path, $Mode
+    ) -ErrorOutput ([ref]$nativeError)
+    if ($LASTEXITCODE -ne 0) { throw "Index finite runtime uninstall refused: $nativeError" }
+    if ($output) { Write-Host $output.Trim() }
 }
 
 if ($InstallDir) {

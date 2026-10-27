@@ -38,6 +38,16 @@ refuse before any cleanup and retain every recovery/state byte.
 Its Dispatch/Index packaged-removal controls run the materialized finite
 entrypoint with no repository library tree, including actual POSIX runtime
 deletion and preservation of configuration, unknown state and the lock inode.
+`tools/test_legacy_transaction_interop.py` verifies Machines/Containers
+publisher and removal admission against opposite native/Python lock backends,
+retained legacy receipts and release on failure/EOF. Its real Linux kernel
+controls also run under actual Bash 3.2 when that shell is selected on PATH.
+The Windows `tests/native_uninstall/test_windows_uninstall_candidates.py`
+packet covers actual broken-PE launches, later candidates, physical/base
+closure, actual finite invokers and retained state on PowerShell 5/7.
+Run its candidate/cleanup and invoker/base-closure partitions separately for
+bounded execution. Its unsupported-version fixture verifies isolated-venv
+`sitecustomize` version reporting; it is not Python 3.8 interoperability proof.
 `tools/test_budget_packaged_installer.py` additionally starts the actual
 materialized standalone Budget status entrypoints without a repository library
 tree; this detects a packaged caller that still sources repository-only helpers.

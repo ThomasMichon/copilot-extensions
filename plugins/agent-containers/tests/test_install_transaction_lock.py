@@ -38,7 +38,10 @@ def _text(path: Path) -> str:
 def _block(path: Path) -> str:
     text = _text(path)
     start = text.index(LOCK_START)
-    return text[start : text.index(LOCK_END, start) + len(LOCK_END)]
+    block = text[start : text.index(LOCK_END, start) + len(LOCK_END)]
+    if path.suffix == ".sh" and '. "$SCRIPT_DIR/legacy-transaction.sh"' in block:
+        return _text(path.with_name("legacy-transaction.sh"))
+    return block
 
 
 def _ps_cleanup() -> str:
@@ -78,7 +81,9 @@ def _isolated_env(home: Path) -> dict[str, str]:
 def test_lock_is_acquired_after_self_stage_and_before_first_mutation(script: Path) -> None:
     text = _text(script)
     first_mutation = PS_FIRST_MUTATION if script.suffix == ".ps1" else SH_FIRST_MUTATION
-    acquire = "(Enter-InstallLock)" if script.suffix == ".ps1" else "if ! _enter_install_lock; then"
+    acquire = (
+        "(Enter-InstallLock)" if script.suffix == ".ps1" else "if ! _enter_install_lock; then"
+    )
 
     assert text.count(LOCK_START) == 1
     assert text.index(SELF_STAGE_END) < text.index(SMOKE_END) < text.index(acquire)
@@ -264,16 +269,19 @@ def _run_sh_block(
         "set -euo pipefail\n_fail() { printf 'FAIL:%s\\n' \"$1\"; }\n"
         f"INSTALL_DIR='{install_dir}'\n" + _block(SH_SCRIPT) + "\n" + body
     )
-    return subprocess.run(
+    result = subprocess.run(
         [bash, "-c", script], capture_output=True, text=True, timeout=60,
         env=env if env is not None else dict(os.environ),
     )
+    assert "command not found" not in result.stderr, result.stderr
+    return result
 
 
 def _flock_holder(bash: str, lock: Path) -> subprocess.Popen[str]:
     holder = subprocess.Popen(
-        [bash, "-c", 'exec 8>"$1"; flock 8; echo held; sleep 60', "_", str(lock)],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+        [bash, "-c", 'exec 8>>"$1"; flock 8; echo held; IFS= read -r release || :',
+         "_", str(lock)],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
     )
     assert holder.stdout is not None
     assert holder.stdout.readline().strip() == "held"
@@ -284,12 +292,18 @@ def test_posix_flock_acquires_releases_and_reacquires(tmp_path: Path) -> None:
     bash = _posix_bash()
     if bash is None or shutil.which("flock") is None:
         pytest.skip("POSIX bash with flock not available")
+    install_dir = tmp_path / "rt"
+    install_dir.mkdir()
+    lock = install_dir / ".install.lock"
+    lock.write_bytes(b"persistent contents")
+    before = lock.stat().st_ino, lock.read_bytes()
     result = _run_sh_block(
-        bash, tmp_path / "rt",
+        bash, install_dir,
         "_enter_install_lock 1 && _exit_install_lock && _enter_install_lock 1 && echo ok",
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "ok"
+    assert (lock.stat().st_ino, lock.read_bytes()) == before
 
 
 def test_posix_flock_times_out_while_held(tmp_path: Path) -> None:
@@ -301,15 +315,16 @@ def test_posix_flock_times_out_while_held(tmp_path: Path) -> None:
     holder = _flock_holder(bash, install_dir / ".install.lock")
     try:
         result = _run_sh_block(
-            bash, install_dir, "if _enter_install_lock 1; then echo acquired; else echo refused; fi"
+            bash, install_dir,
+            "if _enter_install_lock 1; then echo acquired; else echo refused; fi",
         )
     finally:
-        holder.kill()
-        holder.wait()
+        holder.communicate("\n", timeout=5)
+        assert holder.returncode == 0
     assert result.stdout.strip() == "refused", result.stderr
 
 
-def test_posix_pid_fallback_waits_for_live_owner_and_reaps_dead_one(tmp_path: Path) -> None:
+def test_posix_legacy_symlink_preserves_live_and_dead_claims(tmp_path: Path) -> None:
     bash = _posix_bash()
     if bash is None:
         pytest.skip("POSIX bash not available")
@@ -321,6 +336,7 @@ def test_posix_pid_fallback_waits_for_live_owner_and_reaps_dead_one(tmp_path: Pa
 
     os.symlink(str(os.getpid()), link)
     live = _run_sh_block(bash, install_dir, probe, env=env)
+    assert live.returncode == 0, live.stderr
     assert live.stdout.strip() == "refused", live.stderr
     assert os.readlink(link) == str(os.getpid())
 
@@ -328,8 +344,11 @@ def test_posix_pid_fallback_waits_for_live_owner_and_reaps_dead_one(tmp_path: Pa
     dead.wait()
     link.unlink()
     os.symlink(str(dead.pid), link)
-    reaped = _run_sh_block(bash, install_dir, probe, env=env)
-    assert reaped.stdout.strip() == "acquired", reaped.stderr
+    refused = _run_sh_block(bash, install_dir, probe, env=env)
+    assert refused.returncode == 0, refused.stderr
+    assert refused.stdout.strip() == "refused", refused.stderr
+    assert os.readlink(link) == str(dead.pid)
+    assert sorted(path.name for path in install_dir.iterdir()) == [link.name]
 
 
 def test_posix_installer_fails_closed_without_mutating(tmp_path: Path) -> None:
@@ -348,8 +367,8 @@ def test_posix_installer_fails_closed_without_mutating(tmp_path: Path) -> None:
             cwd=tmp_path,
         )
     finally:
-        holder.kill()
-        holder.wait()
+        holder.communicate("\n", timeout=5)
+        assert holder.returncode == 0
     output = result.stdout + result.stderr
     assert result.returncode != 0, output
     assert LOCK_FAILURE in output
@@ -381,11 +400,13 @@ def _wait_fixture(path: Path, processes: list[subprocess.Popen[str]]) -> None:
     deadline = time.monotonic() + 8
     while not path.exists():
         assert time.monotonic() < deadline, f"fixture phase not reached: {path.name}"
-        assert all(proc.poll() is None for proc in processes), "fixture child exited before synchronization"
+        assert all(proc.poll() is None for proc in processes), (
+            "fixture child exited before synchronization"
+        )
         time.sleep(0.005)
 
 
-def test_posix_pid_fallback_empty_owner_interval_never_overlaps(tmp_path: Path) -> None:
+def test_posix_python_fd_waiter_rechecks_legacy_receipt_after_acquisition(tmp_path: Path) -> None:
     bash = _posix_bash()
     if bash is None:
         pytest.skip("POSIX bash not available")
@@ -395,29 +416,15 @@ def test_posix_pid_fallback_empty_owner_interval_never_overlaps(tmp_path: Path) 
         "set -euo pipefail\n_fail() { printf 'FAIL:%s\\n' \"$1\"; }\n"
         f"INSTALL_DIR='{install_dir}'\n" + _block(SH_SCRIPT) + "\n"
     )
-    # Schedule real owner reads; retain the legacy shim for pre-repair reproduction.
     shim = """
-_fixture_owner_probe() {
-    local count=0 value
-    [[ ! -f "$FIXTURE/count" ]] || count=$(cat "$FIXTURE/count")
-    count=$((count + 1)); echo "$count" > "$FIXTURE/count"
-    if [[ "$count" == 1 ]]; then
-        touch "$FIXTURE/first-read"
-        while [[ ! -f "$FIXTURE/resume-first" ]]; do sleep 0.005; done
-    fi
-    value=$("$@" 2>/dev/null || true)
-    if [[ "$count" == 2 && -z "$value" ]]; then
-        touch "$FIXTURE/empty-comparison"
-        while [[ ! -f "$FIXTURE/resume-comparison" ]]; do sleep 0.005; done
-    fi
-    printf '%s\\n' "$value"
+eval "$(
+    declare -f _python_install_fd_lock |
+        sed '1s/_python_install_fd_lock/_fixture_fd_lock/'
+)"
+_python_install_fd_lock() {
+    touch "$FIXTURE/waiting"
+    _fixture_fd_lock "$@"
 }
-if declare -F _read_install_lock_owner >/dev/null; then
-    eval "$(declare -f _read_install_lock_owner | sed '1s/_read_install_lock_owner/_fixture_original_owner/')"
-    _read_install_lock_owner() { _fixture_owner_probe _fixture_original_owner "$@"; }
-else
-    readlink() { _fixture_owner_probe command readlink "$@"; }
-fi
 """
     env = {**_isolated_env(tmp_path), "COPILOT_EXT_NO_FLOCK": "1", "FIXTURE": str(tmp_path)}
     processes: list[subprocess.Popen[str]] = []
@@ -425,56 +432,40 @@ fi
     def spawn(body: str, instrument: bool = False) -> subprocess.Popen[str]:
         proc = subprocess.Popen(
             [bash, "-c", prefix + (shim if instrument else "") + body],
-            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True,
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, start_new_session=True,
         )
         processes.append(proc)
         return proc
 
-    def transaction(label: str) -> str:
-        return (
-            "_enter_install_lock 10 || exit 3\n"
-            f'echo start >> "$FIXTURE/log"; touch "$FIXTURE/{label}-entered"\n'
-            f'while [[ ! -f "$FIXTURE/release-{label}" ]]; do sleep 0.005; done\n'
-            'echo end >> "$FIXTURE/log"\n_exit_install_lock\n'
-        )
-
     try:
         original = spawn(
             '_enter_install_lock 10 || exit 3\ntouch "$FIXTURE/original-entered"\n'
-            'while [[ ! -f "$FIXTURE/release-original" ]]; do sleep 0.005; done\n_exit_install_lock\n'
+            'while [[ ! -f "$FIXTURE/release-original" ]]; do sleep 0.005; done\n'
+            '_exit_install_lock\n'
         )
         _wait_fixture(tmp_path / "original-entered", [original])
-        checker = spawn(transaction("checker"), instrument=True)
-        _wait_fixture(tmp_path / "first-read", [original, checker])
+        lock = install_dir / ".install.lock"
+        before = lock.stat().st_ino, lock.read_bytes()
+        checker = spawn(
+            'if _enter_install_lock 10; then echo entered; _exit_install_lock; exit 9; fi\n'
+            '[[ ! -e /dev/fd/8 ]] || exit 8\necho refused\n', instrument=True,
+        )
+        _wait_fixture(tmp_path / "waiting", [original, checker])
+        receipt = install_dir / ".install.lock.pid"
+        receipt.write_bytes(b"unverified claimant appeared while waiting\n")
+        identity = receipt.stat().st_ino, receipt.read_bytes()
         (tmp_path / "release-original").touch()
         out, err = original.communicate(timeout=8)
         assert original.returncode == 0, out + err
-        (tmp_path / "resume-first").touch()
-        deadline = time.monotonic() + 8
-        while not any((tmp_path / name).exists() for name in ("empty-comparison", "checker-entered")):
-            assert time.monotonic() < deadline
-            assert checker.poll() is None
-            time.sleep(0.005)
-        contender = spawn(transaction("contender"))
-        if (tmp_path / "empty-comparison").exists():
-            # The old code lets this holder enter while its empty comparison is paused.
-            _wait_fixture(tmp_path / "contender-entered", [checker, contender])
-            (tmp_path / "resume-comparison").touch()
-        _wait_fixture(tmp_path / "checker-entered", [checker])
-        (tmp_path / "release-checker").touch()
         out, err = checker.communicate(timeout=8)
         assert checker.returncode == 0, out + err
-        _wait_fixture(tmp_path / "contender-entered", [contender])
-        (tmp_path / "release-contender").touch()
-        out, err = contender.communicate(timeout=8)
-        assert contender.returncode == 0, out + err
-        assert (tmp_path / "log").read_text().split() == ["start", "end"] * 2
-        assert not os.path.lexists(install_dir / ".install.lock.pid")
+        assert out.strip() == "refused"
+        assert (receipt.stat().st_ino, receipt.read_bytes()) == identity
+        assert (lock.stat().st_ino, lock.read_bytes()) == before
         assert not os.path.lexists(install_dir / ".install.lock.pid.reap")
     finally:
-        for name in ("release-original", "resume-first", "resume-comparison",
-                     "release-checker", "release-contender"):
-            (tmp_path / name).touch()
+        (tmp_path / "release-original").touch()
         for proc in processes:
             if proc.poll() is None:
                 os.killpg(proc.pid, 9)
@@ -483,7 +474,7 @@ fi
 
 @pytest.mark.parametrize("leaf", [".install.lock.pid", ".install.lock.pid.reap"])
 @pytest.mark.parametrize("shape", ["directory", "directory-symlink", "numeric-directory-symlink"])
-def test_posix_pid_fallback_directory_nodes_never_admit_or_mutate(
+def test_posix_legacy_directory_nodes_never_admit_or_mutate(
     tmp_path: Path, leaf: str, shape: str,
 ) -> None:
     bash = _posix_bash()
@@ -548,7 +539,9 @@ def test_posix_pid_fallback_directory_nodes_never_admit_or_mutate(
 
 
 @pytest.mark.parametrize("leaf", [".install.lock.pid", ".install.lock.pid.reap"])
-def test_posix_pid_fallback_creation_race_does_not_follow_new_directory(tmp_path: Path, leaf: str) -> None:
+def test_posix_fd_post_acquisition_check_refuses_new_legacy_directory(
+    tmp_path: Path, leaf: str,
+) -> None:
     bash = _posix_bash()
     if bash is None:
         pytest.skip("POSIX bash not available")
@@ -557,18 +550,24 @@ def test_posix_pid_fallback_creation_race_does_not_follow_new_directory(tmp_path
     node = install_dir / leaf
     injected = tmp_path / "injected"
     shim = f"""
-_inject_directory() {{
-    if [[ "$1" == "{node}" && ! -f "{injected}" ]]; then
+eval "$(
+    declare -f _legacy_install_receipts_clear |
+        sed '1s/_legacy_install_receipts_clear/_fixture_clear/'
+)"
+_fixture_checks=0
+_legacy_install_receipts_clear() {{
+    _fixture_checks=$((_fixture_checks + 1))
+    if [[ "$_fixture_checks" == 2 ]]; then
         mkdir "{node}"
         echo unchanged > "{node}/sentinel"
         touch "{injected}"
     fi
+    _fixture_clear
 }}
-ln() {{ _inject_directory "${{@: -1}}"; command ln "$@"; }}
-link() {{ _inject_directory "${{@: -1}}"; command link "$@"; }}
 """
     result = _run_sh_block(
-        bash, install_dir, shim + "\nif _enter_install_lock 1; then echo entered; else echo refused; fi",
+        bash, install_dir,
+        shim + "\nif _enter_install_lock 1; then echo entered; else echo refused; fi",
         env={**os.environ, "COPILOT_EXT_NO_FLOCK": "1"},
     )
     assert result.returncode == 0, result.stderr
@@ -577,12 +576,15 @@ link() {{ _inject_directory "${{@: -1}}"; command link "$@"; }}
     assert node.is_dir() and not node.is_symlink()
     assert sorted(path.name for path in node.iterdir()) == ["sentinel"]
     assert (node / "sentinel").read_text().strip() == "unchanged"
+    assert sorted(path.name for path in install_dir.iterdir()) == [".install.lock", leaf]
 
 
-@pytest.mark.parametrize("record", ["", "123\n", "copilot-extensions.install-lock-pid:v1:not-a-pid\n",
-                                    "copilot-extensions.install-lock-pid:v1:123\nextra\n",
-                                    "copilot-extensions.install-lock-pid:v1:" + "1" * 100 + "\n"])
-def test_posix_pid_fallback_record_reader_refuses_unknown_content(tmp_path: Path, record: str) -> None:
+@pytest.mark.parametrize("record", [
+    "", "123\n", "copilot-extensions.install-lock-pid:v1:not-a-pid\n",
+    "copilot-extensions.install-lock-pid:v1:123\nextra\n",
+    "copilot-extensions.install-lock-pid:v1:" + "1" * 100 + "\n",
+])
+def test_posix_legacy_unknown_record_refuses_admission(tmp_path: Path, record: str) -> None:
     bash = _posix_bash()
     if bash is None:
         pytest.skip("POSIX bash not available")
@@ -592,7 +594,7 @@ def test_posix_pid_fallback_record_reader_refuses_unknown_content(tmp_path: Path
     path.write_text(record)
     result = _run_sh_block(
         bash, install_dir,
-        f'if _read_install_lock_owner "{path}"; then echo trusted; else echo refused; fi',
+        'if _enter_install_lock 1; then echo entered; _exit_install_lock; else echo refused; fi',
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "refused"
@@ -605,7 +607,7 @@ def test_posix_pid_fallback_record_reader_refuses_unknown_content(tmp_path: Path
     "trailing-newline", "trailing-newlines", "trailing-cr", "trailing-crlf",
     "internal-newline", "internal-cr", "leading-newline", "leading-cr",
 ])
-def test_posix_pid_fallback_legacy_target_never_admits_or_mutates(
+def test_posix_legacy_malformed_symlink_never_admits_or_mutates(
     tmp_path: Path, leaf: str, shape: str,
 ) -> None:
     bash = _posix_bash()
@@ -626,19 +628,18 @@ def test_posix_pid_fallback_legacy_target_never_admits_or_mutates(
     identity = path.lstat()
     result = _run_sh_block(
         bash, install_dir,
-        f'if _read_install_lock_owner "{path}"; then echo trusted; else echo untrusted; fi\n'
         "if _enter_install_lock 1; then echo entered; _exit_install_lock; else echo refused; fi",
         env={**_isolated_env(tmp_path), "COPILOT_EXT_NO_FLOCK": "1"},
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines() == ["untrusted", "refused"]
+    assert result.stdout.splitlines() == ["refused"]
     assert os.readlink(path) == target
     assert (path.lstat().st_dev, path.lstat().st_ino) == (identity.st_dev, identity.st_ino)
     assert sorted(node.name for node in install_dir.iterdir()) == [leaf]
 
 
 @pytest.mark.parametrize("suffix", [r"\n", r"\n\n", r"\r", r"\r\n"])
-def test_posix_pid_fallback_legacy_target_never_authorizes_exit_cleanup(
+def test_posix_fd_exit_preserves_legacy_malformed_symlink(
     tmp_path: Path, suffix: str,
 ) -> None:
     bash = _posix_bash()
@@ -649,18 +650,20 @@ def test_posix_pid_fallback_legacy_target_never_authorizes_exit_cleanup(
     result = _run_sh_block(
         bash, install_dir,
         "_enter_install_lock 5 || exit 3\n"
-        f'rm -f "{path}"; ln -s "$$"$\'{suffix}\' "{path}"\n'
+        f'ln -s "$$"$\'{suffix}\' "{path}"\n'
         '_exit_install_lock\necho "$$"',
         env={**_isolated_env(tmp_path), "COPILOT_EXT_NO_FLOCK": "1"},
     )
     assert result.returncode == 0, result.stderr
-    assert os.readlink(path) == result.stdout.strip() + suffix.encode("ascii").decode("unicode_escape")
-    assert sorted(node.name for node in install_dir.iterdir()) == [path.name]
+    assert os.readlink(path) == (
+        result.stdout.strip() + suffix.encode("ascii").decode("unicode_escape")
+    )
+    assert sorted(node.name for node in install_dir.iterdir()) == [".install.lock", path.name]
 
 
-@pytest.mark.parametrize(("digits", "trusted"), [(63, True), (64, False), (1024, False)])
-def test_posix_pid_fallback_legacy_target_reader_enforces_byte_bound(
-    tmp_path: Path, digits: int, trusted: bool,
+@pytest.mark.parametrize("digits", [63, 64, 1024])
+def test_posix_legacy_numeric_symlink_is_never_lock_authority(
+    tmp_path: Path, digits: int,
 ) -> None:
     bash = _posix_bash()
     if bash is None:
@@ -672,10 +675,11 @@ def test_posix_pid_fallback_legacy_target_reader_enforces_byte_bound(
     path.symlink_to(target)
     identity = path.lstat()
     result = _run_sh_block(
-        bash, install_dir, f'if ! _read_install_lock_owner "{path}"; then echo refused; fi',
+        bash, install_dir,
+        'if _enter_install_lock 1; then echo entered; _exit_install_lock; else echo refused; fi',
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == (target if trusted else "refused")
+    assert result.stdout.strip() == "refused"
     assert os.readlink(path) == target
     assert (path.lstat().st_dev, path.lstat().st_ino) == (identity.st_dev, identity.st_ino)
     assert sorted(node.name for node in install_dir.iterdir()) == [path.name]
@@ -684,7 +688,7 @@ def test_posix_pid_fallback_legacy_target_reader_enforces_byte_bound(
 @pytest.mark.parametrize(("ending", "status"), [
     ("", 0), (r"\n\n", 0), (r"\0\n", 0), (r"\n", 1),
 ])
-def test_posix_pid_fallback_legacy_reader_refuses_malformed_or_failed_utility_output(
+def test_posix_legacy_claim_never_relies_on_readlink_output(
     tmp_path: Path, ending: str, status: int,
 ) -> None:
     bash = _posix_bash()
@@ -698,13 +702,14 @@ def test_posix_pid_fallback_legacy_reader_refuses_malformed_or_failed_utility_ou
     identity = path.lstat()
     result = _run_sh_block(
         bash, install_dir,
-        f"readlink() {{ printf '%s{ending}' '{target}'; return {status}; }}\n"
-        f'if _read_install_lock_owner "{path}"; then echo trusted; else echo untrusted; fi\n'
+        f"readlink() {{ touch '{tmp_path / 'reader-called'}';\n"
+        f"printf '%s{ending}' '{target}'; return {status}; }}\n"
         "if _enter_install_lock 1; then echo entered; _exit_install_lock; else echo refused; fi",
         env={**_isolated_env(tmp_path), "COPILOT_EXT_NO_FLOCK": "1"},
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines() == ["untrusted", "refused"]
+    assert result.stdout.splitlines() == ["refused"]
+    assert not (tmp_path / "reader-called").exists()
     assert os.readlink(path) == target
     assert (path.lstat().st_dev, path.lstat().st_ino) == (identity.st_dev, identity.st_ino)
     assert sorted(node.name for node in install_dir.iterdir()) == [path.name]
@@ -714,7 +719,7 @@ def test_posix_pid_fallback_legacy_reader_refuses_malformed_or_failed_utility_ou
 @pytest.mark.parametrize("position", [
     "prefix-start", "prefix-body", "pid-start", "pid-body", "before-newline", "after-newline",
 ])
-def test_posix_pid_fallback_nul_record_never_admits_or_mutates(
+def test_posix_legacy_nul_record_never_admits_or_mutates(
     tmp_path: Path, leaf: str, position: str,
 ) -> None:
     bash = _posix_bash()
@@ -735,19 +740,18 @@ def test_posix_pid_fallback_nul_record_never_admits_or_mutates(
     identity = path.stat()
     result = _run_sh_block(
         bash, install_dir,
-        f'if _read_install_lock_owner "{path}"; then echo trusted; else echo untrusted; fi\n'
         "if _enter_install_lock 1; then echo entered; _exit_install_lock; else echo refused; fi",
         env={**_isolated_env(tmp_path), "COPILOT_EXT_NO_FLOCK": "1"},
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines() == ["untrusted", "refused"]
+    assert result.stdout.splitlines() == ["refused"]
     assert path.read_bytes() == record
     assert (path.stat().st_dev, path.stat().st_ino) == (identity.st_dev, identity.st_ino)
     assert sorted(node.name for node in install_dir.iterdir()) == [leaf]
 
 
 @pytest.mark.parametrize("after_newline", [False, True])
-def test_posix_pid_fallback_nul_record_never_authorizes_exit_cleanup(
+def test_posix_fd_exit_preserves_legacy_nul_record(
     tmp_path: Path, after_newline: bool,
 ) -> None:
     bash = _posix_bash()
@@ -768,11 +772,11 @@ def test_posix_pid_fallback_nul_record_never_authorizes_exit_cleanup(
         b"copilot-extensions.install-lock-pid:v1:" + result.stdout.strip().encode("ascii")
         + (b"\n\0" if after_newline else b"\0\n")
     )
-    assert sorted(node.name for node in install_dir.iterdir()) == [path.name]
+    assert sorted(node.name for node in install_dir.iterdir()) == [".install.lock", path.name]
 
 
 @pytest.mark.parametrize("live", [False, True])
-def test_posix_pid_fallback_typed_receipt_preserves_live_and_reaps_dead_owner(
+def test_posix_legacy_typed_receipt_preserves_live_and_dead_claimants(
     tmp_path: Path, live: bool,
 ) -> None:
     bash = _posix_bash()
@@ -790,19 +794,16 @@ def test_posix_pid_fallback_typed_receipt_preserves_live_and_reaps_dead_owner(
         env={**_isolated_env(tmp_path), "COPILOT_EXT_NO_FLOCK": "1"},
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == ("refused" if live else "entered")
-    if live:
-        assert path.read_bytes() == record
-    else:
-        assert not path.exists()
-    assert sorted(node.name for node in install_dir.iterdir()) == ([path.name] if live else [])
+    assert result.stdout.strip() == "refused"
+    assert path.read_bytes() == record
+    assert sorted(node.name for node in install_dir.iterdir()) == [path.name]
 
 
-@pytest.mark.parametrize(("size", "ending", "trusted"), [
-    (64, b"\n", True), (65, b"\n", False), (63, b"", False), (64, b"\n\n", False),
+@pytest.mark.parametrize(("size", "ending"), [
+    (64, b"\n"), (65, b"\n"), (63, b""), (64, b"\n\n"),
 ])
-def test_posix_pid_fallback_record_reader_enforces_byte_bound_and_newline(
-    tmp_path: Path, size: int, ending: bytes, trusted: bool,
+def test_posix_legacy_record_size_and_newline_never_authorize_admission(
+    tmp_path: Path, size: int, ending: bytes,
 ) -> None:
     bash = _posix_bash()
     if bash is None:
@@ -816,40 +817,46 @@ def test_posix_pid_fallback_record_reader_enforces_byte_bound_and_newline(
     path.write_bytes(record)
     result = _run_sh_block(
         bash, install_dir,
-        f'if ! _read_install_lock_owner "{path}"; then echo refused; fi',
+        'if _enter_install_lock 1; then echo entered; _exit_install_lock; else echo refused; fi',
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == (owner.decode("ascii") if trusted else "refused")
+    assert result.stdout.strip() == "refused"
     assert path.read_bytes() == record
     assert sorted(node.name for node in install_dir.iterdir()) == [path.name]
 
 
-def test_posix_pid_fallback_record_snapshot_refuses_raced_fifo_without_opening(tmp_path: Path) -> None:
+@pytest.mark.parametrize("leaf", [".install.lock.pid", ".install.lock.pid.reap"])
+def test_posix_fd_post_acquisition_check_refuses_fifo_without_opening(
+    tmp_path: Path, leaf: str,
+) -> None:
     bash = _posix_bash()
     if bash is None:
         pytest.skip("POSIX bash not available")
     install_dir = tmp_path / "rt"
     install_dir.mkdir()
-    path = install_dir / ".install.lock.pid"
+    path = install_dir / leaf
     body = f"""
-_create_install_lock_owner "{path}" || exit 3
-link() {{
-    if [[ "$1" == "{path}" ]]; then
-        command rm -f "{path}"
-        mkfifo "{path}"
-    fi
-    command link "$@"
+eval "$(
+    declare -f _python_install_fd_lock |
+        sed '1s/_python_install_fd_lock/_fixture_fd_lock/'
+)"
+_python_install_fd_lock() {{
+    mkfifo "{path}"
+    _fixture_fd_lock "$@"
 }}
-if _read_install_lock_owner "{path}"; then echo trusted; else echo refused; fi
+if _enter_install_lock 1; then echo entered; _exit_install_lock; else echo refused; fi
+[[ ! -e /dev/fd/8 ]] || exit 8
 """
-    result = _run_sh_block(bash, install_dir, body)
+    result = _run_sh_block(
+        bash, install_dir, body, env={**_isolated_env(tmp_path), "COPILOT_EXT_NO_FLOCK": "1"},
+    )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "refused"
     assert path.is_fifo()
-    assert sorted(path.name for path in install_dir.iterdir()) == [".install.lock.pid"]
+    assert sorted(path.name for path in install_dir.iterdir()) == [".install.lock", leaf]
 
 
-def test_posix_pid_fallback_fresh_reacquisition_and_exit_ownership(tmp_path: Path) -> None:
+def test_posix_python_fd_reacquisition_and_exit_preserve_new_legacy_claim(tmp_path: Path) -> None:
     bash = _posix_bash()
     if bash is None:
         pytest.skip("POSIX bash not available")
@@ -857,16 +864,17 @@ def test_posix_pid_fallback_fresh_reacquisition_and_exit_ownership(tmp_path: Pat
     result = _run_sh_block(
         bash, link.parent,
         '_enter_install_lock 1 && _exit_install_lock && _enter_install_lock 1 || exit 3\n'
-        f'rm -f "{link}"; ln -s "{os.getpid()}" "{link}"\n_exit_install_lock\necho ok',
+        f'ln -s "{os.getpid()}" "{link}"\n_exit_install_lock\necho ok',
         env={**os.environ, "COPILOT_EXT_NO_FLOCK": "1"},
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "ok"
     assert os.readlink(link) == str(os.getpid())
+    assert sorted(path.name for path in link.parent.iterdir()) == [".install.lock", link.name]
 
 
 @pytest.mark.parametrize("owner", ["", "not-a-pid"])
-def test_posix_pid_fallback_unknown_owner_never_authorizes_deletion(tmp_path: Path, owner: str) -> None:
+def test_posix_legacy_unknown_owner_never_authorizes_deletion(tmp_path: Path, owner: str) -> None:
     bash = _posix_bash()
     if bash is None:
         pytest.skip("POSIX bash not available")
@@ -890,11 +898,15 @@ def test_posix_pid_fallback_unknown_owner_never_authorizes_deletion(tmp_path: Pa
 
 
 @pytest.mark.parametrize("exit_code", [0, 7])
-def test_posix_pid_fallback_exit_trap_releases_its_owner(tmp_path: Path, exit_code: int) -> None:
+def test_posix_python_fd_exit_trap_releases_same_inode(tmp_path: Path, exit_code: int) -> None:
     bash = _posix_bash()
     if bash is None:
         pytest.skip("POSIX bash not available")
     install_dir = tmp_path / "rt"
+    install_dir.mkdir()
+    lock = install_dir / ".install.lock"
+    lock.write_bytes(b"persistent contents")
+    before = lock.stat().st_ino, lock.read_bytes()
     result = _run_sh_block(
         bash, install_dir,
         f"_enter_install_lock 1 || exit 3\ntrap '_exit_install_lock' EXIT\nexit {exit_code}",
@@ -903,26 +915,44 @@ def test_posix_pid_fallback_exit_trap_releases_its_owner(tmp_path: Path, exit_co
     assert result.returncode == exit_code, result.stderr
     assert not os.path.lexists(install_dir / ".install.lock.pid")
     assert not os.path.lexists(install_dir / ".install.lock.pid.reap")
+    assert (lock.stat().st_ino, lock.read_bytes()) == before
+    retry = _run_sh_block(
+        bash, install_dir, "_enter_install_lock 1 && _exit_install_lock && echo acquired",
+        env={**os.environ, "COPILOT_EXT_NO_FLOCK": "1"},
+    )
+    assert retry.returncode == 0 and retry.stdout.strip() == "acquired", retry.stderr
+    assert (lock.stat().st_ino, lock.read_bytes()) == before
 
 
-def test_posix_pid_fallback_mutex_release_failure_never_admits(tmp_path: Path) -> None:
+def test_posix_python_fd_release_never_unlinks_coordination_or_legacy_claims(
+    tmp_path: Path,
+) -> None:
     bash = _posix_bash()
     if bash is None:
         pytest.skip("POSIX bash not available")
     install_dir = tmp_path / "rt"
+    install_dir.mkdir()
+    lock = install_dir / ".install.lock"
+    lock.write_bytes(b"persistent contents")
+    before = lock.stat().st_ino, lock.read_bytes()
     result = _run_sh_block(
         bash, install_dir,
-        'rm() { if [[ "${@: -1}" == *.reap ]]; then return 1; fi; command rm "$@"; }\n'
+        '_enter_install_lock 1 || exit 3\n'
+        'printf "unknown claimant\\n" > "$INSTALL_DIR/.install.lock.pid.reap"\n'
+        'rm() { echo unexpected-unlink; return 9; }\n'
+        '_exit_install_lock\n'
+        '[[ ! -e /dev/fd/8 ]] || exit 8\n'
         "if _enter_install_lock 1; then echo acquired; else echo refused; fi",
         env={**os.environ, "COPILOT_EXT_NO_FLOCK": "1"},
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "refused"
     assert not os.path.lexists(install_dir / ".install.lock.pid")
-    assert os.path.lexists(install_dir / ".install.lock.pid.reap")
+    assert (install_dir / ".install.lock.pid.reap").read_bytes() == b"unknown claimant\n"
+    assert (lock.stat().st_ino, lock.read_bytes()) == before
 
 
-def test_posix_pid_fallback_dead_admission_mutex_blocks_fresh_acquisition(tmp_path: Path) -> None:
+def test_posix_legacy_dead_reaper_claim_blocks_fresh_acquisition(tmp_path: Path) -> None:
     bash = _posix_bash()
     if bash is None:
         pytest.skip("POSIX bash not available")
@@ -941,13 +971,15 @@ def test_posix_pid_fallback_dead_admission_mutex_blocks_fresh_acquisition(tmp_pa
     assert not os.path.lexists(install_dir / ".install.lock.pid")
 
 
-def test_posix_pid_fallback_serializes_simultaneous_stale_recovery(tmp_path: Path) -> None:
+def test_posix_python_fd_serializes_simultaneous_transactions(tmp_path: Path) -> None:
     bash = _posix_bash()
     if bash is None:
         pytest.skip("POSIX bash not available")
     install_dir = tmp_path / "rt"
     install_dir.mkdir()
-    os.symlink(str(_dead_pid()), install_dir / ".install.lock.pid")
+    lock = install_dir / ".install.lock"
+    lock.write_bytes(b"persistent contents")
+    before = lock.stat().st_ino, lock.read_bytes()
     log = tmp_path / "log"
     contenders = [_sh_contender(bash, install_dir, log) for _ in range(6)]
     for proc in contenders:
@@ -957,9 +989,10 @@ def test_posix_pid_fallback_serializes_simultaneous_stale_recovery(tmp_path: Pat
     assert log.read_text().split() == ["start", "end"] * 6
     assert not os.path.lexists(install_dir / ".install.lock.pid")
     assert not os.path.lexists(install_dir / ".install.lock.pid.reap")
+    assert (lock.stat().st_ino, lock.read_bytes()) == before
 
 
-def test_posix_pid_fallback_fails_closed_on_a_dead_reapers_mutex(tmp_path: Path) -> None:
+def test_posix_legacy_dead_owner_and_reaper_claims_refuse_all_contenders(tmp_path: Path) -> None:
     """A reap mutex left by a reaper that died mid-reap is never reclaimed
     automatically (that would reintroduce the check-then-unlink race):
     simultaneous contenders all fail closed and leave both links untouched."""
@@ -990,7 +1023,7 @@ def test_posix_pid_fallback_fails_closed_on_a_dead_reapers_mutex(tmp_path: Path)
     assert os.readlink(install_dir / ".install.lock.pid.reap") == stale_reaper
 
 
-def test_posix_pid_fallback_fails_closed_on_an_unattributable_lock_path(tmp_path: Path) -> None:
+def test_posix_legacy_unattributable_claim_is_not_reclaimed(tmp_path: Path) -> None:
     """A non-symlink at the lock path names no owner: it is never unlinked,
     and the run fails closed at its deadline."""
     bash = _posix_bash()
@@ -1013,63 +1046,40 @@ def test_posix_pid_fallback_fails_closed_on_an_unattributable_lock_path(tmp_path
     assert lock.read_text() == "not a symlink"
 
 
-def test_posix_pid_fallback_create_survives_concurrent_staging_dir_removal(tmp_path: Path) -> None:
-    """A concurrent `uninstall --purge` can reclaim `_create_install_lock_owner`'s
-    private staging directory the instant after its `link(1)` call already
-    published the receipt -- that publication is a second, independent
-    directory entry on the same inode, so it survives the staging directory's
-    removal. Reporting the call as failed anyway (because best-effort cleanup
-    of now-vanished scratch failed) would make every caller skip releasing the
-    mutex it just admitted, stranding it until manual repair."""
+def test_posix_python_fd_admission_does_not_depend_on_private_staging_links(
+    tmp_path: Path,
+) -> None:
+    """The persistent descriptor protocol must not create receipt staging links."""
     bash = _posix_bash()
     if bash is None:
         pytest.skip("POSIX bash not available")
     install_dir = tmp_path / "rt"
     install_dir.mkdir()
-    link = install_dir / ".install.lock.pid.reap"
+    lock = install_dir / ".install.lock"
+    lock.write_bytes(b"persistent contents")
+    before = lock.stat().st_ino, lock.read_bytes()
     result = _run_sh_block(
         bash, install_dir,
-        # Simulate the purge: the instant link(1) itself succeeds, its
-        # private staging directory is reclaimed out from under the caller.
-        'link() { command link "$@" && rm -rf "$(dirname -- "$1")"; }\n'
-        f'if _create_install_lock_owner "{link}"; then echo created; else echo failed; fi',
+        'link() { echo unexpected-link; return 9; }\n'
+        'ln() { echo unexpected-ln; return 9; }\n'
+        'mktemp() { echo unexpected-staging; return 9; }\n'
+        '_enter_install_lock 1 && _exit_install_lock && echo acquired',
         env={**os.environ, "COPILOT_EXT_NO_FLOCK": "1"},
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "created"
-    assert os.path.lexists(link)
+    assert result.stdout.strip() == "acquired"
+    assert (lock.stat().st_ino, lock.read_bytes()) == before
+    assert sorted(path.name for path in install_dir.iterdir()) == [lock.name]
 
 
-def test_posix_pid_fallback_attempts_once_despite_clock_second_boundary(tmp_path: Path) -> None:
-    """The deadline computation and the acquire loop's own `date +%s` call are
-    two separate invocations; a short timeout (the suites' own 1s default) can
-    straddle a wall-clock second boundary between them. A pre-check-only loop
-    condition would then skip even an uncontended acquisition. Stub `date` to
-    force exactly that boundary and confirm the first attempt still happens
-    before the deadline is ever enforced."""
+def test_posix_python_fd_admission_does_not_depend_on_wall_clock_seconds(tmp_path: Path) -> None:
+    """The fallback uses a monotonic deadline, not shell date observations."""
     bash = _posix_bash()
     if bash is None:
         pytest.skip("POSIX bash not available")
     install_dir = tmp_path / "rt"
     install_dir.mkdir()
-    # The deadline calculation and the loop's `date +%s` run in separate
-    # command-substitution subshells, so the call count must be tracked in a
-    # file -- a plain shell variable resets to 0 in each new subshell and
-    # never actually reaches the second scripted value.
-    stub = (
-        'rm -f "$INSTALL_DIR/.fixture-date-calls"\n'
-        "date() {\n"
-        "    local __n=0\n"
-        '    [[ ! -f "$INSTALL_DIR/.fixture-date-calls" ]] || __n=$(cat "$INSTALL_DIR/.fixture-date-calls")\n'
-        "    __n=$((__n + 1))\n"
-        '    printf \'%s\' "$__n" > "$INSTALL_DIR/.fixture-date-calls"\n'
-        '    if [[ "$1" == "+%s" && "$__n" -le 2 ]]; then\n'
-        '        if [[ "$__n" -eq 1 ]]; then echo 1000; else echo 1001; fi\n'
-        "        return 0\n"
-        "    fi\n"
-        '    command date "$@"\n'
-        "}\n"
-    )
+    stub = 'date() { touch "$INSTALL_DIR/.fixture-date-calls"; return 9; }\n'
     result = _run_sh_block(
         bash, install_dir,
         stub + "if _enter_install_lock 1; then echo acquired; else echo refused; fi",
@@ -1077,3 +1087,5 @@ def test_posix_pid_fallback_attempts_once_despite_clock_second_boundary(tmp_path
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "acquired"
+    assert not (install_dir / ".fixture-date-calls").exists()
+    assert sorted(path.name for path in install_dir.iterdir()) == [".install.lock"]

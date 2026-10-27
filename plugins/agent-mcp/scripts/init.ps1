@@ -662,11 +662,59 @@ function Exit-InstallLock {
 }
 # === end install-transaction lock ===
 
+function Get-FiniteUninstallPython {
+    param([Parameter(Mandatory)][string]$InstallRoot)
+    $probe = @'
+import sys
+assert sys.version_info >= (3, 10)
+from pathlib import Path
+root = Path(sys.argv[1]).absolute()
+assert ".." not in root.parts
+roots = (root, root.resolve())
+paths = (sys.argv[2], sys.executable, sys.prefix, sys.base_prefix,
+         getattr(sys, "_base_executable", sys.executable))
+for value in paths:
+    path = Path(value).absolute()
+    for actual in (path, path.resolve(strict=True)):
+        assert all(not actual.is_relative_to(boundary) for boundary in roots)
+print(Path(sys.executable).resolve(strict=True))
+'@
+    $candidates = @()
+    foreach ($name in @('python3', 'python')) {
+        $candidates += @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue |
+            Where-Object { $_.Source -notmatch 'WindowsApps' } | ForEach-Object { $_.Source })
+    }
+    foreach ($launcher in @(Get-Command py -All -CommandType Application -ErrorAction SilentlyContinue |
+            Where-Object { $_.Source -notmatch 'WindowsApps' })) {
+        try {
+            $nativeError = ''
+            $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError)
+            if ($LASTEXITCODE -eq 0) {
+                foreach ($match in [regex]::Matches("$listed", '(?m)([A-Za-z]:[\\/].*python(?:[0-9.]*)?\.exe)"?\s*$')) {
+                    $candidates += $match.Groups[1].Value
+                }
+            }
+        } catch { }
+    }
+    foreach ($candidate in @($candidates | Select-Object -Unique)) {
+        try {
+            $nativeError = ''
+            $selected = Invoke-Hidden -FilePath $candidate -ArgList @(
+                '-I', '-B', '-c', $probe, $InstallRoot, $candidate
+            ) -ErrorOutput ([ref]$nativeError)
+            if ($LASTEXITCODE -eq 0 -and $selected -and [IO.File]::Exists($selected.Trim())) {
+                return $selected.Trim()
+            }
+        } catch { }
+    }
+    return $null
+}
+
 $ScriptDir = $PSScriptRoot
 . (Join-Path $ScriptDir 'source-runtime.ps1')
 $UninstallPython = $null
 if ($Action -eq 'uninstall') {
-    $UninstallPython = Get-BootstrapPython -ExternalOnly
+    $UninstallPython = Get-FiniteUninstallPython -InstallRoot $InstallDir
     if (-not $UninstallPython) { throw 'Uninstall requires an existing Python 3.10+ outside the runtime' }
     $nativeError = ''
     $status = Invoke-Hidden -FilePath $UninstallPython -ArgList @(
