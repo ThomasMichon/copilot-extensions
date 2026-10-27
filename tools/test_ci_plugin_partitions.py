@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from collections import Counter
 from copy import deepcopy
 import importlib.util
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 from typing import Any
@@ -70,6 +72,47 @@ def test_real_matrix_cli_single_job_mode_is_explicit():
     assert default.returncode == selected.returncode == 0
     assert len(json.loads(default.stdout)) == 4
     assert len(json.loads(selected.stdout)) == 2
+
+
+@pytest.fixture
+def isolated_partition_cli(
+    tmp_path: Path,
+) -> tuple[Path, Callable[..., subprocess.CompletedProcess[str]]]:
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    script = tools / "ci_plugin_partitions.py"
+    shutil.copyfile(REPO / "tools" / "ci_plugin_partitions.py", script)
+    assert {path.name for path in tools.iterdir()} == {"ci_plugin_partitions.py"}
+
+    def run(*arguments: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-I", "-S", str(script), *arguments],
+            cwd=tmp_path, capture_output=True, text=True, timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+
+    return tmp_path, run
+
+
+def test_isolated_matrix_and_files_cli_need_only_the_single_script(
+    isolated_partition_cli: tuple[Path, Callable[..., subprocess.CompletedProcess[str]]],
+) -> None:
+    root, run = isolated_partition_cli
+    matrix = run("matrix", '["agent-dispatch","agent-bridge"]')
+    assert matrix.returncode == 0, matrix.stdout + matrix.stderr
+    assert Counter(row["plugin"] for row in json.loads(matrix.stdout)) == {
+        "agent-dispatch": 3, "agent-bridge": 1,
+    }
+    tests = root / "plugins" / "agent-dispatch" / "tests"
+    tests.mkdir(parents=True)
+    for index in range(26):
+        (tests / f"test_{index:03d}.py").write_text(
+            "def test_fixture(): pass\n", encoding="utf-8",
+        )
+    files = run("files", "--plugin", "agent-dispatch", "--partition", "1", "--partitions", "2")
+    assert files.returncode == 0, files.stdout + files.stderr
+    assert files.stdout.splitlines() == ["--test-file", "tests/test_025.py"]
+    assert {path.name for path in (root / "tools").iterdir()} == {"ci_plugin_partitions.py"}
 
 
 def test_candidate_qualification_requires_exactly_the_actual_smoke_matrix_names():
