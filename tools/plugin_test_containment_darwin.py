@@ -9,6 +9,7 @@ from __future__ import annotations
 import ctypes
 import errno
 import sys
+import time
 from typing import NamedTuple, TypeVar
 
 MAX_PIDS = 65536
@@ -83,12 +84,17 @@ class GroupObservationChanged(ValueError):
         super().__init__(f"Darwin process-group observation: group churn exceeded; last={last}")
 
 
+class _ObservationDeadline(TimeoutError):
+    """The caller's current sampling cycle has no observation budget left."""
+
+
 def _invalid(cause: str) -> ValueError:
     return ValueError(f"Darwin process-group observation: {cause}")
 
 
 class _Native:
     def __init__(self) -> None:
+        self.deadline: float | None = None
         if sys.platform != "darwin" or ctypes.sizeof(ctypes.c_void_p) != 8:
             raise OSError(errno.ENOTSUP, "Darwin group observation requires native 64-bit macOS")
         if (ctypes.sizeof(ctypes.c_int) != 4 or ctypes.sizeof(_ShortBSDInfo) != 64
@@ -112,10 +118,15 @@ class _Native:
         except (AttributeError, OSError):
             raise OSError(errno.ENOTSUP, "Darwin native group inspector unavailable") from None
 
+    def _check_deadline(self) -> None:
+        if self.deadline is not None and time.monotonic() >= self.deadline:
+            raise _ObservationDeadline(errno.ETIMEDOUT, "Darwin group observation cycle expired")
+
     def inventory(self, pgid: int) -> set[int]:
         capacity = 64
         while True:
             data = (ctypes.c_int * capacity)()
+            self._check_deadline()
             ctypes.set_errno(0)
             size = self.listpids(2, pgid, data, ctypes.sizeof(data))  # PROC_PGRP_ONLY.
             error = ctypes.get_errno()
@@ -128,6 +139,7 @@ class _Native:
             values = list(data[:size // ctypes.sizeof(ctypes.c_int)])
             if any(pid <= 0 for pid in values) or len(set(values)) != len(values):
                 raise _invalid("invalid inventory identities")
+            self._check_deadline()
             if size < ctypes.sizeof(data):
                 return set(values)
             if capacity >= MAX_PIDS:
@@ -138,6 +150,7 @@ class _Native:
         self, pid: int, flavor: int, structure: type[_Structure], *, zombies: bool = False,
     ) -> _Structure:
         data = structure()
+        self._check_deadline()
         ctypes.set_errno(0)
         size = self.pidinfo(pid, flavor, int(zombies), ctypes.byref(data), ctypes.sizeof(data))
         if size == 0:
@@ -148,6 +161,7 @@ class _Native:
             raise OSError(error or errno.EIO, "Darwin group member inspection failed")
         if size != ctypes.sizeof(data):
             raise _invalid("partial member inspection")
+        self._check_deadline()
         return data
 
     def _unique(self, pid: int) -> tuple[int, int, bytes]:
@@ -174,7 +188,9 @@ class _Native:
         return self._read(pid, 4, _TaskInfo).resident_size  # Native bytes, not KiB.
 
 
-def group_usage(pgid: int, *, live_only: bool = False) -> tuple[int, int]:
+def group_usage(
+    pgid: int, *, live_only: bool = False, deadline: float | None = None,
+) -> tuple[int, int]:
     """Return a complete group count and resident bytes, or refuse visibly.
 
     Zombies count against the ordinary process budget with zero resident bytes.
@@ -183,6 +199,7 @@ def group_usage(pgid: int, *, live_only: bool = False) -> tuple[int, int]:
     if type(pgid) is not int or not 1 <= pgid <= 0x7fffffff:
         raise _invalid("invalid process-group identifier")
     native = _Native()
+    native.deadline = deadline
     last_change: _CensusChanged | None = None
     for _ in range(MAX_PASSES):
         try:
@@ -210,5 +227,9 @@ def group_usage(pgid: int, *, live_only: bool = False) -> tuple[int, int]:
         except _CensusChanged as change:
             last_change = change
             continue
+        except _ObservationDeadline:
+            if last_change is not None:
+                raise GroupObservationChanged(last_change) from last_change
+            raise
     assert last_change is not None
     raise GroupObservationChanged(last_change) from last_change

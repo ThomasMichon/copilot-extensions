@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ctypes
 import errno
+import io
 import os
 import select
 import subprocess
@@ -522,6 +523,255 @@ def test_resource_polling_churn_is_still_fatal_not_zero_or_skipped(kernel, monke
     kernel.snapshots = [[41], [42]] * darwin.MAX_PASSES
     with pytest.raises(darwin.GroupObservationChanged):
         containment._posix_group_usage(PGID)
+
+
+@pytest.fixture
+def poll_clock(monkeypatch):
+    clock = SimpleNamespace(now=0.0, sleeps=[])
+    def sleep(seconds):
+        assert seconds >= 0
+        clock.sleeps.append(seconds)
+        clock.now += seconds
+    clock.time = SimpleNamespace(monotonic=lambda: clock.now, sleep=sleep)
+    monkeypatch.setattr(containment, "time", clock.time)
+    monkeypatch.setattr(posix_observation, "time", clock.time)
+    monkeypatch.setattr(darwin, "time", clock.time)
+    return clock
+
+
+def test_poll_cycle_transient_churn_returns_only_complete_fresh_counters(poll_clock, monkeypatch):
+    calls = []
+    def observe(pid, *, deadline):
+        calls.append((pid, deadline))
+        poll_clock.now += 0.1
+        if len(calls) == 1:
+            raise _known_churn()
+        return 3, 1234567
+    monkeypatch.setattr(posix_observation, "_darwin_group_usage", observe)
+    assert posix_observation._darwin_poll_group_usage(PGID, deadline=1.0) == (3, 1234567)
+    assert calls == [(PGID, 1.0), (PGID, 1.0)]
+    assert poll_clock.sleeps == [0.05]
+    assert poll_clock.now == pytest.approx(0.25)
+
+
+def test_poll_cycle_persistent_churn_stops_at_deadline_with_last_cause(poll_clock, monkeypatch):
+    errors = []
+    def observe(pid, *, deadline):
+        error = _known_churn()
+        errors.append(error)
+        raise error
+    monkeypatch.setattr(posix_observation, "_darwin_group_usage", observe)
+    with pytest.raises(darwin.GroupObservationChanged) as caught:
+        posix_observation._darwin_poll_group_usage(PGID, deadline=0.11)
+    assert caught.value is errors[-1]
+    assert caught.value.last.native_errno == errno.ESRCH
+    assert poll_clock.now == pytest.approx(0.11)
+    assert poll_clock.sleeps == pytest.approx([0.05, 0.05, 0.01])
+
+
+@pytest.mark.parametrize("failure", [
+    PermissionError(errno.EPERM, "fixture denial"),
+    OSError(errno.ENOTSUP, "fixture unavailable"),
+    ValueError("fixture malformed"),
+    TimeoutError(errno.ETIMEDOUT, "native error, not cycle expiration"),
+])
+def test_poll_cycle_other_errors_are_immediate(poll_clock, monkeypatch, failure):
+    def observe(*args, **kwargs):
+        raise failure
+    monkeypatch.setattr(posix_observation, "_darwin_group_usage", observe)
+    with pytest.raises(type(failure)) as caught:
+        posix_observation._darwin_poll_group_usage(PGID, deadline=1.0)
+    assert caught.value is failure
+    assert poll_clock.sleeps == []
+
+
+@pytest.mark.parametrize("row", [None, (1,), (-1, 0), (0, -1), (True, 1)])
+def test_poll_cycle_never_accepts_unknown_or_partial_counters(poll_clock, monkeypatch, row):
+    monkeypatch.setattr(posix_observation, "_darwin_group_usage", lambda *a, **k: row)
+    with pytest.raises(ValueError, match="complete non-negative"):
+        posix_observation._darwin_poll_group_usage(PGID, deadline=1.0)
+    assert poll_clock.sleeps == []
+
+
+def test_poll_cycle_no_budget_does_not_start_census(poll_clock, monkeypatch):
+    monkeypatch.setattr(posix_observation, "_darwin_group_usage",
+                        lambda *a, **k: pytest.fail("census began without cycle budget"))
+    with pytest.raises(darwin._ObservationDeadline):
+        posix_observation._darwin_poll_group_usage(PGID, deadline=0.0)
+
+
+def test_poll_cycle_discards_late_complete_result(poll_clock, monkeypatch):
+    def observe(*args, **kwargs):
+        poll_clock.now = 1.1
+        return 2, MIB
+    monkeypatch.setattr(posix_observation, "_darwin_group_usage", observe)
+    with pytest.raises(darwin._ObservationDeadline, match="outside its cycle"):
+        posix_observation._darwin_poll_group_usage(PGID, deadline=1.0)
+    assert poll_clock.sleeps == []
+
+
+def test_poll_cycle_deadline_preserves_prior_known_change(poll_clock, monkeypatch):
+    change = _known_churn()
+    calls = [0]
+    def observe(*args, **kwargs):
+        calls[0] += 1
+        if calls[0] == 1:
+            raise change
+        poll_clock.now = 1.0
+        raise darwin._ObservationDeadline(errno.ETIMEDOUT, "fixture cycle expired")
+    monkeypatch.setattr(posix_observation, "_darwin_group_usage", observe)
+    with pytest.raises(darwin.GroupObservationChanged) as caught:
+        posix_observation._darwin_poll_group_usage(PGID, deadline=1.0)
+    assert caught.value is change
+    assert caught.value.last.pid == 41
+
+
+def test_native_cycle_expiration_stops_further_calls_and_rejects_late_empty(
+    kernel, poll_clock,
+):
+    kernel.pids = []
+    original = kernel.library.proc_listpids.function
+    def slow(*args):
+        poll_clock.now = 0.2
+        return original(*args)
+    kernel.library.proc_listpids.function = slow
+    with pytest.raises(darwin._ObservationDeadline):
+        darwin.group_usage(PGID, deadline=0.1)
+    assert len(kernel.inventory_calls) == 1
+    assert kernel.calls == {}
+
+
+@pytest.mark.parametrize("failure", [errno.EPERM, errno.EINVAL])
+def test_native_error_after_deadline_is_not_mislabeled_as_churn(kernel, poll_clock, failure):
+    def denied(pid, flavor, call, data):
+        poll_clock.now = 0.2
+        ctypes.set_errno(failure)
+        return 0
+    kernel.hook = denied
+    with pytest.raises(OSError) as caught:
+        darwin.group_usage(PGID, deadline=0.1)
+    assert caught.value.errno == failure
+    assert not isinstance(caught.value, darwin._ObservationDeadline)
+
+
+def test_native_deadline_after_known_churn_retains_last_numeric_cause(kernel, poll_clock):
+    def gone(pid, flavor, call, data):
+        poll_clock.now = 0.2
+        ctypes.set_errno(errno.ESRCH)
+        return 0
+    kernel.hook = gone
+    with pytest.raises(darwin.GroupObservationChanged) as caught:
+        darwin.group_usage(PGID, deadline=0.1)
+    assert (caught.value.pid, caught.value.flavor, caught.value.native_errno) == (41, 17, errno.ESRCH)
+    assert len(kernel.inventory_calls) == 1
+
+
+@pytest.fixture
+def poll_process(poll_clock, monkeypatch):
+    events = []
+    stderr = io.StringIO()
+    class Ready:
+        def unlink(self, **kwargs):
+            events.append("ready-unlink")
+        def write_text(self, *args, **kwargs):
+            events.append("ready")
+    class Sandbox:
+        def mkdir(self, **kwargs):
+            pass
+        def __truediv__(self, value):
+            return Ready()
+    descriptors = iter([(10, 11), (12, 13)])
+    monkeypatch.setattr(containment, "os", SimpleNamespace(
+        name="posix", pipe=lambda: next(descriptors), set_blocking=lambda *a: None,
+        close=lambda fd: events.append(("close", fd)),
+    ))
+    monkeypatch.setattr(containment, "sys", SimpleNamespace(platform="darwin", stderr=stderr))
+    monkeypatch.setattr(containment.subprocess, "Popen",
+                        lambda *a, **k: SimpleNamespace(pid=PGID))
+    monkeypatch.setattr(containment, "_worker_command", lambda *a: ["fixture"])
+    monkeypatch.setattr(containment, "_posix_group_identity", lambda pid: (pid, pid))
+    monkeypatch.setattr(containment, "_terminate_posix_group", lambda *a: events.append("cleanup"))
+    monkeypatch.setattr(containment, "_reap_controller", lambda *a: events.append("reaped"))
+    monkeypatch.setattr(containment, "_tree_size", lambda *a: 0)
+    codes = iter([None, 0])
+    monkeypatch.setattr(containment, "_posix_exit_code", lambda *a: next(codes))
+    def run(**limits):
+        return containment._run_contained_process(
+            ["fixture"], cwd=".", env={}, sandbox=Sandbox(),
+            limits=containment.Limits(**{"wall_seconds": 3.0, "poll_seconds": 1.0, **limits}),
+        )
+    return SimpleNamespace(run=run, events=events, stderr=stderr)
+
+
+def test_poll_retries_consume_idle_cadence_without_growing_cycles(
+    poll_process, poll_clock, monkeypatch,
+):
+    codes = iter([None, None, 0])
+    monkeypatch.setattr(containment, "_posix_exit_code", lambda *a: next(codes))
+    attempts = []
+    def observe(pid, *, deadline):
+        attempts.append((poll_clock.now, deadline))
+        poll_clock.now += 0.1
+        if len(attempts) == 1:
+            raise _known_churn()
+        return 2, MIB
+    monkeypatch.setattr(posix_observation, "_darwin_group_usage", observe)
+    assert poll_process.run() == 0
+    assert [started for started, _ in attempts] == pytest.approx([0.0, 0.15, 1.0])
+    assert [deadline for _, deadline in attempts] == [1.0, 1.0, 2.0]
+    assert poll_clock.now == pytest.approx(2.0)
+    assert poll_clock.sleeps == pytest.approx([0.05, 0.75, 0.9])
+    assert poll_process.events.count("cleanup") == 1
+
+
+@pytest.mark.parametrize("row,limits,diagnostic", [
+    ((4, 0), {"max_processes": 2}, "process-count limit exceeded"),
+    ((1, 2 * MIB), {"max_memory_mb": 1}, "memory limit exceeded"),
+])
+def test_poll_complete_counters_after_churn_still_enforce_limits(
+    poll_process, poll_clock, monkeypatch, row, limits, diagnostic,
+):
+    calls = [0]
+    def observe(*args, **kwargs):
+        calls[0] += 1
+        if calls[0] == 1:
+            raise _known_churn()
+        return row
+    monkeypatch.setattr(posix_observation, "_darwin_group_usage", observe)
+    assert poll_process.run(**limits) == 124
+    assert diagnostic in poll_process.stderr.getvalue()
+    assert poll_clock.sleeps == [0.05]
+
+
+def test_poll_deadline_is_clamped_to_remaining_wall_budget(
+    poll_process, poll_clock, monkeypatch,
+):
+    deadlines = []
+    def observe(pid, *, deadline):
+        deadlines.append(deadline)
+        raise _known_churn()
+    monkeypatch.setattr(posix_observation, "_darwin_group_usage", observe)
+    with pytest.raises(darwin.GroupObservationChanged):
+        poll_process.run(wall_seconds=0.11)
+    assert set(deadlines) == {0.11}
+    assert poll_clock.now == pytest.approx(0.11)
+    assert poll_process.events.count("cleanup") == 1
+
+
+@pytest.mark.parametrize("platform", ["linux", "freebsd", "win32"])
+def test_non_darwin_poll_retains_its_existing_sleep_behavior(
+    poll_process, poll_clock, monkeypatch, platform,
+):
+    monkeypatch.setattr(containment, "sys", SimpleNamespace(platform=platform, stderr=sys.stderr))
+    monkeypatch.setattr(containment, "_darwin_poll_group_usage",
+                        lambda *a, **k: pytest.fail("Darwin poll on another platform"))
+    def observe(pid):
+        poll_clock.now += 0.25
+        return 2, MIB
+    monkeypatch.setattr(containment, "_posix_group_usage", observe)
+    assert poll_process.run() == 0
+    assert poll_clock.sleeps == [1.0]
+    assert poll_clock.now == 1.25
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="requires actual macOS libproc/RSS")

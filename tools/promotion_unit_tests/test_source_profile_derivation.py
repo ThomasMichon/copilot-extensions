@@ -133,7 +133,11 @@ def test_native_file_matching_requires_package_marker_to_apply(marker, admitted)
         _wheel_pins(content, target, time.monotonic() + 5)
 
 
-def _native_exclusion_inputs(tmp_path):
+def _native_exclusion_inputs(tmp_path, monkeypatch):
+    import installer_native_feed as native
+
+    # Native handle/share-mode behavior belongs to the separate native packet.
+    monkeypatch.setattr(native, "_open", lambda path: path.open("rb"))
     root = tmp_path / "retained"
     root.mkdir()
     config = root / "uv.toml"
@@ -157,10 +161,10 @@ def _native_exclusion_inputs(tmp_path):
     return outer, settings, transaction, constraints
 
 
-def test_native_feed_accepts_only_independently_selected_exact_exclusions(tmp_path):
+def test_native_feed_accepts_only_independently_selected_exact_exclusions(tmp_path, monkeypatch):
     import installer_native_feed as native
 
-    outer, settings, transaction, _path = _native_exclusion_inputs(tmp_path)
+    outer, settings, transaction, _path = _native_exclusion_inputs(tmp_path, monkeypatch)
     wheels = [{"name": "external"}]
     with pytest.raises(native.AcquisitionUnavailable):
         native._machine_constraints(outer, settings, transaction, wheels)
@@ -173,10 +177,10 @@ def test_native_feed_accepts_only_independently_selected_exact_exclusions(tmp_pa
     "version", "marker", "direct", "missing", "extra", "duplicate", "wrong-argv",
     "outside", "remote", "selected", "unselected-wheels", "override", "workspace",
 ])
-def test_native_feed_exact_exclusions_never_relax_other_constraints(tmp_path, fault):
+def test_native_feed_exact_exclusions_never_relax_other_constraints(tmp_path, monkeypatch, fault):
     import installer_native_feed as native
 
-    outer, settings, transaction, path = _native_exclusion_inputs(tmp_path)
+    outer, settings, transaction, path = _native_exclusion_inputs(tmp_path, monkeypatch)
     wheels = [{"name": "external"}]
     if fault in ("version", "marker", "direct", "missing", "extra", "duplicate"):
         path.write_text({

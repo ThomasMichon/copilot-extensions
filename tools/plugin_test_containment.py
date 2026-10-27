@@ -24,12 +24,12 @@ from typing import Any, Mapping, Sequence, TypeVar
 if __package__:
     from .native_test_paths import native_test_path
     from .plugin_test_containment_posix import (
-        GroupObservationChanged, _darwin_group_usage, _ps_group_usage,
+        GroupObservationChanged, _darwin_group_usage, _darwin_poll_group_usage, _ps_group_usage,
     )
 else:
     from native_test_paths import native_test_path
     from plugin_test_containment_posix import (
-        GroupObservationChanged, _darwin_group_usage, _ps_group_usage,
+        GroupObservationChanged, _darwin_group_usage, _darwin_poll_group_usage, _ps_group_usage,
     )
 
 # Repository runners consume the canonical source without a plugin installation.
@@ -855,6 +855,7 @@ def _run_contained_process(
                 assert result_read is not None
                 returncode = _posix_exit_code(result_read)
             now = time.monotonic()
+            cycle_deadline = min(now + limits.poll_seconds, started + limits.wall_seconds)
             if now - started > limits.wall_seconds:
                 print(
                     f"[LIMIT] wall-clock limit exceeded ({limits.wall_seconds:g}s)",
@@ -876,6 +877,8 @@ def _run_contained_process(
                 usage = (
                     job.usage()
                     if os.name == "nt" and job is not None
+                    else _darwin_poll_group_usage(proc.pid, deadline=cycle_deadline)
+                    if sys.platform == "darwin"
                     else _posix_group_usage(proc.pid)
                 )
                 if usage is None:
@@ -894,7 +897,10 @@ def _run_contained_process(
             if violation is not None:
                 print(f"[LIMIT] {violation}", file=sys.stderr)
                 return 124
-            time.sleep(limits.poll_seconds)
+            if sys.platform == "darwin":
+                time.sleep(max(0.0, cycle_deadline - time.monotonic()))
+            else:
+                time.sleep(limits.poll_seconds)
     except KeyboardInterrupt:
         print("[LIMIT] interrupted; reaping contained process tree", file=sys.stderr)
         return 130
