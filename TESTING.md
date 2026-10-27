@@ -23,6 +23,23 @@ result. These are contained component/installed-SDK controls, not actual Docker,
 official-image, automatically constructed controller or production evidence.
 Native/network/build tests remain outside the required no-actor unit packet.
 
+Agent-worktrees' `test_mux_creation_admission.py` covers Windows gate and
+join-result semantics without claiming or typing a seed. Its explicit native
+`tests/native/test_mux_creation_overlap_native.py` packet overlaps the shipped
+PowerShell/Python creation boundaries in both directions against private
+synthetic mux protocol processes. It checks same-target joining, different-target
+overlap and actual kernel-lease release while the original creation client is
+still alive. It does not exercise complete Picker/embody preflight, actual
+PSMux, repo lifecycle fencing, POSIX parity or installation removal.
+Run it with `python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_mux_creation_overlap_native.py --allow-explicit-tiers --timeout 180 --plugin-timeout 600 --test-timeout 60`.
+The synthetic mux is a small executable built with the system C# compiler,
+not a Python interpreter proxy; fixture startup never justifies extending the
+production two-second query cap. An unavailable compiler is an explicit skip,
+not Windows acceptance evidence. Actors finish importing/loading their owners
+before a ready/go barrier admits native creation, matching the production
+creation timer rather than charging another actor's Python startup to it.
+This is not a cold whole-launch performance measurement.
+
 Agent-worktrees' `test_launch_seed_native.py` covers the finite backend and setup
 provider: retained one-time seed claims, literal argv, existing prompt-free
 execution observations, PID/birth and incarnation refusals, definite-spawn
@@ -70,7 +87,7 @@ interrupt, child survival, nonzero exit and the correlated return receipt.
 Neither lane is actual Copilot, real installer removal or live mux
 detach/reattach acceptance.
 The existing manual acceptance workflow's `native_launch` input selects only
-the focused Windows copied-setup packet at the immutable dispatch SHA. It is
+the focused Windows copied-setup and mux-admission packets at the immutable dispatch SHA. It is
 default-off, uses contained test roots without host-state opt-in, and does not
 expand required PR CI or select unrelated derived-diagnostic matrices.
 

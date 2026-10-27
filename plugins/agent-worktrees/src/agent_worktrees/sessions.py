@@ -1927,7 +1927,7 @@ def mux_new_session(
 ) -> dict:
     """Create a detached ``wt-<id>`` session running ``cmd``; return its pane.
 
-    Returns ``{ok, session, new_pane, error}``. Detached, so the caller does not
+    Returns ``{ok, session, new_pane, error, created}``. Detached, so the caller does not
     take over a terminal -- the embodied Copilot registers itself with the local
     bridge (Phase 1), which is how the spawn is later verified and viewed.
     """
@@ -1936,10 +1936,24 @@ def mux_new_session(
     sess = mux_session_name(worktree_id)
     argv: list[str] = []
     try:
-        argv = build_mux_new_session_argv(
-            worktree_id, mux_creation.pane_work_dir(work_dir), cmd, env, mux=mux,
-        )
-        r = mux_creation.run(argv)
+        binary = _mux_bin(mux)
+        gated = platform.system() == "Windows" and _is_psmux(binary)
+        with mux_creation.session_gate(
+            sess, exists=lambda: mux_creation.has_session(binary, sess),
+            enabled=gated,
+        ) as release:
+            if not release:
+                return {
+                    "ok": True, "session": sess, "new_pane": None,
+                    "error": None, "created": False,
+                }
+            argv = build_mux_new_session_argv(
+                worktree_id, mux_creation.pane_work_dir(work_dir), cmd, env, mux=mux,
+            )
+            r = (
+                mux_creation.run_session(argv, sess, release)
+                if gated else mux_creation.run(argv)
+            )
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as e:
         if not isinstance(e, subprocess.TimeoutExpired):
             cleanup_mux_pane_args(argv)
@@ -1959,7 +1973,7 @@ def mux_new_session(
     )
     return {
         "ok": True, "session": sess,
-        "new_pane": r.stdout.strip() or None, "error": None,
+        "new_pane": r.stdout.strip() or None, "error": None, "created": True,
     }
 
 

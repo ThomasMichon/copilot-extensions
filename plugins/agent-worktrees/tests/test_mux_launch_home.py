@@ -28,6 +28,10 @@ def test_mux_creation_keeps_process_home_separate_from_pane(
         selected = str(worktree) if directory != "empty" else str(tmp_path)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     monkeypatch.setattr(mux_creation.platform, "system", lambda: system)
+    monkeypatch.setattr(mux_creation, "has_session", lambda *args: False)
+    monkeypatch.setattr(
+        mux_creation, "run_session", lambda argv, *args: mux_creation.run(argv),
+    )
     monkeypatch.setattr(sessions.activity, "log_event", lambda *a, **k: None)
     monkeypatch.setattr(sessions, "cleanup_mux_pane_args", lambda argv: None)
     monkeypatch.setattr(sessions, "has_mux_session", lambda wt: kind.endswith("window"))

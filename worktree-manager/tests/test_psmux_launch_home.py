@@ -25,6 +25,16 @@ def _creation_source():
         first = source.index(marker)
         last = source.index("\n}\n", first) + 3
         helper = source[first:last]
+    first = source.index("function Enter-AwMuxCreation {")
+    last = source.index("\n}\n", first) + 3
+    helper += "\n" + source[first:last]
+    helper += "\nfunction Test-AwMuxCreationSession { return $false }\n"
+    helper += "\nfunction Stop-AwOwnedPsmuxSession {}\n"
+    helper += (
+        "\nfunction Invoke-AwPsmuxCreation { param($CommandArgs,$Lease)\n"
+        "& $script:AwPsmuxBin @CommandArgs\n"
+        "Set-Variable -Name LASTEXITCODE -Value $LASTEXITCODE -Scope 1\n}\n"
+    )
     return helper, source[start + len("                try {\n"):end]
 
 

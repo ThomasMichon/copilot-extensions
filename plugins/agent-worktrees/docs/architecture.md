@@ -520,6 +520,25 @@ legacy setup scripts remain responsible for entering through
 
 ### Launch-owned pane assets and current boundary handlers
 
+Windows Picker and `sessions.mux_new_session` creators coordinate through
+`~/.psmux/launch-locks/<sha256-session-name>.lock`. The kernel lease uses the
+shared singleton library's sparse lock byte; it is not the seed-admission lock.
+Both paths recheck after acquisition and while contended. Discovery releases
+the lease even when the native creation client has not returned yet; neither
+pane argument receipts, attach nor the backend lifetime retain it. Different
+session names use different leases. Query failure/timeout refuses creation.
+Lock files remain in place; process death releases kernel ownership without
+PID-based stale-lock deletion.
+
+A late detached join reports `created: false` without creating pane arguments
+or claiming/typing a seed. Typed Bridge acquisition still refuses a live mux,
+and exact-restart receipts never credit another creator's session as their own.
+The Picker cleans only its unused handoff before following its existing join
+path and cold-seed refusal. This Windows primitive does not replace the
+engine's broader tracked-worktree lifecycle fence, the separate `pane_create`
+new-session fallback or POSIX parity;
+older installed creators do not participate in this gate.
+
 For a tracked worktree, a constructed Manager launch and the engine's
 new-session/new-window builders copy the selected canonical pane assets before
 creating the pane. The authoritative `record_path` comes from the launch plan.
