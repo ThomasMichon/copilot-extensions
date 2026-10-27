@@ -1,0 +1,9 @@
+{
+  "comment": "Propagate shared caller-owned Windows Job settlement and guarded rollback corrections to this consumer.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}
