@@ -228,6 +228,13 @@ topological ordering against the pinned commit. A terminal page certifies both
 streams, after which the existing bounded stored-identity comparison can infer
 tombstones. Missing objects and unavailable coverage retain pending progress
 without advancing state or falling back to an empty snapshot.
+Before returning from a child directory, the restored parent offset must point
+immediately after that child's tree record. An inconsistent parent/child stack
+therefore cannot silently skip a sibling and complete authoritative coverage.
+This return check reads at most one additional bounded parent object.
+Both full snapshots and ordinary discovery use the resolver's peeled commit
+identity, so an unchanged annotated-tag source does not flip its checkpoint
+between a commit object and a tag object.
 
 Git replacement refs are disabled at the connector's one Git invocation owner,
 consistently across full snapshots, deltas, hints and old direct discovery
@@ -241,8 +248,7 @@ recorded. Finish pending acquisition under its original binding before upgrade
 or use the existing explicit repair flow. No upgrade implicitly starts a full
 crawl or rewrites an old journal.
 
-Shallow
-repositories and mutable history grafts refuse this snapshot path because
+Shallow repositories and mutable history grafts refuse this snapshot path because
 pinning only a commit cannot freeze those external graph boundaries. Normal
 working-tree fallback retains its legacy discovery path, as do old consumers
 calling the unchanged `discover` methods; the canonical-object policy above

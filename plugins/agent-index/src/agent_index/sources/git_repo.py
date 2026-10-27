@@ -302,7 +302,7 @@ class GitRepoConnector:
                 self._git_quiet(["remote", "set-head", self._remote, "-a"])
             ref = self._resolve_ref()
             if ref is not None:
-                commit = self._git(["rev-parse", ref]).strip()
+                commit = self._git(["rev-parse", f"{ref}^{{commit}}"]).strip()
                 if commit:
                     self._index_ref = ref
                     self._index_commit = commit

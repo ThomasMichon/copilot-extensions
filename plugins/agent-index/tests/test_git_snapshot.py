@@ -247,12 +247,16 @@ def test_annotated_tag_pins_the_peeled_commit(repo):
     target = git(repo, "rev-parse", "HEAD")
     git(repo, "tag", "-a", "sample-tag", "-m", "Annotated fixture tag")
     assert git(repo, "rev-parse", "sample-tag") != target
-    result = list(pages(GitRepoConnector(repo_path=repo, ref="sample-tag", fetch=False)))
+    source = GitRepoConnector(repo_path=repo, ref="sample-tag", fetch=False)
+    result = list(pages(source))
     assert all(page.commit == target for page in result)
     assert all(
         entry.metadata["commit"] == target
         for page in result for entry in page.upserts if entry.language != "commit"
     )
+    assert source.current_commit() == target
+    delta = source.discover_delta(target)
+    assert delta.commit == target and delta.upserts == [] and delta.deletions == []
 
 
 def test_history_pages_cover_merges_exactly_once(repo, monkeypatch):
@@ -384,3 +388,40 @@ def test_pre_policy_checkpoint_requires_explicit_reconciliation_before_acquisiti
     assert state.sources["alias"].acquisition_scope == old_scope
     assert paths.count() == 0
     assert PendingCrawls(paths).sources() == []
+
+
+def test_restored_parent_frame_must_point_immediately_after_its_active_child(
+    repo, tmp_path, monkeypatch,
+):
+    for name in ("a", "b"):
+        (repo / name).mkdir()
+        (repo / name / "leaf.md").write_text(name + "\n", encoding="utf-8")
+    target = commit(repo)
+    source = connector(repo)
+    discover = source.discover_snapshot_page
+    assert discover is not None
+    paths = PathIndex(tmp_path / "paths.db")
+    family = source.source_name
+    paths.mark_indexed_batch([(family, "b/leaf.md", "old", 1)])
+    journal = PendingCrawls(paths)
+    scope = recovery_scope("alias", source)
+    monkeypatch.setattr(git_snapshot, "_PAGE_SIZE", 1)
+    kwargs = dict(
+        family=family, stored_family=None, scope=scope, last_commit="base",
+        journal=journal, discover=discover, unit_budget=1,
+    )
+    with pytest.raises(RuntimeError, match="unit budget"):
+        acquire_snapshot("alias", **kwargs)
+    before = journal.read_payload("alias", scope)
+    tree = source._git_bytes(["cat-file", "tree", target + ":"])
+    after_b = tree.index(b" b\0") + 3 + len(target) // 2
+    data = json.loads(before)
+    data["cursor"] = json.dumps({"files": [["", after_b], ["a", 0]]})
+    corrupted = json.dumps(data)
+    journal.compare_and_save("alias", scope=scope, payload=corrupted, expected=before, family=family)
+    monkeypatch.setattr(git_snapshot, "_PAGE_SIZE", 128)
+    with pytest.raises(ValueError, match="parent continuation"):
+        acquire_snapshot("alias", **kwargs)
+    assert journal.read_payload("alias", scope) == corrupted
+    assert journal.load("alias", scope) is None
+    assert paths.count() == 1

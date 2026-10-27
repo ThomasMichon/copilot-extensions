@@ -100,12 +100,29 @@ def _record(raw: bytes, offset: int, oid_bytes: int) -> tuple[str, bytes, str, i
     return mode, name, raw[end + 1:following].hex(), following
 
 
-def _restore_offset(raw: bytes, offset: int, oid_bytes: int) -> None:
+def _restore_offset(
+    raw: bytes, offset: int, oid_bytes: int,
+) -> tuple[str, bytes, str, int] | None:
     boundary = 0
+    previous = None
     while boundary < offset:
-        _, _, _, boundary = _record(raw, boundary, oid_bytes)
+        previous = _record(raw, boundary, oid_bytes)
+        boundary = previous[3]
     if boundary != offset:
         raise ValueError("Git snapshot offset is not a tree-record boundary")
+    return previous
+
+
+def _pop_tree(
+    connector: GitRepoConnector, target: str, stack: list[tuple[str, int]],
+) -> None:
+    if len(stack) > 1:
+        parent = "/".join(name for name, _ in stack[1:-1])
+        raw = _tree(connector, target, parent)
+        previous = _restore_offset(raw, stack[-2][1], len(target) // 2)
+        if previous is None or previous[:2] != ("40000", stack[-1][0].encode()):
+            raise ValueError("Git snapshot parent continuation does not match its child")
+    stack.pop()
 
 
 def _files(
@@ -124,7 +141,7 @@ def _files(
         if cancel_check:
             cancel_check()
         if offset == len(raw):
-            stack.pop()
+            _pop_tree(connector, target, stack)
             break
         mode, name, blob, offset = _record(raw, offset, oid_bytes)
         stack[-1] = (component, offset)
@@ -160,10 +177,6 @@ def discover_git_snapshot(
         if connector._use_worktree:
             raise ValueError("Git working-tree discovery requires legacy reconciliation")
         target = connector._index_commit
-        if immutable_oid(target):
-            target = connector._git([
-                "rev-parse", "--verify", f"{target}^{{commit}}",
-            ]).strip()
     elif isinstance(snapshot, str) and snapshot.startswith(_PREFIX):
         target = snapshot.removeprefix(_PREFIX)
     else:
