@@ -178,6 +178,10 @@ retains these constraints; private host identity stays outside this repository.
   session, actual uninstallation of both systems, installed B and final exit.
 - [x] Resolve or coordinate #8410 only as the required Linux uninstall
   prerequisite; do not substitute deleting a prototype fixture for uninstall.
+- [x] Qualify #9253's bounded producer-complete removal and actual macOS
+  entrypoints, with original capture and unchanged deadlines; retain the
+  [merged-source evidence](<../source-managed-runtime-installs/journal/2026/10.27 native-runtime-removal.md>)
+  separately from same-process interactive and native Windows acceptance.
 - [ ] Record baseline process identities, terminal interactivity, installed
   file removal and locks, and current failure without altering host installs.
 
@@ -349,6 +353,20 @@ and does not delay final Copilot exit indefinitely merely to deliver a lifecycle
 notice; the existing bounded/quiet absent-handler contract remains intact.
 
 ## Journal
+
+### 2026-10-27 - Finite native prerequisite merged; live survival stays open
+
+- #9253 merged as `484cdc64bf2dcac44d16d463c31517b00fb6d71c`.
+  The [canonical source record](<../source-managed-runtime-installs/journal/2026/10.27 native-runtime-removal.md>)
+  retains actual-head review, required CI, 2,503 admitted units and the
+  uninstrumented macOS entrypoint/resource proof. No skipped Windows control
+  becomes positive native Windows qualification.
+- The last recorded original-session admission still refused its rooted
+  legacy runtime wrapper. The merged source does not close that migration,
+  either real installation cycle, protected transport, per-worktree native
+  launch integration, YAML standby or final lifecycle delivery. Continue the
+  existing launch/removal owners and obtain the applicable native-action
+  approval before another live experiment; this effort remains Active.
 
 ### 2026-10-26 - Preparatory review corrections
 
