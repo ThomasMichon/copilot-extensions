@@ -46,12 +46,14 @@ def inspect_owner(owner: KomodoOwner, request: OperationIntent, permit: Permit) 
             receipt = None
             attempt = record["attempt"]
             original_receipt = None
+            resource_receipt = None
             if path.exists():
                 validate_private_file(path)
                 journal = NodeJournal(
                     path, authority=owner.authority, installation=selected.installation,
                     target=selected.declaration.to_dict()["target"])
                 receipt = journal.inspect(request)
+                resource_receipt = journal.inspect_named_external(resource=selected.resource)
                 if attempt is not None:
                     original_receipt = journal.inspect(OperationIntent.from_dict(attempt["request"]))
             accepted = receipt.to_dict()["status"] if receipt is not None else None
@@ -136,7 +138,8 @@ def inspect_owner(owner: KomodoOwner, request: OperationIntent, permit: Permit) 
                     blockers.append("authenticated-current-health-unavailable")
                 else:
                     healthy = True
-            unresolved = accepted == "unknown" or (attempt is not None and (
+            unresolved = (resource_receipt is not None and resource_receipt.to_dict()["status"]
+                          not in ("succeeded", "failed")) or accepted == "unknown" or (attempt is not None and (
                 original_receipt is None
                 or original_receipt.to_dict()["status"] not in ("succeeded", "failed")))
             retired = (absent and accepted == "succeeded" and not containers

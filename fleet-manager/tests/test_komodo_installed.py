@@ -172,7 +172,7 @@ def test_noneditable_host_bootstrap_uses_common_verified_identity_and_fixed_nati
             context = json.loads(sdk_runtime[1][-1])
             context.update(
                 mode=mode, declaration=desired, host_runtime=str(runtime),
-                client_config=str(rig["directory"]),
+                client_config=str(rig["tooling"].client_config),
                 native_python=str(Path(sys.executable).resolve()),
                 native_script=str(rig["root"] / "docker-fixture.py"),
                 material={name: str(getattr(rig["material"], name))

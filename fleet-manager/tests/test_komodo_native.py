@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 import inspect
 import json
+import os
 from pathlib import Path
 import socket
 import subprocess
@@ -190,8 +191,10 @@ def native_rig(tmp_path: Path, monkeypatch: Any) -> Any:
 
     directory = tmp_path / "docker-client"
     directory.mkdir(mode=0o700)
-    (directory / "config.json").write_bytes(b"{}")
-    (directory / "config.json").chmod(0o600)
+    client_config = tmp_path / "client-config"
+    client_config.mkdir(mode=0o700)
+    (client_config / "config.json").write_bytes(b"{}")
+    (client_config / "config.json").chmod(0o600)
     paths = {}
     for name in DATA_NAMES:
         paths[name] = tmp_path / name
@@ -215,7 +218,7 @@ def native_rig(tmp_path: Path, monkeypatch: Any) -> Any:
     def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
         return run_caller_owned([str(executable), str(script), *argv[1:]], **kwargs)
 
-    tooling = KomodoTooling(executable, directory, "daemon-a", run)
+    tooling = KomodoTooling(executable, client_config, "daemon-a", run)
     try:
         yield {"native": KomodoNative(tooling), "tooling": tooling, "material": material,
                "selected": selected, "root": tmp_path, "directory": directory}
@@ -258,6 +261,7 @@ def test_native_prerequisites_use_actual_selected_daemon_images_and_scrub_ambien
     monkeypatch.setenv("DOCKER_HOST", "tcp://wrong-owner.invalid")
     monkeypatch.setenv("DOCKER_CONTEXT", "wrong-context")
     monkeypatch.setenv("DOCKER_AUTH_CONFIG", "private-ambient-material")
+    monkeypatch.setenv("PATH", "/untrusted-client-tools")
     rig = native_rig
     images = rig["native"].prerequisites(rig["selected"], rig["material"], deadline=time.monotonic() + 10)
     assert {name: image.identity for name, image in images.items()} == {
@@ -267,10 +271,11 @@ def test_native_prerequisites_use_actual_selected_daemon_images_and_scrub_ambien
     calls = [json.loads(line) for line in (rig["directory"] / "calls.jsonl").read_text().splitlines()]
     assert len(calls) == 5
     assert all(call["argv"][:4] == [
-        "--config", str(rig["directory"]), "--host", "unix://" + str(rig["material"].docker_socket),
+        "--config", str(rig["tooling"].client_config), "--host", "unix://" + str(rig["material"].docker_socket),
     ] for call in calls)
     assert all(not {"DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_AUTH_CONFIG"} & call["environment"].keys()
                for call in calls)
+    assert all(call["environment"]["PATH"] == os.defpath for call in calls)
     assert not (rig["directory"] / "effects").exists()
     other = KomodoNative(replace(rig["tooling"], daemon_id="other-daemon"))
     with pytest.raises(PlanError, match="physical host"):
@@ -308,6 +313,35 @@ def test_native_failure_never_reports_captured_content_or_replays_effect(native_
     assert "sensitive-native-output" not in str(caught.value)
     assert "fixture-material" not in str(caught.value)
     assert len((rig["directory"] / "calls.jsonl").read_text().splitlines()) == 1
+
+
+@pytest.mark.parametrize("change", ["shared-directory", "cli-plugins", ".docker", "contexts"])
+def test_native_client_configuration_cannot_supply_extra_executable_state(native_rig: Any, change: str) -> None:
+    rig = native_rig
+    directory = rig["tooling"].client_config
+    if change == "shared-directory":
+        directory.chmod(0o755)
+    else:
+        (directory / change).mkdir(mode=0o700)
+    with pytest.raises(PlanError, match="client configuration"):
+        replace(rig["tooling"])
+    with pytest.raises(PlanError, match="client configuration"):
+        rig["native"].prerequisites(rig["selected"], rig["material"], deadline=time.monotonic() + 10)
+    assert not (rig["directory"] / "calls.jsonl").exists()
+
+
+def test_native_client_directory_identity_cannot_be_replaced_after_selection(native_rig: Any) -> None:
+    rig = native_rig
+    directory = rig["tooling"].client_config
+    directory.rename(directory.with_suffix(".retained"))
+    directory.mkdir(mode=0o700)
+    (directory / "config.json").write_bytes(b"{}")
+    (directory / "config.json").chmod(0o600)
+    fresh = replace(rig["tooling"])
+    assert fresh.client_identity != rig["tooling"].client_identity
+    with pytest.raises(PlanError, match="client configuration"):
+        rig["native"].prerequisites(rig["selected"], rig["material"], deadline=time.monotonic() + 10)
+    assert not (rig["directory"] / "calls.jsonl").exists()
 
 
 @pytest.mark.parametrize("repository", [

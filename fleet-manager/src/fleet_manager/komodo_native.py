@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 from threading import Event
@@ -51,16 +52,36 @@ class KomodoTooling:
     client_config: Path
     daemon_id: str
     run: Callable[..., subprocess.CompletedProcess] = field(repr=False, compare=False)
+    client_identity: tuple[int, int] = field(init=False)
 
     def __post_init__(self) -> None:
-        for path in (self.docker, self.client_config):
-            ordinary_path(path)
-        if (not self.docker.is_file() or not os.access(self.docker, os.X_OK)
-                or not self.client_config.is_dir() or not callable(self.run)):
-            raise PlanError("Komodo admitted native toolchain is unavailable")
+        try:
+            for path in (self.docker, self.client_config):
+                ordinary_path(path)
+            if (not self.docker.is_file() or not os.access(self.docker, os.X_OK)
+                    or not self.client_config.is_dir() or not callable(self.run)):
+                raise PlanError("Komodo admitted native toolchain is unavailable")
+            info = self.client_config.stat()
+        except OSError:
+            raise PlanError("Komodo admitted native toolchain is unavailable") from None
         identifier(self.daemon_id, "Komodo physical Docker daemon")
-        if read_private_file(self.client_config / "config.json", 4096) != b"{}":
-            raise PlanError("Komodo requires its owner's inert Docker client configuration")
+        object.__setattr__(self, "client_identity", (info.st_dev, info.st_ino))
+        self.check_client()
+
+    def check_client(self) -> None:
+        try:
+            ordinary_path(self.client_config)
+            info = self.client_config.stat()
+            with os.scandir(self.client_config) as entries:
+                first = next(entries, None)
+                inert = first is not None and first.name == "config.json" and next(entries, None) is None
+            if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077
+                    or (info.st_dev, info.st_ino) != self.client_identity or not inert):
+                raise PlanError("Komodo requires private inert native client configuration")
+            if read_private_file(self.client_config / "config.json", 4096) != b"{}":
+                raise PlanError("Komodo requires its owner's inert Docker client configuration")
+        except OSError:
+            raise PlanError("Komodo native client configuration is unavailable") from None
 
 
 class KomodoNative:
@@ -79,12 +100,11 @@ class KomodoNative:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise PlanError("Komodo native deadline exceeded")
-        if read_private_file(self.tooling.client_config / "config.json", 4096) != b"{}":
-            raise PlanError("Komodo native client configuration changed")
+        self.tooling.check_client()
         settled = Event()
-        environment = {name: os.environ[name] for name in ("PATH", "LANG", "LC_ALL")
+        environment = {name: os.environ[name] for name in ("LANG", "LC_ALL")
                        if name in os.environ}
-        environment.update(HOME=str(self.tooling.client_config), DOCKER_CLI_HINTS="false")
+        environment.update(PATH=os.defpath, HOME=str(self.tooling.client_config), DOCKER_CLI_HINTS="false")
         try:
             result = self.tooling.run([
                 str(self.tooling.docker), "--config", str(self.tooling.client_config),
@@ -199,11 +219,14 @@ class KomodoNative:
         return result
 
     def _apply(self, declaration: KomodoDeclaration, material: KomodoMaterialization,
-               *, profile: Path, expected: bytes, deadline: float) -> None:
+               *, profile: Path, expected: bytes, deadline: float,
+               checkpoint: Callable[[], None] | None = None) -> None:
         """Only the admitted owner calls this after persisting UNKNOWN."""
         ordinary_path(profile)
         if read_private_file(profile, 1024 * 1024) != expected:
             raise PlanError("Komodo generated deployment slot changed before native effect")
+        if checkpoint is not None:
+            checkpoint()
         self._call(material, [
             "compose", "--project-name", declaration.to_dict()["project"],
             "--project-directory", str(profile.parent), "--env-file", "/dev/null",
@@ -232,10 +255,13 @@ class KomodoNative:
             raise PlanError("Komodo native network identity differs from selection")
         return raw[0]
 
-    def _retire(self, material: KomodoMaterialization, identities: list[str], *, deadline: float) -> None:
+    def _retire(self, material: KomodoMaterialization, identities: list[str], *,
+                deadline: float, checkpoint: Callable[[], None]) -> None:
         if not identities or len(identities) > 3 or any(_ID.fullmatch(item) is None for item in identities):
             raise PlanError("Komodo retirement requires exact retained container identities")
+        checkpoint()
         self._call(material, ["container", "stop", "--time", "20", *identities], deadline=deadline)
+        checkpoint()
         self._call(material, ["container", "rm", *identities], deadline=deadline)
 
     def identities_absent(self, material: KomodoMaterialization, identities: list[str], *,

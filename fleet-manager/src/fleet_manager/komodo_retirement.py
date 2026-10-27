@@ -89,20 +89,27 @@ def retire_owner(owner: KomodoOwner, request: OperationIntent, permit: Permit) -
                 state.check()
                 if not journal.begin_external(request):
                     raise PlanError("Komodo retirement was already accepted")
-                owner.admission.complete(permit, request)
-                verify_network(owner.native.network(
-                    selected.declaration, selected.material, deadline=deadline),
-                    selected, containers, network)
-                if identities:
-                    try:
-                        owner.native._retire(selected.material, identities, deadline=deadline)
-                    finally:
-                        if owner.native.native_failure is None:
-                            record["attempt"]["native_settled"] = True
-                            state.save(record)
-                else:
-                    record["attempt"]["native_settled"] = True
-                    state.save(record)
+
+                def checkpoint() -> None:
+                    nonlocal permit
+                    owner._selected(request, content)
+                    permit = owner.admission.revalidate(permit, request)
+                    state.check()
+
+                try:
+                    verify_network(owner.native.network(
+                        selected.declaration, selected.material, deadline=deadline),
+                        selected, containers, network)
+                    if identities:
+                        owner.native._retire(selected.material, identities, deadline=deadline,
+                                             checkpoint=checkpoint)
+                    else:
+                        checkpoint()
+                    owner.admission.complete(permit, request)
+                finally:
+                    if owner.native.native_failure is None:
+                        record["attempt"]["native_settled"] = True
+                        state.save(record)
             elif status == "unknown":
                 owner.admission.complete(permit, request)
                 attempt = record["attempt"]

@@ -435,6 +435,25 @@ class NodeJournal:
                 return None
             return self._accepted(connection, intent)[1]
 
+    def inspect_named_external(self, *, resource):
+        """Read the exact physical-resource fence; caller owns admission and custody."""
+        identifier(resource, "external resource")
+        with self._transaction(write=False) as connection:
+            held = connection.execute(
+                "SELECT operation_id FROM external_owners WHERE resource=?", (resource,),
+            ).fetchone()
+            if held is None:
+                return None
+            row = connection.execute("SELECT intent FROM operations WHERE id=?", held).fetchone()
+            if row is None:
+                raise PlanError("external resource owner is missing")
+            request = OperationIntent(bytes(row[0]))
+            if self._scope(request)["command"] not in ("runner.converge", "manager.converge"):
+                raise PlanError("unsupported named external operation")
+            receipt = self._latest(connection, held[0])
+            receipt.check_intent(request)
+            return receipt
+
     def results(self, *, after=0, limit=100):
         """Read append-only receipt history; transport owns its durable replay cursor."""
         integer(after, "result cursor")

@@ -196,12 +196,15 @@ the bounded declaration, native effect boundary, same-journal admission,
 status/withdrawal and installed-package entry seam. Component qualification
 uses synthetic native subprocess and authenticated HTTP fixtures; it does not
 qualify official images or activate the ordinary installed controller.
-The complete contained Fleet qualification passes 3163 tests with nine explicit
+The complete contained Fleet qualification passes 3174 tests with nine explicit
 platform/prerequisite skips and seven passing subtests, partitioned exhaustively
-into 119 Komodo cases and their 3044-case complement under the existing runner's
+into 129 Komodo cases and their 3045-case complement under the existing runner's
 admission, sandbox and process owner. The required no-actor unit packet passes
 all 2443 admitted cases without skips. Review corrections include mixed-update
 failure settlement and health-blocking missing-key status; retained mixed native
-state never authorizes credentialed probes. These are source/component qualifications.
+state never authorizes credentialed probes. The native client is private and
+inert, each native mutation revalidates current selection/admission, and status
+retains the journal's physical-resource uncertainty even without attempt metadata.
+These are source/component qualifications.
 Actual adopter construction, native official-image acceptance and production
 delivery remain open; no deployment or incumbent adoption is claimed here.

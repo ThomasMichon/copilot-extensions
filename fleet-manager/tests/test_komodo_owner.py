@@ -16,12 +16,13 @@ import pytest
 from fleet_manager.komodo_declaration import KomodoDeclaration
 from fleet_manager.komodo_health import identity_digest
 from fleet_manager.komodo_network import network_fingerprint
+from fleet_manager.komodo_native import KomodoNative
 from fleet_manager.komodo_owner import KomodoOwner, native_fingerprint
 from fleet_manager.komodo_profile import render_profile
 from fleet_manager.komodo_selection import KomodoSelection
 from fleet_manager.komodo_state import KomodoState
 from fleet_manager.planning import PlanError
-from fleet_manager.runtime_admission import OperationGrant
+from fleet_manager.runtime_admission import AdmissionError, OperationGrant
 from test_komodo_declaration import intent
 from test_komodo_native import native_rig as native_rig
 from test_runtime_admission import Harness, actor, policy
@@ -42,6 +43,8 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux host subs
     "stopped-core", "failed-short-1", "failed-short-2",
     "first-complete-unstarted", "missing-core-key", "missing-periphery-key", "adoption-missing-key",
     "mixed-core", "mixed-periphery", "mixed-partial", "mixed-incumbent-drift", "mixed-replacement-drift",
+    "first-empty-lost-metadata", "stale-before-apply",
+    "retire-stale-before-stop", "retire-stale-before-remove", "retire-revoked-before-remove",
 ])
 def test_composed_owner_preserves_original_operation_and_real_native_custody(
     native_rig: Any, keys: Any, scenario: str, monkeypatch: Any,
@@ -133,6 +136,36 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                     instance.inspect if status else instance.settle_failed if failed else instance.converge,
                     original, permit)
 
+            def invalidating_owner(trigger: str, *, revoke: bool = False) -> KomodoOwner:
+                instance = owner()
+                networks = 0
+
+                def run(arguments: list[str], **kwargs: Any) -> Any:
+                    nonlocal networks, revision
+                    result = rig["tooling"].run(arguments, **kwargs)
+                    command = arguments[5:7]
+                    if command == ["network", "ls"]:
+                        networks += 1
+                    if ((trigger == "network" and command == ["network", "ls"] and networks == 2)
+                            or (trigger == "stop" and command == ["container", "stop"])):
+                        if revoke:
+                            revision += 1
+                            harness.current = policy(revision=revision, enrollments=())
+                        else:
+                            current[0] = replace(current[0], valid_until=harness.clock())
+                    return result
+
+                instance.native = KomodoNative(replace(rig["tooling"], run=run))
+                return instance
+
+            if scenario == "stale-before-apply":
+                with pytest.raises(PlanError, match="current selected owner"):
+                    await invoke(invalidating_owner("network"), request())
+                assert effects() == 0 and not health_requests
+                with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
+                    assert state.read()["attempt"]["native_settled"] is True
+                return
+
             if scenario.startswith("adoption") or scenario in ("foreign", "foreign-network"):
                 profile = rig["root"] / "incumbent.json"
                 raw = render_profile(selected.declaration, selected.material, owner="f" * 64)
@@ -220,6 +253,21 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                 with pytest.raises(PlanError, match="uncertain"):
                     await invoke(owner(), original)
                 assert effects() == 1 and not health_requests
+                if scenario == "first-empty-lost-metadata":
+                    with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
+                        (state.root / "selection.json").rename(state.root / "selection.retained")
+                    status = await invoke(owner(), request("inspect-without-attempt"), status=True)
+                    assert status["accepted"] is None and status["unresolved_effects"] is True
+                    assert status["state"] == "unresolved" and status["installed"] is False
+                    current[0] = replace(current[0], generation=2, adopted_network=network_fingerprint(
+                        json.loads((rig["directory"] / "network.json").read_text())))
+                    with pytest.raises(PlanError, match="unsettled"):
+                        await invoke(owner(), request("cannot-take-missing-attempt"))
+                    with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
+                        assert not (state.root / "selection.json").exists()
+                        assert (state.root / "selection.retained").is_file()
+                    assert effects() == 1 and not health_requests
+                    return
                 if scenario == "first-partial-foreign":
                     changed = live()
                     changed["mongo"]["Config"]["Env"].append("UNAPPROVED=changed")
@@ -428,6 +476,19 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                 current[0] = replace(current[0], declaration=KomodoDeclaration.from_dict(changed),
                                      generation=2)
                 absent = request("retire-owned")
+                if scenario.startswith(("retire-stale-", "retire-revoked-")):
+                    before_stop = scenario == "retire-stale-before-stop"
+                    revoke = scenario == "retire-revoked-before-remove"
+                    with pytest.raises((PlanError, AdmissionError)):
+                        await invoke(invalidating_owner("network" if before_stop else "stop", revoke=revoke),
+                                     absent)
+                    path = rig["directory"] / "retire-effects"
+                    assert (len(path.read_text().splitlines()) if path.exists() else 0) == (
+                        0 if before_stop else 1)
+                    assert set(live()) == {"core", "mongo", "periphery"}
+                    with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
+                        assert state.read()["attempt"]["native_settled"] is True
+                    return
                 if scenario != "retire-reinstall":
                     (rig["directory"] / ("lost-rm" if scenario == "retire-lost-reply" else "lost-stop")).touch()
                     with pytest.raises(PlanError, match="uncertain"):

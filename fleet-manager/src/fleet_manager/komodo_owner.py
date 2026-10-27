@@ -319,21 +319,27 @@ class KomodoOwner:
                     state.check()
                     if not journal.begin_external(request):
                         raise PlanError("Komodo effect was already accepted by another owner")
-                    self.admission.complete(permit, request)
-                    verify_network(self.native.network(
-                        selected.declaration, selected.material, deadline=deadline),
-                        selected, containers, record["attempt"]["network_before"], pending=pending)
-                    if needs_apply:
-                        try:
+
+                    def checkpoint() -> None:
+                        nonlocal permit
+                        self._selected(request, content)
+                        permit = self.admission.revalidate(permit, request)
+                        state.check()
+
+                    try:
+                        verify_network(self.native.network(
+                            selected.declaration, selected.material, deadline=deadline),
+                            selected, containers, record["attempt"]["network_before"], pending=pending)
+                        if needs_apply:
                             self.native._apply(selected.declaration, selected.material, profile=slot,
-                                               expected=profile, deadline=deadline)
-                        finally:
-                            if self.native.native_failure is None:
-                                record["attempt"]["native_settled"] = True
-                                state.save(record)
-                    else:
-                        record["attempt"]["native_settled"] = True
-                        state.save(record)
+                                               expected=profile, deadline=deadline, checkpoint=checkpoint)
+                        else:
+                            checkpoint()
+                        self.admission.complete(permit, request)
+                    finally:
+                        if self.native.native_failure is None:
+                            record["attempt"]["native_settled"] = True
+                            state.save(record)
                 else:
                     self.admission.complete(permit, request)
                     attempt = record["attempt"]

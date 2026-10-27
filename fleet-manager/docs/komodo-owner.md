@@ -60,6 +60,11 @@ for admin/database usernames/passwords, JWT secret and webhook secret.
 Credential files cannot be inside service-writable storage. Missing, changed,
 unsafe or unavailable prerequisites refuse; this API installs neither Docker
 nor images and never changes filesystem permissions to accommodate an image.
+The client directory is owner-private, inode-bound and contains only that
+configuration file. Extra plugin/context directories refuse before any child;
+the native child receives the OS default executable path, never ambient `PATH`.
+The existing host authority still authenticates the Docker binary and its
+system-provided plugins; constructing a tooling record does not do that.
 
 Install the SDK's `komodo-host` extra and the separately selected identity
 profile's dependencies. The host owner is Linux-only; parsing and ordinary
@@ -126,7 +131,12 @@ may likewise use the exact owner-issued permit. Neither a DTO nor an SDK
 constructor grants execution authority.
 
 The owner rechecks current selection and admission before persisting UNKNOWN
-and starting native effects. Bounded authenticated readiness then checks
+and immediately before each fixed native command, including between stop and
+remove. Post-inspection expiry or withdrawal refuses the next effect without
+replay. A settled or never-started native invocation retains settled process
+evidence; unconfirmed cleanup does not. A long accepted native run may outlive
+its permit, requiring fresh original-operation proof for later reconciliation.
+Bounded authenticated readiness then checks
 current Core version, selected registered server, Periphery connection/version,
 Docker connection and actual retained public keys before publishing good.
 Container existence, a zero native exit or old good evidence is not readiness.
@@ -179,6 +189,9 @@ Unresolved effects also reflect the retained original attempt's journal
 receipt, even when the admitted status request has a new operation ID and no
 receipt of its own. That resource fence prevents convergence without allowing
 the new request to validate or reconcile the original candidate.
+Status also reads the physical resource's current receipt directly from the
+same journal. Missing attempt metadata cannot hide an unsettled claim or permit
+state reconstruction; the original missing evidence remains a recovery refusal.
 Stopped Core containers never authorize credentialed HTTP probes to their
 released loopback port. Status reports health unavailable; original failure
 settlement treats stopped or incomplete native state as readiness failure.
