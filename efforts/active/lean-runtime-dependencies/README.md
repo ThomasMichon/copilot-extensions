@@ -123,6 +123,19 @@ download or interpreter installer in each helper. The amendment's
 [Python prerequisite boundary](compiler-free-execution.md#python-prerequisite-boundary)
 defines the resulting Windows ordering and qualification.
 
+### 2026-10-27 - Setup-owned PATH Python
+
+Operator verbatim:
+
+> We don't need any signature verification and any of that stuff; it's way more robust to *trust* python from PATH, because this allows the system to be more composable. All this extra logic does is slow stuff down. It's better to have our own upfront setup flow from the harness set up the correct Python, and then just call `python` on path. Now, it's good if we can avoid putting random versions of python on PATH, like versions from our own worktrees or temporary folders, but that's a matter of us keeping tidy, not adding signature verification and everything.
+
+This supersedes the earlier interpreter-admission design: upfront setup owns
+supported Python and PATH hygiene; helpers trust normal PATH selection without
+signature, registry, physical-path or disposable-location admission gates.
+Process identity, containment, leases, authenticated endpoints and safe cleanup
+remain separate requirements. The [amendment](compiler-free-execution.md#python-prerequisite-boundary)
+owns the revised implementation and validation boundary.
+
 ## Plan
 
 ### Phase 1 - Reviewed intent and dependency baseline
@@ -197,8 +210,10 @@ defines the resulting Windows ordering and qualification.
 - [ ] Replace executable embedded Windows helper compilation and runtime code
   emission through their existing installation-context, operation-lock,
   update-driver, process and session-host owners. Establish the existing
-  Agent Machines Python prerequisite before these helpers, and qualify its
-  interpreter handoff rather than introduce another acquisition path.
+  setup-owned Python prerequisite before these helpers, invoke normal PATH
+  Python without interpreter attestation, and remove the superseded signature,
+  registry and physical-path gates rather than introduce another acquisition
+  or admission path.
 - [ ] Remove first-party native sources, generated copies, custom compiled
   artifacts, compiler build hooks and release construction/verification
   compilation; retain normal integrity and source admission.
@@ -257,8 +272,8 @@ shared mutable venv is presumed acceptable.
 
 The compiler-free Phase 7 amendment merged in #9120 after current-head approval
 with no findings and successful required CI. The Linux shared-instance
-replacement subsequently merged in #9129; the next source slice qualifies the
-Windows interpreter boundary before replacing embedded compilation. Neither
+replacement subsequently merged in #9129; the next source slice replaces the
+Windows compiled interpreter selector with setup-provided PATH Python. Neither
 merge closes the complete bootstrap, platform, release or adoption gates.
 The prerequisite clarification and Linux merge reconciliation then merged in
 #9162. Windows implementation now proceeds from the existing machine-owned
@@ -273,6 +288,12 @@ merged in #9197 and the Core signer in #9204. Retained ancestors and the current
 drive-query primitives merged in #9210. Complete canonical-name, short-alias,
 drive-stability and source admission remain open before any compiled bootstrap
 migration; these private primitives do not enable a caller.
+The unused physical-address custody and per-component long-name candidate
+subsequently merged in #9235. Its bounded dual-shell qualification does not
+establish complete interpreter/source admission or actual physical-executable
+and helper startup. The 2026-10-27 PATH-Python direction removes interpreter
+attestation from the migration gate. Actual compiler-free helper startup,
+process/Job behavior and caller compatibility still require qualification.
 
 ### Current execution boundary
 
@@ -333,6 +354,57 @@ transfer without acceptance by a named tracked objective.
 
 ## Journal
 
+### 2026-10-27 - Trust setup-provided PATH Python
+
+- Captured the operator's explicit removal of interpreter signature and related
+  attestation machinery in Request, the service-model vision and the canonical
+  compiler-free amendment. Supported Python and durable PATH hygiene belong to
+  upfront setup, not a replacement blacklist in each helper.
+- Physical interpreter/source-admission experiments are no longer prerequisites
+  for this campaign. Their results remain historical; no caller or installed
+  runtime changed from them. The generic fragment-loader compatibility fix is
+  separate from interpreter trust and does not create an admission gate.
+- Next implement normal PATH invocation and remove compiled interpreter
+  admission through the existing bootstrap and packaging owners, then continue
+  the shared lifecycle migration. Preserve process/Job, endpoint, lock and
+  cleanup safety; review, complete platform qualification and rollout remain
+  distinct gates.
+
+### 2026-10-27 - Preserve physical helper-source addressing
+
+- Read-only inspection on both qualified shells observed native OS
+  architecture, physical-path version metadata, a bounded PE-header read from
+  the original retained handle and cached PSF signature verification without
+  closing that original handle. These are inspection interfaces, not an
+  interpreter-selection or helper-startup verdict.
+- A controlled existing-dependency startup comparison separated an ordinary
+  filename from a physical one while keeping all other process-start fields
+  unchanged. The ordinary baseline completed; the physical PS5 managed seam
+  failed with native error 87. No caller falls back to the ordinary path from
+  that failure. Existing stock process-creation metadata is being qualified
+  before any alternative seam or policy change.
+- Direct stock process-creation controls subsequently failed with error 87
+  for both null and explicit physical application names. A single ordinary
+  application-name control completed with the same full command line and
+  three-pipe protocol, including successful returned-handle ownership and
+  closure. This narrows the observed failure without establishing a general
+  namespace restriction or authorizing an ordinary-path production fallback.
+- That ordinary application-name control reported a physical `sys.executable`
+  while its standard-library paths and module origins remained DOS-addressed.
+  The command line's executable spelling is therefore not image-selection or
+  complete interpreter-namespace proof. Physical startup and prerequisite
+  admission remain open.
+- The baseline separately proved that resolving a physical source path
+  reintroduces an extended DOS drive path. The Python fragment loader now keeps
+  a `GLOBALROOT` entrypoint's lexical parent; ordinary and relative entrypoints
+  retain their previous resolution behavior. This does not change SDK input
+  normalization, source admission, interpreter authority or an active caller.
+- Regenerated all declared copies through the installation-context owner.
+  Five focused loader controls and four vendoring regressions passed through
+  the bounded supervisor. Actual complete held-source import and physical
+  executable startup remain distinct native gates; publication and review
+  are still required.
+
 ### 2026-10-26 - Physical-address canonical custody candidate
 
 - Continued the reviewed compiler-free bootstrap slice without changing a
@@ -380,6 +452,17 @@ transfer without acceptance by a named tracked objective.
   interpreter/helper startup, complete source admission or desktop behavior.
   Review and merge remain required; next compose the existing Python
   prerequisite and complete helper closure before switching any caller.
+- #9235 merged as `0b65e67063d41777193128eb4c6d192782f83ae1` after
+  genuine current-head Copilot approval `5663099778`, no inline or open review
+  issues and successful required CI. Managed publication retained all eleven
+  qualified source files unchanged, and the continuing worktree advanced
+  onto the verified merge without finalization.
+- Both entire owning READMEs and their complete Plan/Validation Plans were
+  re-read after merge. No aggregate item closes from this unused candidate.
+  Next qualify physical-path version/architecture/signer inspection and
+  retained-handle reads for the existing Python prerequisite, then its actual
+  complete helper handoff. No new interpreter acquisition, shell prerequisite,
+  caller switch or production rollout is authorized by this source merge.
 
 ### 2026-10-26 - Retained ancestors and current-drive query candidate
 
