@@ -5,10 +5,11 @@ from __future__ import annotations
 import functools
 import inspect
 import json
+import logging
 import os
 import threading
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import BinaryIO
 
@@ -19,6 +20,7 @@ FTS_LOCK = ".source-fts.lock"
 _domains: dict[tuple[int, int], SourceDomain] = {}
 _registry = threading.Lock()
 _child_guards = []
+log = logging.getLogger(__name__)
 
 def _open_receipt(path: Path) -> BinaryIO:
     """Keep an atomic snapshot readable without preventing its replacement."""
@@ -184,10 +186,17 @@ class SourceDomain:
         return value
 
     def save(self, value: dict) -> None:
+        payload = json.dumps(value, sort_keys=True)
+        if len(payload.encode("utf-8")) > 65536 and "logical_projection" in value:
+            value = {key: item for key, item in value.items() if key != "logical_projection"}
+            payload = json.dumps(value, sort_keys=True)
+            log.warning("Logical projection metadata exceeds the receipt budget; retaining physical coverage")
+        if len(payload.encode("utf-8")) > 65536:
+            raise SourceLayoutError("source-layout receipt exceeds its size limit")
         temporary = self.path / f".source-layout-{uuid.uuid4().hex}.tmp"
         try:
             with temporary.open("w", encoding="utf-8", newline="\n") as stream:
-                json.dump(value, stream, sort_keys=True)
+                stream.write(payload)
                 stream.flush()
                 os.fsync(stream.fileno())
             _replace_receipt(temporary, self.path / MARKER)
@@ -210,16 +219,41 @@ class SourceDomain:
             finally:
                 self._local.reading = False
 
-    def effect(self, operation: str) -> None:
+    def effect(self, operation: str, *, physical_only: str | None = None) -> None:
         """Persist before an irreversible step; surviving rows cannot prove no lost members."""
         if not self.writing:
             raise SourceLayoutError("effect requires participating writer ownership")
+        if physical_only is None:
+            self._local.logical_effect = True
+        else:
+            self._local.physical_only.add(physical_only)
         value = self.receipt()
         kind, _, table = operation.partition(":")
         if kind in ("content-upsert", "canonical-delete", "content-compact"):
             value.setdefault("fts_coverage", {}).pop(table, None)
         value.update(uncertain_effect=True, operation=operation)
         self.save(value)
+
+    @contextmanager
+    def physical_maintenance(self, table_name: str, operation: str):
+        """Exempt only the witnessed transition of this maintenance operation."""
+        from .logical_projection import physical_tables
+
+        if not self.writing:
+            raise SourceLayoutError("maintenance requires participating writer ownership")
+
+        def snapshot():
+            return physical_tables(
+                self.path, {table_name: self._local.db.open_table(table_name).version},
+            )
+
+        before = snapshot()
+        self.effect(operation, physical_only=table_name)
+        yield
+        after = snapshot()
+        if (before is not None and after is not None
+                and self._local.physical_witness.get(table_name) == before[table_name]):
+            self._local.physical_witness[table_name] = after[table_name]
 
     def cover_fts(self, content) -> None:
         if not self.writing:
@@ -244,19 +278,25 @@ class SourceDomain:
         return True
 
     @contextmanager
-    def fts_handoff(self):
+    def fts_handoff(self, *, table_name: str | None = None):
         """Pending intent closes the pre-spawn gap; child guard closes parent-death gap."""
-        self.effect("fts-builder")
-        nonce = uuid.uuid4().hex
-        value = self.receipt()
-        value["fts_pending"] = nonce
-        self.save(value)
-        self._local.fts_guard.close()
-        self._local.fts_guard = None
-        try:
-            yield nonce
-        finally:
-            self._local.fts_guard = kernel_lock(self.path / FTS_LOCK)
+        maintenance = (
+            self.physical_maintenance(table_name, "fts-builder")
+            if table_name is not None else nullcontext()
+        )
+        with maintenance:
+            if table_name is None:
+                self.effect("fts-builder")
+            nonce = uuid.uuid4().hex
+            value = self.receipt()
+            value["fts_pending"] = nonce
+            self.save(value)
+            self._local.fts_guard.close()
+            self._local.fts_guard = None
+            try:
+                yield nonce
+            finally:
+                self._local.fts_guard = kernel_lock(self.path / FTS_LOCK)
 
     @contextmanager
     def write(self, db):
@@ -269,12 +309,20 @@ class SourceDomain:
             return
         with self.exclusion():
             value = self.receipt()
+            versions = _versions(db)
             if (value.get("fts_pending") or value.get("state") != "clean"
-                    or value["versions"] != _versions(db)):
+                    or value["versions"] != versions):
                 raise SourceLayoutError("source projection requires explicit recovery")
+            from .logical_projection import commit_projection, physical_tables
+
+            before = physical_tables(self.path, versions)
             value["state"] = "dirty"
             self.save(value)
             self._local.depth = 1
+            self._local.db = db
+            self._local.logical_effect = False
+            self._local.physical_only = set()
+            self._local.physical_witness = dict(before or {})
             try:
                 yield
                 if self.receipt().get("fts_pending"):
@@ -284,9 +332,19 @@ class SourceDomain:
                 value["state"] = "clean"
                 value.pop("uncertain_effect", None)
                 value.pop("operation", None)
+                after = physical_tables(self.path, value["versions"])
+                preserved = {
+                    name for name in self._local.physical_only
+                    if after is not None and after.get(name) == self._local.physical_witness.get(name)
+                } if not self._local.logical_effect else set()
+                commit_projection(value, before, after, physical_only=preserved)
                 self.save(value)
             finally:
                 self._local.depth = 0
+                self._local.db = None
+                self._local.logical_effect = False
+                self._local.physical_only = set()
+                self._local.physical_witness = {}
 
 
 def domain_for(path: str | Path) -> SourceDomain | None:

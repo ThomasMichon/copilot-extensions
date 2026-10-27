@@ -437,9 +437,13 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin, _ContentSnaps
 
         try:
             cutoff = datetime.timedelta(days=older_than_days)
-            if self._source_domain is not None:
-                self._source_domain.effect(f"content-compact:{self._table_name}")
-            table.optimize(cleanup_older_than=cutoff)
+            maintenance = (
+                self._source_domain.physical_maintenance(
+                    self._table_name, f"content-compact:{self._table_name}",
+                ) if self._source_domain is not None else contextlib.nullcontext()
+            )
+            with maintenance:
+                table.optimize(cleanup_older_than=cutoff)
             logger.info(
                 "Optimized table %s (cleanup older than %d days)",
                 self._table_name, older_than_days,
