@@ -37,8 +37,10 @@ sys.exit(main.main(["--project", project, "worktree-allocation-receive", operati
 
 
 @pytest.mark.parametrize("same_repository", [False, True])
+@pytest.mark.parametrize("bridge", [False, True])
 def test_ordinary_cli_returns_actual_child_from_finite_receiver_before_claim_ack(
     receiver, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, same_repository: bool,
+    bridge: bool,
 ) -> None:
     receiving_config, _, receiving_records = receiver
     if same_repository:
@@ -109,6 +111,7 @@ def test_ordinary_cli_returns_actual_child_from_finite_receiver_before_claim_ack
     command = [
         "--project", "parent", "create", "--machine=test",
         *([] if same_repository else [f"--repo={receiving_config.repo_name}"]),
+        *(["--bridge", "--caller-worktree=creator"] if bridge else []),
         "--no-pair", "--json",
     ]
     with output.capture_json_output() as captured:
@@ -121,7 +124,14 @@ def test_ordinary_cli_returns_actual_child_from_finite_receiver_before_claim_ack
     assert result["worktree"]["id"] == child.worktree_id
     assert result["worktree"]["path"] == child.worktree_path
     assert result["worktree"]["creation_nonce"] == child.creation_nonce
+    assert result["worktree"]["owner_ref"] == "origin/parent/creator"
+    assert result["worktree"]["execution_machine"] == "test"
+    if bridge:
+        assert result["worktree"]["kind"] == "bridge"
+        assert result["worktree"]["caller_worktree"] == "creator"
     assert child.receiving_allocation["phase"] == "created" and child.sessions == []
+    assert child.kind == ("bridge" if bridge else "session")
+    assert child.caller_worktree == ("creator" if bridge else None)
     assert result["allocation"]["linkage"] == "pending"
     assert result["allocation"]["target"]["project"] == receiving_config.repo_name
     assert child.receiving_allocation["token"] not in captured.getvalue()

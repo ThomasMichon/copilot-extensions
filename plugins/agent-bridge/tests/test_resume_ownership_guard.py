@@ -38,6 +38,7 @@ def client(tmp_db: Database, tmp_path: Path, monkeypatch) -> TestClient:
     app.state.db = tmp_db
     manager = SessionManager(tmp_db)
     app.state.session_manager = manager
+    (tmp_path / "workspace").mkdir()
     path = str(tmp_path / "workspace")
     config = SimpleNamespace(project="example-project", host=None)
     app.state.resolver = SimpleNamespace(

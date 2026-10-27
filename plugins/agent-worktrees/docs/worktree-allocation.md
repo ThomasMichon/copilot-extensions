@@ -36,6 +36,21 @@ non-blocking linkage without agent launch. An origin lacking that declaration
 does not support this invocation;
 do not try new arguments against it or fall back to unowned receiving creation.
 
+Bridge-shaped creation additionally requires `ordinary_create.kinds` to include
+`bridge` and `caller_worktree: true`. `create --bridge --caller-worktree <caller>`
+preserves the bridge kind and navigation metadata through either local or remote
+creation without launching an agent. `--bridge` and `--system` are mutually
+exclusive; caller navigation metadata without bridge kind refuses.
+Keyed local creation compares caller navigation identity as an allocation fact,
+including on the omitted-selector path. Historical journals without that fact
+remain replayable only for a child with no caller; a caller-bearing historical
+child refuses rather than guessing or rebinding its caller.
+`creator_identity: true` declares the origin capability probe's optional
+`--owner-ref`: it resolves that actual local creator ledger and returns its
+canonical `creator` without reserving or allocating anything. This preserves
+supported legacy machine labels while refusing a foreign or unavailable origin
+before a composing host attempts receiving effects.
+
 Omitting both selectors retains the ordinary local path. Local repository
 selection scopes the normal creation core to that destination and restores the
 previous project on success or failure. Existing local seed, system,

@@ -170,13 +170,23 @@ def _origin_operation(creator: str, path: Path, operation: str, payload: dict) -
     return metadata
 
 
+def creation_kind(args: argparse.Namespace) -> str:
+    bridge, system = bool(getattr(args, "bridge", False)), bool(getattr(args, "system", False))
+    caller = getattr(args, "caller_worktree", None)
+    if bridge and system:
+        raise ValueError("--bridge and --system select different worktree kinds")
+    if caller is not None and (not bridge or not isinstance(caller, str) or not caller.strip()):
+        raise ValueError("--caller-worktree requires --bridge and a nonempty navigation identity")
+    return "bridge" if bridge else "system" if system else "session"
+
+
 def _remote_options(args: argparse.Namespace, dispatch_attempt: dict | None) -> dict:
     if getattr(args, "seed", None) is not None:
         raise ValueError("remote create does not support --seed; stage prompts through the composing host")
-    options: dict = {"kind": "session", "no_pair": bool(
+    options: dict = {"kind": creation_kind(args), "no_pair": bool(
         getattr(args, "no_pair", False) or os.environ.get("AGENT_WORKTREES_NO_PAIR"),
     )}
-    for field in ("interface", "origin", "bound_agent"):
+    for field in ("interface", "origin", "bound_agent", "caller_worktree"):
         value = getattr(args, field, None)
         if value is not None:
             options[field] = value
@@ -288,6 +298,7 @@ def create(
     invocation_cwd: Path, create_local: Callable[..., dict],
 ) -> dict:
     """Capture origin before selecting a destination or changing ambient project."""
+    kind = creation_kind(args)
     standalone = bool(getattr(args, "no_owner", False) or getattr(args, "system", False))
     project, origin_config, origin_owner = _origin(invocation_cwd, owner_ref, standalone=standalone)
     requested_project = getattr(args, "repo", None)
@@ -310,10 +321,11 @@ def create(
         config = cfg.load_config()
         system = getattr(args, "system", False)
         return create_local(
-            config, no_mux=True, kind="system" if system else "session",
+            config, no_mux=True, kind=kind,
             owner=(getattr(args, "owner", None) or getattr(args, "name", None)) if system else None,
             name=getattr(args, "name", None) if system else None,
             interface=getattr(args, "interface", None), origin=getattr(args, "origin", None),
+            caller_worktree=getattr(args, "caller_worktree", None),
             owner_ref=None if standalone else origin_owner, inherit_parent_session=not standalone,
             dispatch_attempt=dispatch_attempt, bound_agent=getattr(args, "bound_agent", None),
             no_pair=getattr(args, "no_pair", False), pending_seed=getattr(args, "seed", None),

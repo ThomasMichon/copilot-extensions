@@ -9,13 +9,42 @@ from pathlib import Path
 import pytest
 
 import agent_worktrees.__main__ as m
-from agent_worktrees import config as cfg, handoff_cli, repos, resolve_cli, resolve_launch_cli, tracking
+from agent_worktrees import (
+    config as cfg, create_destination, handoff_cli, repos, resolve_cli, resolve_launch_cli, tracking,
+)
 from agent_worktrees.worktree_machine_identity import WorktreeMachineIdentity
 from test_embody import _ns
 from test_launch_preflight import _create_args
 from test_resolve_seed_delivery import _args
 from test_tuple_resolve_equivalence import observed_config as observed_config
 from test_paired_carve import _state_root
+
+
+@pytest.mark.parametrize("selectors", [False, True])
+def test_local_bridge_cli_replay_refuses_changed_caller(
+    observed_config, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture, selectors: bool,
+) -> None:
+    config = observed_config("linux", "matching", "ordinary")
+    args = _create_args(json_output=True)
+    args.bridge, args.caller_worktree, args.creation_key = True, "caller-a", "caller-key"
+    args.no_owner = True
+    if selectors:
+        args.repo = config.repo_name
+        monkeypatch.setattr(create_destination, "_origin", lambda *a, **k: (config.repo_name, config, None))
+        monkeypatch.setattr(
+            create_destination, "_target",
+            lambda *a: {"machine": "local-space", "project": config.repo_name},
+        )
+    assert m.cmd_create(args) == 0
+    first = json.loads(capfd.readouterr().out)
+    assert first["worktree"]["caller_worktree"] == "caller-a"
+    assert m.cmd_create(args) == 0
+    assert json.loads(capfd.readouterr().out)["worktree"] == first["worktree"]
+    monkeypatch.setattr(m.git_ops, "create_worktree", lambda *_a: pytest.fail("replay allocated a child"))
+    args.caller_worktree = "caller-b"
+    assert m.cmd_create(args) == 1
+    failure = json.loads(capfd.readouterr().out)
+    assert failure["creation"]["status"] == "conflict"
 
 
 @pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])

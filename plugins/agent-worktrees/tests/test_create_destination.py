@@ -307,6 +307,19 @@ def test_journal_helper_observes_original_protected_claim_without_adding_plain_r
     assert len(tracking.load_record(path).resources) == 1
 
 
+def test_origin_capability_owner_probe_reads_actual_ledger_without_reservation(owner):
+    path, _ = owner
+    before = path.read_bytes()
+    with output.capture_json_output() as captured:
+        assert worktree_allocation_cli.cmd_worktree_allocation(
+            args(operation="capabilities", owner_ref="m/p/owner#session"),
+        ) == 0
+    capability = json.loads(captured.getvalue())
+    assert capability["creator"] == "m/p/owner"
+    assert capability["ordinary_create"]["creator_identity"] is True
+    assert path.read_bytes() == before
+
+
 def test_origin_uses_original_cwd_repository_before_explicit_destination(owner, monkeypatch):
     path, config = owner
     monkeypatch.setattr(destination, "_cwd_project", lambda cwd: "p")
@@ -392,6 +405,13 @@ def test_destination_parser_keeps_unknown_argument_refusal():
     worktree_ops_cli.add_parsers(parser.add_subparsers(dest="command"))
     selected = parser.parse_args(["create", "--machine=remote", "--repo=target", "--json"])
     assert selected.machine == "remote" and selected.repo == "target"
+    selected = parser.parse_args(["create", "--bridge", "--caller-worktree=caller"])
+    assert destination.creation_kind(selected) == "bridge"
+    assert selected.caller_worktree == "caller"
+    with pytest.raises(SystemExit):
+        parser.parse_args(["create", "--bridge", "--system"])
+    with pytest.raises(ValueError, match="requires --bridge"):
+        destination.creation_kind(args(caller_worktree="caller"))
     with pytest.raises(SystemExit) as caught:
         parser.parse_args(["create", "--machine=remote", "--invented-option"])
     assert caught.value.code == 2

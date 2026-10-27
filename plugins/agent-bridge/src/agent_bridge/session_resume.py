@@ -15,6 +15,9 @@ from repository_policy import AgentHostingError
 from .session_preferences import client_preferences
 from .cold_outages import admitted_recovery, guarded_resume
 from .models import SessionStatus
+from .owned_workspace import (
+    can_resume_allocation, prepare_session as prepare_owned_workspace, retains_allocation,
+)
 from .startup_progress import lifecycle_lock, observed, phase
 from .transport import SpawnTarget
 from .privileged_plugins import CONTEXT_KEY, PrivilegedLaunchRefused, relay_agent, start_client
@@ -241,11 +244,16 @@ class _SessionResumeMixin:
                 # Creation identity survives an interrupted acknowledgement too.
                 allow_recreate = False
             core = _core()
-            if session.status != SessionStatus.STOPPED:
+            allocation_recovery = can_resume_allocation(session)
+            if not session.acp_session_id and retains_allocation(session):
+                allow_recreate = False
+            if session.status != SessionStatus.STOPPED and not (
+                allocation_recovery and session.status == SessionStatus.FAILED
+            ):
                 raise ValueError(
                     f"Session {session_id} is {session.status.value}, not stopped"
                 )
-            if not session.acp_session_id and not allow_recreate:
+            if not session.acp_session_id and not allow_recreate and not allocation_recovery:
                 raise RuntimeError(
                     f"Session {session_id} has no ACP session ID -- cannot resume"
                 )
@@ -349,6 +357,7 @@ class _SessionResumeMixin:
                     client = host_result[0] if host_result is not None else None
                     if client is None:
                         with phase("process-preparation"):
+                            await prepare_owned_workspace(session, self._db)
                             agent_proc = await core.spawn(session.target)
                         client = core.AcpClient(
                             on_event=on_acp_event,
@@ -478,7 +487,7 @@ class _SessionResumeMixin:
                             with contextlib.suppress(Exception):
                                 await client.shutdown()
                         session.client = None
-                    if cold_outage is not None or acquisition_launch is not None:
+                    if cold_outage is not None or acquisition_launch is not None or allocation_recovery:
                         session.status = SessionStatus.STOPPED
                         self._db.update_session_status(
                             session_id, SessionStatus.STOPPED.value, time.time(),
@@ -562,6 +571,7 @@ class _SessionResumeMixin:
                     if host_result is not None:
                         recreate_client, new_acp = host_result
                     else:
+                        await prepare_owned_workspace(session, self._db)
                         agent_proc = await core.spawn(session.target)
                         recreate_client = core.AcpClient(
                             on_event=on_acp_event,
@@ -768,6 +778,7 @@ class _SessionResumeMixin:
             client: AcpClient | None = None
             try:
                 core = _core()
+                await prepare_owned_workspace(session, self._db)
                 agent_proc = await core.spawn(session.target)
                 client = core.AcpClient(
                     on_event=on_capture,

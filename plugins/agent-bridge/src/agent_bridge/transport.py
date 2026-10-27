@@ -436,6 +436,10 @@ async def _resolve_worktree_remote(
     """
     if not target.project:
         raise RuntimeError("remote resolve requires target.project")
+    if not target.worktree_id and target.caller_owner_ref and not target.native_resume_id:
+        raise RuntimeError(
+            "owned remote creation requires the origin's retained allocation before existing-child resolve",
+        )
     base_args = [target.project, "resolve", "--json", "--no-resume"]
     if target.native_resume_id:
         base_args += ["--native-resume-session", target.native_resume_id]
