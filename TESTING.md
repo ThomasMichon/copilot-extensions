@@ -203,7 +203,9 @@ zero results must report that diagnostic limit, not a stale error code.
 Controls check the fixed 32768-code-unit bound, actual pointer/argument
 forwarding, current-versus-prior mapping semantics and release before any
 consumer-visible result. Synthetic failures cover malformed output, partial
-allocation, invocation and post-free errors. A current mapping is a snapshot,
+allocation, invocation and post-free errors. Malformed drive inputs, including
+trailing newline, NUL and Unicode line-separator data, must fail before binding
+and emit no result. A current mapping is a snapshot,
 not proof that a drive is canonical or unchanged.
 
 ```text

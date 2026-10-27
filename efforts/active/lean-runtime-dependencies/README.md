@@ -399,6 +399,13 @@ transfer without acceptance by a named tracked objective.
   hardened Linux packet passed four source controls with 165 explicit native
   skips. Current-head independent review, required CI and merge remain gates;
   no complete canonical-path or interpreter/source admission is inferred.
+- A later review identified the .NET regex end-anchor exception for a final LF
+  in a drive value. The drive grammar now uses absolute start/end anchors.
+  Malformed-input controls preserve newline, NUL and Unicode separator data
+  through an encoded test transport, require rejection before binding and
+  assert zero output. Focused corrected-drive native qualification is pending;
+  the preceding combined packet continues to cover unchanged custody/signer
+  code, not this new drive-validator revision.
 
 ### 2026-10-26 - Core held-file signer candidate
 

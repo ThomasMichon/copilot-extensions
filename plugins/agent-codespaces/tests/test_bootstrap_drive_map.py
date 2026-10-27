@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 
 import pytest
@@ -92,7 +93,7 @@ $mapping=Get-BootstrapStockCurrentDriveMapping -Drive 'C:' | ForEach-Object {
     $observed++
     $_
 }
-if ($mapping -notmatch '^\\Device\\HarddiskVolume[0-9]+$') {
+if ($mapping -notmatch '\A\\Device\\HarddiskVolume[0-9]+\z') {
     throw 'Native current mapping was not the expected existing system volume.'
 }
 [pscustomobject]@{mapping=$mapping;calls=$script:calls;observed=$observed
@@ -104,15 +105,23 @@ if ($mapping -notmatch '^\\Device\\HarddiskVolume[0-9]+$') {
     assert result["allocations"] == result["frees"] == (2 if result["core"] else 0)
 
 
-@pytest.mark.parametrize("drive", ("", "?:", "C:\\", "CC:", "C", "\\Device\\HarddiskVolume1"))
-def test_drive_query_rejects_nonletter_input_before_binding(
+@pytest.mark.parametrize("drive", (
+    "", "?:", "C:\\", "CC:", "C", "\\Device\\HarddiskVolume1",
+    "C:\n", "C:\r\n", "C:\r", "C:\x00", "C:\u2028", "\nC:",
+))
+def test_drive_query_rejects_malformed_input_before_binding(
     host: str, tmp_path: Path, drive: str,
 ) -> None:
     result = _run(host, tmp_path, _LOAD + r"""
 function Get-BootstrapStockDriveBindings { throw 'Invalid drive reached native bindings.' }
-Get-BootstrapStockCurrentDriveMapping -Drive $env:DRIVE_NAME
-""", success=False, environment={"DRIVE_HELPER": str(HELPER), "DRIVE_NAME": drive})
+$drive=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:DRIVE_B64))
+Get-BootstrapStockCurrentDriveMapping -Drive $drive
+""", success=False, environment={
+        "DRIVE_HELPER": str(HELPER),
+        "DRIVE_B64": base64.b64encode(drive.encode("utf-8")).decode("ascii"),
+    })
     assert result.returncode != 0
+    assert result.stdout == ""
     assert "Invalid drive reached native bindings" not in result.stderr
 
 

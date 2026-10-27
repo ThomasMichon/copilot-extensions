@@ -56,7 +56,7 @@ function Close-BootstrapStockDriveAllocation {
 function Get-BootstrapStockCurrentDriveMapping {
     param([Parameter(Mandatory)][string]$Drive)
     $ErrorActionPreference = 'Stop'
-    if ($Drive -cnotmatch '^[A-Za-z]:$') {
+    if ($Drive -cnotmatch '\A[A-Za-z]:\z') {
         throw 'Bootstrap drive query requires exactly one drive letter and colon.'
     }
     $bindings = Get-BootstrapStockDriveBindings
