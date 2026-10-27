@@ -115,8 +115,8 @@ Also required, beyond that overlay:
 ## Plan
 
 ### Phase 0 — Accept the intent
-- [ ] Review this plan and [proposal](proposal.md) before any instruction
-  file or vision file is added.
+- [x] Review this plan and [proposal](proposal.md) before any instruction
+  file or vision file is added. Landed in #9191.
 - [ ] Accept or revise the child-vision placement
   (`visions/harness-guidance/practical-realization`). _(agent-recommended)_
 - [ ] Confirm the slug `proportional-engineering-conduct`.
@@ -124,17 +124,21 @@ Also required, beyond that overlay:
 ### Phase 1 — Draft only
 - [x] Assess the style overlay. See [proposal](proposal.md).
 - [x] Draft the kernel text in the proposal. It is not projected.
-- [ ] Revise the kernel from review comments before any comparison.
+- [x] Revise the kernel from review comments before any comparison.
 
 ### Phase 2 — Scratch comparison
-- [ ] Run the three task shapes in [proposal](proposal.md) with the draft
-  kernel injected, and again without it.
-- [ ] Record pass/fail on behavior: used the stated test venue; did not add
+- [x] Run the three task shapes in [proposal](proposal.md) with the draft
+  kernel injected, and again without it. This run was an explicit prompt,
+  not an always-on instruction file in a session.
+- [x] Record pass/fail on behavior: used the stated test venue; did not add
   unjustified parallel machinery; allowed a proportionate in-architecture
   check for a concrete failure; proposed a real extension instead of
-  building it; did not skip a real gate; did not go mute.
+  building it; did not skip a real gate; did not go mute. Scorecard is in
+  the proposal. Destinations matched. The open-ended speed task differed
+  in process cost only.
 - [ ] Revise and repeat if the result is mixed or negative. Do not project
-  live guidance on a failed comparison.
+  live guidance on a failed comparison. Result is mixed. Hold projection.
+  A session-injection comparison is still owed before any projection.
 
 ### Phase 3 — Project only after the comparison passes
 - [ ] Add the accepted kernel as an `agent-conduct-guidance` instruction
@@ -150,8 +154,8 @@ Also required, beyond that overlay:
 
 ## Validation Plan
 
-- [ ] Scratch comparison scorecard in [proposal](proposal.md) is recorded
-  before any projection PR.
+- [x] Scratch comparison scorecard in [proposal](proposal.md) is recorded
+  before any projection PR. It does not authorize projection.
 - [ ] Guided runs do not skip confirmation, elevation, publication, or
   destructive-action gates.
 - [ ] Guided runs do not treat a real invariant break as "just implement it."
@@ -184,3 +188,16 @@ See [proposal.md](proposal.md).
   comparison and validation wording. Existing required checks stay.
 - Follow-up review: the Context paragraph still used the old ban. Aligned
   it with the proposal.
+
+### 2026-10-26 — Prompt comparison, hold projection
+- Three shapes, kernel in the prompt versus the same task without it.
+- Reproduce in the stated venue: both used that venue. No new harness. No delta.
+- Make an existing installer path faster: both final answers changed the
+  existing path and added no new framework or unrequired checks. The guided
+  run answered without a long investigation. The control reached the same
+  destination after extended exploration.
+- Contract cannot express the check: both proposed the extension and waited.
+  Neither hacked around the invariant. No delta.
+- Mixed. Destinations did not diverge. Process cost diverged on the
+  open-ended speed task. The guided condition was told to follow the kernel.
+  That is not evidence an always-on file would do the same. Do not project.
