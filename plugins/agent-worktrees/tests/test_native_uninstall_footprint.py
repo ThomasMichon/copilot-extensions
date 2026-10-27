@@ -536,6 +536,88 @@ def test_native_existing_python_candidates(native_install, shell, eligible):
     _preserved(durable)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows launcher listing adapter")
+@pytest.mark.parametrize("native_install", ["cold-home"], indirect=True)
+@pytest.mark.parametrize("shell", ["powershell", "pwsh"])
+def test_native_uninstall_discovers_launcher_only_external_python(native_install, shell) -> None:
+    home, payload, root, _, _ = native_install
+    directory = home / "launcher-only"
+    directory.mkdir()
+    query = home / "launcher-query.txt"
+    launcher = directory / "py.cmd"
+    launcher.write_text(
+        '@echo off\n'
+        f'>>"{query}" echo %~1\n'
+        'if not "%~1"=="-0p" exit /b 92\n'
+        'if not "%~2"=="" exit /b 93\n'
+        f'echo -V:3.12 * {str(sys.executable).replace("%", "%%")}\n',
+        encoding="utf-8",
+    )
+    arguments = _native_arguments(shell, _host(shell), payload, root)[:-2]
+    result = _run(arguments, home, env={"PATH": str(directory)})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert query.read_text(encoding="utf-8").splitlines() == ["-0p", "-0p"]
+    assert not root.exists()
+    assert not (root / ".install-stage").exists()
+
+
+@pytest.mark.parametrize("native_install", ["cold-home"], indirect=True)
+@pytest.mark.parametrize("shell", ["bash", "powershell", "pwsh"])
+@pytest.mark.parametrize("kind", ["owned", "foreign", "custom-root"])
+@pytest.mark.parametrize("state", ["missing", "durable-only"])
+def test_command_only_missing_runtime_has_truthful_admission(native_install, shell, kind, state) -> None:
+    home, payload, default_root, _, _ = native_install
+    root = home / "other-runtime" if kind == "custom-root" else default_root
+    durable = {}
+    if state == "durable-only":
+        root.mkdir()
+        config = root / "config.yaml"
+        config.write_bytes(b"operator configuration\n")
+        durable[config] = (config.read_bytes(), config.stat().st_dev, config.stat().st_ino)
+    profile = json.loads((payload / "scripts/uninstall-profile.json").read_text())
+    directory = home / ".local/bin"
+    directory.mkdir(parents=True)
+    for name in profile["local_bin_entries"]:
+        source = payload / "bin" / name
+        if name == "agent-worktrees-update-json.awk":
+            source = payload / "scripts/installation-context/json-query.awk"
+        target = directory / name
+        target.write_bytes(
+            b"operator-owned custom command\n" if kind == "foreign" else source.read_bytes(),
+        )
+        target.chmod(0o755)
+    before = {path: (path.read_bytes(), path.stat().st_dev, path.stat().st_ino)
+              for path in directory.iterdir()}
+    probe = """
+import importlib.util,json,pathlib,sys
+payload=pathlib.Path(sys.argv[1])
+spec=importlib.util.spec_from_file_location('command_only_owner',
+    payload/'scripts/installer_engine_uninstall.py')
+module=importlib.util.module_from_spec(spec)
+sys.modules[spec.name]=module
+spec.loader.exec_module(module)
+profile=module.profile_for(payload,'agent-worktrees',payload/'scripts/uninstall-profile.json')
+print(json.dumps(module._local_bindings(payload,pathlib.Path(sys.argv[2]),profile)[1]))
+"""
+    evidence = _run([
+        sys.executable, "-I", "-S", "-B", "-c", probe, str(payload), str(root),
+    ], home)
+    assert evidence.returncode == 0, evidence.stdout + evidence.stderr
+    assert set(json.loads(evidence.stdout)) == (
+        set(profile["local_bin_entries"]) if kind == "owned" else set()
+    )
+    result = _run(_native_arguments(shell, _host(shell), payload, root), home)
+    if kind == "owned":
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert "command" in (result.stdout + result.stderr).lower()
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+    _preserved(before)
+    _preserved(durable)
+    assert root.exists() is (state == "durable-only")
+    assert not (default_root / ".install-stage").exists()
+
+
 @pytest.mark.parametrize("kind", ["construction", "retention", "publication", "snapshot"])
 def test_native_uninstall_refuses_held_generation_custody(native_install, kind):
     home, payload, root, _, durable = native_install

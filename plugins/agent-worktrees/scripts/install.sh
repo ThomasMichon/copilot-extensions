@@ -43,6 +43,7 @@ __aw_action="${1:-status}"
 __aw_install_dir_arg=""
 __aw_provision_missing_runtime=false
 __aw_remove_config=false
+__aw_project_name=""
 __aw_args=("$@")
 __aw_uninstall_native_path() {
     case "$__aw_action:${OSTYPE:-}" in
@@ -75,6 +76,9 @@ for ((__aw_i = 1; __aw_i < ${#__aw_args[@]}; __aw_i++)); do
             printf 'ERROR: %s requires a value\n' "${__aw_args[$__aw_i]}" >&2
             exit 1
         }
+        if [[ "${__aw_args[$__aw_i]}" == --project-name ]]; then
+            __aw_project_name="${__aw_args[$((__aw_i + 1))]}"
+        fi
         ((__aw_i += 1))
     elif [[ "$__aw_action" == uninstall ]]; then
         case "${__aw_args[$__aw_i]}" in
@@ -549,6 +553,9 @@ if [[ "$__aw_action" == uninstall ]]; then
         --profile "$(__aw_uninstall_native_path "$SCRIPT_DIR/uninstall-profile.json")"
     )
     if $__aw_remove_config; then __aw_uninstall_args+=(--purge); fi
+    if [[ -n "$__aw_project_name" && "$__aw_project_name" != agent-worktrees ]]; then
+        __aw_uninstall_args+=(--project-name "$__aw_project_name")
+    fi
     __aw_uninstall_preflight="$("$__aw_admission_python" "${__aw_uninstall_args[@]}" --check --check-consumers)" || exit $?
     __aw_uninstall_status="$("$__aw_admission_python" -I -S -B -c \
         'import json,sys; status=json.loads(sys.argv[1])["status"]; assert status in ("absent","ready"); sys.stdout.write(status)' \
@@ -3542,18 +3549,20 @@ case "$ACTION" in
         if $HAS_PROJECT; then
             __aw_project_python="$("$__aw_admission_python" -I -S -B -X utf8 \
                 "$(__aw_uninstall_native_path "$SCRIPT_DIR/uninstall-state.py")" \
-                --project-python "$(__aw_uninstall_native_path "$INSTALL_DIR")")" || exit $?
+                --project-python "$(__aw_uninstall_native_path "$INSTALL_DIR")" "$PROJECT_NAME")" || exit $?
             VENV_PYTHON="$("$__aw_admission_python" -I -S -B -X utf8 -c \
-                'import json,sys; print(json.loads(sys.argv[1]))' "$__aw_project_python")" || exit $?
+                'import json,sys; sys.stdout.write(json.loads(sys.argv[1]) or "")' "$__aw_project_python")" || exit $?
             case "${OSTYPE:-}" in
                 msys*|cygwin*)
                     VENV_PYTHON="${VENV_PYTHON%$'\r'}"
-                    VENV_PYTHON="$(cygpath -u "$VENV_PYTHON")" || exit $? ;;
+                    if [[ -n "$VENV_PYTHON" ]]; then
+                        VENV_PYTHON="$(cygpath -u "$VENV_PYTHON")" || exit $?
+                    fi ;;
             esac
         fi
 
         # Remove Tabby profile (before venv removal -- needs Python)
-        if $HAS_PROJECT; then
+        if $HAS_PROJECT && [[ -n "$VENV_PYTHON" ]]; then
             remove_tabby_profile
         fi
 

@@ -282,6 +282,29 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
             if ($admissionPython) { break }
         }
     }
+    if (-not $admissionPython -and $Action -eq 'uninstall') {
+        foreach ($launcher in @(Get-Command py -All -CommandType Application -ErrorAction SilentlyContinue |
+                Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' })) {
+            $listingPreference = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                $listed = @(& $launcher.Source -0p 2>$null)
+                $listingCode = $LASTEXITCODE
+            } catch {
+                $listed = @()
+                $listingCode = 1
+            } finally { $ErrorActionPreference = $listingPreference }
+            if ($listingCode -ne 0) { continue }
+            foreach ($entry in [regex]::Matches(($listed -join "`n"),
+                    '(?m)([A-Za-z]:[\\/].*python(?:[0-9.]*)?\.exe)"?\s*$')) {
+                $candidate = $entry.Groups[1].Value
+                if (-not [IO.File]::Exists($candidate)) { continue }
+                $admissionPython = & $probeAdmissionPython -Candidate $candidate
+                if ($admissionPython) { break }
+            }
+            if ($admissionPython) { break }
+        }
+    }
     if (-not $admissionPython) { throw 'Attributable runtime admission requires an existing Python 3.10+ executable.' }
     $admissionArgs = @(
         '-I', '-S', '-B', '-X', 'utf8', (Join-Path $admissionPayload 'scripts\command_binding.py'),
@@ -739,6 +762,9 @@ if ($Action -eq 'uninstall') {
         '--root', $InstallDir, '--shell', (Get-Process -Id $PID).Path,
         '--profile', (Join-Path $PSScriptRoot 'uninstall-profile.json'))
     if ($RemoveConfig) { $uninstallArgs += '--purge' }
+    if ($ProjectName -and $ProjectName -ne 'agent-worktrees') {
+        $uninstallArgs += @('--project-name', $ProjectName)
+    }
     $uninstallPreflight = @(& $admissionPython @uninstallArgs --check --check-consumers)
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $uninstallStatus = ($uninstallPreflight -join "`n") | ConvertFrom-Json -ErrorAction Stop
@@ -4399,12 +4425,12 @@ switch ($Action) {
 
         if ($HasProject) {
             $projectPython = @(& $admissionPython -I -S -B -X utf8 `
-                (Join-Path $ScriptDir 'uninstall-state.py') --project-python $InstallDir)
+                (Join-Path $ScriptDir 'uninstall-state.py') --project-python $InstallDir $ProjectName)
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             $VenvPython = ($projectPython -join "`n") | ConvertFrom-Json -ErrorAction Stop
         }
 
-        if ($HasProject -and (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
+        if ($HasProject -and $VenvPython -and (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
             $savedPayloadRoot = $env:AGENT_WORKTREES_PAYLOAD_ROOT
             try {
                 $env:AGENT_WORKTREES_PAYLOAD_ROOT = if ($env:COPILOT_PLUGIN_STAGED_FROM) {

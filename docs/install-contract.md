@@ -2466,9 +2466,14 @@ staging watchdog, never arbitrary Python ancestors. A nonempty legacy Worktrees
 `lib` refuses until its ownership has an explicit migration path.
 Watchdog matching accepts only the trusted literal body or its exact Bash 3.2
 quoted-heredoc backslash-newline rendering, not arbitrary whitespace/code changes.
-Project-command cleanup resolves an already completed, selected-source-qualified
-interpreter read-only; it never constructs a runtime to uninstall one. Missing
-or foreign ownership refuses before project-command mutation.
+When project commands or receipts exist, cleanup resolves an already completed,
+selected-source-qualified interpreter read-only; it never constructs a runtime
+to uninstall one. A stamp-only project with neither candidate needs no runtime.
+Missing or foreign ownership still refuses before project-command mutation.
+Worktrees also checks exact owned global/update commands before accepting a
+finite `absent` result, including a missing or durable-only runtime root.
+Orphaned owned commands without runtime ownership evidence refuse without
+creating staging or deleting their bytes; foreign/custom-root commands remain.
 Process attribution preserves native argument boundaries rather than reparsing
 a display command. On macOS, the co-packaged stdlib-only
 `installer_engine_uninstall_darwin.py` uses libproc and sysctl to inspect a bounded

@@ -255,6 +255,76 @@ def test_project_python_refuses_missing_or_ambiguous_without_mutation(project_in
 
 
 @pytest.mark.parametrize("shell", ["bash", "powershell", "pwsh"])
+def test_project_cleanup_without_command_or_receipt_needs_no_runtime(project_install, shell):
+    home, payload, root, durable, environment = project_install
+    before = _snapshot(root)
+    result = _run(_native_project_probe(shell, home, payload, root), home, env=environment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    _preserved(before[0])
+    _preserved(durable)
+    assert not (root / ".venv").exists()
+    assert not (root / "tool").exists()
+
+
+@pytest.mark.parametrize("candidate", ["command", "opaque-receipt"])
+def test_existing_project_candidate_still_refuses_without_completed_runtime(project_install, candidate):
+    home, payload, root, durable, environment = project_install
+    if candidate == "command":
+        templates = _load(payload / "src/agent_worktrees/project_command_templates.py")
+        name = next(iter(templates.render("fixture", payload, windows=os.name == "nt")))
+        path = home / ".local/bin" / name
+    else:
+        path = root / "binstub-receipts/fixture.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"unknown existing project candidate")
+    before = _snapshot(root)
+    before[0][path] = (path.read_bytes(), path.stat().st_dev, path.stat().st_ino)
+    result = _run([
+        sys.executable, "-I", "-S", "-B", str(payload / "scripts/uninstall-state.py"),
+        "--project-python", str(root), "fixture",
+    ], home, env=environment)
+    assert result.returncode != 0
+    assert "No unambiguous completed installed runtime" in result.stderr
+    _preserved(before[0])
+    _preserved(durable)
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell", "pwsh"])
+def test_named_project_command_missing_runtime_refuses_before_absent_return(project_install, shell):
+    home, payload, _, durable, environment = project_install
+    root = home / "missing-named-runtime"
+    templates = _load(payload / "src/agent_worktrees/project_command_templates.py")
+    name = next(iter(templates.render("fixture", payload, windows=os.name == "nt")))
+    command = home / ".local/bin" / name
+    command.parent.mkdir(parents=True, exist_ok=True)
+    command.write_bytes(b"unknown existing project command")
+    before = {command: (command.read_bytes(), command.stat().st_dev, command.stat().st_ino)}
+    arguments = _native_arguments(shell, _host(shell), payload, root)
+    arguments += ["--project-name", "fixture"] if shell == "bash" else ["-ProjectName", "fixture"]
+    result = _run(arguments, home, env=environment)
+    assert result.returncode != 0
+    assert "No unambiguous completed installed runtime" in result.stderr
+    assert not root.exists()
+    _preserved(before)
+    _preserved(durable)
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell", "pwsh"])
+def test_named_project_stamp_without_command_or_receipt_uninstalls(project_install, shell):
+    home, payload, root, durable, environment = project_install
+    before = _snapshot(root)
+    arguments = _native_arguments(shell, _host(shell), payload, root)
+    arguments += ["--project-name", "fixture"] if shell == "bash" else ["-ProjectName", "fixture"]
+    result = _run(arguments, home, env=environment)
+    _skip_unrelated_module_consumer(result, before, durable)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (root / "snapshots/1.0.0").exists()
+    assert not (root / ".venv").exists()
+    assert not (root / "tool").exists()
+    _preserved(durable)
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell", "pwsh"])
 def test_whole_native_uninstall_retires_source_qualified_project_command(project_install, shell):
     home, payload, root, durable, environment = project_install
     python, _ = _slot(home, payload, root, True)
