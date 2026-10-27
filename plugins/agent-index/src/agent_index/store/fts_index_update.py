@@ -19,7 +19,11 @@ def update_fts_index(table: LanceTable) -> None:
     ]
     if len(indices) != 1:
         raise RuntimeError("Incremental FTS requires exactly one content index")
+    name = indices[0].name
     table.to_lance().optimize.optimize_indices(
-        index_names=[indices[0].name], num_indices_to_merge=0, retrain=False,
+        index_names=[name], num_indices_to_merge=0, retrain=False,
     )
     table.checkout_latest()
+    stats = table.index_stats(name)
+    if stats is None or stats.num_unindexed_rows != 0:
+        raise RuntimeError("Incremental FTS did not cover the current table")

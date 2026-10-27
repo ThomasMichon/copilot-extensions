@@ -25,6 +25,22 @@ def test_missing_or_ambiguous_fts_refuses_before_native_update(indices: list[obj
         update_fts_index(SimpleNamespace(list_indices=lambda: indices))
 
 
+@pytest.mark.parametrize("stats", [None, SimpleNamespace(num_unindexed_rows=1)])
+def test_unproven_native_update_cannot_report_success(stats: object) -> None:
+    table = SimpleNamespace(
+        list_indices=lambda: [SimpleNamespace(
+            index_type="FTS", columns=["content"], name="content_idx",
+        )],
+        to_lance=lambda: SimpleNamespace(optimize=SimpleNamespace(
+            optimize_indices=lambda **kwargs: None,
+        )),
+        checkout_latest=lambda: None,
+        index_stats=lambda _name: stats,
+    )
+    with pytest.raises(RuntimeError, match="did not cover"):
+        update_fts_index(table)
+
+
 def test_native_fts_only_update_preserves_scalar_segments_and_fragments(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -60,6 +76,8 @@ def test_native_fts_only_update_preserves_scalar_segments_and_fragments(
     store.reconcile_file_chunks("sample:repo", changed.file_path, {changed.chunk_id})
     before = table.to_lance()
     fragments = [fragment.fragment_id for fragment in before.get_fragments()]
+    fts_name = next(index.name for index in table.list_indices() if index.index_type == "FTS")
+    assert table.index_stats(fts_name).num_unindexed_rows == 1
     optimize = DatasetOptimizer.optimize_indices
     calls: list[dict[str, object]] = []
 
@@ -89,6 +107,7 @@ def test_native_fts_only_update_preserves_scalar_segments_and_fragments(
     assert [fragment.fragment_id for fragment in current.get_fragments()] == fragments
     assert scalar_segments() == original_segments
     assert table.index_stats("chunk_id_idx").num_unindexed_rows == 1
+    assert table.index_stats(fts_name).num_unindexed_rows == 0
     assert [cid for cid, _score in content.fts_search("replacementword")] == [changed.chunk_id]
     assert chunks[0].chunk_id not in [
         cid for cid, _score in content.fts_search("originalword", limit=200)

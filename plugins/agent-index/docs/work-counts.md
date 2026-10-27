@@ -142,7 +142,10 @@ Prepared source-aware FTS refresh also exposed unrelated scalar-index rewrites
 from combined `optimize()`; the incremental child now appends only the FTS delta.
 The native helper regression separately forbids compaction, version cleanup and
 full FTS rebuilding, retains scalar segment/fragment identities and old versions,
-and verifies fresh replacement text and absence of deleted old hits.
+and verifies fresh replacement text and absence of deleted old hits. Actual FTS
+unindexed-row metadata must fall from one to zero; searchability alone could
+come from fallback scanning. The helper also refuses unknown or incomplete
+post-update coverage before the existing owner can publish it as current.
 
 The broader acceptance matrix remains open: unprepared-store adoption, bounded
 upkeep/consolidation over many rounds, hosted pagination/body accounting,
