@@ -12,7 +12,7 @@ This supersedes the gated producer's registry-required assumption and the
 proposed remedy of requiring related projects to bind a control-plane map.
 Ordinary local use is foundational; the optional manifest customizes it.
 The standing intent is
-[`local-first-machine-customization`](../../../visions/agent-fabric/README.md#local-first-machine-customization).
+[`local-first-machine-customization`](../../../../visions/agent-fabric/README.md#local-first-machine-customization).
 
 ## Boundaries
 

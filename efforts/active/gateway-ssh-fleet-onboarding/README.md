@@ -6,7 +6,7 @@
 - **Created:** 2026-10-16
 - **Status:** Active
 - **Umbrella issue:** #6681
-- **Sub-issues:** #5861, #8888; prerequisite owners #6030, #6240, #6424, #5789, #6443, #6804
+- **Sub-issues:** #5861, #8888; allocation prerequisite #5839; prerequisite owners #6030, #6240, #6424, #5789, #6443, #6804
 
 ## Guiding Intent
 
@@ -36,7 +36,7 @@ resource acquisition and identity bindings remain external adapters.
 | `crooked-circuit` | Bounded SSH-service peer-approval source, client contract and isolated qualification | #8888; [peer-approval plan](peer-approval.md) |
 | `squeaky-buckle` | Completed bounded foreground Fleet SSH directory/local-writer consumer after merged #8000; no installation or deployment | Merged #8910; bounded source reservation settled |
 | `restless-actuator` | Non-editable installed SSH runtime and source-denying native consumer qualification | #6681 source reservation6397956631 |
-| `patient-bearing` | Operator-allocated continuity-backed public-key machine enrollment and normal Manager/engine setup consumer | #6681 source allocation6408998175; [implementation boundary](continuity-bootstrap.md#selected-executable-slice) |
+| `patient-bearing` | Operator-allocated continuity/bootstrap source and the origin-owned remote allocation prerequisite | #6681 source allocation6408998175; [bootstrap boundary](continuity-bootstrap.md#selected-executable-slice); #5839 [allocation slice](origin-owned-allocation.md) |
 
 ## Coordination
 
@@ -59,6 +59,12 @@ resource acquisition and identity bindings remain external adapters.
   #6681 comment6408998175, not a transfer of broader construction, publication,
   lifecycle, provider or SSH custody. Review the selected executable slice
   before changing runtime semantics.
+- The continuation selects `patient-bearing` for #5839's reviewed
+  origin-coordinated remote allocation prerequisite. The
+  [ordered execution and validation slice](origin-owned-allocation.md) must
+  clear review before runtime implementation. It owns Worktrees allocation and
+  the narrow Bridge/Dispatch consumers, not the retained Fleet installer,
+  machine-identity mapping, enrollment, provider or controller implementations.
 - The bounded normal SSH consumer continuation is now selected under #6681:
   `squeaky-buckle` drives new `ssh_machine.py`/`ssh_machine_config.py`, focused
   tests/docs and narrow `serve --role ssh-client`/optional-closure wiring.
@@ -363,6 +369,10 @@ onboarded merely because its source is published.
   explicit public-key machine authentication, a real current-policy producer
   and original-operation enrollment in the existing journal, followed by the
   normal Manager/engine setup consumer. No new issuer or parallel registry.
+- [ ] Review and implement the [origin-owned remote allocation prerequisite](origin-owned-allocation.md)
+  under #5839 before relying on remote qualification workers. Retain the
+  originating claim and actual receiving identity across uncertainty; allocation
+  remains distinct from agent launch.
 
 ### Phase 2 - Driver and directional policy
 
@@ -478,6 +488,10 @@ not installation, credential or live-adoption authority.
   explicit recovery cannot become a missing-approver fallback.
 - [x] Peer-approval compatibility: absent policy retains the old contract;
   incapable or rolled-back providers refuse the required policy before effects.
+- [ ] Qualify the [remote allocation acceptance matrix](origin-owned-allocation.md#validation-plan)
+  through actual owner command boundaries, same-allocation recovery,
+  claim-confirmed embodiment and target completion, including an outbound-only
+  origin. Source, installed and native results remain separate.
 
 ## Proposal
 
@@ -488,6 +502,19 @@ setup/apply, enrollment, live rollout, lifecycle takeover or implementation
 completion is asserted.
 
 ## Journal
+
+### 2026-10-26 - Origin-owned remote allocation architecture and execution slice
+
+- #9155 merged the canonical Worktrees/Bridge vision and shared allocation
+  pattern as `cd9125ac742e8d052925835782e49ae725046916`, after current-head
+  Copilot approval with no open findings and successful required checks.
+- #5839 retains runtime ownership. The operator-directed continuation now
+  selects the [bounded implementation slice](origin-owned-allocation.md);
+  its plan review precedes new runtime code. This is not a second allocator,
+  a live retry or a transfer of the parent campaigns' retained responsibilities.
+- The existing pending-resource and keyed-creation primitives are prior art,
+  not interchangeable semantics: disposable absence and conversation retirement
+  cannot substitute for a worktree's actual lifecycle conclusion.
 
 ### 2026-10-26 - Source-denying installed continuity SDK qualified
 

@@ -15,6 +15,43 @@ arbitrary third-party output.
 
 ## Python-free Windows bootstrap admission
 
+### Compiler-free migration boundary
+
+The existing compiled PowerShell entrypoints below have not yet migrated.
+Python is an existing harness prerequisite owned by machine provisioning;
+a cold plugin runtime does not authorize another Python download or a
+helper-owned interpreter installation.
+
+The private `_windows_parent_job.transfer_lifetime_to_parent` primitive is
+a startup-only building block for a qualified, sacrificial Python helper.
+It pins the original direct parent's process handle and creation identity,
+creates a strict kill-on-close Job, duplicates a non-inheritable Job handle
+into that same parent, assigns the helper itself and closes the helper-local
+Job handle before returning. Only the original parent retains continuing
+Job custody. Parent exit or closure of that handle therefore retires the
+helper and its descendants in the kernel, not through a Python polling
+watchdog. No breakaway permission is added, including under test containment.
+
+The returned `ParentJob.parent_handle` belongs to the **parent's handle
+table**, not the helper's. The parent must adopt it through its existing
+handle owner before accepting application work. A stock .NET
+`SafeFileHandle` can own that native handle without compiling interop code.
+Application completion still requires the existing atomic target-Job owner,
+whole-descendant settlement and observation of the original helper's exit.
+A receipt is not a settlement witness. Transfer failure is terminal for the
+sacrificial helper; it must never continue application work.
+
+This primitive does not select or admit an interpreter, authenticate a
+command, acquire an operation lock, or switch an existing bootstrap caller.
+Interpreter/complete-source admission, bounded shell framing, native desktop
+qualification and migration of the compiled implementations remain open in
+the [compiler-free amendment](../../efforts/active/lean-runtime-dependencies/compiler-free-execution.md).
+The portable controls and separate native parent-exit, explicit-handle-close
+and stale-parent-birth controls test this building block, not that complete
+bootstrap contract.
+
+### Existing compiled entrypoints
+
 The packaged `native_daemon.ps1` and `native_owned.ps1` expose the native
 counterparts needed before a Python interpreter exists. These are internal
 process primitives, not an installer, a request queue, an arbitrary-command

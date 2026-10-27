@@ -84,9 +84,57 @@ scripts; the dispatcher itself does not install or select a fallback interpreter
 The invoked commands retain their normal behavior, including any lazy-start or
 backend-launch behavior. Their fixture configuration, explicit autostart controls
 and authorization remain necessary; adding a launcher is not permission to call it.
-Configuration, synthetic
-hosting workspace/registrars, actual services, fake peers and initial-task
+The first configuration/harness source below supplies owner inputs, not an
+actual installed service graph. Service/peer lifecycle and initial-task caller
 wiring still need implementation and qualification before case execution.
+
+## First synthetic harness configuration
+
+`guest_fixture.prepare_fixture(custody)` explicitly prepares only the first
+synthetic hosting repository and supported Worktrees/Bridge/Dispatch inputs.
+It requires the same qualified resource/source/runtime and fresh monitoring
+prerequisites as runtime preparation. It does not initialize databases, start
+services, launch a peer, create a task or install/register a plugin.
+Importing the module has no effect.
+
+The state must contain only the original operation lock and prepared runtime;
+the workspace must be empty. Private, non-redirected guest directories are
+required. An exclusively created state-backed HOME retains any partial attempt.
+Existing state/workspace refuses without overwriting, replay, repair or cleanup.
+Configuration files use exclusive creation with mode `0600`; successful writes
+are not a power-loss or mounted-volume durability qualification.
+
+`environment()` supplies a fresh minimal environment, not an overlay on the
+host or caller environment. HOME, Copilot, XDG, coupled Worktrees registries,
+Bridge configuration/providers and Dispatch state all select experiment-local
+paths. It uses the immutable Worktrees source payload for ordinary helper assets.
+The installed packages and three persistent runtime commands remain those from
+the image recipe. Bridge/Dispatch select the ordinary legacy roots beneath
+that synthetic HOME, with their database paths explicitly set under state.
+This avoids requesting an installation-cell context from an unrelated custom
+install root; no installation selector or completion receipt is invented.
+Existing status-monitor, Dispatch lazy-start/fallback/GC and Bridge self-retire
+switches are explicit. **Bridge has no general lazy-start kill switch here**:
+this module neither adds one nor claims startup/fault qualification. Ordinary
+commands retain their normal behavior and need separately authorized lifecycle.
+
+The subject is a new hosting-permitted synthetic repository, not the source
+checkout. Three fixed bounded local Git calls initialize and commit only its
+generic configuration, without hooks, global/system Git config, inherited templates,
+remotes, credentials or network. A failure propagates its bounded literal
+diagnostic and leaves the attempt intact.
+The explicit agent registry selects the existing test-only stdio ACP peer;
+an exclusively created private executable wrapper places its Python script
+before the ACP flags that Bridge appends. Python itself is not registered as
+the Copilot executable, since those flags would be interpreted by Python.
+its transcript contains only synthetic data. This is not a native Copilot or
+model and does not complete a Dispatch task. Credential relay listening is
+disabled and the private provider registry starts empty; the ordinary Bridge
+startup still invokes its HTTP-source registry machinery.
+
+Actual service startup, source/runtime-origin checks, bounded peer ownership,
+the initial-task caller and original-owner recovery/fault lifecycle remain open.
+Preparation is not permission to execute commands or new work after monitor loss.
 
 ## Controls
 
@@ -100,3 +148,16 @@ private root mode and refusal of a second preparation. It is outside default
 test discovery. Separate actual local command cases cover restrictive source
 permissions and absent/file/symlink Python destinations, preserving prior link
 targets. Neither lane qualifies a real venv, image, mount or service.
+
+`tools/test_reproducer_lab_fixture.py` supplies synthetic preparation/failure,
+minimal-environment, configuration and no-launch controls. Explicitly selected
+`fixture_owner_tests.py` exercises real local Git, the peer wrapper's argument
+parser and actual owner config loaders on temporary synthetic paths; its guest
+ownership check is substituted. The parser control uses `--help` and never
+enters the peer loop or writes a transcript. It first obtains the exact argv
+from the real Bridge `resolve_local_launch()` with `explicit_cwd=True`,
+including ordinary hosting admission. This lane needs the owning projects'
+declared Python dependencies in its isolated test environment.
+It starts no service or backend and is outside default test discovery. Neither
+lane qualifies the actual image, guest mounts, installed runtimes or ordinary
+Dispatch-to-Bridge execution.

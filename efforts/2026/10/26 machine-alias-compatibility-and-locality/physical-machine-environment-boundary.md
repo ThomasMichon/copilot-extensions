@@ -27,7 +27,7 @@ only one machine/environment identifier. It is not another physical machine.
 An SSH alias, default distro and actual distribution name are separate inputs.
 
 This closes the existing
-[host-qualified guest identity vision](../../../visions/agent-fabric/README.md#host-qualified-guest-identity).
+[host-qualified guest identity vision](../../../../visions/agent-fabric/README.md#host-qualified-guest-identity).
 It does not reverse the requirement to distinguish native and guest execution,
 or replace the existing shared map and installation identity authority.
 

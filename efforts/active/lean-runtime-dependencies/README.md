@@ -260,6 +260,9 @@ with no findings and successful required CI. The Linux shared-instance
 replacement subsequently merged in #9129; the next source slice qualifies the
 Windows interpreter boundary before replacing embedded compilation. Neither
 merge closes the complete bootstrap, platform, release or adoption gates.
+The prerequisite clarification and Linux merge reconciliation then merged in
+#9162. Windows implementation now proceeds from the existing machine-owned
+Python prerequisite, not another interpreter acquisition mechanism.
 
 ### Current execution boundary
 
@@ -319,6 +322,28 @@ from #6767: no rejected routing broker or shared mutable venv, and no claimed
 transfer without acceptance by a named tracked objective.
 
 ## Journal
+
+### 2026-10-26 - Windows original-parent lifetime building block
+- The existing path resolver and signed-executable selector do not provide
+  complete prerequisite-to-helper admission. No interpreter installer or
+  compiled-bootstrap replacement was inferred from their presence.
+- Added a private shared Python startup primitive that transfers a strict
+  Job's continuing handle into the original, birth-pinned parent before
+  application work. Kernel parent loss, rather than a polling watchdog, owns
+  the sacrificial helper and its descendants. Existing atomic target-Job
+  execution remains the descendant-settlement owner.
+- The hardened, network-disconnected caller-owned regression packet passed
+  177 tests with 20 explicit platform skips; the final focused portable packet
+  passed 40 controls. Native Windows passed all 45 focused controls, including
+  both cycles of parent exit and explicit Job closure with helper, target and
+  grandchild pinned and confirmed gone before observer cleanup. The initial
+  native failure was an observer wire-string/raw-FILETIME mismatch, corrected
+  without weakening identity checks. Independent review and merge remain
+  gates. Complete source archives were regenerated normally; no existing
+  bootstrap caller switches.
+- Phase 7 and both owning efforts remain open. Next complete review of this
+  native transfer building block, then the existing machine-owned interpreter
+  handoff and bounded shell framing before removing compiled implementations.
 
 ### 2026-10-26 - Linux compiler-free slice merged
 - #9129 merged to `dev` as `1ad9ecc02cb99a1ceed9e03462033f6e2eddeb1d`
