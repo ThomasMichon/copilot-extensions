@@ -61,6 +61,27 @@ policies that the current executor cannot realize remain blocked, never silently
 reset to marketplace delivery. Manager self-update retains its independent
 configured source, versioned publication and mux cutover owner.
 
+## Pane boundary ownership
+
+Tracked launches copy their OS pane shells into the engine's launch-owned state,
+not the Manager's version directory. Each boundary selects the current completed
+generation within the originally selected Manager root, with a finite child
+deadline and no provisioning or service-start fallback. The internal
+`worktree_manager.pane_lifecycle` contract uses that root, platform and configured
+source/ref to distinguish its installation identity from its replaceable version.
+Changing source selection mid-session therefore leaves a previous end notification
+unconfirmed rather than applying it under a different selection.
+
+The registry owner synchronously fences native session plus CLI-pane identity
+and retains an affirmative observed child exit. A handoff retains both live CLI
+panes until their individual exits; one failed pane cannot retire the other.
+Corrupt starts refuse without replacing state, and exit fences protect tombstones
+as well as live entries. Admitted changes notify an existing status monitor
+through bounded local IPC without starting it. The shell's successful process
+spawn alone is not that admission. Missing handlers remain quiet and uncertain.
+See [the engine's lifecycle architecture](../../plugins/agent-worktrees/docs/architecture.md#launch-owned-pane-assets-and-current-boundary-handlers)
+for storage, compatibility and the remaining setup-waiter limitations.
+
 ## Restart recovery requests
 
 Both new behaviors default off. Existing bounded, report-only evidence sampling

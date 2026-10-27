@@ -966,12 +966,11 @@ def _create_worktree_core(
             config, fake_args, worktree_path, profile=selection.profile,
             preflight=launch_preflight,
         )
-        if staged_seed is not None:
-            launch_cmd = deferred_command(
-                launch_cmd, record.yaml_path, seed_id=staged_seed.seed_id,
-            )
-        else:
-            launch_cmd = deferred_command(launch_cmd, record.yaml_path, admission_only=True)
+        launch_cmd = deferred_command(
+            launch_cmd, record.yaml_path,
+            seed_id=staged_seed.seed_id if staged_seed is not None else None,
+            admission_only=staged_seed is None,
+        )
         env = _apply_assignment_env(
             core._build_env(
                 selection.profile, core._repo_session_env(config, worktree_path),
@@ -983,6 +982,8 @@ def _create_worktree_core(
         result["launch"] = {
             "action": "exec", "work_dir": worktree_path, "cmd": launch_cmd, "env": env,
             "worktree_id": worktree_id, "post_exit": True, "no_mux": no_mux,
+            "record_path": str(record.yaml_path),
+            "pane_shell_version": 1,
             "seed_claimed": False, "seed_pending": staged_seed is not None,
             "seed_id": staged_seed.seed_id if staged_seed else None,
             "seed_kind": staged_seed.kind if staged_seed else None,

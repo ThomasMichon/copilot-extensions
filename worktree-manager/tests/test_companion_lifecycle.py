@@ -179,6 +179,33 @@ def test_registry_refresh_same_identity_is_not_a_successor(owner):
     assert lifecycle.cli_alive("example", "one", "%42") is True
 
 
+def test_pinned_companions_resolve_their_own_panes_during_handoff(owner):
+    predecessor = owner.mapping["panes"][0]
+    successor = {"pane_id": "%99", "role": "cli", "live": True}
+    owner.mapping["panes"].append(successor)
+    owner.raw += "\n" + owner.raw.replace("%42", "%99")
+    assert lifecycle.cli_alive("example", "one", "%42") is True
+    assert lifecycle.cli_alive("example", "one", "%99") is True
+    predecessor["live"] = False
+    owner.mapping["observed_end"] = {
+        "pane_id": "%42", "session_incarnation": "$7:100", "exit_code": 0,
+        "observed_at": "2026-01-01T00:00:00+00:00",
+    }
+    assert lifecycle.cli_alive("example", "one", "%42") is False
+    assert lifecycle.cli_alive("example", "one", "%99") is True
+
+
+def test_equivalent_mux_path_does_not_displace_a_pinned_companion(owner, tmp_path, monkeypatch):
+    from worktree_manager import mux_mapping_registry
+
+    executable = tmp_path / "owned-mux"
+    executable.touch()
+    monkeypatch.setattr(mux_mapping_registry.shutil, "which", lambda _name: str(executable))
+    assert lifecycle.cli_alive("example", "one", "%42") is True
+    owner.mapping["mux_bin"] = str(executable)
+    assert lifecycle.cli_alive("example", "one", "%42") is True
+
+
 def test_initial_incarnation_mismatch_refuses_recycled_pane_before_binding_or_probe(owner):
     assert lifecycle.cli_alive("example", "one", "%42", session_incarnation="$6:90") is False
     assert lifecycle._bindings == {}
@@ -259,13 +286,15 @@ def test_owned_observer_process_exits_after_cli_process_exits(tmp_path):
     }
     assert register_mapping(mapping, root=tmp_path)["applied"]
     inventory, ready = tmp_path / "native-inventory", tmp_path / "observer-ready"
+    imported = tmp_path / "observer-imported"
     inventory.write_text(f"%42\t0\tmanaged\t$7:100\t{tmp_path}", encoding="utf-8")
     program = """
 import sys, time
 from pathlib import Path
 from worktree_manager import companion_lifecycle as lifecycle
-inventory, ready = map(Path, sys.argv[1:])
+inventory, ready, imported = map(Path, sys.argv[1:])
 lifecycle._call = lambda *args: inventory.read_text(encoding='utf-8')
+imported.touch()
 for iteration in range(200):
     result = lifecycle.cli_alive('example', 'one', '%42')
     if result is False:
@@ -283,10 +312,15 @@ raise SystemExit(9)
     observer = None
     try:
         observer = subprocess.Popen(
-            [sys.executable, "-c", program, str(inventory), str(ready)],
+            [sys.executable, "-c", program, str(inventory), str(ready), str(imported)],
             env=dict(os.environ, WORKTREE_MANAGER_ROOT=str(tmp_path)),
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **no_window_kwargs(),
         )
+        # This control measures owner-end handling, not cold package imports.
+        import_deadline = time.monotonic() + 10
+        while not imported.is_file() and observer.poll() is None and time.monotonic() < import_deadline:
+            time.sleep(0.025)
+        assert imported.is_file(), "observer dependencies did not initialize"
         deadline = time.monotonic() + 4
         while not ready.is_file() and observer.poll() is None and time.monotonic() < deadline:
             time.sleep(0.025)

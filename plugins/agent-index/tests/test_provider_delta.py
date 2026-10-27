@@ -46,6 +46,10 @@ parser.add_argument("--source", required=True)
 parser.add_argument("--last-commit")
 if config["new"]:
     parser.add_argument("--delta-version", type=int, choices=[1])
+if config.get("snapshot_cli"):
+    parser.add_argument("--snapshot-version", type=int, choices=[1])
+    parser.add_argument("--snapshot")
+    parser.add_argument("--cursor")
 args = parser.parse_args()
 declaration = config["metadata"].get("source_delta")
 canonical = declaration.get("family", args.source) if isinstance(declaration, dict) else args.source
@@ -60,6 +64,11 @@ elif args.verb == "content-list-paths":
         for entry in config["snapshot_entries"]:
             paths.setdefault(entry["source"], []).append(entry["path"])
     response = {"paths": paths}
+elif getattr(args, "snapshot_version", None) is not None:
+    if config.get("fail_snapshot") and args.cursor is not None:
+        sys.stderr.write("snapshot temporarily unavailable")
+        sys.exit(7)
+    response = config["snapshot_pages"][args.cursor or "first"]
 elif getattr(args, "delta_version", None) is not None:
     if config.get("fail_delta"):
         sys.stderr.write("delta refused after acceptance")

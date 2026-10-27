@@ -9,7 +9,7 @@ This is not a claim of implemented behavior.
 Proposed refinements are **agent-recommended** until their production slice
 clears review.
 
-## Current continuous launch path
+## Reviewed baseline continuous launch path
 
 | Consumer / boundary | Current owner and behavior | Required migration or retained obligation |
 |---------------------|----------------------------|-------------------------------------------|
@@ -27,7 +27,77 @@ clears review.
 | Asset materialization | `plugins/agent-worktrees/launch-wrapper-assets.json` and `launch_wrapper_assets.py` declare the canonical Manager shell assets copied into the plugin. | Any new/retired asset must keep both production consumers and packaging declarations consistent. No second canonical wrapper implementation. |
 | Direct/no-mux path and post-attach finalization | The ordinary launch scripts execute/attach and run current agent-worktrees post-exit logic. | Retain supported semantics and the installed exit-noise repair. Mux detach is not child exit; a generic end hook must not finalize a still-live session. |
 
-## Proposed smallest boundary
+## Preparatory production candidate
+
+The first implementation slice copies the canonical platform pane assets into
+the existing launch-attempt namespace (`*.shell`), outside the engine and
+Manager installation roots. It does not copy a runtime, introduce a second
+wrapper implementation or change the seed/admission owner.
+
+Tracked launch plans advertise `pane_shell_version: 1` and their exact
+`record_path`. Manager uses this only when the executing engine exposes that
+capability and its selected wrapper carries the version-1 boundary marker.
+The engine's own mux consumer applies the same wrapper-marker check. Older
+owners, untracked/anchor launches and MSYS/Cygwin retain legacy construction.
+This is provider-first expansion, not a promise that independently updated
+consumers already have installation-survival support.
+
+The copied shell retains OS child/terminal ownership, including the Windows
+kill-on-close Job. At each boundary it selects the current completed runtime
+within the original Manager root without provisioning or starting a daemon.
+`worktree_manager.pane_lifecycle --contract-version 1` admits through the
+existing registry synchronously. Native session incarnation, registered live
+CLI pane and original installation/source-selection identity fence end admission;
+each end retires only its own pane, retaining a concurrent handoff predecessor
+or successor. Strict snapshot-fenced starts refuse corrupt registries. Exit
+fences apply to tombstones too; missing state is unconfirmed, not delivery.
+Admitted changes publish to an existing status monitor without starting one;
+same-owner reconnect retains observed-exit evidence, and companions follow their
+pinned pane within a multi-pane mapping. End metadata carries runtime and launch
+correlation to a bounded current-installed-engine activity writer. Diagnostics
+remain separate from admission and cannot trigger duplicate-end replay;
+reattachment through the same mux executable preserves that identity.
+Reconciliation retains dead CLI pane fences; delayed creation cannot revive
+them or a same-incarnation whole-mapping tombstone, even after a CAS retry.
+An exit records its evidence without reviving an explicitly retired mapping.
+Replacing a different-incarnation tombstone during start requires fresh native
+CLI/pane/path proof from the existing discovery owner, repeated after any
+snapshot-CAS conflict. Incarnation timestamps are identity, not takeover order.
+Creation callbacks require current native CLI identity, liveness and path
+evidence even without a conflicting mapping. A fenced `cancel` retires an
+admitted pane when transport validation or receipt publication fails before
+child dispatch, without inventing `observed_end`. Start still precedes the
+provisional receipt, so the receipt's grace interval cannot run while a start
+callback is pending. Windows command-invocation failures reach teardown with
+an explicit failure result.
+Missing, unsupported or unconfirmed callbacks remain quiet and do not claim
+delivery. Boundary child calls retain a five-second deadline and native mux
+queries a two-second deadline; these are containment limits, not performance
+qualification.
+
+Preparation reads one tracking record and copies one POSIX asset or two Windows
+assets once per constructed pane. Start/end use finite current-selection reads,
+native mux queries and one short-lived lifecycle process per boundary; there is
+no new resident helper, external network call or history scan. The existing
+status-monitor publish uses bounded local IPC, without a provisioning fallback.
+The existing exit activity mark uses one finite current-engine subprocess with
+its own one-second deadline inside the shell's unchanged boundary deadline.
+No captured engine invocation or PATH fallback supplies that writer.
+Start registration is
+rechecked on attach by the existing owner rather than reusing stale native
+incarnation evidence. Native cold/warm end-to-end launch latency and tail
+qualification remain unmeasured; fixture help preparation is not that baseline.
+
+This candidate does **not** qualify removal or migration: both deferred setup
+and final `launch_seed_exec --invoke` still retain runtime-Python waiters.
+Copied assets are retained, not reclaimed on age or inferred liveness. Their
+terminal reclamation, missed-boundary recovery, actual installed consumer
+parity and the literal clean-middle round trip remain this effort's obligations.
+See the [current architecture](../../../plugins/agent-worktrees/docs/architecture.md#launch-owned-pane-assets-and-current-boundary-handlers)
+and explicit native packet in `TESTING.md`; synthetic fixture execution is not
+real Copilot, TTY or installer-removal acceptance.
+
+## Continuing smallest-boundary obligations
 
 The copied shell owns only immutable launch data, native child execution,
 terminal/containment lifetime and two bounded handler invocations. It does not

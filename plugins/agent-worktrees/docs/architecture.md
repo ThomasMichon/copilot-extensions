@@ -518,6 +518,68 @@ boundary, not universal filesystem interception: custom launch commands and
 legacy setup scripts remain responsible for entering through
 `agent-worktrees config-root` before writing concrete setup configuration.
 
+### Launch-owned pane assets and current boundary handlers
+
+For a tracked worktree, a constructed Manager launch and the engine's
+new-session/new-window builders copy the selected canonical pane assets before
+creating the pane. The authoritative `record_path` comes from the launch plan.
+`session_shell.prepare` places each execution's copy under that record's
+existing `launch-attempts` state, outside both declared installation roots.
+The executing engine advertises `pane_shell_version: 1`; Manager migration
+requires that capability, and direct pane builders check the selected wrapper's
+version-1 control marker before adding its new arguments. Older peers keep
+their existing construction without receiving unsupported control syntax.
+Windows copies its one-shot file launcher too; child argv and native interactive
+prompt receipts retain their existing transport. Creating these assets does
+not admit a launch, claim a seed or prove that Copilot started.
+
+The copied shell passes bounded start/end requests to the then-current completed
+Manager generation in the originally selected root. It captures native mux
+session and pane identity before executing the child. The Manager's synchronous
+`pane_lifecycle` owner requires `--contract-version 1` before effects and records
+into the existing mapping registry without
+provisioning a runtime or starting a service. An end request must match the
+original installation/source-selection identity and a registered live CLI pane;
+it retires only that pane. Concurrent handoff panes keep their own live mapping
+until exit, so an unsuccessful successor does not erase its predecessor.
+Identity fences also apply to tombstones; duplicate observed exits are read-only,
+and registry loss or corruption never acknowledges an unrecorded exit.
+Successful end admission persists `observed_end` with the actual child exit
+code, distinct from an unobserved loss. Admitted changes publish a bounded
+observation to an existing status monitor without starting one; unavailable
+monitor delivery is reported separately from durable registry admission.
+Logical-owner checks resolve worktree path aliases using native real-path and
+case semantics; snapshot-CAS fences still compare the exact stored bytes.
+Same-owner reconnect preserves native-discovery identity and the latest observed exit, and companions select
+their pinned pane rather than assuming a single CLI entry. Dead CLI entries
+remain fenced across reconnects; delayed creation and CAS retries cannot revive
+them or a same-incarnation tombstone. A pane exit cannot revive an explicitly
+retired whole mapping. On end, both copied
+shells provide runtime and launch correlation for a bounded `pane_exited` write
+through the current installed engine command, never captured argv or PATH.
+This optional diagnostic cannot change registry admission or Copilot's exit,
+and an uncertain write is not replayed by a duplicate end.
+A start replacing another incarnation's tombstone must obtain fresh native
+CLI/pane/path proof through the same discovery owner as creation registration.
+It rechecks that proof after snapshot-CAS contention rather than treating a
+different incarnation or later timestamp as authority to erase recorded exit.
+Creation registration always confirms the current native CLI pane, incarnation,
+live state and worktree path. The version-1 boundary's fenced `cancel` retires
+its pane if transport validation or provisional receipt publication fails
+before child dispatch, without claiming an observed child exit. Start remains
+before the provisional receipt so its grace interval cannot mistake a pending
+start callback for child readiness. Windows command-invocation failure reports
+a nonzero result rather than retaining a stale successful native exit code.
+Missing/incompatible handlers and
+unconfirmed responses close quietly without claiming notification delivery.
+
+These are shell-storage and callback boundaries, not complete installation
+survival: deferred setup/seed execution can still retain runtime-Python waiters.
+Untracked/anchor, older-owner and MSYS/Cygwin launcher paths retain legacy construction. Copied assets
+are retained in launch-owned state; no age-based sweep may delete a live or
+unconfirmed execution. Remaining launch/admission and reclamation integration is
+tracked by [installation-independent-sessions](../../../efforts/active/installation-independent-sessions/README.md).
+
 ### Current session, conclusion, and succession (the head pointer)
 
 A worktree is a *series of sessions*, not a single one. Its record carries an

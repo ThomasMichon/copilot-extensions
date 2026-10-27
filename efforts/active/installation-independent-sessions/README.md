@@ -227,6 +227,10 @@ own original processes.
 - [ ] Execute the explicitly authorized selected-host [live round trip](live-roundtrip.md):
   protected connectivity and consistent backups first, attributable removal,
   recorded clean middle, reinstall/state reconciliation and same-session proof.
+- [ ] For the authorized legacy migration, preserve and restore exactly the
+  selected active worktrees and associated native sessions. Verify attached
+  `worktrees copilot` and detached `worktrees embody` share create-or-resume
+  semantics with the qualified wrapper and never duplicate a live execution.
 - [ ] Re-read every Plan/Validation item, promote durable truth to owner docs,
   settle owned test/PR resources, mark Done and archive through normal review.
 
@@ -305,6 +309,62 @@ and does not delay final Copilot exit indefinitely merely to deliver a lifecycle
 notice; the existing bounded/quiet absent-handler contract remains intact.
 
 ## Journal
+
+### 2026-10-26 - Preparatory review corrections
+
+- The next review confirmed those five repairs and found connected consumers:
+  same-owner reconnect must retain exit evidence, companions must resolve their
+  pinned pane in a multi-pane mapping, and the copied-shell end must preserve
+  the launch-correlated `pane_exited` mark. Added bounded current-installed-owner
+  logging with separate uncertain diagnostic outcome, plus focused regressions;
+  no captured runtime invocation or PATH fallback was restored.
+  The combined corrected packet passed 107 tests with two platform skips.
+  An earlier native end was unconfirmed; its isolated diagnostic controls
+  and subsequent combined run passed under the unchanged callback deadline,
+  without claiming a proven cause for that earlier result. The observer
+  shutdown fixture now separates bounded dependency initialization from its
+  unchanged four-second liveness/exit checks; it is not cold-start qualification.
+- Opened #9150 through managed publication. Its first required unit lane
+  passed, but the module-size guard caught growth in `sessions.py`; extracted
+  unchanged prompt encoding into the existing pane-argument transport owner
+  rather than widening its shrink-only ceiling.
+- Review identified concrete lifecycle gaps. The candidate now uses strict
+  snapshot-fenced starts, retains concurrent handoff CLI panes until their
+  individual exits, fences tombstones and read-only duplicate exits, refuses
+  absent-state end confirmation, and publishes admitted observations to an
+  existing monitor without starting one.
+- Narrow registry/reconciliation controls passed 158 tests before the final
+  creation/reattach multi-pane controls were added. Final serial packets passed
+  182 engine tests and 223 Manager tests with two explicit platform skips.
+  Concurrent native runs had timeout failures; they are not passing evidence.
+  Fixed overly broad subprocess patching, kept optional absent-install logging
+  outside the seed-transport fixture, and isolated UI imports in worker-custody
+  units that already replace the UI runner. No production or test deadline was
+  increased. The shrink-only size guard and touched Python lint pass.
+  The PR is not merged and none of this is installed acceptance.
+
+### 2026-10-26 - Preparatory copied-shell candidate
+
+- #9108 merged the exact-active-set migration contract; re-read the parent
+  plan and retained every installation-survival and native-session obligation.
+- Prepared canonical launch-owned shell copying and version-1 current-runtime
+  lifecycle admission for tracked Manager and engine mux consumers. Preserved
+  mixed-version legacy construction, same-executable reattachment identity,
+  native incarnation fences, quiet unavailable handlers and Windows containment.
+- The final targeted packet passed 30 engine launch/copy contract tests and
+  141 Manager tests with four explicit platform skips. Both changed Bash
+  scripts pass separate syntax checks; touched Python lint, PowerShell parsing
+  and the runtime install-contract check also passed.
+- Native subprocess controls exercise real copied shells with a prepared
+  synthetic runtime. They do not qualify a complete installed dependency
+  closure, real Copilot/TTY, Linux execution on this Windows host or an actual
+  uninstall/reinstall. Cold/warm composed launch latency remains unmeasured;
+  the five-second callback deadline is not a measured performance budget.
+- Updated the baseline/candidate distinction in [launch-contract.md](launch-contract.md).
+  The next source slice removes both runtime-Python seed/admission waiters
+  while preserving custody, execution correlation and fsmonitor teardown.
+  No selected-host session, service, installation or banner was changed;
+  legacy migration stays blocked until the full replacement launch qualifies.
 
 ### 2026-10-26 - Live charter reviewed; runtime coupling confirmed
 
@@ -723,3 +783,103 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
 - Continue the remaining adapter integration through the existing ownership
   boundaries, then return to the preserved live baseline. This effort remains
   Active; a merged removal prerequisite does not retire its responsibility.
+
+### 2026-10-27 - Registration and retirement race corrections
+
+- The copied-shell review confirmed reconnect and pinned-companion fixes, but
+  also exposed delayed creation reviving an already-ended pane and pane exit
+  reviving an explicitly retired whole mapping. These remain blockers until
+  the corrected implementation and regression packet pass review.
+- Reconnect now retains dead CLI fences, refuses same-incarnation tombstones,
+  and rejects creation of an ended pane, including after snapshot-CAS retries.
+  Pane-owned exit records evidence without undoing whole-mapping retirement.
+- The combined registration/registry/companion packet passed 208 tests with
+  two platform skips. A stale single-CLI assertion was corrected. Native
+  relative-root fixture preparation is now explicit, separate from unchanged
+  ten-second rendezvous and fifteen-second refusal limits; the isolated six
+  controls also passed. Earlier startup timeouts remain recorded, not claimed
+  as cold-start latency qualification. Lint and the module-size gate passed.
+- No live installation, session or service was changed. The effort remains
+  Active; these corrections do not qualify the remaining runtime waiters or
+  the actual clean-middle reinstall contract.
+
+### 2026-10-27 - Startup validation and creation evidence
+
+- The next review overview raised failed startup validation and delayed creation.
+  Both copied shells had registered before validating token/prompt transport or
+  publishing its provisional receipt, without retiring that registration on a
+  pre-dispatch failure. A fenced cancellation now retires only that pane without
+  inventing an observed child exit. Start remains before the receipt: its real
+  consumer checks pane liveness during grace, so delaying start after receipt
+  publication could falsely admit a child while the handler was still pending.
+  Windows invocation errors produce an explicit failure and reach pane teardown.
+- Every creation callback now requires affirmative current native CLI identity,
+  liveness and path evidence, not just callbacks replacing a conflicting entry.
+  Existing same-incarnation tombstones and dead pane fences still refuse first.
+- These are further preparatory source corrections, not deployment or
+  installation-survival evidence. Native failure controls and the changed
+  consumer packet remain the local validation gate before publication.
+- The initial packet passed 111 tests with seven platform skips; adding the
+  positive child-exit control exposed another five-second native callback
+  timeout. A bounded diagnostic first passed both controls, then reproduced
+  start/end timeouts during runtime imports. Import timings and timed stacks
+  are now captured in the synthetic fixture without widening the production
+  deadline. The timing failure remains open; a green retry is not its cause.
+- The revised cancellation/creation/consumer/native packet passed 117 tests
+  with seven platform skips. Actual Windows wrapper controls cover invalid
+  prompt/token transport, blocked receipt preparation, native-locked receipt
+  publication, missing-command failure 127 and preserved real child exit 7.
+  Registry controls retain the predecessor and reject fabricated exit metadata
+  on cancellation. Runtime import timing remains an explicit #8669
+  qualification gap, not a basis for migrating live sessions.
+
+### 2026-10-27 - Delayed start against a foreign tombstone
+
+- The next exact-head overview identified another real race: an old start
+  could replace a different incarnation's newer tombstone and recorded exit.
+  Start now requires fresh native CLI/pane/path proof before that replacement,
+  repeated after a snapshot-CAS conflict. A live foreign incumbent still
+  refuses without replacement.
+- Creation and start reuse one native-proof function in the existing discovery
+  owner. Numeric incarnation timestamps do not grant takeover authority.
+  Regression controls cover current, stale and unknown native evidence, plus
+  an intervening tombstone change during the probe; bounded native subprocess
+  controls exercise the real descendant-Job query path.
+- Local validation and current-head review remain required before publication.
+  The effort remains Active and no target installation or session was changed.
+- The final shared-proof/discovery/registry/CLI/companion packet passed 197
+  tests with two platform skips; lint, module size and changed-file whitespace
+  passed. The Windows subprocess controls use an isolated native-protocol
+  fixture, not a human mux or installation-removal witness. Initial failures
+  were fixture wiring and an explicitly rejected stale successor revision;
+  the CAS regression now asserts that its intervening mutation actually landed.
+
+### 2026-10-27 - Equivalent worktree identity corrections
+
+- The next review overview identified raw worktree-path comparisons in start,
+  reconnect and discovery admission. Equivalent native paths now retain their
+  logical owner, dead CLI fences, latest observed exit and native-discovery
+  identity. Exact stored-snapshot comparisons remain unchanged for CAS.
+- Regression controls cover existing `sub/..` paths, actual Windows case
+  aliases, genuinely different paths, duplicate and subsequent exits, ended-pane
+  creation refusal and an alias-only concurrent write invalidating a snapshot.
+- Rebased onto current upstream while preserving its allocation/pair-completion
+  changes and removal-foundation journal. The creation builder's duplicate
+  seeded/unseeded call branches were folded without changing their arguments.
+- The Bash deadline helper's finite 50-millisecond sleep-child checks are
+  bounded to a boundary call, not a resident poller. Their overhead and native
+  callback latency remain unqualified under #8669; no deadline was increased
+  and no new persistent helper was introduced.
+- Local tests and a fresh exact-head review remain required. No target session,
+  service or installation has changed; the parent effort remains Active.
+- The identity/CLI packet passed 167 tests and the registry/companion/native
+  protocol packet passed another 155. Rebased creation validation exposed a
+  Windows slash-format assertion and cold imports sharing a three-second lock
+  readiness deadline. The assertions now compare native paths; the fixture
+  separately prepares imports before its unchanged lock-acquisition and
+  exclusion windows. These fixture changes do not alter production deadlines.
+- The final rebased creation packet passed 72 tests. Two earlier attempts
+  exhausted the runner's 300-second aggregate preparation budget; the final
+  invocation allowed 600 seconds for preparation plus execution while retaining
+  its 300-second test budget. It completed in 73.34 seconds, including cleanup.
+  Python lint, module-size and whitespace checks passed.

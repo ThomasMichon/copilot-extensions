@@ -3814,6 +3814,22 @@ preparation/identity/native-consumer contracts in `libs/versioned-runtime/tests`
 `libs/agent-procutil/tests`, including explicit native daemon wait-status controls.
 `--all` remains scoped to plugin suites.
 
+The copied-pane boundary controls are an explicit, non-serving native lane:
+
+```text
+python tools\run-plugin-tests.py worktree-manager --allow-explicit-tiers --test-file tests\native\test_pane_boundary_native.py --test-file tests\native\test_pane_boundary_posix.py
+```
+
+Each host runs its native shell cases and skips the other platform. These use
+small synthetic completed prefixes, the real runtime bootstrap and canonical
+shell code to check A-start/B-end, removal of A, and quiet absent-handler exit.
+Fixture preparation runs the real boundary help check before the timed effectful
+calls; first-time full runtime construction is not hidden inside that call budget.
+They do not install the full suite, use a real Copilot, qualify terminal
+interactivity or prove literal uninstall/reinstall survival. The files stay
+outside ordinary unit discovery; pure asset and registry controls remain in
+their owning unit suites.
+
 Manager's cold canonical-adopter acceptance has an explicit native lane:
 
 ```text

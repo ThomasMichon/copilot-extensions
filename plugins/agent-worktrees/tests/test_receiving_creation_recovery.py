@@ -102,11 +102,11 @@ def test_pairing_recovery_uses_configured_anchor_across_invocation_checkouts(rec
     with pytest.raises(OSError, match="before companion"):
         receive("create", request(receiver), config)
     row = creation_requests.inspect(config, admission.key)
-    assert row["worktree"]["receiving_recovery"]["pairing"]["path"] == config.default_repo.anchor
+    assert Path(row["worktree"]["receiving_recovery"]["pairing"]["path"]) == Path(config.default_repo.anchor)
     record = tracking.load_record(next(records.glob("*.yaml")))
     monkeypatch.setattr(tracking, "create_new_record", original)
     monkeypatch.chdir(other)
-    assert real_resolve_state_root(config).path == str(other)
+    assert Path(real_resolve_state_root(config).path) == other
     recovered = receive("inspect", request(receiver), config)
     assert recovered["status"] == "allocated"
     assert recovered["identity"] == receiving.record_identity(record).to_dict()
@@ -491,11 +491,18 @@ def test_original_operation_exclusion_crosses_a_real_process_boundary(receiver, 
     digest = hashlib.sha256(admission.key.encode()).hexdigest()
     operation = records.parent / "creation-operations" / f"{digest}.yaml"
     ready, release = tmp_path / "ready", tmp_path / "release"
+    prepared, start = tmp_path / "prepared", tmp_path / "start"
     script = """
 import sys,time
 from pathlib import Path
 from agent_worktrees import tracking
-operation,ready,release = map(Path, sys.argv[1:])
+operation,ready,release,prepared,start = map(Path, sys.argv[1:])
+prepared.write_text("imported")
+deadline = time.monotonic() + 15
+while not start.exists():
+    if time.monotonic() >= deadline:
+        raise TimeoutError("test owner was not started")
+    time.sleep(0.01)
 with tracking._RecordLock(operation, require_sidecar=True):
     ready.write_text("exclusive")
     deadline = time.monotonic() + 5
@@ -507,10 +514,16 @@ with tracking._RecordLock(operation, require_sidecar=True):
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(
             run_caller_owned,
-            [sys.executable, "-c", script, str(operation), str(ready), str(release)],
-            timeout=8, max_stdout_bytes=1024, max_stderr_bytes=4096,
+            [sys.executable, "-c", script, str(operation), str(ready), str(release),
+             str(prepared), str(start)],
+            timeout=30, max_stdout_bytes=1024, max_stderr_bytes=4096,
         )
         try:
+            deadline = time.monotonic() + 15
+            while not prepared.exists() and not future.done() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert prepared.exists(), future.result(timeout=30) if future.done() else "imports not ready"
+            start.write_text("start")
             deadline = time.monotonic() + 3
             while not ready.exists() and not future.done() and time.monotonic() < deadline:
                 time.sleep(0.01)
@@ -519,7 +532,8 @@ with tracking._RecordLock(operation, require_sidecar=True):
             assert result["status"] == "pending" and not result["allocation_finished"]
             assert creation_requests.inspect(config, admission.key)["status"] == "pending"
         finally:
+            start.write_text("start")
             release.write_text("release")
-        completed = future.result(timeout=8)
+        completed = future.result(timeout=30)
     assert completed.returncode == 0, completed.stderr
     assert receive("inspect", request(receiver), config)["status"] == "allocated"
