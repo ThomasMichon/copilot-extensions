@@ -224,13 +224,19 @@ def _identity(data: _Info) -> tuple[Any, ...]:
 
 
 def _row(native: _Native, pid: int) -> dict[str, Any] | None:
+    before: _Info | None = None
+    phase = "identity-before"
     try:
         before = native.info(pid)
         if before.bsd.status == 5:  # SZOMB: explicit terminal evidence.
             return None
+        phase = "image-before"
         image = native.image(pid)
+        phase = "arguments"
         argv = native.argv(pid, 8 if before.bsd.flags & 0x10 else 4)  # PROC_FLAG_LP64.
+        phase = "image-after"
         final_image = native.image(pid)
+        phase = "identity-after"
         after = native.info(pid)
         if after.bsd.status == 5:
             return None
@@ -241,16 +247,33 @@ def _row(native: _Native, pid: int) -> dict[str, Any] | None:
     except OSError as error:
         if error.errno == errno.ESRCH:
             return None
+        if phase == "arguments":
+            phase = ("argument-size" if error.strerror == "Darwin argument size query failed"
+                     else "argument-read")
         # KERN_PROCARGS2 uses EINVAL for missing proc/task/stack, but also for
         # invalid inputs. Only an independent kernel observation can excuse it.
-        if error.errno == errno.EINVAL:
-            try:
-                terminal = native.info(pid).bsd.status == 5
-            except OSError as confirmation:
-                terminal = confirmation.errno == errno.ESRCH
-            if terminal:
-                return None
-        raise _refuse("native read refused", pid) from None
+        confirmation, confirmation_errno, status, identity_matches = "unverified", 0, 0, -1
+        try:
+            observed = native.info(pid)
+            status = observed.bsd.status
+            if before is not None:
+                identity_matches = int(_identity(before) == _identity(observed))
+            confirmation = ("zombie" if status == 5 else
+                            "changed" if identity_matches == 0 else "live")
+        except OSError as confirmation_error:
+            confirmation_errno = confirmation_error.errno or 0
+            if confirmation_errno == errno.ESRCH:
+                confirmation = "gone"
+        except RuntimeError:
+            pass
+        if error.errno == errno.EINVAL and confirmation in {"gone", "zombie"}:
+            return None
+        # Observations after other failures are diagnostic only. In particular,
+        # EPERM/EIO followed by ESRCH does not convert an unverified read to gone.
+        detail = (f"{_refuse('native read refused', pid)} phase={phase} errno={error.errno or 0} "
+                  f"confirmation={confirmation} confirmation_errno={confirmation_errno} "
+                  f"confirmation_status={status} confirmation_identity={identity_matches}")
+        raise RuntimeError(detail) from None
 
 
 def inspect_processes() -> list[dict[str, Any]]:

@@ -21,6 +21,7 @@ import pytest
 
 from native_shell_support import bash_path
 from test_native_uninstall_footprint import (
+    PLUGIN,
     _host,
     _load,
     _native_arguments,
@@ -38,7 +39,7 @@ pytestmark = [
 
 
 @pytest.fixture
-def project_install(native_install):
+def project_install(native_install, monkeypatch: pytest.MonkeyPatch):
     home, payload, root, _, durable = native_install
     for path, data in {
         root / "config.yaml": b"{}\n",
@@ -49,7 +50,16 @@ def project_install(native_install):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
         durable[path] = (data, path.stat().st_dev, path.stat().st_ino)
-    graph = [str(payload / "src"), os.environ.get("PYTHONPATH", ""), *site.getsitepackages()]
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    monkeypatch.syspath_prepend(str(PLUGIN / "scripts"))
+    engine = _load(PLUGIN / "scripts/installer_engine.py")
+    packages = engine._package_roots(PLUGIN)
+    graph = [
+        str(payload / "src"),
+        *(str(package / "src") for package in packages
+          if package.resolve() != PLUGIN.resolve() and (package / "src").is_dir()),
+        *site.getsitepackages(),
+    ]
     environment = {
         "AGENT_HOME": "",
         "PYTHONPATH": os.pathsep.join(value for value in graph if value),
@@ -59,6 +69,23 @@ def project_install(native_install):
         "AGENT_WORKTREES_STATUS_MONITOR": "0",
     }
     return home, payload, root, durable, environment
+
+
+def test_selected_slot_imports_declared_cli_graph_without_ambient_pythonpath(project_install) -> None:
+    home, payload, root, _, environment = project_install
+    assert not os.environ.get("PYTHONPATH")
+    python, _ = _slot(home, payload, root, True)
+    result = _run([
+        str(python), "-B", "-c",
+        "import json,sys,machine_transport,agent_worktrees.installer;"
+        "print(json.dumps([sys.prefix,machine_transport.__file__,"
+        "agent_worktrees.installer.__file__]))",
+    ], home, env=environment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    prefix, transport, installer = map(Path, json.loads(result.stdout))
+    assert prefix == python.parent.parent
+    assert transport.is_relative_to(PLUGIN.parents[1] / "libs/machine-transport/src")
+    assert installer.is_relative_to(payload / "src")
 
 
 def test_project_fixture_binding_matches_fresh_native_account(project_install) -> None:

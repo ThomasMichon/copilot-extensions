@@ -419,11 +419,110 @@ def test_argument_failure_never_silently_disappears(kernel, error):
         darwin.inspect_processes()
 
 
-def test_eperm_does_not_even_probe_for_disappearance(kernel):
-    kernel.arg_error = errno.EPERM
-    with pytest.raises(RuntimeError, match="native read refused"):
+@pytest.mark.parametrize("failure", [errno.EPERM, errno.EACCES, errno.EIO, errno.ENOMEM, 0])
+def test_non_einval_later_disappearance_is_diagnostic_not_skip(kernel, failure):
+    kernel.arg_error = failure
+    def gone(pid, call, data):
+        if call == 2:
+            ctypes.set_errno(errno.ESRCH)
+            return 0
+    kernel.info_hook = gone
+    with pytest.raises(RuntimeError, match="native read refused") as caught:
         darwin.inspect_processes()
-    assert kernel.info_calls[kernel.self_pid] == 1
+    message = str(caught.value)
+    assert f"errno={failure} " in message
+    assert "confirmation=gone " in message
+    assert f"confirmation_errno={errno.ESRCH} " in message
+    assert kernel.info_calls[kernel.self_pid] == 2
+
+
+@pytest.mark.parametrize("failure", [errno.EPERM, errno.EIO])
+def test_non_einval_terminal_confirmation_does_not_admit_skip(kernel, failure):
+    kernel.arg_error = failure
+    def terminal(pid, call, data):
+        if call == 2:
+            data.bsd.status = 5
+    kernel.info_hook = terminal
+    with pytest.raises(RuntimeError, match="confirmation=zombie "):
+        darwin.inspect_processes()
+
+
+@pytest.mark.parametrize("phase", [
+    "identity-before", "image-before", "argument-size", "argument-read",
+    "image-after", "identity-after",
+])
+def test_native_failure_diagnostic_names_exact_phase_and_numeric_errno(kernel, phase):
+    if phase.startswith("identity"):
+        fail_call = 1 if phase == "identity-before" else 2
+        def identity(pid, call, data):
+            if call == fail_call:
+                ctypes.set_errno(errno.EIO)
+                return 0
+        kernel.info_hook = identity
+    elif phase.startswith("image"):
+        fail_call = 1 if phase == "image-before" else 2
+        def image(pid, call, buffer):
+            if call == fail_call:
+                ctypes.set_errno(errno.EIO)
+                return 0
+            value = b"/opt/example/python"
+            ctypes.memmove(buffer, value + b"\0", len(value) + 1)
+            return len(value)
+        kernel.path_hook = image
+    elif phase == "argument-size":
+        kernel.arg_error = errno.EIO
+    else:
+        original = kernel.system.sysctl.function
+        def argument_read(keys, count, buffer, size_pointer, new, new_size):
+            if count == 3 and buffer is not None:
+                ctypes.set_errno(errno.EIO)
+                return -1
+            return original(keys, count, buffer, size_pointer, new, new_size)
+        kernel.system.sysctl.function = argument_read
+    with pytest.raises(RuntimeError, match="native read refused") as caught:
+        darwin.inspect_processes()
+    message = str(caught.value)
+    assert f"phase={phase} " in message
+    assert f"errno={errno.EIO} " in message
+    assert "confirmation=live confirmation_errno=0 confirmation_status=2" in message
+    expected_identity = -1 if phase == "identity-before" else 1
+    assert message.endswith(f"confirmation_identity={expected_identity}")
+    expected_calls = 3 if phase == "identity-after" else 2
+    assert kernel.info_calls[kernel.self_pid] == expected_calls
+
+
+@pytest.mark.parametrize("confirmation", ["changed", "ownership-refused", "partial"])
+def test_independent_confirmation_failure_still_refuses_original_error(kernel, confirmation):
+    kernel.arg_error = errno.EIO
+    def observe(pid, call, data):
+        if call == 2:
+            if confirmation == "changed":
+                data.bsd.start_sec += 1
+            elif confirmation == "ownership-refused":
+                data.bsd.uid += 1
+            else:
+                return 1
+    kernel.info_hook = observe
+    with pytest.raises(RuntimeError, match="native read refused") as caught:
+        darwin.inspect_processes()
+    message = str(caught.value)
+    assert f"errno={errno.EIO} " in message
+    expected = "changed" if confirmation == "changed" else "unverified"
+    assert f"confirmation={expected} " in message
+    assert kernel.info_calls[kernel.self_pid] == 2
+
+
+def test_native_read_diagnostic_never_formats_exception_payload(kernel):
+    def unreadable(*args):
+        raise OSError(errno.EIO, "PRIVATE_ARGUMENT_AND_ENVIRONMENT")
+    # Construct with the genuine deterministic native seam before introducing
+    # the argument failure, so this exercises the production row error path.
+    native = darwin._Native()
+    kernel.system.sysctl.function = unreadable
+    with pytest.raises(RuntimeError, match="native read refused") as caught:
+        darwin._row(native, kernel.self_pid)
+    assert "PRIVATE_ARGUMENT_AND_ENVIRONMENT" not in str(caught.value)
+    assert "argument-read" in str(caught.value)
 
 
 def test_einval_permission_denial_confirmation_is_not_gone(kernel):
@@ -433,8 +532,10 @@ def test_einval_permission_denial_confirmation_is_not_gone(kernel):
             ctypes.set_errno(errno.EPERM)
             return 0
     kernel.info_hook = inaccessible
-    with pytest.raises(RuntimeError, match="native read refused"):
+    with pytest.raises(RuntimeError, match="native read refused") as caught:
         darwin.inspect_processes()
+    assert "confirmation=unverified " in str(caught.value)
+    assert f"confirmation_errno={errno.EPERM} " in str(caught.value)
     assert kernel.info_calls[kernel.self_pid] == 2
 
 
