@@ -6,9 +6,10 @@ Existing result keys and their meanings remain unchanged. In particular,
 The ordinary worker persists the nested result in its existing `result_stats`.
 Consumers can ignore the additive field; no CLI/provider syntax changes.
 
-Measurements are local integer increments at the existing synchronous owners,
+Measurements are local increments at the existing synchronous owners,
 with one snapshot at return. There is no exporter, daemon, new journal, coverage
-authority or extra store query. Independent/nested runs have separate scopes;
+authority or extra native row query. Mutation summaries read the existing small
+receipt after successful clean publication. Independent/nested runs have separate scopes;
 cancellation and exceptions reset the scope.
 
 ## Measured work
@@ -26,6 +27,7 @@ cancellation and exceptions reset the scope.
 | `models[model_id].vector_rows_upserted` | Actual primary vector rows returned by that model's upsert API. |
 | `fts_ensure_attempts`, `fts_ensure_completed` | Engine finalization calls to ensure FTS availability/currentness. Not full rebuild counts; the API's boolean reports availability. |
 | `cluster_pass_attempts`, `cluster_pass_completed`, `cluster_pass_failures`, `cluster_cache_hits` | Actual clustering calls, successful/failed calls and coverage-cache reuse. A legacy swallowed pass failure still records its attempt/failure. |
+| `source_mutations[source]` | Ordered successful source-application summaries, after store work, cursor save and pending-journal completion. Retained replay and fresh acquisition are separate entries. See below for scope and unavailable values. |
 
 All row counts describe the engine batch writer's primary API operations,
 **not storage-engine I/O,
@@ -47,6 +49,36 @@ provider traffic**. External providers and other transports remain unmeasured.
 Unlisted work is likewise unavailable, not implicitly zero. Do not use this
 partial instrumentation to claim the entire scale acceptance matrix passed.
 
+## Source mutation summaries
+
+Each entry has `available`, `write_commits`, `logical_commits`, `tables`, `epoch`
+and `generation`. In a participating source-aware store, `write_commits` counts
+successful **outer** writer transactions in that application, including
+identical no-ops and physical-only maintenance. Nested content/vector writes
+share the outer commit. `logical_commits` counts those transactions whose witnessed table transitions
+are treated as logical changes by the existing maintenance-exemption policy.
+It is not a semantic comparison of every row. `tables` is their sorted union, not the manifest's
+claimed inputs. Metadata-only changes report only tables actually changed;
+canonical tombstones include affected model tables. Empty applications report
+zero observed writes and logical changes.
+
+`epoch`/`generation` describe the last observed writer's successfully persisted,
+witness-qualified optional logical projection. They are null when no writer
+was observed or the optional coverage was unavailable/dropped. Missing physical
+witnesses make `logical_commits` and `tables` null, never measured zero.
+Unselected legacy stores report `available: false` and all other fields null.
+An empty list/missing source means no successful source publication was observed,
+not proof that no partial store work happened.
+
+Observation is execution-context-local and restricted to the same domain.
+It neither holds exclusion across model/network calls nor delays, combines or
+rewinds existing transaction generations. Several transactions can therefore
+advance a generation within one reported application. Interleaved writers in
+other contexts do not enter its counts; its generation is not a source-exclusive
+watermark. These results must never authorize cache reuse, source advancement
+or recovery. Existing witnessed projection/FTS coverage remains authoritative.
+Final all-source GC, FTS and clustering occur outside these source summaries.
+
 ## Recovery and failures
 
 Counts describe the current invocation, not cumulative task history. Replayed
@@ -56,6 +88,14 @@ completed operations before a failed legacy source remain visible alongside
 `sources_failed`; they are not subtracted to simulate rollback.
 Fatal exceptions/cancellation return no successful result snapshot and retain
 the existing worker failure semantics.
+
+An application that fails during data writes, source-state save or pending-journal
+completion emits no successful mutation summary. Earlier completed source
+applications remain in a returned partial round. A retry reports only the writes
+it performs; compatible writes from an earlier failed attempt may be reused.
+This is not exactly-once lifetime accounting across crashes or transactional
+rollback of a whole source delta. One-generation-per-delta publication and
+whole-store physical I/O qualification remain separate work.
 
 `tests/test_work_counts.py` qualifies native single/two-model rounds in both
 storage layouts, unchanged/replayed content, metadata reuse, changed text,

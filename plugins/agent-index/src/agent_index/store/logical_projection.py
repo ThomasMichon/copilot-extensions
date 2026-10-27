@@ -62,12 +62,12 @@ def commit_projection(
     *,
     physical_only: set[str],
     scoped: dict[str, set[str]] | None = None,
-) -> None:
+) -> set[str] | None:
     """Publish once at the outer clean commit, never at an intermediate effect."""
     previous = current_projection(receipt, before)
     if after is None:
         receipt.pop("logical_projection", None)
-        return
+        return None
     generations = previous["tables"] if previous is not None else {}
     changed = {
         name for name, identity in after.items()
@@ -99,3 +99,4 @@ def commit_projection(
         and before[name]["version"] <= after[name]["version"]
     }
     commit_buckets(previous, receipt["logical_projection"], stable)
+    return logical if before is not None else None

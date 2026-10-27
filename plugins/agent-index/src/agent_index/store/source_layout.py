@@ -389,8 +389,10 @@ class SourceDomain:
                     if buckets is not None and after is not None
                     and after.get(name) == self._local.bucket_witness.get(name)
                 } if not self._local.logical_effect else {}
-                commit_projection(value, before, after, physical_only=preserved, scoped=scoped)
+                logical = commit_projection(value, before, after, physical_only=preserved, scoped=scoped)
                 self.save(value)
+                from .mutation_result import record_write
+                record_write(self, logical, after, self.receipt)
             finally:
                 self._local.depth = 0
                 self._local.db = None
