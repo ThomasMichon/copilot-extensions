@@ -406,6 +406,16 @@ transfer without acceptance by a named tracked objective.
   assert zero output. Focused corrected-drive native qualification is pending;
   the preceding combined packet continues to cover unchanged custody/signer
   code, not this new drive-validator revision.
+- The final drive revision passed its focused 57-control native packet with
+  zero failures or skips on both shell editions, including faithful transport
+  of all 12 malformed values, zero binding calls and zero helper output.
+  Test time was 32.71 seconds, 49.95 seconds including preparation and
+  settlement. All nine bound source/runner files and the original signed
+  executable remained unchanged; canonical cleanup passed. The focused
+  hardened Linux source control passed with 56 explicit native skips.
+  This focused result complements the preceding 169-control custody/signer
+  packet; no 181-control combined rerun is claimed. Current-head review and
+  merge remain gates, and complete canonical/interpreter admission stays open.
 
 ### 2026-10-26 - Core held-file signer candidate
 
