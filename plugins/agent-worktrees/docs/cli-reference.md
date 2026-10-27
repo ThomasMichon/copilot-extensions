@@ -29,6 +29,17 @@ Except for capabilities, operations read exactly one JSON object from stdin.
 See [the exact ABI and callback contract](resource-producer.md). These claims
 cannot be settled through generic release, at-rest, sweep or abandon commands.
 
+## Source-only destination allocation
+
+`create [--machine EXECUTION_SPACE] [--repo REPOSITORY] [--creation-key KEY]
+[--creation-request-id EXISTING_REQUEST]
+--json` selects a destination while preserving the original CWD creator.
+It launches no agent. Remote results distinguish durable receiving creation
+from asynchronous origin linkage and retain the original retry key on uncertain
+outcomes. An unresolved linked CWD refuses implicit ownership even when its
+repository is unregistered; explicitly selecting `--no-owner` remains a local-only
+standalone choice. See [capabilities, explicit refusals and recovery](worktree-allocation.md#ordinary-destination-selection).
+
 ## CLI mode (no project binstub)
 
 The generic `agent-worktrees` command works without a project binstub. If

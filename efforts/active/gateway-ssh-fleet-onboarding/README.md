@@ -510,6 +510,27 @@ completion is asserted.
 
 ## Journal
 
+### 2026-10-26 - Original receiving creation-result source merged
+
+- #9222 merged to `dev` as `97836c1a5a6b2a710b65fd55d2ce4911f6d887fc`.
+  Exact head `fb03cf6d7a9ed5c7efa6d444120f8ba6a239e775` received current-head
+  Copilot approval with the unfinished-status finding resolved and required CI
+  green before managed completion. Canonical completion retained the source
+  vessel for the open allocation prerequisite.
+- The separately negotiated receiver result returns the original completed
+  journal's actual ordinary sessionless worktree, not a planned path or another
+  creation. Unfinished `pending`/`unknown` replies preserve status without a
+  usable ordinary result; strict original-request and incarnation checks do not
+  relax the completed lifecycle-proof validator.
+- The focused isolated result/receiver/CLI/resident-linker selection passed
+  101 cases, including a real receiving interpreter for capability, original
+  result and unknown-history transport. The exact committed no-effects packet
+  passed 2,435 cases with production coverage recorded once.
+- Re-read the Plan and Validation Plan. No broader ordinary-coordinator,
+  startup, consumer, native or installed acceptance item closes. Start ordinary
+  destination selection with CWD-origin capture and actual provider/resident
+  negotiation, then the existing Bridge/Dispatch consumers.
+
 ### 2026-10-26 - Resident-owned asynchronous linkage source merged
 
 - #9214 merged to `dev` as `ce469bffe906be5aad7b72b0b4047c206fb61387`.

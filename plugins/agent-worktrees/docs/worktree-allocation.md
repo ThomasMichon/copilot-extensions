@@ -5,9 +5,90 @@ and optional exact-claim acknowledgement. It uses the existing worktree resource
 ledger and workspace-creation journal, not a second allocator or service.
 It is the provider foundation for the
 [origin-owned allocation pattern](../../../docs/patterns/workspace-allocation-and-session-acquisition.md#origin-owned-remote-allocation).
-The ordinary `create --machine/--repo` coordinator and Bridge/Dispatch
-consumer migration are separate work; these provider
-commands do not implement or advertise those consumers.
+The ordinary `create --machine/--repo` coordinator consumes these contracts.
+Bridge/Dispatch migration and installed/native qualification remain separate;
+the provider commands alone do not implement those consumers.
+
+## Ordinary destination selection
+
+```text
+agent-worktrees create --machine target --repo destination --creation-key logical-request --json
+```
+
+`--machine` selects an existing registered execution space; omission retains
+local creation. `--repo` defaults to the registered repository at the original
+invocation CWD, captured before destination or global `--project` selection.
+Global `--project` keeps its existing assume-project semantics; use `--repo`
+for destination selection without replacing the creator. Explicit `--owner-ref`
+takes precedence over the existing owner environment fallback and CWD owner.
+Remote allocation normalizes a session-qualified owner through its actual
+local worktree ledger. An anchor is never invented as a remote creator.
+An unresolved linked-worktree CWD is refused before local or remote effects
+unless standalone policy is explicitly selected; missing tracking is not
+permission to silently omit the reciprocal owner. Environment labels must agree
+with the actual local execution context or selected SSH profile. Exact
+registered execution keys retain precedence over suffix-like spelling.
+Composing clients discover support from the selected origin executable's
+`worktree-allocation capabilities --json`: `ordinary_create.version: 1`
+declares the two destination selectors, `opaque-v1` creation keys,
+`recovery_request_id: true`, `ordinary-worktree+allocation-v1` results and
+non-blocking linkage without agent launch. An origin lacking that declaration
+does not support this invocation;
+do not try new arguments against it or fall back to unowned receiving creation.
+
+Omitting both selectors retains the ordinary local path. Local repository
+selection scopes the normal creation core to that destination and restores the
+previous project on success or failure. Existing local seed, system,
+standalone, pairing and sessionless behavior is retained.
+
+Remote owned creation first checks the actual registered local writer, the
+authenticated published resident's admitting `worktree-allocation-linker-v1`
+capability and the selected SSH receiver's provider and original-result
+capabilities. Unsupported or older owners refuse before reservation or receiving
+effects; package versions are not capability evidence. Remote `--no-owner`,
+`--system` and `--seed` are explicitly unsupported and refused before effects,
+not silently converted to an owned session or dropped. A composing host retains
+prompt/session admission.
+
+The origin then reserves protected pending responsibility before asking the
+receiver to create. It retrieves the original journaled ordinary result without
+calling origin `bind` or receiving `confirm` on the startup path. The resident
+links the same claim independently. Returned `allocation.linkage` is an
+observed `pending`, `bound`, `confirmed` or explicitly unavailable `unknown`,
+separate from `allocation.receiving_status` and the complete `creation` result.
+Neither a completed result nor pending linkage starts an agent or replaces
+ordinary current-record/head/holder admission.
+
+Caller creation keys retain the existing opaque non-empty, 1,024-character
+bound. A domain-separated digest maps them to the bounded allocation request
+ID. If omitted, a key is generated and returned with that ID in successful and
+uncertain outcomes. Retain the returned key and exact target/options for retries.
+A lost response reuses the same protected token and receiving operation; it
+never authorizes a fresh key, replacement child or automatic cancellation.
+An unfinished or concluded receiving operation supplies no usable worktree.
+Pending and unknown origin responsibility continue to block parent conclusion.
+If the caller disappears before the generated key reaches stdout, the existing
+origin resource ledger still retains the original request ID. Recover it through
+the normal claim inspection surface, then use:
+
+```text
+agent-worktrees create --machine original-target --repo original-destination --creation-request-id retained-request-id --json
+```
+
+Keep the original creation options as well. This mode only inspects an existing
+origin reservation; a missing request or changed target/options cannot reserve
+another allocation. It does not hash the retained ID again. A supplied
+`--creation-key` must agree with it. Recovery may return `creation_key: null`
+because the opaque original key is not reconstructed; the retained request ID
+remains the recovery handle. Request-ID recovery without the original remote
+destination is refused rather than silently performing local creation.
+
+When composed through `run`, its temporary pending wrapper is settled only
+after verifying this same protected responsibility in the actual origin ledger.
+The wrapper does not add a competing plain child claim while linkage is pending.
+An uncertain creation response can retain that protected operation without
+leaking another unresolved wrapper; missing, changed or malformed responsibility
+keeps the wrapper visibly unresolved instead.
 
 ## Source ABI and negotiation
 

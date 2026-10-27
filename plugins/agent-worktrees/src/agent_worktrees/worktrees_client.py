@@ -131,7 +131,7 @@ def validate_result(result: dict, request: dict) -> dict:
     return result
 
 
-def _resident(request: dict) -> dict:
+def _control_client() -> control.ControlClient:
     runtime_home = cfg.install_dir()
     endpoint = routing.read_active_endpoint(control.routing_dir(runtime_home), verify_listener=False)
     if endpoint is None:
@@ -141,8 +141,16 @@ def _resident(request: dict) -> dict:
         token = token_file.read(4097).strip()
     if not token or len(token) > 4096:
         raise ProjectionUnavailable("resident current-roster authentication is unavailable")
-    client = control.ControlClient(endpoint.base_url, token=token, timeout=READ_TIMEOUT)
-    return validate_result(client.worktrees_read(request), request)
+    return control.ControlClient(endpoint.base_url, token=token, timeout=READ_TIMEOUT)
+
+
+def read_health() -> dict:
+    """Read the actual authenticated resident's capabilities, without an advisory fallback."""
+    return _control_client().health()
+
+
+def _resident(request: dict) -> dict:
+    return validate_result(_control_client().worktrees_read(request), request)
 
 
 def read_current(request: dict, *, recover: bool = True) -> dict:

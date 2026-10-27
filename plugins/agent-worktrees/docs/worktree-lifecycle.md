@@ -47,6 +47,12 @@ full verb catalog, see [cli-reference.md](cli-reference.md).
 deployment; **deployed** means a running system reflects it (a separate install
 step for runtime plugins). Don't call a merged change "deployed."
 
+Creation can select a registered destination with `--machine` and `--repo`
+without starting an agent. The
+[origin-owned allocation contract](worktree-allocation.md#ordinary-destination-selection)
+owns remote capability negotiation, stable retry identity and the distinction
+between durable receiving creation and asynchronous origin-claim linkage.
+
 ### Background status freshness
 
 The resident status monitor uses a 30-second default correctness backstop.
