@@ -14,12 +14,20 @@ _CANCELLATION_KEYS = {"reason", "at", "actor", "revision"}
 
 
 def parse(raw: object) -> dict[str, str]:
-    """Keep only a string mapping; malformed evidence grants no capability."""
-    if not isinstance(raw, dict) or any(
-        not isinstance(k, str) or not isinstance(v, str) for k, v in raw.items()
+    """A lossy legacy identity parse must never preserve cancellation proof."""
+    if not isinstance(raw, dict):
+        return {}
+    revision, number = raw.get("pr_revision", 0), raw.get("number")
+    if type(revision) is not int or not 0 <= revision <= tracking.MAX_PERSISTED_COUNTER:
+        return {}
+    if number not in (None, "", "null") and (type(number) is not int or number <= 0):
+        return {}
+    receipt = raw.get("creation")
+    if not isinstance(receipt, dict) or any(
+        not isinstance(k, str) or not isinstance(v, str) for k, v in receipt.items()
     ):
         return {}
-    return dict(raw)
+    return dict(receipt)
 
 
 def _digest(value: object) -> str:

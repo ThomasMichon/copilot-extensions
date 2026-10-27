@@ -1362,7 +1362,7 @@ def _parse_pr_mapping(raw: dict, default_repo: str) -> PRRecord:
         **_parse_frozen_attribution_pair(raw),
         pr_id=pr_id_raw if isinstance(pr_id_raw, str) else "",
         pr_revision=pr_revision,
-        creation=parse(raw.get("creation")),
+        creation=parse(raw),
         rewrite_owner=str(raw.get("rewrite_owner", "") or ""),
         rewrite_identity=str(raw.get("rewrite_identity", "") or ""),
     )

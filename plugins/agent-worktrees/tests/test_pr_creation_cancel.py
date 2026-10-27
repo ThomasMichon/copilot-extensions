@@ -294,6 +294,20 @@ def test_malformed_cancellation_receipt_is_not_finality_proof(reservation, key, 
     assert not state.cancelled(record.pr)
 
 
+@pytest.mark.parametrize("field,value", [
+    ("number", "unknown"), ("number", True), ("number", {}),
+    ("pr_revision", "unknown"), ("pr_revision", True), ("pr_revision", -1),
+    ("pr_revision", tracking.MAX_PERSISTED_COUNTER + 1),
+])
+def test_lossy_legacy_identity_parse_cannot_retain_eligibility(reservation, field, value):
+    record = reservation[5]
+    raw = tracking._pr_to_yaml_dict(record.pr)
+    raw[field] = value
+    parsed = tracking._parse_pr_mapping(raw, record.repo)
+    assert not state.reserved(parsed, record)
+    assert not state.cancelled(parsed)
+
+
 @pytest.mark.parametrize("options", [
     ["--creation", "example", "--pr", "7"],
     ["--creaton", "example"],
