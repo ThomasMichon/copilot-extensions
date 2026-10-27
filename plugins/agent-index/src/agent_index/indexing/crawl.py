@@ -50,6 +50,7 @@ def collect_source_changes(
 
     discover_delta = getattr(connector, "discover_delta", None)
     discover_page = getattr(connector, "discover_delta_page", None)
+    discover_snapshot = getattr(connector, "discover_snapshot_page", None)
     journal = PendingCrawls(path_index)
     refresh = journal.refresh_candidates(source_name, scope, connector.source_name)
     if refresh is not None and change_hints is None and not full:
@@ -67,8 +68,28 @@ def collect_source_changes(
         not full and change_hints is None and callable(discover_page)
         and 1 in getattr(discover_page, "acquisition_page_versions", ())
     )
-    if pending is not None and not pages_selected:
+    snapshot_versions = getattr(discover_snapshot, "snapshot_page_versions", ())
+    if full and callable(discover_snapshot) and not isinstance(
+        snapshot_versions, (tuple, list, set, frozenset),
+    ):
+        raise ValueError("Invalid connector snapshot-page versions")
+    snapshots_selected = (
+        full and change_hints is None and callable(discover_snapshot)
+        and any(
+            type(version) is int and version == 1
+            for version in snapshot_versions
+        )
+    )
+    if pending is not None and not (pages_selected or snapshots_selected):
         raise ValueError("Complete pending paged acquisition before changing acquisition mode")
+    if snapshots_selected and callable(discover_snapshot):
+        from agent_index.indexing.snapshot_crawl import acquire_snapshot
+
+        return acquire_snapshot(
+            source_name, family=connector.source_name, stored_family=canonical,
+            scope=scope, last_commit=last_commit, journal=journal, discover=discover_snapshot,
+            refresh=refresh, cancel_check=cancel_check,
+        )
     if pages_selected and callable(discover_page):
         if refresh is not None:
             raise ValueError("Selected paged connector cannot refresh outstanding hinted candidates")

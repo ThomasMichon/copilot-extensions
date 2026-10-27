@@ -33,7 +33,7 @@ def recovery_scope(config_scope: str, connector: SourceConnector) -> str:
     if identity is None:
         if any(
             callable(getattr(connector, name, None))
-            for name in ("discover_delta", "discover_hints", "discover_delta_page")
+            for name in ("discover_delta", "discover_hints", "discover_delta_page", "discover_snapshot_page")
         ):
             raise ValueError("Delta connector must declare its effective recovery_identity")
         identity = (connector.source_name,)
@@ -176,10 +176,14 @@ class PendingCrawls(PollRefreshJournal):
         if payload is None:
             return None
         data = json.loads(payload)
-        if isinstance(data, dict) and data.get("version") == 2:
+        if isinstance(data, dict) and data.get("version") in (2, 4):
             from agent_index.indexing.paged_crawl import decode_acquisition
+            from agent_index.indexing.snapshot_crawl import decode_snapshot
 
-            decode_acquisition(payload, source)
+            if data["version"] == 4:
+                decode_snapshot(payload, source)
+            else:
+                decode_acquisition(payload, source)
             return None
         if not isinstance(data, dict) or set(data) != {"version", "full", "manifest"}:
             raise ValueError("Invalid pending crawl envelope")
@@ -195,6 +199,7 @@ class PendingCrawls(PollRefreshJournal):
     ) -> None:
         """Explicitly abandon only the exact unapplied phase; complete work must replay."""
         from agent_index.indexing.paged_crawl import decode_acquisition
+        from agent_index.indexing.snapshot_crawl import decode_snapshot
 
         with closing(self._paths._connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -203,7 +208,12 @@ class PendingCrawls(PollRefreshJournal):
             ).fetchone()
             if row is None or row["scope"] != scope or row["payload"] != expected_payload:
                 raise PendingCrawlConflict("Pending acquisition changed before explicit discard")
-            progress = decode_acquisition(row["payload"], source)
+            data = json.loads(row["payload"])
+            progress = (
+                decode_snapshot(row["payload"], source)
+                if isinstance(data, dict) and data.get("version") == 4
+                else decode_acquisition(row["payload"], source)
+            )
             if progress.manifest.accounting_family != family:
                 raise ValueError("Pending acquisition belongs to a different source family")
             conn.execute("DELETE FROM pending_crawls WHERE source = ?", (source,))

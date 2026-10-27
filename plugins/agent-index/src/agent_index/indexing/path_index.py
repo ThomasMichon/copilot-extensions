@@ -296,6 +296,44 @@ class PathIndex:
         finally:
             conn.close()
 
+    def get_family_page(
+        self, family: str, *, after: tuple[str, str] | None = None, limit: int = 256,
+    ) -> list[tuple[str, str]]:
+        """Keyset-read a bounded, ordered slice for explicit full reconciliation."""
+        if not isinstance(family, str) or not family:
+            raise ValueError("Reconciliation requires a source family")
+        if type(limit) is not int or not 1 <= limit <= 256:
+            raise ValueError("Reconciliation identity page must contain 1 to 256 items")
+        if after is not None and (
+            not isinstance(after, tuple) or len(after) != 2
+            or any(not isinstance(value, str) or not value for value in after)
+            or not (after[0] == family or after[0].startswith(family + ":"))
+        ):
+            raise ValueError("Invalid reconciliation identity cursor")
+        conn = self._connect()
+        try:
+            namespace = after[0] if after else family
+            path_clause = "AND file_path > ?" if after else ""
+            rows = conn.execute(
+                "SELECT source, file_path FROM indexed_files "
+                f"WHERE source = ? COLLATE BINARY {path_clause} ORDER BY file_path LIMIT ?",
+                (namespace, after[1], limit) if after else (namespace, limit),
+            ).fetchall()
+            if len(rows) < limit:
+                # Separate seeks keep SQLite from scanning the current namespace
+                # to evaluate a composite cursor as a residual predicate.
+                lower = family + ":" if namespace == family else namespace
+                relation = ">=" if namespace == family else ">"
+                rows.extend(conn.execute(
+                    "SELECT source, file_path FROM indexed_files "
+                    f"WHERE source {relation} ? COLLATE BINARY AND source < ? COLLATE BINARY "
+                    "ORDER BY source, file_path LIMIT ?",
+                    (lower, family + ";", limit - len(rows)),
+                ).fetchall())
+            return [(row["source"], row["file_path"]) for row in rows]
+        finally:
+            conn.close()
+
     def list_sources(self) -> list[str]:
         """Return exact stored source identities, including path-only remnants."""
         conn = self._connect()
