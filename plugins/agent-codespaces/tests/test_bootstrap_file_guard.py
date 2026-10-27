@@ -14,6 +14,15 @@ from agent_procutil import no_window_kwargs
 
 ROOT = Path(__file__).resolve().parents[3]
 HELPER = ROOT / "libs/installer-engine/bootstrap-file-guard.ps1"
+_CAPTURE_IDENTITY_HANDLE = r"""
+$script:observedHandle=$null
+$script:identityReader=${function:Get-BootstrapStockFileIdentity}
+function Get-BootstrapStockFileIdentity {
+    param($Handle, $Bindings)
+    $script:observedHandle=$Handle
+    & $script:identityReader -Handle $Handle -Bindings $Bindings
+}
+"""
 
 
 def test_guard_is_not_an_enabled_bootstrap_or_compilation_path():
@@ -144,17 +153,29 @@ def test_stock_guard_refuses_wrong_kind_and_releases_failed_open(host, tmp_path,
         path.mkdir()
     else:
         path.write_bytes(b"unchanged")
-    result = _run(host, tmp_path, r"""
-Open-BootstrapStockFileGuard -Path $env:FIXTURE_PATH -Directory:($env:EXPECT_DIRECTORY -eq '1')
-""", success=False, environment={
+    result = _run(host, tmp_path, _CAPTURE_IDENTITY_HANDLE + r"""
+$message=$null
+try {
+    $null=Open-BootstrapStockFileGuard -Path $env:FIXTURE_PATH -Directory:($env:EXPECT_DIRECTORY -eq '1')
+} catch { $message=$_.Exception.Message }
+if ($message -cne 'Bootstrap file guard object kind does not match the requested kind.') {
+    throw 'Wrong-kind refusal was lost.'
+}
+if ($null -eq $script:observedHandle -or -not $script:observedHandle.IsClosed) {
+    throw 'Wrong-kind admission did not close its handle before returning.'
+}
+if ($env:EXPECT_DIRECTORY -eq '1') {
+    [IO.File]::Move($env:FIXTURE_PATH, $env:FIXTURE_PATH + '-released')
+    [IO.File]::Move($env:FIXTURE_PATH + '-released', $env:FIXTURE_PATH)
+} else {
+    [IO.Directory]::Move($env:FIXTURE_PATH, $env:FIXTURE_PATH + '-released')
+    [IO.Directory]::Move($env:FIXTURE_PATH + '-released', $env:FIXTURE_PATH)
+}
+[pscustomobject]@{closed=$script:observedHandle.IsClosed} | ConvertTo-Json -Compress
+""", environment={
         "FIXTURE_PATH": str(path), "EXPECT_DIRECTORY": str(int(not directory)),
     })
-    assert result.returncode != 0
-    assert "object kind does not match" in result.stderr
-    # No failed-admission handle retains write/delete exclusion.
-    renamed = path.with_name("after-refusal")
-    path.rename(renamed)
-    renamed.rename(path)
+    assert result == {"closed": True}
 
 
 @pytest.mark.parametrize("path", (
@@ -238,11 +259,19 @@ def test_stock_guard_refuses_final_junction_without_opening_its_target(host, tmp
         capture_output=True, text=True, timeout=10, **no_window_kwargs(),
     )
     assert creation.returncode == 0, creation.stderr
-    result = _run(host, tmp_path, r"""
-Open-BootstrapStockFileGuard -Path $env:FIXTURE_PATH -Directory
-""", success=False, environment={"FIXTURE_PATH": str(junction)})
-    assert result.returncode != 0
-    assert "refuses a final reparse point" in result.stderr
+    result = _run(host, tmp_path, _CAPTURE_IDENTITY_HANDLE + r"""
+$message=$null
+try { $null=Open-BootstrapStockFileGuard -Path $env:FIXTURE_PATH -Directory }
+catch { $message=$_.Exception.Message }
+if ($message -cne 'Bootstrap file guard refuses a final reparse point.') {
+    throw 'Reparse-point refusal was lost.'
+}
+if ($null -eq $script:observedHandle -or -not $script:observedHandle.IsClosed) {
+    throw 'Reparse-point admission did not close its handle before returning.'
+}
+[pscustomobject]@{closed=$script:observedHandle.IsClosed} | ConvertTo-Json -Compress
+""", environment={"FIXTURE_PATH": str(junction)})
+    assert result == {"closed": True}
     assert target.is_dir()
     assert list(target.iterdir()) == []
 

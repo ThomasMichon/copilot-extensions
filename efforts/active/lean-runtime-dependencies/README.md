@@ -339,7 +339,9 @@ transfer without acceptance by a named tracked objective.
   weakened to make the earlier failure pass.
 - The corrected native Windows packet passed all 20 controls with no skips,
   including directory/file exclusion, release and failure cleanup, final
-  junction refusal and the weaker metadata-only differential. The hardened,
+  junction refusal and the weaker metadata-only differential. Wrong-kind and
+  junction refusals inspect the exact captured handle's closure before the
+  PowerShell process exits, not after OS exit cleanup. The hardened,
   network-disconnected Linux packet passed its portable control with 19
   explicit native skips. Independent publication review remains pending.
   This does not close interpreter/source-closure admission,
