@@ -529,6 +529,7 @@ def test_profile_matches_native_publication_declarations(monkeypatch):
     assert set(publication.HOOKS) <= set(profile["bin_entries"])
     assert set(publication.SETUP) <= set(profile["script_entries"])
     assert set(publication.TOOLS) == set(profile["local_bin_entries"])
+    assert "psmux-path.ps1" in profile["bin_entries"]
     assert {
         f"conduct/{path.name}" for path in (SCRIPTS / "conduct").glob("*.md")
     } <= set(profile["bin_entries"])

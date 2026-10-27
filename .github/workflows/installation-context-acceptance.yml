@@ -280,16 +280,16 @@ jobs:
           PY
       - name: Bounded libproc and exact-argv inspection
         run: |
-          cd "$REMOVAL_SOURCE"
           sudo -n -H -u "$REMOVAL_USER" -- env -i \
             "HOME=$REMOVAL_HOME" "PATH=$REMOVAL_PATH" \
-            "$REMOVAL_PYTHON" -B - <<'PY'
+            "$REMOVAL_PYTHON" -B - "$REMOVAL_SOURCE" <<'PY'
           import os
           from pathlib import Path
           import shutil
           import sys
           import tempfile
 
+          os.chdir(sys.argv[1])
           root = Path.cwd()
           sys.path.insert(0, str(root / "tools"))
           from plugin_test_containment import Limits, isolated_environment, run_contained
@@ -309,15 +309,15 @@ jobs:
           PY
       - name: Complete native Worktrees uninstall entrypoints
         run: |
-          cd "$REMOVAL_SOURCE"
           sudo -n -H -u "$REMOVAL_USER" -- env -i \
             "HOME=$REMOVAL_HOME" "PATH=$REMOVAL_PATH" \
             "UV_PYTHON=$REMOVAL_PYTHON" \
             "UV_CACHE_DIR=$REMOVAL_HOME/.cache/uv" \
             "UV_PYTHON_INSTALL_DIR=$REMOVAL_HOME/.cache/python" \
-            "$REMOVAL_PYTHON" -B tools/run-plugin-tests.py agent-worktrees \
+            /bin/bash -c 'cd "$1" && exec "$2" -B tools/run-plugin-tests.py agent-worktrees \
             --test-file tests/test_native_uninstall_footprint.py \
-            --test-file tests/test_uninstall_project_commands.py
+            --test-file tests/test_uninstall_project_commands.py' \
+            bash "$REMOVAL_SOURCE" "$REMOVAL_PYTHON"
 
   ssh-headless-linux:
     if: ${{ inputs.ssh_headless }}

@@ -52,7 +52,8 @@ def test_native_removal_is_an_isolated_manual_selection():
     for name in ("Bounded libproc and exact-argv inspection",
                  "Complete native Worktrees uninstall entrypoints"):
         command = STEPS[name]["run"]
-        assert 'cd "$REMOVAL_SOURCE"' in command
+        assert not command.startswith("cd ")
+        assert '"$REMOVAL_SOURCE"' in command
         assert 'sudo -n -H -u "$REMOVAL_USER" -- env -i' in command
         assert '"HOME=$REMOVAL_HOME" "PATH=$REMOVAL_PATH"' in command
 
@@ -148,6 +149,7 @@ def test_actual_backend_packet_uses_verified_finite_containment(tmp_path, monkey
     root = tmp_path / "source"
     root.mkdir()
     monkeypatch.chdir(root)
+    monkeypatch.setattr(sys, "argv", [sys.executable, str(root)])
     monkeypatch.setattr(sys, "path", sys.path.copy())
     parent_environment = dict(os.environ)
     observed = {}
@@ -168,8 +170,8 @@ def test_actual_backend_packet_uses_verified_finite_containment(tmp_path, monkey
     monkeypatch.setattr(containment, "run_contained", run)
     monkeypatch.setitem(sys.modules, "plugin_test_containment", containment)
     command = STEPS["Bounded libproc and exact-argv inspection"]["run"]
-    prefix, separator, body = command.partition(" - <<'PY'\n")
-    assert separator and prefix.endswith('"$REMOVAL_PYTHON" -B')
+    prefix, separator, body = command.partition(" <<'PY'\n")
+    assert separator and prefix.endswith('"$REMOVAL_PYTHON" -B - "$REMOVAL_SOURCE"')
     assert body.endswith("\nPY\n")
     body = compile(body[:-4], "<native-removal-workflow-step>", "exec")
     if outcome == "unsettled":
