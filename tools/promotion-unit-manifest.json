@@ -26,6 +26,9 @@
         "tools/promotion_unit_tests/test_artifact_license_notices.py::test_source_license_notice_is_preserved_in_first_party_wheels[historical]",
         "tools/promotion_unit_tests/test_artifact_license_notices.py::test_source_license_notice_is_preserved_in_first_party_wheels[empty-source]",
         "tools/promotion_unit_tests/test_artifact_license_notices.py::test_source_license_notice_is_preserved_in_first_party_wheels[directory-source]",
+        "tools/promotion_unit_tests/test_artifact_license_notices.py::test_selected_vendored_notice_is_not_replaced_by_canonical_source[modern]",
+        "tools/promotion_unit_tests/test_artifact_license_notices.py::test_selected_vendored_notice_is_not_replaced_by_canonical_source[changed]",
+        "tools/promotion_unit_tests/test_artifact_license_notices.py::test_selected_vendored_notice_is_not_replaced_by_canonical_source[missing]",
         "tools/promotion_unit_tests/test_daemon_clock.py::test_domain_binds_boot_and_time_namespace_without_wall_time",
         "tools/promotion_unit_tests/test_daemon_clock.py::test_publication_and_observation_share_absolute_monotonic_bounds",
         "tools/promotion_unit_tests/test_daemon_clock.py::test_unknown_or_invalid_timing_never_falls_back_to_epoch[legacy]",
@@ -2532,7 +2535,7 @@
     ],
     "sources": {
         "tools/promotion_unit_tests/test_wheel_acquisition_budget.py": "3b84b0f4dde389f1a31c1b8d684576a29fb62e53b9696064749cf20c37ca0cf6",
-        "tools/promotion_unit_tests/test_artifact_license_notices.py": "7a204bc0ebb3588330fa7fe6efb91d87efacc125b543954457a553cd4b23e885",
+        "tools/promotion_unit_tests/test_artifact_license_notices.py": "65956a73f5582f8c82876a7cf7b833d9f70f70789e72b78fb1de3476c830f76e",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_clock.py": "6036e8400b8250d7c745907025dd48a99a2441e07e9ffebb8ee0f751c6a2c43c",
         "tools/promotion_unit_tests/test_daemon_clock.py": "8dd13337618d5bf7648124bbe20fba9a8c35e06c0b3fb5db6231859406f187f9",
         "plugins/agent-machines/src/agent_machines/gh_account_prerequisite.py": "d8bada832bbbb3b5bba1aa317efdadd9ab4e65c0fa8862ef25f75e8bcdec9d2f",

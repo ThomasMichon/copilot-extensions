@@ -10,20 +10,7 @@ import pytest
 import promotion_python_artifacts as artifacts
 
 
-@pytest.mark.parametrize(
-    "kind",
-    [
-        "missing",
-        "changed",
-        "modern",
-        "legacy",
-        "historical",
-        "empty-source",
-        "directory-source",
-    ],
-)
-def test_source_license_notice_is_preserved_in_first_party_wheels(tmp_path, kind):
-    source = tmp_path / "source"
+def _case(source, kind):
     package = source / "src" / "fixture"
     package.mkdir(parents=True)
     code = b"VALUE = 1\n"
@@ -58,7 +45,25 @@ def test_source_license_notice_is_preserved_in_first_party_wheels(tmp_path, kind
         name: hashlib.sha256(value).hexdigest() for name, value in members.items()
     }
     metadata = BytesParser().parsebytes(metadata_bytes)
-    with zipfile.ZipFile(io.BytesIO(data.getvalue())) as archive:
+    return data.getvalue(), hashes, prefix, metadata
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "missing",
+        "changed",
+        "modern",
+        "legacy",
+        "historical",
+        "empty-source",
+        "directory-source",
+    ],
+)
+def test_source_license_notice_is_preserved_in_first_party_wheels(tmp_path, kind):
+    source = tmp_path / "source"
+    data, hashes, prefix, metadata = _case(source, kind)
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
         options = dict(
             source_dir=source, prefix=prefix, metadata=metadata, candidate_root=tmp_path
         )
@@ -67,3 +72,37 @@ def test_source_license_notice_is_preserved_in_first_party_wheels(tmp_path, kind
                 artifacts.validate_wheel_sources(archive, hashes, **options)
         else:
             artifacts.validate_wheel_sources(archive, hashes, **options)
+
+
+@pytest.mark.parametrize("kind", ["modern", "changed", "missing"])
+def test_selected_vendored_notice_is_not_replaced_by_canonical_source(
+    tmp_path, monkeypatch, kind
+):
+    import build_python_artifacts as builder
+
+    canonical = tmp_path / "libs" / "fixture"
+    _case(canonical, "modern")
+    (canonical / "LICENSE").write_bytes(b"Changed notice.\n")
+    consumer = tmp_path / "plugins" / "consumer"
+    selected = consumer / "libs" / "fixture"
+    data, hashes, prefix, metadata = _case(selected, kind)
+    (consumer / "pyproject.toml").write_text(
+        '[project]\nname="consumer"\nversion="1.0"\nrequires-python=">=3.10"\n'
+        'dependencies=["fixture"]\n[tool.uv.sources]\nfixture={path="libs/fixture"}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(builder, "REPO", tmp_path)
+    monkeypatch.setattr(builder, "LIBS_DIR", tmp_path / "libs")
+    assert builder.resolve_vendored_libs(consumer) == [("fixture", selected)]
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        options = dict(
+            source_dir=selected,
+            prefix=prefix,
+            metadata=metadata,
+            candidate_root=tmp_path,
+        )
+        if kind == "modern":
+            artifacts.validate_wheel_sources(archive, hashes, **options)
+        else:
+            with pytest.raises(artifacts.PromotionArtifactError, match="LICENSE"):
+                artifacts.validate_wheel_sources(archive, hashes, **options)
