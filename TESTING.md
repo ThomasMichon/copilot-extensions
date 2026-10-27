@@ -118,6 +118,17 @@ all fixture bytes and inodes are verified unchanged; it is not positive native
 Windows evidence. Run the actual positive packet in an isolated process
 namespace. Partition the Windows cases by removal/retry, refusal and remaining
 candidate/custody controls rather than increasing their finite runner deadline.
+Worktrees' `test_uninstall_project_commands.py` uses a real completed fixture
+environment to exercise selected-source interpreter resolution without runtime
+construction, exact owned-project command retirement and foreign-command
+preservation. Copied account lookups are isolated before publishing ownership.
+`tools/test_installer_engine_uninstall_darwin.py` covers bounded libproc/sysctl
+inspection, incarnation/ownership/ABI/partial-read refusal and literal arguments,
+including empty strings. Its native live-process case requires actual macOS.
+The manual `installation-context-acceptance.yml` `runtime_removal` selection
+runs that backend and the complete Worktrees entrypoint/project-command packets
+on macOS at the dispatch SHA, under finite process containment. Mocked native
+API controls on another OS are not native macOS qualification.
 The native STOP packet derives daemon commands from actual unit writers,
 preserves original admission across service-stop/PID-reuse controls, and runs
 real Linux pidfd termination and birth-mismatch refusal against owned fixtures.
