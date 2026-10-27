@@ -143,7 +143,7 @@ After the reviewed proposal, the operator admitted execution:
   Only actual projection changes mark FTS or cluster slices dirty.
 - [x] Preserve the existing incremental FTS path; coalesce work and distinguish
   ordinary updates from first-build/recovery rebuilds.
-- [ ] Scope cluster invalidation by affected model/bucket where safe. Keep
+- [x] Scope cluster invalidation by affected model/bucket where safe. Keep
   inherently global repair/compaction explicit and amortized rather than
   claiming every maintenance algorithm can be strictly local.
 - [ ] Coordinate store-reader freshness with #8733 and missing-vector repair
