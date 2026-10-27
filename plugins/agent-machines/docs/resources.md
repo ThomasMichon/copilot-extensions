@@ -62,6 +62,107 @@ opt-in, so an unsatisfied required account cannot become a successful skip.
 
 ## Resource types
 
+### `git-config`
+
+Converge explicitly declared keys in the current user's `.gitconfig`, using one
+resolved transaction for the whole file. Identity is `(git-config, global)`;
+authority is selected independently per normalized Git key. Equal-highest
+disagreement is a validation error, not an arbitrary winner. A declaration owns
+the complete ordered value list of each named key, not just one list element.
+Section and variable names are case-insensitive; subsection spelling is retained.
+
+```yaml
+schema_version: 4
+package: example/git-policy
+resources:
+  - type: git-config
+    scope: global
+    entries:
+      - key: credential.https://github.example.com.helper
+        values: ["", "!example-helper"]
+      - key: fetch.prune
+        values: ["true"]
+      - key: user.obsolete
+        state: absent
+```
+
+`entries` is required. A present entry requires a nonempty list of strings;
+an empty string is significant, including Git's credential-helper reset.
+An absent entry omits `values`. Custom paths, system/repository-local scope,
+credential-bearing keys (`password`, `token`, `secret`, `extraHeader`), unknown
+fields and `maintenance_safe: true` are rejected. Never put a credential in a
+helper command or any other declared value. No account, helper or host defaults
+are supplied.
+
+File resources cannot own the same file, a hardlink to it, or a portable case
+alias such as `.GitConfig`, even before either target exists. Case aliases are
+reserved conservatively on case-sensitive hosts too, without probing by writes.
+On Windows, differing `HOME` and `USERPROFILE` selections are refused before
+preview unless `GIT_CONFIG_GLOBAL` explicitly names this resource's target.
+
+Preview and apply through the existing restore owner:
+
+```text
+agent-machines restore --only git-config --json
+agent-machines restore --only git-config --apply --git-config-plan-sha <preview-digest> --json
+```
+
+The resource's `change_plan` has schema
+`agent-machines.git-config-plan/v1`: target, existence flags, before/after
+SHA-256 hashes, a declared-key value diff and `plan_sha256`. The diff shows only
+changed owned keys; it never includes retained undeclared lines or uses
+whole-file alignment heuristics. Valueless entries are displayed distinctly
+from explicit empty strings. The digest
+also binds the resolved declaration and observed file identity. `--apply`
+without the exact current digest is blocked. An already-converged file needs
+no mutation consent. Maintenance-safe restoration always skips this resource;
+a maintenance opt-in cannot manufacture interactive consent.
+
+Planning uses Git's parser/editor against a disposable candidate, never the
+live target. Its Git commands share a five-second execution budget. Apply
+holds the standard `.gitconfig.lock`, checks the original snapshot again,
+verifies a unique backup before replacement and verifies the resulting bytes.
+It preserves unrelated file content rather than rendering a managed block.
+Competing `file` declarations, read-only targets, links/reparse points and linked
+parent directories are refused. A different `GIT_CONFIG_GLOBAL` is blocked
+rather than editing a file Git is not using. The standard lock serializes
+cooperating Git writers; arbitrary programs that ignore that lock are not
+serialized, although observed intervening changes are refused before commit.
+
+`backup_path` names a receipt under
+`~/.agent-machines/backups/git-config/<unique-id>/receipt.json`. Backups use
+restrictive POSIX modes; Windows files inherit the user-home directory ACL.
+Rollback is also preview-bound and refuses changed applied content or an
+invalid or checksum-inconsistent receipt or backup. Its preview shows byte
+hashes, not the saved file's potentially undeclared values:
+
+```text
+agent-machines git-config rollback --receipt <receipt-path> --json
+agent-machines git-config rollback --receipt <receipt-path> --apply --plan-sha <rollback-preview-digest> --json
+```
+
+Rollback restores the original bytes, including line endings, or the original
+absence. It does not claim to restore file identity or metadata. A post-write
+verification or unconfirmed-cleanup failure is an error with `changed: true`
+and the retained receipt, not an unchanged/success-shaped result.
+Both text and JSON errors disclose the mutation and recovery backup. A failed
+rollback can itself have changed the file; use its newly retained receipt,
+not the original rollback request's receipt, for recovery.
+
+This contract owns **declared file entries only**. Included files, system and
+repository configuration remain untouched; an included or higher-precedence
+setting may still affect Git's effective behavior. Account authentication,
+per-source routing, effective helper/URL verification and a complete shared
+updater policy remain separate. File convergence is not authentication health.
+
+**Compatibility:** this is a provider-first resource/CLI addition. Older
+engines reject the unknown resource/flags; consumers must not strip them or
+fall back to an unconsented writer. Future consumers can use the selected
+engine's existing restore operation and require the versioned `change_plan`
+schema before sending its digest. Legacy resources retain their JSON shape
+(no `change_plan` when absent), commands, defaults and effects. This addition
+does not enable a new updater consumer or deploy a runtime.
+
 ### `gh-account`
 
 Assert an explicitly declared GitHub CLI account prerequisite. Identity is

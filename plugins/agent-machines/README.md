@@ -87,7 +87,9 @@ so an inherited finite guardian is not unlocked by the caller's exit trap.
   settings, and machine-local self-update opt-ins / Scheduled Tasks -- that the
   engine installs/pins/writes itself (with cross-package collision detection),
   instead of hiding them in per-repo scripts. See
-  [`docs/resources.md`](docs/resources.md).
+  [`docs/resources.md`](docs/resources.md). Declared `git-config` keys use a
+  separate preview-bound consent digest and verified rollback; blanket
+  `restore --apply` or unattended maintenance cannot consent to those edits.
 - **Optional unattended self-update watchdog.** A reachable, logged-in machine
   can opt in (per machine or fleet-wide, via the `self-update` resource) to two
   independently-scheduled OS Scheduled Tasks that converge it between
@@ -395,6 +397,7 @@ agent-machines restore --repo myrepo    # another single repo
 agent-machines restore --only ssh       # preview one surface/module
 agent-machines restore --only ssh --apply
 agent-machines restore --json           # structured plan/surface/module result
+agent-machines restore --only git-config --json # exact Git-file preview; no live edit
 agent-machines self-update install      # register opted-in Scheduled Tasks
 agent-machines self-update status       # show opt-in + task presence
 agent-machines self-update uninstall    # remove registered self-update tasks
