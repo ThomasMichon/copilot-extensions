@@ -170,6 +170,24 @@ class PendingCrawls:
             raise ValueError("Unsupported pending crawl version or mode")
         return self.decode_manifest(data["manifest"], source), data["full"]
 
+    def discard_acquisition(
+        self, source: str, *, scope: str, expected_payload: str, family: str,
+    ) -> None:
+        """Explicitly abandon only the exact unapplied phase; complete work must replay."""
+        from agent_index.indexing.paged_crawl import decode_acquisition
+
+        with closing(self._paths._connect()) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT scope, payload FROM pending_crawls WHERE source = ?", (source,),
+            ).fetchone()
+            if row is None or row["scope"] != scope or row["payload"] != expected_payload:
+                raise PendingCrawlConflict("Pending acquisition changed before explicit discard")
+            progress = decode_acquisition(row["payload"], source)
+            if progress.manifest.accounting_family != family:
+                raise ValueError("Pending acquisition belongs to a different source family")
+            conn.execute("DELETE FROM pending_crawls WHERE source = ?", (source,))
+
     @classmethod
     def decode_manifest(cls, raw: object, source: str) -> CrawlManifest:
         if not isinstance(raw, dict) or set(raw) != set(CrawlManifest.__dataclass_fields__):

@@ -66,7 +66,19 @@ retry continues the saved plan instead of restarting acquisition. A phase-2
 journal envelope is intentionally incompatible with v1-only readers, which
 refuse it rather than interpreting partial acquisition as a complete manifest.
 Finish pending work before rollback or switching to hints, full reconciliation
-or a connector without paged support. This adds no external-provider CLI flag;
+or a connector without paged support. An explicit caller-authorized
+`indexing.paged_crawl.discard_acquisition` repair may instead abandon only an
+**unapplied v2** acquisition. It requires the original actual connector,
+configuration scope, path database and exact observed payload; the owning
+journal compares those under its existing SQLite transaction before removing
+the row. Concurrent progress or promotion to a complete v1 manifest refuses
+discard. Conversely, an in-flight unit cannot publish after its observed intent
+was discarded. Committed source state, path checkpoints and canonical data
+remain untouched, so the caller can separately request reconciliation from
+the unchanged checkpoint. A 404, stale item or exhausted budget never invokes
+discard automatically and never becomes a tombstone. Completed v1 manifests
+remain mandatory replay, not eligible for this operation.
+This adds no external-provider CLI flag;
 CLI delta-v1 providers retain their existing complete-result contract.
 
 GitHub ordinary polls use a fresh, **single page of at most 100 identities**
@@ -208,7 +220,8 @@ Another crawl alias cannot acquire or mutate an overlapping canonical family
 work remains pending. Source garbage collection also defers before deletion or
 cursor retirement and reports the pending sources as failures. Restore the
 original source configuration and complete its pending crawl before retiring
-or retargeting it; deleting the journal is not a supported recovery path.
+or retargeting it. Only the explicit exact-payload repair above may discard an
+unapplied v2 acquisition; manual journal deletion is not a supported recovery path.
 Pending work must finish through a journal-capable engine before rolling back
 to an older engine; old runtimes do not implement this recovery contract.
 

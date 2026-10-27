@@ -8,7 +8,9 @@ from dataclasses import asdict, dataclass
 from typing import Protocol
 
 from agent_index.indexing.manifest import CrawlManifest, CrawlStats
-from agent_index.indexing.pending_crawl import PendingCrawls
+from agent_index.indexing.path_index import PathIndex
+from agent_index.indexing.pending_crawl import PendingCrawls, recovery_scope
+from agent_index.sources.base import SourceConnector
 from agent_index.sources.delta import AcquisitionPage, SourceDelta
 
 
@@ -24,6 +26,24 @@ class AcquisitionState:
     manifest: CrawlManifest
     base_commit: str | None
     cursor: str
+
+
+def discard_acquisition(
+    source: str, *, paths: PathIndex, connector: SourceConnector,
+    source_scope: str, expected_payload: str,
+) -> None:
+    """Caller-authorized repair; never a response automatically inferred from an HTTP error.
+
+    The unchanged committed cursor remains the repair authority. CAS serialization
+    with progress publication makes an in-flight acquisition fail before indexing;
+    a completed v1 manifest is never eligible for this operation.
+    """
+    if getattr(connector, "recovery_identity", None) is None:
+        raise ValueError("Acquisition discard requires the actual connector recovery identity")
+    PendingCrawls(paths).discard_acquisition(
+        source, scope=recovery_scope(source_scope, connector),
+        expected_payload=expected_payload, family=connector.source_name,
+    )
 
 
 def decode_acquisition(payload: str, source: str) -> AcquisitionState:
