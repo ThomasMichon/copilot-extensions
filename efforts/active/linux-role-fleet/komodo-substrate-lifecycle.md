@@ -154,7 +154,7 @@ above is requested; these implementation choices remain reviewable.
 
 ## Plan
 
-- [ ] Review this source appointment and lifecycle contract.
+- [x] Review this source appointment and lifecycle contract (#8872).
 - [ ] Implement strict declaration/resolution, fixed native substrate owner,
   operation custody and installed-package entry seam, with focused tests.
 - [ ] Bind the actual adopter install/update composition and versioned desired
@@ -190,5 +190,12 @@ above is requested; these implementation choices remain reviewable.
 
 ## Progress
 
-Planning only. No new runtime API, installed package, manager adoption, update,
-recovery or deployment is claimed by this document.
+The reviewed source appointment landed in #8872. The
+[explicit host SDK owner](../../../fleet-manager/docs/komodo-owner.md) implements
+the bounded declaration, native effect boundary, same-journal admission,
+status/withdrawal and installed-package entry seam. Component qualification
+uses synthetic native subprocess and authenticated HTTP fixtures; it does not
+qualify official images or activate the ordinary installed controller.
+Implementation and operating evidence are still under review. Actual adopter
+construction, native official-image acceptance and production delivery remain
+open; no deployment or incumbent adoption is claimed here.

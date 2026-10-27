@@ -191,7 +191,7 @@ class NodeJournal:
         """
         identifier(resource, "external resource")
         value = self._scope(intent)
-        if value["command"] != "runner.converge":
+        if value["command"] not in ("runner.converge", "manager.converge"):
             raise PlanError("unsupported named external operation")
         with self._transaction() as connection:
             prior = self._find(connection, value)

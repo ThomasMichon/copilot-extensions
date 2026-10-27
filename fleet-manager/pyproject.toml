@@ -23,9 +23,10 @@ construction = ["pip>=25.1,<26"]
 auth = ["PyJWT>=2.10,<3", "cryptography>=44", "jwcrypto>=1.5.6,<2", "joserfc>=1.7.5,<2"]
 server = ["agent-procutil>=0.1.0.dev7", "PyJWT>=2.10,<3", "cryptography>=44", "jwcrypto>=1.5.6,<2", "joserfc>=1.7.5,<2"]
 service-gateway = ["agent-procutil>=0.1.0.dev7", "aiohttp>=3.14.4,<4", "PyJWT>=2.10,<3", "cryptography>=44", "jwcrypto>=1.5.6,<2", "joserfc>=1.7.5,<2"]
+komodo-host = ["agent-procutil>=0.1.0.dev7", "aiohttp>=3.14.4,<4"]
 ssh-client = ["aiohttp>=3.14.4,<4", "PyJWT>=2.10,<3", "cryptography>=44", "jwcrypto>=1.5.6,<2", "joserfc>=1.7.5,<2", "agent-ssh>=0.1.1.dev2", "agent-single-instance-lease"]
 runtime-authentication = ["joserfc>=1.7.5,<2"]
-dev = ["agent-procutil>=0.1.0.dev7", "pytest", "setuptools>=83.0.0", "wheel", "pip>=25.1,<26", "PyJWT>=2.10,<3", "cryptography>=46,<47", "jwcrypto>=1.5.6,<2", "joserfc>=1.7.5,<2", "aiohttp>=3.14.4,<4", "agent-ssh>=0.1.1.dev2", "agent-single-instance-lease"]
+dev = ["agent-procutil>=0.1.0.dev7", "pytest", "pytest-timeout>=2.4,<3", "setuptools>=83.0.0", "wheel", "pip>=25.1,<26", "PyJWT>=2.10,<3", "cryptography>=46,<47", "jwcrypto>=1.5.6,<2", "joserfc>=1.7.5,<2", "aiohttp>=3.14.4,<4", "agent-ssh>=0.1.1.dev2", "agent-single-instance-lease"]
 
 [project.scripts]
 fleet-manager = "fleet_manager.__main__:main"
