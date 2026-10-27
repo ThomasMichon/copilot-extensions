@@ -112,17 +112,30 @@ if ($mapping -notmatch '\A\\Device\\HarddiskVolume[0-9]+\z') {
 def test_drive_query_rejects_malformed_input_before_binding(
     host: str, tmp_path: Path, drive: str,
 ) -> None:
+    encoded = base64.b64encode(drive.encode("utf-8")).decode("ascii")
     result = _run(host, tmp_path, _LOAD + r"""
-function Get-BootstrapStockDriveBindings { throw 'Invalid drive reached native bindings.' }
-$drive=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:DRIVE_B64))
-Get-BootstrapStockCurrentDriveMapping -Drive $drive
-""", success=False, environment={
+$script:bindings=0
+function Get-BootstrapStockDriveBindings {
+    $script:bindings++
+    throw 'Invalid drive reached native bindings.'
+}
+$drive=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:DRIVE_B64.Substring(4)))
+$script:emitted=0
+$message=$null
+try {
+    Get-BootstrapStockCurrentDriveMapping -Drive $drive | ForEach-Object {$script:emitted++}
+} catch { $message=$_.Exception.Message }
+if (-not $message) { throw 'Malformed drive was not refused.' }
+[pscustomobject]@{message=$message;emitted=$script:emitted;bindings=$script:bindings
+    decoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($drive))} |
+    ConvertTo-Json -Compress
+""", environment={
         "DRIVE_HELPER": str(HELPER),
-        "DRIVE_B64": base64.b64encode(drive.encode("utf-8")).decode("ascii"),
+        "DRIVE_B64": "b64:" + encoded,
     })
-    assert result.returncode != 0
-    assert result.stdout == ""
-    assert "Invalid drive reached native bindings" not in result.stderr
+    assert result["decoded"] == encoded
+    assert result["bindings"] == result["emitted"] == 0
+    assert "Invalid drive reached native bindings" not in result["message"]
 
 
 @pytest.mark.parametrize("failure", (
