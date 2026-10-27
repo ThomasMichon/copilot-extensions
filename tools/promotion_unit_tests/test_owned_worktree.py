@@ -61,7 +61,7 @@ def api(monkeypatch):
     load("resource_relationship")
     allocation = load("owned_worktree")
     writer = load("tracking_allocation_write")
-    return SimpleNamespace(producer=producer, allocation=allocation, writer=writer)
+    return SimpleNamespace(producer=producer, allocation=allocation, writer=writer, load=load, stub=stub)
 
 
 def metadata():
@@ -218,6 +218,70 @@ def test_reconcile_preserves_active_claim_until_exact_conclusion(api):
     before = copy.deepcopy(vars(claim))
     assert api.writer._reconcile(claim, observation()) is False
     assert vars(claim) == before
+
+
+@pytest.fixture
+def destination(api, monkeypatch):
+    transport = ModuleType("machine_transport")
+    transport.resolve_machine_selection = None
+    monkeypatch.setitem(sys.modules, transport.__name__, transport)
+    for child in ("config", "allocation_link_demand", "claims_cli", "invocation_project", "worktree_identity"):
+        api.stub(child)
+    api.stub("creation_requests", CreationRequestFailure=RuntimeError)
+    api.stub(
+        "allocation_creation_result", SCHEMA="copilot-extensions.worktree-allocation-result",
+        VERSION=1, MAX_RESPONSE_BYTES=81920,
+    )
+    return api.load("create_destination")
+
+
+def test_destination_capability_decisions_require_actual_complete_receiver_contract(destination, api):
+    valid = {
+        "schema": api.allocation.SCHEMA, "version": 1, "role": "receiver",
+        "lifetime": "owned-worktree", "metadata_version": 3, "receiving_receipt": 1,
+        "claim_linkage": "non-blocking", "agent_launch": False, "max_input_bytes": 16384,
+        "max_identity_bytes": 4096, "lifecycle_capacity_reserved": True,
+        "operations": ["create", "result", "inspect", "confirm"],
+        "creation_result": {
+            "schema": "copilot-extensions.worktree-allocation-result", "version": 1,
+            "max_response_bytes": 81920,
+        },
+    }
+    destination.remote.capabilities = lambda *a: valid
+    destination._receiver_capabilities("origin/project/parent", {"machine": "target", "project": "repo"})
+    for change in (
+        {"version": True}, {"receiving_receipt": True}, {"claim_linkage": "blocking"},
+        {"agent_launch": True}, {"metadata_version": 2}, {"operations": ["create", "inspect"]},
+        {"operations": [[]]}, {"creation_result": {"version": 1}},
+    ):
+        destination.remote.capabilities = lambda *a: {**valid, **change}
+        with pytest.raises(ValueError):
+            destination._receiver_capabilities("origin/project/parent", {"machine": "target", "project": "repo"})
+
+
+def test_destination_request_identity_preserves_the_existing_opaque_key_contract(destination):
+    prefix = "a caller / key with spaces "
+    key = prefix + "\u2603" * (1024 - len(prefix))
+    assert len(key) == 1024
+    first = destination.creation_request_id(key)
+    assert first == destination.creation_request_id(key)
+    assert first.startswith("create_") and len(first) == 71
+    assert destination.creation_request_id(key[:-1] + "x") != first
+    for invalid in ("", " ", key + "x", None, True):
+        with pytest.raises(ValueError, match="creation key"):
+            destination.creation_request_id(invalid)
+
+
+def test_destination_options_keep_no_launch_and_refuse_unsupported_seed(destination):
+    args = SimpleNamespace(no_pair=True, seed=None, interface="acp", origin="delegate", bound_agent="worker")
+    attempt = {"task_id": "original-task"}
+    assert destination._remote_options(args, attempt) == {
+        "kind": "session", "no_pair": True, "interface": "acp", "origin": "delegate",
+        "bound_agent": "worker", "dispatch_attempt": attempt,
+    }
+    args.seed = "must not silently disappear"
+    with pytest.raises(ValueError, match="--seed"):
+        destination._remote_options(args, attempt)
 
 
 def test_reconcile_rejects_uncertain_or_changed_proof_without_mutation(api):

@@ -47,7 +47,11 @@ def capabilities(*, receiver: bool) -> dict:
             "schema": allocation_creation_result.SCHEMA,
             "version": allocation_creation_result.VERSION,
             "max_response_bytes": allocation_creation_result.MAX_RESPONSE_BYTES,
-        }} if receiver else {}),
+        }} if receiver else {"ordinary_create": {
+            "version": 1, "destination_selectors": ["machine", "repo"],
+            "creation_key": "opaque-v1", "result": "ordinary-worktree+allocation-v1",
+            "claim_linkage": "non-blocking", "agent_launch": False,
+        }}),
     }
 
 

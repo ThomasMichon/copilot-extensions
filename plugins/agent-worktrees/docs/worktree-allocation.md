@@ -5,9 +5,62 @@ and optional exact-claim acknowledgement. It uses the existing worktree resource
 ledger and workspace-creation journal, not a second allocator or service.
 It is the provider foundation for the
 [origin-owned allocation pattern](../../../docs/patterns/workspace-allocation-and-session-acquisition.md#origin-owned-remote-allocation).
-The ordinary `create --machine/--repo` coordinator and Bridge/Dispatch
-consumer migration are separate work; these provider
-commands do not implement or advertise those consumers.
+The ordinary `create --machine/--repo` coordinator consumes these contracts.
+Bridge/Dispatch migration and installed/native qualification remain separate;
+the provider commands alone do not implement those consumers.
+
+## Ordinary destination selection
+
+```text
+agent-worktrees create --machine target --repo destination --creation-key logical-request --json
+```
+
+`--machine` selects an existing registered execution space; omission retains
+local creation. `--repo` defaults to the registered repository at the original
+invocation CWD, captured before destination or global `--project` selection.
+Global `--project` keeps its existing assume-project semantics; use `--repo`
+for destination selection without replacing the creator. Explicit `--owner-ref`
+takes precedence over the existing owner environment fallback and CWD owner.
+Remote allocation normalizes a session-qualified owner through its actual
+local worktree ledger. An anchor is never invented as a remote creator.
+Composing clients discover support from the selected origin executable's
+`worktree-allocation capabilities --json`: `ordinary_create.version: 1`
+declares the two destination selectors, `opaque-v1` creation keys,
+`ordinary-worktree+allocation-v1` results and non-blocking linkage without agent
+launch. An origin lacking that declaration does not support this invocation;
+do not try new arguments against it or fall back to unowned receiving creation.
+
+Omitting both selectors retains the ordinary local path. Local repository
+selection scopes the normal creation core to that destination and restores the
+previous project on success or failure. Existing local seed, system,
+standalone, pairing and sessionless behavior is retained.
+
+Remote owned creation first checks the actual registered local writer, the
+authenticated published resident's admitting `worktree-allocation-linker-v1`
+capability and the selected SSH receiver's provider and original-result
+capabilities. Unsupported or older owners refuse before reservation or receiving
+effects; package versions are not capability evidence. Remote `--no-owner`,
+`--system` and `--seed` are explicitly unsupported and refused before effects,
+not silently converted to an owned session or dropped. A composing host retains
+prompt/session admission.
+
+The origin then reserves protected pending responsibility before asking the
+receiver to create. It retrieves the original journaled ordinary result without
+calling origin `bind` or receiving `confirm` on the startup path. The resident
+links the same claim independently. Returned `allocation.linkage` is an
+observed `pending`, `bound`, `confirmed` or explicitly unavailable `unknown`,
+separate from `allocation.receiving_status` and the complete `creation` result.
+Neither a completed result nor pending linkage starts an agent or replaces
+ordinary current-record/head/holder admission.
+
+Caller creation keys retain the existing opaque non-empty, 1,024-character
+bound. A domain-separated digest maps them to the bounded allocation request
+ID. If omitted, a key is generated and returned with that ID in successful and
+uncertain outcomes. Retain the returned key and exact target/options for retries.
+A lost response reuses the same protected token and receiving operation; it
+never authorizes a fresh key, replacement child or automatic cancellation.
+An unfinished or concluded receiving operation supplies no usable worktree.
+Pending and unknown origin responsibility continue to block parent conclusion.
 
 ## Source ABI and negotiation
 

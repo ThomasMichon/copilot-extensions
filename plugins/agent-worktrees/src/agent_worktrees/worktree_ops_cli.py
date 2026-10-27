@@ -82,6 +82,8 @@ def add_parsers(sub) -> None:
         help="Opaque logical allocation identity; replay returns the original "
         "worktree, while changed facts, pending effects, or terminal results refuse",
     )
+    p.add_argument("--machine", default=None, help="Destination registered execution space (default: local)")
+    p.add_argument("--repo", default=None, help="Destination repository (default: original CWD repository)")
     p.add_argument(
         "--system",
         action="store_true",
@@ -357,28 +359,37 @@ def cmd_create(args: argparse.Namespace) -> int:
             if project_state.namespaced():
                 project_state.ensure_project_state(cfg.project_name())
             config = cfg.load_config()
-            if not owner_ref and not (is_system or no_owner):
-                owner_ref = _resolve_owner_ref()
-            result = _create_worktree_core(
-                config,
-                no_mux=True,
-                kind="system" if is_system else "session",
-                owner=(getattr(args, "owner", None) or getattr(args, "name", None))
-                if is_system
-                else None,
-                name=getattr(args, "name", None) if is_system else None,
-                interface=getattr(args, "interface", None),
-                origin=getattr(args, "origin", None),
-                owner_ref=owner_ref,
-                inherit_parent_session=not (is_system or no_owner),
-                dispatch_attempt=dispatch_attempt,
-                bound_agent=getattr(args, "bound_agent", None),
-                no_pair=getattr(args, "no_pair", False),
-                pending_seed=getattr(args, "seed", None),
-                creation_key=getattr(args, "creation_key", None),
-                build_launch_plan=False,
-                identity_mode="tuple-v1",
-            )
+            if getattr(args, "machine", None) is not None or getattr(args, "repo", None) is not None:
+                from . import create_destination
+
+                result = create_destination.create(
+                    args, owner_ref=owner_ref, dispatch_attempt=dispatch_attempt,
+                    invocation_cwd=_core()._INVOCATION_CWD or Path.cwd(),
+                    create_local=_create_worktree_core,
+                )
+            else:
+                if not owner_ref and not (is_system or no_owner):
+                    owner_ref = _resolve_owner_ref()
+                result = _create_worktree_core(
+                    config,
+                    no_mux=True,
+                    kind="system" if is_system else "session",
+                    owner=(getattr(args, "owner", None) or getattr(args, "name", None))
+                    if is_system
+                    else None,
+                    name=getattr(args, "name", None) if is_system else None,
+                    interface=getattr(args, "interface", None),
+                    origin=getattr(args, "origin", None),
+                    owner_ref=owner_ref,
+                    inherit_parent_session=not (is_system or no_owner),
+                    dispatch_attempt=dispatch_attempt,
+                    bound_agent=getattr(args, "bound_agent", None),
+                    no_pair=getattr(args, "no_pair", False),
+                    pending_seed=getattr(args, "seed", None),
+                    creation_key=getattr(args, "creation_key", None),
+                    build_launch_plan=False,
+                    identity_mode="tuple-v1",
+                )
         except CreationRequestFailure as exc:
             if args.json:
                 output._json_output(exc.payload())
@@ -404,6 +415,9 @@ def cmd_create(args: argparse.Namespace) -> int:
     print(f"✅ Created {label}: {wt['id']}")
     print(f"   Path:   {wt['path']}")
     print(f"   Branch: {wt['branch']}")
+    if "allocation" in result:
+        print(f"   Origin linkage: {result['allocation']['linkage']}")
+        print(f"   Retry creation key: {result['allocation']['creation_key']!r}")
     return 0
 
 
@@ -425,12 +439,14 @@ def _resolve_owner_ref() -> str | None:
     return tracking.format_claim_ref(machine, project, caller_id, session)
 
 
-def _resolve_anchor_owner_ref(config: cfg.Config) -> str | None:
+def _resolve_anchor_owner_ref(
+    config: cfg.Config, *, cwd: Path | None = None, project: str | None = None,
+) -> str | None:
     """Resolve an ANCHOR owner ref when the CWD is a **singleton** repo's anchor."""
     try:
         from . import repos as _repos
 
-        project = cfg.project_name()
+        project = project or cfg.project_name()
     except Exception:
         return None
     if not project:
@@ -445,7 +461,7 @@ def _resolve_anchor_owner_ref(config: cfg.Config) -> str | None:
     if not anchor:
         return None
     try:
-        cwd = Path.cwd().resolve()
+        cwd = (cwd or Path.cwd()).resolve()
         anchor_p = Path(anchor).resolve()
         if cwd != anchor_p and anchor_p not in cwd.parents:
             return None
