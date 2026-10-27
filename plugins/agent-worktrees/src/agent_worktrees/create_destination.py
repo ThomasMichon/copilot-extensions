@@ -57,10 +57,10 @@ def _origin(
         else project or cfg.project_name()
     )
     config = cfg.load_project_config(context_project)
-    if not owner_ref and not standalone and project:
+    if not owner_ref and not standalone:
         record = worktree_identity.tracked_invocation_record(
             cwd, project=project, anchor=Path(config.default_repo.anchor),
-        )
+        ) if project else None
         if record is not None:
             execution_spaces.require_record_mutation(record, config)
             owner_ref = tracking.format_claim_ref(
@@ -74,7 +74,8 @@ def _origin(
                 raise ValueError(
                     "original linked worktree owner is untracked; adopt it or explicitly select --no-owner",
                 )
-            owner_ref = _resolve_anchor_owner_ref(config, cwd=cwd, project=project)
+            if project:
+                owner_ref = _resolve_anchor_owner_ref(config, cwd=cwd, project=project)
     return project, config, owner_ref
 
 

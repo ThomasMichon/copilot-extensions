@@ -36,7 +36,9 @@ cannot be settled through generic release, at-rest, sweep or abandon commands.
 --json` selects a destination while preserving the original CWD creator.
 It launches no agent. Remote results distinguish durable receiving creation
 from asynchronous origin linkage and retain the original retry key on uncertain
-outcomes. See [capabilities, explicit refusals and recovery](worktree-allocation.md#ordinary-destination-selection).
+outcomes. An unresolved linked CWD refuses implicit ownership even when its
+repository is unregistered; explicitly selecting `--no-owner` remains a local-only
+standalone choice. See [capabilities, explicit refusals and recovery](worktree-allocation.md#ordinary-destination-selection).
 
 ## CLI mode (no project binstub)
 

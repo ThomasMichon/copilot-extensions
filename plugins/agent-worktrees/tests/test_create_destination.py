@@ -333,20 +333,25 @@ def test_explicit_owner_controls_authority_but_not_default_destination_repositor
     assert selected == ["p"] and project == "cwd-project" and owner_ref == "m/p/owner#session"
 
 
-def test_untracked_linked_origin_is_refused_before_local_child_unless_explicit_standalone(owner, monkeypatch):
+@pytest.mark.parametrize("project", ["p", None])
+@pytest.mark.parametrize("machine", [None, "remote"])
+def test_untracked_linked_origin_is_refused_before_child_unless_explicit_standalone(
+    owner, monkeypatch, project, machine,
+):
     _, config = owner
-    monkeypatch.setattr(destination, "_cwd_project", lambda cwd: "p")
+    monkeypatch.setattr(destination, "_cwd_project", lambda cwd: project)
+    monkeypatch.setattr(cfg, "project_name", lambda: "p")
     monkeypatch.setattr(destination.worktree_identity, "tracked_invocation_record", lambda *a, **k: None)
     monkeypatch.setattr(destination.worktree_identity, "_worktree_id_from_git", lambda *a, **k: "external")
     with pytest.raises(ValueError, match="linked worktree owner is untracked"):
         destination.create(
-            args(machine=None, repo="p"), owner_ref=None, dispatch_attempt=None,
+            args(machine=machine, repo="p"), owner_ref=None, dispatch_attempt=None,
             invocation_cwd=Path("/external/linked"), create_local=lambda *a, **k: pytest.fail("child created"),
         )
-    project, selected, owner_ref = destination._origin(
+    origin_project, selected, owner_ref = destination._origin(
         Path("/external/linked"), None, standalone=True,
     )
-    assert project == "p" and selected is config and owner_ref is None
+    assert origin_project == project and selected is config and owner_ref is None
 
 
 @pytest.mark.parametrize("local", [False, True])
