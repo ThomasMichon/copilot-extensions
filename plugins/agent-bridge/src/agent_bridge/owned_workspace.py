@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import replace
 from pathlib import PurePosixPath, PureWindowsPath
@@ -26,6 +27,15 @@ def selects_new_owned_ssh(target: SpawnTarget) -> bool:
         and not target.worktree_id and not target.explicit_cwd and not target.native_resume_id
         and not target.spawn_command and not target.codespace and not target.container
     )
+
+
+async def acquire_start(session: Session) -> asyncio.Lock | None:
+    """Serialize this original startup with the existing stop/resume owner."""
+    if not selects_new_owned_ssh(session.target):
+        return None
+    lock = session._lifecycle_lock
+    await lock.acquire()
+    return lock
 
 
 def arm(target: SpawnTarget, session_id: str) -> SpawnTarget:

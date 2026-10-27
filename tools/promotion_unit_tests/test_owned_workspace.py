@@ -99,6 +99,21 @@ def test_bridge_intent_preserves_original_owner_and_refuses_legacy_or_changed_ta
     with pytest.raises(ValueError):
         module.can_resume_allocation(session)
 
+    class Lock:
+        acquired = 0
+
+        async def acquire(self) -> None:
+            self.acquired += 1
+
+    session._lifecycle_lock = lock = Lock()
+    for selected, expected in ((Target(), lock), (Target(type="local"), None)):
+        session.target = selected
+        pending = module.acquire_start(session)
+        with pytest.raises(StopIteration) as finished:
+            pending.send(None)
+        assert finished.value.value is expected
+    assert lock.acquired == 1
+
 
 def test_bridge_capability_requires_actual_origin_and_nonblocking_creation_mode(api):
     module, Target = api

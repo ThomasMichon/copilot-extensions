@@ -17,6 +17,7 @@ from .caller_session import normalize_caller_session_id
 from .connect import ConnectError, ConnectStage, ConnectTracker
 from .events import EventLog
 from .models import SessionStatus
+from .owned_workspace import acquire_start, prepare_session
 from .session_manager import (
     _ACTIVE_STATES,
     _AcpLaunchTiming,
@@ -361,11 +362,7 @@ class _SessionStartMixin:
                 agent_proc.alive,
             )
 
-        from .owned_workspace import selects_new_owned_ssh
-
-        owned_start = selects_new_owned_ssh(target)
-        if owned_start:
-            await session._lifecycle_lock.acquire()
+        owned_start = await acquire_start(session)
         try:
             cs_target = None
             # Prefer the structured provider metadata (#177); fall back to
@@ -687,8 +684,6 @@ class _SessionStartMixin:
                 # ThomasMichon/copilot-extensions#566), so this is their only
                 # path. It is NOT reachable for a local target. Emits per-stage
                 # checkpoints (auth-env, ssh-connect, worktree) into the event log.
-                from .owned_workspace import prepare_session
-
                 await prepare_session(session, self._db)
                 core = _core()
                 agent_proc = await core.spawn(
@@ -896,8 +891,8 @@ class _SessionStartMixin:
             session.event_log.append("error", {"message": str(exc)})
             log.error("Failed to start session %s: %s", session_id, exc, exc_info=True)
         finally:
-            if owned_start:
-                session._lifecycle_lock.release()
+            if owned_start is not None:
+                owned_start.release()
 
         session.touch()
         return session
