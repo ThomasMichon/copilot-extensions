@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .clustering import source_bucket
+from .clustering import source_bucket, validate_bucket
 from .content_snapshot import _records
 from .repo_filter import _sql_str
 from .scalar_index import (
@@ -22,9 +22,7 @@ BATCH_SIZE = 200
 
 
 def bucket_predicate(bucket: str) -> str:
-    if (not isinstance(bucket, str) or not bucket or len(bucket.encode()) > 256
-            or any(ord(char) < 32 for char in bucket) or source_bucket(bucket) != bucket):
-        raise ValueError("Invalid clustering bucket")
+    validate_bucket(bucket)
     exact = f"source = '{_sql_str(bucket)}'"
     if ":" not in bucket:
         return exact

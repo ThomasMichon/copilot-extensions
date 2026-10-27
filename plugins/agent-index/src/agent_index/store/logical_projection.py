@@ -61,6 +61,7 @@ def commit_projection(
     after: dict[str, Any] | None,
     *,
     physical_only: set[str],
+    scoped: dict[str, set[str]] | None = None,
 ) -> None:
     """Publish once at the outer clean commit, never at an intermediate effect."""
     previous = current_projection(receipt, before)
@@ -89,3 +90,12 @@ def commit_projection(
         },
         "witness": after,
     }
+    from .bucket_projection import commit_buckets
+
+    stable = {
+        name: buckets for name, buckets in (scoped or {}).items()
+        if before is not None and name in before and name in after
+        and before[name]["storage"][:2] == after[name]["storage"][:2]
+        and before[name]["version"] <= after[name]["version"]
+    }
+    commit_buckets(previous, receipt["logical_projection"], stable)
