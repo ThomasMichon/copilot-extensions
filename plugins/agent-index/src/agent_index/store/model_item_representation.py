@@ -87,6 +87,7 @@ class _ItemRepresentationMixin:
     @source_read
     def iter_bucket_item_representations(
         self, bucket: str, *, model_ids: tuple[str, ...], row_budget: int,
+        include_unembedded: bool = False,
     ) -> Iterator[ItemRepresentation]:
         """Read a prepared bucket and only selected model tables, without full scans."""
         from .source_bucket_index import bucket_records
@@ -102,7 +103,7 @@ class _ItemRepresentationMixin:
         for key in sorted(items):
             records = sorted(items[key], key=lambda record: (record.line_start, record.line_end))
             rep = self._item_from_records(records, models, strict=True, bounded=True)
-            if rep.centroids:
+            if rep.centroids or include_unembedded:
                 yield rep
 
     @source_read

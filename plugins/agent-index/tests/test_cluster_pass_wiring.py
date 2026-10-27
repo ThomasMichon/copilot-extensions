@@ -13,6 +13,7 @@ def _config(tmp_path: Path, *, enabled: bool = True) -> SimpleNamespace:
         cluster_threshold_default=0.8,
         cluster_thresholds={},
         cluster_min_size=2,
+        cluster_slice_row_budget=None,
     )
 
 
