@@ -82,6 +82,8 @@ _WORKTREE_VERBS = {
     "claims": "claims",
     "resource-producer": "resource-producer",
     "resource-relationship": "resource-relationship",
+    "worktree-allocation": "worktree-allocation",
+    "worktree-allocation-receive": "worktree-allocation-receive",
     "follow-ups": "follow-ups",
     "claimant-liveness": "claimant-liveness",
     "codename-lookup": "codename-lookup",

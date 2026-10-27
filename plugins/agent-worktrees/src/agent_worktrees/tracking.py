@@ -753,6 +753,8 @@ class WorktreeRecord(record_machine_identity.RecordMachineIdentityView):
     #     `prs`). Both are emitted only when set/non-empty, so legacy YAMLs load
     #     byte-identically.
     owner_ref: str | None = None
+    receiving_allocation: object = None
+    receiving_allocation_present: bool = field(default=False, repr=False, compare=False)
     resources: list[ResourceClaim] = field(default_factory=list)
     # pr-attribution-codenames root-chain-capture: a random token stamped
     # ONCE at ``create_new_record`` time, unique per actual creation --
@@ -2068,6 +2070,8 @@ def parse_record_data(data: dict, *, path: Path) -> WorktreeRecord:
                          if data.get("caller_worktree") else None),
         owner_ref=(str(data["owner_ref"])
                    if data.get("owner_ref") else None),
+        receiving_allocation=data.get("receiving_allocation"),
+        receiving_allocation_present=("receiving_allocation" in data),
         creation_nonce=str(data.get("creation_nonce", "") or ""),
         resources=resources_list,
         last_finalize_released=last_finalize_released_list,
@@ -2341,6 +2345,9 @@ def _save_record_contents_unlocked(
     from . import pr_authority, pr_publication_state
     if path is None:
         path = record.yaml_path
+    from . import receiving_allocation
+
+    receiving_allocation.preserve(record, current, path)
     if preserve_handoff_reservations and current is not None:
         if current.effort_revision > record.effort_revision:
             record.active_effort = current.active_effort
@@ -2823,6 +2830,7 @@ def _save_record_contents_unlocked(
     # set, so an unclaimed worktree's YAML stays byte-identical.
     if record.owner_ref:
         content += f"owner_ref: {_yaml_scalar(record.owner_ref)}\n"
+    content += receiving_allocation.serialized_receipt(record)
     if record.creation_nonce:
         content += f"creation_nonce: {_yaml_scalar(record.creation_nonce)}\n"
     # agent-bridge-worktree-native-agents: the bound charter. Emitted only
@@ -2943,6 +2951,7 @@ def _save_record_contents_unlocked(
 
     pr_authority.write_record(record, path, content)
     record_cache.store(path, record)
+    receiving_allocation.persist_conclusion(record)
 
 
 def _flush_session_projections(record: WorktreeRecord) -> None:
@@ -3165,8 +3174,8 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
     deferred by a contended lock or changed pair -- callers retry on a later
     reap pass. Raises ``ValueError`` for unsettled responsibility.
     """
-    from . import paired_claims
-    from .retirement_safety import require_retirable, retirement_blocker, same_pair
+    from . import paired_claims, receiving_allocation
+    from .retirement_safety import delete_retired_pair, require_retirable, retirement_blocker, same_pair
 
     path = tracking_path / f"{record.worktree_id}.yaml"
     sibling_path: Path | None = None
@@ -3195,6 +3204,7 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
                 return True
 
             latest = load_record(path)
+            receiving_allocation.recover_missing(latest, tracking_path)
             require_retirable(latest)
             if not same_pair(record, latest):
                 return False
@@ -3216,10 +3226,7 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
                     hard_delete_sibling = True
 
             if hard_delete_sibling:
-                if sibling_path is not None:
-                    sibling_path.unlink(missing_ok=True)
-                path.unlink(missing_ok=True)
-                return True
+                return delete_retired_pair(record, sibling, path, sibling_path)
 
             def _write_tombstone(status: WorktreeStatus) -> bool:
                 # A refused paired conclusion must retain its responsibility.
@@ -3233,8 +3240,9 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
                     record.reaped_at = now
                     save_record(record, path=path)
                     return True
-                except Exception:
-                    if record.is_paired:
+                except Exception as exc:
+                    if record.is_paired or record.receiving_allocation_present:
+                        logging.getLogger(__name__).warning("Record retirement deferred; record retained: %s", exc)
                         return False
                     path.unlink(missing_ok=True)
                     return True

@@ -2407,7 +2407,32 @@
         "tools/promotion_unit_tests/test_resume_cli_contract.py::test_selected_cli_rollback_refuses_unsupported_syntax_before_dispatch[exact-selector]",
         "tools/promotion_unit_tests/test_resume_cli_contract.py::test_selected_cli_rollback_refuses_unsupported_syntax_before_dispatch[support-disclosure]",
         "tools/promotion_unit_tests/test_resume_cli_contract.py::test_truncated_http_body_is_unconfirmed_without_replay[ordinary]",
-        "tools/promotion_unit_tests/test_resume_cli_contract.py::test_truncated_http_body_is_unconfirmed_without_replay[hosting-fenced]"
+        "tools/promotion_unit_tests/test_resume_cli_contract.py::test_truncated_http_body_is_unconfirmed_without_replay[hosting-fenced]",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_pending_and_bound_use_distinct_existing_ledger_subjects",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_malformed_pending_metadata_never_becomes_settled[change0]",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_malformed_pending_metadata_never_becomes_settled[change1]",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_malformed_pending_metadata_never_becomes_settled[change2]",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_malformed_pending_metadata_never_becomes_settled[change3]",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_malformed_pending_metadata_never_becomes_settled[change4]",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_malformed_pending_metadata_never_becomes_settled[change5]",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_malformed_pending_metadata_never_becomes_settled[change6]",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_malformed_pending_metadata_never_becomes_settled[change7]",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_absence_or_incomplete_receiver_never_binds_or_closes[unknown]",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_absence_or_incomplete_receiver_never_binds_or_closes[pending]",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_absence_or_incomplete_receiver_never_binds_or_closes[absent]",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_absence_or_incomplete_receiver_never_binds_or_closes[retired]",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_durable_child_can_bind_before_optional_origin_acknowledgement",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_only_exact_original_receiving_lifecycle_closes_bound_responsibility[finalized]",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_only_exact_original_receiving_lifecycle_closes_bound_responsibility[archived]",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_changed_proof_cannot_mutate_original_bound_claim[origin-target/repo/other]",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_changed_proof_cannot_mutate_original_bound_claim[request_id-other]",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_changed_proof_cannot_mutate_original_bound_claim[token-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb]",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_changed_proof_cannot_mutate_original_bound_claim[version-True]",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_changed_proof_cannot_mutate_original_bound_claim[allocation_finished-False]",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_changed_proof_cannot_mutate_original_bound_claim[identity-value5]",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_pending_admission_reserves_capacity_for_duplicated_lifecycle_proof",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_identity_limit_counts_canonical_escaped_bytes_not_path_characters",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_exact_wire_capacity_includes_transport_newline"
     ],
     "sources": {
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_clock.py": "6036e8400b8250d7c745907025dd48a99a2441e07e9ffebb8ee0f751c6a2c43c",
@@ -2537,7 +2562,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/context_cli.py": "13ce40dfd09ab82e9f80988f7078014f135ad667d2d53103c61891c1053e4809",
         "plugins/agent-worktrees/src/agent_worktrees/manager_launcher_ownership.py": "96bfea0e9109527f8ea585a3b99ec2f472d9425d53f94bf56aa60bd06807679d",
         "plugins/agent-worktrees/src/agent_worktrees/mux_list_result.py": "d6f123741dd943db6bfc38c2f9d736f1cf6e0ad28bcc63644420443c17d7efa2",
-        "plugins/agent-worktrees/src/agent_worktrees/project_routing.py": "a3b7750280dff6eb6c271207e61bbf103715163e1eed382f1a9fa4a992b26d65",
+        "plugins/agent-worktrees/src/agent_worktrees/project_routing.py": "83fd448f58b2d461e49aa84edbc2d1c9a64915187de778a1744d5953135a2dfe",
         "services/chat/src/agent_chat_service/__init__.py": "45cf6ef37ebbfa21a716e56cdf483a93cc3f173f5536baeba29cbfc70d1b4d4b",
         "services/chat/src/agent_chat_service/client.py": "218c66f571cfa5b6fa67b58a880d6ac435f4ef2e72b1d374354606da501e7935",
         "services/chat/src/agent_chat_service/collaboration.py": "5996687f5309db15edf5fe129c8339b6f5067591872a2617bf1da37efb5142eb",
@@ -2701,7 +2726,12 @@
         "tools/promotion_unit_tests/test_ssh_hosting_policy.py": "e49ac3ddc13ccdb7c3c2adfc335862c383397d5903191d56f874d2937e1775dd",
         "libs/ssh-manager/src/ssh_manager/config_sources.py": "27e181d2e93549476e1ef6487f321078e8761c0b4dc1bb383d80bb2587d84753",
         "libs/ssh-manager/src/ssh_manager/__init__.py": "52f1d821423d8f043665cd455c887e7066de6979ea2e0c9282c67f7e4e16d69a",
-        "tools/promotion_unit_tests/fixtures/bridge_resume_parser_v0.py": "66723445ed476c265b03dac68af604b85f709dcda1e55ad42e045df29b1586bd"
+        "tools/promotion_unit_tests/fixtures/bridge_resume_parser_v0.py": "66723445ed476c265b03dac68af604b85f709dcda1e55ad42e045df29b1586bd",
+        "tools/promotion_unit_tests/test_owned_worktree.py": "ac5e25d284b0b7af7ca41d47adfdbda741d4f1590d96010713ab9c60eab6ae8a",
+        "plugins/agent-worktrees/src/agent_worktrees/resource_producer.py": "af20a7bafb1bba7a4fce8808d2b830253f51287144e60ebd48916d5a933cf51c",
+        "plugins/agent-worktrees/src/agent_worktrees/resource_relationship.py": "bc4ac5c41a880bc785f0064872cb7f3e81d8530139ce8540b3bd06ba328b9426",
+        "plugins/agent-worktrees/src/agent_worktrees/owned_worktree.py": "eaa2eb00a19e6c60dac772cdb1de9d928e1b8a523d313cbe13321fdca80c57f3",
+        "plugins/agent-worktrees/src/agent_worktrees/tracking_allocation_write.py": "bbee47d64406543de981592a480e49bf0e92909c5240e2e5e8260a6bb22f5274"
     },
     "coverage_targets": [
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_clock.py",
@@ -2832,7 +2862,9 @@
         "plugins/agent-bridge/src/agent_bridge/resume_handoff_cli.py",
         "plugins/agent-bridge/src/agent_bridge/service_start_cli.py",
         "plugins/agent-bridge/src/agent_bridge/client.py",
-        "plugins/agent-bridge/src/agent_bridge/client_protocol_floor.py"
+        "plugins/agent-bridge/src/agent_bridge/client_protocol_floor.py",
+        "plugins/agent-worktrees/src/agent_worktrees/owned_worktree.py",
+        "plugins/agent-worktrees/src/agent_worktrees/tracking_allocation_write.py"
     ],
     "max_seconds": 300
 }
