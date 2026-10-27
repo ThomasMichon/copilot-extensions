@@ -164,6 +164,20 @@ def apply_worktree_allocation(
     args: dict, *, authority_check: Callable[[], bool] | None = None,
     context_lock: ContextManager | None = None,
 ) -> dict:
+    result = _apply_worktree_allocation(
+        args, authority_check=authority_check, context_lock=context_lock,
+    )
+    if result.get("ok") and args["operation"] == "reserve" and result["phase"] != "closed":
+        from . import allocation_link_demand
+
+        allocation_link_demand.request(result["owner"])
+    return result
+
+
+def _apply_worktree_allocation(
+    args: dict, *, authority_check: Callable[[], bool] | None = None,
+    context_lock: ContextManager | None = None,
+) -> dict:
     """Reserve before effects; observe outside the lock and compare before commit."""
     try:
         fields = {"schema", "version", "operation", "input", "owner_ref", "yaml_path"}

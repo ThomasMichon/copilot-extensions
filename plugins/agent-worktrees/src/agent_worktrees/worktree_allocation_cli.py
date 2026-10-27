@@ -74,7 +74,7 @@ def cmd_worktree_allocation(args) -> int:
             "schema": allocation.SCHEMA, "version": allocation.VERSION,
             "operation": args.operation, "input": payload,
             "owner_ref": args.owner_ref, "yaml_path": str(path),
-        }, reason="allocation observes outside bounded registered RMW; no monitor bootstrap")
+        }, reason="allocation observes outside bounded registered RMW")
         _emit(result)
         return 1 if result.get("error") else 0
     except (ValueError, TypeError, OSError, RuntimeError, sqlite3.Error, yaml.YAMLError) as exc:

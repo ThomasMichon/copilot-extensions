@@ -74,8 +74,18 @@ Its private observer receives current tracking records before public roster
 projection; protected tokens and recovery facts never enter public roster rows.
 On restart it discovers registered repositories, including source-only repos,
 and adopted projects through their current ledgers, not retained creation history.
-Discovery is bounded per sweep; unavailable ledgers remain visible and retry
-without starving other projects.
+Registry and successful-project discovery refresh on a 60-second cadence within
+the same bounded sweep budget; unavailable ledgers retry without starving other
+projects. Known parsing failures remain visible rather than terminating the
+resident. The periodic inventory itself is not permanent idle demand.
+
+After a new or replayed reservation is durable and its record lock is released,
+the origin requests the existing resident/current-roster demand path. That path
+can ensure the existing monitor after idle exit; no second service is created.
+An unavailable wake is explicitly logged as unconfirmed, not claimed as
+delivered. The original responsibility remains durable and periodic or restart
+discovery can recover it. The wake is advisory, never an acknowledgement gate
+before receiving creation or agent startup.
 
 At most one finite receiving request runs at a time, outside the monitor's
 project-context and record locks. The registered `reconcile` transaction binds
@@ -90,6 +100,8 @@ work and before local commit. Drain/rollback cannot admit a prior epoch's result
 In-flight linkage participates in drain diagnostics, unresolved responsibility
 prevents false idle exit, and mandatory retirement waits for the concrete finite
 worker before releasing the resident route, including interrupted cleanup.
+An attempt whose candidate was already positively closed or replaced cannot
+reintroduce stale retry/error bookkeeping.
 The existing authenticated health response advertises
 `worktree-allocation-linker-v1` and aggregate `allocationLinker` admission,
 pending, active, discovery and error facts without private allocation tokens.

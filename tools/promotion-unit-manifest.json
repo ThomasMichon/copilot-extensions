@@ -2734,7 +2734,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/resource_producer.py": "af20a7bafb1bba7a4fce8808d2b830253f51287144e60ebd48916d5a933cf51c",
         "plugins/agent-worktrees/src/agent_worktrees/resource_relationship.py": "bc4ac5c41a880bc785f0064872cb7f3e81d8530139ce8540b3bd06ba328b9426",
         "plugins/agent-worktrees/src/agent_worktrees/owned_worktree.py": "eaa2eb00a19e6c60dac772cdb1de9d928e1b8a523d313cbe13321fdca80c57f3",
-        "plugins/agent-worktrees/src/agent_worktrees/tracking_allocation_write.py": "8f70ed612e46ab5c855d2a3e66d4f2763095b6217dd8bda554797ca232f5d09b"
+        "plugins/agent-worktrees/src/agent_worktrees/tracking_allocation_write.py": "fc5a2da8d8a3125acd2797c1d2a27bc2af43bfb21be3f55f9faf38e395329d8f"
     },
     "coverage_targets": [
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_clock.py",

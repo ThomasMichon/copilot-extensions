@@ -171,8 +171,9 @@ def test_corrupt_current_ledger_is_not_silently_discovered_as_an_empty_project(t
     root.mkdir()
     (root / "owner.yaml").write_text("not: [valid", encoding="utf-8")
     monkeypatch.setattr(discovery.cfg, "tracking_dir", lambda project: root)
-    with pytest.raises(yaml.YAMLError):
+    with pytest.raises(discovery.AllocationDiscoveryError) as failure:
         discovery.current_records("p")
+    assert isinstance(failure.value.__cause__, yaml.YAMLError)
 
 
 def test_shared_foreign_execution_space_is_not_admitted_as_local_work(owner, runtime, monkeypatch):
@@ -321,3 +322,49 @@ def test_retirement_keeps_route_until_worker_settles_despite_repeated_interrupts
         with pytest.raises(KeyboardInterrupt, match="retirement interrupted"):
             done.result(timeout=5)
     assert len(interrupts) == 2 and released == [True] and value.active_count() == 0
+
+
+def test_closed_inflight_claim_cannot_recreate_orphan_retry_demand(owner, runtime, monkeypatch):
+    path, _ = owner
+    monkeypatch.setattr(discovery.cfg, "tracking_dir", lambda project=None: path.parent)
+    pending = reserve(path)
+    value, _, _ = runtime
+    entered, finish = threading.Event(), threading.Event()
+    monkeypatch.setattr(discovery, "registered_projects", lambda: {"p"})
+    value.discover()
+
+    def receive(operation, metadata, **kwargs):
+        if operation == "cancel":
+            return observation(metadata, "cancelled")
+        entered.set()
+        assert finish.wait(5)
+        return observation(metadata)
+
+    monkeypatch.setattr(remote, "request", receive)
+    value.tick()
+    try:
+        assert entered.wait(5)
+        assert call(path, "cancel", {"token": pending["token"]})["phase"] == "closed"
+        value.observe("p", [tracking.load_record(path)])
+        assert value.health()["allocationLinker"]["pending"] == 0
+    finally:
+        finish.set()
+    value._worker.join(5)
+    assert not value._worker.is_alive()
+    assert value._retry == {} and value._claim_errors == {}
+    assert not value.has_demand()
+
+
+def test_replaced_candidate_does_not_inherit_the_previous_attempt_result(owner, runtime):
+    from dataclasses import replace
+
+    path, _ = owner
+    reserve(path)
+    value, _, _ = runtime
+    value.observe("p", [tracking.load_record(path)])
+    key, old = next(iter(value._candidates.items()))
+    replacement = replace(old, path=path.parent / "other.yaml")
+    value._candidates[key] = replacement
+    value._complete_attempt(key, old, {"phase": "closed"}, "old attempt refused")
+    assert value._candidates[key] == replacement
+    assert value._retry == {} and value._claim_errors == {}

@@ -17,6 +17,9 @@ from .tracking_allocation_write import apply_worktree_allocation
 
 CAPABILITY = "worktree-allocation-linker-v1"
 _LOG = logging.getLogger(__name__)
+_DISCOVERY_FAILURES = (
+    OSError, ValueError, RuntimeError, KeyError, TypeError, OverflowError, yaml.YAMLError,
+)
 
 
 @dataclass(frozen=True)
@@ -52,7 +55,9 @@ class AllocationLinkRuntime:
         self._candidates: dict[tuple[str, str], Candidate] = {}
         self._retry: dict[tuple[str, str], tuple[float, int]] = {}
         self._discover: dict[str, float] = {}
+        self._startup_pending: set[str] = set()
         self._initialized = False
+        self._next_registry_refresh = 0.0
         self._discovery_error: str | None = None
         self._errors: dict[str, str] = {}
         self._claim_errors: dict[tuple[str, str], str] = {}
@@ -87,7 +92,7 @@ class AllocationLinkRuntime:
                 try:
                     if not discovery.locally_owned(record):
                         continue
-                except (OSError, ValueError, RuntimeError, yaml.YAMLError) as exc:
+                except _DISCOVERY_FAILURES as exc:
                     malformed = True
                     _LOG.warning("Allocation creator authority unavailable for %s: %s", project, type(exc).__name__)
                     continue
@@ -131,18 +136,22 @@ class AllocationLinkRuntime:
         with self._lock:
             if not self._admitting:
                 return
-            initialized = self._initialized
-        if not initialized:
+            refresh = not self._initialized or self._now() >= self._next_registry_refresh
+        if refresh:
             try:
                 projects = discovery.registered_projects()
-            except (OSError, ValueError, RuntimeError, yaml.YAMLError) as exc:
+            except _DISCOVERY_FAILURES as exc:
                 with self._lock:
                     self._discovery_error = type(exc).__name__
                 _LOG.warning("Allocation restart discovery unavailable: %s", type(exc).__name__)
                 return
             with self._lock:
-                self._discover.update(dict.fromkeys(projects, 0.0))
+                for project in projects:
+                    self._discover.setdefault(project, 0.0)
+                if not self._initialized:
+                    self._startup_pending.update(projects)
                 self._initialized = True
+                self._next_registry_refresh = self._now() + 60.0
                 self._discovery_error = None
         with self._lock:
             projects = [
@@ -153,7 +162,7 @@ class AllocationLinkRuntime:
         for project in projects:
             try:
                 complete = self.observe(project, discovery.current_records(project))
-            except (OSError, ValueError, RuntimeError, yaml.YAMLError) as exc:
+            except _DISCOVERY_FAILURES as exc:
                 with self._lock:
                     self._errors[project] = "current allocation ledger unavailable: " + type(exc).__name__
                     self._discover[project] = self._now() + 30.0
@@ -161,7 +170,8 @@ class AllocationLinkRuntime:
             else:
                 with self._lock:
                     if complete:
-                        self._discover.pop(project, None)
+                        self._discover[project] = self._now() + 60.0
+                        self._startup_pending.discard(project)
 
     def tick(self) -> None:
         with self._lock:
@@ -213,6 +223,8 @@ class AllocationLinkRuntime:
         self, key: tuple[str, str], candidate: Candidate, result: dict | None, error: str | None,
     ) -> None:
         with self._lock:
+            if self._candidates.get(key) != candidate:
+                return
             failures = self._retry.get(key, (0.0, 0))[1]
             if error is not None:
                 failures += 1
@@ -238,7 +250,7 @@ class AllocationLinkRuntime:
     def has_demand(self) -> bool:
         with self._lock:
             return bool(
-                not self._initialized or self._discover or self._candidates
+                not self._initialized or self._startup_pending or self._candidates
                 or self._errors or self._claim_errors or self._discovery_error
                 or not self._finished.is_set()
             )
@@ -251,7 +263,7 @@ class AllocationLinkRuntime:
                     "admitting": self._admitting,
                     "active": int(not self._finished.is_set()),
                     "pending": len(self._candidates),
-                    "discovering": not self._initialized or bool(self._discover),
+                    "discovering": not self._initialized or bool(self._startup_pending),
                     "errors": len(self._errors) + len(self._claim_errors) + int(self._discovery_error is not None),
                 },
             }
