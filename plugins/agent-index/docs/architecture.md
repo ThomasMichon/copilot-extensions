@@ -607,8 +607,12 @@ Changed-table counters use the monotonic commit generation, so removing and
 recreating a table cannot resurrect its old coverage key. Strict
 identical-content skips change neither physical nor logical versions. Explicitly
 annotated scalar-index preparation, FTS building and compaction preserve logical
-generations for their existing tables. Other effects conservatively count changed
-tables as logical changes, even when physical-only maintenance also occurs.
+generations for their existing tables. Each operation records its own physical
+before/after transition under the existing writer; exemptions require a contiguous
+chain from writer entry through the final witness. Raw changes before, after or
+between maintenance operations cannot inherit an exemption. Other effects
+conservatively count changed tables as logical changes, even when physical-only
+maintenance also occurs.
 
 Logical keys are reusable only while their physical table versions and local
 directory identities match the receipt's witness. Missing, invalid, oversized or

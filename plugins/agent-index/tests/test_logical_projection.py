@@ -166,6 +166,54 @@ def test_writer_without_effect_does_not_inherit_physical_only_exemption(corpus):
     assert after["tables"][table.name] == after["generation"]
 
 
+@pytest.mark.parametrize("position", ["before", "after", "between"])
+def test_maintenance_cannot_exempt_raw_logical_changes_in_outer_transaction(corpus, position):
+    config, store = corpus
+    assert engine._refresh_clusters(store, config)["clusters"] == 2
+    signature = cluster_signature(store, config)
+    domain = store._source_domain
+    vector = store.get_vector_table("small")
+    table = vector._get_or_create_table()
+    before = domain.receipt()["logical_projection"]
+
+    def raw_update():
+        table.update(
+            where=f"chunk_id = '{item('two.md').chunk_id}'", values={"vector": [0.0, 1.0]},
+        )
+
+    with domain.write(store.content_store.db):
+        if position == "before":
+            raw_update()
+        prepare_chunk_id_index(vector, max_rows=10)
+        if position != "before":
+            raw_update()
+        if position == "between":
+            prepare_chunk_id_index(vector, max_rows=10)
+    after = domain.receipt()["logical_projection"]
+    assert after["generation"] == before["generation"] + 1
+    assert after["tables"][vector.table_name] == after["generation"]
+    assert cluster_signature(store, config) != signature
+    refreshed = engine._refresh_clusters(store, config)
+    assert refreshed["clusters"] == 1 and "maintenance_skipped" not in refreshed
+
+
+def test_contiguous_physical_operations_preserve_only_their_covered_transitions(corpus):
+    config, store = corpus
+    domain = store._source_domain
+    table = store.get_vector_table("small")._get_or_create_table()
+    signature = cluster_signature(store, config)
+    before = domain.receipt()["logical_projection"]
+    with domain.write(store.content_store.db):
+        for timestamp in (1.0, 2.0):
+            with domain.physical_maintenance(table.name, "fixture-physical"):
+                table.update(values={"indexed_at": timestamp})
+    after = domain.receipt()["logical_projection"]
+    assert after["witness"] != before["witness"]
+    assert after["generation"] == before["generation"]
+    assert after["tables"] == before["tables"]
+    assert cluster_signature(store, config) == signature
+
+
 def test_older_writer_witness_drift_invalidates_then_starts_new_epoch(corpus):
     config, store = corpus
     domain = store._source_domain
