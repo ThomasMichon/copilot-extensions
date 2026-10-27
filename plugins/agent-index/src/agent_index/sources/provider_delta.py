@@ -30,6 +30,9 @@ Optional ``snapshot_versions`` is a distinct positive-integer array, empty or
 absent by default. Snapshot v1 requires delta v1 and additionally negotiates
 immutable full pages on the existing discovery verb; its response parser lives
 in :mod:`agent_index.sources.provider_snapshot`. It never changes legacy forms.
+Optional ``acquisition_page_versions`` uses the same declaration rules for
+ordinary delta pages on the existing changed-discovery verb; its parser lives
+in :mod:`agent_index.sources.provider_acquisition`.
 
 Example additive metadata (``commit`` retains its legacy meaning)::
 
@@ -78,6 +81,7 @@ class DeltaDeclaration:
     account: str
     target: str
     snapshot_versions: tuple[int, ...] = ()
+    acquisition_page_versions: tuple[int, ...] = ()
 
     @property
     def available(self) -> bool:
@@ -86,6 +90,21 @@ class DeltaDeclaration:
     @property
     def snapshot_available(self) -> bool:
         return self.available and 1 in self.snapshot_versions
+
+    @property
+    def acquisition_page_available(self) -> bool:
+        return self.available and 1 in self.acquisition_page_versions
+
+
+def _optional_versions(raw: dict[str, Any], field: str) -> tuple[int, ...]:
+    versions = raw.get(field, [])
+    if (
+        not isinstance(versions, list)
+        or any(type(version) is not int or version < 1 for version in versions)
+        or len(set(versions)) != len(versions)
+    ):
+        raise ValueError(f"source_delta {field} must be a distinct positive-integer array")
+    return tuple(versions)
 
 
 def _identity(value: object, field: str) -> str:
@@ -125,14 +144,11 @@ def parse_declaration(data: dict[str, Any], requested: str) -> DeltaDeclaration 
             raise ValueError(
                 "source_delta target must be nonsecret and exclude URL credentials/query",
             )
-    snapshot_versions = raw.get("snapshot_versions", [])
-    if (
-        not isinstance(snapshot_versions, list)
-        or any(type(version) is not int or version < 1 for version in snapshot_versions)
-        or len(set(snapshot_versions)) != len(snapshot_versions)
-    ):
-        raise ValueError("source_delta snapshot_versions must be a distinct positive-integer array")
-    return DeltaDeclaration(tuple(versions), family, account, target, tuple(snapshot_versions))
+    return DeltaDeclaration(
+        tuple(versions), family, account, target,
+        _optional_versions(raw, "snapshot_versions"),
+        _optional_versions(raw, "acquisition_page_versions"),
+    )
 
 
 def validate_scope_echo(data: object, declaration: DeltaDeclaration) -> None:

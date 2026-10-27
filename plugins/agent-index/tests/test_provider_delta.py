@@ -49,6 +49,9 @@ if config["new"]:
 if config.get("snapshot_cli"):
     parser.add_argument("--snapshot-version", type=int, choices=[1])
     parser.add_argument("--snapshot")
+if config.get("acquisition_cli"):
+    parser.add_argument("--acquisition-page-version", type=int, choices=[1])
+if config.get("snapshot_cli") or config.get("acquisition_cli"):
     parser.add_argument("--cursor")
 args = parser.parse_args()
 declaration = config["metadata"].get("source_delta")
@@ -69,6 +72,14 @@ elif getattr(args, "snapshot_version", None) is not None:
         sys.stderr.write("snapshot temporarily unavailable")
         sys.exit(7)
     response = config["snapshot_pages"][args.cursor or "first"]
+elif getattr(args, "acquisition_page_version", None) is not None:
+    if config.get("fail_acquisition") and args.cursor is not None:
+        sys.stderr.write("acquisition temporarily unavailable")
+        sys.exit(7)
+    if config.get("truncate_acquisition"):
+        print('{"acquisition_page_version": 1, "upserts": [')
+        sys.exit(0)
+    response = config["acquisition_pages"][args.cursor or "first"]
 elif getattr(args, "delta_version", None) is not None:
     if config.get("fail_delta"):
         sys.stderr.write("delta refused after acceptance")
