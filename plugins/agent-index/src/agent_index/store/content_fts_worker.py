@@ -102,7 +102,7 @@ class _ContentFtsWorkerMixin(_ContentFtsCoverageMixin):
         if not full and self.fts_current():
             return
         if self._source_domain is not None:
-            with self._source_domain.fts_handoff() as nonce:
+            with self._source_domain.fts_handoff(table_name=self._table_name) as nonce:
                 code = (
                     "import sys,lancedb; "
                     "from agent_index.store.source_layout import child_fts_owner; "

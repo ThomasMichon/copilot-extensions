@@ -110,15 +110,15 @@ def prepare_chunk_id_index(
             if state.prepared and state.physical_unindexed_rows == 0:
                 return state
             covered_fts = domain.receipt().get("fts_coverage", {}).get(owner._table_name) == state.version
-            domain.effect("scalar-index:" + owner._table_name)
-            if state.prepared:
-                dataset.optimize.optimize_indices(
-                    index_names=[INDEX_NAME], num_indices_to_merge=0, retrain=False,
-                )
-            else:
-                from lancedb.index import BTree
+            with domain.physical_maintenance(owner._table_name, "scalar-index:" + owner._table_name):
+                if state.prepared:
+                    dataset.optimize.optimize_indices(
+                        index_names=[INDEX_NAME], num_indices_to_merge=0, retrain=False,
+                    )
+                else:
+                    from lancedb.index import BTree
 
-                table.create_index("chunk_id", config=BTree(), name=INDEX_NAME, replace=False)
+                    table.create_index("chunk_id", config=BTree(), name=INDEX_NAME, replace=False)
             table.checkout_latest()
             after, _ = _inspect(table)
             if not after.prepared or after.physical_unindexed_rows:

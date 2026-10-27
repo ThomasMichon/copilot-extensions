@@ -33,8 +33,10 @@ refusal exits the write context normally before being re-raised, preserving the
 current clean receipt and intervening commit. Errors after the index effect
 begins retain the existing dirty/uncertain recovery semantics.
 Pure index-only writes carry forward previously current source FTS coverage
-without claiming that a stale FTS index became current. Existing physical-version
-cluster coverage remains conservatively invalidated.
+without claiming that a stale FTS index became current. Participating writers
+preserve witnessed logical cluster coverage across physical-only preparation;
+unproven or legacy coverage stays conservative. See
+[covered derived maintenance](architecture.md#covered-derived-maintenance).
 
 Bounded reads require complete index coverage and at most 32 segments. They
 deduplicate input IDs, query batches of 200, reject duplicate/unexpected stored
