@@ -69,6 +69,13 @@ Additional operator request:
 > We need to ensure that these dispatched autopilot workers and tracked and
 > attributed correctly. We also need to ensure they are garbage collected.
 
+**Interface-neutral terminal lifecycle clarification (summary):** Dispatch
+requests agent shutdown from Bridge, then Worktrees evaluates cleanup. CLI/ACP
+is tracking metadata, not ownership authority. The bounded
+[interface-neutral conclusion contract](interface-neutral-conclusion.md)
+owns this source slice and its validation; it does not authorize historical
+adoption, runtime rollout or disposal of another owner's obligations.
+
 ## Plan
 
 ### Phase 1 — Durable allocation and resolution contract
@@ -93,6 +100,8 @@ Additional operator request:
       prune-eligibility ledger.
 
 ### Phase 2 — Supervisor reclamation loop
+- [ ] Close the [interface-neutral terminal conclusion](interface-neutral-conclusion.md)
+      contract through Bridge-owned shutdown followed by ground cleanup.
 - [x] Reconcile release-requested, failed, and yielded attempts before reserving
       a replacement: retire the exact session, delegate safe conclusion to
       agent-worktrees, and retain a visible retryable cleanup state until the
