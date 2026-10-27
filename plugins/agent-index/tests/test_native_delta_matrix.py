@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -192,6 +193,33 @@ def assert_reference(
                 np.testing.assert_array_equal(left_vectors[cid], right_vectors[cid])
 
 
+def measure_round(
+    run: Callable[[], dict[str, Any]], monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, Any]:
+    from lancedb.query import LanceEmptyQueryBuilder
+
+    work = NativeWork()
+    batches = LanceEmptyQueryBuilder.to_batches
+
+    def measured_batches(query: Any, *args: Any, **kwargs: Any) -> Any:
+        work.queries += 1
+        # Diagnostic replay conservatively contributes to measured process I/O.
+        work.plans.append(query.analyze_plan())
+        return batches(query, *args, **kwargs)
+
+    before_io = io_counts()
+    with monkeypatch.context() as patch:
+        patch.setattr(LanceEmptyQueryBuilder, "to_batches", measured_batches)
+        result = run()
+    after_io = io_counts()
+    counts = result["work_counts"]
+    counts.pop("source_mutations")  # Generation/epoch values are intentionally unique.
+    return {
+        "counts": counts, "native": work.summary(),
+        "io": {key: after_io[key] - before_io[key] for key in before_io},
+    }
+
+
 @pytest.mark.skipif(sys.platform != "linux", reason="process I/O counter qualification is Linux-only")
 @pytest.mark.parametrize("selected", [False, True], ids=["legacy", "source-aware"])
 @pytest.mark.parametrize("model_count", [1, 2])
@@ -200,8 +228,6 @@ def test_prepared_native_finite_delta_matrix(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selected: bool, model_count: int,
     capsys: pytest.CaptureFixture[str], seed_via_engine: bool,
 ) -> None:
-    from lancedb.query import LanceEmptyQueryBuilder
-
     if seed_via_engine and not selected:
         pytest.skip("legacy ingestion does not opt into source-owned scalar upkeep")
     monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT if selected else "")
@@ -245,28 +271,9 @@ def test_prepared_native_finite_delta_matrix(
                     key: replace(profile, revision="next") if key == model else profile
                     for key, profile in profiles.items()
                 })
-            work = NativeWork()
-            batches = LanceEmptyQueryBuilder.to_batches
-
-            def measured_batches(query: Any, *args: Any, **kwargs: Any) -> Any:
-                work.queries += 1
-                # The same native query's execution plan is evidence, not an API count.
-                # This diagnostic replay contributes conservatively to process I/O.
-                work.plans.append(query.analyze_plan())
-                return batches(query, *args, **kwargs)
-
             fixture.delta = delta
-            before_io = io_counts()
-            with monkeypatch.context() as patch:
-                patch.setattr(LanceEmptyQueryBuilder, "to_batches", measured_batches)
-                result = fixture.run()
-            after_io = io_counts()
-            counts = result["work_counts"]
-            counts.pop("source_mutations")  # Generation/epoch values are intentionally unique.
-            measurement = {
-                "counts": counts, "native": work.summary(),
-                "io": {key: after_io[key] - before_io[key] for key in before_io},
-            }
+            measurement = measure_round(fixture.run, monkeypatch)
+            counts = measurement["counts"]
             measurements[name] = measurement
             with capsys.disabled():
                 print("NATIVE_DELTA_WORK " + json.dumps({

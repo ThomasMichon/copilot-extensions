@@ -51,6 +51,35 @@ compatibility in required CI. Scale, native lifecycle, packaged-source and
 consumer-composition checks use existing bounded opt-in lanes. Do not create
 an exhaustive new required matrix.
 
+The opt-in native policy and model-backfill controls use separate bounded
+invocations:
+
+```bash
+python tools/run-plugin-tests.py agent-index --allow-explicit-tiers \
+  --test-file tests/test_native_policy_matrix.py
+python tools/run-plugin-tests.py agent-index --allow-explicit-tiers \
+  --test-file tests/test_native_backfill_matrix.py
+```
+
+The policy control presents one item to the actual shared engine at 100,
+10,000 and 100,000 unchanged chunks in both layouts. It adds a second model,
+changes that model's revision, changes chunk output while preserving raw file
+bytes, rechecks an unchanged output under a new policy revision, then replays
+the same input. It requires equal stage counts, clean-reference results,
+bounded native query rows/I/O and bounded growth in process read/write bytes.
+An added model's unreturned corpus rows deliberately remain uncovered; this
+is not a complete backfill claim.
+
+The explicit source-aware backfill control proves the original model's
+coverage first, adds another model, interrupts offset publication after proven
+vector storage, reopens store/progress and verifies a covered replay followed
+by the next finite slice. It reads three logical offsets per call amid the
+three corpus sizes, checks source filtering, zero old-model embedding, only
+missing new-model pairs, and unchanged canonical/source-checkpoint bytes.
+The test covers the first two slices, not completion of a whole-corpus sweep.
+These controls measure Linux process I/O and native query plans, not physical
+disk traffic, whole-operation CPU/memory, Windows behavior or consumer rollout.
+
 Qualify both a standalone single-model engine and a generic injected two-model
 consumer. A downstream adopts only a reviewed/published compatible engine
 revision, records its consumed provenance, and repeats the same count assertions
