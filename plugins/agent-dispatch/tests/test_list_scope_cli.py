@@ -145,6 +145,15 @@ def test_list_still_rejects_unknown_flags(capsys: pytest.CaptureFixture[str]) ->
     assert "unrecognized arguments" in capsys.readouterr().err
 
 
+def test_list_registration_preserves_cli_callback_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cli, "_cmd_list", lambda _args: 42)
+    args = cli.build_parser().parse_args(["list", "--all-repos"])
+
+    assert args.func(args) == 42
+
+
 def test_all_repo_list_uses_existing_http_query_contract(
     listing: ListingClient,
     monkeypatch: pytest.MonkeyPatch,
