@@ -2578,6 +2578,7 @@ do_uninstall() {
         fi
     fi
     [[ "$DRY_RUN" -eq 1 ]] && echo "agent-dispatch uninstall dry run complete -- nothing was changed"
+    return 0
 }
 
 _dispatch_uninstall_preflight() {

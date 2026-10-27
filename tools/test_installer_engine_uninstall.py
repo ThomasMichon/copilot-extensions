@@ -202,9 +202,13 @@ def _cleanup(payload: Path, root: Path, **arguments: Any) -> dict[str, Any]:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Actual packaged POSIX removal")
-@pytest.mark.parametrize("plugin", ("agent-dispatch", "agent-index"))
+@pytest.mark.parametrize(("plugin", "entrypoint"), (
+    ("agent-dispatch", "helper"),
+    ("agent-index", "helper"),
+    ("agent-dispatch", "native"),
+))
 def test_materialized_shell_adopter_removes_runtime_without_repository_libraries(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plugin: str,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plugin: str, entrypoint: str,
 ) -> None:
     if not HOST:
         pytest.skip("Native shell unavailable")
@@ -234,14 +238,26 @@ def test_materialized_shell_adopter_removes_runtime_without_repository_libraries
     environment.update(
         HOME=str(home), USERPROFILE=str(home), COPILOT_EXTENSIONS_TEST_CONTAINED="1",
     )
-    result = subprocess.run(
+    command = (
+        [HOST, str(payload / "scripts/install.sh"), "uninstall", "--no-service", "--no-supervisor"]
+        if entrypoint == "native" else
         [sys.executable, "-I", "-B", str(payload / "scripts" / SOURCE.name),
          "--payload-root", str(payload), "--plugin-id", plugin, "--root", str(root),
-         "--shell", HOST, "--remove-runtime"],
+         "--shell", HOST, "--remove-runtime"]
+    )
+    result = subprocess.run(
+        command,
         cwd=home, env=environment, capture_output=True, text=True, timeout=60, check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert json.loads(result.stdout)["status"] == "removed"
+    if entrypoint == "helper":
+        assert json.loads(result.stdout)["status"] == "removed"
+    else:
+        assert "Venv removed (config + DB kept" in result.stdout
+        repeated = subprocess.run(
+            command, cwd=home, env=environment, capture_output=True, text=True, timeout=60, check=False,
+        )
+        assert repeated.returncode == 0, repeated.stdout + repeated.stderr
     assert not (root / "versions" / "1.0.0").exists()
     assert not (root / "snapshots" / "1.0.0").exists()
     assert not (root / "deploy-manifest.json").exists()
