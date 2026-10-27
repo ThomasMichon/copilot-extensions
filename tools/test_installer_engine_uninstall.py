@@ -815,6 +815,47 @@ def test_retained_transaction_gate_requires_exact_trusted_source_and_parent(
     )
 
 
+def test_captured_argv_preserves_quoted_controller_paths(
+    installation: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload, root = installation
+    quoted_payload = payload.with_name("payload's quoted space")
+    quoted_root = root.with_name("runtime's quoted space")
+    payload.rename(quoted_payload)
+    root.rename(quoted_root)
+    payload, root = quoted_payload, quoted_root
+    if not HOST:
+        pytest.skip("Native host unavailable")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
+    entry = payload / "scripts/uninstall-state.py"
+    entry.write_text("# fixture entrypoint\n", encoding="utf-8")
+    invocation = [str(entry), "--root", str(root), "--remove-runtime"]
+    monkeypatch.setattr(sys, "argv", invocation)
+    native = ([HOST, "-NoProfile", "-File", str(payload / "scripts/install.ps1"),
+               "uninstall", "-InstallDir", str(root)] if os.name == "nt" else
+              [HOST, str(payload / "scripts/install.sh"), "uninstall", "--install-dir", str(root)])
+    parent = os.getppid()
+    redirect = [sys.executable, "-I", "-B", *invocation]
+    rows = [
+        {"pid": parent, "ppid": 9001, "image": sys.executable,
+         "command": " ".join(redirect), "argv": redirect},
+        {"pid": 9001, "ppid": 9002, "image": HOST, "command": " ".join(native), "argv": native},
+        {"pid": 9002, "ppid": 1, "image": str(root / "versions/1.0.0/python"),
+         "command": "python -m agent_bridge", "argv": ["python", "-m", "agent_bridge"]},
+    ]
+    controllers, redirectors = MODULE._controllers(rows, payload, root, "agent-bridge")
+    assert controllers == {9001}
+    assert redirectors == {parent}
+    assert 9002 not in controllers | redirectors
+    assert MODULE._arguments({**rows[0], "argv": []}) == []
+    gate = payload / "scripts/install-transaction.py"
+    gate.write_text("# fixture gate\n", encoding="utf-8")
+    arguments = [sys.executable, "-I", "-B", str(gate), str(root), "30"]
+    row = {"ppid": parent, "image": sys.executable, "command": " ".join(arguments), "argv": arguments}
+    assert MODULE._transaction_helper(row, payload, root)
+    assert not MODULE._transaction_helper({**row, "argv": []}, payload, root)
+
+
 @pytest.mark.parametrize("shell", ("ps1", "sh"))
 def test_real_self_staged_idle_cleanup_retains_source_and_coproc_gate(
     installation: tuple[Path, Path], shell: str,

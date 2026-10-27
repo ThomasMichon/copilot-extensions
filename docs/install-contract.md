@@ -2464,6 +2464,16 @@ at the original source only through the inherited live lifecycle. Process
 inspection recognizes that exact teardown owner, native caller and canonical
 staging watchdog, never arbitrary Python ancestors. A nonempty legacy Worktrees
 `lib` refuses until its ownership has an explicit migration path.
+Project-command cleanup resolves an already completed, selected-source-qualified
+interpreter read-only; it never constructs a runtime to uninstall one. Missing
+or foreign ownership refuses before project-command mutation.
+Process attribution preserves native argument boundaries rather than reparsing
+a display command. On macOS, the co-packaged stdlib-only
+`installer_engine_uninstall_darwin.py` uses libproc and sysctl to inspect a bounded
+current-user census, verifying process incarnation and executable identity
+around exact-argument capture. Unavailable inspection, ambiguous ownership,
+partial native results and excessive census churn refuse explicitly. This
+observation does not replace transaction custody or qualify session survival.
 Shell-only adopters also co-package `installer_engine_process.py`: POSIX finite
 deletion uses its bounded child owner even without the Python installer facade.
 Global command selection uses the co-packaged

@@ -577,6 +577,11 @@ def _argv(command: str, image: str) -> list[str]:
     return arguments
 
 
+def _arguments(row: dict[str, Any]) -> list[str]:
+    captured = row.get("argv")
+    return _argv(row["command"], row["image"]) if captured is None else captured
+
+
 def _parent(pid: int, image: str, command: str, payload: Path, root: Path, plugin: str,
             expected_parent: int | None = None, *, arguments: list[str] | None = None) -> bool:
     if (pid != (os.getppid() if expected_parent is None else expected_parent)
@@ -619,7 +624,7 @@ def _transaction_helper(row: dict[str, Any], payload: Path, root: Path,
     if row.get("ppid") not in (parents if parents is not None else {os.getppid()}) or Path(row["image"]).is_relative_to(root):
         return False
     try:
-        argv = _argv(row["command"], row["image"])
+        argv = _arguments(row)
         if (len(argv) != 6 or argv[1:3] != ["-I", "-B"]
                 or Path(argv[3]) != payload / "scripts" / "install-transaction.py"
                 or Path(os.path.abspath(argv[4])) != root):
@@ -651,7 +656,7 @@ def _lifecycle_controllers(rows: list[dict[str, Any]], payload: Path, root: Path
     owner = next((row for row in rows if row["pid"] == lease.ticket["pid"]), None)
     if owner is None or Path(owner["image"]).is_relative_to(root):
         return origins, admitted
-    argv = owner.get("argv") or _argv(owner["command"], owner["image"])
+    argv = _arguments(owner)
     helpers = [index for index, value in enumerate(argv)
                if Path(value) in {origin / "scripts" / "command_binding.py" for origin in origins}]
     if len(helpers) != 1 or "--" not in argv or not re.fullmatch(
@@ -671,7 +676,8 @@ def _lifecycle_controllers(rows: list[dict[str, Any]], payload: Path, root: Path
         return origins, admitted
     admitted.add(owner["pid"])
     admitted.update(row["pid"] for row in rows if row["pid"] == owner["ppid"] and any(
-        _parent(row["pid"], row["image"], row["command"], origin, root, plugin, row["pid"])
+        _parent(row["pid"], row["image"], row["command"], origin, root, plugin, row["pid"],
+                arguments=row.get("argv"))
         for origin in origins
     ))
     if payload.parent.parent == Path.home() / ("." + plugin) / ".install-stage":
@@ -679,7 +685,7 @@ def _lifecycle_controllers(rows: list[dict[str, Any]], payload: Path, root: Path
         body = commands._sh(commands._read(payload / "scripts/install.sh"), "INSTALL_WATCHDOG").rstrip("\n")
         for _ in range(2):
             for row in rows:
-                args = row.get("argv") or _argv(row["command"], row["image"])
+                args = _arguments(row)
                 if (row["ppid"] in admitted and Path(row["image"]).stem.lower() in {"bash", "sh"}
                         and len(args) > 8 and args[1:4] == ["-c", body, "bash"]
                         and Path(args[4]) == payload / "scripts/install.sh" and args[5] == plugin
@@ -701,11 +707,12 @@ def _controllers(rows: list[dict[str, Any]], payload: Path, root: Path,
         for row in rows:
             if row["pid"] not in controllers:
                 continue
-            if any(_parent(row["pid"], row["image"], row["command"], origin, root, plugin, row["pid"])
+            if any(_parent(row["pid"], row["image"], row["command"], origin, root, plugin, row["pid"],
+                           arguments=row.get("argv"))
                    for origin in origins):
                 controllers.add(row["ppid"])
             try:
-                argv = _argv(row["command"], row["image"])
+                argv = _arguments(row)
                 source = Path(os.path.abspath(sys.argv[0]))
                 trusted = (source == Path(os.path.abspath(__file__))
                            or source == payload / "scripts" / "uninstall-state.py")
@@ -719,12 +726,13 @@ def _controllers(rows: list[dict[str, Any]], payload: Path, root: Path,
                 continue
     verified = admitted | {row["pid"] for row in rows if row["pid"] in controllers and any(_parent(
         row["pid"], row["image"], row["command"], origin, root, plugin, row["pid"],
+        arguments=row.get("argv"),
     ) for origin in origins)}
     for _ in range(4):
         verified.update(row["pid"] for row in rows if row.get("ppid") in verified
                         and Path(row["image"]).stem.lower() in {"bash", "sh"}
                         and _parent(row["pid"], row["image"], row["command"],
-                                    payload, root, plugin, row["pid"]))
+                                    payload, root, plugin, row["pid"], arguments=row.get("argv")))
     return verified, redirectors
 
 
@@ -791,8 +799,10 @@ ConvertTo-Json -InputObject $rows -Compress
                 continue
             except PermissionError as error:
                 raise UninstallRefused("Cannot inspect a current-user process") from error
+    elif sys.platform == "darwin":
+        rows = _load(_dependency(payload, "installer_engine_uninstall_darwin.py")).inspect_processes()
     else:
-        raise UninstallRefused("Runtime removal requires native Windows or Linux /proc process inspection")
+        raise UninstallRefused("Runtime removal requires native Windows, Linux /proc or Darwin process inspection")
     if not any(row["pid"] == os.getpid() for row in rows):
         raise UninstallRefused("Process inventory did not include its inspector")
     identities = [profile.module]

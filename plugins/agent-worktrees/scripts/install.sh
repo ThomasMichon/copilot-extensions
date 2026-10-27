@@ -44,6 +44,12 @@ __aw_install_dir_arg=""
 __aw_provision_missing_runtime=false
 __aw_remove_config=false
 __aw_args=("$@")
+__aw_uninstall_native_path() {
+    case "$__aw_action:${OSTYPE:-}" in
+        uninstall:msys*|uninstall:cygwin*) cygpath -m -- "$1" ;;
+        *) printf '%s\n' "$1" ;;
+    esac
+}
 for ((__aw_i = 1; __aw_i < ${#__aw_args[@]}; __aw_i++)); do
     if [[ "${__aw_args[$__aw_i]}" == "--provision-missing-runtime" ]]; then
         __aw_provision_missing_runtime=true
@@ -122,8 +128,10 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
                     */Microsoft/WindowsApps/*) continue ;;
                 esac
                 if [[ "$__aw_action" == uninstall ]]; then
-                    "$__aw_candidate_path" -I -S -B "$SCRIPT_DIR/uninstall-state.py" \
-                        --probe-python "$__aw_admission_root" >/dev/null 2>&1 || continue
+                    "$__aw_candidate_path" -I -S -B \
+                        "$(__aw_uninstall_native_path "$SCRIPT_DIR/uninstall-state.py")" \
+                        --probe-python "$(__aw_uninstall_native_path "$__aw_admission_root")" \
+                        >/dev/null 2>&1 || continue
                 else
                     "$__aw_candidate_path" -I -S -B -c \
                         'import sys; assert sys.version_info >= (3, 11)' >/dev/null 2>&1 || continue
@@ -144,11 +152,11 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
                 unset COPILOT_PLUGIN_STAGED_FROM
             fi
             __aw_admission_args=(
-                -I -S -B -X utf8 "$PLUGIN_DIR/scripts/command_binding.py"
-                --payload-root "$PLUGIN_DIR" --plugin-id agent-worktrees
-                --legacy-root "$__aw_admission_root"
-                --source-payload-root "$__aw_admission_source"
-                --project-root "$__aw_admission_project"
+                -I -S -B -X utf8 "$(__aw_uninstall_native_path "$PLUGIN_DIR/scripts/command_binding.py")"
+                --payload-root "$(__aw_uninstall_native_path "$PLUGIN_DIR")" --plugin-id agent-worktrees
+                --legacy-root "$(__aw_uninstall_native_path "$__aw_admission_root")"
+                --source-payload-root "$(__aw_uninstall_native_path "$__aw_admission_source")"
+                --project-root "$(__aw_uninstall_native_path "$__aw_admission_project")"
             )
             __aw_admission_operation=publish
             [[ "$__aw_action" != uninstall ]] || __aw_admission_operation=teardown
@@ -534,10 +542,11 @@ if [[ "$__aw_action" == uninstall ]]; then
     __aw_uninstall_shell="$(type -P bash)" || exit 1
     __aw_uninstall_shell="$(cd "$(dirname "$__aw_uninstall_shell")" && pwd -P)/$(basename "$__aw_uninstall_shell")"
     __aw_uninstall_args=(
-        -I -S -B -X utf8 "$SCRIPT_DIR/uninstall-state.py"
-        --payload-root "$PLUGIN_DIR" --plugin-id agent-worktrees
-        --root "$__aw_admission_root" --shell "$__aw_uninstall_shell"
-        --profile "$SCRIPT_DIR/uninstall-profile.json"
+        -I -S -B -X utf8 "$(__aw_uninstall_native_path "$SCRIPT_DIR/uninstall-state.py")"
+        --payload-root "$(__aw_uninstall_native_path "$PLUGIN_DIR")" --plugin-id agent-worktrees
+        --root "$(__aw_uninstall_native_path "$__aw_admission_root")"
+        --shell "$(__aw_uninstall_native_path "$__aw_uninstall_shell")"
+        --profile "$(__aw_uninstall_native_path "$SCRIPT_DIR/uninstall-profile.json")"
     )
     if $__aw_remove_config; then __aw_uninstall_args+=(--purge); fi
     __aw_uninstall_preflight="$("$__aw_admission_python" "${__aw_uninstall_args[@]}" --check --check-consumers)" || exit $?
@@ -3529,6 +3538,19 @@ case "$ACTION" in
     uninstall)
         header "Uninstalling $SERVICE_NAME"
         "$__aw_admission_python" "${__aw_uninstall_args[@]}" --check --check-consumers || exit $?
+
+        if $HAS_PROJECT; then
+            __aw_project_python="$("$__aw_admission_python" -I -S -B -X utf8 \
+                "$(__aw_uninstall_native_path "$SCRIPT_DIR/uninstall-state.py")" \
+                --project-python "$(__aw_uninstall_native_path "$INSTALL_DIR")")" || exit $?
+            VENV_PYTHON="$("$__aw_admission_python" -I -S -B -X utf8 -c \
+                'import json,sys; print(json.loads(sys.argv[1]))' "$__aw_project_python")" || exit $?
+            case "${OSTYPE:-}" in
+                msys*|cygwin*)
+                    VENV_PYTHON="${VENV_PYTHON%$'\r'}"
+                    VENV_PYTHON="$(cygpath -u "$VENV_PYTHON")" || exit $? ;;
+            esac
+        fi
 
         # Remove Tabby profile (before venv removal -- needs Python)
         if $HAS_PROJECT; then

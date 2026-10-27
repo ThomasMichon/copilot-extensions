@@ -38,6 +38,41 @@ def check_under_custody(*, root: Path, payload_root: Path, plugin_id: str) -> No
             )
 
 
+def project_python(root: Path) -> Path:
+    """Resolve completed installed code, never the incoming payload's version."""
+    external_python(root)
+    owner = _finite_owner()
+    payload = Path(__file__).absolute().parents[1]
+    owner._root(payload, root)
+    for marker in ("current-version", "last-known-good"):
+        owner._plain(root / marker, file=True)
+    runtime = owner._load(payload / "scripts/versioned_runtime.py")
+    selected = runtime.resolve_python(root)
+    if selected is None:
+        raise RuntimeError(
+            "No unambiguous completed installed runtime for project-command cleanup; "
+            "refusing to guess or provision an interpreter"
+        )
+    relative = selected.relative_to(root / "versions")
+    if len(relative.parts) != 3 or not owner._generation(relative.parts[0]):
+        raise RuntimeError("Project-command interpreter is outside an ordinary installed generation")
+    owner._plain(selected.parent)
+    if not os.access(selected, os.X_OK):
+        raise RuntimeError("Selected project-command interpreter is not executable")
+    return selected
+
+
+def _finite_owner():
+    helper = Path(__file__).absolute().with_name("installer_engine_uninstall.py")
+    spec = importlib.util.spec_from_file_location("_worktrees_finite_uninstall", helper)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Canonical finite uninstall owner is unavailable")
+    owner = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = owner
+    spec.loader.exec_module(owner)
+    return owner
+
+
 def main() -> int:
     if len(sys.argv) == 3 and sys.argv[1] == "--probe-python":
         try:
@@ -46,6 +81,14 @@ def main() -> int:
             return 1
         print(json.dumps(sys.executable))
         return 0
+    if len(sys.argv) == 3 and sys.argv[1] == "--project-python":
+        try:
+            selected = project_python(Path(sys.argv[2]))
+        except (OSError, RuntimeError, ValueError) as error:
+            print(f"Project-command cleanup refused: {error}", file=sys.stderr)
+            return 1
+        print(json.dumps(str(selected)))
+        return 0
     try:
         root = Path(sys.argv[sys.argv.index("--root") + 1])
         check_under_custody(root=root, payload_root=Path(__file__).absolute().parents[1],
@@ -53,13 +96,7 @@ def main() -> int:
     except (IndexError, OSError, RuntimeError, ValueError) as error:
         print(f"Runtime uninstall refused: {error}", file=sys.stderr)
         return 1
-    helper = Path(__file__).absolute().with_name("installer_engine_uninstall.py")
-    spec = importlib.util.spec_from_file_location("_worktrees_finite_uninstall", helper)
-    if spec is None or spec.loader is None:
-        raise RuntimeError("Canonical finite uninstall owner is unavailable")
-    owner = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = owner
-    spec.loader.exec_module(owner)
+    owner = _finite_owner()
     if "--purge" in sys.argv:
         # An unknown-only root is absent to the finite planner, not to a purge.
         try:

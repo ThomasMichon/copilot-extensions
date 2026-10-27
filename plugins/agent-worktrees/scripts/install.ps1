@@ -4397,6 +4397,13 @@ switch ($Action) {
         & $admissionPython @uninstallArgs --check --check-consumers
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+        if ($HasProject) {
+            $projectPython = @(& $admissionPython -I -S -B -X utf8 `
+                (Join-Path $ScriptDir 'uninstall-state.py') --project-python $InstallDir)
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $VenvPython = ($projectPython -join "`n") | ConvertFrom-Json -ErrorAction Stop
+        }
+
         if ($HasProject -and (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
             $savedPayloadRoot = $env:AGENT_WORKTREES_PAYLOAD_ROOT
             try {

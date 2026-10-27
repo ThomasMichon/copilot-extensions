@@ -460,6 +460,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "immutable_runtime", "immutable_runtime_ref",
         "interactive_completion", "native_launch", "ssh_service",
         "ssh_headless", "update_diagnostics",
+        "runtime_removal",
     }
     assert inputs["watch_owner"]["type"] == "boolean"
     assert inputs["watch_owner"]["default"] is False
@@ -495,6 +496,8 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "native-launch-windows",
         "ssh-headless-linux", "ssh-headless-windows",
         "update-diagnostics-linux", "update-diagnostics-windows",
+        "packaging-seed-linux", "packaging-seed-windows",
+        "runtime-removal-macos",
     }
     for name, runner in routes.items():
         job = workflow["jobs"][name]
@@ -504,7 +507,8 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
             "&& !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service "
             "&& !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles "
             "&& !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless "
-            "&& !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics }}"
+            "&& !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics "
+            "&& !inputs.runtime_removal }}"
         )
         assert job["runs-on"] == runner
         assert job["timeout-minutes"] == 4

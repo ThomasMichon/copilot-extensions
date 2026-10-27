@@ -12,6 +12,7 @@ import sys
 import pytest
 
 from native_shell_support import admit_native_bash, bash_path, run_headless
+from runtime_install_fixture import isolate_account_profile
 
 PLUGIN = Path(__file__).resolve().parents[1]
 SCRIPTS = PLUGIN / "scripts"
@@ -56,8 +57,9 @@ def _run(arguments, home, *, env=None, input=None, timeout=60):
 
 
 @pytest.fixture
-def native_install(tmp_path):
-    home = tmp_path / "home"
+def native_install(tmp_path, tmp_path_factory, request):
+    parameter = getattr(request, "param", "home")
+    home = tmp_path_factory.mktemp("p") if parameter == "short-project-home" else tmp_path / parameter
     payload = home / ".copilot/installed-plugins/example/agent-worktrees"
     payload.mkdir(parents=True)
     for folder in ("scripts", "bin"):
@@ -65,16 +67,26 @@ def native_install(tmp_path):
             PLUGIN / folder, payload / folder,
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
         )
-    (payload / "src/agent_worktrees").mkdir(parents=True)
-    shutil.copyfile(
-        PLUGIN / "src/agent_worktrees/native_source_context.py",
-        payload / "src/agent_worktrees/native_source_context.py",
-    )
+    if parameter == "short-project-home":
+        shutil.copytree(
+            PLUGIN / "src", payload / "src",
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+    else:
+        (payload / "src/agent_worktrees").mkdir(parents=True)
+        shutil.copyfile(
+            PLUGIN / "src/agent_worktrees/native_source_context.py",
+            payload / "src/agent_worktrees/native_source_context.py",
+        )
     for name in ("plugin.json", "pyproject.toml"):
         shutil.copyfile(PLUGIN / name, payload / name)
     for path in (REPO / "libs/installer-engine").iterdir():
         if path.is_file() and path.suffix in {".py", ".sh", ".ps1"}:
             shutil.copyfile(path, payload / "scripts" / path.name)
+    isolate_account_profile(
+        payload, home,
+        runtime_package="agent_worktrees" if parameter == "short-project-home" else None,
+    )
     (home / ".copilot/settings.json").write_text(json.dumps({
         "extraKnownMarketplaces": {
             "example": {"source": {"source": "github", "repo": "Example/Plugins"}},
@@ -203,8 +215,7 @@ def test_module_refusal_matcher_is_literal(message, code, accepted):
     assert (_module_refusal(SimpleNamespace(stderr=message, returncode=code)) is not None) == accepted
 
 
-@pytest.mark.parametrize("shell", ["bash", "powershell", "pwsh"])
-def test_native_default_uninstall_removes_writer_footprint(native_install, shell):
+def _assert_default_uninstall(native_install, shell):
     home, payload, root, owned, durable = native_install
     executable = _host(shell)
     arguments = _native_arguments(shell, executable, payload, root)
@@ -218,6 +229,17 @@ def test_native_default_uninstall_removes_writer_footprint(native_install, shell
         _preserved(durable)
     assert not (root / ".venv").exists()
     assert not (root / "tool").exists()
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell", "pwsh"])
+def test_native_default_uninstall_removes_writer_footprint(native_install, shell):
+    _assert_default_uninstall(native_install, shell)
+
+
+@pytest.mark.parametrize("native_install", ["home's quoted space"], indirect=True)
+@pytest.mark.parametrize("shell", ["bash", "powershell", "pwsh"])
+def test_native_default_uninstall_accepts_quoted_space_paths(native_install, shell):
+    _assert_default_uninstall(native_install, shell)
 
 
 @pytest.mark.parametrize("shell", ["bash", "powershell", "pwsh"])
@@ -511,3 +533,74 @@ def test_pre_admission_precedes_identical_standard_stage(suffix):
     assert source.index("--check --check-consumers") < source.index(start)
     assert source.index("absent", source.index("--check --check-consumers")) < source.index(start)
     assert "--remove-runtime" not in source[:source.index(start)]
+
+
+def test_late_copied_posix_account_isolation_invalidates_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Model POSIX account lookup on Windows; use the actual binding publisher."""
+    from types import ModuleType, SimpleNamespace
+    from typing import Any
+
+    import runtime_install_fixture as fixture_support
+
+    home = tmp_path / "home"
+    account = tmp_path / "passwd-account"
+    account.mkdir()
+    payload = home / ".copilot/installed-plugins/example/agent-worktrees"
+    shutil.copytree(
+        SCRIPTS, payload / "scripts",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    shutil.copyfile(PLUGIN / "plugin.json", payload / "plugin.json")
+    (home / ".copilot/settings.json").write_text(json.dumps({
+        "extraKnownMarketplaces": {
+            "example": {"source": {"source": "github", "repo": "Example/Plugins"}},
+        },
+    }), encoding="utf-8")
+    root = home / ".agent-worktrees"
+    root.mkdir()
+    monkeypatch.setitem(
+        sys.modules, "pwd", SimpleNamespace(getpwuid=lambda _uid: SimpleNamespace(pw_dir=str(account))),
+    )
+
+    def posix_primitive() -> ModuleType:
+        primitive = _load(payload / "scripts/installation-context/installation_context.py")
+        primitive.os = SimpleNamespace(**{**vars(os), "getuid": lambda: 123})
+        primitive._is_wsl_guest = lambda: False
+        current = primitive._current_environment
+
+        def current_posix(**arguments: Any) -> tuple[dict[str, Any], Path]:
+            return current(**{**arguments, "platform": "posix"})
+
+        primitive._current_environment = current_posix
+        return primitive
+
+    arguments = {
+        "payload_root": payload, "plugin_id": "agent-worktrees", "legacy_root": root,
+        "project_root": home, "environment": {"HOME": str(home), "USERPROFILE": str(home)},
+    }
+    binding = _load(payload / "scripts/command_binding.py")
+    primitive = posix_primitive()
+    result = binding.write_legacy_manifest(primitive, {
+        "schema_version": 3, "service": "agent-worktrees",
+        "source": {"kind": "marketplace", "plugin": "agent-worktrees", "path": str(payload)},
+    }, **arguments)
+    assert result["status"] == "published"
+    manifest = root / "deploy-manifest.json"
+    before = manifest.read_bytes()
+    receipt = json.loads(before)["commandBinding"]
+    assert receipt["environment"] == primitive.probe_legacy_entrypoint(**arguments)["environment"]
+    assert receipt["environment"]["homeRealPath"] == str(account.resolve())
+
+    monkeypatch.setattr(fixture_support, "os", SimpleNamespace(name="posix"))
+    fixture_support.isolate_account_profile(payload, home, runtime_package=None)
+    fresh = posix_primitive()
+    observed = fresh.probe_legacy_entrypoint(**arguments)["environment"]
+    assert observed == {**receipt["environment"], "homeRealPath": str(home.resolve())}
+    assert fresh.resolve_payload_source(**{
+        key: arguments[key] for key in ("payload_root", "plugin_id", "project_root", "environment")
+    })["sourceFingerprint"] == receipt["sourceFingerprint"]
+    with pytest.raises(binding.CommandOwnershipConflict, match="another source, installation, or environment"):
+        binding.publish_legacy_binding(fresh, **arguments)
+    assert manifest.read_bytes() == before
