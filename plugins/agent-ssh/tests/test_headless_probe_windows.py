@@ -51,6 +51,11 @@ def test_selected_client_jump_chain_is_headless_and_reaped(tmp_path, capsys, par
     assert canary["windows"] and all(
         window["pid"] == canary["process"] for window in canary["windows"]
     )
+    assert evidence["cached_profile_refresh"] == {
+        "same_file": True, "source_cache_unchanged": True,
+        "cached_hostname": "cached-old.invalid", "refreshed_hostname": "cached-new.invalid",
+        "refreshed_jump": "cache-first.invalid,cache-last.invalid", "metadata_queries": 2,
+    }
     expected_arch = os.environ["SSH_MANAGER_EXPECTED_PYTHON_ARCH"]
     assert evidence["parent_platform"] == {
         "arm64": "win-arm64", "x64": "win-amd64",
@@ -58,7 +63,7 @@ def test_selected_client_jump_chain_is_headless_and_reaped(tmp_path, capsys, par
     assert len(evidence["cycles"]) == 2
     assert {cycle["kind"] for cycle in evidence["cycles"]} == {"timeout", "cancel"}
     assert all(cycle["ssh_processes"] == 3 for cycle in evidence["cycles"])
-    assert all(cycle["metadata_queries"] == 3 for cycle in evidence["cycles"])
+    assert all(cycle["metadata_queries"] == 4 for cycle in evidence["cycles"])
     assert sum(cycle["version_queries"] for cycle in evidence["cycles"]) <= 1
     assert all(cycle["cleanup_confirmed"] for cycle in evidence["cycles"])
     assert all(not any(cycle["console_handles"]) for cycle in evidence["cycles"])

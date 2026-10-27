@@ -83,6 +83,9 @@ cannot pass as zero windows. Its window owner must match the spawned canary
 PID; an unrelated terminal cannot validate observer sensitivity.
 The fixture refuses shared hosts before native
 work. Run no desktop reproduction of an unqualified path.
+Each native parent also edits one controlled profile in place while retaining
+the original cached config. The real selected client's metadata must observe
+the new hostname and jump route without mutating that cache or dialing a host.
 
 Mocked route/probe contracts are available through the contained `ssh-manager`
 and `agent-ssh` targets. This lane establishes only its exact source/client/

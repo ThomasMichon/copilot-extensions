@@ -226,10 +226,12 @@ remain intact. Destination overrides retain SSH's first-value precedence and
 but before the remote command. Cycle identity uses declared aliases, not resolved addresses,
 so different network scopes may legitimately reuse an endpoint.
 CLI `ProxyCommand`/`ProxyJump` selection retains its first-selected precedence.
-An explicit changed `-F` re-resolves the effective root through the existing
-bounded selected-client resolver using the original argv; every hop then
-uses that same configuration file. This adds one local configuration read
-only when the caller selects a different file.
+Every profile-backed launch refreshes its effective root through the existing
+bounded selected-client resolver using the original argv, even with a cached
+config and unchanged filename. Native profile matching and explicit overrides
+remain authoritative; every hop uses the selected configuration file.
+This adds one fresh local root query per profile-backed launch. Pure
+programmatic configurations retain their existing non-profile path.
 The imported runtime advertises this bounded selected-client probe contract as
 `ssh_manager.proxy.WINDOWS_OWNED_PROBE_VERSION = 1`, independently of its package
 version. Older consumers retain their existing API; a new Windows probe caller

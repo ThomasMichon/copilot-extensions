@@ -95,7 +95,7 @@ def _expand_hostname(value: str, alias: str) -> str:
 
 
 def prepare_jump_arguments(
-    args: Sequence[str], config: SSHConfig,
+    args: Sequence[str], config: SSHConfig, *, apply_overrides: bool = True,
 ) -> tuple[tuple[str, ...], SSHConfig]:
     """Consume native jump options while preserving their route and remote argv."""
     prepared = [args[0]]
@@ -119,7 +119,7 @@ def prepare_jump_arguments(
             index += 1
             continue
         for offset, option in enumerate(argument[1:], 1):
-            if option not in "BbcDEeFIiJLlmOopQRSWw":
+            if option not in "BbcDEeFIiJLlmOopPQRSWw":
                 continue
             attached = argument[offset + 1:]
             if attached:
@@ -134,12 +134,10 @@ def prepare_jump_arguments(
             if option == "F":
                 config_file = value
             if option == "o":
-                key, separator, setting = value.partition("=")
-                if not separator:
-                    fields = value.split(None, 1)
-                    if not fields:
-                        raise ValueError("SSH option -o requires a setting")
-                    key, setting = fields[0], fields[1] if len(fields) == 2 else ""
+                setting_match = re.fullmatch(r"\s*([^\s=]+)(?:\s*=\s*|\s+)(.*)", value)
+                if setting_match is None:
+                    raise ValueError("SSH option -o requires a setting")
+                key, setting = setting_match.groups()
                 if key.strip().casefold() == "proxyjump":
                     consumed, value = True, setting.strip()
                 elif key.strip().casefold() == "proxycommand":
@@ -151,7 +149,7 @@ def prepare_jump_arguments(
             if consumed:
                 if not value:
                     raise ValueError("SSH jump option requires a value")
-                if option == "J" and (jump is not None or proxy is not None):
+                if apply_overrides and option == "J" and (jump is not None or proxy is not None):
                     raise ValueError("Duplicate SSH jump option")
                 if jump is None and proxy is None:
                     jump = value
@@ -165,6 +163,8 @@ def prepare_jump_arguments(
         else:
             prepared.append(argument)
         index += 1
+    if not apply_overrides:
+        return tuple(prepared), replace(config, config_file=config_file)
     if overrides or config_file != config.config_file:
         port = int(overrides["port"]) if "port" in overrides else config.port
         if port is not None and not 1 <= port <= 65535:
@@ -204,16 +204,20 @@ async def prepare_windows_launch(
     args: Sequence[str], config: SSHConfig, executable: str,
     *, cwd: str | None = None, environment: Mapping[str, str] | None = None,
 ) -> tuple[tuple[str, ...], SSHConfig]:
-    prepared, selected = prepare_jump_arguments(args, config)
-    if selected.config_file != config.config_file:
+    prepared, selected = prepare_jump_arguments(args, config, apply_overrides=False)
+    if config.effective_config or config.config_file or selected.config_file != config.config_file:
+        resolution_args = tuple(args[1:])
+        if selected.config_file:
+            resolution_args = ("-F", selected.config_file, *resolution_args)
+            prepared = (prepared[0], "-F", selected.config_file, *prepared[1:])
         source = SSHProfileSource(
             config.host_alias, config_file=selected.config_file,
             resolve_timeout=15, ssh_executable=executable, resolve_cwd=cwd,
-            process_env=environment, resolve_args=args[1:],
+            process_env=environment, resolve_args=resolution_args,
         )
         selected = await asyncio.to_thread(source.get_ssh_config)
-        prepared, selected = prepare_jump_arguments(args, selected)
-    return prepared, selected
+        return prepared, selected
+    return prepare_jump_arguments(args, config)
 
 
 async def resolve_jump_route(

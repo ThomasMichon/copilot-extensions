@@ -195,6 +195,53 @@ def observe_canary(console_python: Path) -> dict:
     return evidence
 
 
+async def verify_cached_profile_refresh(root: Path, client: Path) -> dict:
+    require_hosted_windows()
+    from ssh_manager.config_sources import SSHProfileSource, ssh_option
+    from ssh_manager.proxy_jump import prepare_windows_launch
+
+    profile = root / "cached-profile.config"
+    if profile.exists():
+        raise RuntimeError("Native cache control will not replace an existing profile")
+    common = (
+        "  User probe\n  BatchMode yes\n  CanonicalizeHostname no\n"
+        "  IdentityFile none\n  IdentityAgent none\n"
+        "  UserKnownHostsFile NUL\n  StrictHostKeyChecking yes\n"
+    )
+    profile.write_text(
+        "Host cached-target.invalid\n  HostName cached-old.invalid\n" + common,
+        encoding="utf-8",
+    )
+    source = SSHProfileSource(
+        "cached-target.invalid", config_file=str(profile),
+        ssh_executable=str(client), resolve_timeout=15,
+    )
+    cached = await asyncio.to_thread(source.get_ssh_config)
+    profile.write_text(
+        "Host cached-target.invalid\n  HostName cached-new.invalid\n"
+        "  ProxyJump cache-first.invalid,cache-last.invalid\n" + common,
+        encoding="utf-8",
+    )
+    _args, refreshed = await prepare_windows_launch(
+        (str(client), "-F", str(profile), "cached-target.invalid"), cached, str(client),
+    )
+    evidence = {
+        "same_file": refreshed.config_file == cached.config_file == str(profile),
+        "source_cache_unchanged": source.get_ssh_config() is cached,
+        "cached_hostname": ssh_option(cached, "hostname"),
+        "refreshed_hostname": ssh_option(refreshed, "hostname"),
+        "refreshed_jump": ssh_option(refreshed, "proxyjump"),
+    }
+    if not (
+        evidence["same_file"] and evidence["source_cache_unchanged"]
+        and evidence["cached_hostname"] == "cached-old.invalid"
+        and evidence["refreshed_hostname"] == "cached-new.invalid"
+        and evidence["refreshed_jump"] == "cache-first.invalid,cache-last.invalid"
+    ):
+        raise RuntimeError(f"Native cached-profile refresh failed: {evidence}")
+    return evidence
+
+
 async def drive(root: Path) -> dict:
     require_hosted_windows()
     from agent_ssh.probe import _probe_windows
@@ -294,6 +341,8 @@ async def drive(root: Path) -> dict:
         proxy._ProxyBroker._spawn_child = record_spawn
         proxy._track_owner_job = record_track
         SSHProfileSource._resolve_effective_config = record_profile
+        refresh_control = await verify_cached_profile_refresh(root, client)
+        refresh_control["metadata_queries"] = len(query_seconds)
         for index, mode in enumerate(("timeout", "cancel")):
             phase = f"{mode}-launch"
             processes.clear()
@@ -378,6 +427,7 @@ async def drive(root: Path) -> dict:
         "parent_platform": sysconfig.get_platform(),
         "parent_python_version": platform.python_version(),
         "observer_canary": canary, "observed_windows": list(window_events.values()),
+        "cached_profile_refresh": refresh_control,
         "observer_control_detected_and_retired": True,
         "cycles": cycles, "new_visible_terminal_windows": len(observed),
         "terminal_took_foreground": foreground_changed,

@@ -42,6 +42,14 @@ def test_window_identity_query_refuses_shared_hosts(monkeypatch):
         module.window_identity(0)
 
 
+async def test_cached_profile_control_refuses_shared_hosts_before_writing(monkeypatch, tmp_path):
+    module = _fixture()
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    with pytest.raises(RuntimeError, match="GitHub-hosted Windows ARM64"):
+        await module.verify_cached_profile_refresh(tmp_path, Path("not-a-real-client"))
+    assert not list(tmp_path.iterdir())
+
+
 def test_native_jump_profile_has_two_hops_without_credentials():
     source = _fixture().profile_text("synthetic-console --stdio")
     assert "ProxyJump jump-first.invalid,jump-last.invalid" in source

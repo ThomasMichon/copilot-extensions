@@ -157,7 +157,7 @@ async def test_jump_planning_uses_the_pinned_account_environment(monkeypatch):
     key = "c28fc6f98a2c44abbbd89d6a3037d0d9_POSIX_FD_STATE"
     environment = {"EXAMPLE_ACCOUNT": "selected", key: "ancestor"}
     config = _profile("target", "jump", process_env=environment)
-    calls = _profiles(monkeypatch, {"jump": _profile("jump")})
+    calls = _profiles(monkeypatch, {"target": config, "jump": _profile("jump")})
     monkeypatch.setattr(proxy, "_is_windows", lambda: True)
     monkeypatch.setattr(proxy, "_create_prepared_ssh", AsyncMock(return_value=SimpleNamespace()))
     await proxy.create_ssh_subprocess("ssh", "target", config=config)
@@ -214,6 +214,7 @@ async def test_resolved_direct_route_cannot_reenable_native_jump(monkeypatch):
     spawn = AsyncMock(return_value=(process, None))
     monkeypatch.setattr(proxy, "_is_windows", lambda: True)
     monkeypatch.setattr(proxy, "spawn_in_kill_on_close_job", spawn)
+    _profiles(monkeypatch, {"target": _profile("target")})
     try:
         await proxy.create_ssh_subprocess("ssh", "target", config=_profile("target"))
         assert spawn.await_args.args[:3] == ("ssh", "-o", "ProxyCommand=none")
@@ -227,7 +228,9 @@ async def test_resolved_direct_route_cannot_reenable_native_jump(monkeypatch):
     ("-o", "ProxyJump jump"),
 ])
 async def test_windows_consumes_explicit_jump_before_installing_its_proxy(monkeypatch, options):
-    calls = _profiles(monkeypatch, {"jump": _profile("jump")})
+    calls = _profiles(monkeypatch, {
+        "target": _profile("target", "jump", port=2200), "jump": _profile("jump"),
+    })
     prepared = AsyncMock(return_value=SimpleNamespace())
     monkeypatch.setattr(proxy, "_is_windows", lambda: True)
     monkeypatch.setattr(proxy, "_create_prepared_ssh", prepared)
@@ -243,7 +246,7 @@ async def test_windows_consumes_explicit_jump_before_installing_its_proxy(monkey
     assert proxy_jump.ssh_option(config, "proxyjump") == "jump"
     assert route is not None and route.argv[-1] == "jump"
     assert route.argv[-2] == "target:2200"
-    assert [host for host, _options in calls] == ["jump"]
+    assert [host for host, _options in calls] == ["target", "jump"]
 
 
 def test_jump_projection_preserves_other_options_and_explicit_disable():
@@ -299,6 +302,7 @@ async def test_plain_config_cannot_reenable_an_explicitly_disabled_jump(monkeypa
 
 @pytest.mark.parametrize("command", ["owned-proxy --stdio", "none"])
 async def test_cli_proxy_command_overrides_profile_jump(monkeypatch, command):
+    _profiles(monkeypatch, {"target": _profile("target", proxy_command=command)})
     prepared = AsyncMock(return_value=SimpleNamespace())
     monkeypatch.setattr(proxy, "_is_windows", lambda: True)
     monkeypatch.setattr(proxy, "_create_prepared_ssh", prepared)
@@ -314,6 +318,7 @@ async def test_cli_proxy_command_overrides_profile_jump(monkeypatch, command):
 
 
 async def test_cli_proxy_command_is_not_lost_from_a_direct_profile(monkeypatch):
+    _profiles(monkeypatch, {"target": _profile("target", proxy_command="owned-proxy --stdio")})
     prepared = AsyncMock(return_value=SimpleNamespace())
     monkeypatch.setattr(proxy, "_is_windows", lambda: True)
     monkeypatch.setattr(proxy, "_create_prepared_ssh", prepared)
@@ -339,7 +344,7 @@ def test_cli_proxy_selection_preserves_first_selected_route(options, command, ju
 @pytest.mark.parametrize("options", [("-F", "selected.conf"), ("-Fselected.conf",)])
 async def test_cli_config_selection_rebinds_root_and_every_jump(monkeypatch, options):
     selected_root = _profile(
-        "target", config_file="selected.conf", hostname="selected-target.example", port=2200,
+        "target", "gateway", config_file="selected.conf", hostname="selected-target.example", port=2200,
     )
     gateway = _profile("gateway", config_file="selected.conf", identity_file="selected-key")
     calls = _profiles(monkeypatch, {"target": selected_root, "gateway": gateway})
@@ -362,9 +367,49 @@ async def test_cli_config_selection_rebinds_root_and_every_jump(monkeypatch, opt
     assert calls[0][1] == {
         "config_file": "selected.conf", "resolve_timeout": 15,
         "ssh_executable": "selected-ssh", "resolve_cwd": "caller-work",
-        "process_env": environment, "resolve_args": arguments[1:],
+        "process_env": environment, "resolve_args": ("-F", "selected.conf", *arguments[1:]),
     }
     assert calls[1][1]["config_file"] == "selected.conf"
+
+
+@pytest.mark.parametrize("setting", [
+    "ProxyCommand proxy --endpoint=value",
+    "ProxyCommand = proxy --endpoint=value",
+    "ProxyCommand=proxy --endpoint=value",
+])
+def test_proxy_setting_uses_its_first_name_separator_not_command_equals(setting):
+    _args, config = proxy_jump.prepare_jump_arguments(
+        ("ssh", "-o", setting, "target"), SSHConfig("target"),
+    )
+    assert config.proxy_command == "proxy --endpoint=value"
+
+
+def test_tag_option_does_not_consume_the_destination_position():
+    args, config = proxy_jump.prepare_jump_arguments(
+        ("ssh", "-P", "scope", "target", "-J", "jump"), SSHConfig("target"),
+    )
+    assert args == ("ssh", "-P", "scope", "target")
+    assert proxy_jump.ssh_option(config, "proxyjump") == "jump"
+
+
+@pytest.mark.parametrize("filename", [None, "same.conf"])
+async def test_profile_routing_refreshes_on_relaunch_with_the_same_cached_config(
+    monkeypatch, filename,
+):
+    cached = _profile("target", config_file=filename)
+    profiles = {"target": cached, "gateway": _profile("gateway", config_file=filename)}
+    calls = _profiles(monkeypatch, profiles)
+    prepared = AsyncMock(return_value=SimpleNamespace())
+    monkeypatch.setattr(proxy, "_is_windows", lambda: True)
+    monkeypatch.setattr(proxy, "_create_prepared_ssh", prepared)
+    await proxy.create_ssh_subprocess("selected-ssh", "target", config=cached)
+    assert prepared.await_args.args[2] is None
+    profiles["target"] = _profile("target", "gateway", config_file=filename)
+    await proxy.create_ssh_subprocess("selected-ssh", "target", config=cached)
+    route = prepared.await_args.args[2]
+    assert route is not None and route.argv[-1] == "gateway"
+    assert proxy_jump.ssh_option(cached, "proxyjump") is None
+    assert [host for host, _options in calls] == ["target", "target", "gateway"]
 
 
 @pytest.mark.parametrize("args", [
