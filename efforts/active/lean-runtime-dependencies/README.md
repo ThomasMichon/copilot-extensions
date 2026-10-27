@@ -391,6 +391,14 @@ transfer without acceptance by a named tracked objective.
   coverage. All eight declared installer-engine consumers now have release
   entries in this contribution; no helper or caller behavior changed for that
   metadata-only repair.
+- The final corrected packet passed 169 controls with zero failures or skips,
+  including the existing-object trailing-separator refusals and valid
+  root-directory custody on both hosts. Test time was 87.27 seconds, 101.35
+  seconds including preparation and settlement. All nine bound source/runner
+  files remained unchanged and the canonical cleanup completed. The matching
+  hardened Linux packet passed four source controls with 165 explicit native
+  skips. Current-head independent review, required CI and merge remain gates;
+  no complete canonical-path or interpreter/source admission is inferred.
 
 ### 2026-10-26 - Core held-file signer candidate
 
