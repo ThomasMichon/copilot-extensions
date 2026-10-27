@@ -2470,6 +2470,9 @@ When project commands or receipts exist, cleanup resolves an already completed,
 selected-source-qualified interpreter read-only; it never constructs a runtime
 to uninstall one. A stamp-only project with neither candidate needs no runtime.
 Missing or foreign ownership still refuses before project-command mutation.
+Uninstall resolves the existing CWD-based project policy before admission and
+forwards that effective name through lifecycle and staging re-execution.
+An explicit project name retains precedence.
 Worktrees also checks exact owned global/update commands before accepting a
 finite `absent` result, including a missing or durable-only runtime root.
 Orphaned owned commands without runtime ownership evidence refuse without

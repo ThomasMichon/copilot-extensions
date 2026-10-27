@@ -40,7 +40,7 @@ def _host(shell: str) -> str:
     return executable
 
 
-def _run(arguments, home, *, env=None, input=None, timeout=60):
+def _run(arguments, home, *, env=None, input=None, timeout=60, cwd=None):
     environment = {
         key: value for key, value in os.environ.items()
         if not key.startswith(("COPILOT_PLUGIN_", "COPILOT_EXTENSIONS_", "AGENT_WORKTREES_"))
@@ -51,7 +51,7 @@ def _run(arguments, home, *, env=None, input=None, timeout=60):
     )
     environment.update(env or {})
     return run_headless(
-        arguments, cwd=home, env=environment, input=input,
+        arguments, cwd=home if cwd is None else cwd, env=environment, input=input,
         capture_output=True, text=True, encoding="utf-8", timeout=timeout,
     )
 
@@ -456,7 +456,7 @@ def _negative_admission_path(home: Path, shell: str, executable: str) -> Path:
 
     directory = home / "admission-tools"
     directory.mkdir()
-    names = ("dirname", "cygpath") if os.name == "nt" else ("dirname",)
+    names = ("dirname", "basename", "cygpath") if os.name == "nt" else ("dirname", "basename")
     if shell == "bash":
         for name in names:
             result = _run(
@@ -680,6 +680,25 @@ def test_pre_admission_precedes_identical_standard_stage(suffix):
     assert source.index("--check --check-consumers") < source.index(start)
     assert source.index("absent", source.index("--check --check-consumers")) < source.index(start)
     assert "--remove-runtime" not in source[:source.index(start)]
+
+
+@pytest.mark.parametrize("suffix", ["sh", "ps1"])
+def test_effective_project_is_resolved_and_forwarded_before_lifecycle(suffix):
+    source = (SCRIPTS / f"install.{suffix}").read_text(encoding="utf-8-sig")
+    admission = source.index("# === command-lifecycle: admission before staging ===")
+    if suffix == "sh":
+        assert source.index(
+            '__aw_project_name="$(_aw_resolve_installer_project_name "$__aw_project_name")"'
+        ) < admission
+        assert source.index('__aw_args+=(--project-name "$__aw_project_name")') < source.index(
+            'set -- "${__aw_args[@]}"',
+        ) < admission
+        assert source.count('cwd_name="$(basename "$PWD")"') == 1
+        assert 'PROJECT_NAME="$(_aw_resolve_installer_project_name "$PROJECT_NAME_ARG")"' in source
+    else:
+        assert source.index("$ProjectName = Resolve-InstallerProjectName -Name $ProjectName") < admission
+        assert source.index("$PSBoundParameters['ProjectName'] = $ProjectName") < admission
+        assert source.count("$candidateConf = Join-Path $env:USERPROFILE") == 1
 
 
 def test_late_copied_posix_account_isolation_invalidates_binding(

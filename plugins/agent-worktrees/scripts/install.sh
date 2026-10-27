@@ -44,7 +44,18 @@ __aw_install_dir_arg=""
 __aw_provision_missing_runtime=false
 __aw_remove_config=false
 __aw_project_name=""
+__aw_project_name_index=-1
 __aw_args=("$@")
+_aw_resolve_installer_project_name() {
+    local name="${1:-}" cwd_name
+    if [[ -z "$name" ]]; then
+        cwd_name="$(basename "$PWD")"
+        if [[ "$cwd_name" != agent-worktrees && -f "$HOME/.$cwd_name/config.yaml" ]]; then
+            name="$cwd_name"
+        fi
+    fi
+    printf '%s' "$name"
+}
 __aw_uninstall_native_path() {
     case "$__aw_action:${OSTYPE:-}" in
         uninstall:msys*|uninstall:cygwin*) cygpath -m -- "$1" ;;
@@ -78,6 +89,7 @@ for ((__aw_i = 1; __aw_i < ${#__aw_args[@]}; __aw_i++)); do
         }
         if [[ "${__aw_args[$__aw_i]}" == --project-name ]]; then
             __aw_project_name="${__aw_args[$((__aw_i + 1))]}"
+            __aw_project_name_index=$((__aw_i + 1))
         fi
         ((__aw_i += 1))
     elif [[ "$__aw_action" == uninstall ]]; then
@@ -88,6 +100,17 @@ for ((__aw_i = 1; __aw_i < ${#__aw_args[@]}; __aw_i++)); do
         esac
     fi
 done
+if [[ "$__aw_action" == uninstall && -z "${COPILOT_EXTENSIONS_CONTEXT:-}" &&
+      -z "$__aw_project_name" ]]; then
+    __aw_project_name="$(_aw_resolve_installer_project_name "$__aw_project_name")"
+    if [[ -n "$__aw_project_name" ]]; then
+        if ((__aw_project_name_index >= 0)); then
+            __aw_args[$__aw_project_name_index]="$__aw_project_name"
+        else
+            __aw_args+=(--project-name "$__aw_project_name")
+        fi
+    fi
+fi
 if $__aw_provision_missing_runtime && [[ "$__aw_action" != update ||
     -n "${COPILOT_EXTENSIONS_CONTEXT:-}" || -z "$__aw_install_dir_arg" ||
     -z "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" ]]; then
@@ -787,25 +810,7 @@ done
 # Priority: --project-name arg > existing config
 # CWD is NOT auto-adopted -- pass --project-name to adopt explicitly.
 
-PROJECT_NAME=""
-
-if [[ -n "$PROJECT_NAME_ARG" ]]; then
-    PROJECT_NAME="$PROJECT_NAME_ARG"
-else
-    # Try to infer from CWD basename matching an existing config dir. Never
-    # infer the reserved runtime name itself: ~/.agent-worktrees/config.yaml is
-    # the TOOL's OWN runtime config (always present once installed), not a
-    # user-created project -- inferring it whenever the CWD happens to be a
-    # directory literally named `agent-worktrees` (e.g. this plugin's own
-    # checkout/payload dir) is a guaranteed false positive, not something to
-    # warn about on every routine invocation. Skip inference for it entirely
-    # so the noisy message below is reserved for a genuine explicit
-    # --project-name mistake.
-    _cwd_name="$(basename "$PWD")"
-    if [[ "$_cwd_name" != "agent-worktrees" && -f "$HOME/.$_cwd_name/config.yaml" ]]; then
-        PROJECT_NAME="$_cwd_name"
-    fi
-fi
+PROJECT_NAME="$(_aw_resolve_installer_project_name "$PROJECT_NAME_ARG")"
 # Reserved-name guard: `agent-worktrees` is the runtime's own global command
 # (the project-agnostic shim from bin/agent-worktrees, deployed by
 # deploy_tool_binstub), never a per-project launcher. Auto-inference above

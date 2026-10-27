@@ -198,6 +198,17 @@ function Write-ServiceWarn($message) {{ [Console]::Out.WriteLine($message) }}
             [executable, "-NoProfile", "-NonInteractive", "-File", str(script)])
 
 
+def _project_invocation(home, payload, root, shell, inferred):
+    arguments = _native_arguments(shell, _host(shell), payload, root)
+    if inferred:
+        cwd = home / "fixture"
+        cwd.mkdir(exist_ok=True)
+    else:
+        cwd = home
+        arguments += ["--project-name", "fixture"] if shell == "bash" else ["-ProjectName", "fixture"]
+    return arguments, cwd
+
+
 @pytest.mark.parametrize("shell", ["bash", "powershell", "pwsh"])
 @pytest.mark.parametrize("qualified", [False, True], ids=["package-slot", "source-slot"])
 @pytest.mark.parametrize("foreign", [False, True], ids=["owned", "foreign"])
@@ -290,18 +301,24 @@ def test_existing_project_candidate_still_refuses_without_completed_runtime(proj
 
 
 @pytest.mark.parametrize("shell", ["bash", "powershell", "pwsh"])
-def test_named_project_command_missing_runtime_refuses_before_absent_return(project_install, shell):
-    home, payload, _, durable, environment = project_install
+@pytest.mark.parametrize("inferred", [False, True], ids=["explicit", "inferred-cwd"])
+@pytest.mark.parametrize("candidate", ["command", "receipt"])
+def test_named_project_command_missing_runtime_refuses_before_absent_return(
+    project_install, shell, inferred, candidate,
+):
+    home, payload, default_root, durable, environment = project_install
     root = home / "missing-named-runtime"
-    templates = _load(payload / "src/agent_worktrees/project_command_templates.py")
-    name = next(iter(templates.render("fixture", payload, windows=os.name == "nt")))
-    command = home / ".local/bin" / name
+    if candidate == "command":
+        templates = _load(payload / "src/agent_worktrees/project_command_templates.py")
+        name = next(iter(templates.render("fixture", payload, windows=os.name == "nt")))
+        command = home / ".local/bin" / name
+    else:
+        command = default_root / "binstub-receipts/fixture.json"
     command.parent.mkdir(parents=True, exist_ok=True)
     command.write_bytes(b"unknown existing project command")
     before = {command: (command.read_bytes(), command.stat().st_dev, command.stat().st_ino)}
-    arguments = _native_arguments(shell, _host(shell), payload, root)
-    arguments += ["--project-name", "fixture"] if shell == "bash" else ["-ProjectName", "fixture"]
-    result = _run(arguments, home, env=environment)
+    arguments, cwd = _project_invocation(home, payload, root, shell, inferred)
+    result = _run(arguments, home, env=environment, cwd=cwd)
     assert result.returncode != 0
     assert "No unambiguous completed installed runtime" in result.stderr
     assert not root.exists()
@@ -310,12 +327,12 @@ def test_named_project_command_missing_runtime_refuses_before_absent_return(proj
 
 
 @pytest.mark.parametrize("shell", ["bash", "powershell", "pwsh"])
-def test_named_project_stamp_without_command_or_receipt_uninstalls(project_install, shell):
+@pytest.mark.parametrize("inferred", [False, True], ids=["explicit", "inferred-cwd"])
+def test_named_project_stamp_without_command_or_receipt_uninstalls(project_install, shell, inferred):
     home, payload, root, durable, environment = project_install
     before = _snapshot(root)
-    arguments = _native_arguments(shell, _host(shell), payload, root)
-    arguments += ["--project-name", "fixture"] if shell == "bash" else ["-ProjectName", "fixture"]
-    result = _run(arguments, home, env=environment)
+    arguments, cwd = _project_invocation(home, payload, root, shell, inferred)
+    result = _run(arguments, home, env=environment, cwd=cwd)
     _skip_unrelated_module_consumer(result, before, durable)
     assert result.returncode == 0, result.stdout + result.stderr
     assert not (root / "snapshots/1.0.0").exists()
@@ -325,7 +342,8 @@ def test_named_project_stamp_without_command_or_receipt_uninstalls(project_insta
 
 
 @pytest.mark.parametrize("shell", ["bash", "powershell", "pwsh"])
-def test_whole_native_uninstall_retires_source_qualified_project_command(project_install, shell):
+@pytest.mark.parametrize("inferred", [False, True], ids=["explicit", "inferred-cwd"])
+def test_whole_native_uninstall_retires_source_qualified_project_command(project_install, shell, inferred):
     home, payload, root, durable, environment = project_install
     python, _ = _slot(home, payload, root, True)
     paths, receipt = _publish_project(home, payload, root, python, environment, False)
@@ -333,10 +351,41 @@ def test_whole_native_uninstall_retires_source_qualified_project_command(project
     before[0].update({
         path: (path.read_bytes(), path.stat().st_dev, path.stat().st_ino) for path in paths
     })
-    arguments = _native_arguments(shell, _host(shell), payload, root)
-    arguments += ["--project-name", "fixture"] if shell == "bash" else ["-ProjectName", "fixture"]
-    result = _run(arguments, home, env=environment)
+    arguments, cwd = _project_invocation(home, payload, root, shell, inferred)
+    result = _run(arguments, home, env=environment, cwd=cwd)
     _skip_unrelated_module_consumer(result, before, durable)
     assert result.returncode == 0, result.stdout + result.stderr
     assert not any(path.exists() for path in (*paths, receipt, python))
+    _preserved(durable)
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell", "pwsh"])
+def test_inferred_project_without_candidates_is_cold_noop(project_install, shell):
+    home, payload, default_root, durable, environment = project_install
+    root = home / "missing-inferred-runtime"
+    before = _snapshot(default_root)
+    arguments, cwd = _project_invocation(home, payload, root, shell, True)
+    result = _run(arguments, home, env=environment, cwd=cwd)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not root.exists()
+    _preserved(before[0])
+    _preserved(durable)
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell", "pwsh"])
+def test_explicit_project_wins_over_cwd_inference(project_install, shell):
+    home, payload, _, durable, environment = project_install
+    root = home / "missing-explicit-runtime"
+    templates = _load(payload / "src/agent_worktrees/project_command_templates.py")
+    name = next(iter(templates.render("fixture", payload, windows=os.name == "nt")))
+    command = home / ".local/bin" / name
+    command.parent.mkdir(parents=True, exist_ok=True)
+    command.write_bytes(b"unknown existing project command")
+    before = {command: (command.read_bytes(), command.stat().st_dev, command.stat().st_ino)}
+    arguments, cwd = _project_invocation(home, payload, root, shell, True)
+    arguments += ["--project-name", "other"] if shell == "bash" else ["-ProjectName", "other"]
+    result = _run(arguments, home, env=environment, cwd=cwd)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not root.exists()
+    _preserved(before)
     _preserved(durable)

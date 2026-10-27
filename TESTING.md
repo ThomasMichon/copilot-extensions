@@ -122,6 +122,9 @@ Worktrees' `test_uninstall_project_commands.py` uses a real completed fixture
 environment to exercise selected-source interpreter resolution without runtime
 construction, exact owned-project command retirement and foreign-command
 preservation. Copied account lookups are isolated before publishing ownership.
+Explicit-name and actual-CWD inference controls cover missing-runtime refusal,
+stamp-only cleanup, explicit precedence and completed source-qualified cleanup
+through staging.
 `tools/test_installer_engine_uninstall_darwin.py` covers bounded libproc/sysctl
 inspection, incarnation/ownership/ABI/partial-read refusal and literal arguments,
 including empty strings. Its native live-process case requires actual macOS.

@@ -73,6 +73,18 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
 
+function Resolve-InstallerProjectName {
+    param([AllowEmptyString()][string]$Name)
+    if (-not $Name -and (Get-Location).Path -match '[\\/]([^\\/]+)$') {
+        $cwdName = $Matches[1]
+        if ($cwdName -ne 'agent-worktrees') {
+            $candidateConf = Join-Path $env:USERPROFILE ".$cwdName\config.yaml"
+            if (Test-Path $candidateConf) { $Name = $cwdName }
+        }
+    }
+    return $Name
+}
+
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
 function Copy-InstallerStageDirectory {
     param([string]$Source, [string]$Destination)
@@ -169,6 +181,10 @@ if ($InstallDir) {
     $InstallDir = Join-Path $env:USERPROFILE '.agent-worktrees'
 }
 $ContextualInstall = [bool]$env:COPILOT_EXTENSIONS_CONTEXT
+if ($Action -eq 'uninstall' -and -not $ContextualInstall -and -not $ProjectName) {
+    $ProjectName = Resolve-InstallerProjectName -Name $ProjectName
+    if ($ProjectName) { $PSBoundParameters['ProjectName'] = $ProjectName }
+}
 if ($ProvisionMissingRuntime -and (
     $Action -ne 'update' -or $ContextualInstall -or -not $InstallDirSpecified -or
     -not $env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE
@@ -983,25 +999,8 @@ $LegacyBinstubs = @(
 # RepoDir: detect from existing config, then CWD.
 $RepoDir = $null
 
-# Infer project name: explicit parameter > existing config matching CWD
-if (-not $ProjectName) {
-    # Try to infer from existing config directories (find any .{name}/config.yaml).
-    # Never infer the reserved runtime name itself: ~/.agent-worktrees/config.yaml
-    # is the TOOL's OWN runtime config (always present once installed), not a
-    # user-created project -- inferring it whenever the CWD happens to be a
-    # directory literally named `agent-worktrees` (e.g. this plugin's own
-    # checkout/payload dir) is a guaranteed false positive, not something to
-    # warn about on every routine invocation. Skip inference for it entirely so
-    # the noisy warning below is reserved for a genuine explicit -ProjectName
-    # mistake.
-    if ((Get-Location).Path -match '[\\/]([^\\/]+)$') {
-        $cwdName = $Matches[1]
-        if ($cwdName -ne 'agent-worktrees') {
-            $candidateConf = Join-Path $env:USERPROFILE ".$cwdName\config.yaml"
-            if (Test-Path $candidateConf) { $ProjectName = $cwdName }
-        }
-    }
-}
+# Infer project name: explicit parameter > existing config matching CWD.
+$ProjectName = Resolve-InstallerProjectName -Name $ProjectName
 # Don't auto-adopt the CWD repo -- project association is explicit.
 # Runtime installs fine without a project name.
 # Reserved-name guard: `agent-worktrees` is the runtime's own global command
