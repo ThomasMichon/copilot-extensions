@@ -145,7 +145,7 @@ def test_two_builders_publish_once_under_existing_kernel_lease(assembly):
     assert len(list((root / ".source-wheel-cache" / "inputs").glob("*/wheel.json"))) == 1
 
 
-@pytest.mark.parametrize("changed", ["source", "backend", "target", "extras", "uv", "environment"])
+@pytest.mark.parametrize("changed", ["source", "tree-mode", "backend", "target", "extras", "uv", "environment"])
 def test_composer_identity_invalidates_each_admitted_build_input(assembly, tmp_path, monkeypatch, changed):
     import runtime_source_wheels as completion
     from build_toolchain_lock import ToolchainLock
@@ -155,7 +155,10 @@ def test_composer_identity_invalidates_each_admitted_build_input(assembly, tmp_p
     python = tmp_path / "python"
     uv.write_bytes(b"selected uv")
     python.write_bytes(b"selected python")
-    record = {"source": {"assembly_hash": "1" * 64}, "target": {"tags": ["py3-none-any"]}, "extras": []}
+    record = {
+        "source": {"assembly_hash": "1" * 64, "source_tree": "5" * 40},
+        "target": {"tags": ["py3-none-any"]}, "extras": [],
+    }
     profile = {"wheels": [{
         "name": "backend", "version": "1", "filename": "backend-1-py3-none-any.whl",
         "sha256": "sha256:" + "2" * 64,
@@ -174,6 +177,8 @@ def test_composer_identity_invalidates_each_admitted_build_input(assembly, tmp_p
     assert len(builds) == 1
     if changed == "source":
         record["source"]["assembly_hash"] = "3" * 64
+    elif changed == "tree-mode":
+        record["source"]["source_tree"] = "6" * 40
     elif changed == "backend":
         profile["wheels"][0]["sha256"] = "sha256:" + "4" * 64
     elif changed == "target":

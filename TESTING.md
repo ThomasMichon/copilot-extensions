@@ -1155,7 +1155,8 @@ changed seasoning identity, no lock creation and zero feed requests. A current
 build-wheel denial must refuse before tools installation or backend execution.
 The exact admitted offline lane also caches locally built wheels in the
 installation owner's `.source-wheel-cache/inputs`. Reuse binds authenticated
-source content, the complete selected backend wheel identities, target/profile,
+source content and Git tree (including modes), the complete selected backend
+wheel identities, target/profile,
 executor/tooling bytes and the actual sanitized build environment. Retained
 temporary paths and package versions alone never identify a build. Cache
 publication uses the existing per-key kernel lease and an atomic completed-entry
@@ -1165,7 +1166,9 @@ inspection and installed-content checks. The cache is not source/feed approval
 and does not enable another consumer. `tools/test_runtime_source_wheel_cache.py`
 covers failure, corruption, input invalidation and concurrent construction;
 the real source-build packet additionally checks zero repeated backend builds
-across fresh retained workspaces and a source-body-only invalidation.
+across fresh retained workspaces and source-body/mode-only invalidation. Compact
+source content and modes are checked before a newly built wheel can be
+published, so a backend-mutated source refuses without poisoning a later retry.
 Source-mode configuration refusals additionally forbid effectful compiler
 execution and require zero package requests for implicit public indexes and
 unsupported index, credential, TLS and proxy settings.

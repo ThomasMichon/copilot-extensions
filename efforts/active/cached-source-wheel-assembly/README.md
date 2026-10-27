@@ -168,6 +168,16 @@ evidence is no longer needed.
 
 ## Journal
 
+### 2026-10-27 - Corrected review-discovered cache invalidation gaps
+
+The first review identified permission-only source changes and publication
+before the compact backend source was rechecked. The binding now includes the
+authenticated Git tree, and fresh cache publication checks compact source
+content and modes before publishing. Actual backend-mutation/retry and POSIX
+mode-only wheel-permission controls were added. The updated targeted Windows
+packet passed19 controls, with its two POSIX-only cases skipped; updated
+cross-platform qualification and review remain required.
+
 ### 2026-10-27 - Implemented the exact-input composition slice locally
 
 The ordinary retained UV preflight supplies configuration and source custody,

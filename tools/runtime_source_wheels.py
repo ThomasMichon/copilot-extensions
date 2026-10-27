@@ -13,6 +13,7 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import stat
 import time
 
 from packaging.requirements import Requirement
@@ -113,6 +114,7 @@ def _build_cache_binding(record, build_record, toolchain, uv, *, deadline, opaqu
         # Retention remaps local paths into a fresh private workspace. Its raw
         # hash is custody evidence, not a stable identity across transactions.
         "source_sha256": record["source"]["assembly_hash"],
+        "source_tree": record["source"]["source_tree"],
         "target": record["target"], "extras": record["extras"],
         "build_wheels": sorted(
             ({key: item[key] for key in ("name", "version", "filename", "sha256")}
@@ -263,11 +265,22 @@ def retain_source_profile(
             selected_projects = _selected_projects(
                 frozen.packages, root, record["extras"], record["target"]["environment"], deadline,
             )
+        frozen_modes = (
+            tuple((path, stat.S_IMODE(path.stat().st_mode)) for path in _source_files(frozen.packages))
+            if frozen is not None else ()
+        )
+
+        def verify_compact_source():
+            if frozen is not None:
+                files = _source_files(frozen.packages)
+                modes = tuple((path, stat.S_IMODE(path.stat().st_mode)) for path in files)
+                if before != runtime.fingerprint_source(files) or modes != frozen_modes:
+                    raise ProfileError("compact source changed before wheel cache publication")
+
         local_projects = {}
         for project_path in selected_projects:
             candidate.verify(deadline=deadline)
-            if frozen is not None and before != runtime.fingerprint_source(_source_files(frozen.packages)):
-                raise ProfileError("compact source changed before backend execution")
+            verify_compact_source()
             declaration = _toml(project_path / "pyproject.toml")["project"]
 
             def build(destination):
@@ -292,6 +305,7 @@ def retain_source_profile(
                     raise ProfileError("built first-party wheel filename differs from retained source")
                 if _build_environment_identity(opaque_identity) != cache_binding["environment"]:
                     raise ProfileError("source build environment changed during construction")
+                verify_compact_source()
                 candidate.verify(deadline=deadline)
 
             if cache_binding is None:
@@ -317,8 +331,7 @@ def retain_source_profile(
             expected[wheel.name] = _digest(wheel, limits.max_archive_bytes, deadline)
         if before != runtime.fingerprint_source(_source_files(projects)):
             raise ProfileError("source changed while building the exact wheel closure")
-        if frozen is not None and before != runtime.fingerprint_source(_source_files(frozen.packages)):
-            raise ProfileError("compact source changed while building the exact wheel closure")
+        verify_compact_source()
         observed_toolchain = toolchain.record if build_record is None else {
             "packages": toolchain.packages, "admitted_profile": build_profile.record(),
         }
