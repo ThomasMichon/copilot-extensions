@@ -55,6 +55,37 @@ def test_candidate_inventory_keeps_same_name_plugin_and_standalone_distinct(tmp_
     }
 
 
+@pytest.mark.parametrize("foreign", [False, True])
+def test_candidate_closure_uses_selected_root_without_mutating_reference_owner(tmp_path, monkeypatch, foreign):
+    import build_python_artifacts as builder
+
+    candidate, host = tmp_path / "candidate", tmp_path / "host"
+    consumer = candidate / "fleet-manager"
+    consumer.mkdir(parents=True)
+    for root in (candidate, host):
+        library = root / "libs" / "helper"
+        (library / "src" / "helper").mkdir(parents=True)
+        (library / "src" / "helper" / "__init__.py").write_text("")
+        (library / "pyproject.toml").write_text(
+            '[project]\nname="helper"\nversion="1"\n',
+        )
+    (consumer / "pyproject.toml").write_text(
+        '[project]\nname="consumer"\nversion="1"\n[tool.uv.sources]\n'
+        'helper={path="' + ("../../host/libs/helper" if foreign else "../libs/helper")
+        + '",editable=true}\n',
+    )
+    monkeypatch.setattr(builder, "REPO", candidate)
+    monkeypatch.setattr(builder, "LIBS_DIR", candidate / "libs")
+    monkeypatch.setattr(builder.uer, "REPO", host)
+    monkeypatch.setattr(builder.uer, "LIBS_DIR", host / "libs")
+    if foreign:
+        with pytest.raises(builder.ArtifactBuildError, match="not libs/helper"):
+            builder.resolve_vendored_libs(consumer)
+    else:
+        assert builder.resolve_vendored_libs(consumer) == [("helper", candidate / "libs" / "helper")]
+    assert builder.uer.REPO == host and builder.uer.LIBS_DIR == host / "libs"
+
+
 @pytest.mark.parametrize("failure", ["missing", "malformed"])
 def test_registered_candidate_metadata_cannot_be_silently_omitted(tmp_path, failure):
     source = tmp_path / "services" / "pr"

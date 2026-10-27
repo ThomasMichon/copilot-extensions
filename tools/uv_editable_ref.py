@@ -254,7 +254,7 @@ def _find_symlink(tree: Path, *, skip_test_runs: bool = True) -> str | None:
     return None
 
 
-def uv_editable_problems(consumer: str, consumer_dir: Path) -> list[str]:
+def uv_editable_problems(consumer: str, consumer_dir: Path, *, repo: Path | None = None) -> list[str]:
     """Validity problems in ``consumer``'s `uv`-editable canonical-reference
     entries: a missing ``editable = true`` (would silently resolve to a
     frozen, non-live copy on `dev` -- the exact hazard the second course
@@ -269,6 +269,8 @@ def uv_editable_problems(consumer: str, consumer_dir: Path) -> list[str]:
     skipping validation (and letting promotion leave the symlink -- and
     whatever unresolved external source entry it hides -- in the
     snapshot)."""
+    root = REPO if repo is None else repo
+    libraries = LIBS_DIR if repo is None else root / "libs"
     pyproject = consumer_dir / "pyproject.toml"
     if pyproject.is_symlink():
         return [
@@ -291,14 +293,14 @@ def uv_editable_problems(consumer: str, consumer_dir: Path) -> list[str]:
                 "separator) -- refusing"
             )
             continue
-        if not editable and not is_retained_flat_ref(consumer_dir, name, LIBS_DIR / lib):
+        if not editable and not is_retained_flat_ref(consumer_dir, name, libraries / lib):
             problems.append(
                 f"{consumer}: {name} references {raw_path} outside its own "
                 "root but is missing editable = true (would resolve to a "
                 "frozen, non-live copy)"
             )
-        canonical_unresolved = LIBS_DIR / lib
-        bad_ancestor = _find_symlinked_ancestor(canonical_unresolved, REPO)
+        canonical_unresolved = libraries / lib
+        bad_ancestor = _find_symlinked_ancestor(canonical_unresolved, root)
         canonical = (consumer_dir / raw_path).resolve()
         if bad_ancestor is not None:
             problems.append(
