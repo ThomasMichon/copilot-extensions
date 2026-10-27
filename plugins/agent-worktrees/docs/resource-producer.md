@@ -11,6 +11,10 @@ Retained local relationship responsibility uses the separate
 allocation/absence protocol. Both share protected ledger preservation;
 their version/lifetime, callbacks and transaction semantics remain distinct.
 
+The [owned-worktree provider](worktree-allocation.md) likewise shares protected
+ledger storage, but retains actual child lifecycle responsibility rather than
+disposable-resource absence or relationship retirement.
+
 Provider callback commands may include a registered argument prefix, for example
 `["agent-containers", "raw-docker"]`. Status and reclaim retain their own prefix
 before `claim-status` or `claim-reclaim` and the resource identifier. Installation

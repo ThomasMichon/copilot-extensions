@@ -71,7 +71,37 @@ def allocation_facts(config: cfg.Config, **options) -> dict:
         # Attempt provenance is evidence about the original allocation, not a
         # logical revision authorizing another one.
         "dispatch_task_id": (options["dispatch_attempt"] or {}).get("task_id"),
+        **({"receiving_allocation": options["receiving_allocation"].to_fields()}
+           if options.get("receiving_allocation") is not None else {}),
     }
+
+
+def inspect(config: cfg.Config, key: str) -> dict | None:
+    """Read retained original-operation evidence without creating a missing journal."""
+    path = cfg.tracking_dir(config.repo_name).parent / "workspace-creation.sqlite3"
+    if not path.exists():
+        return None
+    digest = hashlib.sha256(key.encode()).hexdigest()
+    connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=5)
+    try:
+        row = connection.execute(
+            "SELECT version, facts, status, worktree FROM creations WHERE key_digest=?", (digest,),
+        ).fetchone()
+        if row is None:
+            return None
+        if row[0] != SCHEMA_VERSION:
+            raise CreationRequestFailure("unsupported", "Unsupported creation journal version")
+        facts = json.loads(row[1])
+        if not isinstance(facts, dict):
+            raise CreationRequestFailure("invalid", "Invalid retained creation facts")
+        return {
+            "facts": facts, "status": row[2],
+            "worktree": json.loads(row[3]) if row[3] is not None else None,
+        }
+    except sqlite3.DatabaseError as exc:
+        raise CreationRequestFailure("invalid", f"Cannot inspect creation journal: {exc}") from exc
+    finally:
+        connection.close()
 
 
 def _connection(path: Path) -> sqlite3.Connection:
