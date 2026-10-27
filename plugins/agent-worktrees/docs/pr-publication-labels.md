@@ -57,8 +57,10 @@ result. It never replaces/removes labels or reapplies create-only `pr.labels`.
 Configured consent and hold labels cannot be selected as publication labels.
 GitHub and Azure DevOps support this optional provider capability; other
 providers report an unsupported metadata result without repeating publication.
-GitHub label definitions must already exist and the acting account needs label
-write permission. No repository labels or permissions are provisioned.
+The acting account needs label write permission. Provider label-creation
+semantics apply: GitHub's additive issue-label endpoint can create a missing
+label definition while attaching it. No separate definition-provisioning or
+permission-management request is made.
 
 Create results and successful `push-changes --json` results include
 `publication_labels` when reconciliation ran. `ok: false` retains the PR
