@@ -73,10 +73,33 @@ def read_delta_file(
     return connector._file_entry(path, target, content)
 
 
+def read_current_file(connector: GitRepoConnector, path: str, target: str) -> FileEntry | None:
+    raw = connector._git_bytes(["ls-tree", "-z", target, "--", f":(literal){path}"])
+    if not raw:
+        return None
+    records = raw.split(b"\0")
+    if len(records) != 2 or records[-1] != b"" or b"\t" not in records[0]:
+        raise ValueError("Invalid Git hinted tree record")
+    header, raw_path = records[0].split(b"\t", 1)
+    fields = header.decode("ascii").split()
+    if (
+        len(fields) != 3 or decode_git_path(raw_path) != path
+        or not immutable_oid(fields[2])
+        or (fields[0], fields[1]) not in {
+            ("100644", "blob"), ("100755", "blob"), ("120000", "blob"),
+            ("040000", "tree"), ("160000", "commit"),
+        }
+    ):
+        raise ValueError("Invalid Git hinted tree identity")
+    return read_delta_file(connector, path, target, fields[0], fields[2], "M")
+
+
 def discover_git_delta(
     connector: GitRepoConnector,
     last_commit: str | None,
     cancel_check: Callable[[], None] | None = None,
+    *,
+    refresh_paths: tuple[str, ...] = (),
 ) -> SourceDelta:
     connector._resolve()
     target = connector._index_commit
@@ -87,7 +110,7 @@ def discover_git_delta(
     assert last_commit is not None
     if cancel_check:
         cancel_check()
-    if last_commit == target:
+    if last_commit == target and not refresh_paths:
         return SourceDelta(commit=target)
     try:
         connector._git(["merge-base", "--is-ancestor", last_commit, target])
@@ -96,12 +119,22 @@ def discover_git_delta(
             "Git cursor is unavailable or history was rewritten; run an explicit full reindex",
         ) from exc
     result = SourceDelta(commit=target)
+    seen: set[str] = set()
     for path, mode, blob, status in range_records(connector, last_commit, target):
         if cancel_check:
             cancel_check()
         if not connector._is_indexable_path(path):
             continue
+        seen.add(path)
         entry = read_delta_file(connector, path, target, mode, blob, status)
+        if entry is None:
+            result.deletions.append(DeletedFile(connector.source_name, path))
+        else:
+            result.upserts.append(entry)
+    for path in sorted(set(refresh_paths) - seen):
+        if cancel_check:
+            cancel_check()
+        entry = read_current_file(connector, path, target)
         if entry is None:
             result.deletions.append(DeletedFile(connector.source_name, path))
         else:

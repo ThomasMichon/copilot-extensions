@@ -81,7 +81,9 @@ was discarded. Committed source state, path checkpoints and canonical data
 remain untouched, so the caller can separately request reconciliation from
 the unchanged checkpoint. A 404, stale item or exhausted budget never invokes
 discard automatically and never becomes a tombstone. Completed v1 manifests
-remain mandatory replay, not eligible for this operation.
+remain mandatory replay, not eligible for this operation. Expanded v3 completed
+manifests carrying polling-refresh generations are likewise mandatory replay,
+never eligible for acquisition discard; ordinary manifests retain v1 encoding.
 This adds no external-provider CLI flag;
 CLI delta-v1 providers retain their existing complete-result contract.
 
@@ -705,6 +707,32 @@ The polling cursor remains unchanged, including on an empty range. Acquired
 manifests use the existing pending-crawl replay before a retry observes newer
 canonical content. Ordinary ref resolution/fetch policy is unchanged: a pinned
 local remote-tracking ref is not proof of remote freshness.
+
+Git also declares `hint_poll_refresh = True`: a hinted edit/deletion must remain
+a candidate even after its pending manifest completes. Otherwise an unhinted
+revert can disappear from the next net polling diff. The existing pending-crawl
+owner therefore transactionally retains each hinted file candidate and a unique
+generation in the same path database **before** indexing effects. An ordinary
+poll snapshots those candidates and unions them with its range diff, reading
+each identity once at its pinned ref even when the net diff is empty. The actual
+`discover_delta` callable advertises `poll_refresh_versions = (1,)` and accepts
+`refresh_paths`; unsupported replacements refuse instead of dropping candidates.
+Hint preflight checks this support before opening stores/embedding clients.
+This connector requirement survives wrappers around `discover_hints`.
+
+The complete manifest records candidate generations. Only after canonical/
+vector writes and source-state publication does the journal atomically clear
+its pending manifest and the covered generations. A newer delivery's generation
+survives an older poll's completion; interrupted state/completion replays pinned
+work. Complete explicit reconciliation can cover the same candidates, including
+already-deleted identities. Aliases, account/ref changes and source retirement
+cannot bypass outstanding candidate ownership.
+
+This is neither another polling cursor nor a source lock. Old readers reject
+required v3 manifest metadata; v1 manifests without this metadata remain byte-
+compatible. Finish both pending acquisition **and** outstanding Git candidate
+refresh before rolling back to a reader that does not understand this expansion.
+No automatic discard, broad rebuild or unscoped ledger cleanup is introduced.
 
 GitHub implements targeted positive canonical decimal issue/PR numbers, unioned
 from `item_ids` and `metadata_revisions.item_id`. For this connector, metadata

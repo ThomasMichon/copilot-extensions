@@ -71,7 +71,11 @@ def test_distinct_and_duplicate_ranges_union_candidates_not_content_authority(re
 
 
 @pytest.mark.parametrize("filename", [
-    "edit.md", "prefix[1].md", ":path.md",
+    "edit.md", "prefix[1].md",
+    pytest.param(
+        ":path.md",
+        marks=pytest.mark.skipif(os.name == "nt", reason="Win32 interprets colons as data streams"),
+    ),
     pytest.param(
         "tab\tand\nnewline.md",
         marks=pytest.mark.skipif(os.name == "nt", reason="Win32 forbids control-character filenames"),
@@ -304,18 +308,15 @@ def test_configured_static_account_binds_only_after_explicit_credential_resoluti
     assert kwargs.get("hint_account") == ("selected" if token else None)
 
 
-@pytest.mark.parametrize("selected", [False, True], ids=["legacy", "source-aware"])
-def test_native_engine_replays_pending_git_hints_then_refreshes_canonical_revert(
-    repo, tmp_path, monkeypatch, selected,
-):
+@pytest.fixture(params=[False, True], ids=["legacy", "source-aware"])
+def native_git(repo, tmp_path, monkeypatch, request):
     from test_consumer_runtime import Client
     from agent_index.index_config import IndexConfig, ModelProfile
     from agent_index.indexing.embedding_runtime import EmbeddingRuntime
-    from agent_index.indexing.pending_crawl import PendingCrawls
     from agent_index.store.multi_model_store import MultiModelStore
     from agent_index.store.source_layout import LAYOUT
 
-    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT if selected else "")
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT if request.param else "")
     monkeypatch.setattr(MultiModelStore, "compact", lambda self: {})
     config = IndexConfig(
         data_dir=tmp_path / "native", cluster_enabled=False,
@@ -345,6 +346,16 @@ def test_native_engine_replays_pending_git_hints_then_refreshes_canonical_revert
             source=spec.name, config=config, source_specs=[spec], embedding_runtime=runtime, **kwargs,
         )
 
+    return config, spec, run, events, callbacks
+
+
+def test_native_engine_replays_pending_git_hints_then_refreshes_canonical_revert(
+    repo, monkeypatch, native_git,
+):
+    from agent_index.indexing.pending_crawl import PendingCrawls
+    from agent_index.store.multi_model_store import MultiModelStore
+
+    config, spec, run, events, callbacks = native_git
     base = git(repo, "rev-parse", "HEAD")
     assert "sources_failed" not in run(full=True)
     (repo / "edit.md").write_text("interrupted event\n")
@@ -373,7 +384,9 @@ def test_native_engine_replays_pending_git_hints_then_refreshes_canonical_revert
     monkeypatch.setattr(GitRepoConnector, "discover_hints", measured)
     run(change_hints=envelope)
     assert observed == [envelope]
-    assert spec.name not in PendingCrawls(paths).sources()
+    scope = recovery_scope(engine.source_scope_hash(spec), connector(repo))
+    assert PendingCrawls(paths).read_payload(spec.name, scope) is None
+    assert spec.name in PendingCrawls(paths).sources()
     store = MultiModelStore(config.lance_dir)
     document = store.get_document(spec.name, "edit.md")
     assert document.content == "edit.md\n" and document.metadata["commit"] == target
@@ -386,3 +399,125 @@ def test_native_engine_replays_pending_git_hints_then_refreshes_canonical_revert
     assert events[before:] == ["close:a"]
     assert store.content_store._get_or_create_table().version == version
     assert IndexState.load(config.state_file).sources[spec.name].last_commit == base
+
+
+@pytest.mark.parametrize("change", ["edit", "delete", "add", "rename"])
+def test_native_hint_then_unhinted_revert_is_refreshed_before_poll_checkpoint(
+    repo, native_git, monkeypatch, change,
+):
+    from agent_index.indexing.pending_crawl import PendingCrawls
+    from agent_index.store.multi_model_store import MultiModelStore
+
+    config, spec, run, _, _ = native_git
+    base = git(repo, "rev-parse", "HEAD")
+    assert "sources_failed" not in run(full=True)
+    if change == "delete":
+        (repo / "edit.md").unlink()
+    elif change == "rename":
+        (repo / "edit.md").rename(repo / "new.md")
+    elif change == "add":
+        (repo / "new.md").write_text("hinted addition\n")
+    else:
+        (repo / "edit.md").write_text("hinted content\n")
+    middle = commit(repo)
+    run(change_hints=hints((base, middle)))
+    journal = PendingCrawls(PathIndex(config.data_dir / "path_index.db"))
+    assert spec.name in journal.sources()
+    assert IndexState.load(config.state_file).sources[spec.name].last_commit == base
+    first_store = MultiModelStore(config.lance_dir)
+    if change in {"delete", "rename"}:
+        assert first_store.get_document(spec.name, "edit.md") is None
+    elif change == "edit":
+        assert first_store.get_document(spec.name, "edit.md").content == "hinted content\n"
+    else:
+        assert first_store.get_document(spec.name, "new.md").content == "hinted addition\n"
+    if change == "rename":
+        (repo / "new.md").rename(repo / "edit.md")
+    elif change == "add":
+        (repo / "new.md").unlink()
+    else:
+        (repo / "edit.md").write_text("edit.md\n")
+    target = commit(repo)
+    for name in ("discover", "discover_changed", "list_paths", "_tracked_paths", "_commit_shas"):
+        monkeypatch.setattr(GitRepoConnector, name, forbidden)
+    assert "sources_failed" not in run()
+    current = MultiModelStore(config.lance_dir).get_document(spec.name, "edit.md")
+    assert current.content == "edit.md\n"
+    if change != "add":
+        assert current.metadata["commit"] == target
+    assert MultiModelStore(config.lance_dir).get_document(spec.name, "new.md") is None
+    assert IndexState.load(config.state_file).sources[spec.name].last_commit == target
+    assert spec.name not in journal.sources()
+    version = MultiModelStore(config.lance_dir).content_store._get_or_create_table().version
+    assert run()["chunks_total"] == 0
+    assert MultiModelStore(config.lance_dir).content_store._get_or_create_table().version == version
+
+
+@pytest.mark.parametrize("failure", ["state", "completion"])
+def test_native_poll_failure_preserves_refresh_for_pinned_restart(
+    repo, native_git, monkeypatch, failure,
+):
+    from agent_index.indexing.pending_crawl import PendingCrawls
+    from agent_index.store.multi_model_store import MultiModelStore
+
+    config, spec, run, _, _ = native_git
+    base = git(repo, "rev-parse", "HEAD")
+    assert "sources_failed" not in run(full=True)
+    (repo / "edit.md").write_text("delivered\n")
+    middle = commit(repo)
+    run(change_hints=hints((base, middle)))
+    (repo / "edit.md").write_text("edit.md\n")
+    target = commit(repo)
+    pending = PendingCrawls(PathIndex(config.data_dir / "path_index.db"))
+    failed = []
+    if failure == "state":
+        save = IndexState.save
+
+        def fail_state(self, path):
+            if self.sources[spec.name].last_commit == target and not failed:
+                failed.append(True)
+                raise RuntimeError("interrupted state publication")
+            return save(self, path)
+
+        monkeypatch.setattr(IndexState, "save", fail_state)
+    else:
+        clear = PendingCrawls.clear
+
+        def fail_completion(self, source, **kwargs):
+            if not failed:
+                failed.append(True)
+                raise RuntimeError("interrupted journal completion")
+            return clear(self, source, **kwargs)
+
+        monkeypatch.setattr(PendingCrawls, "clear", fail_completion)
+    assert "sources_failed" in run()
+    scope = recovery_scope(engine.source_scope_hash(spec), connector(repo))
+    assert pending.load(spec.name, scope) is not None
+    assert pending.refresh_candidates(spec.name, scope, spec.name) is not None
+    (repo / "edit.md").write_text("newest canonical\n")
+    latest = commit(repo)
+    assert "sources_failed" not in run()
+    assert pending.load(spec.name, scope) is None
+    assert pending.refresh_candidates(spec.name, scope, spec.name) is None
+    assert IndexState.load(config.state_file).sources[spec.name].last_commit == latest
+    assert MultiModelStore(config.lance_dir).get_document(spec.name, "edit.md").content == (
+        "newest canonical\n"
+    )
+
+
+def test_explicit_full_reconciliation_covers_an_already_deleted_hint_candidate(repo, native_git):
+    from agent_index.indexing.pending_crawl import PendingCrawls
+    from agent_index.store.multi_model_store import MultiModelStore
+
+    config, spec, run, _, _ = native_git
+    base = git(repo, "rev-parse", "HEAD")
+    assert "sources_failed" not in run(full=True)
+    (repo / "edit.md").unlink()
+    target = commit(repo)
+    run(change_hints=hints((base, target)))
+    pending = PendingCrawls(PathIndex(config.data_dir / "path_index.db"))
+    assert spec.name in pending.sources()
+    assert "sources_failed" not in run(full=True)
+    assert pending.sources() == []
+    assert IndexState.load(config.state_file).sources[spec.name].last_commit == target
+    assert MultiModelStore(config.lance_dir).get_document(spec.name, "edit.md") is None

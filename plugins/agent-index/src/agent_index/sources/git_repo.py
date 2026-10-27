@@ -158,6 +158,8 @@ class GitRepoConnector:
     working tree; see the module docstring for the configuration and fallback.
     """
 
+    hint_poll_refresh = True
+
     def __init__(
         self,
         source: str = "git",
@@ -450,10 +452,12 @@ class GitRepoConnector:
         self,
         last_commit: str | None,
         cancel_check: Callable[[], None] | None = None,
+        *,
+        refresh_paths: tuple[str, ...] = (),
     ) -> SourceDelta:
         from agent_index.sources.git_delta import discover_git_delta
 
-        return discover_git_delta(self, last_commit, cancel_check)
+        return discover_git_delta(self, last_commit, cancel_check, refresh_paths=refresh_paths)
 
     def discover(self, cancel_check: Callable[[], None] | None = None) -> list[FileEntry]:
         """Discover current tracked files plus commit-history entries."""
@@ -740,3 +744,4 @@ class GitRepoConnector:
 
 
 setattr(GitRepoConnector.discover_hints, "change_hints_versions", (1,))
+setattr(GitRepoConnector.discover_delta, "poll_refresh_versions", (1,))

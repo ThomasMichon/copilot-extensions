@@ -9,9 +9,8 @@ from typing import TYPE_CHECKING
 from agent_index.indexing.change_hints import ChangeHints
 from agent_index.sources.delta import DeletedFile, SourceDelta
 from agent_index.sources.git_delta import (
-    GitReconciliationRequired, immutable_oid, range_records, read_delta_file,
+    GitReconciliationRequired, immutable_oid, range_records, read_current_file,
 )
-from agent_index.sources.git_records import decode_git_path
 
 if TYPE_CHECKING:
     from agent_index.sources.base import FileEntry
@@ -62,24 +61,7 @@ def acquire_hints(
     for path in sorted(paths):
         if cancel_check:
             cancel_check()
-        raw = connector._git_bytes(["ls-tree", "-z", target, "--", f":(literal){path}"])
-        entry = None
-        if raw:
-            records = raw.split(b"\0")
-            if len(records) != 2 or records[-1] != b"" or b"\t" not in records[0]:
-                raise ValueError("Invalid Git hinted tree record")
-            header, raw_path = records[0].split(b"\t", 1)
-            fields = header.decode("ascii").split()
-            if (
-                len(fields) != 3 or decode_git_path(raw_path) != path
-                or not immutable_oid(fields[2])
-                or (fields[0], fields[1]) not in {
-                    ("100644", "blob"), ("100755", "blob"), ("120000", "blob"),
-                    ("040000", "tree"), ("160000", "commit"),
-                }
-            ):
-                raise ValueError("Invalid Git hinted tree identity")
-            entry = read_delta_file(connector, path, target, fields[0], fields[2], "M")
+        entry = read_current_file(connector, path, target)
         if entry is None:
             result.deletions.append(DeletedFile(connector.source_name, path))
         else:
