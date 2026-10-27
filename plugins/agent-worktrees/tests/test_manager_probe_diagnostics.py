@@ -250,8 +250,13 @@ def test_real_bundled_fallback_keeps_its_exit_status(
 
 def test_healthy_provider_has_no_failure_diagnostic(
     provider: Provider, capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manifest = provider("print('worktree-manager 1.2.3')")
+    monkeypatch.setattr(
+        launch, "_safe_probe_diagnostic",
+        lambda *_a, **_kw: pytest.fail("healthy probes must not format failure details"),
+    )
     assert launch._usable_worktree_manager() == manifest.command
     captured = capsys.readouterr()
     assert captured.out == captured.err == ""

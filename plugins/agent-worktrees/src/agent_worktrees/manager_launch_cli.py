@@ -218,10 +218,6 @@ def _worktree_manager_health() -> _ManagerHealth:
     version, proc = _core_helper(
         "_probe_worktree_manager_version", _probe_worktree_manager_version
     )([*manifest.command, "--version"])
-    display_name, display_source = _provider_command_display_name(manifest)
-    source = _safe_probe_diagnostic(
-        f"{display_name} {display_source} ({manifest.command[0]})", 240,
-    )
     if proc is None:
         reason = "its --version health check could not complete (could not start or timed out)"
     elif proc.returncode != 0:
@@ -235,6 +231,10 @@ def _worktree_manager_health() -> _ManagerHealth:
         )
     else:
         return _ManagerHealth("ready", command=manifest.command)
+    display_name, display_source = _provider_command_display_name(manifest)
+    source = _safe_probe_diagnostic(
+        f"{display_name} {display_source} ({manifest.command[0]})", 240,
+    )
     detail = f"Cannot use {source}: {reason}."
     if proc is not None:
         stderr = _safe_probe_diagnostic(proc.stderr or "")
