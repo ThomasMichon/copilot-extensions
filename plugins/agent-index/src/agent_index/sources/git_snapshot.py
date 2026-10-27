@@ -63,7 +63,7 @@ def _cursor(value: str | None) -> _Cursor:
 
 
 def _stable_graph(connector: GitRepoConnector, target: str) -> None:
-    if connector._git(["--no-replace-objects", "cat-file", "-t", target]).strip() != "commit":
+    if connector._git(["cat-file", "-t", target]).strip() != "commit":
         raise ValueError("Git full snapshot requires an available commit object")
     if connector._git(["rev-parse", "--is-shallow-repository"]).strip() != "false":
         raise ValueError("Git full snapshots require complete history, not a shallow repository")
@@ -76,10 +76,10 @@ def _stable_graph(connector: GitRepoConnector, target: str) -> None:
 
 def _tree(connector: GitRepoConnector, target: str, directory: str) -> bytes:
     identity = f"{target}:{directory}"
-    size = int(connector._git(["--no-replace-objects", "cat-file", "-s", identity]).strip())
+    size = int(connector._git(["cat-file", "-s", identity]).strip())
     if not 0 <= size <= _MAX_TREE_BYTES:
         raise ValueError("Git snapshot directory exceeds the 16000000-byte tree limit")
-    raw = connector._git_bytes(["--no-replace-objects", "cat-file", "tree", identity])
+    raw = connector._git_bytes(["cat-file", "tree", identity])
     if len(raw) != size:
         raise ValueError("Incomplete Git snapshot tree object")
     return raw
@@ -136,9 +136,7 @@ def _files(
             stack.append((decoded, 0))
             break
         if connector._is_indexable_path(path):
-            entry = read_delta_file(
-                connector, path, target, mode, blob, "M", no_replace_objects=True,
-            )
+            entry = read_delta_file(connector, path, target, mode, blob, "M")
             if entry is not None:
                 entries.append(entry)
     return SnapshotPage(_PREFIX + target, entries, target, _Cursor(files=stack).encode())
@@ -164,7 +162,7 @@ def discover_git_snapshot(
         target = connector._index_commit
         if immutable_oid(target):
             target = connector._git([
-                "--no-replace-objects", "rev-parse", "--verify", f"{target}^{{commit}}",
+                "rev-parse", "--verify", f"{target}^{{commit}}",
             ]).strip()
     elif isinstance(snapshot, str) and snapshot.startswith(_PREFIX):
         target = snapshot.removeprefix(_PREFIX)
@@ -181,7 +179,7 @@ def discover_git_snapshot(
         offset = data.history
         entries = connector._discover_commits(
             None, target_commit=target, max_count=_PAGE_SIZE, skip=offset,
-            cancel_check=cancel_check, strict=True, no_replace_objects=True,
+            cancel_check=cancel_check, strict=True,
         )
         if len(entries) > _PAGE_SIZE:
             raise ValueError("Git snapshot history exceeded its requested page")

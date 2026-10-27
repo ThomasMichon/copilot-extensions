@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 from agent_procutil import no_window_kwargs
@@ -183,7 +184,7 @@ def test_missing_snapshot_commit_does_not_replace_pending_progress(repo, tmp_pat
     read = source._git
 
     def missing(args):
-        if args[:3] == ["--no-replace-objects", "cat-file", "-t"]:
+        if args[:2] == ["cat-file", "-t"]:
             raise subprocess.CalledProcessError(128, ["git", *args], stderr="missing object")
         return read(args)
 
@@ -200,7 +201,7 @@ def test_tree_limit_refuses_before_loading_object(repo, monkeypatch):
     read = source._git
 
     def oversized(args):
-        if args[:3] == ["--no-replace-objects", "cat-file", "-s"]:
+        if args[:2] == ["cat-file", "-s"]:
             return str(git_snapshot._MAX_TREE_BYTES + 1)
         return read(args)
 
@@ -354,3 +355,32 @@ def test_deep_git_tree_cursor_grows_linearly_and_finishes(repo):
     assert {entry.path for entry in entries} == {
         "/".join([*names, "leaf.md"]), f"commits/{target}.txt",
     }
+
+
+def test_pre_policy_checkpoint_requires_explicit_reconciliation_before_acquisition(
+    repo, tmp_path, monkeypatch,
+):
+    from agent_index.indexing.crawl import collect_source_changes
+    from agent_index.indexing.state import IndexState, SourceState
+
+    source = connector(repo)
+    target = source.current_commit()
+    assert source.recovery_identity[-1] == "git-objects:canonical-v1"
+    previous = SimpleNamespace(
+        source_name=source.source_name, recovery_identity=source.recovery_identity[:-1],
+    )
+    old_scope = recovery_scope("alias", previous)
+    state = IndexState(sources={"alias": SourceState(
+        last_commit=target, acquisition_scope=old_scope,
+    )})
+    paths = PathIndex(tmp_path / "paths.db")
+    monkeypatch.setattr(source, "discover_delta", forbidden)
+    with pytest.raises(ValueError, match="explicit full reindex required"):
+        collect_source_changes(
+            "alias", state=state, path_index=paths, full=False,
+            source_aware=False, connector=source,
+        )
+    assert state.sources["alias"].last_commit == target
+    assert state.sources["alias"].acquisition_scope == old_scope
+    assert paths.count() == 0
+    assert PendingCrawls(paths).sources() == []

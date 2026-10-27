@@ -705,3 +705,35 @@ def test_full_snapshot_covers_retained_history_even_when_path_store_already_lack
     assert journal.refresh_candidates(source.source_name, scope, source.source_name) is not None
     journal.clear(source.source_name, manifest=full, scope=scope)
     assert journal.sources() == []
+
+
+@pytest.mark.parametrize("delivery", ["poll", "hint"])
+def test_native_full_then_incremental_uses_one_object_view_with_replacement_refs(
+    repo, native_git, delivery,
+):
+    from agent_index.store.multi_model_store import MultiModelStore
+
+    config, spec, run, _, _ = native_git
+    base = git(repo, "rev-parse", "HEAD")
+    (repo / "edit.md").write_text("Canonical B.\n", encoding="utf-8")
+    target = commit(repo)
+    replacement = git(repo, "commit-tree", f"{target}^{{tree}}", "-m", "Synthetic replacement")
+    git(repo, "replace", base, replacement)
+    git(repo, "update-ref", "refs/heads/main", base)
+    assert "sources_failed" not in run(full=True)
+    assert IndexState.load(config.state_file).sources[spec.name].last_commit == base
+    assert MultiModelStore(config.lance_dir).get_document(spec.name, "edit.md").content == "edit.md\n"
+    git(repo, "update-ref", "refs/heads/main", target)
+    kwargs = {"change_hints": hints((base, target))} if delivery == "hint" else {}
+    assert "sources_failed" not in run(**kwargs)
+    assert MultiModelStore(config.lance_dir).get_document(spec.name, "edit.md").content == (
+        "Canonical B.\n"
+    )
+    assert IndexState.load(config.state_file).sources[spec.name].last_commit == (
+        base if delivery == "hint" else target
+    )
+    assert "sources_failed" not in run()
+    assert IndexState.load(config.state_file).sources[spec.name].last_commit == target
+    assert MultiModelStore(config.lance_dir).get_document(spec.name, "edit.md").content == (
+        "Canonical B.\n"
+    )

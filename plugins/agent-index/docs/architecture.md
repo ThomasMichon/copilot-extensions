@@ -229,11 +229,24 @@ streams, after which the existing bounded stored-identity comparison can infer
 tombstones. Missing objects and unavailable coverage retain pending progress
 without advancing state or falling back to an empty snapshot.
 
-Git replacement refs are disabled for snapshot object/history reads. Shallow
+Git replacement refs are disabled at the connector's one Git invocation owner,
+consistently across full snapshots, deltas, hints and old direct discovery
+methods. This deliberately indexes canonical objects rather than a mutable
+local replacement overlay; otherwise a snapshot could use one tree view and a
+following poll silently advance over changes in another. The effective recovery
+identity includes `git-objects:canonical-v1`. Checkpoints from before this policy
+therefore require explicit full reconciliation before ordinary acquisition,
+even when no replacement refs currently exist; their old object view was not
+recorded. Finish pending acquisition under its original binding before upgrade
+or use the existing explicit repair flow. No upgrade implicitly starts a full
+crawl or rewrites an old journal.
+
+Shallow
 repositories and mutable history grafts refuse this snapshot path because
 pinning only a commit cannot freeze those external graph boundaries. Normal
 working-tree fallback retains its legacy discovery path, as do old consumers
-calling the unchanged `discover` methods. No new CLI flag, source journal,
+calling the unchanged `discover` methods; the canonical-object policy above
+applies to their Git history reads too. No new CLI flag, source journal,
 checkpoint or provider storage is introduced.
 
 These are **result-page and tree-object bounds**, not a whole-source

@@ -56,20 +56,18 @@ def range_records(
 
 def read_delta_file(
     connector: GitRepoConnector, path: str, target: str, mode: str, blob: str, status: str,
-    *, no_replace_objects: bool = False,
 ) -> FileEntry | None:
     """Read a size-bounded immutable blob; failures never become tombstones."""
     if status == "D" or mode not in {"100644", "100755", "120000"}:
         return None
     if not immutable_oid(blob):
         raise ValueError("Invalid Git delta blob identity")
-    prefix = ["--no-replace-objects"] if no_replace_objects else []
-    size = int(connector._git([*prefix, "cat-file", "-s", blob]).strip())
+    size = int(connector._git(["cat-file", "-s", blob]).strip())
     if size < 0:
         raise ValueError("Invalid Git delta blob size")
     if size > _MAX_FILE_BYTES:
         return None
-    content = connector._git_bytes([*prefix, "cat-file", "blob", blob])
+    content = connector._git_bytes(["cat-file", "blob", blob])
     if len(content) != size:
         raise ValueError("Incomplete Git delta blob")
     return connector._file_entry(path, target, content)

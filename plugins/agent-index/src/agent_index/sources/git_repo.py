@@ -260,7 +260,10 @@ class GitRepoConnector:
     def recovery_identity(self) -> tuple[str, ...]:
         """Effective local target/ref/remote without credentials or transient tokens."""
         remote = self._git_quiet(["remote", "get-url", self._remote]).strip()
-        identity = (str(self.repo_path), self._remote, self._ref, nonsecret_target(remote) or "local-only")
+        identity = (
+            str(self.repo_path), self._remote, self._ref, nonsecret_target(remote) or "local-only",
+            "git-objects:canonical-v1",
+        )
         return identity if self._hint_account is None else (*identity, self._hint_account)
 
     @property
@@ -622,7 +625,6 @@ class GitRepoConnector:
         target_commit: str | None = None,
         max_count: int | None = None,
         skip: int | None = None,
-        no_replace_objects: bool = False,
     ) -> list[FileEntry]:
         args = [
             "log",
@@ -631,8 +633,6 @@ class GitRepoConnector:
             "--date=iso-strict",
             "--format=%H%x00%an%x00%ae%x00%aI%x00%s%x00%b",
         ]
-        if no_replace_objects:
-            args.insert(0, "--no-replace-objects")
         if max_count is not None:
             args.append(f"--max-count={max_count}")
         if skip is not None:
@@ -683,7 +683,7 @@ class GitRepoConnector:
 
     def _git_command(self, args: list[str]) -> list[str]:
         prefix = [f"--git-dir={self.repo_path}"] if self._bare_repository else []
-        return [_GIT, *prefix, *args]
+        return [_GIT, "--no-replace-objects", *prefix, *args]
 
     @staticmethod
     def _authenticated_environment() -> dict[str, str]:
