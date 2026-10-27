@@ -57,8 +57,9 @@ physical unindexed rows per index. The existing scalar helper appends only the
 named index's tail, without consolidation, data compaction or version cleanup.
 It verifies real fragment/row coverage and preserves the logical generation of
 physical-only transitions. The 32-segment ceiling refuses a future row-writing
-application before mutation; explicit owner-coordinated consolidation remains
-separate work. A failure during post-write upkeep retains the dirty/uncertain
+application before mutation; [explicit owner-budgeted consolidation](chunk-id-index.md#ingestion-preparation-and-explicit-consolidation)
+can restore capacity before retrying the retained acquisition. It never runs
+automatically from ingestion. A failure during post-write upkeep retains the dirty/uncertain
 latch and pending acquisition, not an acknowledged source cursor.
 
 Each file checkpoint still follows its completed vector coverage and stale

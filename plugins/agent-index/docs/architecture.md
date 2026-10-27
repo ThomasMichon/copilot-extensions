@@ -47,7 +47,9 @@ store-before-checkpoint ordering remain; this is not cross-store rollback.
 
 Participating source stores can explicitly prepare
 [bounded chunk-ID point reads](chunk-id-index.md). This additive Python path
-does not change ordinary-round defaults or migrate legacy stores automatically.
+also owns explicit whole-table-budgeted scalar consolidation when ordinary
+ingestion reaches its segment ceiling. It does not migrate legacy stores or
+run corpus-sized maintenance automatically.
 
 An in-process connector may opt into `DeltaSourceConnector.discover_delta()`,
 returning a version-1 `SourceDelta` with changed `FileEntry` values, explicit

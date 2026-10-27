@@ -23,8 +23,8 @@ index extends only the unindexed tail with the seasoned `pylance` SDK's
 `optimize_indices(index_names=["chunk_id_idx"], num_indices_to_merge=0,
 retrain=False)`. It never invokes combined optimization, compaction, version
 cleanup or an FTS rebuild. At most 32 index segments are accepted; exhaustion
-requests separately budgeted owner-coordinated consolidation, never an implicit
-merge of large old segments. A covered no-op performs no index write.
+requests [explicit owner-coordinated consolidation](#ingestion-preparation-and-explicit-consolidation),
+never an implicit merge of large old segments. A covered no-op performs no index write.
 
 Known preflight failures occur before a dirty writer transaction. The writer
 rechecks under the existing exclusion before changing the index. If an
@@ -51,6 +51,63 @@ Existing calls without `bounded=True` retain their compatibility behavior.
 They are **not** certified bounded merely because their returned row count is
 small. No ordinary-round migration, legacy writer adoption, model backfill,
 retention policy or automatic consolidation is supplied by this API.
+
+## Ingestion preparation and explicit consolidation
+
+[Ordinary source publication](prepared-application.md) creates missing point/file
+indices on empty participating tables and covers each committed delta's bounded
+tail. The following **explicit Python maintenance path** handles an existing
+nonempty participating store or an exhausted segment budget:
+
+```python
+from agent_index.store.ingestion_index import (
+    consolidate_ingestion_indices,
+    prepare_ingestion_indices,
+)
+
+# `store` is an already initialized, clean participating MultiModelStore.
+# Choose a physical-row admission budget explicitly; do not infer it from a delta.
+prepare_ingestion_indices(store, max_rows=initial_rows_budget)
+
+# Later, when ordinary ingestion refuses the segment ceiling:
+consolidate_ingestion_indices(store, max_rows=whole_table_rows_budget)
+# Retry the same indexing operation. Keep its existing pending journal intact.
+```
+
+Both helpers select canonical `chunk_id`/`file_path` and registered-model
+`chunk_id` indices under the existing source-domain operation exclusion.
+They preflight every selected index before changing any. Preparation budgets
+unindexed physical rows per index; it still refuses a segment overflow.
+Consolidation budgets **all physical rows of each affected current table**,
+including deleted rows retained in its fragments, not just live rows or the
+unindexed tail. This is a per-index admission budget, not an aggregate byte,
+CPU, memory or duration limit. Index pages, historical index entries and
+metadata are additional backend work; consolidation is explicitly corpus-sized.
+A single covered segment is a no-op even with a zero budget.
+
+Consolidation requires an existing compatible B-tree. It invokes only that
+index's SDK `optimize_indices` with `num_indices_to_merge` equal to its current
+segment count and `retrain=False`, covering any unindexed tail as well.
+The result must have one segment and complete actual fragment/row coverage.
+It never calls combined optimization, data compaction or version cleanup;
+old native versions and canonical/vector bytes remain retained.
+For a single selected index, use
+`store.scalar_index.consolidate_index(owner, column=..., max_rows=...)`.
+
+The existing writer rechecks each index's budget before effects, witnesses the
+physical-only transition and carries forward FTS coverage only if it was already
+current. Unexpected/post-effect failures retain the normal dirty/uncertain latch;
+this helper cannot repair an uncertain store. A preflight refusal is clean.
+The whole-store helper excludes readers across its independently committed
+index operations, not a new cross-table rollback transaction.
+Missing/incompatible indices require explicit preparation or repair, not a
+replacement index silently created by consolidation.
+
+An ingestion refusal preserves the existing acquired manifest and prepared
+vectors. After successful explicit maintenance, retry replays that retained work
+before acquiring a newer delta. Neither helper advances a source cursor,
+acknowledges file checkpoints, discards pending work, migrates a legacy layout
+or runs automatically from an ordinary round.
 
 ### Embedding coverage
 
@@ -245,6 +302,11 @@ explicit preparation/refusals, duplicate rows and source FTS currentness.
 `tests/test_scalar_index_sdk.py` separately qualifies index-only SDK compatibility
 in both layouts, retained old native versions, prohibited combined maintenance
 and bounded append work at the same three corpus sizes.
+`tests/test_scalar_consolidation.py` qualifies explicit whole-table admission,
+deleted physical rows, all-index refusal, FTS/logical coverage, retained versions,
+effect failures and native merge I/O at those three sizes.
+`tests/test_prepared_application.py` includes actual engine replay after
+nonempty-store preparation and the real 32-segment ceiling.
 These belong to the existing bounded native integration lane, not required
 unit-only CI.
 

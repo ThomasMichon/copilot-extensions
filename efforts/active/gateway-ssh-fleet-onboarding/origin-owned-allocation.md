@@ -203,10 +203,19 @@ separate linkage status and stable retry identity. The
 [provider reference](../../../plugins/agent-worktrees/docs/worktree-allocation.md#ordinary-destination-selection)
 owns supported options and explicit pre-effect refusals.
 
-Bridge/Dispatch migration, actual startup alongside delayed linkage, real
-outbound-only/native qualification and release/installed acceptance remain open.
-No source-only checkbox establishes those outcomes or closes #5839. The next
-source slice is consumer integration, not another linkage service or an
+The first origin-local owned SSH Bridge consumer merged in #9241 as
+`d8c29a492ad29c0bcd4ff2f6a4291170952107fb`. It persists the original operation
+and receiving child before native startup, while preserving independent claim
+linkage and ordinary hosting/session admission. Its
+[owning reference](../../../plugins/agent-bridge/docs/owned-workspace-allocation.md)
+records interrupted allocation, unknown native identity and serialized
+stop/resume behavior.
+
+Foreign-origin Bridge composition, Dispatch migration, actual startup alongside
+delayed linkage, real outbound-only/native qualification and release/installed
+acceptance remain open. No source-only checkbox establishes those outcomes or
+closes #5839. Continue the supported owner-local installed/native lane and the
+remaining named consumers; do not introduce another linkage service or an
 acknowledgement-dependent startup gate.
 
 ## Validation Plan
