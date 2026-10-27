@@ -2832,6 +2832,7 @@
         "tools/promotion_unit_tests/test_git_config_transaction.py": "d47c4b32c9ccbffdda2cc3813ae66871970a068be44fddcbde5449230db4da2b"
     },
     "coverage_targets": [
+        "libs/installer-engine/installer_wheel_acquisition.py",
         "libs/installer-engine/installer_native_feed.py",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_clock.py",
         "libs/ssh-manager/src/ssh_manager/config_sources.py",
