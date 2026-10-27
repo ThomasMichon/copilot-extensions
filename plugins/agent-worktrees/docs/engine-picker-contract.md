@@ -585,7 +585,10 @@ process identity before dialing it. A confirmed exited owner or PID/birth
 mismatch enters the existing missing-owner recovery path; this avoids a short
 Windows connect timeout hiding a dead endpoint as a slow live peer. Legacy
 routes without a PID and owners whose birth cannot be read retain the existing
-transport behavior. A live-peer timeout never authorizes replacement.
+transport behavior. Ensure, restart and candidate incumbent admission use the
+same exit-aware liveness predicate, so a retained exited Windows process object
+cannot veto that recovery. Unsupported native-exit platforms retain the existing
+PID/birth check. A live-peer timeout never authorizes replacement.
 The `machine-ssh:` source-ID namespace is stable for both local and remote
 machine sources; it is not transport evidence. Local Manager failure notices
 explicitly identify local execution (no SSH) and the resident current-roster read.

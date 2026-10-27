@@ -488,7 +488,7 @@ def test_worktrees_feed_retained_crashed_route_runs_bounded_recovery(owner, monk
 def test_worktrees_feed_confirmed_dead_route_does_not_wait_for_socket_timeout(
     owner, monkeypatch, tmp_path,
 ):
-    from agent_worktrees import worktrees_client
+    from agent_worktrees import locks, worktrees_client
     from zdd import process_exit
 
     routes = iter([
@@ -499,6 +499,8 @@ def test_worktrees_feed_confirmed_dead_route_does_not_wait_for_socket_timeout(
     token.write_text("fixture", encoding="utf-8")
     monkeypatch.setattr(control, "control_token_path", lambda runtime_home=None: token)
     monkeypatch.setattr(worktrees_client.routing, "read_active_endpoint", lambda *a, **kw: next(routes))
+    monkeypatch.setattr(locks, "lock_is_live", lambda identity: True)
+    monkeypatch.setattr(locks.platform, "system", lambda: "Windows")
     monkeypatch.setattr(process_exit, "observe_original_exit", lambda pid, birth: pid == 12345)
     recovery = []
     monkeypatch.setattr(

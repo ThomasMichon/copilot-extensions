@@ -114,9 +114,10 @@ def test_live_or_unknown_route_timeout_never_restarts_owner(tmp_path, monkeypatc
         client.read_current(request())
 
 
+@pytest.mark.skipif(sys.platform not in {"win32", "linux"}, reason="native original-exit platforms")
 def test_route_owner_exit_and_birth_mismatch_use_actual_process_identity(tmp_path, monkeypatch):
     from agent_procutil import no_window_kwargs
-    from agent_worktrees import locks
+    from agent_worktrees import locks, status_monitor_reap_stale, status_monitor_runtime as monitor
 
     process = subprocess.Popen(
         [getattr(sys, "_base_executable", sys.executable), "-c", "import time; time.sleep(30)"],
@@ -125,17 +126,33 @@ def test_route_owner_exit_and_birth_mismatch_use_actual_process_identity(tmp_pat
     try:
         birth = locks.process_start_time(process.pid)
         assert birth is not None
+        lock = tmp_path / "monitor.lock"
+        lock.write_text(json.dumps({
+            "pid": process.pid, "start_time": birth, "prefix": sys.prefix, "mux": True,
+        }), encoding="utf-8")
+        monkeypatch.setattr(monitor, "_monitor_lock_path", lambda: lock)
+        monkeypatch.setattr(monitor, "_core_helper", lambda _name, local: local)
+        monkeypatch.setattr(monitor.status_updater_cli, "_runtime_superseded", lambda **kw: False)
+        monkeypatch.setattr(status_monitor_reap_stale, "current_runtime_python", lambda: sys.executable)
+        starts = []
+        monkeypatch.setattr(monitor, "_spawn_detached", lambda argv: starts.append(argv) or True)
+        assert monitor._ensure_status_monitor() is True
+        assert starts == []
         endpoint = SimpleNamespace(pid=process.pid, process_start_time=birth)
         monkeypatch.setattr(client.routing, "read_active_endpoint", lambda *a, **kw: endpoint)
         assert client.resident_endpoint(tmp_path) is endpoint
         endpoint.process_start_time = str(int(birth) + 1)
         with pytest.raises(ConnectionError, match="exited or was replaced"):
             client.resident_endpoint(tmp_path)
+        assert monitor._ensure_status_monitor() is True
+        assert starts == []
         endpoint.process_start_time = birth
         process.terminate()
         process.wait(timeout=5)
         with pytest.raises(ConnectionError, match="exited or was replaced"):
             client.resident_endpoint(tmp_path)
+        assert monitor._ensure_status_monitor() is True
+        assert len(starts) == 1
     finally:
         if process.poll() is None:
             process.terminate()

@@ -630,7 +630,7 @@ def _ensure_status_monitor() -> bool:
         from . import locks as _locks
 
         data = _locks.read_lock(_monitor_lock_path())
-        if _locks.lock_is_live(data) and isinstance(data, dict):
+        if _locks.lock_is_running(data) and isinstance(data, dict):
             other_prefix = data.get("prefix")
             superseded_fn = _core_helper("_runtime_superseded", status_updater_cli._runtime_superseded)
             identity = {"generation": data["runtime_generation"]} if data.get("runtime_generation") else {}
@@ -679,7 +679,7 @@ def _restart_status_monitor(
 
         lock = _monitor_lock_path()
         data = _locks.read_lock(lock)
-        if _locks.lock_is_live(data) and isinstance(data, dict):
+        if _locks.lock_is_running(data) and isinstance(data, dict):
             pid = data.get("pid")
             prefix = data.get("prefix")
             identity = {"generation": data["runtime_generation"]} if data.get("runtime_generation") else {}

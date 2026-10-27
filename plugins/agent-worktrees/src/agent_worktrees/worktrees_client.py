@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import math
 import time
 
@@ -135,28 +134,15 @@ def validate_result(result: dict, request: dict) -> dict:
 def resident_endpoint(runtime_home):
     """Reject a confirmed dead route before a short Windows connect can time out."""
     from . import locks
-    from zdd.process_exit import observe_original_exit
 
     endpoint = routing.read_active_endpoint(control.routing_dir(runtime_home), verify_listener=False)
     if endpoint is None:
         raise ConnectionError("resident current-roster endpoint is unavailable")
     pid = getattr(endpoint, "pid", None)
-    if type(pid) is int and pid > 0:
-        birth = getattr(endpoint, "process_start_time", None)
-        if birth is None:
-            exited = not locks.lock_is_live({"pid": pid})
-        else:
-            try:
-                exited = observe_original_exit(pid, birth)
-            except NotImplementedError:
-                exited = not locks.lock_is_live({"pid": pid, "start_time": birth})
-            except (OSError, ValueError) as exc:
-                logging.getLogger(__name__).warning(
-                    "Resident owner exit evidence unavailable; retaining transport admission: %s", exc,
-                )
-                exited = False
-        if exited:
-            raise ConnectionError("resident current-roster endpoint owner exited or was replaced")
+    if type(pid) is int and pid > 0 and not locks.lock_is_running({
+        "pid": pid, "start_time": getattr(endpoint, "process_start_time", None),
+    }):
+        raise ConnectionError("resident current-roster endpoint owner exited or was replaced")
     return endpoint
 
 
