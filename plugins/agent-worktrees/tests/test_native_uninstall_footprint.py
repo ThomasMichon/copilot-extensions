@@ -110,6 +110,13 @@ def _aw_fixture_rooted_diagnostic(
             watchdog = {
                 "parentAdmitted": row["ppid"] in lifecycle,
                 "bodyMatch": arguments[1:4] == ["-c", body, "bash"],
+                "commandFlagMatch": arguments[1] == "-c",
+                "commandBodyMatch": arguments[2] == body,
+                "zeroNameMatch": arguments[3] == "bash",
+                "commandBodyWithoutFinalNewlinesMatch": arguments[2].rstrip("\n") == body,
+                "commandBodyWithFinalNewlinesMatch": arguments[2] == body + "\n",
+                "commandBodyLength": len(arguments[2]),
+                "expectedBodyLength": len(body),
                 "entryMatch": Path(arguments[4]) == payload / "scripts/install.sh",
                 "pluginMatch": arguments[5] == "agent-worktrees",
                 "stageMatch": Path(arguments[6]) == payload.parent,
