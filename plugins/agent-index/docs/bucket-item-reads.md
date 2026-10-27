@@ -32,6 +32,11 @@ Pure preparation retains already-current FTS coverage and witnessed logical
 generations through the existing source-domain maintenance transition.
 The old chunk-ID state/exception imports remain compatible aliases of the shared
 scalar state/exception; no new receipt or writer authority is introduced.
+After that explicit initial source preparation, ordinary participating ingestion
+includes the existing source index in its budgeted tail upkeep and segment
+preflights. The same [explicit consolidation owner](chunk-id-index.md#ingestion-preparation-and-explicit-consolidation)
+handles its exhausted segments. An unprepared nonempty source index still
+requires explicit preparation, never a reader-side build or scan fallback.
 
 A bucket is the existing first-two-colon-segments definition. `forge:issues`
 includes that exact source and its colon-delimited descendants, not

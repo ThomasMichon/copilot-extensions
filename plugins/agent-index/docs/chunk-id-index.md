@@ -76,6 +76,11 @@ consolidate_ingestion_indices(store, max_rows=whole_table_rows_budget)
 
 Both helpers select canonical `chunk_id`/`file_path` and registered-model
 `chunk_id` indices under the existing source-domain operation exclusion.
+If the canonical `source_idx` has already been explicitly prepared, they also
+include it in the same tail, segment-reservation and consolidation preflights.
+Ordinary ingestion then keeps that bucket-read prerequisite current alongside
+the point/file indices. A missing `source_idx` is not created by these helpers:
+its initial build still requires explicit `prepare_source_index` authorization.
 They preflight every selected index before changing any. Preparation budgets
 unindexed physical rows per index; it still refuses a segment overflow.
 Consolidation budgets **all physical rows of each affected current table**,
