@@ -148,6 +148,14 @@ def projection(fixture):
     )
 
 
+def hosted_chunk_ids(store):
+    return {
+        cid for family, path in (
+            (SOURCE + ":issues", "issues/1.md"), (SOURCE + ":pulls", "pulls/2.md"),
+        ) for cid in store.content_store.get_chunk_ids_by_file(family, path)
+    }
+
+
 def assert_reference(fixture, hosted, directory, monkeypatch):
     entries = hosted.entries()
     reference = RoundFixture(replace(fixture.config, data_dir=directory), fixture.selected)
@@ -212,6 +220,8 @@ def test_hosted_timestamp_overlap_at_three_corpus_sizes(
         state.stored_families[SOURCE] = SOURCE
         state.save(fixture.config.state_file)
         hosted.run(monkeypatch)
+        seen_ids = hosted_chunk_ids(fixture.store())
+        assert len(seen_ids) == 7
         checkpoint = INITIAL
         journal = PendingCrawls(PathIndex(fixture.config.data_dir / "path_index.db"))
         saved = None
@@ -328,13 +338,20 @@ def test_hosted_timestamp_overlap_at_three_corpus_sizes(
                     fixture, hosted, tmp_path / f"reference-{size}-{name}", monkeypatch,
                 )
             store = fixture.store()
+            current_ids = hosted_chunk_ids(store)
+            assert len(current_ids) == 7
+            retired_ids = list(seen_ids - current_ids)
+            seen_ids.update(current_ids)
             assert store.content_store.source_counts() == {
                 "sample:repo": size, SOURCE + ":issues": 5, SOURCE + ":pulls": 2,
             }
             sentinels = [unchanged[0].chunk_id, unchanged[-1].chunk_id]
             assert set(store.content_store.get_by_ids(sentinels)) == set(sentinels)
             for model in profiles:
-                vectors = store.get_vector_table(model).get_vectors(sentinels, strict=True)
+                table = store.get_vector_table(model)
+                assert table.count() == size + len(current_ids)
+                assert table.get_vectors(retired_ids, strict=True) == {}
+                vectors = table.get_vectors(sentinels, strict=True)
                 assert vectors.keys() == set(sentinels)
                 for vector in vectors.values():
                     np.testing.assert_array_equal(vector, [1, 1])

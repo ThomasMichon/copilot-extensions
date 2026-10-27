@@ -154,7 +154,10 @@ than one-row-per-item assumptions. Reference rebuilds, explicit corpus/index
 preparation and sentinel checks are outside measurement. Full path enumeration
 is forbidden in measured rounds. Complete changed chunk/vector ID sets and
 metadata match a clean small shared-engine rebuild, and unrelated sentinels
-remain intact. Replay/catch-up/refusal has zero embedding, projection writes,
+remain intact. Every model's total row count must equal the complete fixture
+inventory, and every observed superseded chunk ID must be absent from vectors;
+checking only current content IDs would miss orphaned vector rows.
+Replay/catch-up/refusal has zero embedding, projection writes,
 FTS/cluster passes and native queries. This is not live-provider, arbitrary
 clock-skew, immutable full-snapshot, whole-memory/CPU or rollout qualification.
 
