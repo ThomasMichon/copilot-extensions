@@ -34,7 +34,6 @@ _SESSION_GUIDANCE_MAX_BYTES = 4 * 1024
 _COMMAND_CATALOG_HEADING = "## agent-worktrees session command catalog"
 _GUIDANCE_HEADER = "# Agent Worktrees session guidance\n\n"
 
-
 def _read_json(path: Path) -> dict | None:
     try:
         value = json.loads(path.read_text("utf-8"))
@@ -174,7 +173,6 @@ def _request(kind: str, payload: dict, home: Path) -> dict | None:
         return lifecycle.unavailable(kind) if source_aware or kind == "sessionEnd" else None
     result = value.get("result")
     return result if isinstance(result, dict) else {}
-
 
 def _plugin_version() -> str:
     try:
@@ -924,6 +922,11 @@ def decide(kind: str, payload: dict, *, home: Path | None = None) -> dict:
         payload = _enrich_session_payload(payload)
     if kind == "sessionEnd" and not isinstance(payload.get("_agentWorktrees"), dict):
         payload = _enrich_session_end_payload(payload)
+    if kind == "preToolUse" and (payload.get("toolName") or payload.get("tool_name")) in ("view", "rg", "glob", "bash", "sh", "shell", "powershell", "pwsh", "cmd", "run", "run_command", "execute", "exec", "terminal"):
+        helper = _load_sibling("hook_pre_relevance.py")
+        irrelevant = getattr(helper, "is_irrelevant", None)
+        if callable(irrelevant) and irrelevant(payload, contextual, _load_sibling):
+            return {}
     remote = _request(kind, payload, home)
     if remote is not None:
         return remote
