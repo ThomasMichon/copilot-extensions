@@ -126,6 +126,9 @@ crash immediately before the final journal commit without repeating pairing.
 A valid already-stamped pair can retry plugin composition through the existing
 pair validator. An unproven partial companion remains blocking, not an invitation
 to allocate another pair.
+The original journaled external-companion requirement remains authoritative if a
+later state-root lookup fails or a no-pair environment override appears. A skipped
+required carve or composition stays pending and cannot earn a ready checkpoint.
 
 If an older generic writer omits the new top-level receiving receipt, the
 receiver can reconstruct it only from the exact retained original local journal,

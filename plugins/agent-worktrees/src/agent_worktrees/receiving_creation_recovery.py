@@ -22,6 +22,31 @@ def pairing_facts(config: cfg.Config) -> dict:
     }
 
 
+def requires_pair(record: tracking.WorktreeRecord, config: cfg.Config) -> bool:
+    """Keep the original companion requirement despite later lookup/opt-out drift."""
+    admission = parsed_receipt(record)
+    row = creation_requests.inspect(config, admission.key)
+    if (
+        row is None or row["status"] != "pending"
+        or producer.canonical_json(row["facts"].get("receiving_allocation"))
+        != producer.canonical_json(admission.to_fields())
+        or not isinstance(row["worktree"], dict)
+        or row["worktree"].get("creation_nonce") != record.creation_nonce
+    ):
+        raise ValueError("receiving pairing has no original pending operation")
+    recovery = row["worktree"].get("receiving_recovery")
+    if not isinstance(recovery, dict) or "pairing" not in recovery:
+        raise ValueError("receiving pairing has no original configuration")
+    pairing = recovery["pairing"]
+    if row["facts"].get("no_pair") is True or row["facts"].get("kind") != "session":
+        return False
+    if not isinstance(pairing, dict) or set(pairing) != {
+        "repo", "path", "source", "requires_external", "bound",
+    }:
+        raise ValueError("invalid original receiving pairing configuration")
+    return bool(pairing["requires_external"] and pairing["bound"] and pairing["path"])
+
+
 def _update_pending(config: cfg.Config, admission: ReceivingAllocation, row: dict, result: dict, *, complete: bool) -> None:
     path = cfg.tracking_dir(config.repo_name).parent / "workspace-creation.sqlite3"
     connection = creation_requests._connection(path)

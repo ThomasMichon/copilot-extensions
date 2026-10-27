@@ -76,6 +76,86 @@ def test_crash_after_tail_checkpoint_does_not_repeat_pairing(receiver, monkeypat
     assert receive("inspect", request(receiver), config)["status"] == "allocated"
 
 
+@pytest.mark.parametrize("failure", ["lookup", "no-pair-env", "env-before-reserve"])
+def test_required_companion_skip_stays_pending_and_recovers_original_child(receiver, monkeypatch, failure):
+    from agent_worktrees import knowledge_plugins, state_root
+
+    config, admission, records = receiver
+    admission.target["options"]["no_pair"] = False
+    original_root = state_root.StateRoot(
+        path=Path(config.default_repo.anchor), source="knowledge_repo", repo="knowledge",
+        stateless=True, requires_external=True, bound=True, error=None,
+    )
+    monkeypatch.setattr(state_root, "resolve_state_root", lambda *a, **k: original_root)
+    original = tracking.create_new_record
+    identities = []
+    if failure == "env-before-reserve":
+        original_create = creation_requests.create
+
+        def delayed_create(config, key, facts, allocate, **kwargs):
+            def after_facts(reserve):
+                monkeypatch.setenv("AGENT_WORKTREES_NO_PAIR", "1")
+                return allocate(reserve)
+            return original_create(config, key, facts, after_facts, **kwargs)
+
+        monkeypatch.setattr(creation_requests, "create", delayed_create)
+
+    def first_save(**kwargs):
+        record = original(**kwargs)
+        identities.append(receiving.record_identity(record))
+        if failure == "lookup":
+            def unavailable(*a, **k):
+                raise OSError("transient state-root lookup failure")
+            monkeypatch.setattr(state_root, "resolve_state_root", unavailable)
+        elif failure == "no-pair-env":
+            monkeypatch.setenv("AGENT_WORKTREES_NO_PAIR", "1")
+        return record
+
+    monkeypatch.setattr(tracking, "create_new_record", first_save)
+    with pytest.raises(worktree_creation.LaunchSeedStagingFailure, match="pairing remains incomplete"):
+        receive("create", request(receiver), config)
+    row = creation_requests.inspect(config, admission.key)
+    assert row["status"] == "pending" and "receiving_ready" not in row["worktree"]
+    assert row["worktree"]["receiving_recovery"]["pairing"]["requires_external"] is True
+    assert row["facts"]["no_pair"] is False
+    record = tracking.load_record(next(records.glob("*.yaml")))
+    assert not record.pair_id and not record.pair_ref
+    monkeypatch.setattr(state_root, "resolve_state_root", lambda *a, **k: original_root)
+    monkeypatch.setattr(tracking, "create_new_record", original)
+    monkeypatch.delenv("AGENT_WORKTREES_NO_PAIR", raising=False)
+    monkeypatch.setattr(
+        worktree_creation.git_ops, "create_worktree",
+        lambda *a, **k: pytest.fail("companion recovery must not replace the primary child"),
+    )
+    carved = []
+
+    def carve(*args, **kwargs):
+        carved.append(kwargs["harness_id"])
+        return {
+            "pair_id": f"{kwargs['timestamp']}-{kwargs['suffix']}",
+            "pair_role": "harness", "pair_kind": "anchor",
+            "pair_ref": f"{admission.target['machine']}/knowledge/anchor",
+        }
+
+    monkeypatch.setattr(worktree_creation._core(), "_carve_paired_knowledge", carve)
+    monkeypatch.setattr(knowledge_plugins, "compose_from_pair", lambda **kw: {"action": "unchanged"})
+    recovered = receive("inspect", request(receiver, identities[0].to_dict()), config)
+    assert recovered["status"] == "allocated" and recovered["identity"] == identities[0].to_dict()
+    assert carved == [record.worktree_id] and len(list(records.glob("*.yaml"))) == 1
+    assert creation_requests.inspect(config, admission.key)["status"] == "complete"
+
+
+def test_original_no_pair_environment_remains_intentional_after_override_disappears(receiver, monkeypatch):
+    config, admission, _ = receiver
+    admission.target["options"]["no_pair"] = False
+    monkeypatch.setenv("AGENT_WORKTREES_NO_PAIR", "1")
+    created = receive("create", request(receiver), config)
+    row = creation_requests.inspect(config, admission.key)
+    assert row["facts"]["no_pair"] is True
+    monkeypatch.delenv("AGENT_WORKTREES_NO_PAIR")
+    assert receive("inspect", request(receiver, created["identity"]), config) == created
+
+
 def test_live_creator_is_not_overtaken_after_its_first_save(receiver, monkeypatch):
     config, admission, records = receiver
     entered, finish = Event(), Event()

@@ -584,6 +584,8 @@ def _create_worktree_core(
     if creation_key is not None:
         from . import creation_replay, creation_requests
 
+        if receiving_allocation is not None:
+            no_pair = no_pair or bool(os.environ.get("AGENT_WORKTREES_NO_PAIR"))
         options = {
             "profile": profile, "profile_is_explicit": profile_is_explicit,
             "no_mux": no_mux, "kind": kind, "owner": owner, "interface": interface,
@@ -838,8 +840,7 @@ def _create_worktree_core(
                         "execution_origin": creation_replay.execution_origin(config),
                         "pairing": (
                             receiving_creation_recovery.pairing_facts(config)
-                            if kind == "session" and not no_pair
-                            and not os.environ.get("AGENT_WORKTREES_NO_PAIR") else None
+                            if kind == "session" and not no_pair else None
                         ),
                     }}
                 creation_intent({

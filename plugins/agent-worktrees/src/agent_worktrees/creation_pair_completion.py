@@ -18,7 +18,12 @@ def complete_created_pair(
     timestamp: str, suffix: str, no_pair: bool,
     carve: Callable[..., dict | None], stamp: Callable[..., dict | None],
 ) -> bool:
-    if record.kind != "session" or no_pair:
+    required_pair = False
+    if record.receiving_allocation_present:
+        from .receiving_creation_recovery import requires_pair
+
+        required_pair = requires_pair(record, config)
+    if record.kind != "session" or no_pair and not required_pair:
         return True
     composition_ready = True
     try:
@@ -36,6 +41,8 @@ def complete_created_pair(
         pair_stamp = None
         composition_ready = False
     composition = stamp(config, record, record.worktree_path, pair_stamp)
+    if required_pair and (not pair_stamp or not composition):
+        composition_ready = False
     if not composition_ready or composition and (
         composition.get("action") == "error" or composition.get("pair_error")
     ):
