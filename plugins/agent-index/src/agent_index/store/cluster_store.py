@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 
 from .source_layout import SourceLayoutError, domain_for, source_read, source_write
 from .projection_snapshot import ClusterCoverage
+from .cluster_slice_coverage import ClusterSliceManifest, MAX_CLUSTER_COVERAGE_BYTES
 
 if TYPE_CHECKING:
     from agent_index.store.clustering import Cluster
@@ -65,11 +66,21 @@ CREATE TABLE IF NOT EXISTS cluster_coverage (
     slices INTEGER NOT NULL,
     clusters INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS cluster_slice_coverage (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    manifest TEXT NOT NULL
+);
 """
 _SCHEMA += "\n".join(
     f"CREATE TRIGGER IF NOT EXISTS cluster_coverage_{table}_{event.lower()} "
     f"AFTER {event} ON {table} BEGIN DELETE FROM cluster_coverage; END;"
     for table in ("clusters", "cluster_members")
+    for event in ("INSERT", "UPDATE", "DELETE")
+)
+_SCHEMA += "\n".join(
+    f"CREATE TRIGGER IF NOT EXISTS cluster_slices_{table}_{event.lower()} "
+    f"AFTER {event} ON {table} BEGIN DELETE FROM cluster_slice_coverage; END;"
+    for table in ("clusters", "cluster_members", "cluster_coverage")
     for event in ("INSERT", "UPDATE", "DELETE")
 )
 
@@ -140,6 +151,7 @@ class ClusterStore:
     @source_write
     def replace_all(
         self, clusters: list[Cluster], *, coverage: ClusterCoverage | None = None,
+        slice_manifest: ClusterSliceManifest | None = None,
     ) -> int:
         """Atomically swap in a fresh full set of clusters.
 
@@ -149,6 +161,12 @@ class ClusterStore:
         """
         if coverage is not None and coverage.clusters != len(clusters):
             raise ValueError("Cluster coverage does not describe the stored artifact")
+        if slice_manifest is not None:
+            if coverage != slice_manifest.coverage:
+                raise ValueError("Cluster slice manifest does not match full coverage")
+            slice_manifest.validate_clusters([(cluster.bucket, cluster.model_id) for cluster in clusters])
+            if len({cluster_id_for(cluster) for cluster in clusters}) != len(clusters):
+                raise ValueError("Cluster slice artifact contains duplicate cluster identities")
         now = time.time()
         if self._source_domain is not None:
             self._source_domain.effect("cluster-replace")
@@ -159,47 +177,128 @@ class ClusterStore:
             conn.execute("DELETE FROM cluster_members")
             conn.execute("DELETE FROM clusters")
             conn.execute("DELETE FROM cluster_coverage")
-            for cluster in clusters:
-                cid = cluster_id_for(cluster)
-                rep = cluster.representative
+            conn.execute("DELETE FROM cluster_slice_coverage")
+            self._insert_clusters(conn, clusters, now, replace_existing=True)
+            self._publish_coverage(conn, coverage, slice_manifest)
+            conn.commit()
+            return len(clusters)
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def _insert_clusters(
+        self, conn: sqlite3.Connection, clusters: list[Cluster], now: float, *,
+        replace_existing: bool = False,
+    ) -> None:
+        insert = "INSERT OR REPLACE" if replace_existing else "INSERT"
+        for cluster in clusters:
+            cid = cluster_id_for(cluster)
+            rep = cluster.representative
+            conn.execute(
+                f"{insert} INTO clusters "
+                "(cluster_id, bucket, model_id, size, rep_source, "
+                "rep_file_path, has_exact_dupes, avg_score, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (cid, cluster.bucket, cluster.model_id, cluster.size, rep.source,
+                 rep.file_path, int(cluster.has_exact_dupes), cluster.avg_score, now),
+            )
+            conn.executemany(
+                f"{insert} INTO cluster_members "
+                "(cluster_id, source, file_path, score, is_exact_dupe, "
+                "member_rank) VALUES (?, ?, ?, ?, ?, ?)",
+                [(cid, m.source, m.file_path, m.score, int(m.is_exact_dupe), rank)
+                 for rank, m in enumerate(cluster.members)],
+            )
+
+    def _publish_coverage(
+        self, conn: sqlite3.Connection, coverage: ClusterCoverage | None,
+        manifest: ClusterSliceManifest | None,
+    ) -> None:
+        if coverage is not None:
+            conn.execute(
+                "INSERT INTO cluster_coverage VALUES (1, ?, ?, ?, ?)",
+                (coverage.signature, coverage.items, coverage.slices, coverage.clusters),
+            )
+        if manifest is not None:
+            conn.execute("INSERT INTO cluster_slice_coverage VALUES (1, ?)", (manifest.encode(),))
+
+    def _slice_manifest(self, conn: sqlite3.Connection) -> ClusterSliceManifest | None:
+        if conn.execute(
+            "SELECT count(*) FROM sqlite_master WHERE type = 'table' "
+            "AND name IN ('cluster_slice_coverage', 'cluster_coverage')",
+        ).fetchone()[0] != 2:
+            return None
+        row = conn.execute(
+            "SELECT substr(s.manifest, 1, ?) AS manifest, "
+            "length(CAST(s.manifest AS BLOB)) AS bytes, "
+            "c.signature, c.items, c.slices, c.clusters "
+            "FROM cluster_slice_coverage s JOIN cluster_coverage c USING (singleton) "
+            "WHERE s.singleton = 1",
+            (MAX_CLUSTER_COVERAGE_BYTES + 1,),
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            if row["bytes"] > MAX_CLUSTER_COVERAGE_BYTES:
+                raise ValueError("Cluster slice coverage exceeds its byte budget")
+            manifest = ClusterSliceManifest.decode(row["manifest"])
+            if manifest.coverage != ClusterCoverage(
+                row["signature"], row["items"], row["slices"], row["clusters"],
+            ):
+                raise ValueError("Cluster slice coverage differs from full coverage")
+            return manifest
+        except ValueError:
+            log.warning("Cluster slice coverage is invalid; full repair is required", exc_info=True)
+            return None
+
+    @source_read
+    def slice_manifest(self) -> ClusterSliceManifest | None:
+        if not Path(self._db_path).is_file():
+            return None
+        conn = self._connect()
+        try:
+            return self._slice_manifest(conn)
+        finally:
+            conn.close()
+
+    @source_write
+    def replace_slices(
+        self, clusters: list[Cluster], *, changed: tuple[tuple[str, str], ...],
+        previous: ClusterSliceManifest, manifest: ClusterSliceManifest,
+    ) -> int:
+        """CAS bounded coverage and replace only selected bucket/model rows.
+
+        The caller must retain source exclusion from input reads through this
+        publication and bind signatures to those witnessed input generations.
+        Stale/missing artifact receipts require full repair, never a partial
+        success. Empty replacements still update coverage transactionally.
+        """
+        manifest.validate_replacement(previous, changed)
+        manifest.validate_clusters([(cluster.bucket, cluster.model_id) for cluster in clusters],
+                                   selected=changed)
+        if len({cluster_id_for(cluster) for cluster in clusters}) != len(clusters):
+            raise ValueError("Cluster slice artifact contains duplicate cluster identities")
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            current = self._slice_manifest(conn)
+            if current is None or current.encode() != previous.encode():
+                raise RuntimeError("Cluster slice coverage changed; full repair is required")
+            if self._source_domain is not None:
+                self._source_domain.effect("cluster-replace")
+            for bucket, model_id in changed:
                 conn.execute(
-                    "INSERT OR REPLACE INTO clusters "
-                    "(cluster_id, bucket, model_id, size, rep_source, "
-                    "rep_file_path, has_exact_dupes, avg_score, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        cid,
-                        cluster.bucket,
-                        cluster.model_id,
-                        cluster.size,
-                        rep.source,
-                        rep.file_path,
-                        int(cluster.has_exact_dupes),
-                        cluster.avg_score,
-                        now,
-                    ),
+                    "DELETE FROM cluster_members WHERE cluster_id IN "
+                    "(SELECT cluster_id FROM clusters WHERE bucket = ? AND model_id = ?)",
+                    (bucket, model_id),
                 )
-                conn.executemany(
-                    "INSERT OR REPLACE INTO cluster_members "
-                    "(cluster_id, source, file_path, score, is_exact_dupe, "
-                    "member_rank) VALUES (?, ?, ?, ?, ?, ?)",
-                    [
-                        (
-                            cid,
-                            m.source,
-                            m.file_path,
-                            m.score,
-                            int(m.is_exact_dupe),
-                            rank,
-                        )
-                        for rank, m in enumerate(cluster.members)
-                    ],
-                )
-            if coverage is not None:
-                conn.execute(
-                    "INSERT INTO cluster_coverage VALUES (1, ?, ?, ?, ?)",
-                    (coverage.signature, coverage.items, coverage.slices, coverage.clusters),
-                )
+                conn.execute("DELETE FROM clusters WHERE bucket = ? AND model_id = ?", (bucket, model_id))
+            conn.execute("DELETE FROM cluster_coverage")
+            conn.execute("DELETE FROM cluster_slice_coverage")
+            self._insert_clusters(conn, clusters, time.time())
+            self._publish_coverage(conn, manifest.coverage, manifest)
             conn.commit()
             return len(clusters)
         except Exception:
