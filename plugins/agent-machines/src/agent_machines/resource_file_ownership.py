@@ -62,8 +62,12 @@ def conflicting_git_config_files(
             continue
         path = resolve_file_path(res.desired["path"], ctx.home, ctx.repo_paths)
         try:
-            if path is not None and path.resolve() == target:
-                files.append(res)
+            if path is not None:
+                # Reserve portable case aliases even before either file exists.
+                if str(path.resolve()).casefold() == str(target).casefold():
+                    files.append(res)
+                elif path.exists() and target.exists() and path.samefile(target):
+                    files.append(res)
         except (OSError, RuntimeError):
             files.append(res)
     return {res.identity for res in [*git_resources, *files]} if files else set()

@@ -177,6 +177,70 @@ def test_file_owners_cannot_compete_with_the_git_transaction(tmp_path, path):
     assert not target.exists()
 
 
+@pytest.mark.parametrize("exists", [False, True])
+def test_case_spelled_file_alias_cannot_write_before_git_consent(tmp_path, monkeypatch, exists):
+    from pathlib import Path, PurePosixPath
+
+    from agent_machines import resources
+
+    original_resolve = Path.resolve
+
+    def preserve_leaf_spelling(path, *args, **kwargs):
+        if path.name.casefold() == ".gitconfig":
+            return PurePosixPath(str(original_resolve(path.parent, *args, **kwargs))) / path.name
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", preserve_leaf_spelling)
+    target = tmp_path / ".gitconfig"
+    original = b"[user]\n\tname = Retained\n"
+    if exists:
+        target.write_bytes(original)
+    git = package(tmp_path)
+    other = load_package(write_package(
+        tmp_path, "alias.yaml", base_package(
+            name="other/file", manage={},
+            resources=[{"type": "file", "path": "$HOME/.GitConfig", "content": "would replace"}],
+        ),
+    ))
+    ctx = resources.ResourceContext(tmp_path, {}, "darwin")
+    resolved, _ = resources.resolve_resources([other, git], "box-1", "darwin")
+    assert resources.conflicting_git_config_files(resolved, ctx) == {
+        item.identity for item in resolved
+    }
+    results = resources.apply_resources([other, git], "box-1", "darwin", ctx, dry_run=False)
+    assert len(results) == 2 and all(item.status == "blocked" for item in results)
+    if exists:
+        assert target.read_bytes() == original
+    else:
+        assert not target.exists() and not (tmp_path / ".GitConfig").exists()
+
+
+def test_hardlinked_file_owner_is_refused_before_any_writer(tmp_path):
+    import os
+
+    from agent_machines import resources
+
+    target = tmp_path / ".gitconfig"
+    original = b"[user]\n\tname = Retained\n"
+    target.write_bytes(original)
+    alias = tmp_path / "other-config"
+    try:
+        os.link(target, alias)
+    except OSError as error:
+        pytest.skip(f"host cannot create a hardlink: {error}")
+    git = package(tmp_path)
+    other = load_package(write_package(
+        tmp_path, "alias.yaml", base_package(
+            name="other/file", manage={},
+            resources=[{"type": "file", "path": str(alias), "content": "would replace"}],
+        ),
+    ))
+    ctx = resources.ResourceContext(tmp_path, {}, "windows")
+    results = resources.apply_resources([other, git], "box-1", "windows", ctx, dry_run=False)
+    assert len(results) == 2 and all(item.status == "blocked" for item in results)
+    assert target.read_bytes() == alias.read_bytes() == original
+
+
 def test_new_parser_rejects_unknown_flags_before_rollback(monkeypatch):
     from agent_machines import __main__ as cli
 

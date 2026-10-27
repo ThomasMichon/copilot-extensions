@@ -6,11 +6,9 @@ import json
 import subprocess
 
 import pytest
-
 from agent_procutil import no_window_kwargs
 
 from agent_machines import git_config_transaction as transaction
-
 
 HELPER = "credential.https://github.example.com.helper"
 
@@ -25,6 +23,47 @@ def git_values(path, key):
     )
     assert result.returncode in (0, 1)
     return result.stdout.decode("utf-8").removesuffix("\0").split("\0") if result.stdout else []
+
+
+@pytest.mark.parametrize("repetitions,terminated", [(0, False), (240, False), (240, True)])
+def test_owned_preview_never_discloses_retained_unowned_lines(tmp_path, repetitions, terminated):
+    target = tmp_path / ".gitconfig"
+    sentinel = "retained-private-fixture"
+    original = (
+        "[user]\n\tname = Before\n"
+        + "# repeated\n" * repetitions
+        + "[private]\n\tvalue = " + sentinel + ("\n" if terminated else "")
+    ).encode()
+    target.write_bytes(original)
+    plan = transaction.preview(target, {"user.name": ["After"], "fetch.prune": ["true"]})
+    assert plan.changed
+    assert sentinel not in plan.diff
+    assert sentinel not in json.dumps(plan.summary())
+    assert "Before" in plan.diff and "After" in plan.diff
+    assert target.read_bytes() == original
+    receipt = transaction.apply(
+        plan, expected_plan_sha256=plan.plan_sha256, backup_root=tmp_path / "backups"
+    )
+    rollback = transaction.rollback_preview(target, receipt)
+    assert sentinel not in json.dumps(rollback.summary())
+    assert rollback.after == original
+
+
+def test_valueless_boolean_is_not_an_explicit_empty_string(tmp_path):
+    target = tmp_path / ".gitconfig"
+    original = b"[core]\n\tfilemode\n"
+    target.write_bytes(original)
+    plan = transaction.preview(target, {"core.filemode": [""]})
+    assert plan.changed
+    transaction.apply(
+        plan, expected_plan_sha256=plan.plan_sha256, backup_root=tmp_path / "backups"
+    )
+    observed = subprocess.run(
+        ["git", "config", "--file", str(target), "--bool", "core.filemode"],
+        capture_output=True, check=True, timeout=5, **no_window_kwargs(),
+    )
+    assert observed.stdout.strip() == b"false"
+    assert not transaction.preview(target, {"core.filemode": [""]}).changed
 
 
 def test_preview_apply_and_rollback_preserve_exact_original_bytes(tmp_path):

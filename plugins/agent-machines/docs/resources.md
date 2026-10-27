@@ -94,6 +94,10 @@ fields and `maintenance_safe: true` are rejected. Never put a credential in a
 helper command or any other declared value. No account, helper or host defaults
 are supplied.
 
+File resources cannot own the same file, a hardlink to it, or a portable case
+alias such as `.GitConfig`, even before either target exists. Case aliases are
+reserved conservatively on case-sensitive hosts too, without probing by writes.
+
 Preview and apply through the existing restore owner:
 
 ```text
@@ -103,7 +107,10 @@ agent-machines restore --only git-config --apply --git-config-plan-sha <preview-
 
 The resource's `change_plan` has schema
 `agent-machines.git-config-plan/v1`: target, existence flags, before/after
-SHA-256 hashes, exact zero-context unified diff and `plan_sha256`. The digest
+SHA-256 hashes, a declared-key value diff and `plan_sha256`. The diff shows only
+changed owned keys; it never includes retained undeclared lines or uses
+whole-file alignment heuristics. Valueless entries are displayed distinctly
+from explicit empty strings. The digest
 also binds the resolved declaration and observed file identity. `--apply`
 without the exact current digest is blocked. An already-converged file needs
 no mutation consent. Maintenance-safe restoration always skips this resource;
@@ -124,7 +131,8 @@ serialized, although observed intervening changes are refused before commit.
 `~/.agent-machines/backups/git-config/<unique-id>/receipt.json`. Backups use
 restrictive POSIX modes; Windows files inherit the user-home directory ACL.
 Rollback is also preview-bound and refuses changed applied content or an
-invalid or checksum-inconsistent receipt or backup:
+invalid or checksum-inconsistent receipt or backup. Its preview shows byte
+hashes, not the saved file's potentially undeclared values:
 
 ```text
 agent-machines git-config rollback --receipt <receipt-path> --json

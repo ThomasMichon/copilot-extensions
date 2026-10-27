@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import difflib
 import hashlib
 import json
 import os
@@ -139,6 +138,27 @@ def _git(path: Path, *args: str, statuses: tuple[int, ...] = (0,), deadline: flo
     return result.stdout
 
 
+def _config_values(raw: bytes) -> dict[bytes, list[bytes | None]]:
+    entries: dict[bytes, list[bytes | None]] = {}
+    for entry in raw.split(b"\0"):
+        if entry:
+            key, separator, value = entry.partition(b"\n")
+            entries.setdefault(key, []).append(value if separator else None)
+    return entries
+
+
+def _value_changes(key: str, before: list[bytes | None], after: list[bytes]) -> list[str]:
+    changes = []
+    for prefix, selected in (("-", before), ("+", after)):
+        for value in selected:
+            rendered = (
+                "<valueless>" if value is None
+                else json.dumps(value.decode("utf-8", errors="backslashreplace"))
+            )
+            changes.append(f"{prefix} {key} = {rendered}\n")
+    return changes
+
+
 @dataclass(frozen=True)
 class Plan:
     target: Path
@@ -146,6 +166,7 @@ class Plan:
     after: bytes | None
     identity: tuple[int, ...]
     intent: str
+    changes: tuple[str, ...] = ()
 
     @property
     def changed(self) -> bool:
@@ -175,9 +196,11 @@ class Plan:
 
     @property
     def diff(self) -> str:
-        before = (self.before or b"").decode("utf-8", errors="backslashreplace").splitlines(True)
-        after = (self.after or b"").decode("utf-8", errors="backslashreplace").splitlines(True)
-        return "".join(difflib.unified_diff(before, after, fromfile="before", tofile="after", n=0))
+        if not self.changed:
+            return ""
+        if self.intent.startswith("rollback:"):
+            return f"- sha256:{self.before_sha256}\n+ sha256:{self.after_sha256}\n"
+        return "--- declared before\n+++ declared after\n" + "".join(self.changes)
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -207,15 +230,16 @@ def preview(target: Path, desired: dict[str, list[str] | None]) -> Plan:
     with tempfile.TemporaryDirectory(prefix="git-config-plan-") as directory:
         candidate = Path(directory) / "candidate.gitconfig"
         candidate.write_bytes(before or b"")
-        _git(candidate, "--null", "--list", deadline=deadline)
+        existing = _config_values(_git(candidate, "--null", "--list", deadline=deadline))
         changed = False
+        changes = []
         for key, values in sorted(normalized.items()):
-            raw = _git(candidate, "--null", "--get-all", key, statuses=(0, 1), deadline=deadline)
-            current = raw.removesuffix(b"\0").split(b"\0") if raw else []
+            current = existing.get(key.encode("utf-8"), [])
             expected = [value.encode("utf-8") for value in values] if values is not None else []
             if current == expected:
                 continue
             changed = True
+            changes.extend(_value_changes(key, current, expected))
             _git(candidate, "--unset-all", key, statuses=(0, 5), deadline=deadline)
             for value in values or []:
                 _git(candidate, "--add", key, value, deadline=deadline)
@@ -224,7 +248,7 @@ def preview(target: Path, desired: dict[str, list[str] | None]) -> Plan:
             raise TransactionError("proposed configuration exceeds the size limit")
         _git(candidate, "--null", "--list", deadline=deadline)
     intent = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
-    return Plan(target, before, after, identity, intent)
+    return Plan(target, before, after, identity, intent, tuple(changes))
 
 
 def _write_private(path: Path, data: bytes) -> None:

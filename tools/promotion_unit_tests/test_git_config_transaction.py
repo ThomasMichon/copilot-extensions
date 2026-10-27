@@ -78,9 +78,21 @@ def test_plan_consent_binds_existence_identity_intent_target_and_bytes(engine):
     assert len(plan.plan_sha256) == 64
     before = b"[unrelated]\nsecret = synthetic-retained\n[user]\nname = Old\n"
     after = before.replace(b"name = Old", b"name = New")
-    displayed = replace(plan, before=before, after=after).summary()
+    parsed = engine._config_values(
+        b"private.value\nsynthetic-retained\0user.name\nOld\0core.filemode\0"
+        b"core.empty\n\0user.name\nOther\nLine\0"
+    )
+    assert parsed[b"core.filemode"] == [None] and parsed[b"core.empty"] == [b""]
+    assert parsed[b"user.name"] == [b"Old", b"Other\nLine"]
+    changes = tuple(engine._value_changes("user.name", parsed[b"user.name"], [b"New"]))
+    displayed = replace(plan, before=before, after=after, changes=changes).summary()
     assert "synthetic-retained" not in json.dumps(displayed)
-    assert "-name = Old" in displayed["diff"] and "+name = New" in displayed["diff"]
+    assert '- user.name = "Old"' in displayed["diff"]
+    assert '+ user.name = "New"' in displayed["diff"]
+    rollback = replace(plan, before=before, after=after, intent="rollback:fixture").summary()
+    assert "synthetic-retained" not in json.dumps(rollback)
+    assert "Old" not in rollback["diff"] and "New" not in rollback["diff"]
+    assert "<valueless>" in "".join(engine._value_changes("core.filemode", [None], [b""]))
 
 
 def test_wrong_stale_and_read_only_plans_refuse_before_file_effects(
