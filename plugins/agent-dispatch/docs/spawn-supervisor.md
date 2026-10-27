@@ -935,8 +935,13 @@ worktrees and legacy records without exact ownership are never treated as
 dispatch-owned.
 
 The older `--disposable-cli-label LABEL` path remains for explicitly declared
-CLI worker classes whose worktrees predate allocation provenance. A registrar
-may supply the equivalent `body.disposable_cli_labels`.
+disposable worker classes whose worktrees predate allocation provenance. Its
+name is historical: CLI/ACP tracking metadata is not ownership authority. A
+registrar may supply the equivalent `body.disposable_cli_labels`.
+For a local Bridge body, Dispatch checkpoints the native session identity and
+asks Bridge to end the exact idle/stopped worker before ground conclusion.
+Bridge's `end --if-idle` is terminal shutdown, not a resumable host detach; busy
+turns, queued prompts and active background work retain their existing checks.
 
 ### Idle-confirm nudge exemption
 
@@ -997,7 +1002,7 @@ agent-worktrees conclude-disposable \
     --json
 ```
 
-The legacy label-scoped CLI path instead invokes:
+The legacy label-scoped worker path instead invokes the existing wire form:
 
 ```bash
 agent-worktrees conclude-disposable \
@@ -1013,6 +1018,10 @@ The ground layer preserves any live mux/bound session, follow-up or resource
 obligation, open pull request, branch drift, arbitrary dirty path, or local
 commit. It also preserves a different or unresolved asserted lifecycle head
 rather than making a clean checkout GC-eligible around a resumable session.
+The historical `disposable-cli` policy no longer refuses ACP metadata or
+converts it to CLI. Older Worktrees receivers can still return
+`not-cli-worktree`; Dispatch records that as held cleanup, not success, and
+never changes interfaces or retries another policy to bypass it.
 Dirty generated overlays are preserved under the same rule as other dirty work;
 a clean branch with zero commits ahead of the configured upstream may remain
 behind without being rewritten. A safe result concludes the exact recorded

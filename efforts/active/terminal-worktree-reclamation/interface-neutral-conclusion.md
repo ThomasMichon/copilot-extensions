@@ -68,12 +68,12 @@ and ownership split above are the requested contract.
 
 ## Plan
 
-- [ ] Qualify the current Bridge terminal-shutdown operation and Dispatch
+- [x] Qualify the current Bridge terminal-shutdown operation and Dispatch
       ordering; extend only the missing boundary, rather than inventing a
       parallel Stop implementation.
-- [ ] Make existing ground conclusion interface-neutral without
+- [x] Make existing ground conclusion interface-neutral without
       changing any independent preservation check or allocation provenance.
-- [ ] Qualify Dispatch's existing terminal caller against the corrected ground
+- [x] Qualify Dispatch's existing terminal caller against the corrected ground
       operation, preserving exact pre-shutdown identity, failure visibility and
       durable retry state. Change routing only if a missing boundary is proven.
 - [ ] Update CLI and lifecycle docs, then land source through normal review.
@@ -81,20 +81,31 @@ and ownership split above are the requested contract.
 
 ## Validation Plan
 
-- [ ] CLI, ACP and legacy-interface records with equivalent identity, content
+- [x] CLI, ACP and legacy-interface records with equivalent identity, content
       and obligations produce equivalent safe conclusion/preservation results;
       the recorded interface survives unchanged.
-- [ ] Bridge shutdown precedes Worktrees cleanup. Busy turns, queued prompts,
+- [x] Bridge shutdown precedes Worktrees cleanup. Busy turns, queued prompts,
       background work, stop failure, timeout and unknown liveness cannot
       produce successful cleanup or stop a newer owner.
-- [ ] The native identity remains available across Bridge teardown and a
+- [x] The native identity remains available across Bridge teardown and a
       supervisor restart; missing identity stays visibly blocked.
-- [ ] Fresh live bodies, changed heads, dirty/unmerged work, handoffs, efforts,
+- [x] Fresh live bodies, changed heads, dirty/unmerged work, handoffs, efforts,
       PRs, pairs and unrelated resource claims still prevent removal.
-- [ ] Repeated shutdown/conclusion is idempotent and a reused/targeted
+- [x] Repeated shutdown/conclusion is idempotent and a reused/targeted
       allocation never acquires created-allocation authority.
-- [ ] Strict old-receiver rejection is visible; no interface rewrite,
+- [x] Strict old-receiver rejection is visible; no interface rewrite,
       permissive fallback or production operation occurs during validation.
 
 No historical-cohort adoption, bulk deletion, held-cleanup rearm, forced stop,
 service update or runtime activation is authorized by this source plan.
+
+## Source qualification
+
+The plan merged in #9305 before implementation. The focused source packet
+removes the ground interface veto and preserves the effective interface before
+kind conversion; it retains the existing shutdown operation and wire syntax.
+Worktrees' terminal-conclusion packet passes 158 controls, Dispatch's selected
+terminal/disposable packet passes 36, and eight existing Bridge controls cover
+idle shutdown, busy/queued/background refusals, admission serialization and
+actual isolated Session Host/child exit. These are source tests with synthetic
+state, not production shutdown, historical adoption or rollout evidence.
