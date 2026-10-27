@@ -141,9 +141,11 @@ Also required, beyond that overlay:
   session and absent from the control. Scorecard is in the proposal.
   Destinations diverged. Neither added unjustified machinery. Process cost
   did not show a clear guided win. Does not authorize projection.
-- [ ] Revise and repeat if the result is mixed or negative. Do not project
-  live guidance on a failed comparison. Session-injection result is
-  inconclusive. Hold projection.
+- [x] Reframe the draft kernel so the subject is a bug fix or a feature
+  scope, not a validation exam. See [proposal](proposal.md). Not projected.
+- [ ] Repeat the comparison on a bug fix and a feature scope after that
+  reframe. The installer session-injection run does not count as that test.
+  Do not project before it. Hold projection.
 
 ### Phase 3 — Project only after the comparison passes
 - [ ] Add the accepted kernel as an `agent-conduct-guidance` instruction
@@ -227,3 +229,16 @@ See [proposal.md](proposal.md).
   path. The control did not bloat, so this run does not show that the
   ambient file prevents that failure. Wall time did not favor the guided
   session. Do not project.
+- This run did not test bug-fixing or feature scoping. Do not treat it as
+  evidence for or against the kernel's actual subject.
+
+### 2026-10-26 — Reframe the kernel around the ask
+- The installer session-injection run scored extra validation. That was the
+  wrong objective. The ask is ordinary bug-fixing and feature scoping.
+- Draft kernel lead is now: if the existing architecture can express the bug
+  fix or the feature, change the implementation. If it cannot, propose the
+  smallest extension and wait.
+- Receipts, hashes, ownership schemes, redundant downloads, and extra
+  refreshes stay examples of a second system. They are not the subject.
+- Not projected. The next comparison, when run, is a bug fix and a feature
+  scope. The installer run does not count as that test.
