@@ -27,6 +27,13 @@ declares schema `copilot-extensions.worktree-allocation`, version `1`,
 `claim_linkage: non-blocking`, `agent_launch: false`, `max_identity_bytes: 4096`,
 and `lifecycle_capacity_reserved: true`.
 
+The receiver additionally declares `creation_result` with schema
+`copilot-extensions.worktree-allocation-result`, version `1`, and its explicit
+`max_response_bytes`. Only a receiver declaring this capability and the `result`
+operation supports returning the original ordinary creation result. Older
+receivers retain their existing lifecycle-proof operations; callers must not
+send the new operation without negotiating it.
+
 The origin resolves an exact qualified local creator through its registered
 project configuration. A session alias, anchor, foreign creator or caller-supplied
 ledger path is not a substitute. The receiver resolves its own actual execution
@@ -130,7 +137,8 @@ effects; accepted allocations retain room for cancellation or exact finality.
 
 ## Receiving operation
 
-The named receiver accepts `create`, `inspect`, `confirm` and `cancel`. Its input
+The named receiver accepts `create`, `inspect`, `confirm`, `cancel` and the
+separately negotiated `result` operation. Its input
 contains exactly:
 
 ```json
@@ -174,6 +182,43 @@ the origin's claim link finished. `confirmed` adds optional acknowledgement.
 `pending` and `unknown` preserve uncertainty. A zero CLI exit means the query
 ran, **not** that allocation finished; callers must inspect both result fields.
 Refusals contain an explicit error and exit nonzero.
+
+### Original ordinary creation result
+
+The `result` operation inspects the same original receiving operation. It never
+creates another worktree, acknowledges origin linkage or launches an agent.
+Its distinct version-1 response contains `allocation` (the unchanged strict
+lifecycle proof) and `result`. Only an allocated or confirmed, completed
+original journal supplies `result`, containing the journal's actual serialized
+`worktree` and a replayed complete `creation` marker. The receiver verifies the
+original nonce, recorded owner/pair evidence and actual record identity before
+returning that row. It does not construct an ordinary result from a planned path.
+Pending, unknown or concluded allocations carry no ordinary result; they are not
+permission to create a replacement.
+Unfinished `pending`/`unknown` replies retain their lifecycle status through the
+transport. A separate strict validator requires the exact original request,
+`allocation_finished: false`, a null ordinary result and any supplied identity
+to match the selected target and already-bound incarnation. Missing identity is
+uncertainty, never permission to discard or replace a known allocation. The
+finished-proof validator is unchanged; unfinished replies cannot authorize
+binding, acknowledgement or conclusion.
+
+Consumers verify the exact original request proof and compare the ordinary
+row's execution space, repository, worktree ID, nonce, path, branch and creator
+before using it. The original sessionless result is not fresh session/head/
+holder admission; a composing host must still perform its normal current-record
+checks before embodiment.
+
+This response has a separate bound: the existing 64 KiB ordinary-row budget
+plus the 16 KiB lifecycle-proof budget. The old proof ABI, input bound,
+receiving ready-checkpoint bound and lifecycle-capacity reservation are unchanged.
+An oversized or invalid result is an explicit refusal with the original
+allocation retained, not a truncated row or a second creation attempt.
+
+The finite selected-SSH transport can read the receiver's existing `capabilities`
+declaration before origin reservation or receiving effects. It retains the
+creator's registered project and exact target selection; discovery does not
+select another runtime or fall back to an older effectful command.
 
 ## Recovery and conclusion
 

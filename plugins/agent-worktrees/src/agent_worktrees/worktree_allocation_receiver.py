@@ -96,17 +96,32 @@ def _record(row: dict, admission: receiving.ReceivingAllocation, config: cfg.Con
 
 def receive(operation: str, payload: object, config: cfg.Config) -> dict:
     """Execute/recover one original request, with no origin callback or agent launch."""
-    if operation not in {"create", "inspect", "confirm", "cancel"}:
+    if operation not in {"create", "inspect", "confirm", "cancel", "result"}:
         raise ValueError("unsupported receiving allocation operation")
     admission, expected = _request(payload, config)
     options = _options(admission) if operation == "create" and expected is None else {}
-    if operation == "inspect" and creation_requests.inspect(config, admission.key) is None:
-        return _response(admission, status="unknown", finished=False)
+    if operation in {"inspect", "result"} and creation_requests.inspect(config, admission.key) is None:
+        proof = _response(admission, status="unknown", finished=False)
+        if operation == "result":
+            from .allocation_creation_result import response
+
+            return response(proof, None, None)
+        return proof
     digest = hashlib.sha256(admission.key.encode()).hexdigest()
     # This is an operation lock, not the child record's short RMW lock. A
     # concurrent inspector reports pending rather than overtaking a live creator.
     path = cfg.tracking_dir(config.repo_name).parent / "creation-operations" / f"{digest}.yaml"
     with tracking._RecordLock(path, blocking=False, require_sidecar=True) as guard:
+        if operation == "result":
+            from .allocation_creation_result import response
+
+            proof = _receive("inspect", admission, expected, options, config, exclusive=guard.acquired)
+            row = creation_requests.inspect(config, admission.key)
+            record = (
+                _record(row, admission, config)
+                if row is not None and proof["status"] in {"allocated", "confirmed"} else None
+            )
+            return response(proof, row, record)
         return _receive(operation, admission, expected, options, config, exclusive=guard.acquired)
 
 

@@ -12,7 +12,7 @@ from . import resource_producer as producer, tracking_write
 from .resource_producer_cli import read_input
 
 ORIGIN_OPERATIONS = ("reserve", "inspect", "bind", "confirm", "close", "cancel", "reconcile")
-RECEIVING_OPERATIONS = ("create", "inspect", "confirm", "cancel")
+RECEIVING_OPERATIONS = ("create", "inspect", "confirm", "cancel", "result")
 
 
 def add_parsers(sub) -> None:
@@ -31,6 +31,8 @@ def add_parsers(sub) -> None:
 
 
 def capabilities(*, receiver: bool) -> dict:
+    from . import allocation_creation_result
+
     return {
         "schema": allocation.SCHEMA, "version": allocation.VERSION,
         "role": "receiver" if receiver else "origin",
@@ -41,11 +43,22 @@ def capabilities(*, receiver: bool) -> dict:
         "max_input_bytes": producer.MAX_INPUT_BYTES,
         "max_identity_bytes": allocation.MAX_IDENTITY_BYTES,
         "lifecycle_capacity_reserved": True,
+        **({"creation_result": {
+            "schema": allocation_creation_result.SCHEMA,
+            "version": allocation_creation_result.VERSION,
+            "max_response_bytes": allocation_creation_result.MAX_RESPONSE_BYTES,
+        }} if receiver else {}),
     }
 
 
 def _emit(value: dict) -> None:
-    output.write_real_stdout(allocation.wire_json(value))
+    from . import allocation_creation_result
+
+    encoded = (
+        allocation_creation_result.wire_json(value)
+        if value.get("schema") == allocation_creation_result.SCHEMA else allocation.wire_json(value)
+    )
+    output.write_real_stdout(encoded)
 
 
 def _failure(exc: Exception) -> int:

@@ -16,6 +16,7 @@ from agent_procutil.owned_process import run_caller_owned
 from agent_worktrees import __main__ as main, output, resource_producer_cli as family
 from agent_worktrees import owned_worktree as allocation, owned_worktree_remote as remote
 from agent_worktrees import worktree_allocation_cli as cli
+from agent_worktrees import allocation_creation_result
 from test_receiving_allocation import create, receiver as receiver
 from test_resource_producer import owner as owner
 from test_owned_worktree_transactions import TARGET
@@ -33,6 +34,12 @@ def test_actual_lazy_capability_dispatch_needs_no_full_cluster(monkeypatch, comm
     assert result["metadata_version"] == 3 and result["claim_linkage"] == "non-blocking"
     assert result["agent_launch"] is False
     assert result["max_identity_bytes"] == 4096 and result["lifecycle_capacity_reserved"] is True
+    if role == "receiver":
+        assert "result" in result["operations"]
+        assert result["creation_result"] == {
+            "schema": allocation_creation_result.SCHEMA, "version": 1,
+            "max_response_bytes": allocation_creation_result.MAX_RESPONSE_BYTES,
+        }
 
 
 def test_actual_wire_encoding_counts_newline_and_does_not_expand_pretty_printed_input():
@@ -133,8 +140,11 @@ sys.exit(main.main(["--project", project, "worktree-allocation-receive", operati
         assert argv[-2] == "receiving-alias"
         assert "worktree-allocation-receive" in argv[-1]
         assert "claimant-liveness" not in argv[-1]
-        operation = "confirm" if " confirm " in argv[-1] else "inspect"
-        seen.append((operation, json.loads(kwargs["input_text"])))
+        operation = next(
+            name for name in ("capabilities", "result", "confirm", "inspect")
+            if f" {name} " in argv[-1]
+        )
+        seen.append((operation, json.loads(kwargs["input_text"]) if kwargs["input_text"] else None))
         return run_caller_owned(
             [
                 sys.executable, "-c", script, config.repo_name, str(records), config.srcroot,
@@ -144,12 +154,20 @@ sys.exit(main.main(["--project", project, "worktree-allocation-receive", operati
         )
 
     monkeypatch.setattr(remote, "run_caller_owned", transport)
+    declared = remote.capabilities(admission.origin, admission.target)
+    assert declared["creation_result"]["schema"] == allocation_creation_result.SCHEMA
+    assert "result" in declared["operations"]
     observed = remote.request("inspect", metadata)
     assert observed["status"] == "allocated"
     assert allocation.verified_observation(observed, metadata)
+    ordinary = remote.request("result", metadata)
+    assert ordinary["result"]["worktree"]["creation_nonce"] == record.creation_nonce
+    assert ordinary["allocation"] == observed and "launch" not in ordinary["result"]
+    unknown = remote.request("result", {**metadata, "request_id": "unseen-original"})
+    assert unknown["result"] is None and unknown["allocation"]["status"] == "unknown"
     acknowledged = remote.request("confirm", metadata)
     assert acknowledged["status"] == "confirmed"
     assert acknowledged["identity"] == identity
-    assert [operation for operation, _ in seen] == ["inspect", "confirm"]
-    assert all(payload["origin"] == admission.origin for _, payload in seen)
+    assert [operation for operation, _ in seen] == ["capabilities", "inspect", "result", "result", "confirm"]
+    assert all(payload["origin"] == admission.origin for _, payload in seen if payload is not None)
     assert len(list(Path(records).glob("*.yaml"))) == 1
