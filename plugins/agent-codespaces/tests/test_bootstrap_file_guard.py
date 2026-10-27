@@ -35,13 +35,13 @@ def test_guard_is_not_an_enabled_bootstrap_or_compilation_path():
         assert HELPER.name not in caller.read_text(encoding="utf-8")
 
 
-@pytest.fixture
-def host():
+@pytest.fixture(params=("powershell", "pwsh"))
+def host(request: pytest.FixtureRequest) -> str:
     if os.name != "nt":
         pytest.skip("native Windows stock-framework guard")
-    executable = shutil.which("powershell")
+    executable = shutil.which(request.param)
     if not executable:
-        pytest.skip("Windows PowerShell is unavailable")
+        pytest.skip(f"{request.param} is unavailable")
     return executable
 
 
@@ -281,9 +281,14 @@ def test_attribute_only_directory_handle_does_not_establish_custody(host, tmp_pa
     path.mkdir()
     result = _run(host, tmp_path, r"""
 $bindings=Get-BootstrapStockFileBindings
-$handle=$bindings.Open.Invoke($null, [object[]]@(
-    $env:FIXTURE_PATH, [int]0x80, [int]1, [IntPtr]::Zero, [int]3, [int]0x02200000, [IntPtr]::Zero
-))
+$arguments=if ($bindings.Core) {
+    [object[]]@($env:FIXTURE_PATH, [int]0x80, [IO.FileShare]::Read, [IO.FileMode]::Open, [int]0x02200000)
+} else {
+    [object[]]@(
+        $env:FIXTURE_PATH, [int]0x80, [int]1, [IntPtr]::Zero, [int]3, [int]0x02200000, [IntPtr]::Zero
+    )
+}
+$handle=$bindings.Open.Invoke($null, $arguments)
 try {
     if ($handle.IsInvalid) { throw 'Metadata-only control did not open.' }
     $before=Get-BootstrapStockFileIdentity -Handle $handle -Bindings $bindings
@@ -321,14 +326,115 @@ $bindings=Get-BootstrapStockFileBindings
     assert result == {"forbidden": 0, "open": "CreateFile"}
 
 
-def test_unqualified_powershell_core_refuses_before_native_open(host, tmp_path):
+@pytest.fixture
+def core() -> str:
+    if os.name != "nt":
+        pytest.skip("native Windows Core file bindings")
     core = shutil.which("pwsh")
     if not core:
         pytest.skip("PowerShell Core is unavailable; parity remains unqualified")
-    path = tmp_path / "not-opened"
+    return core
+
+
+@pytest.mark.parametrize("directory", (False, True))
+def test_core_final_path_uses_same_guard_handle_and_releases_reference(
+    core: str, tmp_path: Path, directory: bool,
+) -> None:
+    path = tmp_path / "final's \u00e9"
+    if directory:
+        path.mkdir()
+    else:
+        path.write_bytes(b"untouched")
+    result = _run(core, tmp_path, r"""
+$guard=Open-BootstrapStockFileGuard -Path $env:FIXTURE_PATH -Directory:($env:IS_DIRECTORY -eq '1')
+$bindings=Get-BootstrapStockFileBindings
+$script:final=$bindings.FinalPath
+$script:info=$bindings.Information
+$script:expected=$guard.Handle
+$script:calls=0
+$proxy=[pscustomobject]@{}
+$proxy | Add-Member ScriptMethod Invoke {
+    param($target, $arguments)
+    if (-not [object]::ReferenceEquals($script:expected, $arguments[0]) -or $arguments[0].IsClosed) {
+        throw 'Final path did not receive the exact live guard handle.'
+    }
+    if ($arguments[1].Length -ne 32768) { throw 'Final path buffer is not bounded.' }
+    $script:calls++
+    return $script:final.Invoke($target,$arguments)
+}
+$bindings.FinalPath=$proxy
+$infoProxy=[pscustomobject]@{}
+$infoProxy | Add-Member ScriptMethod Invoke {
+    param($target, $arguments)
+    if (-not [object]::ReferenceEquals($script:expected, $arguments[0]) -or $arguments[0].IsClosed) {
+        throw 'Identity did not receive the exact live guard handle.'
+    }
+    return $script:info.Invoke($target,$arguments)
+}
+$bindings.Information=$infoProxy
+try {
+    $path=Get-BootstrapStockFinalPath -Handle $guard.Handle -Bindings $bindings
+    if (-not [string]::Equals($path, '\\?\' + $env:FIXTURE_PATH, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Final path did not name the held object.'
+    }
+    $identity=Get-BootstrapStockFileIdentity -Handle $guard.Handle -Bindings $bindings
+    [pscustomobject]@{sameIdentity=($identity.Volume -eq $guard.Identity.Volume -and
+        $identity.IndexHigh -eq $guard.Identity.IndexHigh -and $identity.IndexLow -eq $guard.Identity.IndexLow)
+        open=(-not $guard.Handle.IsClosed);calls=$script:calls} | ConvertTo-Json -Compress
+} finally { $guard.Handle.Dispose() }
+if (-not $guard.Handle.IsClosed) { throw 'Final path leaked its retained handle reference.' }
+""", environment={"FIXTURE_PATH": str(path), "IS_DIRECTORY": str(int(directory))})
+    assert result == {"sameIdentity": True, "open": True, "calls": 1}
+
+
+@pytest.mark.parametrize("failure", ("zero", "capacity", "terminator", "embedded", "throw"))
+def test_core_final_path_errors_emit_no_path_and_release_reference(
+    core: str, tmp_path: Path, failure: str,
+) -> None:
+    path = tmp_path / "error"
     path.write_bytes(b"untouched")
     result = _run(core, tmp_path, r"""
-Open-BootstrapStockFileGuard -Path $env:FIXTURE_PATH
+$guard=Open-BootstrapStockFileGuard -Path $env:FIXTURE_PATH
+$bindings=Get-BootstrapStockFileBindings
+$proxy=[pscustomobject]@{}
+$proxy | Add-Member ScriptMethod Invoke {
+    param($target, $arguments)
+    switch ($env:FAILURE) {
+        'zero' { [Runtime.InteropServices.Marshal]::SetLastPInvokeError(6); return [uint32]0 }
+        'capacity' { return [uint32]32768 }
+        'terminator' { $arguments[1][1]=[char]65; return [uint32]1 }
+        'embedded' { return [uint32]2 }
+        'throw' { throw 'synthetic final-path refusal' }
+    }
+}
+$bindings.FinalPath=$proxy
+$script:emitted=0
+$message=$null
+try {
+    Get-BootstrapStockFinalPath -Handle $guard.Handle -Bindings $bindings | ForEach-Object {$script:emitted++}
+} catch { $message=$_.Exception.Message }
+$guard.Handle.Dispose()
+if (-not $guard.Handle.IsClosed) { throw 'Final-path failure leaked its retained handle reference.' }
+if (-not $message) { throw 'Final-path failure was lost.' }
+[pscustomobject]@{closed=$guard.Handle.IsClosed;emitted=$script:emitted;message=$message} | ConvertTo-Json -Compress
+""", environment={"FIXTURE_PATH": str(path), "FAILURE": failure})
+    assert result["closed"] is True
+    assert result["emitted"] == 0
+    assert result["message"]
+
+
+def test_core_final_path_closed_handle_does_not_invoke_binding(core: str, tmp_path: Path) -> None:
+    path = tmp_path / "closed"
+    path.write_bytes(b"untouched")
+    result = _run(core, tmp_path, r"""
+$guard=Open-BootstrapStockFileGuard -Path $env:FIXTURE_PATH
+$bindings=Get-BootstrapStockFileBindings
+$proxy=[pscustomobject]@{}
+$proxy | Add-Member ScriptMethod Invoke { throw 'Closed handle reached final path.' }
+$bindings.FinalPath=$proxy
+$guard.Handle.Dispose()
+Get-BootstrapStockFinalPath -Handle $guard.Handle -Bindings $bindings
 """, success=False, environment={"FIXTURE_PATH": str(path)})
     assert result.returncode != 0
-    assert "require qualified 64-bit Windows PowerShell" in result.stderr
+    assert "DangerousAddRef" in result.stderr
+    assert "Closed handle reached final path" not in result.stderr

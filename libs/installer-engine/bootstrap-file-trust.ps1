@@ -1,6 +1,9 @@
 # Private prerequisite building block; not complete interpreter/source admission.
 # The caller loads bootstrap-file-guard.ps1 and retains its guard through this call.
 function Get-BootstrapStockTrustBindings {
+    if ($PSVersionTable.PSEdition -eq 'Core') {
+        throw 'Stock bootstrap trust bindings require qualified 64-bit Windows PowerShell.'
+    }
     $null = Get-BootstrapStockFileBindings
     $assembly = [Management.Automation.PSObject].Assembly
     $native = $assembly.GetType('System.Management.Automation.Security.NativeMethods', $true)
