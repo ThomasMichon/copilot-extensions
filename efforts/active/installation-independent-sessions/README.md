@@ -853,3 +853,33 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   fixture, not a human mux or installation-removal witness. Initial failures
   were fixture wiring and an explicitly rejected stale successor revision;
   the CAS regression now asserts that its intervening mutation actually landed.
+
+### 2026-10-27 - Equivalent worktree identity corrections
+
+- The next review overview identified raw worktree-path comparisons in start,
+  reconnect and discovery admission. Equivalent native paths now retain their
+  logical owner, dead CLI fences, latest observed exit and native-discovery
+  identity. Exact stored-snapshot comparisons remain unchanged for CAS.
+- Regression controls cover existing `sub/..` paths, actual Windows case
+  aliases, genuinely different paths, duplicate and subsequent exits, ended-pane
+  creation refusal and an alias-only concurrent write invalidating a snapshot.
+- Rebased onto current upstream while preserving its allocation/pair-completion
+  changes and removal-foundation journal. The creation builder's duplicate
+  seeded/unseeded call branches were folded without changing their arguments.
+- The Bash deadline helper's finite 50-millisecond sleep-child checks are
+  bounded to a boundary call, not a resident poller. Their overhead and native
+  callback latency remain unqualified under #8669; no deadline was increased
+  and no new persistent helper was introduced.
+- Local tests and a fresh exact-head review remain required. No target session,
+  service or installation has changed; the parent effort remains Active.
+- The identity/CLI packet passed 167 tests and the registry/companion/native
+  protocol packet passed another 155. Rebased creation validation exposed a
+  Windows slash-format assertion and cold imports sharing a three-second lock
+  readiness deadline. The assertions now compare native paths; the fixture
+  separately prepares imports before its unchanged lock-acquisition and
+  exclusion windows. These fixture changes do not alter production deadlines.
+- The final rebased creation packet passed 72 tests. Two earlier attempts
+  exhausted the runner's 300-second aggregate preparation budget; the final
+  invocation allowed 600 seconds for preparation plus execution while retaining
+  its 300-second test budget. It completed in 73.34 seconds, including cleanup.
+  Python lint, module-size and whitespace checks passed.

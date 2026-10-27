@@ -548,7 +548,9 @@ Successful end admission persists `observed_end` with the actual child exit
 code, distinct from an unobserved loss. Admitted changes publish a bounded
 observation to an existing status monitor without starting one; unavailable
 monitor delivery is reported separately from durable registry admission.
-Same-owner reconnect preserves the latest observed exit, and companions select
+Logical-owner checks resolve worktree path aliases using native real-path and
+case semantics; snapshot-CAS fences still compare the exact stored bytes.
+Same-owner reconnect preserves native-discovery identity and the latest observed exit, and companions select
 their pinned pane rather than assuming a single CLI entry. Dead CLI entries
 remain fenced across reconnects; delayed creation and CAS retries cannot revive
 them or a same-incarnation tombstone. A pane exit cannot revive an explicitly

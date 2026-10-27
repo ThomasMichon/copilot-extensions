@@ -57,8 +57,9 @@ def _register_pane(payload: dict, root: Path) -> dict:
         if current is not None and current["live"]:
             if (
                 any(current.get(field) != payload[field] for field in (
-                    "mux_session", "session_incarnation", "worktree_path",
+                    "mux_session", "session_incarnation",
                 ))
+                or not mappings._same_worktree_path(current["worktree_path"], payload["worktree_path"])
                 or not mappings._same_mux_executable(current["mux_bin"], payload["mux_bin"])
             ):
                 return {"applied": False, "reason": "incumbent-mapping"}

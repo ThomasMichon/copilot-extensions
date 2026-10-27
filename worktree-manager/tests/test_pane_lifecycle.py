@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from worktree_manager import mux_mapping_registry as mappings, pane_lifecycle
@@ -23,6 +25,41 @@ def entry(pane="%1", **overrides):
         "panes": [{"pane_id": pane, "role": "cli", "live": True}],
         "mapping_revision": 1, **overrides,
     }
+
+
+@pytest.mark.parametrize("alias_kind", ["dotdot", "case", "different"])
+def test_start_uses_logical_path_identity_without_losing_existing_exit(tmp_path, alias_kind):
+    if alias_kind == "case" and os.name != "nt":
+        pytest.skip("Case aliases require Windows path semantics")
+    (tmp_path / "sub").mkdir()
+    alias = {
+        "dotdot": str(tmp_path / "sub" / ".."),
+        "case": str(tmp_path).swapcase(),
+        "different": str(tmp_path / "sub"),
+    }[alias_kind]
+    registry = mappings.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register_next(entry(
+        worktree_path=str(tmp_path), native_session_incarnation="$1:123",
+        panes=[{"pane_id": pane, "role": "cli", "live": True} for pane in ("%1", "%2")],
+    ))
+    registry.remove("example", "worktree", session_incarnation="$1:123", pane_id="%2", exit_code=7)
+    before = registry.get("example", "worktree")
+    result = pane_lifecycle.admit(
+        "start", root=tmp_path, expected_installation=None,
+        project="example", worktree_id="worktree", mux_session="wt-worktree",
+        session_incarnation="$1:123", pane_id="%3", worktree_path=alias, mux_bin="tmux",
+    )["result"]
+    current = registry.get("example", "worktree")
+    if alias_kind == "different":
+        assert result == {"applied": False, "reason": "incumbent-mapping"}
+        assert current == before
+    else:
+        assert result["applied"]
+        assert current["panes"] == [
+            *before["panes"], {"pane_id": "%3", "role": "cli", "live": True},
+        ]
+        assert current["observed_end"] == before["observed_end"]
+        assert current["native_session_incarnation"] == "$1:123"
 
 
 def test_delayed_exit_does_not_retire_a_successor_in_the_same_mux(tmp_path):

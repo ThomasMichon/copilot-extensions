@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 from pathlib import Path
@@ -11,7 +10,9 @@ from pathlib import Path
 from agent_procutil import no_window_kwargs
 
 from .mux_child_process import run as run_mux_child
-from .mux_mapping_registry import _same_mux_executable, get_mapping, register_next_mapping
+from .mux_mapping_registry import (
+    _same_mux_executable, _same_worktree_path, get_mapping, register_next_mapping,
+)
 
 _LOOKUP = object()
 
@@ -31,9 +32,7 @@ def _reconnect_cli_panes(payload: dict, incumbent: object = _LOOKUP) -> list[dic
         if key not in {"worktree_path", "mux_bin"}
     ) or not _same_mux_executable(str(incumbent.get("mux_bin") or ""), payload["mux_bin"]):
         return []
-    if os.path.normcase(os.path.realpath(str(incumbent.get("worktree_path") or ""))) != (
-        os.path.normcase(os.path.realpath(payload["worktree_path"]))
-    ):
+    if not _same_worktree_path(incumbent.get("worktree_path"), payload["worktree_path"]):
         return []
     cli = [
         pane for pane in incumbent.get("panes", [])
@@ -85,8 +84,9 @@ def _register_reconnect(payload: dict, *, creation: bool = False) -> dict:
         conflict = incumbent is not None and (
             incumbent.get("live") is not True
             or any(incumbent.get(field) != payload.get(field) for field in (
-                "project", "worktree_id", "mux_session", "session_incarnation", "worktree_path",
+                "project", "worktree_id", "mux_session", "session_incarnation",
             ))
+            or not _same_worktree_path(incumbent.get("worktree_path"), payload.get("worktree_path"))
             or not _same_mux_executable(
                 str(incumbent.get("mux_bin") or ""), str(payload.get("mux_bin") or ""),
             )
@@ -125,8 +125,10 @@ def _register_reconnect(payload: dict, *, creation: bool = False) -> dict:
             supplied = {pane["pane_id"] for pane in payload["panes"]}
             panes = [*[pane for pane in panes if pane["pane_id"] not in supplied], *payload["panes"]]
         reconciled = dict(payload, panes=panes)
-        if not conflict and incumbent is not None and "observed_end" in incumbent:
-            reconciled["observed_end"] = incumbent["observed_end"]
+        if not conflict and incumbent is not None:
+            for field in ("observed_end", "native_session_incarnation"):
+                if field in incumbent:
+                    reconciled[field] = incumbent[field]
         result = register_next_mapping(reconciled, expected=incumbent)
         if result.get("reason") == "mapping-changed":
             continue

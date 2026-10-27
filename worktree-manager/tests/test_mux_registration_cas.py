@@ -1,6 +1,8 @@
 """Reconnect reconciliation cannot overwrite a newer creation snapshot."""
 
 from concurrent.futures import ThreadPoolExecutor
+import os
+from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
 
@@ -28,6 +30,64 @@ def owner(tmp_path, monkeypatch):
 
 def _cli(pane="%42"):
     return [{"pane_id": pane, "role": "cli", "live": True}]
+
+
+@pytest.mark.parametrize("alias_kind", ["dotdot", "case"])
+def test_equivalent_path_reconnect_preserves_cli_exit_and_native_identity(
+    owner, monkeypatch, alias_kind,
+):
+    if alias_kind == "case" and os.name != "nt":
+        pytest.skip("Case aliases require Windows path semantics")
+    path = Path(owner["worktree_path"])
+    (path / "sub").mkdir()
+    alias = str(path / "sub" / "..") if alias_kind == "dotdot" else str(path).swapcase()
+    registry.register_next_mapping(dict(
+        owner, panes=[*_cli(), *_cli("%99")], native_session_incarnation="$7:100",
+    ))
+    assert registry.remove_mapping(
+        "example", "one", session_incarnation="$7:100", pane_id="%99", exit_code=7,
+    )["applied"]
+    before = registry.get_mapping("example", "one")
+
+    def unavailable(*args, **kwargs):
+        raise TimeoutError("unknown inventory must retain the same owner")
+
+    monkeypatch.setattr(mux_daemon_cli, "run_mux_child", unavailable)
+    assert mux_daemon_cli._register_reconnect(dict(owner, worktree_path=alias))["applied"]
+    current = registry.get_mapping("example", "one")
+    assert current["panes"] == before["panes"]
+    assert current["observed_end"] == before["observed_end"]
+    assert current["native_session_incarnation"] == "$7:100"
+    saved = registry.registry_path().read_bytes()
+    assert registry.remove_mapping(
+        "example", "one", session_incarnation="$7:100", pane_id="%99", exit_code=7,
+    ) == {"applied": True, "reason": "already-observed"}
+    assert registry.registry_path().read_bytes() == saved
+    assert mux_daemon_cli._register_reconnect(
+        dict(owner, worktree_path=alias, panes=_cli("%99")), creation=True,
+    ) == {"applied": False, "reason": "ended-pane"}
+    assert registry.remove_mapping(
+        "example", "one", session_incarnation="$7:100", pane_id="%42", exit_code=0,
+    )["applied"]
+    current = registry.get_mapping("example", "one")
+    assert current["live"] is False
+    assert current["observed_end"]["exit_code"] == 0
+
+
+@pytest.mark.parametrize("operation", ["register", "discover"])
+def test_equivalent_path_write_still_invalidates_raw_snapshot_cas(owner, operation):
+    path = Path(owner["worktree_path"])
+    (path / "sub").mkdir()
+    registry.register_next_mapping(dict(owner, panes=_cli()))
+    snapshot = registry.get_mapping("example", "one")
+    assert registry.register_next_mapping(dict(
+        snapshot, worktree_path=str(path / "sub" / ".."),
+    ))["applied"]
+    if operation == "register":
+        result = registry.register_next_mapping(owner, expected=snapshot)
+    else:
+        result = registry.MuxMappingRegistry(registry.registry_path()).discover(owner, expected=snapshot)
+    assert result == {"applied": False, "reason": "mapping-changed"}
 
 
 def test_explicit_absence_fence_rejects_a_new_mapping(owner):

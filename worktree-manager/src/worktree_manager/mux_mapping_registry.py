@@ -38,6 +38,14 @@ from .mux_file_lock import _try_lock_file_once as _try_lock_file_once, _unlock_f
 _REQUIRED_MAPPING_STR_FIELDS = ("project", "worktree_id", "mux_session", "mux_bin")
 
 
+def _same_worktree_path(first: str | None, second: str | None) -> bool:
+    if first == second:
+        return True
+    if not first or not second:
+        return False
+    return os.path.normcase(os.path.realpath(first)) == os.path.normcase(os.path.realpath(second))
+
+
 def _same_mux_executable(first: str, second: str) -> bool:
     if first == second:
         return True
@@ -366,7 +374,8 @@ class MuxMappingRegistry:
                 return {"applied": False, "reason": "mapping-changed"}
             if current is not None:
                 if (
-                    any(current[field] != entry[field] for field in ("mux_session", "worktree_path"))
+                    current["mux_session"] != entry["mux_session"]
+                    or not _same_worktree_path(current["worktree_path"], entry["worktree_path"])
                     or not _same_mux_executable(current["mux_bin"], entry["mux_bin"])
                 ):
                     return {"applied": False, "reason": "incumbent-mapping"}
