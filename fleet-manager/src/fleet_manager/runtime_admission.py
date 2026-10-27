@@ -111,7 +111,7 @@ class OperationGrant:
         _generation(self.generation)
         if self.command not in COMMAND_FIELDS:
             raise AdmissionError("unsupported-action")
-        if self.command == "runner.converge":
+        if self.command in ("runner.converge", "manager.converge"):
             if (type(self.request_digest) is not str
                     or re.fullmatch(r"[0-9a-f]{64}", self.request_digest) is None):
                 raise AdmissionError("invalid-record")
@@ -412,7 +412,9 @@ class AdmissionAuthority:
             raise AdmissionError("actor-mismatch")
         requested = OperationGrant(
             value["command"], value["target"], value["generation"],
-            request.request_digest if value["command"] == "runner.converge" else None,
+            request.request_digest if value["command"] in (
+                "runner.converge", "manager.converge",
+            ) else None,
         )
         if requested not in enrolled.operations:
             raise AdmissionError("forbidden-scope")

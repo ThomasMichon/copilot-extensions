@@ -66,6 +66,11 @@ independent resolution by their existing owners. Constructing a
 `ProviderInstance` here records a configured reference; it is not an
 authenticated fleet-contracts provider-instance registration.
 
+The namespace may also preserve an optional `substrates` map for explicit
+[Komodo host-owner selection](komodo-owner.md#selected-configuration-and-existing-owners).
+The role compiler does not select or execute it; unselected declarations remain
+inert and do not change bootstrap/readiness output.
+
 Provider fields are exactly those shown. Binding fields require
 `implementation`, `provider`, `target`, `resource`, `artifact_ref` and
 `configuration_ref`; `key_refs`, `requires` and `depends_on` are optional
@@ -124,6 +129,9 @@ Core API. This compiler does not resolve that reference or invent an installer.
 `KomodoRoleProvider` does not support hosting `komodo.core` through that same
 Core; selecting it blocks instead of hiding a bootstrap cycle. An independent
 bootstrap executor and real proof remain prerequisites under #6030/#6240/#6424.
+The separate [Komodo host SDK owner](komodo-owner.md) now supplies that explicit
+execution seam; this compiler still fabricates no installed-owner evidence,
+and actual adopter construction and official-image qualification remain open.
 
 ## Output, revalidation and limits
 

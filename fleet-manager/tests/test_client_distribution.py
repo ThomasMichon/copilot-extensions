@@ -139,7 +139,8 @@ def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
                    and not requirement.marker.evaluate({"extra": ""})
                    and any(requirement.marker.evaluate({"extra": extra})
                            for extra in ("dev", "release-verification", "construction", "auth", "server",
-                                         "service-gateway",
+                                         "service-gateway", "ssh-client",
+                                         "komodo-host",
                                          "runtime-authentication"))
                    for requirement in requirements)
         verification = [requirement for requirement in requirements

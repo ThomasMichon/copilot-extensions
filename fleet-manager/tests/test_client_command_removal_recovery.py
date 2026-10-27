@@ -111,7 +111,7 @@ def test_foreign_replacement_after_partial_removal_is_preserved_on_retry(selecte
             unregister(root, directory)
     command.write_bytes(b"new foreign owner\n")
     before = states([command])
-    with pytest.raises(PlanError, match="unattributed"):
+    with pytest.raises(PlanError, match="client commands could not establish owned removal"):
         unregister(root, directory)
     assert states([command]) == before and (namespace / frontdoor.REMOVING).is_file()
 

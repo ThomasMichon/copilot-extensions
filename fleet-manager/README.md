@@ -72,6 +72,13 @@ requirements without contacting Core, installing a manager or authorizing
 effects. Default planning preserves its optional configuration namespace without
 selecting it; actual managed lifecycle and production readiness remain separate.
 
+The explicit Linux host [Komodo substrate owner](docs/komodo-owner.md) supplies
+fixed native Core/Periphery/Mongo convergence, preserving adoption, current
+authenticated status and receipt-owned container withdrawal. Its installed SDK
+bootstrap works independently of Core/Gateway and may register with the
+existing service Gateway. This opt-in API does not activate the ordinary CLI;
+actual adopter construction and official-image/live qualification remain open.
+
 The explicit [ARC Helm owner API](docs/arc-owner.md) supplies fixed, journaled
 scale-set convergence through an independently adopted Helm 3/cluster owner.
 It consumes the exact reviewed preparation and a separately content-bound

@@ -154,8 +154,8 @@ above is requested; these implementation choices remain reviewable.
 
 ## Plan
 
-- [ ] Review this source appointment and lifecycle contract.
-- [ ] Implement strict declaration/resolution, fixed native substrate owner,
+- [x] Review this source appointment and lifecycle contract (#8872).
+- [x] Implement strict declaration/resolution, fixed native substrate owner,
   operation custody and installed-package entry seam, with focused tests.
 - [ ] Bind the actual adopter install/update composition and versioned desired
   configuration; retire the manual-only dependency without a parallel writer.
@@ -167,13 +167,13 @@ above is requested; these implementation choices remain reviewable.
 
 ## Validation Plan
 
-- [ ] Unit tests cover strict input, immutable images, malformed/secret-shaped
+- [x] Unit tests cover strict input, immutable images, malformed/secret-shaped
   declarations, exact instance/host/storage binding, foreign resources,
   credential drift, supported database transitions and no raw command surface.
-- [ ] Component tests use actual contained subprocesses and existing journals
+- [x] Component tests use actual contained subprocesses and existing journals
   for exact repeat, competing owners, crash before/after mutation, lost replies,
   cleanup uncertainty and restart reconciliation without duplicate effects.
-- [ ] Installed-package tests execute the public owner seam outside its source
+- [x] Installed-package tests execute the public owner seam outside its source
   tree. Default client/planner commands perform no Docker or credential effects.
 - [ ] A fresh isolated Linux host/project with official immutable images reaches
   authenticated Core and native Periphery readiness without a web/manual step.
@@ -190,5 +190,23 @@ above is requested; these implementation choices remain reviewable.
 
 ## Progress
 
-Planning only. No new runtime API, installed package, manager adoption, update,
-recovery or deployment is claimed by this document.
+The reviewed source appointment landed in #8872. The
+[explicit host SDK owner](../../../fleet-manager/docs/komodo-owner.md) implements
+the bounded declaration, native effect boundary, same-journal admission,
+status/withdrawal and installed-package entry seam. Component qualification
+uses synthetic native subprocess and authenticated HTTP fixtures; it does not
+qualify official images or activate the ordinary installed controller.
+The complete contained Fleet qualification passes 3184 tests with nine explicit
+platform/prerequisite skips and seven passing subtests, partitioned exhaustively
+into 139 Komodo cases and their 3045-case complement under the existing runner's
+admission, sandbox and process owner. The required no-actor unit packet passes
+all 2443 admitted cases without skips. Review corrections include mixed-update
+failure settlement and health-blocking missing-key status; retained mixed native
+state never authorizes credentialed probes. The native client is private and
+inert, each native mutation revalidates current selection/admission, and status
+retains the journal's physical-resource uncertainty even without attempt metadata.
+Shared post-health observations reject stops, restarts or key drift before
+publishing or reusing success; original key evidence survives uncertain retries.
+These are source/component qualifications.
+Actual adopter construction, native official-image acceptance and production
+delivery remain open; no deployment or incumbent adoption is claimed here.

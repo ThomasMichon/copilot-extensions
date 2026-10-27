@@ -50,8 +50,8 @@ class EnrolledHarness(Harness):
 def test_actual_source_inert_provider_and_complete_immutable_context():
     h = EnrolledHarness()
     assert not h.calls and not h.reads
-    assert Path(enrolled_identity.__file__).resolve() == (
-        Path(__file__).parents[1] / "src/fleet_manager/enrolled_identity.py").resolve()
+    assert Path(enrolled_identity.__file__).read_bytes() == (
+        Path(__file__).parents[1] / "src/fleet_manager/enrolled_identity.py").read_bytes()
     context, verifier = parse_context(h.source(), h.clock, identity_provider=h.provider)
     assert type(verifier) is enrolled_identity.EnrolledIdentityVerifier
     assert context.trust_digest != planning.digest(h.document["identity"])
