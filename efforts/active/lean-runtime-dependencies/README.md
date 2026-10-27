@@ -268,9 +268,10 @@ native parent-loss and descendant-settlement evidence, but no compiled caller
 has switched and the interpreter admission boundary remains open.
 The unused stock-framework file guard merged in #9181, including native
 directory sharing and same-process refusal-cleanup controls. The cached-only
-held-file signer merged in #9187. The next unused Core file/final-path adapter
-has bounded native qualification; Core WinTrust and complete path/source
-admission remain open before any compiled bootstrap migration.
+held-file signer merged in #9187. The unused Core file/final-path adapter
+merged in #9197 and the Core signer in #9204. Complete canonical path, drive,
+ancestor and source admission remain open before any compiled bootstrap
+migration; these private primitives do not enable a caller.
 
 ### Current execution boundary
 
@@ -331,6 +332,91 @@ transfer without acceptance by a named tracked objective.
 
 ## Journal
 
+### 2026-10-26 - Retained ancestors and current-drive query candidate
+
+- Added unused root-to-leaf custody composition over the existing file guard,
+  with a bounded component count, no-follow directory/file checks and reverse
+  release on partial admission. Cleanup attempts every retained entry and
+  preserves both admission and cleanup errors.
+- Added an unused current-drive mapping query through the exact existing
+  Windows PowerShell and Core declarations. Bounded preliminary native
+  callability succeeded on both editions; Core accepts owned IntPtr arguments
+  for its existing pointer parameters. The Core raw thunk does not capture
+  native last error, and the Windows PowerShell StringBuilder marshaler does
+  not expose the native MULTI_SZ tail. The implementation preserves these
+  limits rather than reporting stale errors or pretending to observe the tail.
+- Earlier metadata searches hit their declared limits; they do not prove
+  Windows PowerShell final-path support absent. The exact symbolic-link
+  helper type has no matching final-path method in its completed narrow
+  inspection. Other incomplete scopes remain unknown.
+- Complete source-helper tests, native composed-custody qualification,
+  independent review and merge remain gates. These primitives do not decide
+  canonical names, short-name aliases, drive stability or interpreter/source
+  admission, and no compiled caller or installed runtime changes. This targets
+  a prerequisite delta of `plugin-services/compiler-free-first-party-execution`;
+  no aggregate Plan or Validation Plan item is complete from this candidate.
+- The first native preparation stopped before environment construction because
+  expected PowerShell hashes described Git's LF blobs rather than the
+  repository's CRLF archive exports. Actual archive entries and extracted
+  bytes agree exactly, and their LF-normalized content matches Git; no source
+  normalization or repair was performed. Qualification must bind the actual
+  exported bytes. The exact component-limit fixture now uses one-character
+  names to avoid depending on long-path settings, and the count gate precedes
+  framework normalization.
+- The corrected source packet passed all 155 controls with zero failures or
+  skips on Windows PowerShell 5.1 and Core 7.6.9: four portable source contracts
+  and 151 host-dependent tests, not 151 asserted native API calls. Test time
+  was 81.88 seconds, 100.69 seconds including preparation and settlement.
+  The fresh canonical environment used existing offline inputs; all nine bound
+  source/runner files and the original signed executable remained unchanged.
+  The selected cleanup assertions and canonical Job/sandbox settlement passed.
+  The final hardened Linux packet passed four source controls with 151
+  explicit native skips.
+- Corrected a containment-description error without changing the runner:
+  the original canonical monitored thresholds are 128 target processes,
+  4096 MiB peak Job memory and 2048 MiB temporary storage; kernel emergency
+  ceilings are 257 total Job processes and 8192 MiB Job memory. There is no
+  per-process memory cap. The same canonical source governed the earlier
+  signer packet. Monitored thresholds must not be reported as kernel caps.
+  Independent review and merge remain gates, and complete canonical-path,
+  interpreter/source admission and compiled-caller replacement remain open.
+- Review identified a file-mode trailing-separator path that composition could
+  silently shorten before opening. The shared validator now refuses non-root
+  trailing separators for both guard forms before binding or opening anything,
+  while preserving drive-root directory custody. Existing-file/directory,
+  zero-output/before-binding and root-directory regressions cover the class.
+  The earlier 155-control packet is historical evidence for the preceding
+  source; final-candidate native requalification remains pending.
+- The initial CI attempt also caught incomplete shared-library changefile
+  coverage. All eight declared installer-engine consumers now have release
+  entries in this contribution; no helper or caller behavior changed for that
+  metadata-only repair.
+- The final corrected packet passed 169 controls with zero failures or skips,
+  including the existing-object trailing-separator refusals and valid
+  root-directory custody on both hosts. Test time was 87.27 seconds, 101.35
+  seconds including preparation and settlement. All nine bound source/runner
+  files remained unchanged and the canonical cleanup completed. The matching
+  hardened Linux packet passed four source controls with 165 explicit native
+  skips. Current-head independent review, required CI and merge remain gates;
+  no complete canonical-path or interpreter/source admission is inferred.
+- A later review identified the .NET regex end-anchor exception for a final LF
+  in a drive value. The drive grammar now uses absolute start/end anchors.
+  Malformed-input controls preserve newline, NUL and Unicode separator data
+  through an encoded test transport, require rejection before binding and
+  assert zero output. Focused corrected-drive native qualification is pending;
+  the preceding combined packet continues to cover unchanged custody/signer
+  code, not this new drive-validator revision.
+- The final drive revision passed its focused 57-control native packet with
+  zero failures or skips on both shell editions, including faithful transport
+  of all 12 malformed values, zero binding calls and zero helper output.
+  Test time was 32.71 seconds, 49.95 seconds including preparation and
+  settlement. All nine bound source/runner files and the original signed
+  executable remained unchanged; canonical cleanup passed. The focused
+  hardened Linux source control passed with 56 explicit native skips.
+  This focused result complements the preceding 169-control custody/signer
+  packet; no 181-control combined rerun is claimed. Current-head review and
+  merge remain gates, and complete canonical/interpreter admission stays open.
+
 ### 2026-10-26 - Core held-file signer candidate
 
 - The existing typed Core `WINTRUST_DATA` and `WINTRUST_FILE_INFO` passed a
@@ -377,6 +463,17 @@ transfer without acceptance by a named tracked objective.
   controls with 71 explicit native skips. Independent review and merge remain
   gates; complete interpreter/source admission, compiled-caller replacement
   and production rollout remain open.
+- #9204 merged as `5cf50e5f0e78f2efb1a6142e3bfefb8a82e438f1` after
+  current-head Copilot review `5661678432` reported no open or inline issues
+  and required CI passed. The owner-authored clean-comment policy applies;
+  the native concerns were assessed against the actual dual-shell packet and
+  direct loader argument-flow evidence, not portable source inspection alone.
+  Both entire owning effort READMEs were re-read after merge; all aggregate
+  implementation and validation gates remain open.
+  Next qualify Windows PowerShell final paths and both editions' drive-target
+  queries, then compose canonical-path/ancestor/source custody before any
+  compiled-caller switch. The source worktree is reconciled; no runtime
+  rollout or complete admission is inferred.
 
 ### 2026-10-26 - Core held-file and managed final-path adapter
 

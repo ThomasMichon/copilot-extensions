@@ -192,16 +192,19 @@ function Get-BootstrapStockFinalPath {
     }
 }
 
-function Open-BootstrapStockFileGuard {
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [switch]$Directory
-    )
-    $ErrorActionPreference = 'Stop'
+function Assert-BootstrapStockOrdinaryPath {
+    param([Parameter(Mandatory)][string]$Path, [int]$MaximumComponents = 0)
     if ($Path -notmatch '^[A-Za-z]:\\' -or $Path.Substring(2).Contains(':') -or
         $Path.Contains('/') -or $Path.Length -gt 32767 -or
-        $Path -match '[\x00-\x1f]' -or
-        -not [string]::Equals([IO.Path]::GetFullPath($Path), $Path, [StringComparison]::Ordinal)) {
+        ($Path.Length -gt 3 -and $Path.EndsWith('\')) -or
+        $Path -match '[\x00-\x1f]') {
+        throw 'Bootstrap file guard requires an ordinary absolute normalized drive path.'
+    }
+    if ($MaximumComponents -gt 0 -and
+        @($Path.Substring(3).Split('\') | Where-Object { $_ }).Count -gt $MaximumComponents) {
+        throw 'Bootstrap ancestor guard exceeds its bounded component count.'
+    }
+    if (-not [string]::Equals([IO.Path]::GetFullPath($Path), $Path, [StringComparison]::Ordinal)) {
         throw 'Bootstrap file guard requires an ordinary absolute normalized drive path.'
     }
     foreach ($segment in $Path.Substring(3).Split('\')) {
@@ -209,6 +212,15 @@ function Open-BootstrapStockFileGuard {
             throw 'Bootstrap file guard refuses a path with an aliased component.'
         }
     }
+}
+
+function Open-BootstrapStockFileGuard {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [switch]$Directory
+    )
+    $ErrorActionPreference = 'Stop'
+    Assert-BootstrapStockOrdinaryPath -Path $Path
     $bindings = Get-BootstrapStockFileBindings
     # Attribute-only opens do not participate in sharing checks; include FILE_LIST_DIRECTORY.
     $access = if ($Directory) { 0x81 } else { -2147483648 }
@@ -240,5 +252,63 @@ function Open-BootstrapStockFileGuard {
         return $result
     } finally {
         if ($null -ne $handle) { $handle.Dispose() }
+    }
+}
+
+function Close-BootstrapStockPathGuard {
+    param([Parameter(Mandatory)]$Guard)
+    $failures = [Collections.Generic.List[Exception]]::new()
+    for ($index = $Guard.Entries.Count - 1; $index -ge 0; $index--) {
+        try { $Guard.Entries[$index].Handle.Dispose() }
+        catch { $failures.Add($_.Exception) }
+    }
+    if ($failures.Count -gt 0) {
+        throw [AggregateException]::new('Bootstrap ancestor guard cleanup failed.', $failures.ToArray())
+    }
+}
+
+function Open-BootstrapStockPathGuard {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [switch]$Directory
+    )
+    $ErrorActionPreference = 'Stop'
+    Assert-BootstrapStockOrdinaryPath -Path $Path -MaximumComponents 128
+    $segments = @($Path.Substring(3).Split('\') | Where-Object { $_ })
+    if ($segments.Count -eq 0 -and -not $Directory) {
+        throw 'Bootstrap ancestor guard requires a file below the drive root.'
+    }
+    $entries = [Collections.Generic.List[object]]::new($segments.Count + 1)
+    $result = $null
+    $failure = $null
+    try {
+        $current = $Path.Substring(0, 3)
+        $entries.Add((Open-BootstrapStockFileGuard -Path $current -Directory))
+        for ($index = 0; $index -lt $segments.Count; $index++) {
+            $current = [IO.Path]::Combine($current, $segments[$index])
+            $isDirectory = $Directory -or $index -lt $segments.Count - 1
+            $entries.Add((Open-BootstrapStockFileGuard -Path $current -Directory:$isDirectory))
+        }
+        $result = [pscustomobject]@{
+            Path = $Path
+            Entries = $entries.ToArray()
+            Leaf = $entries[$entries.Count - 1]
+        }
+        return $result
+    } catch {
+        $failure = $_.Exception
+        throw
+    } finally {
+        if ($null -eq $result) {
+            try {
+                Close-BootstrapStockPathGuard -Guard ([pscustomobject]@{ Entries = $entries.ToArray() })
+            } catch {
+                if ($null -ne $failure) {
+                    throw [AggregateException]::new('Bootstrap ancestor admission and cleanup failed.',
+                        [Exception[]]@($failure, $_.Exception))
+                }
+                throw
+            }
+        }
     }
 }
