@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-10-26
+- **Last revised:** 2026-10-27
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -215,6 +215,26 @@ Existing operating-system facilities, supported interpreters and admitted
 third-party binary distributions remain external dependencies; this boundary
 does not require replacing their implementations. Their acquisition does not
 silently fall back to compiling native dependencies.
+
+### setup-owned-python-prerequisite
+
+Python is a normal, composable prerequisite supplied by upfront harness or
+standalone setup and selected through the platform's ordinary PATH command.
+Helper launchers trust that selection rather than rediscovering, signing,
+attesting or physically pinning the interpreter on each invocation. Python
+provenance and signature checks, registry-only selection and special physical
+launch namespaces are not prerequisites for running the suite's helpers.
+
+Setup owns a supported Python and tidy command exposure. The suite does not
+accidentally publish interpreters from disposable worktrees or temporary
+environments onto durable PATH. This is provisioning and environment hygiene,
+not a per-launch blacklist or another interpreter-admission service. Missing
+or incompatible Python produces a clear prerequisite failure and uses the
+existing explicit setup owner, never an implicit helper-owned download.
+
+Trusting the interpreter does not waive process-birth identity, containment,
+lease ownership, authenticated endpoints, operation locks or safe cleanup.
+Those protect the work the helper performs, not the provenance of Python.
 
 ### attributed-daemon-instances
 

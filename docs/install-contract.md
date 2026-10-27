@@ -2669,6 +2669,14 @@ fix must **not** require downloaders to disable SAC.
 
 ### Rules (Windows `install.ps1` / `init.ps1`)
 
+The signature-driven Python discovery below describes the current legacy
+implementation. The [setup-owned Python prerequisite](../visions/plugin-services/README.md#setup-owned-python-prerequisite)
+and [compiler-free amendment](../efforts/active/lean-runtime-dependencies/compiler-free-execution.md#python-prerequisite-boundary)
+replace that discovery with trusted PATH Python supplied by upfront setup.
+Windows code-integrity enforcement, copied-venv construction and avoiding
+console-script trampolines remain separate from per-helper signature checks.
+The source migration is not complete merely because that intent is recorded.
+
 1. **Build the venv from a PSF-signed base Python via `--copies`.** Resolve a
    signed interpreter (`py -3.x` whose `Get-AuthenticodeSignature` reports
    `Valid`) and run `& $signedBase -m venv --copies $VenvDir`. `--copies`
@@ -2988,6 +2996,14 @@ delegate to the canonical `install.*` rather than duplicate the deploy logic.
 ## Shared installer-engine helpers (`libs/installer-engine/`)
 
 ### Independent Windows evaluator bootstrap
+
+The selector below is the current compiled implementation, not the target
+prerequisite policy. The [compiler-free amendment](../efforts/active/lean-runtime-dependencies/compiler-free-execution.md#python-prerequisite-boundary)
+requires replacing its signature, registry and physical-path interpreter
+admission with ordinary setup-provided PATH Python. Setup owns supported Python
+and durable PATH hygiene; missing/incompatible Python is a prerequisite error,
+not a reason to compile a fallback or introduce another interpreter installer.
+Process containment, lifetime, endpoint, lock and cleanup guarantees remain.
 
 `bootstrap-python.ps1` is a standalone, read-only selector for an existing
 external CPython base that can evaluate the owning payload's stdlib SDK.

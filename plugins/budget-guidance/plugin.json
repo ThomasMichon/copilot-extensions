@@ -1,7 +1,7 @@
 {
   "name": "budget-guidance",
   "description": "Provider-neutral budget posture, deterministic source resolution, sustainable-rate arithmetic, and an on-demand credential-free foreground-session quota capture tool.",
-  "version": "0.1.68-dev1",
+  "version": "0.1.69-dev1",
   "runtimeScope": "universal",
   "hooks": "hooks.json",
   "sessionContext": "session-context.json",

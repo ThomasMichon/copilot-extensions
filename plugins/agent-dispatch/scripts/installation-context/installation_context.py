@@ -27,11 +27,21 @@ _FRAGMENT_FILES = (
 )
 
 
+def _fragment_directory(script: Path) -> Path:
+    # Resolving a bootstrap-held GLOBALROOT path reintroduces the mutable DOS map.
+    if script.drive.casefold() == "\\\\?\\globalroot" and script.root == "\\":
+        return script.parent
+    return script.resolve().parent
+
+
 def _load_fragments() -> None:
-    fragment_dir = Path(__file__).resolve().parent
+    fragment_dir = _fragment_directory(Path(__file__))
     for fragment_name in _FRAGMENT_FILES:
         fragment_path = fragment_dir / fragment_name
-        exec(compile(fragment_path.read_text(encoding="utf-8"), str(fragment_path), "exec"), globals())
+        exec(  # noqa: S102 - Fixed canonical fragments share the module namespace.
+            compile(fragment_path.read_text(encoding="utf-8"), str(fragment_path), "exec"),
+            globals(),
+        )
 
 
 _load_fragments()

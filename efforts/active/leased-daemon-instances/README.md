@@ -85,6 +85,12 @@ compiled implementation with thin shell entrypoints and standard-library
 Python. Original completed phases remain historical evidence, not proof of the
 replacement.
 
+The operator's 2026-10-27 clarification uses setup-provided Python from normal
+PATH resolution, without interpreter signature, registry or physical-path
+attestation. The linked amendment owns that prerequisite and setup-hygiene
+boundary; process identity, leases, Job containment and safe cleanup retain
+their existing owners and guarantees.
+
 ## Plan
 
 ### Phase 1 - Reviewed contract
@@ -157,8 +163,9 @@ replacement.
 - [x] Reuse shared Python reservation, schema, locks and identity operations;
   replace Linux C supervise/cleanup and preserve owner-loss, lease/hard maximum,
   subreaper descendant settlement and exact-artifact behavior.
-- [ ] Migrate thin shell and PowerShell instance entrypoints through a qualified
-  interpreter boundary; preserve Windows process/Job and uncertainty contracts.
+- [ ] Migrate thin shell and PowerShell instance entrypoints through
+  setup-provided PATH Python without interpreter attestation; preserve Windows
+  process/Job and uncertainty contracts.
 - [x] Remove canonical C, all distributed copies and native build/export hooks,
   regenerating consumers through their normal owner.
 - [ ] Complete actual compiler-free construction and lifecycle qualification,
