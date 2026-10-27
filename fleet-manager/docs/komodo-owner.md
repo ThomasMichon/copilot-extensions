@@ -78,7 +78,7 @@ Only Core publishes a loopback port. Mongo and Periphery publish none.
 Periphery receives the selected native Docker socket; that is a powerful host
 capability requiring the host owner's independent admission.
 
-The owner interrogates the actual daemon, Compose 2 version, installed image
+The owner interrogates the actual daemon, Compose 2 or stable Compose 5 version, installed image
 digests/platform/configuration, container IDs/configuration/mounts and physical
 network. It scrubs ambient Docker context/auth controls. Native output is
 bounded and private; credential-bearing container configuration never enters
@@ -89,6 +89,15 @@ Docker Hub's familiar Mongo repository spellings are equivalent only for the
 same selected official repository and exact digest; other registries and the
 Core/Periphery repository names remain exact. Network discovery matches the
 complete expected name, not similarly named neighboring networks.
+
+Compose 5 retains the Compose Specification and the fixed `up --no-build
+--pull never --wait --wait-timeout` interface used here. Stable 5.x is accepted
+alongside the existing 2.x contract; other majors and 5.x prereleases refuse.
+The contained native-protocol lifecycle matrix exercises both 2.39.4 and 5.1.4.
+This is not qualification of an actual Docker installation or official service
+images. The selected host authority must still authenticate its executable and
+system Compose plugin; no plugin download, replacement or global configuration
+change is performed by this owner.
 
 A matching Compose project name does not authorize adoption. First adoption
 requires exact independently authenticated fingerprints of all three native
