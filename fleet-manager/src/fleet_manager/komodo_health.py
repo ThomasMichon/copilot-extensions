@@ -24,8 +24,8 @@ def public_keys(material: KomodoMaterialization) -> dict[str, str]:
     result = {}
     for name in ("core", "periphery"):
         path = material.keys / (name + ".pub")
-        ordinary_path(path)
         try:
+            ordinary_path(path)
             value = _bytes(path, 4096).decode("utf-8").strip()
         except (OSError, UnicodeError):
             raise PlanError("Komodo retained public identity is unavailable") from None

@@ -80,6 +80,10 @@ bounded and private; credential-bearing container configuration never enters
 receipts or error details. Only fixed `compose up --no-build --pull never`
 and receipt-owned container withdrawal are available. No orphan/volume removal,
 build, automatic pull, network cleanup or workload modification is issued.
+Docker Hub's familiar Mongo repository spellings are equivalent only for the
+same selected official repository and exact digest; other registries and the
+Core/Periphery repository names remain exact. Network discovery matches the
+complete expected name, not similarly named neighboring networks.
 
 A matching Compose project name does not authorize adoption. First adoption
 requires exact independently authenticated fingerprints of all three native
@@ -158,6 +162,10 @@ previous-good/failed candidate, drift blockers and unresolved effects.
 not converge a new desired selection. Inspection never mutates native state.
 Only the actual current accepted UNKNOWN candidate can supply candidate
 evidence; changed legacy containers are not blessed through a fallback.
+Unresolved effects also reflect the retained original attempt's journal
+receipt, even when the admitted status request has a new operation ID and no
+receipt of its own. That resource fence prevents convergence without allowing
+the new request to validate or reconcile the original candidate.
 
 Explicit `desired_state: absent` uses the same content-bound operation and
 requires a recorded installation, unchanged declaration apart from desired

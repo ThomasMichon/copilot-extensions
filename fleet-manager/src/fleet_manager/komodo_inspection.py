@@ -44,12 +44,16 @@ def inspect_owner(owner: KomodoOwner, request: OperationIntent, permit: Permit) 
             record = owner._baseline(state, selected, containers)
             path = state.root / "node.sqlite"
             receipt = None
+            attempt = record["attempt"]
+            original_receipt = None
             if path.exists():
                 validate_private_file(path)
                 journal = NodeJournal(
                     path, authority=owner.authority, installation=selected.installation,
                     target=selected.declaration.to_dict()["target"])
                 receipt = journal.inspect(request)
+                if attempt is not None:
+                    original_receipt = journal.inspect(OperationIntent.from_dict(attempt["request"]))
             accepted = receipt.to_dict()["status"] if receipt is not None else None
             retained = record["failed"] or record["good"]
             blockers = []
@@ -58,7 +62,6 @@ def inspect_owner(owner: KomodoOwner, request: OperationIntent, permit: Permit) 
             observed_declaration = None
             drift_error = None
             fingerprints = {name: native_fingerprint(item) for name, item in containers.items()}
-            attempt = record["attempt"]
             candidate = (accepted == "unknown" and attempt is not None
                          and attempt["request"] == request.to_dict()
                          and attempt["deployment"] == content and "before" in attempt)
@@ -116,7 +119,9 @@ def inspect_owner(owner: KomodoOwner, request: OperationIntent, permit: Permit) 
                     blockers.append("authenticated-current-health-unavailable")
                 else:
                     healthy = True
-            unresolved = accepted == "unknown"
+            unresolved = accepted == "unknown" or (attempt is not None and (
+                original_receipt is None
+                or original_receipt.to_dict()["status"] not in ("succeeded", "failed")))
             retired = (absent and accepted == "succeeded" and not containers
                        and record["retirement"] is not None
                        and record["retirement"]["deployment"] == content and not unresolved and not blockers)

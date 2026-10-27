@@ -27,6 +27,7 @@ def _docker_protocol(args: list[str], directory: str) -> tuple[int, str]:
     import json
     import os
     from pathlib import Path
+    import re
     import time
 
     root = Path(directory)
@@ -42,14 +43,19 @@ def _docker_protocol(args: list[str], directory: str) -> tuple[int, str]:
     if args[:2] == ["compose", "version"]:
         return 0, "2.39.4"
     if args[:2] == ["image", "inspect"]:
+        overrides = root / "image-digests.json"
+        digests = json.loads(overrides.read_text()) if overrides.exists() else {}
         return 0, json.dumps({
             "id": "sha256:" + args[-1].split("sha256:")[1],
-            "os": "linux", "architecture": "arm64", "digests": [args[-1]],
+            "os": "linux", "architecture": "arm64", "digests": digests.get(args[-1], [args[-1]]),
             "environment": [], "entrypoint": [], "command": [], "user": "",
         })
     if args[:2] == ["network", "ls"]:
         network = json.loads((root / "network.json").read_text()) if (root / "network.json").exists() else None
-        return 0, network["Id"] if network else ""
+        extra = root / "extra-networks.json"
+        networks = ([network] if network else []) + (json.loads(extra.read_text()) if extra.exists() else [])
+        pattern = args[args.index("--filter") + 1].removeprefix("name=")
+        return 0, "\n".join(item["Id"] for item in networks if re.search(pattern, item["Name"]))
     if args[:2] == ["network", "inspect"]:
         network = json.loads((root / "network.json").read_text())
         live = json.loads((root / "live.json").read_text()) if (root / "live.json").exists() else {}
@@ -283,6 +289,66 @@ def test_native_failure_never_reports_captured_content_or_replays_effect(native_
     assert "sensitive-native-output" not in str(caught.value)
     assert "fixture-material" not in str(caught.value)
     assert len((rig["directory"] / "calls.jsonl").read_text().splitlines()) == 1
+
+
+@pytest.mark.parametrize("repository", [
+    "mongo", "library/mongo", "docker.io/mongo", "docker.io/library/mongo",
+    "index.docker.io/library/mongo", "foreign.invalid/library/mongo", "docker.io/other/mongo",
+    "ghcr.io/library/mongo", "mongo-other",
+])
+@pytest.mark.parametrize("matching_digest", [True, False])
+def test_native_mongo_digest_accepts_only_equivalent_official_repository(
+    native_rig: Any, repository: str, matching_digest: bool,
+) -> None:
+    rig = native_rig
+    image = rig["selected"].to_dict()["images"]["mongo"]["image"]
+    actual = repository + "@sha256:" + ("c" if matching_digest else "d") * 64
+    (rig["directory"] / "image-digests.json").write_text(json.dumps({image: [actual]}))
+    arguments = (rig["selected"], rig["material"])
+    if matching_digest and repository in {
+        "mongo", "library/mongo", "docker.io/mongo", "docker.io/library/mongo",
+        "index.docker.io/library/mongo",
+    }:
+        images = rig["native"].selected_images(*arguments, deadline=time.monotonic() + 10)
+        assert images["mongo"].identity == "sha256:" + "c" * 64
+    else:
+        with pytest.raises(PlanError, match="immutable image"):
+            rig["native"].selected_images(*arguments, deadline=time.monotonic() + 10)
+    assert not (rig["directory"] / "effects").exists()
+
+
+@pytest.mark.parametrize("service", ["core", "periphery"])
+def test_native_other_official_repositories_do_not_gain_familiar_name_aliases(
+    native_rig: Any, service: str,
+) -> None:
+    rig = native_rig
+    image = rig["selected"].to_dict()["images"][service]["image"]
+    (rig["directory"] / "image-digests.json").write_text(json.dumps({
+        image: [image.removeprefix("ghcr.io/")],
+    }))
+    with pytest.raises(PlanError, match="immutable image"):
+        rig["native"].selected_images(rig["selected"], rig["material"], deadline=time.monotonic() + 10)
+
+
+@pytest.mark.parametrize("scenario", ["substring-only", "exact-and-substring", "duplicate-exact"])
+def test_native_network_filter_matches_complete_name_only(native_rig: Any, scenario: str) -> None:
+    rig = native_rig
+    name = rig["selected"].to_dict()["project"] + "_default"
+    expected = {"Id": "a" * 64, "Name": name, "Containers": {}}
+    if scenario != "substring-only":
+        (rig["directory"] / "network.json").write_text(json.dumps(expected))
+    extras = [{"Id": "b" * 64, "Name": "other-" + name, "Containers": {}},
+              {"Id": "c" * 64, "Name": name + "-other", "Containers": {}}]
+    if scenario == "duplicate-exact":
+        extras.append({"Id": "d" * 64, "Name": name, "Containers": {}})
+    (rig["directory"] / "extra-networks.json").write_text(json.dumps(extras))
+    if scenario == "duplicate-exact":
+        with pytest.raises(PlanError, match="ambiguous"):
+            rig["native"].network(rig["selected"], rig["material"], deadline=time.monotonic() + 10)
+    else:
+        result = rig["native"].network(rig["selected"], rig["material"], deadline=time.monotonic() + 10)
+        assert result == (None if scenario == "substring-only" else expected)
+    assert not (rig["directory"] / "effects").exists()
 
 
 def test_unconfirmed_cleanup_latches_native_owner_before_another_process(native_rig: Any) -> None:

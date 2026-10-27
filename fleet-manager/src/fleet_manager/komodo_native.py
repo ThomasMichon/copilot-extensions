@@ -22,6 +22,18 @@ _ID = re.compile(r"[0-9a-f]{64}\Z")
 _INFO = '{"id":{{json .ID}},"os":{{json .OSType}},"architecture":{{json .Architecture}}}'
 
 
+def _digest_spellings(image: str) -> set[str]:
+    """Docker Hub familiar names retain the exact official repository and digest."""
+    prefix = "docker.io/library/mongo@"
+    if image.startswith(prefix):
+        suffix = image[len(prefix):]
+        return {repository + "@" + suffix for repository in (
+            "docker.io/library/mongo", "docker.io/mongo", "library/mongo", "mongo",
+            "index.docker.io/library/mongo",
+        )}
+    return {image}
+
+
 @dataclass(frozen=True)
 class KomodoImage:
     identity: str
@@ -133,7 +145,9 @@ class KomodoNative:
                     or type(result["id"]) is not str
                     or re.fullmatch(r"sha256:[0-9a-f]{64}", result["id"]) is None
                     or result["os"] != "linux" or result["architecture"] != value["architecture"]
-                    or not isinstance(result["digests"], list) or image not in result["digests"]):
+                    or not isinstance(result["digests"], list)
+                    or not any(type(item) is str and item in _digest_spellings(image)
+                               for item in result["digests"])):
                 raise PlanError("Komodo immutable image is absent or differs from admitted platform")
             values = []
             for name in ("environment", "entrypoint", "command"):
@@ -204,7 +218,8 @@ class KomodoNative:
                 deadline: float) -> dict[str, Any] | None:
         name = declaration.to_dict()["project"] + "_default"
         identities = self._call(material, [
-            "network", "ls", "--no-trunc", "--filter", "name=" + name, "--format", "{{.ID}}",
+            "network", "ls", "--no-trunc", "--filter", "name=^" + re.escape(name) + "$",
+            "--format", "{{.ID}}",
         ], deadline=deadline).splitlines()
         if not identities:
             return None

@@ -169,6 +169,15 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                 with pytest.raises(PlanError, match="uncertain"):
                     await invoke(owner(), original)
                 assert effects() == 1
+                status = await invoke(owner(), request("inspect-with-new-id"), status=True)
+                assert status["accepted"] is None and status["unresolved_effects"] is True
+                assert status["state"] == "unresolved" and status["converged"] is False
+                assert status["installed"] is status["currently_healthy"] is None
+                assert status["blockers"] == [
+                    "native-resources-differ-from-current-or-retained-owner",
+                    "native-network-custody-changed-or-unproved",
+                ]
+                assert effects() == 1 and status["native_mutations_performed"] is False
                 if scenario == "unsettled-restart":
                     with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
                         record = state.read()
@@ -285,6 +294,10 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                     assert len((rig["directory"] / "retire-effects").read_text().splitlines()) == (
                         2 if scenario == "retire-lost-reply" else 1)
                     if scenario == "retire-partial":
+                        status = await invoke(owner(), request("inspect-partial-retirement"), status=True)
+                        assert status["accepted"] is None and status["unresolved_effects"] is True
+                        assert status["state"] == "unresolved" and status["converged"] is False
+                        assert status["native_mutations_performed"] is False
                         with pytest.raises(PlanError, match="unresolved"):
                             await invoke(owner(), absent)
                         assert len((rig["directory"] / "retire-effects").read_text().splitlines()) == 1

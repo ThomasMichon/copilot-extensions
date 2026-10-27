@@ -22,13 +22,16 @@ from test_komodo_native import native_rig as native_rig
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux host substrate contract")
 
 
-@pytest.mark.parametrize("failure", [None, "credentials", "version", "key", "disconnected", "payload"])
+@pytest.mark.parametrize("failure", [
+    None, "credentials", "version", "key", "disconnected", "payload", "missing-core", "missing-periphery",
+])
 def test_real_authenticated_current_core_and_periphery_health(
     native_rig: Any, failure: str | None,
 ) -> None:
     rig = native_rig
     for name in ("core", "periphery"):
-        (rig["material"].keys / (name + ".pub")).write_text("fixture-public-key-" + name)
+        if failure != "missing-" + name:
+            (rig["material"].keys / (name + ".pub")).write_text("fixture-public-key-" + name)
 
     async def exercise() -> None:
         token = "local-fixture-session-token"
@@ -90,6 +93,8 @@ def test_real_authenticated_current_core_and_periphery_health(
                 with pytest.raises(PlanError) as caught:
                     await current_health(selected, rig["material"], deadline=deadline)
                 assert token not in str(caught.value) and "fixture-material" not in str(caught.value)
+                if failure in ("missing-core", "missing-periphery"):
+                    assert str(caught.value) == "Komodo retained public identity is unavailable"
                 assert requests.count("/auth/login/LoginLocalUser") == 1
 
     asyncio.run(exercise())
