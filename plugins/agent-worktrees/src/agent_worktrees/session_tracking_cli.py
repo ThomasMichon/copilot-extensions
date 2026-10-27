@@ -164,10 +164,10 @@ def add_parsers(sub) -> None:
         help="Emit JSON (default; accepted for caller compatibility)",
     )
 
-    # conclude-disposable -- safely conclude an exact disposable CLI worker
+    # conclude-disposable -- safely conclude an exact disposable worker
     sp = sub.add_parser(
         "conclude-disposable",
-        help="Conclude an exact disposable CLI worker and optionally remove it",
+        help="Conclude an exact disposable worker and optionally remove it",
     )
     sp.add_argument(
         "--worktree",
@@ -774,7 +774,7 @@ def _relocate_active_project_for_worktree(wt_id: str) -> bool:
 
 
 def cmd_conclude_disposable(args: argparse.Namespace) -> int:
-    """Conclude one exact disposable CLI worker and optionally remove it."""
+    """Conclude one exact disposable worker and optionally remove it."""
     raw = args.worktree_id
     if not raw or re.search(r"[/\\]|\.\.", raw):
         return output._json_error(f"Invalid exact worktree id: {raw!r}")

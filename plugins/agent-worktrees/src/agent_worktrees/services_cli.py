@@ -119,7 +119,7 @@ def _worktree_usage() -> None:
     print("  remove-system <id> [--json]  Tear down a system worktree by id", file=out)
     print(
         "  conclude-disposable --worktree ID --policy disposable-cli --owner NAME  "
-        "Prime an exact dead CLI worker for managed GC",
+        "Prime an exact stopped worker for managed GC",
         file=out,
     )
     print("  list [--json]          List this project's worktrees", file=out)
