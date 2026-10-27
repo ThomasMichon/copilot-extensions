@@ -12,7 +12,7 @@ from typing import Callable, ContextManager, Iterable
 import yaml
 
 from . import allocation_link_discovery as discovery, owned_worktree as allocation
-from . import tracking
+from . import config as cfg, tracking
 from .tracking_allocation_write import apply_worktree_allocation
 
 CAPABILITY = "worktree-allocation-linker-v1"
@@ -20,6 +20,19 @@ _LOG = logging.getLogger(__name__)
 _DISCOVERY_FAILURES = (
     OSError, ValueError, RuntimeError, KeyError, TypeError, OverflowError, yaml.YAMLError,
 )
+
+
+def _may_hold_allocation(claim: tracking.ResourceClaim) -> bool:
+    metadata = claim.producer
+    return (
+        claim.metadata_opaque or claim.ref.startswith(allocation.NAMESPACE + ":")
+        or claim.has_producer and (
+            not isinstance(metadata, dict)
+            or metadata.get("lifetime") is None
+            or metadata.get("lifetime") == allocation.LIFETIME
+            or metadata.get("namespace") == allocation.NAMESPACE
+        )
+    )
 
 
 @dataclass(frozen=True)
@@ -90,7 +103,7 @@ class AllocationLinkRuntime:
         for record in records:
             for claim in record.resources:
                 metadata = claim.producer
-                if not isinstance(metadata, dict) or metadata.get("lifetime") != allocation.LIFETIME:
+                if not _may_hold_allocation(claim):
                     continue
                 try:
                     if not discovery.locally_owned(record):
@@ -99,7 +112,7 @@ class AllocationLinkRuntime:
                     malformed = True
                     _LOG.warning("Allocation creator authority unavailable for %s: %s", project, type(exc).__name__)
                     continue
-                if not allocation.valid_metadata(metadata):
+                if claim.metadata_opaque or not allocation.valid_metadata(metadata):
                     malformed = True
                     continue
                 creator = tracking.format_claim_ref(record.execution_machine, record.repo, record.worktree_id)
@@ -149,6 +162,7 @@ class AllocationLinkRuntime:
                 _LOG.warning("Allocation restart discovery unavailable: %s", type(exc).__name__)
                 return
             with self._lock:
+                self._startup_pending.update(projects.difference(self._discover))
                 for project in projects:
                     self._discover.setdefault(project, 0.0)
                 if not self._initialized:
@@ -164,9 +178,10 @@ class AllocationLinkRuntime:
             ][:budget]
         for project in projects:
             try:
-                complete = self.observe(
-                    project, discovery.current_records(project), inventory_complete=True,
-                )
+                with cfg.ConfigCacheSession().scope():
+                    complete = self.observe(
+                        project, discovery.current_records(project), inventory_complete=True,
+                    )
             except _DISCOVERY_FAILURES as exc:
                 with self._lock:
                     self._errors[project] = "current allocation ledger unavailable: " + type(exc).__name__

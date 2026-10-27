@@ -79,7 +79,13 @@ the same bounded sweep budget; unavailable ledgers retry without starving other
 projects. Known parsing failures remain visible rather than terminating the
 resident. Only a successful complete inventory scan clears a project discovery
 error; lenient public-roster observation cannot clear it when unreadable records
-were skipped. The periodic inventory itself is not permanent idle demand.
+were skipped. Locally owned opaque resource entries and malformed
+allocation-marked claims also retain discovery errors until ledger repair.
+Every newly registered project remains discovery demand until its first complete
+scan succeeds, including projects beyond the current sweep budget. Each strict
+project scan shares one fresh configuration cache; it never lends that cache to
+the worker's later mutation-authority checks. The periodic inventory itself is
+not permanent idle demand.
 
 After a new or replayed reservation is durable and its record lock is released,
 the origin requests the existing resident/current-roster demand path. That path
