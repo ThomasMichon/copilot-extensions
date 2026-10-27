@@ -230,3 +230,74 @@ def test_actual_installer_constructor_binds_guarded_drain_first_contract(owner, 
     monkeypatch.setattr(CutoverOrchestrator, "run", run)
     assert control.activate_after_update()["result"]["ok"] is True
     assert activation == ["recovery", "reap", "release", "delayed-reap"]
+
+
+@pytest.mark.parametrize("was_live", [False, True])
+def test_guarded_live_owner_without_url_never_restarts(owner, activation, monkeypatch, was_live):
+    from agent_worktrees import status_monitor_runtime
+    monkeypatch.setattr(control, "_monitor_control_url_from_route", lambda: None)
+    monkeypatch.setattr(status_monitor_runtime, "_restart_status_monitor", lambda **k: activation.append("restart"))
+    result = control.activate_after_update(monitor_was_live=was_live)
+    assert result["action"] == "refused" and result["result"]["ok"] is False
+    assert activation == []
+
+
+@pytest.mark.parametrize("accepted,exited", [(False, False), (True, False), (True, True)])
+def test_guarded_shutdown_requires_native_exit_not_only_acceptance(owner, monkeypatch, accepted, exited):
+    from zdd import process_exit
+    events = []
+    @contextmanager
+    def opened(pid, start):
+        assert (pid, start) == (owner.route.pid, owner.start)
+        events.append("capture")
+        def wait(timeout):
+            assert 0 <= timeout <= 0.25 and events[-1] == "shutdown"
+            events.append("wait")
+            return exited
+        try:
+            yield SimpleNamespace(wait=wait)
+        finally:
+            events.append("close")
+    monkeypatch.setattr(process_exit, "open_process", opened)
+    client = control.ControlClient(owner.route.base_url, token="fixture", timeout=0.25,
+                                   guarded_predecessor=owner.retained)
+    def request(action, **kwargs):
+        assert action == "shutdown" and events == ["capture"]
+        assert 0 < kwargs["total_timeout"] <= 0.25
+        events.append(action)
+        return {"shutdown": accepted}
+    monkeypatch.setattr(client, "_request", request)
+    if accepted and exited:
+        assert client.shutdown() == {"shutdown": True, "retired": True}
+    else:
+        with pytest.raises(recovery.RecoveryUnavailable, match="retirement"):
+            client.shutdown()
+    assert events == (["capture", "shutdown", "wait", "close"] if accepted
+                      else ["capture", "shutdown", "close"])
+
+
+def test_guarded_shutdown_native_identity_failure_precedes_control(owner, monkeypatch):
+    from zdd import process_exit
+    def refused(*a):
+        raise ProcessLookupError("identity mismatch")
+    monkeypatch.setattr(process_exit, "open_process", refused)
+    client = control.ControlClient(owner.route.base_url, token="fixture", guarded_predecessor=owner.retained)
+    monkeypatch.setattr(client, "_request", lambda *a, **k: pytest.fail("shutdown before native identity"))
+    with pytest.raises(ProcessLookupError):
+        client.shutdown()
+
+
+@pytest.mark.parametrize("missing", [None, "published", "worktrees", "repositories", "pid"])
+def test_successor_serving_gate_is_stricter_than_passive_preflight(owner, missing):
+    health = {"status": "ready", "pid": owner.route.pid, "published": True,
+              "worktrees": {"status": "ready"}, "repositories": {"admitting": True}}
+    if missing is not None:
+        health.pop(missing)
+    make_client = lambda url: SimpleNamespace(health=lambda: health)
+    assert recovery.successor_healthy("127.0.0.1", 61001, make_client) is True
+    assert recovery.successor_healthy("127.0.0.1", 61001, make_client, expected=owner.route) is (missing is None)
+    passive = {"status": "ready", "pid": owner.route.pid, "published": False,
+               "worktrees": {"status": "unready"}, "repositories": {"admitting": False}}
+    make_client = lambda url: SimpleNamespace(health=lambda: passive)
+    assert recovery.successor_healthy("127.0.0.1", 61001, make_client) is True
+    assert recovery.successor_healthy("127.0.0.1", 61001, make_client, expected=owner.route) is False

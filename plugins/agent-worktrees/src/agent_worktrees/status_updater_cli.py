@@ -443,12 +443,23 @@ def _run_status_updater_loop(path, interval, session_state, owns, runtime_supers
                 segment = ""
             set_option("@aw_seg", segment)
             time.sleep(interval)
+    except BaseException as error:
+        if interrupted is None:
+            interrupted = error
     finally:
         while pending is not None:
-            if settle():
-                pending = None
-            else:
-                time.sleep(interval)
+            try:
+                if settle():
+                    pending = None
+            except BaseException as error:
+                if interrupted is None:
+                    interrupted = error
+            if pending is not None:
+                try:
+                    time.sleep(interval)
+                except BaseException as error:
+                    if interrupted is None:
+                        interrupted = error
     if interrupted is not None:
         raise interrupted
     return 0

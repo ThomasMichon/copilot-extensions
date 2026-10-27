@@ -775,6 +775,7 @@ class CutoverOrchestrator:
                     new_port=new_port, new_pid=new_pid, started_at=started_at,
                     requires_writer_reconciliation=self.drain_before_publish,
                 )
+                result.retirement_requested = conditional is not None or self.drain_before_publish
                 if conditional:
                     conditional.retire_predecessor()
                 else:
@@ -783,7 +784,9 @@ class CutoverOrchestrator:
                         not isinstance(retirement, dict) or retirement.get("retired") is not True
                     ):
                         raise CutoverError("old daemon retirement was not confirmed by its owner")
-                result.retirement_requested = conditional is not None
+                    if self.drain_before_publish:
+                        result.retirement_confirmed = True
+                        result.steps.append("old daemon exit confirmed")
                 result.steps.append("old daemon shutdown requested")
                 if conditional:
                     conditional.confirm_retired()

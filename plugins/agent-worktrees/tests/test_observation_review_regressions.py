@@ -207,3 +207,121 @@ def test_updater_contention_rechecks_owner_session_and_runtime(updater_command, 
     else:
         assert "run" not in state.events
         assert not state.held and state.attempts == 1
+
+
+@pytest.mark.parametrize("kind", [KeyboardInterrupt, SystemExit])
+def test_main_monitor_surfaces_stored_cancellation_before_continuing(owner, monkeypatch, kind):
+    custody.test_actual_monitor_shutdown_retains_custody_and_negative_control(
+        owner, monkeypatch, False, operation="cancellation", cancellation=kind("original cancellation"),
+    )
+
+
+@pytest.mark.parametrize("kind", [KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize("background", [False, True])
+def test_segment_cancellation_retires_main_but_background_only_transfers_custody(
+    owner, monkeypatch, kind, background,
+):
+    cause = kind("observation interrupted")
+    error = pt.ObservationCleanupError("retained")
+    error.operation_error = cause
+    error.try_settle = lambda: True
+    monkeypatch.setattr(core, "_find_record_for_path", lambda path: None)
+    monkeypatch.setattr(core, "_render_status_segment", lambda *a, **k: custody.fail(error))
+    if background:
+        results = []
+        worker = threading.Thread(target=lambda: results.append(owner.get("/repo/wt")))
+        worker.start()
+        worker.join(5)
+        assert not worker.is_alive() and results == [owner.pending_segment()]
+        with pytest.raises(kind) as caught:
+            owner.settle_pending_once()
+    else:
+        with pytest.raises(kind) as caught:
+            owner.get("/repo/wt")
+    assert caught.value is cause and owner.observation_counts() == (0, 1)
+    owner.finish_custody(None, lambda: pytest.fail("already settled"))
+    assert owner.observation_counts() == (0, 0)
+
+
+@pytest.mark.parametrize("scope", ["path", "alias", "all"])
+@pytest.mark.parametrize("observation_path", ["/repo/wt", "/repo/sibling"])
+def test_invalidation_waits_for_custody_then_forces_real_render(
+    owner, monkeypatch, scope, observation_path,
+):
+    import time
+    key, alias = owner._key("/repo/wt"), owner._key("/repo/wt/nested")
+    saved = (time.monotonic(), "FINAL")
+    owner._entries[key] = saved
+    owner._aliases[alias] = key
+    error = custody.pending(owner, path=observation_path)
+    error.try_settle = lambda: True
+    if scope == "all":
+        owner.invalidate_all()
+    else:
+        owner.invalidate("/repo/wt/nested" if scope == "alias" else "/repo/wt")
+    assert owner.get("/repo/wt/nested") == owner.pending_segment()
+    assert owner._entries[key] == saved and owner._aliases[alias] == key
+    assert owner.settle_pending_once() == 0
+    rendered = []
+    monkeypatch.setattr(core, "_find_record_for_path", lambda path: SimpleNamespace(worktree_path="/repo/wt"))
+    monkeypatch.setattr(core, "_render_status_segment", lambda *a, **k: rendered.append(a[0]) or "FRESH")
+    assert owner.get("/repo/wt/nested") == "FRESH"
+    assert rendered == ["/repo/wt"] and owner._entries[key][1] == "FRESH"
+
+
+@pytest.mark.parametrize("first_kind", [KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize("second_kind", [KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize("during", ["settle", "wait"])
+def test_updater_secondary_cancellation_keeps_native_lease_until_settled(
+    owner, monkeypatch, tmp_path, first_kind, second_kind, during,
+):
+    import hashlib
+    import single_instance_lease as lease
+    from agent_worktrees import status_updater_cli as updater, status_monitor_runtime
+
+    first, second = first_kind("governing"), second_kind("secondary")
+    error = pt.ObservationCleanupError("native cleanup")
+    error.operation_error = first
+    session = "second-cancellation"
+    name = hashlib.sha256(session.encode("utf-8")).hexdigest()
+    competitor = lease.SingleInstance(
+        tmp_path, service="status-updater", lock_name=f"status-updater-{name}.lock",
+    )
+    attempts, waits, renders = [], [], []
+
+    def assert_held():
+        with pytest.raises(lease.AlreadyRunningError):
+            competitor.acquire()
+
+    def settle():
+        assert_held()
+        attempts.append(1)
+        if len(attempts) == 1:
+            if during == "settle":
+                raise second
+            return False
+        return True
+
+    def sleep(seconds):
+        assert_held()
+        waits.append(seconds)
+        if len(waits) == 1:
+            raise first  # Enter final settlement with custody still outstanding.
+        if during == "wait" and len(waits) == 2:
+            raise second
+
+    def render(*a, **k):
+        renders.append(1)
+        raise error
+
+    error.try_settle = settle
+    monkeypatch.setattr(status_monitor_runtime, "_aw_runtime_home", lambda: tmp_path)
+    monkeypatch.setattr(updater, "_render_status_segment", render)
+    monkeypatch.setattr(updater.time, "sleep", sleep)
+    with pytest.raises((KeyboardInterrupt, SystemExit)) as caught:
+        updater._with_updater_lease(session, lambda: updater._run_status_updater_loop(
+            "/repo/wt", 15, lambda: "alive", lambda: True, lambda: False, lambda *a: None,
+        ))
+    assert caught.value is first and len(attempts) == 2 and renders == [1]
+    competitor.acquire()
+    competitor.release()
