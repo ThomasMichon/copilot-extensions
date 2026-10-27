@@ -218,6 +218,11 @@ closes #5839. Continue the supported owner-local installed/native lane and the
 remaining named consumers; do not introduce another linkage service or an
 acknowledgement-dependent startup gate.
 
+The [selected native SDK witness](README.md#2026-10-27---native-linux-aarch64-sdk-boundary-qualified)
+now exercises that installed origin-local path and the exact 11-case reviewed
+SDK packet on Linux `aarch64`. It does not qualify every allocation caller or
+platform, delayed-link startup latency, child conclusion or the Manager product.
+
 ## Validation Plan
 
 All techniques below are **agent-recommended**. Pure schema/state tests belong

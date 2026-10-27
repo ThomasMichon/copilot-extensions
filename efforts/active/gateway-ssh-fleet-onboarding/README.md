@@ -495,6 +495,8 @@ not installation, credential or live-adoption authority.
   Manager/engine consumer. Restart the receiver at the same origin/journal and
   retain the original machine key and operation. Manager/engine installation,
   native providers, released construction and live adoption remain open.
+  A separately bounded native Linux `aarch64` packet also passed all 11 cases;
+  that source-built SDK witness does not widen the product/provider claim.
 - [x] Peer-approval selection: pending public identities never enter active
   directory or native relay authorization before exact authenticated approval;
   explicit recovery cannot become a missing-approver fallback.
@@ -515,6 +517,38 @@ setup/apply, enrollment, live rollout, lifecycle takeover or implementation
 completion is asserted.
 
 ## Journal
+
+### 2026-10-27 - Native Linux aarch64 SDK boundary qualified
+
+- The reviewed origin-local allocation consumer was promoted through #9254:
+  source `d8c29a492ad29c0bcd4ff2f6a4291170952107fb`, exact candidate
+  `5a456e8063c9fea8b658bcea4ed1e88799158601`, landed Main
+  `5bee9e23a937da2ae460cb18e068314e2d52d358`. Normal unified installation
+  supplied Worktrees `1.24.312-dev1` and Bridge `0.9.189-dev1`; actual creator,
+  receiver/result capabilities and serving identity were checked.
+- That supported path created one actual receiving workspace and native
+  conversation, with the original protected obligation confirmed. Readiness
+  used the hosting Bridge's mapping, not an independently running receiver
+  Bridge's empty local roster. No duplicate registration or replacement was
+  introduced to bridge that distinction.
+- Exact reviewed #9066 source
+  `a15737268e591255b077bea514bb2e3e0ed0f551` passed **11 cases, zero skips**
+  on native Linux `aarch64`, Python `3.12.13`: eight source cases and three
+  fresh noneditable SDK cases. Real synthetic TLS, checkout-import refusal,
+  original-key/operation receiver restart and source Manager/engine consumption
+  remained intact. The SDK was built from reviewed source for this test,
+  not installed as the Manager product or a released construction closure.
+- Two-CPU/1536-MiB/zero-swap outer supervision and the existing inner test
+  sandbox contained preparation and tests. Both supervisor receipts verified
+  cleanup; preparation-through-test elapsed 61.37 seconds. The coordinator
+  independently parsed all JUnit cases, inspected the observation-only runner
+  hook and checked source/custody and resource receipts. This timing is not
+  cold/warm native agent-startup qualification.
+- Re-read the Plan and Validation Plan. Close only this selected native
+  synthetic SDK lane. Foreign-origin composition, Dispatch, outbound-only and
+  remaining platform/provider acceptance, actual child conclusion and installed
+  Manager/Core/Gateway delivery remain open under their existing owners.
+  Retained workspaces and claims were not cleared as a side effect of testing.
 
 ### 2026-10-27 - First owned SSH Bridge consumer source merged
 
