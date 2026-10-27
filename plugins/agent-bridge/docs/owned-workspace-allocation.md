@@ -33,7 +33,9 @@ recorded and no native conversation or client exists. Recovery replays that
 allocation and permits one first native launch. If native startup then has an
 unknown result, it does not reroll or recreate the conversation. A retained child
 without a native identity requires explicit original-operation reconciliation;
-it is not evidence that native launch never started.
+it is not evidence that native launch never started. That retained fence also
+rejects automatic recreation requested by ordinary send, including after a
+Bridge restart.
 
 ## Supported boundary
 

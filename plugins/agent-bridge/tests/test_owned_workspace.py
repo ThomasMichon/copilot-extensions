@@ -11,6 +11,7 @@ import pytest
 from agent_bridge import owned_workspace as owned, transport
 from agent_bridge.acquisition_contract import AcquisitionRefused
 from agent_bridge.models import SessionStatus
+from agent_bridge.session_manager import SessionManager
 from agent_bridge.spawn_target import SpawnTarget
 from test_session_manager import _patch_acp as _patch_acp, _patch_spawn as _patch_spawn
 
@@ -262,8 +263,10 @@ async def test_manager_resumes_original_interrupted_allocation_before_first_nati
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("restart", [False, True])
+@pytest.mark.parametrize("recreate", [False, True])
 async def test_interrupted_allocation_recovery_never_retries_an_unknown_native_launch(
-    session_manager, monkeypatch, _patch_spawn, _patch_acp,
+    session_manager, tmp_db, monkeypatch, _patch_spawn, _patch_acp, restart, recreate,
 ):
     monkeypatch.setattr("agent_bridge.hosting_policy.require_target_hosting", AsyncMock())
     calls = []
@@ -283,6 +286,8 @@ async def test_interrupted_allocation_recovery_never_retries_an_unknown_native_l
         await session_manager.resume_session(session.session_id, allow_recreate=True)
     assert _patch_spawn.await_count == 1
     assert session.target.worktree_id == "actual-child"
+    if restart:
+        session_manager = SessionManager(tmp_db)
     with pytest.raises(RuntimeError, match="no ACP session ID"):
-        await session_manager.resume_session(session.session_id)
+        await session_manager.resume_session(session.session_id, allow_recreate=recreate)
     assert _patch_spawn.await_count == 1 and len(calls) == 2

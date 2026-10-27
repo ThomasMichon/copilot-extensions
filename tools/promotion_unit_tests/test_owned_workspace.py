@@ -89,6 +89,9 @@ def test_bridge_intent_preserves_original_owner_and_refuses_legacy_or_changed_ta
         acp_session_id=None, client=None,
     )
     assert module.can_resume_allocation(session) is True
+    session.target.worktree_id = "original-child"
+    assert module.retains_allocation(session) is True
+    assert module.can_resume_allocation(session) is False
     for selected in (Target(), Target(worktree_id="existing")):
         session.target = selected
         assert module.can_resume_allocation(session) is False

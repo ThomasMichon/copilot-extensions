@@ -15,7 +15,9 @@ from repository_policy import AgentHostingError
 from .session_preferences import client_preferences
 from .cold_outages import admitted_recovery, guarded_resume
 from .models import SessionStatus
-from .owned_workspace import can_resume_allocation, prepare_session as prepare_owned_workspace
+from .owned_workspace import (
+    can_resume_allocation, prepare_session as prepare_owned_workspace, retains_allocation,
+)
 from .startup_progress import lifecycle_lock, observed, phase
 from .transport import SpawnTarget
 from .privileged_plugins import CONTEXT_KEY, PrivilegedLaunchRefused, relay_agent, start_client
@@ -243,7 +245,7 @@ class _SessionResumeMixin:
                 allow_recreate = False
             core = _core()
             allocation_recovery = can_resume_allocation(session)
-            if allocation_recovery:
+            if not session.acp_session_id and retains_allocation(session):
                 allow_recreate = False
             if session.status != SessionStatus.STOPPED and not (
                 allocation_recovery and session.status == SessionStatus.FAILED
