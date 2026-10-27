@@ -59,8 +59,9 @@ def _python_files(root: Path) -> dict[str, bytes]:
                 if entry.is_symlink():
                     raise ValueError("main-package inventory contains a redirected path")
                 if entry.is_dir(follow_symlinks=False):
-                    if entry.name != "__pycache__":
-                        pending.append(Path(entry.path))
+                    pending.append(Path(entry.path))
+                elif entry.name.endswith((".pyc", ".pyo")):
+                    raise ValueError("main-package inventory contains cached bytecode; no import")
                 elif entry.name.endswith(".py"):
                     data = _read(Path(entry.path))
                     total += len(data)
@@ -89,6 +90,8 @@ def observe(plugin: str, *, runtime: Path = RUNTIME, source: Path = SOURCE) -> R
         raise ValueError("probe is not executing the selected isolated runtime")
     distribution_name = "agent-" + plugin
     module_name = "agent_" + plugin
+    if any(name == module_name or name.startswith(module_name + ".") for name in sys.modules):
+        raise ValueError("main package was imported before source observation")
     project = source / "plugins" / distribution_name
     source_package = project / "src" / module_name
     if source.resolve(strict=True) != source or source_package.resolve(strict=True) != source_package:

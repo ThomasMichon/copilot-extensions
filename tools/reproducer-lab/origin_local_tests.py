@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import py_compile
 import sys
 import venv
 from pathlib import Path
@@ -23,7 +25,9 @@ print(json.dumps(dataclasses.asdict(value), sort_keys=True))
 """
 
 
-@pytest.mark.parametrize("change", ["none", "bytes", "editable", "version"])
+@pytest.mark.parametrize("change", [
+    "none", "bytes", "editable", "version", "cached-initializer", "cached-helper",
+])
 def test_actual_isolated_interpreter_observes_only_its_synthetic_package(
     tmp_path: Path, change: str,
 ) -> None:
@@ -54,11 +58,30 @@ def test_actual_isolated_interpreter_observes_only_its_synthetic_package(
     }), encoding="utf-8")
     if change == "bytes":
         (installed / "__init__.py").write_bytes(b"# wrong synthetic bytes\n")
+    elif change.startswith("cached-"):
+        name = "__init__.py" if change == "cached-initializer" else "helper.py"
+        target = installed / name
+        target.write_bytes(b'value = "old"\n')
+        before = target.stat()
+        py_compile.compile(str(target), doraise=True)
+        # Timestamp-valid cache with different code but identical source size.
+        for root in (installed, original):
+            (root / name).write_bytes(b'value = "new"\n')
+        os.utime(target, ns=(before.st_atime_ns, before.st_mtime_ns))
     poison = tmp_path / "ambient"
     poison.mkdir()
     (poison / "agent_bridge.py").write_text(
         'raise RuntimeError("ambient PYTHONPATH must not execute")\n', encoding="utf-8",
     )
+    if change.startswith("cached-"):
+        module = "agent_bridge" if change == "cached-initializer" else "agent_bridge.helper"
+        baseline = run(
+            [str(prefix / "bin/python3"), "-I", "-B", "-c",
+             f"import importlib; print(importlib.import_module({module!r}).value)"],
+            timeout=10, max_stdout_bytes=16 * 1024,
+            env={"PATH": "/usr/bin:/bin", "LC_ALL": "C.UTF-8", "PYTHONPATH": str(poison)},
+        )
+        assert baseline.returncode == 0 and baseline.stdout.strip() == "old", baseline.stderr
     result = run(
         [str(prefix / "bin/python3"), "-I", "-B", "-c", CONTROL,
          str(Path(__file__).with_name("runtime_origin_probe.py")), str(runtime), str(source)],
@@ -80,5 +103,6 @@ def test_actual_isolated_interpreter_observes_only_its_synthetic_package(
         assert {
             "bytes": "Python bytes differ", "editable": "noneditable local project",
             "version": "distribution version differs",
+            "cached-initializer": "cached bytecode", "cached-helper": "cached bytecode",
         }[change] in result.stderr
     assert "ambient PYTHONPATH must not execute" not in result.stderr

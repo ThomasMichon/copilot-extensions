@@ -47,6 +47,9 @@ def paths(tmp_path: Path, monkeypatch: Any) -> SimpleNamespace:
     module = SimpleNamespace(__file__=str(package / "__init__.py"))
     monkeypatch.setattr(sys, "prefix", str(prefix))
     monkeypatch.setattr(sys, "executable", str(executable))
+    for name in tuple(sys.modules):
+        if name == "agent_bridge" or name.startswith("agent_bridge."):
+            monkeypatch.delitem(sys.modules, name)
     monkeypatch.setattr(probe.importlib.metadata, "distribution", lambda _name: distribution)
     monkeypatch.setattr(probe.importlib, "import_module", lambda _name: module)
     return SimpleNamespace(
@@ -114,7 +117,9 @@ def test_wrong_installed_source_refuses(
         probe.observe("bridge", runtime=paths.runtime, source=paths.source)
 
 
-@pytest.mark.parametrize("change", ["symlink", "entries", "file-bytes", "total-bytes"])
+@pytest.mark.parametrize("change", [
+    "symlink", "entries", "file-bytes", "total-bytes", "cached-initializer", "cached-helper",
+])
 def test_source_inventory_is_bounded(
     paths: SimpleNamespace, monkeypatch: Any, change: str,
 ) -> None:
@@ -124,9 +129,22 @@ def test_source_inventory_is_bounded(
         monkeypatch.setattr(probe, "MAX_FILES", 1)
     elif change == "file-bytes":
         monkeypatch.setattr(probe, "MAX_FILE_BYTES", 1)
+    elif change.startswith("cached-"):
+        cache = paths.package / "__pycache__"
+        cache.mkdir()
+        name = "__init__" if change == "cached-initializer" else "helper"
+        (cache / (name + ".cpython-312.pyc")).write_bytes(b"synthetic stale bytecode")
     else:
         monkeypatch.setattr(probe, "MAX_BYTES", 1)
-    with pytest.raises(ValueError, match="redirected|limit|bounded"):
+    with pytest.raises(ValueError, match="redirected|limit|bounded|cached bytecode"):
+        probe.observe("bridge", runtime=paths.runtime, source=paths.source)
+
+
+def test_preimported_main_package_refuses(
+    paths: SimpleNamespace, monkeypatch: Any,
+) -> None:
+    monkeypatch.setitem(sys.modules, "agent_bridge", paths.module)
+    with pytest.raises(ValueError, match="imported before"):
         probe.observe("bridge", runtime=paths.runtime, source=paths.source)
 
 

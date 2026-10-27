@@ -149,7 +149,11 @@ without retries, partial-success results, repairs or persisted readiness markers
 The stdlib-only `runtime_origin_probe.py` checks the executing virtualenv prefix
 and executable, distribution location/version and noneditable local-project
 metadata. It compares all main-package `.py` files with the selected source,
-refusing missing, extra, changed or redirected Python paths. Each inventory has
+refusing missing, extra, changed or redirected Python paths. Cached `.pyc`/`.pyo`
+files, including those beneath `__pycache__`, refuse before importing; `-B`
+prevents writes, not stale-cache reads. Previously imported main-package modules
+also refuse. No cache is removed or repaired, even if it might be consistent.
+Each inventory has
 4,096 entries, 1 MiB per file and 64 MiB total ceilings. It then imports only the
 verified top-level package and checks its actual origin, never a service/CLI
 entry point. The returned observations name the interpreter, package, version,
@@ -192,4 +196,5 @@ behavior on synthetic paths/metadata. Explicitly selected `origin_local_tests.py
 runs a real isolated Python child in a temporary empty stdlib venv with only a
 synthetic package and metadata. No actual plugin, build or dependency is installed.
 It checks origin/version/byte/editable rejection and ambient-path exclusion,
-not the actual guest recipe, dependency closure or service lifecycle.
+plus rejection of actual timestamp-valid stale initializer/helper bytecode.
+It does not qualify the actual guest recipe, dependency closure or service lifecycle.
