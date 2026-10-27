@@ -100,7 +100,7 @@ For **every** worktree `cleanup` reports as `dirty`, go in individually:
    superseded upstream) — don't rely on `--stat`, which renders a mode-only/
    rename-only change as `0 insertions/deletions`, indistinguishable at a
    glance from real content.
-2. **Land real work through the repo's own contribution flow — branch on
+2. **Commit and deliver useful work through the repo's contribution flow — branch on
    `pr-profile`.** Check `<agent-worktrees catalog argv[0]> get pr-profile`
    first: a `pr-*` profile means commit, open its PR, get it
    reviewed/merged (see § PR Workflow in SKILL.md); a **`direct`** profile has no
@@ -109,8 +109,14 @@ For **every** worktree `cleanup` reports as `dirty`, go in individually:
    steps just produces inapplicable instructions. If the diff looks like it
    duplicates something already on the default branch, confirm with
    `git diff <default-branch> -- <path>` before writing it off as noise —
-   don't assume.
-3. **Discard confirmed noise explicitly, file by file, matching how it's
+   don't assume. If the work is superseded or no longer aligned with the
+   current objective/vision, use the explicit abandonment procedure below
+   instead of committing obsolete content or archiving it as the outcome.
+   Selected planning/prototype material may become a named artifact of its
+   canonical effort only when its purpose, execution owner and remaining
+   acceptance are explicit; useful source work must not disappear into that
+   exception. An archive or recovery ref alone is not reconciliation.
+3. **With the required operator approval, discard confirmed noise file by file, matching how it's
    dirty.** `git checkout -- <path>` only restores the working tree from
    the index — a **staged** noise change stays staged and the path stays
    dirty. For a tracked path, discard both index and working tree with
@@ -123,8 +129,8 @@ For **every** worktree `cleanup` reports as `dirty`, go in individually:
    A clean tree does not by itself make a worktree `completed` — it
    reclassifies to whatever the underlying content actually is: `wip` if it
    still carries unmerged commits ahead of the default branch (not pruned
-   by plain `cleanup --clean`; that content needs to land first, per step
-   2); `unused` if it now has no commits *and* the session held no
+   by plain `cleanup --clean`; resolve that content by delivery or explicitly
+   approved abandonment); `unused` if it now has no commits *and* the session held no
    conversation turns (needs `--include-unused`); or `conversation-only` if
    it has no commits but the session *did* hold turns (needs the separate
    `--include-conversations` flag — `--include-unused` alone does **not**
@@ -142,6 +148,50 @@ mode-only bit or a stale generated file), that is itself a defect worth
 tracking or fixing at the source — reaping the symptom once, by hand, after
 verifying it's genuinely inert, is reasonable; silently normalizing
 `--force` as the standing remedy for that pattern is not.
+
+### Abandon superseded or rejected WIP only with exact approval
+
+The normal outcomes are useful work committed and delivered, or an explicit
+operator-approved abandonment of the particular obsolete/rejected work.
+Archiving WIP is not a third completion outcome. This does not prohibit
+archiving genuinely completed efforts or retaining historical lifecycle records.
+
+1. **Establish the disposition.** Compare all authored commits and staged,
+   unstaged, untracked and relevant ignored content with current source and the
+   canonical objective/vision. Record concrete delivery/supersession evidence
+   or the operator's explicit rejection. Age, branch-ahead counts, a clean
+   checkout or a missing owner do not establish that work is obsolete.
+   Resolve or explicitly retain/transfer every remaining objective, PR and
+   resource obligation; abandoning one patch does not complete its parent.
+2. **Request exact destructive consent.** Name the checkout, actual branch and
+   HEAD, the index/working content to discard, any untracked/ignored paths
+   affected, the pinned published reset target if applicable, and any expected
+   lifecycle claim settlement. State what recovery will remain, or explicitly
+   disclose unrecoverable loss when none will be retained. Approval of a
+   cleanup preference, artifact export or another checkout is not this grant.
+3. **Revalidate before effects.** Confirm the actual repository/branch/content,
+   live and protected owners, PRs, claims and remaining responsibility after
+   the approval pause. Verify required recovery independently, including both
+   index and raw working variants, not just HEAD or a filtered patch. A backup
+   is recovery storage, never the requested outcome. Changed or unavailable
+   evidence stops the action; do not displace another owner or repair metadata
+   merely to make the candidate eligible.
+4. **Perform only the approved discard/reset.** Use the per-path commands above
+   when that is the approved scope. Only an explicit whole-checkout grant may
+   authorize `git reset --hard <approved-published-tip>` on the exact branch.
+   It moves that branch and overwrites index/working content, and may remove
+   untracked paths obstructing tracked files; disclose those effects before
+   approval. It does not generally remove other untracked/ignored files.
+   Never add a blanket `git clean`, switch to a different branch, or apply the
+   grant to other checkouts.
+5. **Use the ordinary lifecycle, then verify the result.** Recheck all remaining
+   source states and obtain a fresh positive native landing explanation before
+   normal `finalize` and exact non-forced cleanup. A clean reset is not proof
+   that the original objective landed. Record the approved abandonment
+   truthfully; retain remaining responsibility with its named owner. Verify
+   the actual checkout/registration/branch outcome and any retained recovery.
+   A refusal or unexpected effect is a stop, not permission for `--force`,
+   manual finalization, claim release or history rewriting.
 
 ### Reconcile repeated noise without discarding real work
 

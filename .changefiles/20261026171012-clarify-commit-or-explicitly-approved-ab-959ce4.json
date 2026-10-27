@@ -1,0 +1,9 @@
+{
+  "comment": "Clarify commit-or-explicitly-approved-abandon WIP disposition; archives and recovery refs are not completion.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

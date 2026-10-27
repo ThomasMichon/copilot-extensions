@@ -1,8 +1,10 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/agent-dispatch/session-guidance.instructions.md","plugin":"agent-dispatch@copilot-extensions","pluginVersion":"0.1.2-dev202","renderedBytes":785,"schema":"copilot-extensions.instruction-projection","sourceId":"session-guidance","template":"instructions/session-guidance.instructions.md","templateBytes":244,"templateSha256":"8969f4b96dfa1febf513b11827a4e94d6f0db32ea775a8c7b3610474b4668dd4","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","deliveryKind":"selector","destination":".github/instructions/agent-dispatch/session-guidance.instructions.md","plugin":"agent-dispatch@copilot-extensions","pluginVersion":"0.1.2-dev205","renderedBytes":1300,"schema":"copilot-extensions.instruction-projection","sourceId":"session-guidance","templateSha256":"8969f4b96dfa1febf513b11827a4e94d6f0db32ea775a8c7b3610474b4668dd4","version":2} -->
 
-Read `instructions/agent-dispatch/session-guidance.instructions.md` in this
-session's already-disclosed session folder, if it exists, and treat its
-contents as authoritative for this session. Its absence is not an error.
+Before dependent action, acquire guidance or BLOCK. No body delivery asserted.
+Local `.github/instructions/agent-dispatch/session-guidance.local.instructions.md`; reviewed `.github/copilot/context-fallbacks/agent-dispatch/session-guidance.md`.
+Invoke `reviewing-customizations`; use its returned base and an absolute Python interpreter. Substitute the three placeholders in this executable argv:
+["<python>","<skill-base>/scripts/manage-instruction-projections.py","resolve-source","<repository>",".github/instructions/agent-dispatch/session-guidance.instructions.md","--from-settings","--json"]
+Apply inline cache recovery: authenticate canonical locals or use reviewed fallback; newer wins, equal version/hash favors local, unequal hash favors reviewed. Read fully unless complete body/provenance/receipt is visible now.

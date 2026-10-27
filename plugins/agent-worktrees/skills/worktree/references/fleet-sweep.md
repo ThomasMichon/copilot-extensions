@@ -18,8 +18,13 @@ system and retained finalized directories, not just visible Picker rows or
 tracking statuses. Reconcile Git's worktree inventory with directories carrying
 Git administrative markers under the resolved roots; a cache directory is not a
 checkout, and a missing tracking row is not proof a directory is disposable.
-Do not satisfy a count by hiding rows, archiving unmerged branches, or resetting
-real work. Retain it with an accountable owner or drive its disposition first.
+Do not satisfy a count by hiding rows, archiving unmerged WIP, or resetting work
+without exact operator approval. Drive useful work through commit/publication,
+or explicitly abandon superseded/rejected work under
+[cleanup-details.md](cleanup-details.md)'s approval-gated procedure. Recovery
+storage is not completion; retain any remaining objective with its accountable
+owner. Selected planning/prototype artifacts belong to a named canonical
+effort, not a generic WIP archive.
 
 If recurring producers are growing the backlog, contain them through their
 owning subsystem **before** reaping their outputs, within the operator's
@@ -198,6 +203,15 @@ parent's completion evidence once, then verify each child's own landed slice
 and claims. An open parent is not an automatic hold on a completed child whose
 remaining responsibility was explicitly retained by the parent; a merged child
 is not evidence the parent finished.
+
+For WIP, record which outcome is actually being driven: useful work committed
+and delivered, or particular superseded/rejected work explicitly abandoned with
+operator approval. Neither copying it into an archive nor approving a recovery
+backup resolves that choice. A canonical-effort planning/prototype artifact must
+retain its purpose, owner and remaining acceptance; completed-effort and
+historical-record archival are unaffected. Follow
+[cleanup-details.md](cleanup-details.md) before any approved reset/discard;
+the fleet count grants no destructive or ownership authority.
 
 Only after this step should you treat a worktree as safe to prune, safe to
 leave silently, or in need of a decision from the operator. A `cleanup`
