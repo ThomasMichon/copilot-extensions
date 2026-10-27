@@ -269,8 +269,9 @@ has switched and the interpreter admission boundary remains open.
 The unused stock-framework file guard merged in #9181, including native
 directory sharing and same-process refusal-cleanup controls. The cached-only
 held-file signer merged in #9187. The unused Core file/final-path adapter
-merged in #9197 and the Core signer in #9204. Complete canonical path, drive,
-ancestor and source admission remain open before any compiled bootstrap
+merged in #9197 and the Core signer in #9204. Retained ancestors and the current
+drive-query primitives merged in #9210. Complete canonical-name, short-alias,
+drive-stability and source admission remain open before any compiled bootstrap
 migration; these private primitives do not enable a caller.
 
 ### Current execution boundary
@@ -331,6 +332,54 @@ from #6767: no rejected routing broker or shared mutable venv, and no claimed
 transfer without acceptance by a named tracked objective.
 
 ## Journal
+
+### 2026-10-26 - Physical-address canonical custody candidate
+
+- Continued the reviewed compiler-free bootstrap slice without changing a
+  caller. A single strict current-volume mapping now supplies an internally
+  derived physical address; root, ancestors and leaf remain retained while
+  each actual long name is checked. DOS device aliases, wildcard components,
+  nonphysical mappings and nonfixed volumes refuse explicitly.
+- Reused the existing handle-open/identity worker and reverse-order closure.
+  Windows PowerShell uses existing native declarations; Core uses its existing
+  file-system and DriveInfo wrappers. The Core long-name getter returns a
+  non-boxable span, so bounded owned memory reads the qualified existing
+  value-type record without defining a type or emitting code.
+- Native callability and complete helper qualification remain distinct.
+  The new source and controls are under qualification; no full native pass,
+  interpreter/helper admission or migration is claimed here. The parent
+  Plan and Validation Plan remain open.
+- The first complete native candidate run exposed an observer defect. A
+  bounded diagnostic confirmed on both shell editions that a new live
+  allocation could reuse an earlier freed address; the observer then rejected
+  the address before calling the real free. Replaced its historical-address
+  check with live-allocation tracking and added deterministic address-reuse,
+  double-free and unknown-address controls. The helper is unchanged, and the
+  corrected complete native packet remains required before qualification.
+- The corrected packet isolated four remaining alias-control failures. A
+  bounded diagnostic proved that both shells already expanded the aliases and
+  rejected their original spelling before any guarded open; the controls had
+  required only the later long-name error. Preserve that early refusal and
+  separately exercise the post-open defense with an unexpanded-input
+  validation control and actual native alias lookup. No production validator,
+  helper policy or caller changed; complete fresh qualification remains open.
+- Final exact-source qualification passed all 270 selected cases, with zero
+  failures or skips and 2,542 deselected, on Windows PowerShell
+  5.1.26100.9711 and Core 7.6.9/CLR 10.0.14. The count comprises five portable
+  source contracts and 265 host-dependent tests, not native-call counts.
+  All eight actual-alias controls ran, separating stock early normalization
+  from the explicitly injected unexpanded-input post-open defense.
+- The packet used a fresh source-only snapshot and its own canonical offline
+  environment. All eleven tested source files matched the frozen export and
+  repository bytes before and after execution. Selected controls asserted
+  search/file closure, allocation release and zero live state; the original
+  bounded Job owner settled all contained processes before fixture cleanup.
+  Runtime limits and the twenty-second PowerShell child bound were unchanged.
+- The final portable packet separately passed five source contracts with 265
+  explicit native skips. Neither packet proves actual DOS-remap races,
+  interpreter/helper startup, complete source admission or desktop behavior.
+  Review and merge remain required; next compose the existing Python
+  prerequisite and complete helper closure before switching any caller.
 
 ### 2026-10-26 - Retained ancestors and current-drive query candidate
 
@@ -416,6 +465,22 @@ transfer without acceptance by a named tracked objective.
   This focused result complements the preceding 169-control custody/signer
   packet; no 181-control combined rerun is claimed. Current-head review and
   merge remain gates, and complete canonical/interpreter admission stays open.
+- #9210 merged as `506a17c83760bf1811cd1a35e18adc75519b7833` after
+  exact-head Copilot approval `5662234581`, no active review issues and
+  successful required CI. Both entire owning effort READMEs and their
+  Plan/Validation Plans were re-read after merge; all aggregate compiler-free
+  and bootstrap obligations remain open.
+  Post-merge reconciliation retained the original head and dropped only
+  provider-confirmed merged history before the managed sync succeeded.
+  No unmerged tail was discarded, and the worktree remains active.
+- A bounded, read-only Windows PowerShell witness qualified existing physical
+  volume-path opens, exact file/directory identity comparisons, the stock
+  long-name getter after handle retention and physical-root drive-type queries.
+  This is two-target callability, not short-alias refusal, remap-race,
+  equivalent canonical-path or interpreter-startup proof. Next compose and
+  qualify canonical namespace/name and source custody through the existing
+  Python prerequisite owner before changing a compiled caller. No additional
+  interpreter acquisition, new shell prerequisite or runtime rollout is enabled.
 
 ### 2026-10-26 - Core held-file signer candidate
 
