@@ -638,12 +638,12 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
             return 3
     if seed_pending:
         launch_cmd = deferred_command(
-            launch_cmd, record.yaml_path, seed_id=staged_seed.seed_id,
+            launch_cmd, record.yaml_path, seed_id=staged_seed.seed_id, prepare_native=not args.dry_run,
         )
         print("   Launch prompt staged until Copilot handoff.")
     else:
         launch_cmd = deferred_command(
-            launch_cmd, record.yaml_path, admission_only=True,
+            launch_cmd, record.yaml_path, admission_only=True, prepare_native=not args.dry_run,
             preserve_seed_id=staged_seed.seed_id if staged_seed else None,
             native_resume_session=native_resume,
         )

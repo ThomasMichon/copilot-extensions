@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 from dataclasses import asdict
 import json
 import os
@@ -10,7 +11,7 @@ from pathlib import Path
 import sys
 from uuid import uuid4
 
-from . import agent_policy, config as cfg, launch_execution, launch_seed_exec, launch_seed_state, locks
+from . import agent_policy, config as cfg, launch_execution, locks
 from . import tracking_write
 
 _ERRORS = (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome)
@@ -33,20 +34,37 @@ def require_current_runtime(root: Path) -> None:
 def prepare(
     record_path: Path, command: list[str], *, seed_id: str | None,
     correlation: launch_execution.Correlation | None = None,
+    setup: bool = False, admission_only: bool = False, preserve_seed_id: str | None = None,
+    native_resume_session: str | None = None, pid: int | None = None,
+    process_start_time: str | None = None,
 ) -> dict:
     """Claim once before native spawn; only argv crosses the in-memory pipe."""
+    from . import launch_admission, launch_seed_exec
+
     if not command or not all(isinstance(arg, str) for arg in command):
         raise ValueError("A literal backend command is required")
-    if not launch_seed_exec._valid_request(record_path, invoke=True, seed_id=seed_id):
+    if not setup and (admission_only or preserve_seed_id or native_resume_session or pid or process_start_time):
+        raise ValueError("Backend preparation cannot include setup admission")
+    if setup:
+        _require_process(pid, process_start_time)
+    if not launch_seed_exec._valid_request(
+        record_path, invoke=not setup, seed_id=seed_id, admission_only=admission_only,
+        preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
+    ):
         raise ValueError("Backend launch policy refused preparation")
     execution = launch_execution.Execution(
         record_path, correlation or launch_execution.Correlation(uuid4().hex, uuid4().hex),
     )
     execution.append("execution-requested")
     try:
-        prepared = launch_seed_exec._prepare(
-            record_path, command, invoke=True, seed_id=seed_id, execution=execution,
-        )
+        # Admission-only preparation performs no seed mutation. Seeded preparation
+        # uses the existing seed authority's own guards, never a nested lease.
+        with launch_admission.guard(record_path) if admission_only else nullcontext():
+            prepared = launch_seed_exec._prepare(
+                record_path, command, invoke=not setup, seed_id=seed_id,
+                admission_only=admission_only, preserve_seed_id=preserve_seed_id,
+                native_resume_session=native_resume_session, execution=execution,
+            )
         if execution.failed:
             raise ValueError("Backend handoff observation is unconfirmed")
     except (*_ERRORS, KeyboardInterrupt):
@@ -55,13 +73,28 @@ def prepare(
     if isinstance(prepared, int):
         execution.observed("execution-returned", exit_code=prepared)
         raise ValueError("Backend launch preparation was refused")
+    if setup:
+        _require_process(pid, process_start_time)
+        execution.append(
+            "process-spawned", pid=pid, process_start_time=process_start_time,
+            boundary="launcher-command",
+        )
     return {
         "version": 1, "argv": prepared.argv, "environment": prepared.environment,
         "attempt_id": execution.subject["attempt_id"],
         "resolution_id": execution.subject["resolution_id"],
         "operation_id": execution.subject["operation_id"],
         "parent_id": execution.subject["parent_id"],
+        **({"setup_seed_id": prepared.setup_seed_id} if setup else {}),
     }
+
+
+def _require_process(pid: int, process_start_time: str) -> None:
+    if (
+        type(pid) is not int or pid < 1 or not process_start_time
+        or locks.process_start_time(pid) != process_start_time
+    ):
+        raise ValueError("Backend child identity is unconfirmed")
 
 
 def _load(
@@ -83,6 +116,8 @@ def _receipt(record_path: Path, saved: dict) -> dict | None:
     claims = [event["details"] for event in saved["events"] if event["phase"] == "seed-claimed"]
     if not claims:
         return None
+    from . import launch_seed_state
+
     current = launch_seed_state.peek(record_path)
     claim, = claims
     if current is None or (
@@ -100,17 +135,15 @@ def spawned(
     execution, saved = _load(record_path, correlation, operation_id)
     if any(event["phase"] == "process-spawned" for event in saved["events"]):
         raise ValueError("Backend spawn was already observed; do not replay it")
-    if (
-        type(pid) is not int or pid < 1 or not process_start_time
-        or locks.process_start_time(pid) != process_start_time
-    ):
-        raise ValueError("Backend child identity is unconfirmed")
+    _require_process(pid, process_start_time)
     receipt = _receipt(record_path, saved)
     execution.observed(
         "process-spawned", pid=pid, process_start_time=process_start_time,
         boundary="backend-command",
     )
     if receipt:
+        from . import launch_seed_state
+
         if launch_seed_state.finish(record_path, receipt) != {"finished": True}:
             raise ValueError("Backend started, but its seed completion is unconfirmed")
     if execution.failed:
@@ -126,6 +159,8 @@ def spawn_failed(
         raise ValueError("A spawned backend cannot restore its seed")
     receipt = _receipt(record_path, saved)
     if receipt:
+        from . import launch_seed_state
+
         if launch_seed_state.restore(record_path, receipt) != {"restored": True}:
             raise ValueError("Backend seed restoration is unconfirmed")
     execution.append("execution-returned", exit_code=3)
@@ -146,13 +181,26 @@ def returned(
     execution.append("execution-returned", exit_code=exit_code or (3 if receipt_uncertain else 0))
 
 
+def interrupted(
+    record_path: Path, correlation: launch_execution.Correlation, operation_id: str,
+) -> None:
+    execution, _ = _load(record_path, correlation, operation_id)
+    execution.append("unknown")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--contract-version", type=int, choices=[1], required=True)
-    parser.add_argument("--phase", choices=["prepare", "spawned", "spawn-failed", "returned"], required=True)
+    parser.add_argument(
+        "--phase", choices=["prepare", "setup", "spawned", "spawn-failed", "returned", "interrupted"],
+        required=True,
+    )
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--record", type=Path, required=True)
     parser.add_argument("--seed-id")
+    parser.add_argument("--admission-only", action="store_true")
+    parser.add_argument("--preserve-seed-id")
+    parser.add_argument("--native-resume-session")
     parser.add_argument("--launch-attempt-id")
     parser.add_argument("--launch-resolution-id")
     parser.add_argument("--launch-parent-id")
@@ -169,14 +217,24 @@ def main() -> int:
         correlation = launch_execution.Correlation(
             args.launch_attempt_id, args.launch_resolution_id, args.launch_parent_id,
         ) if any((args.launch_attempt_id, args.launch_resolution_id, args.launch_parent_id)) else None
-        if args.phase == "prepare":
-            if args.receipt_uncertain or any(value is not None for value in (
-                args.operation_id, args.pid, args.process_start_time, args.exit_code,
-            )):
+        if args.phase in {"prepare", "setup"}:
+            setup = args.phase == "setup"
+            if (
+                args.receipt_uncertain or args.operation_id is not None or args.exit_code is not None
+                or (not setup and (args.pid is not None or args.process_start_time is not None))
+            ):
                 raise ValueError("Preparation cannot include a backend outcome")
-            result = prepare(args.record, command, seed_id=args.seed_id, correlation=correlation)
+            result = prepare(
+                args.record, command, seed_id=args.seed_id, correlation=correlation, setup=setup,
+                admission_only=args.admission_only, preserve_seed_id=args.preserve_seed_id,
+                native_resume_session=args.native_resume_session, pid=args.pid,
+                process_start_time=args.process_start_time,
+            )
         else:
-            if not correlation or not args.operation_id or command or args.seed_id:
+            if (
+                not correlation or not args.operation_id or command or args.seed_id
+                or args.admission_only or args.preserve_seed_id or args.native_resume_session
+            ):
                 raise ValueError("Backend callback requires only its original execution identity")
             if args.phase == "spawned" and args.exit_code is None and not args.receipt_uncertain:
                 spawned(
@@ -192,6 +250,10 @@ def main() -> int:
                     args.record, correlation, args.operation_id, exit_code=args.exit_code,
                     receipt_uncertain=args.receipt_uncertain,
                 )
+            elif args.phase == "interrupted" and not args.receipt_uncertain and all(value is None for value in (
+                args.pid, args.process_start_time, args.exit_code,
+            )):
+                interrupted(args.record, correlation, args.operation_id)
             else:
                 raise ValueError("Invalid backend outcome arguments")
             result = {"recorded": True}

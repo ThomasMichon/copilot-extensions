@@ -23,6 +23,7 @@ HOOKS = (
 )
 SETUP = (
     "default-setup.ps1", "default-setup.sh", "launch-command.ps1", "launch-command.sh",
+    "native-seed-boundary.ps1",
     "reconcile-machine-settings.ps1", "reconcile-machine-settings.sh",
 )
 TOOLS = (

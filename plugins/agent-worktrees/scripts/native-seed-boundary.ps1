@@ -18,6 +18,70 @@ function Get-AwNativeSeedRuntime {
     } catch { return $null }
 }
 
+function Register-AwNativeSeedConsoleControl {
+    if (-not $IsWindows) { return $null }
+    if (-not ('AwNativeSeed.ConsoleControl' -as [type])) {
+        $assembly = [Reflection.Emit.AssemblyBuilder]::DefineDynamicAssembly(
+            [Reflection.AssemblyName]::new('AwNativeSeed'),
+            [Reflection.Emit.AssemblyBuilderAccess]::Run
+        )
+        $module = $assembly.DefineDynamicModule('ConsoleControl')
+        $handler = $module.DefineType(
+            'AwNativeSeed.ControlHandler', [Reflection.TypeAttributes]'Public, Sealed', [MulticastDelegate]
+        )
+        $constructor = $handler.DefineConstructor(
+            [Reflection.MethodAttributes]'Public, HideBySig, RTSpecialName',
+            [Reflection.CallingConventions]::Standard, [type[]]@([object], [IntPtr])
+        )
+        $constructor.SetImplementationFlags([Reflection.MethodImplAttributes]'Runtime, Managed')
+        $invoke = $handler.DefineMethod(
+            'Invoke', [Reflection.MethodAttributes]'Public, HideBySig, NewSlot, Virtual',
+            [bool], [type[]]@([uint32])
+        )
+        $invoke.SetImplementationFlags([Reflection.MethodImplAttributes]'Runtime, Managed')
+        $handlerType = $handler.CreateType()
+        $type = $module.DefineType(
+            'AwNativeSeed.ConsoleControl', [Reflection.TypeAttributes]'Public, Abstract, Sealed'
+        )
+        foreach ($binding in @(
+            @('GetConsoleCP', [uint32], [type[]]@()),
+            @('SetConsoleCtrlHandler', [bool], [type[]]@([IntPtr], [bool]))
+        )) {
+            $method = $type.DefinePInvokeMethod(
+                $binding[0], 'kernel32.dll',
+                [Reflection.MethodAttributes]'Public, Static, PinvokeImpl',
+                [Reflection.CallingConventions]::Standard, $binding[1], $binding[2],
+                [Runtime.InteropServices.CallingConvention]::Winapi,
+                [Runtime.InteropServices.CharSet]::Unicode
+            )
+            $method.SetImplementationFlags([Reflection.MethodImplAttributes]::PreserveSig)
+        }
+        # A native callback cannot run a PowerShell scriptblock on its OS thread.
+        # Handle only Ctrl+C/Break here; the backend receives the same event and
+        # decides whether to cancel a turn or exit. Close/logoff retain OS policy.
+        $method = $type.DefineMethod(
+            'Handle', [Reflection.MethodAttributes]'Public, Static', [bool], [type[]]@([uint32])
+        )
+        $il = $method.GetILGenerator()
+        $il.Emit([Reflection.Emit.OpCodes]::Ldarg_0)
+        $il.Emit([Reflection.Emit.OpCodes]::Ldc_I4_1)
+        $il.Emit([Reflection.Emit.OpCodes]::Cgt_Un)
+        $il.Emit([Reflection.Emit.OpCodes]::Ldc_I4_0)
+        $il.Emit([Reflection.Emit.OpCodes]::Ceq)
+        $il.Emit([Reflection.Emit.OpCodes]::Ret)
+        $null = $type.CreateType()
+    } else {
+        $handlerType = 'AwNativeSeed.ControlHandler' -as [type]
+    }
+    if ([AwNativeSeed.ConsoleControl]::GetConsoleCP() -eq 0) { return $null }
+    $callback = [AwNativeSeed.ConsoleControl].GetMethod('Handle').CreateDelegate($handlerType)
+    $pointer = [Runtime.InteropServices.Marshal]::GetFunctionPointerForDelegate($callback)
+    if (-not [AwNativeSeed.ConsoleControl]::SetConsoleCtrlHandler($pointer, $true)) {
+        throw 'Could not retain console control ownership; no backend started.'
+    }
+    return @{ Callback = $callback; Pointer = $pointer }
+}
+
 function Invoke-AwNativeSeedPhase {
     param([string]$Root, [string[]]$Arguments)
     $runtime = Get-AwNativeSeedRuntime $Root
@@ -42,7 +106,7 @@ function Invoke-AwNativeSeedPhase {
         $process.StandardInput.Close()
         $stdout = $process.StandardOutput.ReadToEndAsync()
         $stderr = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit(5000)) {
+        if (-not $process.WaitForExit(10000)) {
             $process.Kill($true)
             $null = $process.WaitForExit(1000)
             return $null
@@ -51,7 +115,33 @@ function Invoke-AwNativeSeedPhase {
             [Threading.Tasks.Task[]]@($stdout, $stderr), 1000
         )) { return $null }
         if ($process.ExitCode -ne 0) { return $null }
-        return ConvertFrom-Json -InputObject $stdout.GetAwaiter().GetResult() -ErrorAction Stop
+        $raw = $stdout.GetAwaiter().GetResult()
+        $reply = ConvertFrom-Json -InputObject $raw -ErrorAction Stop
+        $document = [System.Text.Json.JsonDocument]::Parse($raw)
+        try {
+            # ConvertFrom-Json coerces ISO-shaped strings on supported PS 7 hosts.
+            $element = [System.Text.Json.JsonElement]::new()
+            if ($document.RootElement.TryGetProperty('argv', [ref]$element)) {
+                $literalArgv = [Collections.Generic.List[string]]::new()
+                foreach ($argument in $element.EnumerateArray()) {
+                    if ($argument.ValueKind -ne [System.Text.Json.JsonValueKind]::String) { return $null }
+                    $literalArgv.Add($argument.GetString())
+                }
+                $reply.argv = $literalArgv.ToArray()
+            }
+            if (
+                $document.RootElement.TryGetProperty('environment', [ref]$element) -and
+                $element.ValueKind -ne [System.Text.Json.JsonValueKind]::Null
+            ) {
+                $environment = @{}
+                foreach ($property in $element.EnumerateObject()) {
+                    if ($property.Value.ValueKind -ne [System.Text.Json.JsonValueKind]::String) { return $null }
+                    $environment[$property.Name] = $property.Value.GetString()
+                }
+                $reply.environment = [pscustomobject]$environment
+            }
+            return $reply
+        } finally { $document.Dispose() }
     } catch {
         if ($process) {
             try { if (-not $process.HasExited) { $process.Kill($true) } } catch {}
@@ -163,7 +253,9 @@ function Invoke-AwNativeSeedBackend {
     $process.StartInfo = $info
     $receiptUncertain = $false
     $outputCopies = [Collections.Generic.List[object]]::new()
+    $consoleControl = $null
     try {
+        $consoleControl = Register-AwNativeSeedConsoleControl
         try {
             if (-not $process.Start()) {
                 [Console]::Error.WriteLine('Native backend start is unconfirmed; the handoff is retained.')
@@ -208,5 +300,11 @@ function Invoke-AwNativeSeedBackend {
         $null = Invoke-AwNativeSeedPhase $Root $returnedArgs
         if ($code -eq 0 -and $receiptUncertain) { return 3 }
         return $code
-    } finally { $process.Dispose() }
+    } finally {
+        if ($consoleControl) {
+            $null = [AwNativeSeed.ConsoleControl]::SetConsoleCtrlHandler($consoleControl.Pointer, $false)
+            [GC]::KeepAlive($consoleControl.Callback)
+        }
+        $process.Dispose()
+    }
 }

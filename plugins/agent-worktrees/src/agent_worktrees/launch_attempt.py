@@ -216,6 +216,15 @@ def resolve(args, work: Callable[[], int]) -> int:
             raise ValueError("Invalid launch plan")
         launch = plan.get("launch") if isinstance(plan.get("launch"), dict) else plan
         command = launch.get("cmd")
+        from .launch_seed_exec import native_setup_index
+
+        native_setup = native_setup_index(command) if isinstance(command, list) else None
+        if native_setup is not None:
+            launch["cmd"] = [
+                *command[:native_setup + 1],
+                "-LaunchAttemptId", attempt_id, "-LaunchResolutionId", operation_id,
+                *command[native_setup + 1:],
+            ]
         if (
             isinstance(command, list)
             and command[:3] == [sys.executable, "-m", "agent_worktrees.launch_seed_exec"]

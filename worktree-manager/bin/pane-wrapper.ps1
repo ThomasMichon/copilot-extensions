@@ -1,5 +1,6 @@
 #Requires -Version 7.0
 # worktree-manager:pane-boundary-v1
+# worktree-manager:native-console-owner-v1
 # pane-wrapper.ps1 -- Windows counterpart of pane-wrapper.sh. Wraps the psmux
 # pane command so the child's real exit code is observable (the launcher cannot
 # see it -- the child runs inside the pane), records a durable `pane_exited`
@@ -332,6 +333,13 @@ if (-not [string]::IsNullOrWhiteSpace($initialPromptB64)) {
 
 $start = Get-Date
 $awChildAttempted = $true
+$awConsoleControl = $null
+$awConsoleHelper = Join-Path $PSScriptRoot 'native-seed-boundary.ps1'
+try {
+if (Test-Path -LiteralPath $awConsoleHelper -PathType Leaf) {
+    . $awConsoleHelper
+    $awConsoleControl = Register-AwNativeSeedConsoleControl
+}
 if ($ahpChildToken) {
     try {
         $startInfo = [Diagnostics.ProcessStartInfo]::new()
@@ -368,6 +376,12 @@ if ($ahpChildToken) {
     } catch {
         [Console]::Error.WriteLine("[agent-worktrees] child launch failed: $($_.Exception.Message)")
         $exitCode = 127
+    }
+}
+} finally {
+    if ($awConsoleControl) {
+        $null = [AwNativeSeed.ConsoleControl]::SetConsoleCtrlHandler($awConsoleControl.Pointer, $false)
+        [GC]::KeepAlive($awConsoleControl.Callback)
     }
 }
 if ($null -eq $exitCode) { $exitCode = 0 }

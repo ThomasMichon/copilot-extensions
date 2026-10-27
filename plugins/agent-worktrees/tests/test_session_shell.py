@@ -1,11 +1,12 @@
 from pathlib import Path
 import json
+import os
 import shutil
 import stat
 
 import pytest
 
-from agent_worktrees import config, manager_launch_cli, session_shell, sessions, tracking
+from agent_worktrees import config, launch_seed_exec, manager_launch_cli, session_shell, sessions, tracking
 
 
 @pytest.fixture
@@ -186,3 +187,117 @@ def test_prompt_controls_require_receipt_before_launch(receipt):
 
     with pytest.raises(RuntimeError, match="requires a receipt"):
         prompt_controls("prompt", receipt)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows setup plan")
+@pytest.mark.parametrize("admission", [False, True])
+@pytest.mark.parametrize("wrapped", [False, True])
+@pytest.mark.parametrize("peer_ready", [False, True])
+def test_normalized_setup_is_its_native_lifetime_owner_with_launch_owned_assets(
+    launch, monkeypatch, admission, wrapped, peer_ready,
+):
+    record, runtime, assets = launch
+    scripts = runtime / "scripts"
+    scripts.mkdir()
+    canonical = Path(__file__).resolve().parents[1] / "scripts"
+    for name in ("default-setup.ps1", "launch-command.ps1", "native-seed-boundary.ps1", "reconcile-machine-settings.ps1"):
+        shutil.copy2(canonical / name, scripts / name)
+    monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: runtime)
+    monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: runtime.with_name("manager"))
+    (assets / "pane-wrapper.ps1").write_text(
+        (session_shell.NATIVE_CONSOLE_MARKER if peer_ready else "# old peer") + "\n", encoding="utf-8",
+    )
+    monkeypatch.setattr(manager_launch_cli, "_usable_worktree_manager_launcher_dir", lambda: assets)
+    command = [
+        "pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(scripts / "default-setup.ps1"),
+        "-NativeArgumentsJson", json.dumps({"args": ["", "--model", "fixture", "--", "literal"]}),
+    ]
+    if wrapped:
+        command = [
+            "pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(scripts / "launch-command.ps1"), "--",
+            *command,
+        ]
+    prepared = launch_seed_exec.deferred_command(
+        command, record, seed_id=None if admission else "seed-a", admission_only=admission,
+    )
+    if not peer_ready:
+        assert prepared[1:3] == ["-m", "agent_worktrees.launch_seed_exec"]
+        assert prepared[-len(command):] == command
+        assert not (record.parent / "launch-attempts").exists()
+        return
+    assert "agent_worktrees.launch_seed_exec" not in prepared
+    index = launch_seed_exec.native_setup_index(prepared)
+    assert index == (10 if wrapped else 4)
+    copied = Path(prepared[index])
+    assert copied.is_relative_to(record.parent / "launch-attempts")
+    assert prepared[prepared.index("-LaunchSeedPreparation") + 1] == ("admission" if admission else "seed")
+    assert prepared[prepared.index("-LaunchSeedNativeRoot") + 1] == str(runtime)
+    assert prepared[-2:] == command[-2:]
+    if wrapped:
+        assert Path(prepared[4]) == copied.with_name("launch-command.ps1")
+        assert prepared[5] == "--"
+    expected = {path.name: path.read_bytes() for path in copied.parent.iterdir()}
+    shutil.rmtree(runtime)
+    assert {path.name: path.read_bytes() for path in copied.parent.iterdir()} == expected
+
+
+def test_native_pane_copies_engine_owned_console_helper_with_canonical_wrapper(launch, monkeypatch):
+    record, runtime, assets = launch
+    scripts = runtime / "scripts"
+    scripts.mkdir()
+    helper = scripts / "native-seed-boundary.ps1"
+    helper.write_text("# current engine fixture\n", encoding="utf-8")
+    wrapper = assets / "pane-wrapper.ps1"
+    wrapper.write_text(
+        "# worktree-manager:pane-boundary-v1\n" + session_shell.NATIVE_CONSOLE_MARKER + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: runtime)
+    prepared = session_shell.prepare(record, wrapper, installation_roots=(runtime,))
+    copied = prepared.directory / helper.name
+    assert copied.read_bytes() == helper.read_bytes()
+    shutil.rmtree(runtime)
+    assert copied.read_text(encoding="utf-8") == "# current engine fixture\n"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows setup plan")
+def test_old_normalized_setup_keeps_legacy_provider_instead_of_silent_native_activation(launch, monkeypatch):
+    record, runtime, _assets = launch
+    scripts = runtime / "scripts"
+    scripts.mkdir()
+    setup = scripts / "default-setup.ps1"
+    setup.write_text(launch_seed_exec.BOUNDARY_MARKER + "\n", encoding="utf-8")
+    monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: runtime)
+    command = ["pwsh.exe", "-NoProfile", "-File", str(setup)]
+    prepared = launch_seed_exec.deferred_command(command, record, seed_id="seed-a")
+    assert prepared[1:3] == ["-m", "agent_worktrees.launch_seed_exec"]
+    assert prepared[-len(command):] == command
+    assert not (record.parent / "launch-attempts").exists()
+
+
+def test_preview_never_materializes_native_setup_assets(launch, monkeypatch):
+    record, _runtime, _assets = launch
+    monkeypatch.setattr(
+        launch_seed_exec, "_native_setup_command",
+        lambda *args, **kwargs: pytest.fail("A preview must not prepare assets"),
+    )
+    prepared = launch_seed_exec.deferred_command(
+        ["copilot"], record, admission_only=True, prepare_native=False,
+    )
+    assert prepared[1:3] == ["-m", "agent_worktrees.launch_seed_exec"]
+    assert not (record.parent / "launch-attempts").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows setup plan")
+def test_windows_powershell_keeps_legacy_host_semantics(launch, monkeypatch):
+    record, runtime, _assets = launch
+    scripts = runtime / "scripts"
+    scripts.mkdir()
+    setup = scripts / "default-setup.ps1"
+    setup.write_text(launch_seed_exec.NATIVE_SETUP_MARKER + "\n", encoding="utf-8")
+    monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: runtime)
+    command = ["powershell.exe", "-NoProfile", "-File", str(setup)]
+    prepared = launch_seed_exec.deferred_command(command, record, admission_only=True)
+    assert prepared[1:3] == ["-m", "agent_worktrees.launch_seed_exec"]
+    assert prepared[-len(command):] == command
+    assert not (record.parent / "launch-attempts").exists()

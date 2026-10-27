@@ -32,7 +32,8 @@ def _core():
 
 
 def _core_helper(name: str, local):
-    candidate = vars(_core()).get(name)
+    core = sys.modules.get(f"{__package__}.__main__")
+    candidate = vars(core).get(name) if core is not None else None
     if callable(candidate) and candidate is not local:
         return candidate
     return local
