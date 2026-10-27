@@ -279,20 +279,18 @@ class SessionHost:
             finally:
                 writer.close()
             return
-        # Displace any stale front (its process almost always already gone).
-        old = self._front
-        if old is not None and not old.closed:
-            old.closed = True
-            with _suppress_close(old.writer):
-                old.writer.close()
-        # A (re)attach cancels any pending unexpected-disconnect reap and clears the
-        # graceful-detach latch: the child is watched again, so its lifetime is
-        # once more owned by the front.
-        self._cancel_reap_timer()
-        self._graceful_detach = False
-
-        first = await proto.read_message(reader)
+        try:
+            first = await proto.read_message(reader)
+        except proto.ProtocolError:
+            log.warning("malformed frontend attachment; rejecting")
+            writer.close()
+            return
         if first is None or first[0] != proto.MsgType.ATTACH:
+            log.warning("frontend did not present ATTACH; rejecting")
+            writer.close()
+            return
+        if len(first[1]) < 8:
+            log.warning("frontend presented a truncated ATTACH cursor; rejecting")
             writer.close()
             return
         last_acked, nonce = proto.unpack_attach(first[1])
@@ -304,6 +302,15 @@ class SessionHost:
             log.warning("frontend presented an invalid connect nonce; rejecting")
             writer.close()
             return
+        # Only a validated attachment may displace the current front or change
+        # child lifetime state. Keep this transition synchronous until publication.
+        old = self._front
+        if old is not None and not old.closed:
+            old.closed = True
+            with _suppress_close(old.writer):
+                old.writer.close()
+        self._cancel_reap_timer()
+        self._graceful_detach = False
         self._ack_cursor = max(self._ack_cursor, last_acked)
         front = _Front(reader, writer, next_seq=last_acked + 1)
         self._front = front

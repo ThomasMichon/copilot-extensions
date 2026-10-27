@@ -1,0 +1,9 @@
+{
+  "comment": "Validate legacy Session Host attachments before displacing the active frontend or changing child lifetime state.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

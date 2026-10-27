@@ -287,9 +287,9 @@ mutation follows from this amendment.
   thresholds, not hard quotas; #9101 reviewed the linked amendment before
   implementation of that source policy.
   The selected [retained experiment lifetime](retained-experiment-lifetime.md)
-  behavior cleared review in #9176; precise existing-owner admission/API and
-  compatibility review remains before service/peer wiring. Ordinary disposable-test
-  expiry and production lifetime remain unchanged.
+  behavior and concrete API proposals cleared review in #9176 and #9183;
+  existing-owner integration settlement remains before service/peer wiring.
+  Ordinary disposable-test expiry and production lifetime remain unchanged.
 
 ### Mission amendment - Setup, refresh and first useful services
 
@@ -492,6 +492,14 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+- #9183 merged the concrete retained-admission/API proposal as
+  `dda0771bf792f61ab0dfd01d042c965b3535d11b` after exact-head Copilot approval,
+  no inline findings and all current required checks. Re-read this complete Plan
+  and Validation Plan. This reviews a proposal, not provider implementation or
+  #8403's acceptance of the integration seams. Existing source/platform ownership,
+  actual historical-reader qualification, retained fixture wiring and separately
+  approved resource/lifecycle proof remain open. The next step is that existing
+  owner's integration settlement, not another supervisor or an implicit rollout.
 - #9176 merged the retained-work behavior proposal as
   `42f117714271fa8f423c25b6e6a3d3cd1c1ecb59` after exact-head Copilot approval,
   no inline findings and all current required checks. Re-read this complete Plan

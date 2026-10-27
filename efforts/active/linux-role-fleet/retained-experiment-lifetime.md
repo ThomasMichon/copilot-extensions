@@ -5,8 +5,8 @@ Back to [Linux role fleet](README.md) and its
 Existing shared lifecycle owner: #8403 and
 [Leased Daemon Instances](../leased-daemon-instances/README.md).
 
-**Status: behavior proposal reviewed in #9176; precise existing-owner admission,
-API and compatibility review remains before implementation.** This does not
+**Status: behavior and concrete API proposals reviewed in #9176 and #9183;
+existing-owner integration settlement remains before implementation.** This does not
 transfer the existing owner's compiler-free
 Python/native-binding work or authorize provisioning, process actions or rollout.
 
@@ -89,7 +89,7 @@ installation/READY receipt supplies the capability.
 
 ## Concrete admission/API proposal
 
-**Pending the existing #8403 owner's integration review, not an implemented API.**
+**Proposal reviewed in #9183; pending #8403 owner integration, not an implemented API.**
 The proposed names below make the amendment reviewable; they do not appoint this
 contributor to edit the shared library or its distributed bindings. The current
 compiler-free Linux implementation remains the baseline, and its separately owned
@@ -197,7 +197,8 @@ new-form launch is replayed through a legacy production/disposable invocation.
 ## Plan
 
 - [x] Review the selected behavior proposal before implementation; #9176 merged.
-  The concrete admission/API and compatibility review remains separate.
+- [x] Submit the concrete admission/API and compatibility proposal for automated
+  source review; #9183 merged. This does not settle the existing owner's integration.
 - [ ] Coordinate this bounded amendment with #8403's existing integration owner;
   preserve its separate source/native-binding work and resource custody.
 - [ ] Review the existing-owner classification/admission and compatibility

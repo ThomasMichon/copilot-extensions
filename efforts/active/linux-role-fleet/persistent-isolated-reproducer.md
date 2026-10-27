@@ -28,9 +28,9 @@ records bounded main-package origin-observation source and its qualification lim
 Those observations merged in #9173; they are not actual guest qualification.
 The operator selected retaining accepted work after driver loss. The
 [existing-owner lifetime amendment](retained-experiment-lifetime.md) cleared
-behavior review in #9176; precise admission/API and compatibility review remains
-before implementation. Ordinary disposable-test expiry and ongoing #8403 work
-remain unchanged.
+behavior review in #9176 and concrete API proposal review in #9183. Existing-owner
+integration settlement remains before implementation. Ordinary disposable-test
+expiry and ongoing #8403 work remain unchanged.
 This is an agent-recommended decomposition of the remaining isolated
 failure-reproduction and logging qualification work. It does not authorize
 resource creation, production fault injection, deployment or credential access.
