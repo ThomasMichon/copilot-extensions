@@ -18,6 +18,9 @@ for value in paths:
 sys.stdout.write(str(Path(sys.executable).resolve(strict=True)))'
     while IFS= read -r candidate; do
         [[ "$candidate" != *WindowsApps* ]] || continue
+        case "${OSTYPE:-}" in
+            msys*|cygwin*) [[ "$candidate" == *.exe || ! -f "$candidate.exe" ]] || candidate="$candidate.exe" ;;
+        esac
         selected="$("$candidate" -I -B -c "$probe" "$INSTALL_DIR" "$candidate" 2>/dev/null)" || continue
         [[ -n "$selected" && -x "$selected" ]] || continue
         printf '%s' "$selected"

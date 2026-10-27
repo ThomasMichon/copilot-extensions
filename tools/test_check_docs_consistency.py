@@ -466,6 +466,19 @@ def test_excluded_subtrees_are_not_enumerated(tmp_path, monkeypatch):
     assert tmp_path / "node_modules-copy" / "deep" in visited
 
 
+@pytest.mark.parametrize("prefix", ["", "nested"])
+def test_generated_test_trees_are_not_repository_documentation(tmp_path, monkeypatch, prefix):
+    generated = tmp_path / prefix / ".test-runs" / "fixture" / "operator.md"
+    generated.parent.mkdir(parents=True)
+    generated.write_bytes(b"retained\0\xff")
+    document = tmp_path / "docs" / "README.md"
+    document.parent.mkdir()
+    document.write_text("# Repository guide\n", encoding="utf-8")
+    monkeypatch.setattr(mod, "REPO", tmp_path)
+    assert sorted(mod._markdown_paths()) == [document]
+    assert mod.check_counts({"total": 0, "runtime": 0, "payload": 0, "cc_skills": 0}) == []
+
+
 def test_unreadable_markdown_subtree_fails_closed(tmp_path, monkeypatch):
     blocked = tmp_path / "docs"
     blocked.mkdir()

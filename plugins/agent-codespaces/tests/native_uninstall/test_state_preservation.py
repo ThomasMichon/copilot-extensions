@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import py_compile
 import shutil
 import socket
 import subprocess
@@ -17,6 +18,9 @@ ROOT = Path(__file__).resolve().parents[4]
 PLUGINS = ("agent-codespaces", "agent-ssh", "agent-pull-requests")
 ENGINE = ROOT / "libs" / "installer-engine"
 pytestmark = pytest.mark.guard
+ROOT_MODULES = tuple(f"versioned_runtime{suffix}.py" for suffix in (
+    "", "_leases", "_construction", "_source", "_publication",
+))
 
 
 def _policy(plugin):
@@ -72,6 +76,11 @@ def _fixture(tmp_path, plugin):
         "venv": str(root / "versions" / "1.2.3"),
         "runtime": "python", "deployed_at": "2026-01-01T00:00:00Z", "deployed_by": "fixture",
     }), encoding="utf-8")
+    if plugin == "agent-codespaces":
+        for name in ROOT_MODULES:
+            target = root / name
+            target.write_bytes((ROOT / "plugins" / plugin / "scripts" / name).read_bytes())
+            py_compile.compile(str(target), doraise=True)
     durable = {
         "config.yaml": b"operator: config\n",
         "auth.json": b'{"identity": "fixture"}',
@@ -92,6 +101,7 @@ def _fixture(tmp_path, plugin):
         ".install-stage/live-owner/payload": b"publisher source",
         "bin/operator-custom": b"unknown helper content",
         "scripts/operator-custom.py": b"unknown script content",
+        "__pycache__/operator.cpython-313.pyc": b"unknown bytecode retained",
         "versions/operator-note.txt": b"unknown runtime container child",
         "snapshots/operator-note.txt": b"unknown snapshot container child",
         "logs/operator.log": b"persistent operator log\n",
@@ -188,6 +198,12 @@ def test_native_success_removes_runtime_and_preserves_all_state(tmp_path, plugin
             assert not (root / name / "1.2.3").exists()
             continue
         assert not os.path.lexists(root / name), name
+    if plugin == "agent-codespaces":
+        assert all(not (root / name).exists() for name in ROOT_MODULES)
+        assert not any(
+            list((root / "__pycache__").glob(Path(name).stem + ".*.pyc"))
+            for name in ROOT_MODULES
+        )
 
 
 @pytest.mark.parametrize("plugin", ("agent-codespaces", "agent-ssh"))

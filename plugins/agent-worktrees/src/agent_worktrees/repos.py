@@ -168,6 +168,7 @@ class ReposRegistry:
     # :func:`account_for_github_owner`. Keys are compared case-insensitively.
     account_map: dict[str, str] = field(default_factory=dict)
     _baseline: tuple[str, str] | None = field(default=None, repr=False, compare=False)
+    schema_version: int | None = field(default=None, kw_only=True)
 
 
 # ---------------------------------------------------------------------------
