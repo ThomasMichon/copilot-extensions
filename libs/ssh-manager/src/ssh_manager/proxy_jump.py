@@ -314,6 +314,7 @@ async def resolve_jump_route(
         raise ValueError("Cyclic SSH jump chain")
     proxy = config.proxy_command or ssh_option(config, "proxycommand")
     if proxy:
+        expand_proxy_tokens(proxy, config)
         return None
     value = ssh_option(config, "proxyjump")
     if not value or value.casefold() == "none":

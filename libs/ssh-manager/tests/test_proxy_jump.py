@@ -146,6 +146,22 @@ async def test_unsupported_jump_tokens_refuse_before_metadata_lookup(monkeypatch
     assert calls == []
 
 
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("command", ["owned-proxy %Z", "owned-proxy %"])
+async def test_invalid_terminal_proxy_tokens_refuse_before_transport(
+    monkeypatch, nested, command,
+):
+    root = _profile("target", "jump" if nested else None,
+                    proxy_command=None if nested else command)
+    _profiles(monkeypatch, {"target": root, "jump": _profile("jump", proxy_command=command)})
+    prepared = AsyncMock(return_value=SimpleNamespace())
+    monkeypatch.setattr(proxy, "_is_windows", lambda: True)
+    monkeypatch.setattr(proxy, "_create_prepared_ssh", prepared)
+    with pytest.raises(ValueError, match="Unsupported SSH proxy token"):
+        await proxy.create_ssh_subprocess("ssh", "target", config=root)
+    prepared.assert_not_awaited()
+
+
 async def test_distinct_aliases_sharing_an_endpoint_are_not_a_cycle(monkeypatch):
     endpoint = "192.0.2.1"
     _profiles(monkeypatch, {
