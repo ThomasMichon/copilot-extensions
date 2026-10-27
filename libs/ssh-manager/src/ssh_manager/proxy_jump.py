@@ -80,7 +80,7 @@ async def resolve_jump_route(
 ) -> JumpRoute | None:
     """Freeze each hop's profile and reject loops before creating a broker."""
     endpoint = _endpoint(config)
-    identity = (endpoint[0].casefold(), endpoint[1], endpoint[2])
+    identity = (config.host_alias.casefold(), endpoint[1], endpoint[2])
     if identity in seen:
         raise ValueError("Cyclic SSH jump chain")
     proxy = config.proxy_command or ssh_option(config, "proxycommand")

@@ -105,6 +105,32 @@ async def test_profile_derived_nested_jump_is_owned(monkeypatch):
     assert route.upstream.config.host_alias == "inner"
 
 
+async def test_distinct_aliases_sharing_an_endpoint_are_not_a_cycle(monkeypatch):
+    endpoint = "192.0.2.1"
+    _profiles(monkeypatch, {
+        "inner": _profile("inner", "outer", hostname=endpoint),
+        "outer": _profile("outer", hostname=endpoint),
+    })
+    route = await proxy_jump.resolve_jump_route(
+        _profile("target", "inner", hostname=endpoint), "ssh",
+    )
+    assert route is not None and route.config.host_alias == "inner"
+    assert route.argv[-2:] == (f"{endpoint}:22", "inner")
+    assert route.upstream is not None and route.upstream.config.host_alias == "outer"
+    assert route.upstream.argv[-2:] == (f"{endpoint}:22", "outer")
+    assert route.upstream.upstream is None
+
+
+async def test_repeated_alias_is_cyclic_even_when_resolved_endpoints_change(monkeypatch):
+    _profiles(monkeypatch, {
+        "Inner": _profile("Inner", "outer", hostname="192.0.2.1"),
+        "outer": _profile("outer", "inner", hostname="192.0.2.2"),
+        "inner": _profile("inner", "outer", hostname="192.0.2.3"),
+    })
+    with pytest.raises(ValueError, match="Cyclic"):
+        await proxy_jump.resolve_jump_route(_profile("target", "Inner"), "ssh")
+
+
 async def test_ipv6_forward_endpoint_retains_its_brackets(monkeypatch):
     _profiles(monkeypatch, {"jump": _profile("jump")})
     route = await proxy_jump.resolve_jump_route(_profile("2001:db8::2", "jump"), "ssh")
