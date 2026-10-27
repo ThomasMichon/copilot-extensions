@@ -15,6 +15,11 @@ from zdd import breadcrumb, routing
 from agent_worktrees import status_monitor_cutover as smc
 
 
+@pytest.fixture(autouse=True)
+def legacy_or_posix_cutover_contract(monkeypatch):
+    monkeypatch.setattr(smc.guarded_recovery, "enabled", lambda: False)
+
+
 class _Handle:
     def __init__(self, daemon):
         self.daemon = daemon

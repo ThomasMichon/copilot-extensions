@@ -43,6 +43,19 @@ def _undrain(self: CutoverOrchestrator, old: Endpoint, result: CutoverResult) ->
     from .cutover import CutoverError
 
     try:
+        if self.drain_before_publish or self.expected_old is not None:
+            table = self.routing.read_table(self.config_dir) or {}
+            raw = table.get("active")
+            current = Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+            if current is None or any(
+                getattr(current, name) != getattr(old, name)
+                for name in ("bind", "port", "pid", "version", "process_start_time")
+            ):
+                raise CutoverError("restored predecessor ownership changed before undrain")
+            if self.refuse_old is not None:
+                refusal = self.refuse_old(raw)
+                if refusal:
+                    raise CutoverError(refusal)
         response = self.make_client(old.base_url).undrain()
         if (self.drain_before_publish or self.expected_old is not None) and (
             not isinstance(response, dict) or response.get("draining") is not False
@@ -135,12 +148,19 @@ def _rollback(
                             return "successor retraction changed before predecessor restoration"
                         return None
 
+                    def refuse_restoration(active: dict | None) -> str | None:
+                        if self.refuse_old is not None:
+                            refusal = self.refuse_old(old.to_dict())
+                            if refusal:
+                                return refusal
+                        return refuse_retraction(active) if retracted else None
+
                     self.routing.publish_active_with_previous_guarded(
                         self.config_dir, bind=old.bind, port=old.port,
                         pid=old.pid, version=old.version, demote_existing=True,
                         process_start_time=old.process_start_time,
                         expected_active=current,
-                        **({"refuse_current": refuse_retraction} if retracted else {}),
+                        **({"refuse_current": refuse_restoration} if retracted or self.refuse_old is not None else {}),
                     )
                 else:
                     self.routing.publish_active(

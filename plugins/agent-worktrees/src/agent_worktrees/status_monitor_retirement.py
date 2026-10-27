@@ -8,6 +8,14 @@ import time
 from . import locks, resident_push, status_monitor_cutover
 
 
+def prune_retired_surfaces(hooks, classifiers, writers, has_inflight_write) -> None:
+    """Forget only handler-free surfaces while the caller holds its state lock."""
+    hooks[:] = [server for server in hooks if server.active_handler_count() > 0]
+    classifiers[:] = [server for server in classifiers if server.active_handler_count() > 0]
+    if not has_inflight_write():
+        writers[:] = [server for server in writers if server.active_handler_count() > 0]
+
+
 def retire_monitor(
     *, close_admission, repositories_runtime, worktrees_runtime,
     close_request_surfaces, control_server, receipts, worktree_status_runtime,

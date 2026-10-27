@@ -221,7 +221,7 @@ class _StatusSegmentCache:
         from . import __main__ as core
         from . import status_bar_cli
 
-        project = cfg.project_name()
+        project = cfg.project_name() if git_ops._windows_observation() else ""
         input_key = self._key(path)
         with self._lock:
             if self.observation_blocked(project, path):

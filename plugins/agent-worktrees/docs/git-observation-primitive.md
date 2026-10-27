@@ -47,11 +47,26 @@ still pending. Do not discard it in a broad catch, render it as fresh facts,
 start another observation of the affected scope, or report successful shutdown.
 Preserve cancellation during both the operation and cleanup phases.
 
-This foundation adds **no active classifier, segment, monitor, updater,
-roster, cutover or recovery integration**. Landing the API is not permission
-to opt those consumers in without their own custody/lifetime contract. It
-does not resolve owner-bound undrain, passive fsmonitor, admission-lock
-separation, process-economy or broader platform/harness acceptance.
+The Windows classifier, segment/cache, monitor/producer and standalone updater
+use this boundary under their admitted instance-owned custody contract. The
+existing monitor owns settlement before authority release; standalone callers
+retain their own unresolved cleanup. This does not resolve passive fsmonitor,
+admission-lock separation, process-economy or broader platform/harness acceptance.
+
+## Owner-bound recovery
+
+The opt-in Windows cutover adapter requires `guarded-undrain/v1` from one
+existing-token authenticated health response before transition effects. Legacy
+providers refuse this qualified path rather than silently receive legacy
+undrain. Existing truly absent-owner and ordinary POSIX branches are unchanged.
+The new control action binds expected PID/native start/runtime generation and
+exact restored route/port. Under the monitor state lock then existing routing
+lock, the receiver verifies both identities before using its existing undrain
+callback. Rollback may advance route election generation without changing the
+retained process identity. Only the matching typed positive reply qualifies;
+lost/malformed/untyped replies, publication uncertainty and unconfirmed successor
+exit retain unresolved reconciliation. No new ZDD API or parallel controller is
+introduced; old callers retain their separate legacy compatibility behavior.
 
 ## Bounded qualification
 
@@ -71,3 +86,14 @@ Only fixture-owned exact resources may be cleaned up. No process-name kill,
 installed update, live monitor/mux/UI fixture or full-harness benchmark is
 needed to qualify this primitive. Broader nominal performance, POSIX parity
 and integrated-consumer acceptance remain separately tracked followups.
+
+
+The separate opt-in native packet now exercises real Git/descendant-held pipes,
+caller death during execution and before first resume, native Job/root/reader
+settlement, real installer/control recovery and cwd/env/text/binary behavior.
+Run `test_git_observation_native.py`,
+`test_status_monitor_guarded_recovery_native.py` and
+`test_status_monitor_guarded_cutover_native.py` through the contained plugin
+runner with `AGENT_WORKTREES_NATIVE_RECOVERY=1`. They use disposable Jobs and
+fresh isolated routes, never a production monitor. Source/native qualification
+is not installed rollout or full-harness performance acceptance.

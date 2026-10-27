@@ -1,10 +1,12 @@
 # Atomic creation and handoff review proposal
 
-**Latest split:** the independent admitted atomic spawn/facade is implemented
-and pure-tested; the recovery hold never revoked that work. The proposed
-receiving operation is now specified separately in
-[the bounded wire decision packet](guarded-undrain-contract-decision.md).
-No client, receiver or ZDD recovery implementation is made by that packet.
+**Current status:** the atomic spawn/facade and the narrowly admitted receiver-
+bound guarded recovery integration are implemented candidates. See the
+[current effort status](README.md#current-admitted-slice) and
+[wire contract](guarded-undrain-contract-decision.md). The historical stop and
+fail-first counterexample below are preserved; their two probes now pass.
+Native fixture qualification is recorded separately in validation.md. Source
+review/CI and installed acceptance remain open; no broader lane is admitted.
 
 ## Counterexample at the admitted recovery boundary
 
