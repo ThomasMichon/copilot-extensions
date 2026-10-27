@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -19,6 +20,21 @@ from agent_index.sources.delta import SourceDelta
 from agent_index.store.source_layout import LAYOUT
 
 pytestmark = [pytest.mark.portfolio_tier("T3"), pytest.mark.effect("filesystem")]
+
+
+def test_clean_reference_rejects_missing_vectors_even_when_both_stores_omit_them():
+    item = FileEntry("active.md", "Useful text.", "markdown", SOURCE)
+    record = Chunk(item.content, item.path, "text", item.language, 1, 1, SOURCE)
+    content = SimpleNamespace(
+        get_chunk_ids_by_file=lambda *_a: [record.chunk_id],
+        get_by_ids=lambda _ids: {record.chunk_id: record},
+    )
+    store = SimpleNamespace(
+        content_store=content, model_ids=["a"],
+        get_vector_table=lambda _model: SimpleNamespace(get_vectors=lambda *_a, **_k: {}),
+    )
+    with pytest.raises(AssertionError):
+        assert_reference(store, store, [item], set())
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="native process I/O qualification is Linux-only")
@@ -112,7 +128,9 @@ def test_model_addition_and_chunk_policy_invalidation_at_three_corpus_sizes(
             assert store.content_store.source_counts() == {SOURCE: size + chunk_count}
             sentinel_ids = [unchanged[0].chunk_id, unchanged[-1].chunk_id]
             assert set(store.content_store.get_by_ids(sentinel_ids)) == set(sentinel_ids)
-            for vector in store.get_vector_table("a").get_vectors(sentinel_ids, strict=True).values():
+            sentinel_vectors = store.get_vector_table("a").get_vectors(sentinel_ids, strict=True)
+            assert set(sentinel_vectors) == set(sentinel_ids)
+            for vector in sentinel_vectors.values():
                 np.testing.assert_array_equal(vector, [1, 1])
             # Adding a model does not certify coverage of unreturned corpus rows.
             assert store.get_vector_table("b").get_vectors(sentinel_ids, strict=True) == {}

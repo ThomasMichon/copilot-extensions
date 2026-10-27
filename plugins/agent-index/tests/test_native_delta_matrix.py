@@ -188,7 +188,7 @@ def assert_reference(
         for model in actual.model_ids:
             left_vectors = actual.get_vector_table(model).get_vectors(actual_ids, strict=True)
             right_vectors = reference.get_vector_table(model).get_vectors(expected_ids, strict=True)
-            assert left_vectors.keys() == right_vectors.keys()
+            assert left_vectors.keys() == right_vectors.keys() == set(expected_ids)
             for cid in right_vectors:
                 np.testing.assert_array_equal(left_vectors[cid], right_vectors[cid])
 
