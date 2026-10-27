@@ -1,6 +1,7 @@
 """Controlled TLS-feed checks; no live feed or production installation."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timezone
 import ctypes
@@ -157,6 +158,145 @@ def test_real_tls_acquisition_retains_exact_bytes_and_policy_facts(feeds):
         assert b"127.0.0.1" not in result.evidence_json
     assert all(not path.exists() for path in paths)
     assert [path for path, _ in state["requests"]] == ["/simple/fixture/", "/files/" + FILENAME]
+
+
+def parallel_projects(state, count=2):
+    expected = []
+    for index in range(count):
+        item = {
+            **EXPECTED, "name": f"fixture{index}",
+            "filename": f"fixture{index}-1.0-py3-none-any.whl",
+        }
+        expected.append(item)
+        metadata = json.dumps({
+            "meta": {"api-version": "1.1"}, "name": item["name"],
+            "files": [listed(filename=item["filename"], url="/files/" + item["filename"])],
+        }).encode()
+        state["routes"]["/simple/" + item["name"] + "/"] = (
+            200, {"Content-Type": "application/vnd.pypi.simple.v1+json"}, metadata,
+        )
+        state["routes"]["/files/" + item["filename"]] = (200, {}, DATA)
+    return expected, {item["name"]: datetime(2025, 1, 1, tzinfo=timezone.utc) for item in expected}
+
+
+def test_real_parallel_transfers_overlap_and_keep_selected_evidence_order(feeds):
+    state = feeds()
+    expected, cutoffs = parallel_projects(state)
+    barrier = threading.Barrier(2)
+    completed = []
+
+    def download(handler):
+        barrier.wait(timeout=3)
+        if handler.path.endswith(expected[0]["filename"]):
+            time.sleep(0.1)
+        handler.send_response(200)
+        handler.send_header("Content-Length", str(len(DATA)))
+        handler.end_headers()
+        handler.wfile.write(DATA)
+        completed.append(handler.path)
+
+    for item in expected:
+        state["routes"]["/files/" + item["filename"]] = download
+    with acquire(state, expected=expected, cutoffs=cutoffs, limits=limits(max_workers=2)) as result:
+        assert [item["filename"] for item in result.evidence()["files"]] == [
+            item["filename"] for item in expected
+        ]
+        assert result.evidence()["request_count"] == 4
+        paths = tuple(result.snapshot.paths.values())
+        assert all(path.read_bytes() == DATA for path in paths)
+    assert completed[0].endswith(expected[1]["filename"])
+    assert all(not path.exists() for path in paths)
+
+
+@pytest.mark.parametrize("maximum,accepted", [(3, False), (4, True)])
+def test_parallel_requests_share_one_inclusive_budget(feeds, maximum, accepted):
+    state = feeds()
+    expected, cutoffs = parallel_projects(state)
+    options = dict(
+        expected=expected, cutoffs=cutoffs,
+        limits=limits(max_workers=2, max_requests=maximum),
+    )
+    if accepted:
+        with acquire(state, **options) as result:
+            assert result.evidence()["request_count"] == maximum
+    else:
+        with pytest.raises(acquisition.WheelError, match="request budget"):
+            with acquire(state, **options):
+                pytest.fail("parallel requests multiplied the aggregate limit")
+    assert len(state["requests"]) <= maximum
+
+
+@pytest.mark.parametrize("kind", ["metadata", "wheels", "redirects"])
+@pytest.mark.parametrize("accepted", [False, True])
+def test_parallel_transfers_share_aggregate_byte_and_redirect_budgets(feeds, kind, accepted):
+    state = feeds()
+    expected, cutoffs = parallel_projects(state)
+    if kind == "metadata":
+        maximum = sum(len(state["routes"]["/simple/" + item["name"] + "/"][2]) for item in expected)
+        changes = {"max_total_metadata_bytes": maximum - int(not accepted)}
+        counter = "metadata_bytes"
+    elif kind == "wheels":
+        maximum = len(DATA) * len(expected)
+        changes = {"max_closure_bytes": maximum - int(not accepted)}
+        counter = "wheel_bytes"
+    else:
+        maximum = 2
+        changes = {"max_redirects": maximum - int(not accepted)}
+        counter = "redirect_count"
+        for item in expected:
+            state["routes"]["/files/" + item["filename"]] = (
+                302, {"Location": "/redirected/" + item["filename"]}, b"",
+            )
+            state["routes"]["/redirected/" + item["filename"]] = (200, {}, DATA)
+    options = dict(expected=expected, cutoffs=cutoffs, limits=limits(max_workers=2, **changes))
+    if accepted:
+        with acquire(state, **options) as result:
+            assert result.evidence()[counter] == maximum
+    else:
+        with pytest.raises(acquisition.WheelError, match="budget"):
+            with acquire(state, **options):
+                pytest.fail("parallel transfers multiplied an aggregate budget")
+
+
+def test_parallel_digest_failure_settles_a_peer_before_releasing_private_inputs(feeds, monkeypatch):
+    state = feeds()
+    expected, cutoffs = parallel_projects(state)
+    barrier = threading.Barrier(2)
+    peer_finished = threading.Event()
+    roots = []
+    temporary = policy._temporary_inputs
+
+    @contextmanager
+    def tracked(parent):
+        with temporary(parent) as root:
+            roots.append(Path(root))
+            yield root
+
+    def download(handler):
+        barrier.wait(timeout=3)
+        peer = handler.path.endswith(expected[1]["filename"])
+        body = DATA if peer else b"x" * len(DATA)
+        try:
+            handler.send_response(200)
+            handler.send_header("Content-Length", str(len(body)))
+            handler.end_headers()
+            if peer:
+                time.sleep(0.15)
+            handler.wfile.write(body)
+        except OSError:
+            pass
+        finally:
+            if peer:
+                peer_finished.set()
+
+    for item in expected:
+        state["routes"]["/files/" + item["filename"]] = download
+    monkeypatch.setattr(policy, "_temporary_inputs", tracked)
+    with pytest.raises(acquisition.WheelError, match="digest"):
+        with acquire(state, expected=expected, cutoffs=cutoffs, limits=limits(max_workers=2)):
+            pytest.fail("one successful peer concealed a changed wheel")
+    assert peer_finished.wait(timeout=2)
+    assert roots and all(not root.exists() for root in roots)
 
 
 def test_html_metadata_preserves_hash_upload_time_and_python_hint(feeds):
