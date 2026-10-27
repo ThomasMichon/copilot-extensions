@@ -485,6 +485,37 @@ def test_worktrees_feed_retained_crashed_route_runs_bounded_recovery(owner, monk
     assert restored.port == 2 and recovery == [request()] and len(routes) == 2
 
 
+def test_worktrees_feed_confirmed_dead_route_does_not_wait_for_socket_timeout(
+    owner, monkeypatch, tmp_path,
+):
+    from agent_worktrees import locks, worktrees_client
+    from zdd import process_exit
+
+    routes = iter([
+        SimpleNamespace(pid=12345, process_start_time="12345", base_url="http://127.0.0.1:1"),
+        SimpleNamespace(pid=23456, process_start_time="23456", base_url="http://127.0.0.1:2"),
+    ])
+    token = tmp_path / "token"
+    token.write_text("fixture", encoding="utf-8")
+    monkeypatch.setattr(control, "control_token_path", lambda runtime_home=None: token)
+    monkeypatch.setattr(worktrees_client.routing, "read_active_endpoint", lambda *a, **kw: next(routes))
+    monkeypatch.setattr(locks, "lock_is_live", lambda identity: True)
+    monkeypatch.setattr(locks.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(process_exit, "observe_original_exit", lambda pid, birth: pid == 12345)
+    recovery = []
+    monkeypatch.setattr(
+        worktrees_client, "read_current", lambda payload: recovery.append(payload) or owner.handle(payload),
+    )
+
+    def health(self, *args, **kwargs):
+        assert self.port == 2, "confirmed dead route was dialed"
+        return owner.health()
+
+    monkeypatch.setattr(control.ControlClient, "_request", health)
+    assert client._client(request()).port == 2
+    assert recovery == [request()]
+
+
 @pytest.mark.parametrize("failure", [TimeoutError("slow"), ValueError("malformed")])
 def test_worktrees_feed_live_health_failure_cannot_trigger_recovery(owner, monkeypatch, tmp_path, failure):
     from zdd import routing

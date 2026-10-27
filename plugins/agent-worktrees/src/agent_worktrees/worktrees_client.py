@@ -131,11 +131,24 @@ def validate_result(result: dict, request: dict) -> dict:
     return result
 
 
-def _control_client() -> control.ControlClient:
-    runtime_home = cfg.install_dir()
+def resident_endpoint(runtime_home):
+    """Reject a confirmed dead route before a short Windows connect can time out."""
+    from . import locks
+
     endpoint = routing.read_active_endpoint(control.routing_dir(runtime_home), verify_listener=False)
     if endpoint is None:
         raise ConnectionError("resident current-roster endpoint is unavailable")
+    pid = getattr(endpoint, "pid", None)
+    if type(pid) is int and pid > 0 and not locks.lock_is_running({
+        "pid": pid, "start_time": getattr(endpoint, "process_start_time", None),
+    }):
+        raise ConnectionError("resident current-roster endpoint owner exited or was replaced")
+    return endpoint
+
+
+def _control_client() -> control.ControlClient:
+    runtime_home = cfg.install_dir()
+    endpoint = resident_endpoint(runtime_home)
     # An ordinary reader must never create or replace the owner's credential.
     with control.control_token_path(runtime_home).open(encoding="utf-8") as token_file:
         token = token_file.read(4097).strip()

@@ -8,4 +8,4 @@ plugins' prerequisites cannot itself be one of those inert plugins.
 See the vision (`visions/installer/`) and umbrella issue #352.
 """
 
-__version__ = "0.6.178-dev1"
+__version__ = "0.6.179-dev1"

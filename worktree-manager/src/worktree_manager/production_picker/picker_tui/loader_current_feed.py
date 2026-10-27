@@ -107,6 +107,8 @@ class CurrentFeedMixin:
                 self._feed_backoff[source.cache_key] = 0.25
 
     def _feed_error(self, source, gen, reason: str) -> None:
+        if source.local:
+            reason = f"Local resident current-roster read failed: {reason}"
         with self._lock:
             if not self._feed_current(source, gen):
                 return

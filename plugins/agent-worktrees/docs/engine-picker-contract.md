@@ -580,6 +580,19 @@ uses the existing owner token. It never silently removes `--follow` or
 use this path by default; `AGENT_WORKTREES_PICKER_STREAM=0` explicitly selects
 the current one-shot compatibility path instead.
 
+One-shot reads and held-feed admission check a retained route's recorded
+process identity before dialing it. A confirmed exited owner or PID/birth
+mismatch enters the existing missing-owner recovery path; this avoids a short
+Windows connect timeout hiding a dead endpoint as a slow live peer. Legacy
+routes without a PID and owners whose birth cannot be read retain the existing
+transport behavior. Ensure, restart and candidate incumbent admission use the
+same exit-aware liveness predicate, so a retained exited Windows process object
+cannot veto that recovery. Unsupported native-exit platforms retain the existing
+PID/birth check. A live-peer timeout never authorizes replacement.
+The `machine-ssh:` source-ID namespace is stable for both local and remote
+machine sources; it is not transport evidence. Local Manager failure notices
+explicitly identify local execution (no SSH) and the resident current-roster read.
+
 An admitted feed registers its project notification before reading its initial
 publication. Its `begin` includes the complete projection, `selected_count`,
 `cursor` (the project publication revision) and null `base_cursor`; `done`
