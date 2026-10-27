@@ -2957,7 +2957,27 @@ This primitive does **not** establish canonical final paths, ordinary ancestors,
 drive mapping, publisher trust, complete Python/source closure or a safe helper
 handoff. Its native tests cover held-file write/rename/delete exclusion,
 directory rename/delete exclusion and release/error controls, not interpreter
-admission. The existing selector and its compiled verifier remain unchanged
+admission.
+
+The likewise **unused, repository-only**
+`libs/installer-engine/bootstrap-file-trust.ps1` composes that guard with
+qualified existing Windows PowerShell WinTrust bindings. It pins its own
+System32 library reference, refuses an ambiguous or redirected loaded module,
+and supplies the retained file handle with no UI and cache-only URL retrieval.
+Publisher extraction uses the actual verified provider/signer state while
+that state and the caller's file guard remain alive. Provider state closes
+before its inputs and the library reference are released; cleanup failures
+throw, and no trust result is returned before cleanup completes. Neither
+helper compiles or emits interop code.
+
+The signer primitive reports native verification status and the verified leaf's
+publisher; it does not select or execute Python, enforce a publisher policy, or
+admit canonical paths, ancestors, drive mappings or the complete interpreter
+and helper closure. Native controls distinguish the held file from a different
+reported pathname, reject unsigned/modified input and exercise state/error
+cleanup. The [bounded test flow](../TESTING.md#optional-stock-windows-bootstrap-building-blocks)
+does not qualify PowerShell Core parity or enable either helper for callers.
+The existing selector and its compiled verifier remain unchanged
 until the [compiler-free prerequisite gates](../efforts/active/lean-runtime-dependencies/compiler-free-execution.md#python-prerequisite-boundary)
 are satisfied.
 

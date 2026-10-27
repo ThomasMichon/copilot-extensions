@@ -266,6 +266,10 @@ Python prerequisite, not another interpreter acquisition mechanism.
 The private original-parent Windows Job primitive merged in #9170. It has
 native parent-loss and descendant-settlement evidence, but no compiled caller
 has switched and the interpreter admission boundary remains open.
+The unused stock-framework file guard merged in #9181, including native
+directory sharing and same-process refusal-cleanup controls. Continue the
+cached-only signer, path and complete-source admission boundary before any
+compiled bootstrap migration.
 
 ### Current execution boundary
 
@@ -326,6 +330,34 @@ transfer without acceptance by a named tracked objective.
 
 ## Journal
 
+### 2026-10-26 - Stock-framework held-file signer qualification
+- Added an unused, repository-only WinTrust adapter through the existing
+  qualified Windows PowerShell bindings. It retains its own System32 library
+  reference, passes the caller's held file handle, preserves no-UI/cache-only
+  verification and extracts the actual verified leaf before closing provider
+  state. The original selector and distributed bootstrap callers remain
+  unchanged; the adapter does not enforce interpreter/source admission.
+- Bounded native qualification is in progress. The hardened portable packet
+  passed its source contract with 12 explicit native skips. Signed, unsigned,
+  modified and mismatched path/handle controls, repeated closure and failure
+  cleanup are separate native obligations, not inferred from metadata or
+  portable success. Independent review remains pending.
+- This is a prerequisite slice of
+  `plugin-services/compiler-free-first-party-execution`, consistent with the
+  existing independent-installation, explicit-error and platform-parity
+  contracts. Complete canonical paths, ancestors, drive mappings,
+  interpreter/helper closure, Core parity and bounded shell handoff remain
+  open before any compiled caller switches. No production rollout is enabled.
+- The final native packet passed all 13 controls without skips (12 native and
+  one portable), including consumer-visible publication only after cleanup
+  and zero success objects on provider/close failures. The final hardened
+  portable packet passed its control with 12 explicit native skips.
+  The first candidate was rejected by the stock parser before native calls
+  because its return was inside `finally`; the corrected return follows
+  completed cleanup. The signed, unsigned, modified and mismatched path/handle
+  controls retained their original expectations. Independent review and merge
+  remain gates; neither complete admission nor Core parity is inferred.
+
 ### 2026-10-26 - Stock-framework file custody qualification
 - Added an unused, repository-only Windows PowerShell file-guard primitive
   through exact existing framework bindings, without embedded compilation or
@@ -348,6 +380,15 @@ transfer without acceptance by a named tracked objective.
   canonical path and drive checks, signer verification, shell framing,
   PowerShell Core parity, compiled-caller replacement or native desktop gates.
   Phase 7 and the parent campaign remain Active.
+- #9181 merged as `8f6553d7733aa161fa5b5209543946c9504f126e` after
+  independent approval of exact head `e1b62491e6d7a5d7eeeb47925871f356e9e8a9f0`,
+  resolution of the same-process cleanup coverage gap and required green CI.
+  The final native packet passed all 20 controls; the portable packet passed
+  its control with 19 explicit native skips. Both owning effort READMEs were
+  re-read after merge; no aggregate Plan or Validation Plan item closes.
+  Existing stock trust and PowerShell Core bindings have metadata evidence
+  only, not callable or admission qualification. Continue the existing Python
+  prerequisite handoff; no compiled caller switched or installed runtime changed.
 
 ### 2026-10-26 - Windows original-parent lifetime building block
 - The existing path resolver and signed-executable selector do not provide
