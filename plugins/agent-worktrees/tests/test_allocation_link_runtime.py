@@ -368,3 +368,36 @@ def test_replaced_candidate_does_not_inherit_the_previous_attempt_result(owner, 
     value._complete_attempt(key, old, {"phase": "closed"}, "old attempt refused")
     assert value._candidates[key] == replacement
     assert value._retry == {} and value._claim_errors == {}
+
+
+def test_current_loop_governance_is_rechecked_after_network_before_commit(owner, runtime, monkeypatch):
+    from agent_worktrees import __main__ as core, loop_governance
+
+    path, _ = owner
+    reserve(path)
+    before = path.read_bytes()
+    value, _, _ = runtime
+    allowed = [True]
+    checkpoints = []
+
+    def decision(checkpoint):
+        checkpoints.append(checkpoint)
+        return {"status": "ready" if allowed[0] else "deferred", "reason": "runtime policy changed"}
+
+    governance = loop_governance.LoopGovernance(helper=decision)
+
+    def authority():
+        core._status_monitor_recheck(governance, "pre-mutation:allocation-link")
+        return True
+
+    def receive(operation, metadata, **kwargs):
+        allowed[0] = False
+        return observation(metadata)
+
+    monkeypatch.setattr(value, "_elected", authority)
+    monkeypatch.setattr(remote, "request", receive)
+    value.observe("p", [tracking.load_record(path)])
+    step(value)
+    assert checkpoints == ["pre-mutation:allocation-link"] * 2
+    assert path.read_bytes() == before
+    assert value.health()["allocationLinker"]["errors"] == 1

@@ -77,7 +77,9 @@ and adopted projects through their current ledgers, not retained creation histor
 Registry and successful-project discovery refresh on a 60-second cadence within
 the same bounded sweep budget; unavailable ledgers retry without starving other
 projects. Known parsing failures remain visible rather than terminating the
-resident. The periodic inventory itself is not permanent idle demand.
+resident. Only a successful complete inventory scan clears a project discovery
+error; lenient public-roster observation cannot clear it when unreadable records
+were skipped. The periodic inventory itself is not permanent idle demand.
 
 After a new or replayed reservation is durable and its record lock is released,
 the origin requests the existing resident/current-roster demand path. That path
@@ -95,8 +97,9 @@ receiving creation or cancellation, launches an agent, or converts missing
 evidence into absence. Failed linkage retains the original claim with bounded
 volatile backoff; restart reconstructs responsibility from the original ledger.
 
-The resident's elected authority and admission epoch are checked before remote
-work and before local commit. Drain/rollback cannot admit a prior epoch's result.
+The resident's current loop governance, elected authority and admission epoch
+are checked before remote work and before local commit. Drain/rollback or a
+governance deferral cannot admit the previous authorization's result.
 In-flight linkage participates in drain diagnostics, unresolved responsibility
 prevents false idle exit, and mandatory retirement waits for the concrete finite
 worker before releasing the resident route, including interrupted cleanup.

@@ -80,7 +80,10 @@ class AllocationLinkRuntime:
             admitted = self._admitting and self._epoch == epoch
         return admitted and self._elected()
 
-    def observe(self, project: str, records: Iterable[tracking.WorktreeRecord]) -> bool:
+    def observe(
+        self, project: str, records: Iterable[tracking.WorktreeRecord], *,
+        inventory_complete: bool = False,
+    ) -> bool:
         found: dict[tuple[str, str], Candidate] = {}
         closed: set[tuple[str, str]] = set()
         malformed = False
@@ -125,7 +128,7 @@ class AllocationLinkRuntime:
             if malformed:
                 self._errors[project] = "malformed allocation responsibility; inspect the original ledger"
                 self._discover[project] = self._now() + 30.0
-            else:
+            elif inventory_complete:
                 self._errors.pop(project, None)
         if malformed:
             _LOG.warning("Allocation discovery for %s found malformed responsibility", project)
@@ -161,7 +164,9 @@ class AllocationLinkRuntime:
             ][:budget]
         for project in projects:
             try:
-                complete = self.observe(project, discovery.current_records(project))
+                complete = self.observe(
+                    project, discovery.current_records(project), inventory_complete=True,
+                )
             except _DISCOVERY_FAILURES as exc:
                 with self._lock:
                     self._errors[project] = "current allocation ledger unavailable: " + type(exc).__name__

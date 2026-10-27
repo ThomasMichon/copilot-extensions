@@ -368,15 +368,19 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     incarnations: dict[str, str] = {}
     session_projects: dict[str, str] = {}
     state_lock = threading.RLock()
-    allocation_linker = AllocationLinkRuntime(
-        elected=lambda: status_monitor_cutover.active_generation_for_pid(os.getpid()) is not None,
-        context_lock=state_lock, wake=wake_event,
-    )
     lifecycle_priority = threading.Event()
     lifecycle_count_lock = threading.Lock()
     lifecycle_count = 0
     lifecycle_claims: dict[str, float] = {}
     governance = loop_governance.LoopGovernance()
+
+    def _allocation_owner_elected() -> bool:
+        core._status_monitor_recheck(governance, "pre-mutation:allocation-link")
+        return status_monitor_cutover.active_generation_for_pid(os.getpid()) is not None
+
+    allocation_linker = AllocationLinkRuntime(
+        elected=_allocation_owner_elected, context_lock=state_lock, wake=wake_event,
+    )
     hook_client = load_hook_client_module()
     hook_policy = resident_hook_policy_type(hook_client)
     if hook_policy.ready():

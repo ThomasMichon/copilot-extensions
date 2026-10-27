@@ -5,7 +5,7 @@ from __future__ import annotations
 import yaml
 import pytest
 
-from agent_worktrees import allocation_link_discovery as discovery
+from agent_worktrees import allocation_link_discovery as discovery, tracking
 from test_allocation_link_runtime import runtime as runtime
 from test_owned_worktree_transactions import reserve
 from test_resource_producer import owner as owner
@@ -79,3 +79,31 @@ def test_successful_periodic_scans_do_not_turn_empty_inventory_into_permanent_de
         assert not value.has_demand()
         assert value.health()["allocationLinker"]["discovering"] is False
         clock[0] += 60
+
+
+def test_lenient_roster_cannot_clear_a_strict_inventory_failure(owner, runtime, monkeypatch):
+    path, _ = owner
+    value, clock, _ = runtime
+    monkeypatch.setattr(discovery.cfg, "tracking_dir", lambda project=None: path.parent)
+    monkeypatch.setattr(discovery, "registered_projects", lambda: {"p"})
+    value.discover()
+    assert not value.has_demand()
+    pending = reserve(path)
+    original = path.read_bytes()
+    document = yaml.safe_load(original)
+    document.pop("branch")
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    clock[0] += 60
+    value.discover()
+    assert value.health()["allocationLinker"]["errors"] == 1
+    rows = tracking.list_records(path.parent)
+    assert all(record.worktree_id != "owner" for record in rows)
+    value.observe("p", rows)
+    assert value.health()["allocationLinker"]["errors"] == 1 and value.has_demand()
+    path.write_bytes(original)
+    value.observe("p", [tracking.load_record(path)])
+    assert value.health()["allocationLinker"]["errors"] == 1
+    clock[0] += 30
+    value.discover()
+    assert value.health()["allocationLinker"]["errors"] == 0
+    assert next(iter(value._candidates.values())).token == pending["token"]
