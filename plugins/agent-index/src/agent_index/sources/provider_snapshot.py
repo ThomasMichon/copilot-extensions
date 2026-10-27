@@ -10,6 +10,12 @@ from agent_index.sources.delta import SnapshotPage
 from agent_index.sources.provider_delta import DeltaDeclaration, parse_declaration, validate_scope_echo
 
 
+def validate_cli_tokens(*values: str | None) -> None:
+    """Reject opaque values the subprocess argv boundary cannot represent."""
+    if any(value is not None and "\0" in value for value in values):
+        raise ValueError("Snapshot tokens, cursors and checkpoints must not contain NUL characters")
+
+
 def parse_snapshot(
     data: object,
     declaration: DeltaDeclaration,
@@ -31,4 +37,5 @@ def parse_snapshot(
         commit=data["commit"], cursor=data["cursor"], version=data["version"],
     )
     page.validate(declaration.family)
+    validate_cli_tokens(page.snapshot, page.cursor, page.commit)
     return page

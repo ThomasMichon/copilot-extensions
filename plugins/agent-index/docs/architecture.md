@@ -183,8 +183,9 @@ after a failed negotiated call.
 
 Each reply explicitly contains `version: 1`, `snapshot`, `upserts`, `commit`,
 `cursor` and `source_delta`. `upserts` has at most 256 ordinary file-entry objects.
-`snapshot` and non-null `cursor` are bounded nonempty nonsecret strings; `commit`
-is a string or null. `cursor: null` alone certifies terminal coverage of the
+`snapshot` and non-null `cursor` are bounded nonempty nonsecret strings without
+NUL characters (the subprocess argument boundary cannot represent them); `commit`
+is a NUL-free string or null. `cursor: null` alone certifies terminal coverage of the
 entire negotiated family, including descendants. The scope echo must match
 family/account/target and still advertise snapshot v1. The shared journal checks
 stable snapshot/target, rejects repeated cursors, and infers no deletions before

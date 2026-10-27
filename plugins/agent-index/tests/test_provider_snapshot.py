@@ -160,6 +160,7 @@ def test_complete_snapshot_restarts_at_acknowledged_page_without_store_effects(
 
 @pytest.mark.parametrize("field,value", [
     ("version", True), ("version", 2), ("snapshot", ""), ("snapshot", None),
+    ("snapshot", "bad\0snapshot"), ("cursor", "bad\0cursor"), ("commit", "bad\0commit"),
     ("cursor", ""), ("cursor", 4), ("commit", 4), ("upserts", None),
     ("upserts", [ENTRY] * 257), ("upserts", [ENTRY, ENTRY]),
     ("upserts", [{**ENTRY, "source": "other:repo"}]),
@@ -176,6 +177,15 @@ def test_invalid_snapshot_pages_never_reach_journal(tmp_path, field, value):
         )
     assert PendingCrawls(paths).sources() == []
     assert paths.count() == 0
+
+
+@pytest.mark.parametrize("snapshot,cursor", [("bad\0snapshot", "next"), ("pinned", "bad\0cursor")])
+def test_unrepresentable_request_tokens_refuse_before_provider_call(tmp_path, snapshot, cursor):
+    receiver = snapshot_receiver(tmp_path)
+    discover = receiver.connector().discover_snapshot_page
+    with pytest.raises(ValueError, match="NUL"):
+        discover(snapshot, cursor)
+    assert receiver.calls() == [["content-current-commit", "--source", "forge"]]
 
 
 @pytest.mark.parametrize("field", ["version", "snapshot", "upserts", "commit", "cursor"])

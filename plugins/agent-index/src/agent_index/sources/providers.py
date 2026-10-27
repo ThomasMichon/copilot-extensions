@@ -511,7 +511,7 @@ class CliSourceConnector:
         self, snapshot: str | None, cursor: str | None,
         *, cancel_check: Callable[[], None] | None = None,
     ) -> SnapshotPage:
-        from agent_index.sources.provider_snapshot import parse_snapshot
+        from agent_index.sources.provider_snapshot import parse_snapshot, validate_cli_tokens
 
         declaration = self._declaration
         if declaration is None or not declaration.snapshot_available:
@@ -520,6 +520,7 @@ class CliSourceConnector:
             raise ValueError("Snapshot continuation requires a pinned snapshot")
         if snapshot is not None:
             SnapshotPage(snapshot, cursor=cursor).validate(declaration.family)
+            validate_cli_tokens(snapshot, cursor)
         args = (
             *((f"--snapshot={snapshot}",) if snapshot is not None else ()),
             *((f"--cursor={cursor}",) if cursor is not None else ()),
