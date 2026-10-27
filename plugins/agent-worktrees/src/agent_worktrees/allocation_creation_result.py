@@ -64,8 +64,42 @@ def response(
     return value
 
 
+def _verified_unfinished(proof: object, metadata: dict) -> bool:
+    if (
+        not isinstance(proof, dict) or set(proof) != {
+            "schema", "version", "origin", "request_id", "token", "target",
+            "identity", "status", "allocation_finished",
+        }
+        or proof["schema"] != allocation.SCHEMA or type(proof["version"]) is not int
+        or proof["version"] != allocation.VERSION
+        or proof["status"] not in ("pending", "unknown")
+        or proof["allocation_finished"] is not False
+        or proof["origin"] != metadata["creator"]
+        or proof["request_id"] != metadata["request_id"]
+        or proof["token"] != metadata["token"]
+    ):
+        return False
+    try:
+        producer.canonical_json(proof)
+        if producer.canonical_json(proof["target"]) != producer.canonical_json(metadata["recovery"]):
+            return False
+        if proof["identity"] is not None:
+            identity = allocation.AllocationIdentity.from_dict(proof["identity"])
+            if allocation.qualified_ref(identity.ref)[:2] != (
+                metadata["recovery"]["machine"], metadata["recovery"]["project"],
+            ):
+                return False
+            if "identity" in metadata and identity.to_dict() != metadata["identity"]:
+                return False
+    except (ValueError, TypeError, KeyError, RecursionError):
+        return False
+    return True
+
+
 def validate(value: object, metadata: dict) -> dict | None:
     """Validate the exact receiving proof and ordinary row before consumption."""
+    if not allocation.valid_metadata(metadata):
+        raise ValueError("invalid original allocation responsibility for creation result")
     if (
         not isinstance(value, dict) or set(value) != {"schema", "version", "allocation", "result"}
         or value["schema"] != SCHEMA or type(value["version"]) is not int
@@ -74,6 +108,10 @@ def validate(value: object, metadata: dict) -> dict | None:
         raise ValueError("unsupported allocation creation-result contract")
     wire_json(value)
     proof = value["allocation"]
+    if isinstance(proof, dict) and proof.get("status") in ("pending", "unknown"):
+        if not _verified_unfinished(proof, metadata) or value["result"] is not None:
+            raise ValueError("invalid unfinished allocation creation result")
+        return None
     if not allocation.verified_observation(proof, metadata):
         raise ValueError("allocation creation result does not verify the original request")
     result = value["result"]

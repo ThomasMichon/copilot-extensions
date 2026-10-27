@@ -195,6 +195,13 @@ original nonce, recorded owner/pair evidence and actual record identity before
 returning that row. It does not construct an ordinary result from a planned path.
 Pending, unknown or concluded allocations carry no ordinary result; they are not
 permission to create a replacement.
+Unfinished `pending`/`unknown` replies retain their lifecycle status through the
+transport. A separate strict validator requires the exact original request,
+`allocation_finished: false`, a null ordinary result and any supplied identity
+to match the selected target and already-bound incarnation. Missing identity is
+uncertainty, never permission to discard or replace a known allocation. The
+finished-proof validator is unchanged; unfinished replies cannot authorize
+binding, acknowledgement or conclusion.
 
 Consumers verify the exact original request proof and compare the ordinary
 row's execution space, repository, worktree ID, nonce, path, branch and creator

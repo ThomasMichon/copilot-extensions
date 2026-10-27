@@ -163,9 +163,11 @@ sys.exit(main.main(["--project", project, "worktree-allocation-receive", operati
     ordinary = remote.request("result", metadata)
     assert ordinary["result"]["worktree"]["creation_nonce"] == record.creation_nonce
     assert ordinary["allocation"] == observed and "launch" not in ordinary["result"]
+    unknown = remote.request("result", {**metadata, "request_id": "unseen-original"})
+    assert unknown["result"] is None and unknown["allocation"]["status"] == "unknown"
     acknowledged = remote.request("confirm", metadata)
     assert acknowledged["status"] == "confirmed"
     assert acknowledged["identity"] == identity
-    assert [operation for operation, _ in seen] == ["capabilities", "inspect", "result", "confirm"]
+    assert [operation for operation, _ in seen] == ["capabilities", "inspect", "result", "result", "confirm"]
     assert all(payload["origin"] == admission.origin for _, payload in seen if payload is not None)
     assert len(list(Path(records).glob("*.yaml"))) == 1

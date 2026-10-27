@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import copy
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from agent_worktrees import allocation_creation_result as results, creation_requests
 from agent_worktrees import owned_worktree as allocation, tracking
+from agent_worktrees import owned_worktree_remote as remote
 from agent_worktrees import worktree_allocation_receiver as receiver_api
 from test_receiving_allocation import create, receiver as receiver
 
@@ -53,6 +55,7 @@ def test_absent_original_result_remains_unknown_without_creating_history(receive
     value = receiver_api.receive("result", payload(admission), config)
     assert value["result"] is None
     assert value["allocation"]["status"] == "unknown"
+    assert results.validate(value, metadata(admission)) is None
     assert creation_requests.inspect(config, admission.key) is None
     assert not list(records.glob("*.yaml"))
 
@@ -144,3 +147,79 @@ def test_original_journal_record_evidence_is_required_before_returning_a_result(
     proof = receiver_api.receive("inspect", payload(admission), config)
     with pytest.raises(ValueError, match="record identity"):
         results.response(proof, row, record)
+
+
+@pytest.mark.parametrize("status", ["pending", "unknown"])
+@pytest.mark.parametrize("identity_mode", ["absent", "new", "bound", "bound-absent"])
+def test_transport_preserves_valid_unfinished_status_without_returning_a_worktree(
+    receiver, monkeypatch, status, identity_mode,
+):
+    config, admission, _ = receiver
+    _, record = create(receiver)
+    original = metadata(admission)
+    value = receiver_api.receive("result", payload(admission), config)
+    identity = value["allocation"]["identity"]
+    value["allocation"].update(status=status, allocation_finished=False)
+    value["allocation"]["identity"] = None if identity_mode in {"absent", "bound-absent"} else identity
+    value["result"] = None
+    if identity_mode.startswith("bound"):
+        original.update(phase="bound", identity=identity)
+    monkeypatch.setattr(remote, "_destination", lambda *a: ("receiving-alias", "named result"))
+    monkeypatch.setattr(remote, "run_caller_owned", lambda *a, **k: SimpleNamespace(
+        returncode=0, stdout=json.dumps(value), stderr="",
+    ))
+    before = record.yaml_path.read_bytes()
+    received = remote.request("result", original)
+    assert received == value and results.validate(received, original) is None
+    assert received["allocation"]["status"] == status
+    assert record.yaml_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("change", [
+    {"schema": "other"}, {"version": True}, {"origin": "remote/parent/other"},
+    {"request_id": "other"}, {"token": "b" * 32}, {"allocation_finished": True},
+    {"target": {"machine": "other", "project": "demo-repo"}}, {"extra": True},
+    {"identity": {"ref": "other/demo-repo/child", "creation_nonce": "a", "path": "/child", "branch": "worktree/child"}},
+])
+@pytest.mark.parametrize("status", ["pending", "unknown"])
+def test_unfinished_transport_rejects_mismatched_or_malformed_original_proof(
+    receiver, monkeypatch, status, change,
+):
+    config, admission, _ = receiver
+    create(receiver)
+    value = receiver_api.receive("result", payload(admission), config)
+    value["allocation"].update(status=status, allocation_finished=False)
+    value["allocation"].update(change)
+    value["result"] = None
+    monkeypatch.setattr(remote, "_destination", lambda *a: ("receiving-alias", "named result"))
+    monkeypatch.setattr(remote, "run_caller_owned", lambda *a, **k: SimpleNamespace(
+        returncode=0, stdout=json.dumps(value), stderr="",
+    ))
+    with pytest.raises(ValueError, match="unfinished"):
+        remote.request("result", metadata(admission))
+
+
+@pytest.mark.parametrize("status", ["pending", "unknown"])
+def test_unfinished_proof_cannot_carry_an_ordinary_result(receiver, status):
+    config, admission, _ = receiver
+    create(receiver)
+    value = receiver_api.receive("result", payload(admission), config)
+    value["allocation"].update(status=status, allocation_finished=False)
+    with pytest.raises(ValueError, match="unfinished"):
+        results.validate(value, metadata(admission))
+
+
+@pytest.mark.parametrize("status", ["pending", "unknown"])
+def test_unfinished_provided_identity_cannot_replace_the_already_bound_incarnation(receiver, status):
+    config, admission, _ = receiver
+    create(receiver)
+    value = receiver_api.receive("result", payload(admission), config)
+    original = {
+        **metadata(admission), "phase": "bound",
+        "identity": copy.deepcopy(value["allocation"]["identity"]),
+    }
+    value["allocation"].update(status=status, allocation_finished=False)
+    value["allocation"]["identity"]["creation_nonce"] = "different"
+    value["result"] = None
+    with pytest.raises(ValueError, match="unfinished"):
+        results.validate(value, original)
