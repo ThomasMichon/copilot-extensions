@@ -391,10 +391,12 @@ mode when exercising the builder locally.
 
 ### Registered standalone first-party artifacts
 
-The same locked builder accepts `--standalone pr-service` or
-`--standalone fleet-manager` (the positional value is a registered component,
-not an arbitrary path). Promotion discovers `services/pr` and `fleet-manager`
-explicitly alongside its existing plugins. Standalone manifests use schema 4,
+The same locked builder accepts `--standalone` with an explicit identity from
+`tools/standalone_python_artifacts.py`'s `COMPONENTS`: `pr-service`,
+`fleet-manager`, `chat-service`, `dispatch-service`, `ssh-service` or
+`worktree-manager`, never an arbitrary path. These are existing registered
+standalone consumers, discovered alongside the existing plugins; the optional
+Index service is not added by this core coverage. Standalone manifests use schema 4,
 `component` instead of `plugin`, a `standalone` primary wheel and an exact
 `build_resources` source closure; plugin schema-3 manifests are unchanged.
 Schema-2 promotion indexes carry either explicit identity, with standalone
@@ -402,17 +404,23 @@ filenames and version tags prefixed `standalone-`. Existing plugin release
 names, signature checks and optional artifact/source selection remain unchanged.
 
 Standalone builds share the existing toolchain, generator, source-content,
-wheel-hash and candidate composition checks. Fleet's resource-injecting setup
-and helper must match trusted producer code. The verifier maps its injected
+wheel-hash and candidate composition checks. Fleet's and Chat's resource-injecting
+setups and helper must match trusted producer code. The verifier maps their injected
 modules to canonical resource bytes without executing candidate code; changed,
 missing, linked or substituted inputs fail closed. This does not admit arbitrary
 `setup.py` files or weaken plugin static-build admission.
 
 The manual **Installation context native acceptance** workflow's
 `pr_artifacts` input builds real plugin and standalone wheels on Linux and
-Windows, verifies their bundles against the source tree, then installs only
-the standalone wheels into a fresh environment offline with no dependencies.
-Its outside-checkout import/resource checks prove first-party packaging, not
+Windows, verifies their bundles against the source tree, then installs each
+standalone component's first-party wheel set in its own fresh environment
+offline without resolving dependencies. The retained representative PR/Fleet
+nested export fixture derives its projects, dependencies and build resources
+from the same owner rather than assuming a fixed library list.
+Separate component environments do not silently select between conflicting
+shared-wheel identities; they are not the consolidated core environment.
+Outside-checkout distribution/resource checks and the retained PR/Fleet import
+controls prove first-party packaging, not
 service execution, governed-feed runtime closure, native Worktrees selection
 or image/fleet acceptance. Public toolchain provisioning remains the narrow
 hosted-runner exception above; no third-party runtime bytes enter release bundles.

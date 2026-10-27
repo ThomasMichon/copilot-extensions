@@ -194,21 +194,25 @@ def test_file_admission_refusals_precede_wheel_download(feeds, change, message, 
 @pytest.mark.parametrize("route", ["link", "redirect", "index-redirect"])
 def test_untrusted_origin_is_refused_before_endpoint_receives_a_request(feeds, route):
     state, untrusted = feeds(), feeds()
+    location = untrusted["origin"] + "/files/" + FILENAME + "?signature=synthetic-private-value"
     project(state)
     if route == "link":
-        project(state, [listed(url=untrusted["origin"] + "/files/" + FILENAME)])
+        project(state, [listed(url=location)])
     elif route == "redirect":
         state["routes"]["/files/" + FILENAME] = (
-            302, {"Location": untrusted["origin"] + "/files/" + FILENAME}, b"",
+            302, {"Location": location}, b"",
         )
     else:
         state["routes"]["/simple/fixture/"] = (
             302, {"Location": untrusted["origin"] + "/simple/fixture/"}, b"",
         )
-    with pytest.raises(ValueError, match="source trust"):
+    with pytest.raises(ValueError, match="source trust") as error:
         with acquire(state):
             pytest.fail("untrusted endpoint was reached")
     assert untrusted["requests"] == []
+    assert untrusted["origin"] in str(error.value)
+    assert "synthetic-private-value" not in str(error.value)
+    assert FILENAME not in str(error.value)
 
 
 def test_explicit_download_origin_allows_redirect_without_forwarding_credentials(feeds):
