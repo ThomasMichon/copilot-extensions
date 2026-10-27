@@ -287,6 +287,7 @@ async def test_cli_endpoint_overrides_bind_the_owned_forward(monkeypatch, option
 
 @pytest.mark.parametrize("options", [("-Jnone",), ("-o", "ProxyJump=none")])
 async def test_plain_config_cannot_reenable_an_explicitly_disabled_jump(monkeypatch, options):
+    _profiles(monkeypatch, {"target": _profile("target")})
     process = SimpleNamespace(wait=AsyncMock(return_value=0))
     spawn = AsyncMock(return_value=(process, None))
     monkeypatch.setattr(proxy, "_is_windows", lambda: True)
@@ -298,6 +299,32 @@ async def test_plain_config_cannot_reenable_an_explicitly_disabled_jump(monkeypa
         assert spawn.await_args.args == ("ssh", "-o", "ProxyCommand=none", "target")
     finally:
         await run_process_cleanup(process)
+
+
+@pytest.mark.parametrize("options", [(), ("-p2200",), ("-lprobe",), ("-oHostName=endpoint",)])
+@pytest.mark.parametrize("inherited", ["jump", "proxy"])
+async def test_plain_config_overrides_preserve_inherited_native_routes(
+    monkeypatch, options, inherited,
+):
+    root = _profile(
+        "target", "gateway" if inherited == "jump" else None,
+        proxy_command="owned-proxy --stdio" if inherited == "proxy" else None,
+    )
+    calls = _profiles(monkeypatch, {"target": root, "gateway": _profile("gateway")})
+    prepared = AsyncMock(return_value=SimpleNamespace())
+    monkeypatch.setattr(proxy, "_is_windows", lambda: True)
+    monkeypatch.setattr(proxy, "_create_prepared_ssh", prepared)
+    await proxy.create_ssh_subprocess(
+        "ssh", *options, "target", config=SSHConfig("target"),
+    )
+    _args, selected, route, _kwargs = prepared.await_args.args
+    assert selected == root
+    assert (route is not None) is (inherited == "jump")
+    assert selected.proxy_command == root.proxy_command
+    assert [host for host, _options in calls] == (
+        ["target", "gateway"] if inherited == "jump" else ["target"]
+    )
+    assert calls[0][1]["resolve_args"] == (*options, "target")
 
 
 @pytest.mark.parametrize("command", ["owned-proxy --stdio", "none"])
@@ -550,9 +577,7 @@ async def test_programmatic_destination_identity_binds_owned_forward(
     original = SSHConfig(
         "target", user="old-user", port=2200, extra_options={"ProxyJump": "jump"},
     )
-    args, selected = await proxy_jump.prepare_windows_launch(
-        ("ssh", *arguments), original, "ssh",
-    )
+    args, selected = proxy_jump.prepare_jump_arguments(("ssh", *arguments), original)
     route = await proxy_jump.resolve_jump_route(selected, "ssh")
     assert args == ("ssh", *arguments)
     assert proxy_jump._endpoint(selected)[1:] == (user, port)

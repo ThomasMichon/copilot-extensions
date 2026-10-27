@@ -237,40 +237,38 @@ async def prepare_windows_launch(
     *, cwd: str | None = None, environment: Mapping[str, str] | None = None,
 ) -> tuple[tuple[str, ...], SSHConfig]:
     prepared, selected = prepare_jump_arguments(args, config, apply_overrides=False)
-    if config.effective_config or config.config_file or selected.config_file != config.config_file:
-        programmatic = selected if selected.config_file == config.config_file else None
-        resolution_args = tuple(args[1:])
-        if selected.config_file:
-            resolution_args = ("-F", selected.config_file, *resolution_args)
-            prepared = (prepared[0], "-F", selected.config_file, *prepared[1:])
-        source = SSHProfileSource(
-            config.host_alias, config_file=selected.config_file,
-            resolve_timeout=15, ssh_executable=executable, resolve_cwd=cwd,
-            process_env=environment, resolve_args=resolution_args,
+    programmatic = selected if selected.config_file == config.config_file else None
+    resolution_args = tuple(args[1:])
+    if selected.config_file:
+        resolution_args = ("-F", selected.config_file, *resolution_args)
+        prepared = (prepared[0], "-F", selected.config_file, *prepared[1:])
+    source = SSHProfileSource(
+        config.host_alias, config_file=selected.config_file,
+        resolve_timeout=15, ssh_executable=executable, resolve_cwd=cwd,
+        process_env=environment, resolve_args=resolution_args,
+    )
+    selected = await asyncio.to_thread(source.get_ssh_config)
+    if programmatic is not None:
+        explicit_keys = {key.casefold() for key in programmatic.extra_options}
+        selected = replace(
+            selected, hostname=programmatic.hostname or selected.hostname,
+            user=programmatic.user or selected.user,
+            port=programmatic.port if programmatic.port is not None else selected.port,
+            identity_file=programmatic.identity_file or selected.identity_file,
+            extra_options={
+                **{key: value for key, value in selected.extra_options.items()
+                   if key.casefold() not in explicit_keys},
+                **programmatic.extra_options,
+            },
         )
-        selected = await asyncio.to_thread(source.get_ssh_config)
-        if programmatic is not None:
-            explicit_keys = {key.casefold() for key in programmatic.extra_options}
-            selected = replace(
-                selected, hostname=programmatic.hostname or selected.hostname,
-                user=programmatic.user or selected.user,
-                port=programmatic.port if programmatic.port is not None else selected.port,
-                identity_file=programmatic.identity_file or selected.identity_file,
-                extra_options={
-                    **{key: value for key, value in selected.extra_options.items()
-                       if key.casefold() not in explicit_keys},
-                    **programmatic.extra_options,
-                },
-            )
-            explicit = replace(programmatic, effective_config=())
-            command = explicit.proxy_command or ssh_option(explicit, "proxycommand")
-            jump = ssh_option(explicit, "proxyjump")
-            if command:
-                selected = _override_proxy(selected, command)
-            elif jump is not None:
-                selected = _override_jump(selected, jump)
-        return prepared, selected
-    return prepare_jump_arguments(args, config)
+        explicit = replace(programmatic, effective_config=())
+        command = explicit.proxy_command or ssh_option(explicit, "proxycommand")
+        jump = ssh_option(explicit, "proxyjump")
+        if command:
+            selected = _override_proxy(selected, command)
+        elif jump is not None:
+            selected = _override_jump(selected, jump)
+    return prepared, selected
 
 
 async def resolve_jump_route(

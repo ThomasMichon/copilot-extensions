@@ -226,12 +226,14 @@ remain intact. Destination overrides retain SSH's first-value precedence and
 but before the remote command. Cycle identity uses declared aliases, not resolved addresses,
 so different network scopes may legitimately reuse an endpoint.
 CLI `ProxyCommand`/`ProxyJump` selection retains its first-selected precedence.
-Every profile-backed launch refreshes its effective root through the existing
+Every Windows launch resolves its effective root through the existing
 bounded selected-client resolver using the original argv, even with a cached
-config and unchanged filename. Native profile matching and explicit overrides
-remain authoritative; every hop uses the selected configuration file.
-This adds one fresh local root query per profile-backed launch. Pure
-programmatic configurations retain their existing non-profile path.
+config and unchanged filename, or a plain programmatic configuration without
+an explicit file. The implicit native profile can still supply routing for
+that plain configuration; partial CLI overrides are not proof of a direct route.
+Native profile matching and explicit overrides remain authoritative; every hop
+uses the selected configuration file. This adds one fresh local root query per
+Windows launch, including plain programmatic configurations.
 With an unchanged profile selection, explicit programmatic fields and proxy
 options remain overrides rather than cached file values. CLI selections take
 precedence; choosing another `-F` file does not resurrect the previous
