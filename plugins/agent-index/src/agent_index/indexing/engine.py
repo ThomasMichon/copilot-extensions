@@ -262,6 +262,7 @@ def _connector_kwargs(spec: SourceSpec) -> dict[str, object]:
             token = _resolve_gh_token(spec.auth_account)
             if token:
                 kwargs["token"] = token
+                kwargs["hint_account"] = spec.auth_account
         return kwargs
     if spec.type == "github":
         if not spec.auth_account:

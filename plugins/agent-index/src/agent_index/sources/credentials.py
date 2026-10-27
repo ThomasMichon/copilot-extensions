@@ -104,6 +104,7 @@ def gateway_connector_kwargs(spec: SourceSpec) -> dict[str, object]:
         raise SourceCredentialError("source-materialization-identity-mismatch")
     return {
         "repo_path": str(connector.repo_path), "token_provider": provider,
+        "hint_account": spec.auth_account,
         **({"ref": spec.ref} if spec.ref else {}),
     }
 

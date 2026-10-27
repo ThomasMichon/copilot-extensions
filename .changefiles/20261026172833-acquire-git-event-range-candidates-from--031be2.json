@@ -1,0 +1,9 @@
+{
+  "comment": "Acquire Git event-range candidates from the configured pinned ref with explicit account binding",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
