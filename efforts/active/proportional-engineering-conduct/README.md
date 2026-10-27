@@ -55,8 +55,10 @@ state their own. Agents still invent parallel harnesses and extra checks.
 
 [Instruction source resolution](../instruction-source-resolution/README.md)
 is keeping required provenance and reviewed-fallback checks. This effort must
-not weaken that. It forbids adding those checks where the owning contract does
-not already require them.
+not weaken that. It forbids unjustified parallel machinery. It does not forbid
+a proportionate safeguard that fits the existing architecture and is justified
+by a concrete failure, and it does not remove a check the owning contract
+already requires.
 
 A style overlay (direct answers, simpler code, stated tradeoffs, dense
 formatting, user-focused explanation) was the seed. The assessment is in
@@ -180,3 +182,5 @@ See [proposal.md](proposal.md).
   check fits the existing architecture. Narrowed the prohibition to
   unjustified parallel machinery, in the proposal and in this plan's
   comparison and validation wording. Existing required checks stay.
+- Follow-up review: the Context paragraph still used the old ban. Aligned
+  it with the proposal.
