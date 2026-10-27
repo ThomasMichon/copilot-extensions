@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from agent_index.indexing.change_hints import ChangeHints
-    from agent_index.sources.delta import SourceDelta
+    from agent_index.sources.delta import AcquisitionPage, SourceDelta
 
 _DEFAULT_API_BASE = "https://api.github.com"
 _DEFAULT_TIMEOUT = 20.0
@@ -128,6 +128,29 @@ class GitHubConnector:
 
         return acquire_hints(self, hints, last_commit, cancel_check=cancel_check)
 
+    def discover_delta_page(
+        self, last_commit: str | None, cursor: str | None,
+        *, cancel_check: Callable[[], None] | None = None,
+    ) -> AcquisitionPage:
+        from agent_index.sources.github_poll import acquire_page
+
+        return acquire_page(self, last_commit, cursor, cancel_check=cancel_check)
+
+    def discover_delta(
+        self, last_commit: str | None, cancel_check: Callable[[], None] | None = None,
+    ) -> SourceDelta:
+        """Bounded compatibility path for callers without durable acquisition pages."""
+        from agent_index.sources.delta import SourceDelta
+
+        cursor = None
+        entries = []
+        while True:
+            page = self.discover_delta_page(last_commit, cursor, cancel_check=cancel_check)
+            entries.extend(page.delta.upserts)
+            cursor = page.cursor
+            if cursor is None:
+                return SourceDelta(upserts=entries, commit=page.delta.commit)
+
     def _authenticated_recovery_account(self) -> str:
         try:
             data = self._http.get_json(
@@ -198,8 +221,8 @@ class GitHubConnector:
         }
 
     def current_commit(self) -> str | None:
-        """GitHub issue and pull request state is timestamp-tracked, not HEAD-tracked."""
-        return None
+        """Capture a reconciliation start marker, before discovering source content."""
+        return datetime.now(UTC).isoformat()
 
     @property
     def _issues_source(self) -> str:
@@ -372,6 +395,7 @@ class GitHubConnector:
     def _since_marker(marker: str | None) -> str | None:
         if not marker:
             return None
+        dt: datetime | None
         try:
             dt = datetime.fromtimestamp(float(marker), tz=UTC)
         except ValueError:
@@ -382,6 +406,7 @@ class GitHubConnector:
 
 
 setattr(GitHubConnector.discover_hints, "change_hints_versions", (1,))
+setattr(GitHubConnector.discover_delta_page, "acquisition_page_versions", (1,))
 
 
 def _env_token() -> str | None:

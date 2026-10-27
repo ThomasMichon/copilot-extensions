@@ -52,6 +52,59 @@ storage layout. The opt-in Python
 protocol is independent of the external provider CLI wire format. External
 providers can opt into the separately negotiated contract below.
 
+In-process connectors can additionally advertise
+`discover_delta_page.acquisition_page_versions = (1,)`. The method receives
+`(last_commit, cursor, *, cancel_check=None)` and returns an `AcquisitionPage`:
+one validated `SourceDelta` plus a nonsecret opaque continuation string, or
+`None` for completion. All units keep one target checkpoint; duplicate/conflicting
+identities, changed targets and non-progressing cursors refuse. The shared
+engine commits each complete unit and its continuation to the **same**
+`pending_crawls` row before requesting another. Nothing reaches indexing or
+source checkpoint publication until the complete manifest is durably ready.
+Each new acquisition receives a unique generation, retained across resumed
+units and included in progress/promotion/discard comparisons. Discard followed
+by an identical provider plan cannot let a worker from the old generation
+publish into or discard the new acquisition.
+There is a finite 128-unit invocation budget; exhaustion fails visibly and a
+retry continues the saved plan instead of restarting acquisition. A phase-2
+journal envelope is intentionally incompatible with v1-only readers, which
+refuse it rather than interpreting partial acquisition as a complete manifest.
+Finish pending work before rollback or switching to hints, full reconciliation
+or a connector without paged support. An explicit caller-authorized
+`indexing.paged_crawl.discard_acquisition` repair may instead abandon only an
+**unapplied v2** acquisition. It requires the original actual connector,
+configuration scope, path database and exact observed payload; the owning
+journal compares those under its existing SQLite transaction before removing
+the row. Concurrent progress or promotion to a complete v1 manifest refuses
+discard. Conversely, an in-flight unit cannot publish after its observed intent
+was discarded. Committed source state, path checkpoints and canonical data
+remain untouched, so the caller can separately request reconciliation from
+the unchanged checkpoint. A 404, stale item or exhausted budget never invokes
+discard automatically and never becomes a tombstone. Completed v1 manifests
+remain mandatory replay, not eligible for this operation.
+This adds no external-provider CLI flag;
+CLI delta-v1 providers retain their existing complete-result contract.
+
+GitHub ordinary polls use a fresh, **single page of at most 100 identities**
+updated since their committed timestamp, replaying the existing 60-second
+overlap. The immutable captured work plan binds repository/account/base/target;
+each subsequently acquired issue/PR and its complete comments form one durable
+unit. Retry may refetch the interrupted item, not the original listing or
+completed items. Hints and polling reuse the same fresh item, repository,
+minimum-revision and complete-comment validation. The target is the maximum of
+the previous timestamp and observed item revisions; an empty page retains the
+timestamp. No poll enumerates stored paths, infers unseen-item tombstones or
+uses a mutable provider page offset as a recovery cursor. A missing/invalid
+timestamp or a `next` link fails with an explicit reconciliation request; it
+never silently starts a full crawl or advances past an oversized window.
+GitHub's list API is not an immutable snapshot or a deleted-item feed. This
+polling path does not prove complete reconciliation or capture edits invisible
+to the provider's `updated_at` semantics. Explicit full discovery retains the
+legacy reconciliation path and captures a timestamp **before** discovery.
+Budgeted full reconciliation, external paged CLI support and durable recovery
+within one item's comment pages remain separate work; they are not supplied by
+this bounded polling contract.
+
 An external provider's existing `content-current-commit --source SOURCE` reply
 may add `source_delta` with contract `agent-index.source-delta`, explicit
 `versions`, canonical `family`, stable nonsecret `account` and effective
@@ -141,8 +194,8 @@ scope, including empty full snapshots with a null cursor. Failed application
 or publication restores the prior in-memory checkpoint and retains any pending
 acquisition for replay. Older state files still load, but their unbound cursors
 require full reconciliation. An already-admitted pending journal with a matching
-scope may finish and bind its checkpoint before fresh acquisition; its existing
-envelope does not change. No additional identity or credential authority is
+scope may finish and bind its checkpoint before fresh acquisition; complete
+manifest envelopes remain v1. No additional identity or credential authority is
 introduced. The same constructed connector supplies both acquisition
 and its canonical/effective recovery identity: delta connectors declare a
 nonsecret `recovery_identity` tuple. Built-in Git binds the resolved checkout,
@@ -171,7 +224,8 @@ Another crawl alias cannot acquire or mutate an overlapping canonical family
 work remains pending. Source garbage collection also defers before deletion or
 cursor retirement and reports the pending sources as failures. Restore the
 original source configuration and complete its pending crawl before retiring
-or retargeting it; deleting the journal is not a supported recovery path.
+or retargeting it. Only the explicit exact-payload repair above may discard an
+unapplied v2 acquisition; manual journal deletion is not a supported recovery path.
 Pending work must finish through a journal-capable engine before rolling back
 to an older engine; old runtimes do not implement this recovery contract.
 

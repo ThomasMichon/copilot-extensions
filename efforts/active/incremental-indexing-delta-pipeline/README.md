@@ -114,7 +114,7 @@ After the reviewed proposal, the operator admitted execution:
   Add normal-round fingerprint checks, not only retry-window skipping.
 - [x] Separate text, searchable metadata, chunker/schema and embedding-profile
   identity. Metadata-only updates must not invalidate unchanged vectors.
-- [ ] Make embedding selection operate on missing/invalid chunk-model pairs,
+- [x] Make embedding selection operate on missing/invalid chunk-model pairs,
   with bounded batch lookups and resumable coverage/backfill.
 - [x] Delay expensive model readiness until a nonempty embedding plan exists.
   Keep search availability independent of indexing-engine lifecycle.
