@@ -37,7 +37,7 @@ from agent_procutil import no_window_kwargs
 
 from agent_index.indexing.change_hints import ChangeHints
 from agent_index.sources.base import FileEntry, nonsecret_target
-from agent_index.sources.delta import SourceDelta
+from agent_index.sources.delta import SnapshotPage, SourceDelta
 from agent_index.sources.git_records import commit_records, decode_git_path, nul_git_paths
 from agent_index.sources.credentials import (
     SourceCredentialError,
@@ -469,6 +469,19 @@ class GitRepoConnector:
             refresh_paths=refresh_paths, refresh_commits=refresh_commits,
         )
 
+    @property
+    def discover_snapshot_page(self) -> Callable[..., SnapshotPage] | None:
+        self._resolve()
+        return None if self._use_worktree else self._discover_snapshot_page
+
+    def _discover_snapshot_page(
+        self, snapshot: str | None, cursor: str | None,
+        *, cancel_check: Callable[[], None] | None = None,
+    ) -> SnapshotPage:
+        from agent_index.sources.git_snapshot import discover_git_snapshot
+
+        return discover_git_snapshot(self, snapshot, cursor, cancel_check=cancel_check)
+
     def discover(self, cancel_check: Callable[[], None] | None = None) -> list[FileEntry]:
         """Discover current tracked files plus commit-history entries."""
         self._resolve()
@@ -608,6 +621,8 @@ class GitRepoConnector:
         strict: bool = False,
         target_commit: str | None = None,
         max_count: int | None = None,
+        skip: int | None = None,
+        no_replace_objects: bool = False,
     ) -> list[FileEntry]:
         args = [
             "log",
@@ -616,8 +631,12 @@ class GitRepoConnector:
             "--date=iso-strict",
             "--format=%H%x00%an%x00%ae%x00%aI%x00%s%x00%b",
         ]
+        if no_replace_objects:
+            args.insert(0, "--no-replace-objects")
         if max_count is not None:
             args.append(f"--max-count={max_count}")
+        if skip is not None:
+            args.extend(["--topo-order", f"--skip={skip}"])
         revision = target_commit or self._index_rev()
         if last_commit:
             args.append(f"{last_commit}..{revision}")
@@ -758,3 +777,4 @@ class GitRepoConnector:
 
 setattr(GitRepoConnector.discover_hints, "change_hints_versions", (1,))
 setattr(GitRepoConnector.discover_delta, "poll_refresh_versions", (1,))
+setattr(GitRepoConnector._discover_snapshot_page, "snapshot_page_versions", (1,))
