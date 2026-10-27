@@ -36,6 +36,16 @@ class _BSDInfo(ctypes.Structure):
     ]
 
 
+class _ShortBSDInfo(ctypes.Structure):
+    _fields_ = [
+        *((name, ctypes.c_uint32) for name in ("pid", "ppid", "pgid", "status")),
+        ("comm", ctypes.c_char * 16),
+        *((name, ctypes.c_uint32) for name in (
+            "flags", "uid", "gid", "ruid", "rgid", "svuid", "svgid", "reserved",
+        )),
+    ]
+
+
 class _UniqueInfo(ctypes.Structure):
     _fields_ = [
         ("uuid", ctypes.c_ubyte * 16),
@@ -47,6 +57,18 @@ class _UniqueInfo(ctypes.Structure):
 
 class _Info(ctypes.Structure):
     _fields_ = [("bsd", _BSDInfo), ("unique", _UniqueInfo)]
+
+
+class _ReadRefused(RuntimeError):
+    """PID-bound failure evidence, never authority to return a partial census."""
+
+    def __init__(self, pid: int, phase: str, native_errno: int, detail: str,
+                 evidence: dict[str, int]) -> None:
+        super().__init__(detail)
+        self.pid = pid
+        self.phase = phase
+        self.native_errno = native_errno
+        self.evidence = evidence
 
 
 def _refuse(scope: str, pid: int | None = None) -> RuntimeError:
@@ -140,31 +162,31 @@ class _Native:
         return size.value
 
     def inventory(self) -> set[int]:
-        pids: set[int] = set()
         # Include effective and real UID ownership; privileged candidates refuse
         # below rather than disappearing from the consumer census.
-        for kind in (4, 5):  # PROC_UID_ONLY, PROC_RUID_ONLY.
-            capacity = 256
-            while True:
-                buffer = (ctypes.c_int * capacity)()
-                ctypes.set_errno(0)
-                size = self.listpids(kind, self.uid, buffer, ctypes.sizeof(buffer))
-                if size <= 0:
-                    raise _refuse("current-user inventory unavailable")
-                if size > ctypes.sizeof(buffer) or size % 4:
-                    raise _refuse("invalid inventory size")
-                values = list(buffer[:size // 4])
-                if any(pid <= 0 for pid in values) or len(set(values)) != len(values):
-                    raise _refuse("invalid inventory identities")
-                if size < ctypes.sizeof(buffer):
-                    pids.update(values)
-                    break
-                if capacity >= MAX_PIDS:
-                    raise _refuse("inventory bound exceeded")
-                capacity = min(capacity * 2, MAX_PIDS)
+        pids = self._inventory_kind(4) | self._inventory_kind(5)
         if len(pids) > MAX_PIDS or os.getpid() not in pids:
             raise _refuse("incomplete current-user inventory")
         return pids
+
+    def _inventory_kind(self, kind: int) -> set[int]:
+        capacity = 256
+        while True:
+            buffer = (ctypes.c_int * capacity)()
+            ctypes.set_errno(0)
+            size = self.listpids(kind, self.uid, buffer, ctypes.sizeof(buffer))
+            if size <= 0:
+                raise _refuse("current-user inventory unavailable")
+            if size > ctypes.sizeof(buffer) or size % 4:
+                raise _refuse("invalid inventory size")
+            values = list(buffer[:size // 4])
+            if any(pid <= 0 for pid in values) or len(set(values)) != len(values):
+                raise _refuse("invalid inventory identities")
+            if size < ctypes.sizeof(buffer):
+                return set(values)
+            if capacity >= MAX_PIDS:
+                raise _refuse("inventory bound exceeded")
+            capacity = min(capacity * 2, MAX_PIDS)
 
     def info(self, pid: int) -> _Info:
         data = _Info()
@@ -223,6 +245,45 @@ def _identity(data: _Info) -> tuple[Any, ...]:
             bytes(unique.uuid))
 
 
+def _failure_evidence(native: _Native, pid: int) -> dict[str, int]:
+    """Read bounded numeric evidence only; it cannot admit a process or retry."""
+    evidence = {"census_uid": native.uid,
+                "caller_ruid": os.getuid(), "caller_uid": os.geteuid()}
+    # Each complete filtered inventory uses at most nine bounded native calls.
+    # Unknown, empty, malformed or truncated inventories never prove absence.
+    for kind, prefix in ((4, "uid_inventory"), (5, "ruid_inventory")):
+        evidence.update({prefix + "_member": -1, prefix + "_self": -1,
+                         prefix + "_errno": 0})
+        ctypes.set_errno(0)
+        try:
+            pids = native._inventory_kind(kind)
+        except (OSError, RuntimeError) as error:
+            evidence[prefix + "_errno"] = (
+                error.errno or 0 if isinstance(error, OSError) else ctypes.get_errno()
+            )
+        else:
+            evidence[prefix + "_member"] = int(pid in pids)
+            evidence[prefix + "_self"] = int(os.getpid() in pids)
+    # Flavor 13 omits the same-effective-UID check applied to flavors 3/18.
+    # MAC policy still applies to every flavor; neither read bypasses custody.
+    for flavor, structure in ((3, _BSDInfo), (13, _ShortBSDInfo)):
+        prefix = f"bsd{flavor}"
+        data = structure()
+        ctypes.set_errno(0)
+        try:
+            size = native.pidinfo(pid, flavor, 0, ctypes.byref(data), ctypes.sizeof(data))
+        except OSError as error:
+            size = 0
+            ctypes.set_errno(error.errno or 0)
+        evidence.update({prefix + "_bytes": size, prefix + "_errno": ctypes.get_errno()})
+        valid = size == ctypes.sizeof(data) and data.pid == pid
+        evidence[prefix + "_valid"] = int(valid)
+        if valid:
+            for name in ("uid", "ruid", "svuid", "flags", "status"):
+                evidence[prefix + "_" + name] = int(getattr(data, name))
+    return evidence
+
+
 def _row(native: _Native, pid: int) -> dict[str, Any] | None:
     before: _Info | None = None
     phase = "identity-before"
@@ -270,10 +331,12 @@ def _row(native: _Native, pid: int) -> dict[str, Any] | None:
             return None
         # Observations after other failures are diagnostic only. In particular,
         # EPERM/EIO followed by ESRCH does not convert an unverified read to gone.
+        evidence = _failure_evidence(native, pid)
         detail = (f"{_refuse('native read refused', pid)} phase={phase} errno={error.errno or 0} "
                   f"confirmation={confirmation} confirmation_errno={confirmation_errno} "
                   f"confirmation_status={status} confirmation_identity={identity_matches}")
-        raise RuntimeError(detail) from None
+        detail += " " + " ".join(f"{key}={value}" for key, value in evidence.items())
+        raise _ReadRefused(pid, phase, error.errno or 0, detail, evidence) from None
 
 
 def inspect_processes() -> list[dict[str, Any]]:

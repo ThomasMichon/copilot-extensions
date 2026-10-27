@@ -58,7 +58,7 @@ def _run(arguments, home, *, env=None, input=None, timeout=60):
 
 _ROOTED_DIAGNOSTIC_SOURCE = r'''
 def _aw_fixture_rooted_diagnostic(
-    row: dict[str, Any], payload: Path, rows: list[dict[str, Any]],
+    row: dict[str, Any], payload: Path, root: Path, rows: list[dict[str, Any]],
     controllers: set[int], gates: set[int], redirectors: set[int],
 ) -> None:
     """Copied-fixture diagnostics only; never grant or change admission."""
@@ -101,6 +101,24 @@ def _aw_fixture_rooted_diagnostic(
         ):
             image = "other"
         inspector_ancestry = ancestry(os.getpid())
+        _, lifecycle = _lifecycle_controllers(rows, payload, root, "agent-worktrees")
+        staged_home = payload.parent.parent == Path.home() / ".agent-worktrees/.install-stage"
+        watchdog = {}
+        if staged_home and len(arguments) > 8:
+            commands = _load(_dependency(payload, "installer_engine_commands.py"))
+            body = commands._sh(commands._read(payload / "scripts/install.sh"), "INSTALL_WATCHDOG").rstrip("\n")
+            watchdog = {
+                "parentAdmitted": row["ppid"] in lifecycle,
+                "bodyMatch": arguments[1:4] == ["-c", body, "bash"],
+                "entryMatch": Path(arguments[4]) == payload / "scripts/install.sh",
+                "pluginMatch": arguments[5] == "agent-worktrees",
+                "stageMatch": Path(arguments[6]) == payload.parent,
+                "deadlineMatch": re.fullmatch(r"-?[0-9]+", arguments[7]) is not None,
+                "nativeTailMatch": _parent(
+                    row["pid"], arguments[0], "", payload, root, "agent-worktrees", row["pid"],
+                    arguments=[arguments[0], arguments[4], *arguments[8:]],
+                ),
+            }
         record.update({
             "imageBasename": image,
             "capturedArgv": row.get("argv") is not None,
@@ -118,6 +136,9 @@ def _aw_fixture_rooted_diagnostic(
             "ancestryPids": ancestry(row["pid"]),
             "inspectorAncestryPids": inspector_ancestry,
             "candidateIsInspectorAncestor": row["pid"] in inspector_ancestry,
+            "lifecycleAdmittedPids": sorted(lifecycle),
+            "stagedHome": staged_home,
+            "watchdog": watchdog,
         })
     except Exception as error:
         record["diagnosticError"] = type(error).__name__
@@ -137,7 +158,7 @@ def _instrument_copied_rooted_refusal(payload: Path) -> None:
     assert source.count("\ndef refuse_consumers(") == 1
     source = source.replace(
         marker,
-        "            _aw_fixture_rooted_diagnostic(row, payload, rows, controllers, gates, redirectors)\n"
+        "            _aw_fixture_rooted_diagnostic(row, payload, root, rows, controllers, gates, redirectors)\n"
         + marker,
     )
     source = source.replace(
@@ -258,7 +279,7 @@ def test_copied_rooted_diagnostics_are_sanitized_and_preserve_argument_boundary(
         "command": "PRIVATE_COMMAND_VALUE", "argv": [] if empty_argv else argv,
     }
     rows = [row, {"pid": 100, "ppid": 0}]
-    module._aw_fixture_rooted_diagnostic(row, payload, rows, set(), set(), set())
+    module._aw_fixture_rooted_diagnostic(row, payload, root, rows, set(), set(), set())
     output = capsys.readouterr().err
     assert output.startswith("AW_FIXTURE_ROOTED_CONSUMER ")
     value = json.loads(output.removeprefix("AW_FIXTURE_ROOTED_CONSUMER "))
@@ -268,6 +289,7 @@ def test_copied_rooted_diagnostics_are_sanitized_and_preserve_argument_boundary(
         "stagedEntryResolvedMatch", "originalEntryIndex", "stagedEntryIndex",
         "controller", "gate", "redirector", "ancestryPids", "inspectorAncestryPids",
         "candidateIsInspectorAncestor",
+        "lifecycleAdmittedPids", "stagedHome", "watchdog",
     }
     assert value["argvCount"] == (0 if empty_argv else len(argv))
     assert value["capturedArgv"] is True
@@ -583,6 +605,45 @@ def test_native_uninstall_refuses_runtime_owned_interpreter(native_install, shel
     _preserved(durable)
 
 
+def _negative_admission_path(home: Path, shell: str, executable: str) -> Path:
+    """Expose required real shell tools, never an ambient Python candidate."""
+    import shlex
+
+    directory = home / "admission-tools"
+    directory.mkdir()
+    names = ("dirname", "cygpath") if os.name == "nt" else ("dirname",)
+    if shell == "bash":
+        for name in names:
+            result = _run(
+                [executable, "-c", 'command -v "$1"', "fixture-tool", name],
+                home, timeout=10,
+            )
+            target = result.stdout.strip()
+            assert result.returncode == 0 and target.startswith("/"), result.stderr
+            wrapper = directory / name
+            wrapper.write_text(
+                '#!/bin/sh\nexec ' + shlex.quote(target) + ' "$@"\n', encoding="utf-8",
+            )
+            wrapper.chmod(0o755)
+    assert {path.name for path in directory.iterdir()} == (set(names) if shell == "bash" else set())
+    return directory
+
+
+def test_negative_admission_path_has_tools_but_no_python(native_install) -> None:
+    home, _, _, _, _ = native_install
+    executable = _host("bash")
+    directory = _negative_admission_path(home, "bash", executable)
+    expected = bash_path(executable, home)
+    result = _run([
+        executable, "-c",
+        'for name in python python3; do '
+        'if command -v "$name" >/dev/null 2>&1; then exit 90; fi; done; dirname "$1"',
+        "fixture-path", expected + "/witness",
+    ], home, env={"PATH": str(directory)}, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == expected
+
+
 @pytest.mark.parametrize("shell", ["bash", "powershell", "pwsh"])
 @pytest.mark.parametrize("eligible", [False, True])
 def test_native_existing_python_candidates(native_install, shell, eligible):
@@ -604,18 +665,22 @@ def test_native_existing_python_candidates(native_install, shell, eligible):
         ])
     else:
         paths.extend(["/usr/bin", "/bin"])
+    if not eligible:
+        paths = [str(_negative_admission_path(home, shell, executable))]
     arguments = _native_arguments(shell, executable, payload, root)
     if shell != "bash":
         arguments = arguments[:-2]
     before = _snapshot(root)
-    result = _run(arguments, home, env={"PATH": os.pathsep.join(paths)})
+    result = _run(
+        arguments, home, env={"PATH": os.pathsep.join(paths)},
+        timeout=60 if eligible else 15,
+    )
     output = result.stdout + result.stderr
     admission_refused = output.strip() == "ERROR: Attributable runtime admission requires bootstrap Python." \
         or ("requires an existing Python" in output and "executable" in output)
-    if not eligible and admission_refused:
-        # Without the qualified runner, system PATH may offer no Python 3.10+.
-        # macOS /usr/bin/python3 can be 3.9; Linux may supply an eligible one.
+    if not eligible:
         assert result.returncode != 0
+        assert admission_refused, output
         _unchanged(before, durable)
     elif result.returncode:
         # A real host consumer is not exempted to qualify candidate selection.

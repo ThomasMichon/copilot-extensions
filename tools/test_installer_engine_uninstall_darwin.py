@@ -50,6 +50,9 @@ class Kernel:
         self.list_calls = []
         self.info_calls = {}
         self.info_hook = None
+        self.bsd_calls = []
+        self.bsd_error = {}
+        self.bsd_hook = None
         self.path_calls = 0
         self.path_hook = None
         self.arg_error = None
@@ -88,6 +91,23 @@ class Kernel:
         return len(values) * 4
 
     def pidinfo(self, pid, flavor, arg, pointer, size):
+        if flavor in (3, 13):
+            structure = darwin._BSDInfo if flavor == 3 else darwin._ShortBSDInfo
+            assert arg == 0 and size == ctypes.sizeof(structure)
+            self.bsd_calls.append((pid, flavor))
+            if flavor in self.bsd_error:
+                ctypes.set_errno(self.bsd_error[flavor])
+                return 0
+            data = structure()
+            data.pid = pid
+            data.uid = data.ruid = data.svuid = 1000
+            data.flags, data.status = 16, 2
+            if self.bsd_hook:
+                result = self.bsd_hook(pid, flavor, data)
+                if result is not None:
+                    return result
+            ctypes.memmove(pointer, ctypes.byref(data), size)
+            return size
         assert flavor == 18 and arg == 0 and size == 192
         self.info_calls[pid] = self.info_calls.get(pid, 0) + 1
         data = darwin._Info()
@@ -486,7 +506,7 @@ def test_native_failure_diagnostic_names_exact_phase_and_numeric_errno(kernel, p
     assert f"errno={errno.EIO} " in message
     assert "confirmation=live confirmation_errno=0 confirmation_status=2" in message
     expected_identity = -1 if phase == "identity-before" else 1
-    assert message.endswith(f"confirmation_identity={expected_identity}")
+    assert f"confirmation_identity={expected_identity} " in message
     expected_calls = 3 if phase == "identity-after" else 2
     assert kernel.info_calls[kernel.self_pid] == expected_calls
 
@@ -523,6 +543,121 @@ def test_native_read_diagnostic_never_formats_exception_payload(kernel):
         darwin._row(native, kernel.self_pid)
     assert "PRIVATE_ARGUMENT_AND_ENVIRONMENT" not in str(caught.value)
     assert "argument-read" in str(caught.value)
+
+
+def test_failure_evidence_binds_exact_pid_and_preserves_refusal(kernel):
+    kernel.arg_error = errno.EPERM
+    with pytest.raises(darwin._ReadRefused) as caught:
+        darwin.inspect_processes()
+    error = caught.value
+    assert error.pid == kernel.self_pid
+    assert error.phase == "argument-size"
+    assert error.native_errno == errno.EPERM
+    assert error.evidence["uid_inventory_member"] == 1
+    assert error.evidence["ruid_inventory_member"] == 1
+    assert error.evidence["bsd3_valid"] == error.evidence["bsd13_valid"] == 1
+    assert kernel.bsd_calls == [(kernel.self_pid, 3), (kernel.self_pid, 13)]
+
+
+@pytest.mark.parametrize("uid_member,ruid_member", [(False, False), (False, True),
+                                                   (True, False), (True, True)])
+def test_failure_membership_is_diagnostic_and_never_omits_row(kernel, uid_member, ruid_member):
+    target = 90001
+    native = darwin._Native()
+    kernel.pids = [kernel.self_pid]
+    original = kernel.libproc.proc_listpids.function
+    def filtered(kind, uid, buffer, size):
+        member = uid_member if kind == 4 else ruid_member
+        kernel.pids = [kernel.self_pid, *([target] if member else [])]
+        return original(kind, uid, buffer, size)
+    kernel.libproc.proc_listpids.function = filtered
+    def inaccessible(pid, call, data):
+        ctypes.set_errno(errno.EPERM)
+        return 0
+    kernel.info_hook = inaccessible
+    kernel.bsd_error = {3: errno.EPERM, 13: errno.ESRCH}
+    with pytest.raises(darwin._ReadRefused) as caught:
+        darwin._row(native, target)
+    error = caught.value
+    assert error.pid == target
+    assert error.phase == "identity-before"
+    assert error.evidence["uid_inventory_member"] == int(uid_member)
+    assert error.evidence["ruid_inventory_member"] == int(ruid_member)
+    assert error.evidence["bsd3_errno"] == errno.EPERM
+    assert error.evidence["bsd13_errno"] == errno.ESRCH
+    assert error.evidence["bsd3_valid"] == error.evidence["bsd13_valid"] == 0
+    assert "bsd3_uid" not in error.evidence
+    assert "bsd13_uid" not in error.evidence
+    assert len(kernel.list_calls) == 2
+    assert kernel.info_calls[target] == 2
+
+
+@pytest.mark.parametrize("mode", ["empty", "denied", "duplicate", "partial", "full"])
+def test_invalid_fresh_inventory_is_unknown_not_disappearance(kernel, mode, monkeypatch):
+    native = darwin._Native()
+    if mode == "empty":
+        kernel.pids = []
+    elif mode == "denied":
+        def denied(*args):
+            ctypes.set_errno(errno.EPERM)
+            return 0
+        kernel.libproc.proc_listpids.function = denied
+    elif mode == "duplicate":
+        kernel.pids = [kernel.self_pid, kernel.self_pid]
+    elif mode == "partial":
+        kernel.list_size = 3
+    else:
+        monkeypatch.setattr(darwin, "MAX_PIDS", 256)
+        kernel.pids = list(range(1, 257))
+    evidence = darwin._failure_evidence(native, 90001)
+    assert evidence["uid_inventory_member"] == -1
+    assert evidence["ruid_inventory_member"] == -1
+    if mode == "denied":
+        assert evidence["uid_inventory_errno"] == errno.EPERM
+        assert evidence["ruid_inventory_errno"] == errno.EPERM
+
+
+def test_fresh_inventory_proof_requires_complete_buffer_growth(kernel):
+    native = darwin._Native()
+    kernel.pids = [kernel.self_pid, *range(100000, 100300)]
+    evidence = darwin._failure_evidence(native, 90001)
+    assert evidence["uid_inventory_member"] == evidence["ruid_inventory_member"] == 0
+    assert evidence["uid_inventory_self"] == evidence["ruid_inventory_self"] == 1
+    assert kernel.list_calls == [(4, 1024), (4, 2048), (5, 1024), (5, 2048)]
+
+
+@pytest.mark.parametrize("mode", ["wrong-pid", "partial", "denied"])
+def test_bsd_diagnostics_do_not_decode_unverified_record(kernel, mode):
+    native = darwin._Native()
+    def unverified(pid, flavor, data):
+        if mode == "wrong-pid":
+            data.pid = pid + 1
+        elif mode == "partial":
+            return 1
+        else:
+            ctypes.set_errno(errno.EPERM)
+            return 0
+    kernel.bsd_hook = unverified
+    evidence = darwin._failure_evidence(native, 90001)
+    assert evidence["bsd3_valid"] == evidence["bsd13_valid"] == 0
+    assert "bsd3_uid" not in evidence
+    assert "bsd13_uid" not in evidence
+
+
+def test_bsd_diagnostics_preserve_uid_transition_without_names_or_argv(kernel):
+    native = darwin._Native()
+    def credentials(pid, flavor, data):
+        data.uid = data.ruid = data.svuid = 0
+        data.comm = b"PRIVATE_NAME"
+    kernel.bsd_hook = credentials
+    evidence = darwin._failure_evidence(native, 90001)
+    assert evidence["bsd3_uid"] == evidence["bsd13_uid"] == 0
+    assert evidence["bsd3_ruid"] == evidence["bsd13_ruid"] == 0
+    assert evidence["bsd3_svuid"] == evidence["bsd13_svuid"] == 0
+    assert all(type(value) is int for value in evidence.values())
+    assert "PRIVATE_NAME" not in json.dumps(evidence)
+    assert kernel.info_calls == {}
+    assert kernel.path_calls == 0
 
 
 def test_einval_permission_denial_confirmation_is_not_gone(kernel):
@@ -682,9 +817,13 @@ def _ownership_diagnostic(native, pid, guard_metadata, guard_identity):
 
 def test_diagnostic_short_bsd_abi():
     assert ctypes.sizeof(_ShortBSDInfo) == 64
+    assert ctypes.sizeof(darwin._ShortBSDInfo) == 64
     assert _ShortBSDInfo.uid.offset == 36
     assert _ShortBSDInfo.ruid.offset == 44
     assert _ShortBSDInfo.svuid.offset == 52
+    assert darwin._ShortBSDInfo.uid.offset == 36
+    assert darwin._ShortBSDInfo.ruid.offset == 44
+    assert darwin._ShortBSDInfo.svuid.offset == 52
     assert darwin._BSDInfo.uid.offset == 20
     assert darwin._BSDInfo.ruid.offset == 28
     assert darwin._BSDInfo.svuid.offset == 36
