@@ -38,7 +38,8 @@ Handled kinds include ``package`` (winget/apt/pipx/uv-tool/pip), ``file``
 (whole-file or managed-block), ``registry`` (reg.exe), ``feature`` (DISM or
 systemctl), ``power-setting`` (powercfg), ``self-update`` and ``fleet-update``
 (machine-local opt-ins), ``copilot-cli-update``, and ``gh-account`` (read-only
-prerequisites). Add a ``ResourceHandler`` subclass to :data:`HANDLERS` for a
+prerequisites), and ``git-config`` (consent-bound user-global file edits).
+Add a ``ResourceHandler`` subclass to :data:`HANDLERS` for a
 new type; the resolution and restore pipeline remain shared.
 
 A whole-file ``enforce`` declaration may set ``marker``: a substring that must
@@ -77,6 +78,10 @@ from agent_procutil import no_window_kwargs
 
 from .authority import contributor, effective_authority, sort_decisions
 from .registry_values import parse_reg_query as _parse_reg_query, registry_values_equal
+from .resource_file_ownership import (
+    conflicting_git_config_files,
+    file_ownership_findings as _file_ownership_findings,
+)
 from .manifest import (
     RequirementPackage,
 )
@@ -153,6 +158,8 @@ class ResolvedResource:
         """A one-word disposition-ish label for plan output."""
         if self.type == "gh-account":
             return "prerequisite-check"
+        if self.type == "git-config":
+            return "consent-required"
         if self.type == "package":
             state = self.desired.get("state", "present")
             ver = self.desired.get("version")
@@ -194,6 +201,7 @@ class ResourceResult:
     blocked_reason: str | None = None
     backup_path: str | None = None
     commands: list[list[str]] = field(default_factory=list)
+    change_plan: dict[str, Any] | None = None
 
     @property
     def status(self) -> str:
@@ -228,6 +236,7 @@ class ResourceContext:
     repo_paths: dict[str, Path]
     platform: str
     runner: Runner = default_runner
+    git_config_plan_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1811,6 +1820,7 @@ def _build_handlers() -> dict[str, ResourceHandler]:
     from .resource_copilot_cli_update import CopilotCliUpdateResourceHandler
     from .resource_fleet_update import FleetUpdateResourceHandler
     from .resource_gh_account import GhAccountResourceHandler
+    from .resource_git_config import GitConfigResourceHandler
     from .resource_power import PowerSettingResourceHandler
     from .resource_self_update import SelfUpdateResourceHandler
 
@@ -1824,6 +1834,7 @@ def _build_handlers() -> dict[str, ResourceHandler]:
         "fleet-update": FleetUpdateResourceHandler(),
         "copilot-cli-update": CopilotCliUpdateResourceHandler(),
         "gh-account": GhAccountResourceHandler(),
+        "git-config": GitConfigResourceHandler(),
     }
 
 
@@ -1917,34 +1928,6 @@ def resolve_resources(
     return resolved, findings
 
 
-def _file_ownership_findings(resolved: list[ResolvedResource]) -> list[ResourceFinding]:
-    """Flag a path claimed by *both* a whole-file owner and a managed block.
-
-    Distinct managed blocks in one file are compatible (that is the point of the
-    strategy); a whole-file ``enforce``/``ensure-present`` owner and any block on
-    the same path are not -- the file is either wholly owned or block-owned.
-    """
-    findings: list[ResourceFinding] = []
-    by_path: dict[str, list[ResolvedResource]] = {}
-    for res in resolved:
-        if res.type == "file":
-            by_path.setdefault(res.identity[1], []).append(res)
-    for path, group in sorted(by_path.items()):
-        blocks = {res.identity[2] for res in group}
-        if "" in blocks and any(b != "" for b in blocks):
-            owners = sorted({o for res in group for o in res.contributors})
-            findings.append(
-                ResourceFinding(
-                    "error",
-                    "resource-conflict",
-                    f"file '{path}' has both whole-file and managed-block declarations "
-                    f"across packages: {', '.join(owners)}; a file is either wholly owned "
-                    f"or block-owned, not both.",
-                )
-            )
-    return findings
-
-
 def detect_conflicts(
     packages: list[RequirementPackage], machine: str, plat: str
 ) -> list[ResourceFinding]:
@@ -1963,9 +1946,16 @@ def apply_resources(
 ) -> list[ResourceResult]:
     """Apply every resolved resource (optionally filtered by ``only``)."""
     resolved, _ = resolve_resources(packages, machine, plat)
+    overlapping = conflicting_git_config_files(resolved, ctx)
     results: list[ResourceResult] = []
     for res in resolved:
         if only and not _resource_wanted(res, only):
+            continue
+        if res.identity in overlapping:
+            results.append(ResourceResult(
+                res.type, res.id, False, dry_run, "blocked",
+                blocked_reason="git-config overlaps another declared file owner",
+            ))
             continue
         handler = HANDLERS.get(res.type)
         if handler is None:

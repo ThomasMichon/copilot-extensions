@@ -61,14 +61,15 @@ BOOTSTRAP_CRITICAL_MARKETPLACES = ("copilot-extensions",)
 #: capabilities and Linux/WSL units), ``power-setting`` (Windows power
 #: schemes), ``self-update`` (machine-local unattended tier opt-in),
 #: ``fleet-update`` (machine-local unattended worktree-manager update
-#: sweep opt-in), ``gh-account`` (read-only account prerequisites), and
+#: sweep opt-in), ``gh-account`` (read-only account prerequisites),
+#: ``git-config`` (consent-bound user-global file transactions), and
 #: ``copilot-cli-update`` (the Copilot CLI's own
 #: built-in self-updater: disable it and/or pin the installed binary to a
 #: known-good version -- Windows only for now). See ``resources.py`` for the
 #: handlers.
 KNOWN_RESOURCE_TYPES = (
     "package", "file", "registry", "feature", "power-setting", "self-update",
-    "fleet-update", "copilot-cli-update", "gh-account",
+    "fleet-update", "copilot-cli-update", "gh-account", "git-config",
 )
 
 #: Minimal required identity fields per resource type (checked at load).
@@ -82,6 +83,7 @@ REQUIRED_FIELDS = {
     "fleet-update": ("tier",),
     "copilot-cli-update": (),
     "gh-account": ("host", "login", "credential_source"),
+    "git-config": ("entries",),
 }
 
 #: Accepted values for a resource's ``state`` / ``strategy`` selectors.
@@ -443,6 +445,26 @@ def load_package(
                 raise ManifestError(
                     f"{path}: resource type {rtype!r} is missing required field '{req_key}'"
                 )
+        if rtype == "git-config":
+            from .git_config_transaction import validate_entries
+
+            allowed = {
+                "type", "id", "scope", "entries", "authority", "platforms",
+                "gate", "owner", "maintenance_safe",
+            }
+            if (
+                set(res) - allowed
+                or res.get("scope", "global") != "global"
+                or res.get("maintenance_safe", False) is not False
+            ):
+                raise ManifestError(
+                    f"{path}: git-config accepts only user-global declarations; "
+                    "custom paths and unattended mutation opt-ins are unsupported"
+                )
+            try:
+                validate_entries(res["entries"])
+            except ValueError as exc:
+                raise ManifestError(f"{path}: {exc}") from exc
         if rtype == "gh-account":
             allowed = {
                 "type", "id", "host", "login", "credential_source",

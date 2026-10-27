@@ -1800,6 +1800,19 @@ the new constructor must not repair it.
 
 ## Unit-only promotion packet
 
+`tools/promotion_unit_tests/test_git_config_transaction.py` exercises the
+canonical Machines Git-configuration declaration, consent digest, pre-effect
+refusals, lock identity, rollback receipt and bounded Git adapter with synthetic
+file/process observations. Its native file/lock/backup/rollback witnesses use
+only the audit-scoped temporary filesystem and start no child actor. The
+separate Machines `test_git_config_transaction.py` and
+`test_resource_git_config.py` run real Git and the manifest/authority/restore/JSON
+and parser boundaries in isolated homes, including exact rollback, stale consent,
+competing ownership, backup/verification failure and read-only native Windows
+controls. A link fixture skips only when the host cannot create it. These are
+synthetic policy/file tests, not live profile application, authentication health,
+shared updater consumption, two-machine qualification or deployment evidence.
+
 `tools/promotion_unit_tests/test_gh_account_prerequisite.py` exercises the
 canonical Machines account-prerequisite evaluator with synthetic CLI responses
 and a substituted owned-process boundary. It checks explicit stored/environment
