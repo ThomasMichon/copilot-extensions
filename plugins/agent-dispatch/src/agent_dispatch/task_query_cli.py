@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import time
+from collections.abc import Callable
 
 from .client import DispatchError
 from .handoff_claim_release import is_handoff_task
@@ -115,9 +116,40 @@ def _browse_peer(args: argparse.Namespace, subcommand: str, *, repo: str | None 
         print(f"agent-dispatch: {diagnosis}", file=sys.stderr)
     return result.returncode
 
+def register_list_command(
+    sub: argparse._SubParsersAction[argparse.ArgumentParser],
+    *,
+    handler: Callable[[argparse.Namespace], int],
+) -> None:
+    p = sub.add_parser("list", help="list tasks (scoped to the calling repo by default)")
+    p.add_argument("--category", choices=("work", "maintenance", "all"), default="work")
+    scope = p.add_mutually_exclusive_group()
+    scope.add_argument("--repo", help="lane to list (local name or remote URL); default: calling repo")
+    scope.add_argument(
+        "--all-repos", action="store_true",
+        help="explicitly list every repository lane without resolving the calling repo",
+    )
+    p.add_argument(
+        "--status",
+        help="filter by status; comma-separate for several (e.g. queued,started)",
+    )
+    p.add_argument("--target-machine")
+    p.add_argument("--target-repo")
+    p.add_argument("--label")
+    p.add_argument("--evaluator-ref")
+    p.add_argument("--limit", type=int, default=200)
+    p.add_argument(
+        "--machine",
+        help="read another machine's queue over the SSH mesh (peer browse); "
+        "default: this machine's local coordinator",
+    )
+    p.set_defaults(func=handler)
+
+
 def _cmd_list(args: argparse.Namespace) -> int:
-    repo = _core()._scope_repo(args)
-    if not repo:
+    all_repos = bool(getattr(args, "all_repos", False))
+    repo = None if all_repos else _core()._scope_repo(args)
+    if not all_repos and not repo:
         print(_core()._REPO_UNRESOLVED, file=sys.stderr)
         return 2
     from . import remote_dispatch

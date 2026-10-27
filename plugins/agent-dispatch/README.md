@@ -2698,6 +2698,7 @@ agent-dispatch complete <id> <owner> --result-ref artifact/123
 agent-dispatch complete <id> <owner> --result-file result.json
 agent-dispatch result <id> [--raw]
 agent-dispatch list --status queued
+agent-dispatch list --all-repos --status queued         # explicit cross-lane duplicate sweep
 agent-dispatch recover                                 # requeue tasks whose owner is gone
 agent-dispatch watch                                   # stream task events (SSE) as JSON lines
 ```
@@ -2739,7 +2740,15 @@ interpreting domain-specific fields.
 
 `inbox` complements the two lane-scoped reads: `worktree-status` is *this
 worktree's* assigned/owned tasks, and `list` is scoped to the calling repo's
-lane, but `inbox` spans **every** lane and returns the tasks *this machine* can
+lane by default. `list --all-repos` explicitly reads every lane without CWD
+repository discovery; it is mutually exclusive with `--repo` and retains the
+normal filters, category and limit. All-repository worker startup seeds use
+this form for their contract-net duplicate sweep. Peer browse forwards the
+explicit scope, so a peer running an older CLI rejects the new flag visibly;
+it never falls back to a narrower listing. No coordinator API change or new
+authorization grant is involved.
+
+`inbox` spans **every** lane and returns the tasks *this machine* can
 pick up — a matching `target_machine` plus machine-agnostic ones — defaulting to
 the `proposed` state. Each entry carries `target_worktree`, `affinity`, `labels`
 and `repo_name`, so a consumer (e.g. the worktree picker's task pivot) can group
