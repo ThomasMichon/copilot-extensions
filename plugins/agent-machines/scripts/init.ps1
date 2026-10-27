@@ -17,7 +17,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'init', 'stamp', 'stamp-binstub', 'provision', 'cell-provision', 'cell-repair', 'cell-uninstall', 'cell-attribute-legacy', 'cell-deactivate', 'cell-retire-legacy', 'slot-provision', 'slot-validate', 'slot-complete', 'slot-completion-validate', 'slot-cutover')]
+    [ValidateSet('install', 'init', 'uninstall', 'stamp', 'stamp-binstub', 'provision', 'cell-provision', 'cell-repair', 'cell-uninstall', 'cell-attribute-legacy', 'cell-deactivate', 'cell-retire-legacy', 'slot-provision', 'slot-validate', 'slot-complete', 'slot-completion-validate', 'slot-cutover')]
     [string]$Action = 'install',
     [string]$InstallDir,
     [string]$Context,
@@ -129,9 +129,21 @@ function Set-CopilotPersistentEnvironmentVariable {
 # === end install-contract:test-persistent-environment ===
 $CellMode = $false
 
-if ($InstallDir) {
-    $InstallDir = [IO.Path]::GetFullPath($InstallDir)
+. (Join-Path $PSScriptRoot 'legacy-transaction.ps1')
+if ($Action -in @('install', 'init', 'stamp', 'stamp-binstub', 'provision', 'uninstall')) {
+    if (-not $InstallDir) { $InstallDir = Join-Path $env:USERPROFILE '.agent-machines' }
+    $InstallDir = Resolve-LegacyTransactionRoot $InstallDir
     $PSBoundParameters['InstallDir'] = $InstallDir
+} elseif ($InstallDir) {
+    $InstallDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallDir)
+    $PSBoundParameters['InstallDir'] = $InstallDir
+}
+if ($Action -eq 'uninstall') {
+    foreach ($key in $PSBoundParameters.Keys) {
+        if ($key -notin @('Action', 'InstallDir')) { throw "Unsupported legacy uninstall parameter: $key" }
+    }
+    & (Join-Path $PSScriptRoot 'legacy-uninstall.ps1') -InstallDir $InstallDir
+    exit $LASTEXITCODE
 }
 
 # Refuse every legacy mutation before self-staging creates or removes files.
@@ -808,6 +820,14 @@ if (-not $InstallDir) {
     $InstallDir = Join-Path $env:USERPROFILE '.agent-machines'
 }
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
+$legacyTransaction = $null
+if (-not $cellSlotAction) {
+    $InstallDir = Resolve-LegacyTransactionRoot $InstallDir
+    $transactionArgs = @{ Root = $InstallDir }
+    if ($Action -eq 'stamp-binstub') { $transactionArgs.MaximumWaitSec = 1 }
+    $legacyTransaction = Enter-LegacyTransaction @transactionArgs
+}
+try {
 $DefaultInstallDir = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.agent-machines'))
 $VenvDir  = Join-Path $InstallDir '.venv'
 $LocalBin = Join-Path $env:USERPROFILE '.local\bin'
@@ -1997,8 +2017,8 @@ goto :eof
 # Serializes full stamps and source-qualified fast stamps against concurrent
 # invocations -- e.g. two fresh
 # sessions launching their sessionStart hook at nearly the same instant --
-# under ONE named mutex keyed by the install dir. Legacy fast stamps remain
-# deliberately unlocked.
+# under ONE additional named mutex keyed by the install dir. Every legacy
+# action already holds the whole-action .install.lock, including fast stamps.
 function Enter-StampLock {
     $stampHash = [BitConverter]::ToString(
         [Security.Cryptography.SHA256]::Create().ComputeHash(
@@ -2056,23 +2076,15 @@ function Invoke-StampBinstubOnly {
         Write-Fail "stamp-binstub only supports the default install dir ($DefaultInstallDir) -- the generated launcher hardcodes that root and cannot read markers written to '$InstallDir'."
         exit 1
     }
-    # Source stamps share the full stamp's lock across selection and publication.
-    # Legacy stamps remain Python-free and deliberately unlocked.
+    # Source stamps additionally share the full stamp's selection mutex.
+    # Legacy stamps remain Python-free, under the whole-action transaction.
     $stampMutex = $null
     if ($SourceRuntimeIdentity) { $stampMutex = Enter-StampLock }
     try {
     Assert-SourceRuntimeIdentity
-    # Review finding (round 11): the legacy path used to take Enter-StampLock
-    # mutex Invoke-Stamp holds across its whole (multi-second) snapshot copy.
-    # A concurrent slow `stamp` already holding it made this "fast" path wait
-    # behind it for up to 20 seconds -- reintroducing the very hook-timeout
-    # race this two-stage split exists to prevent. Deliberately NOT taking
-    # any lock for legacy here: every operation below (Publish-FileAtomically's marker
-    # writes, Deploy-SelfProvisioningBinstub's stub/resolver writes) was
-    # already hardened in round 9 to be safe under UNLOCKED concurrent
-    # callers -- non-overwriting Move-Item with retry-through-Replace() on a
-    # destination race -- so this fast path no longer needs mutual exclusion
-    # to be correct, only to be genuinely fast.
+    # The fast legacy path does not need this second mutex. It still requires
+    # the shared whole-action transaction, with a one-second admission bound
+    # so a blocked session-start stamp refuses rather than outliving its hook.
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
@@ -2699,4 +2711,7 @@ exit 0
     if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {
         Stop-RuntimeConstruction
     }
+}
+} finally {
+    if ($legacyTransaction) { $legacyTransaction.Dispose() }
 }

@@ -17,6 +17,39 @@ The legacy decision child suppresses PowerShell module-preparation progress,
 not diagnostics or refusal status. Ordinary invocation, native command decoding,
 runtime construction and publication authority remain unchanged.
 
+## Legacy runtime removal
+
+The native `scripts/init.ps1 -Action uninstall -InstallDir <root>` and
+`scripts/init.sh uninstall --install-dir <root>` actions remove only admitted
+runtime artifacts. Config, databases, authentication, state, logs, unknown
+entries, the root and coordination lease files remain. Uninstall is not a
+purge or an installation-cell retirement operation.
+
+All legacy publishers (including `stamp-binstub`) and uninstall serialize on
+the same whole-action `.install.lock`. Fast session-start stamps bound admission
+to one second and refuse on contention; they never publish unlocked. Removal holds the canonical
+command lifecycle, construction, retention and selector custody; a live runtime
+or an unavailable idle proof refuses removal. Bootstrap Python, the native host
+and all executing helpers must be outside the root. Paths containing raw `..`,
+linked/reparse ancestors, managed/cell roots and foreign/malformed ownership
+are refused before staging or removal. Unknown runtime-bin contents are retained,
+not selected wholesale. Missing ownership or custody proof refuses removal.
+
+The native adapter calls `installer_engine_uninstall.py` with the trusted
+`scripts/uninstall-profile.json`, under the whole-action transaction. The helper
+and native engine must be materialized in this payload's own `scripts/`; no
+ambient or sibling installation is searched. Its
+`--check` is structural/read-only, not removal authority; `--remove-runtime`
+reacquires all canonical custody and repeats admission. The finite entry-name
+installer-engine API is required; there is no purge fallback. The existing
+deploy manifest is removed last, retaining ownership for a failed removal's retry.
+
+Unexpected outer-owner death remains an integration qualification: canonical
+writer custody does not transfer a parent's noninherited .NET transaction lock
+or PID receipt. A native lifetime/handle bridge is required before claiming
+whole-gate custody across that boundary. POSIX kernel-lock release is close-only
+so an inherited finite guardian is not unlocked by the caller's exit trap.
+
 ## What works today
 
 - **Runtime is standalone.** With absent or false installation-mode policy, the

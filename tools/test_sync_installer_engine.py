@@ -64,9 +64,10 @@ def test_human_output_declarations_bind_real_packaged_entrypoints():
         assert declaration == contract.human_output_declaration(script)
 
 
-def test_mcp_cleanup_ships_its_native_engine_and_finite_process_supervisor():
+@pytest.mark.parametrize("plugin", ("agent-mcp", "agent-machines", "agent-containers", "budget-guidance"))
+def test_native_cleanup_ships_its_engine_and_finite_process_supervisor(plugin: str) -> None:
     contract = sync_installer_engine.ier
-    consumer = REPO / "plugins" / "agent-mcp"
+    consumer = REPO / "plugins" / plugin
     assert consumer in contract.native_adopter_dirs(REPO)
     for name in contract.STANDALONE_NATIVE_FILES:
         assert (consumer / "scripts" / name).read_bytes() == (
@@ -608,6 +609,7 @@ def _mk_plugin_scripts(repo: Path, name: str) -> Path:
 
 def test_evaluator_bootstrap_delivery_is_scoped_and_byte_identical(fake_repo, monkeypatch):
     monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ())
+    monkeypatch.setattr(sync_installer_engine.ier, "STANDALONE_NATIVE_ADOPTERS", ())
     source = sync_installer_engine.CANONICAL_DIR / sync_installer_engine.BOOTSTRAP_FILE
     source.write_bytes(b"function Resolve-EvaluatorBootstrapPython {}\n")
     for plugin in (*sync_installer_engine.BOOTSTRAP_ADOPTERS, "agent-unrelated"):
@@ -690,6 +692,10 @@ def test_standalone_native_engine_uses_existing_sync_owner(fake_repo, monkeypatc
     monkeypatch.setattr(contract, "STANDALONE_PYTHON_ADOPTERS", ())
     consumer = fake_repo / "libs" / "update-driver"
     consumer.mkdir()
+    for name in ("installer_engine_uninstall.py", "installer_engine_commands.py", "installer_engine_stop.py"):
+        (sync_installer_engine.CANONICAL_DIR / name).write_text(
+            "canonical uninstall\n", encoding="utf-8",
+        )
     assert len(sync_installer_engine.verify()) == len(contract.STANDALONE_NATIVE_FILES)
     assert len(sync_installer_engine.sync()) == len(contract.STANDALONE_NATIVE_FILES)
     assert sync_installer_engine.verify() == []

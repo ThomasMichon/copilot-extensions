@@ -55,7 +55,42 @@ callers must exhaust it successfully before publishing any derived artifact.
 Memory and clustering work can grow with the selected bucket, and native
 manifest/fragment metadata and index I/O are not constant or zero. This API does
 not certify whole-index write I/O, retention, atomic source-delta results,
-per-bucket generations or partial artifact coverage.
+or partial artifact coverage.
+
+## Witnessed bucket generations
+
+Participating content/vector upserts, canonical deletes and vector provenance
+updates now describe their affected sources through
+`SourceDomain.bucket_mutation`. Canonical deletes reuse their existing row
+stream, selecting source alongside chunk ID; they do not add a second listing.
+The owner's table transition must connect writer-entry identity, every scoped
+mutation or physical-maintenance transition, and the final clean witness.
+Raw writes before, after or between those operations cannot inherit that proof.
+An unannotated effect conservatively invalidates changed tables as a whole.
+Standalone vector ID/staleness deletion remains on this conservative path.
+
+Optional `bucket_generations` version-1 metadata is nested inside the existing
+`logical_projection`, not a separate file, lock, source cursor or authority.
+Each table has a coarse baseline and sparse bucket overrides stamped with the
+outer logical commit generation. Nested writes union affected buckets and publish
+only once at the clean commit. Empty/deleted buckets retain their overrides so
+removing the last item cannot resurrect an earlier key. Creation, replacement,
+unknown writers and unsupported source identities reset coarse coverage.
+Invalid/missing bucket metadata uses the table generation instead.
+
+The map permits at most 256 sparse overrides across tables, and each writer's
+per-table union is similarly bounded. Exceeding the budget logs a conservative
+fallback, never a partial map that omits an affected bucket. Every receipt
+publication drops bucket metadata before table-level logical metadata when
+needed for the existing 64 KiB limit; mandatory state still refuses overflow.
+Sources that cannot form a reader-qualified bucket remain writable, with
+whole-table invalidation rather than an invented partial proof.
+
+`bucket_generation` is an internal key helper for an already-current, physically
+witnessed logical projection. It is not a standalone freshness check. Existing
+global cluster coverage is unchanged and still observes every table generation;
+transactional partial artifact replacement and incremental bucket discovery are
+not yet wired.
 
 ## Reproduction
 
@@ -67,3 +102,6 @@ reported I/O operations per query. Actual representation calls reject global
 identity enumeration, per-file canonical scans and unselected model reads.
 Strict-input, budget, restart, tail, update/delete and compatibility controls
 remain in this opt-in integration lane, not the required unit-only CI packet.
+`tests/test_bucket_projection.py` adds native write/delete/model isolation,
+nested unions, restart/tombstones, mixed maintenance, raw/unknown writes,
+older-writer drift, failed publication and bounded metadata fallback controls.

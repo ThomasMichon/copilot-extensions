@@ -3,6 +3,66 @@
 How to run the plugin test suites, explicit development checks, and the
 **opt-in end-to-end smoke tests** that require real infrastructure.
 
+The optional native runtime-removal portfolio includes
+`tools/test_installer_engine_uninstall.py`,
+`tools/test_installer_engine_commands.py`,
+`tools/test_installer_engine_stop.py`,
+`tools/test_runtime_uninstall_process.py`, CodeSpaces'
+`tests/native_uninstall/`, Machines' `test_legacy_runtime_uninstall.py` and
+`test_legacy_publisher_transaction.py`, Containers'
+`test_containers_legacy_runtime_uninstall.py`, Index's
+`test_native_runtime_uninstall.py` and `test_legacy_transaction_admission.py`,
+and Vault's cross-adapter `test_native_uninstall_adapters.py`.
+They use disposable roots and real native removal/custody boundaries; service
+registration adapters remain isolated from host tasks and units. Controls cover
+durable/unknown-byte preservation, retained lock identities, idle retry,
+construction/retention/publication contention, default nested-engine removal,
+managed/foreign-root refusal and live/reconnect transport negatives.
+The command packet derives current native writer bodies from trusted sources
+and covers exact owned forms, custom/foreign roots, comments and modified
+programs, independently executable cmd forms and delegating-peer refusal.
+The native STOP packet derives daemon commands from actual unit writers,
+preserves original admission across service-stop/PID-reuse controls, and runs
+real Linux pidfd termination and birth-mismatch refusal against owned fixtures.
+Index's transaction packet exercises the real admission and mutex code across
+separate simulated elevation processes, without UAC or host task registration.
+CodeSpaces' `test_cold_native_transaction.py` accepts `NATIVE_UNINSTALL_BASH`
+for actual Bash 3.2 qualification. It checks read-only status without lock
+capabilities, Python-free cold stamping, same-inode contention, attached-owner
+EOF and the exact declared first-party snapshot-library closure.
+Its native/Python gate controls also create private cold roots under a
+group-writable caller umask while refusing unsafe pre-existing roots unchanged.
+Machines/Containers native removal controls reject unsupported preview,
+check, force and context/profile options before mutation, including trailing
+options on their private adapters.
+`tools/test_uninstall_path_candidates.py` exercises activated runtime venvs
+ahead of eligible external interpreters, broken/aliased candidates and explicit
+no-external refusal across native metadata callers. The common finite-removal
+packet also checks that malformed deployment/binding/lifecycle/source records
+refuse before any cleanup and retain every recovery/state byte.
+Its Dispatch/Index packaged-removal controls run the materialized finite
+entrypoint with no repository library tree, including actual POSIX runtime
+deletion and preservation of configuration, unknown state and the lock inode.
+`tools/test_legacy_transaction_interop.py` verifies Machines/Containers
+publisher and removal admission against opposite native/Python lock backends,
+retained legacy receipts and release on failure/EOF. Its real Linux kernel
+controls also run under actual Bash 3.2 when that shell is selected on PATH.
+The Windows `tests/native_uninstall/test_windows_uninstall_candidates.py`
+packet covers actual broken-PE launches, later candidates, physical/base
+closure, actual finite invokers and retained state on PowerShell 5/7.
+Run its candidate/cleanup and invoker/base-closure partitions separately for
+bounded execution. Its unsupported-version fixture verifies isolated-venv
+`sitecustomize` version reporting; it is not Python 3.8 interoperability proof.
+`tools/test_budget_packaged_installer.py` additionally starts the actual
+materialized standalone Budget status entrypoints without a repository library
+tree; this detects a packaged caller that still sources repository-only helpers.
+Pull Requests' `test_install_lock_fallback.py` additionally exercises cold
+materialized staging on Windows PowerShell 5 and 7, including source hashing
+without the optional `Get-FileHash` command. Native platform skips are not
+acceptance evidence for those platforms. These tests do not qualify abrupt
+caller death, whole-suite removal around a running Copilot mux, fresh SSH/Gateway
+reconnection or deployment, and do not enlarge the required unit-only packet.
+
 The opt-in `installation-context-acceptance.yml` dependency-compile selection
 also runs independent registered-marketplace provider and inventory partitions
 on Linux and Windows, each retaining a six-minute job ceiling.

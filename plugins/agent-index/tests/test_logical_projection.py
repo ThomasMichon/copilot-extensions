@@ -282,6 +282,7 @@ def test_optional_metadata_is_evicted_at_every_receipt_publication(corpus, phase
     _config, store = corpus
     domain = store._source_domain
     value = domain.receipt()
+    value["logical_projection"].pop("bucket_generations", None)
     value["fixture_padding"] = ""
     size = len(json.dumps(value, sort_keys=True).encode())
     value["fixture_padding"] = "x" * (65536 - size - spare)

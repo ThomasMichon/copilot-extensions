@@ -205,21 +205,26 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin, _ContentSnaps
         records = [dict(content_record(c), indexed_at=now) for c in chunks]
 
         chunk_ids = [c.chunk_id for c in chunks]
-        if self._source_domain is not None:
-            self._source_domain.effect(f"content-upsert:{self._table_name}")
-        try:
-            id_list = ", ".join(f"'{_sql_str(cid)}'" for cid in chunk_ids)
-            table.delete(f"chunk_id IN ({id_list})")
-        except Exception:
-            if self._source_domain is not None or skip_identical:
-                raise
-            pass
+        mutation = (
+            self._source_domain.bucket_mutation(
+                self._table_name, f"content-upsert:{self._table_name}",
+                (chunk.source for chunk in chunks),
+            ) if self._source_domain is not None else contextlib.nullcontext()
+        )
+        with mutation:
+            try:
+                id_list = ", ".join(f"'{_sql_str(cid)}'" for cid in chunk_ids)
+                table.delete(f"chunk_id IN ({id_list})")
+            except Exception:
+                if self._source_domain is not None or skip_identical:
+                    raise
+                pass
 
-        table.add(records)
+            table.add(records)
         if self._source_domain is not None:
             from .source_projection import sync_content_projection
 
-            sync_content_projection(self._db, chunks)
+            sync_content_projection(self._db, chunks, source_domain=self._source_domain)
         logger.info("Upserted %d chunks to content store", len(records))
         return len(records)
 

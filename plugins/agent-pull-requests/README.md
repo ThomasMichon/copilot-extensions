@@ -43,10 +43,15 @@ dispatch; cold refusal and missing/older helper readiness do not provision.
 Retained snapshots preserve canonical source identity after publisher removal.
 
 The installer's `uninstall` action holds the same transaction lock as
-install/update. It removes runtime/config contents but retains the lock files
-and `.install-stage` coordination, so the install directory may remain.
-Normal self-staging reap removes dead-owner stages on later invocations; purge
-never replaces a held lock.
+install/update. It removes only explicitly named runtime code and selectors;
+watch subscriptions, journals, replay and observation state, authentication,
+configuration, unknown entries, lock files and `.install-stage` remain.
+Matching deployment ownership and the installer-engine entry-list API are
+required. Foreign roots and links refuse before removal; unowned binstubs are
+retained. The canonical uninstall engine holds runtime, snapshot and
+redirect-publication custody throughout finite native cleanup. Persistent
+lease registries alone do not veto removal, and their inodes remain intact.
+Normal self-staging reap removes dead-owner stages on later invocations.
 
 The installation-cell adopter remains under validation below. Its generated
 payload command and `scripts/init.ps1` / `scripts/init.sh` resolve native

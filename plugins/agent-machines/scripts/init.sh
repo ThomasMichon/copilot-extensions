@@ -386,14 +386,46 @@ while [[ $# -gt 0 ]]; do
         --expected-current-version) EXPECTED_CURRENT_VERSION="${2:-}"; shift 2 ;;
         --expect-current-absent) EXPECT_CURRENT_ABSENT=1; shift ;;
         --maintenance-token) MAINTENANCE_TOKEN="${2:-}"; shift 2 ;;
-        stamp|provision|init|cell-provision|cell-repair|cell-uninstall|cell-attribute-legacy|cell-deactivate|cell-retire-legacy|slot-provision|slot-validate|slot-complete|slot-completion-validate|slot-cutover) ACTION="$1"; shift ;;
+        install|uninstall|stamp|provision|init|cell-provision|cell-repair|cell-uninstall|cell-attribute-legacy|cell-deactivate|cell-retire-legacy|slot-provision|slot-validate|slot-complete|slot-completion-validate|slot-cutover) ACTION="$1"; shift ;;
         *) shift ;;
     esac
 done
 export AGENT_MACHINES_ACTION="$ACTION"
+case "$ACTION" in
+    install|init|uninstall|stamp|provision|cell-provision|cell-repair|cell-uninstall|cell-attribute-legacy|cell-deactivate|cell-retire-legacy|slot-provision|slot-validate|slot-complete|slot-completion-validate|slot-cutover) ;;
+    *) _fail "Unknown installer action: $ACTION"; exit 2 ;;
+esac
+
+if [[ "$ACTION" == uninstall ]]; then
+    for ((argument_index=0; argument_index<${#ORIGINAL_ARGS[@]}; argument_index++)); do
+        case "${ORIGINAL_ARGS[$argument_index]}" in
+            uninstall) ;;
+            --install-dir) argument_index=$((argument_index + 1)) ;;
+            *) _fail "Unsupported legacy uninstall argument: ${ORIGINAL_ARGS[$argument_index]}"; exit 2 ;;
+        esac
+    done
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+case "$ACTION" in
+    install|init|stamp|provision|uninstall)
+        INSTALL_DIR="${INSTALL_DIR:-$HOME/.agent-machines}"
+        case "/$INSTALL_DIR/" in */../*) _fail 'Legacy runtime paths must not contain raw .. components'; exit 1 ;; esac
+        [[ "$INSTALL_DIR" == /* ]] || INSTALL_DIR="$PWD/$INSTALL_DIR"
+        . "$SCRIPT_DIR/legacy-transaction.sh"
+        _validate_install_root || { _fail 'Unsafe legacy runtime root or transaction lock'; exit 1; }
+        for ((argument_index=0; argument_index<${#ORIGINAL_ARGS[@]}; argument_index++)); do
+            if [[ "${ORIGINAL_ARGS[$argument_index]}" == --install-dir ]]; then
+                ORIGINAL_ARGS[$((argument_index + 1))]="$INSTALL_DIR"
+            fi
+        done
+        if [[ "$ACTION" == uninstall ]]; then
+            exec bash "$SCRIPT_DIR/legacy-uninstall.sh" "$INSTALL_DIR"
+        fi
+        ;;
+esac
 
 if [[ "$ACTION" == cell-repair || "$ACTION" == cell-uninstall || "$ACTION" == cell-attribute-legacy || "$ACTION" == cell-deactivate || "$ACTION" == cell-retire-legacy ]]; then
     [[ "${ORIGINAL_ARGS[0]:-}" == "$ACTION" ]] || {
@@ -641,6 +673,15 @@ INSTALL_DIR="${INSTALL_DIR:-$HOME/.agent-machines}"
 if [[ "$INSTALL_DIR" != /* ]]; then
     INSTALL_DIR="$PWD/$INSTALL_DIR"
 fi
+case "$ACTION" in
+    install|init|stamp|provision)
+        . "$SCRIPT_DIR/legacy-transaction.sh"
+        _enter_install_lock || { _fail 'Could not acquire the install transaction lock; refusing to proceed unlocked'; exit 1; }
+        trap '_exit_install_lock' EXIT
+        trap '_exit_install_lock; exit 130' INT
+        trap '_exit_install_lock; exit 143' TERM
+        ;;
+esac
 VENV_DIR="$INSTALL_DIR/.venv"
 LOCAL_BIN="$HOME/.local/bin"
 VENV_PYTHON="$VENV_DIR/bin/python"
@@ -1762,7 +1803,9 @@ if [[ "$ACTION" == "stamp" ]]; then
             fi
         done
     fi
-    trap _unlock_stamp EXIT INT TERM
+    trap '_unlock_stamp; _exit_install_lock' EXIT
+    trap '_unlock_stamp; _exit_install_lock; exit 130' INT
+    trap '_unlock_stamp; _exit_install_lock; exit 143' TERM
     _assert_source_runtime_identity || exit 1
     # Review finding: the stamp lock above serializes writers against each
     # other, but the generated binstub reads payload-dir WITHOUT taking it.
@@ -1793,6 +1836,7 @@ if [[ "$ACTION" == "stamp" ]]; then
     deploy_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
     _unlock_stamp
+    _exit_install_lock
     trap - EXIT INT TERM
     exit 0
 fi

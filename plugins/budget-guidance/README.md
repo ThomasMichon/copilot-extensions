@@ -20,7 +20,15 @@ package-version and agent-procutil injection paths.
 An existing source-qualified snapshot is verified and reused without rewriting
 its contents. All mutating installer actions share the same bounded transaction
 lock (`COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC`, default 300 seconds); uninstall
-retains the lock and staging coordination while removing runtime/configuration.
+retains the lock and staging coordination. Default uninstall removes named
+runtime slots, snapshots, selectors, generated hook/resolver files and deployment
+metadata, retaining configuration, data and unknown files. It is a CLI-only
+plugin and does not stop a daemon. Live consumers, linked roots, foreign
+manifests and held runtime/snapshot/publication custody refuse removal.
+The payload packages the canonical finite-removal helper, native engine and
+installer lifecycle SDK; its version-1 command/catalog behavior is unchanged.
+Released lease files retain their inodes and do not imply contention.
+See the [install contract](../../docs/install-contract.md).
 
 The PowerShell installer's declared, captured human output uses the packaged
 UTF-8 initializer only when requested by its admitting parent. Construction-shell

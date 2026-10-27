@@ -702,3 +702,24 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   task/process/custody controls and isolated Linux integration cover these
   boundaries. This adds no whole-harness reference-accounting or abrupt-death
   recovery claim; the real all-absent witness remains open.
+
+### 2026-10-26 - Removal foundation merged, portfolio integration continues
+
+- #9087 merged as `6ab06aa912e5b243ca6f8cebd5a3b489f04fc2bf` after
+  current-head review without open findings and required green CI. The
+  [source qualification record](<../source-managed-runtime-installs/journal/2026/10.26 runtime-removal.md>)
+  separates the actual Windows/Linux packets from live-session acceptance.
+- Selective native cleanup, finite child settlement and the Logger/MCP
+  prerequisites now preserve default durable/unknown state and coordination.
+  Root aliases, Windows filesystem casing, active consumers, historical
+  registrations and retry ownership were corrected rather than represented
+  as successful removal. The container terminal-process assertion has a
+  bounded portability follow-up under this effort.
+- Re-read the Plan and Validation Plan after merge. Actual all-absent removal
+  and reinstall around the same session remains open, as do complete default
+  adapter coverage, protected SSH/Gateway closure, copied wrappers/current
+  boundary handlers, native Windows survival, YAML standby and released
+  installed acceptance. No checkbox for those gates changes here.
+- Continue the remaining adapter integration through the existing ownership
+  boundaries, then return to the preserved live baseline. This effort remains
+  Active; a merged removal prerequisite does not retire its responsibility.

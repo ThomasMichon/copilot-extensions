@@ -254,6 +254,7 @@ fi
 if [[ -z "${UV_HTTP_TIMEOUT:-}" ]]; then export UV_HTTP_TIMEOUT=60; fi
 
 PKG_SRC_DIR="$PLUGIN_DIR/src/budget_guidance"
+. "$SCRIPT_DIR/installer-engine.sh"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.budget-guidance}"
 VENV_DIR="$INSTALL_DIR/.venv"
 LOCAL_BIN="$HOME/.local/bin"
@@ -760,16 +761,28 @@ if [[ "$ACTION" == "status" ]]; then
     exit 0
 fi
 
-if [[ "$ACTION" == "uninstall" ]]; then
-    rm -f "$STUB"
-    for entry in "$INSTALL_DIR"/* "$INSTALL_DIR"/.[!.]* "$INSTALL_DIR"/..?*; do
-        [[ -e "$entry" || -L "$entry" ]] || continue
-        case "${entry##*/}" in
-            .install.lock|.install.lock.pid|.install.lock.pid.reap|.install-stage) continue ;;
-        esac
-        rm -rf -- "$entry"
+_remove_budget_runtime_code() {
+    _finite_runtime_uninstall --remove-runtime
+}
+
+_remove_budget_helper_files() {
+    local directory="$1" name
+    shift
+    [[ -d "$directory" && ! -L "$directory" ]] || { _fail "Refusing linked runtime helpers"; return 1; }
+    for name in "$@"; do
+        [[ -e "$directory/$name" || -L "$directory/$name" ]] || continue
+        [[ -f "$directory/$name" && ! -L "$directory/$name" ]] || {
+            _fail "Refusing linked/non-file runtime helper"; return 1;
+        }
     done
-    _ok 'budget-guidance runtime removed (transaction/staging coordination retained)'
+    for name in "$@"; do rm -f -- "$directory/$name" || return 1; done
+}
+
+if [[ "$ACTION" == "uninstall" ]]; then
+    . "$SCRIPT_DIR/uninstall-runtime.sh"
+    _finite_runtime_uninstall --check || exit 1
+    _remove_budget_runtime_code || exit 1
+    _ok 'budget-guidance runtime removed (data, unknown files and coordination retained)'
     exit 0
 fi
 

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "root_entries": [".venv", "current-version", "last-known-good", "running-version.json", "payload-dir", "stamped-version", "deploy-manifest.json", ".provision-status"],
+  "bin_entries": ["resolve-runtime.ps1", "resolve-runtime.sh"],
+  "script_entries": [],
+  "local_bin_entries": ["agent-codespaces", "agent-codespaces.ps1", "agent-codespaces.cmd"],
+  "module": "agent_codespaces",
+  "guard_module": "uninstall-state.py",
+  "guard_function": "check_under_custody"
+}

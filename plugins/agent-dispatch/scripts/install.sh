@@ -2531,56 +2531,101 @@ do_uninstall() {
     echo ''; echo '=== agent-dispatch uninstall ==='
     [[ "$DRY_RUN" -eq 1 ]] && echo '(dry run -- nothing will be changed)'
     echo ''
+    . "$SCRIPT_DIR/uninstall-runtime.sh"
+    _finite_runtime_uninstall --check || return 1
+    _dispatch_uninstall_preflight || return 1
     if command -v systemctl >/dev/null 2>&1; then
         if [[ "$DRY_RUN" -eq 1 ]]; then
             echo "[dry-run] would stop supervisors + remove supervisor systemd units"
             [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]] && echo "[dry-run] would stop + disable + remove coordinator unit: $SYSTEMD_UNIT"
         else
-            _remove_all_supervisor_units
+            local unit_path
+            for unit_path in "$UNIT_DIR/$SUPERVISOR_UNIT" "$UNIT_DIR/$SUPERVISOR_UNIT_BASE"-*.service; do
+                [[ -f "$unit_path" ]] || continue
+                if [[ " ${_dispatch_uninstall_loaded_units[*]:-} " == *" ${unit_path##*/} "* ]]; then
+                    _remove_supervisor_unit "${unit_path##*/}" || return 1
+                else
+                    rm -f -- "$unit_path" || return 1
+                fi
+            done
             _ok "Embody supervisor services removed"
-            systemctl --user stop "$SYSTEMD_UNIT" 2>/dev/null || true
-            systemctl --user disable "$SYSTEMD_UNIT" 2>/dev/null || true
-            rm -f "$UNIT_DIR/$SYSTEMD_UNIT"
+            if [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]]; then
+                if [[ " ${_dispatch_uninstall_loaded_units[*]:-} " == *" $SYSTEMD_UNIT "* ]]; then
+                    systemctl --user stop "$SYSTEMD_UNIT" || return 1
+                    systemctl --user disable "$SYSTEMD_UNIT" || return 1
+                fi
+                rm -f "$UNIT_DIR/$SYSTEMD_UNIT" || return 1
+            fi
             systemctl --user daemon-reload 2>/dev/null || true
             _ok "Coordinator service removed"
         fi
     fi
-    if [[ "$DRY_RUN" -eq 1 ]]; then
-        [[ -e "$STUB" || -e "$BOARD_STUB" ]] && echo "[dry-run] would remove binstubs: $STUB $BOARD_STUB"
-        [[ -f "$HOME/.agent-worktrees/pivots/agent-dispatch.json" ]] && \
-            echo "[dry-run] would remove pivot: $HOME/.agent-worktrees/pivots/agent-dispatch.json"
-    else
-        rm -f "$STUB" "$BOARD_STUB"; _ok "Binstubs removed"
-        rm -f "$HOME/.agent-worktrees/pivots/agent-dispatch.json" 2>/dev/null || true
-    fi
+    [[ "$DRY_RUN" -eq 1 ]] || _finite_stop_owned || return 1
     if [[ "$PURGE" -eq 1 ]]; then
         if [[ "$DRY_RUN" -eq 1 ]]; then
             echo "[dry-run] would PURGE (config + DB): $INSTALL_DIR"
         else
-            rm -rf "$INSTALL_DIR"; _ok "Runtime purged: $INSTALL_DIR (config + DB deleted)"
+            _finite_runtime_uninstall --remove-runtime || return 1
+            remove_install_runtime_content "$INSTALL_DIR" || return 1
+            _ok "Runtime purged: $INSTALL_DIR (config + DB deleted; coordination retained)"
         fi
     else
-        # Versioned: the `.venv` link + the versions/ tree; else the real venv dir.
+        _remove_dispatch_runtime_code || return 1
         if [[ "$DRY_RUN" -eq 1 ]]; then
-            if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
-                [[ -e "$LINK_DIR" ]] && echo "[dry-run] would remove: $LINK_DIR"
-                [[ -d "$INSTALL_DIR/versions" ]] && echo "[dry-run] would remove: $INSTALL_DIR/versions"
-            else
-                [[ -d "$VENV_DIR" ]] && echo "[dry-run] would remove venv: $VENV_DIR"
-            fi
             echo "[dry-run] config + DB at $INSTALL_DIR would be kept (--purge to delete)"
         else
-            if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
-                [[ -L "$LINK_DIR" ]] && rm -f "$LINK_DIR"
-                [[ -d "$LINK_DIR" && ! -L "$LINK_DIR" ]] && rm -rf "$LINK_DIR"
-                [[ -d "$INSTALL_DIR/versions" ]] && rm -rf "$INSTALL_DIR/versions"
-            else
-                rm -rf "$VENV_DIR"
-            fi
             _ok "Venv removed (config + DB kept; --purge to delete)"
         fi
     fi
     [[ "$DRY_RUN" -eq 1 ]] && echo "agent-dispatch uninstall dry run complete -- nothing was changed"
+}
+
+_dispatch_uninstall_preflight() {
+    local unit properties state
+    _dispatch_uninstall_loaded_units=()
+    for unit in "$UNIT_DIR/$SYSTEMD_UNIT" "$UNIT_DIR/$SUPERVISOR_UNIT" "$UNIT_DIR/${SUPERVISOR_UNIT%.service}-"*.service; do
+        [[ -e "$unit" || -L "$unit" ]] || continue
+        _finite_stop_tool check-unit --unit "$unit" || return 1
+        if command -v systemctl >/dev/null 2>&1; then
+            properties="$(systemctl --user show --all --no-pager --property=LoadState,ActiveState,FragmentPath,DropInPaths,ExecStart,WorkingDirectory -- "${unit##*/}")" || return 1
+            state="$(printf '%s\n' "$properties" |
+                _finite_stop_tool check-effective-unit --unit "$unit")" || return 1
+            case "$state" in
+                loaded) _dispatch_uninstall_loaded_units+=("${unit##*/}") ;;
+                unloaded) ;;
+                *) _fail "Effective Dispatch service ownership was not admitted"; return 1 ;;
+            esac
+        else
+            _fail "Cannot verify effective Dispatch service ownership without systemctl"
+            return 1
+        fi
+    done
+    _finite_owned_pids >/dev/null
+}
+
+_remove_dispatch_runtime_code() {
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        echo "[dry-run] would remove owned runtime code at: $INSTALL_DIR"
+        return 0
+    fi
+    _finite_runtime_uninstall --remove-runtime
+}
+
+_remove_dispatch_helper_files() {
+    local directory="$1" name ancestor="$1"
+    shift
+    while [[ "$ancestor" != "$INSTALL_DIR" ]]; do
+        [[ -d "$ancestor" && ! -L "$ancestor" ]] || { _fail "Refusing linked runtime helpers"; return 1; }
+        ancestor="${ancestor%/*}"
+        [[ -n "$ancestor" ]] || return 1
+    done
+    for name in "$@"; do
+        [[ -e "$directory/$name" || -L "$directory/$name" ]] || continue
+        [[ -f "$directory/$name" && ! -L "$directory/$name" ]] || {
+            _fail "Refusing linked/non-file runtime helper"; return 1;
+        }
+    done
+    for name in "$@"; do rm -f -- "$directory/$name" || return 1; done
 }
 
 _lifecycle_emit() {

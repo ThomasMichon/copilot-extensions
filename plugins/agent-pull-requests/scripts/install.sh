@@ -593,6 +593,10 @@ _install_hook_files() {
 if [[ "$ACTION" == install || "$ACTION" == update || "$ACTION" == stamp || "$ACTION" == provision ]]; then
     _initialize_source_runtime || exit 1
 fi
+if [[ "$ACTION" == uninstall ]]; then
+    source "$SCRIPT_DIR/uninstall-runtime.sh"
+    uninstall_state_preserving_runtime validate || exit 1
+fi
 if [[ "$ACTION" == "install" || "$ACTION" == "update" || "$ACTION" == "stamp" || "$ACTION" == "provision" || "$ACTION" == "uninstall" ]]; then
     if ! _enter_install_lock; then
         _fail "Timed out waiting for the install transaction lock: $INSTALL_DIR/.install.lock"
@@ -671,9 +675,9 @@ if [[ "$ACTION" == "status" ]]; then
 fi
 
 if [[ "$ACTION" == "uninstall" ]]; then
-    rm -f "$LOCAL_BIN/agent-pull-requests"
-    remove_install_runtime_content "$INSTALL_DIR" || exit 1
-    _ok 'agent-pull-requests runtime removed (transaction/staging coordination retained)'
+    source "$SCRIPT_DIR/uninstall-runtime.sh"
+    uninstall_state_preserving_runtime || exit 1
+    _ok 'agent-pull-requests runtime removed (durable, unknown and coordination state retained)'
     exit 0
 fi
 

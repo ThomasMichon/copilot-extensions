@@ -78,7 +78,80 @@ function Copy-InstallerStageDirectory {
 # === end install-contract:v4 payload-copy ===
 . (Join-Path $PSScriptRoot 'installer-engine.ps1')
 
+function Get-FiniteUninstallPython {
+    param([Parameter(Mandatory)][string]$InstallRoot)
+    $probe = @'
+import sys
+assert sys.version_info >= (3, 10)
+from pathlib import Path
+root = Path(sys.argv[1]).absolute()
+assert ".." not in root.parts
+roots = (root, root.resolve())
+paths = (sys.argv[2], sys.executable, sys.prefix, sys.base_prefix,
+         getattr(sys, "_base_executable", sys.executable))
+for value in paths:
+    path = Path(value).absolute()
+    for actual in (path, path.resolve(strict=True)):
+        assert all(not actual.is_relative_to(boundary) for boundary in roots)
+print(Path(sys.executable).resolve(strict=True))
+'@
+    $candidates = @()
+    foreach ($name in @('python3', 'python')) {
+        $candidates += @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue |
+            Where-Object { $_.Source -notmatch 'WindowsApps' } | ForEach-Object { $_.Source })
+    }
+    foreach ($launcher in @(Get-Command py -All -CommandType Application -ErrorAction SilentlyContinue |
+            Where-Object { $_.Source -notmatch 'WindowsApps' })) {
+        try {
+            $nativeError = ''
+            $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError)
+            if ($LASTEXITCODE -eq 0) {
+                foreach ($match in [regex]::Matches("$listed", '(?m)([A-Za-z]:[\\/].*python(?:[0-9.]*)?\.exe)"?\s*$')) {
+                    $candidates += $match.Groups[1].Value
+                }
+            }
+        } catch { }
+    }
+    foreach ($candidate in @($candidates | Select-Object -Unique)) {
+        try {
+            $nativeError = ''
+            $selected = Invoke-Hidden -FilePath $candidate -ArgList @(
+                '-I', '-B', '-c', $probe, $InstallRoot, $candidate
+            ) -ErrorOutput ([ref]$nativeError)
+            if ($LASTEXITCODE -eq 0 -and $selected -and [IO.File]::Exists($selected.Trim())) {
+                return $selected.Trim()
+            }
+        } catch { }
+    }
+    return $null
+}
+
+function Invoke-IndexFiniteUninstall {
+    param([string]$Root, [string]$Mode)
+    # This admission also runs before the installer's normal native-helper import.
+    . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+    $python = Get-FiniteUninstallPython -InstallRoot $Root
+    if (-not $python) { throw 'Index uninstall requires an existing external Python 3.10+ outside runtime and prefix closure' }
+    $helper = Join-Path $PSScriptRoot 'installer_engine_uninstall.py'
+    if (-not (Test-Path -LiteralPath $helper -PathType Leaf)) {
+        $helper = Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer_engine_uninstall.py'
+    }
+    $nativeError = ''
+    $output = Invoke-Hidden -FilePath $python -ArgList @(
+        '-I', '-B', $helper, '--payload-root', (Split-Path $PSScriptRoot),
+        '--plugin-id', 'agent-index', '--root', $Root,
+        '--shell', (Get-Process -Id $PID).Path, $Mode
+    ) -ErrorOutput ([ref]$nativeError)
+    if ($LASTEXITCODE -ne 0) { throw "Index finite runtime uninstall refused: $nativeError" }
+    if ($output) { Write-Host $output.Trim() }
+}
+
 if ($InstallDir) {
+    if ($Action -eq 'uninstall' -and ($InstallDir -split '[/\\]') -contains '..') {
+        throw 'Index uninstall refuses parent-traversal components'
+    }
+    $providerRoot = $ExecutionContext.SessionState.Path.CurrentFileSystemLocation.ProviderPath
+    if (-not [IO.Path]::IsPathRooted($InstallDir)) { $InstallDir = Join-Path $providerRoot $InstallDir }
     $InstallDir = [IO.Path]::GetFullPath($InstallDir)
     $PSBoundParameters['InstallDir'] = $InstallDir
 }
@@ -136,6 +209,9 @@ if ($Action -notin @(
     & $probeHost -NoProfile -ExecutionPolicy Bypass -File $legacyProbe `
         -PayloadRoot $authorizationPayload -LegacyRoot $probeLegacyRoot
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    if ($Action -eq 'uninstall') {
+        Invoke-IndexFiniteUninstall -Root $probeLegacyRoot -Mode '--check'
+    }
 }
 
 # Status and dependency-light cell-slot actions do not enter the self-stage
@@ -2244,7 +2320,9 @@ function Invoke-RegisterTasks {
     # missed-trigger recovery. Opt-in via -AllowTaskElevation /
     # AGENT_INDEX_ALLOW_TASK_ELEVATION=1.
     if ((Test-TaskElevationOptIn) -and -not (Test-Elevated)) {
-        [void](Invoke-ScopedElevation -ElevAction 'register-tasks')
+        if (-not (Invoke-ScopedElevation -ElevAction 'register-tasks')) {
+            throw 'Task-scheduling elevation did not complete; tasks were not registered'
+        }
         return
     }
     Remove-LogonAutostart -Name $TaskName
@@ -2725,6 +2803,8 @@ function Invoke-Stop {
 }
 
 function Invoke-Uninstall {
+    Invoke-IndexFiniteUninstall -Root $InstallDir -Mode '--check'
+    if (-not (Test-Path -LiteralPath $InstallDir)) { Write-Ok 'Index runtime already absent'; return }
     if ($DryRun) {
         Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow
         Write-Host '[dry-run] would stop agent-index'
@@ -2748,7 +2828,7 @@ function Invoke-Uninstall {
             if (Test-Path $EngineHome) { Write-Host "[dry-run] would PURGE engine home: $EngineHome" }
             if (Test-Path $InstallDir) { Write-Host "[dry-run] would PURGE: $InstallDir" }
         } else {
-            Write-Host "[dry-run] engine home + install dir would be kept (-Purge to delete)"
+            Write-Host '[dry-run] would remove owned runtime generations, snapshots, selectors and helpers; data kept'
         }
         Write-Host 'agent-index uninstall dry run complete -- nothing was changed' -ForegroundColor Yellow
         return
@@ -2763,15 +2843,33 @@ function Invoke-Uninstall {
         Stop-ScheduledTask -TaskName $EngineTaskName -ErrorAction SilentlyContinue
         Unregister-ScheduledTask -TaskName $EngineTaskName -Confirm:$false -ErrorAction SilentlyContinue
     }
-    Remove-Item (Join-Path $LocalBin 'agent-index.ps1') -Force -ErrorAction SilentlyContinue
-    Remove-Item (Join-Path $LocalBin 'agent-index.cmd') -Force -ErrorAction SilentlyContinue
+    Invoke-IndexFiniteUninstall -Root $InstallDir -Mode '--remove-runtime'
     if ($Purge) {
-        if (Test-Path $EngineHome) { Remove-Item $EngineHome -Recurse -Force -ErrorAction SilentlyContinue }
-        if (Test-Path $InstallDir) { Remove-Item $InstallDir -Recurse -Force }
+        if (Test-Path -LiteralPath $EngineHome) { Remove-InstallRuntimeContent -InstallRoot $EngineHome }
+        Remove-InstallRuntimeContent -InstallRoot $InstallDir
     }
     Write-Ok 'agent-index uninstalled'
 }
 
+$transactionMutex = $null
+try {
+if ($Action -eq 'register-tasks' -and (Test-TaskElevationOptIn) -and -not (Test-Elevated)) {
+    # The elevated child owns admission; its waiting parent must not hold the mutex.
+    Invoke-RegisterTasks
+    return
+}
+if ($Action -ne 'status' -and
+    -not ($Action -eq 'uninstall' -and ($DryRun -or -not (Test-Path -LiteralPath $InstallDir)))) {
+    $transactionTimeout = 20
+    if ($env:INDEX_TRANSACTION_LOCK_TIMEOUT_SECONDS) {
+        if ($env:INDEX_TRANSACTION_LOCK_TIMEOUT_SECONDS -notmatch '^[0-9]{1,3}$' -or
+            [int]$env:INDEX_TRANSACTION_LOCK_TIMEOUT_SECONDS -gt 180) {
+            throw 'Invalid Index transaction timeout (expected 0-180 seconds)'
+        }
+        $transactionTimeout = [int]$env:INDEX_TRANSACTION_LOCK_TIMEOUT_SECONDS
+    }
+    $transactionMutex = Enter-IndexStampLock -Scope 'Transaction' -TimeoutSeconds $transactionTimeout
+}
 $ScriptDir = $PSScriptRoot
 . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 . (Join-Path $PSScriptRoot 'source-runtime.ps1')
@@ -2841,5 +2939,11 @@ switch ($Action) {
 } finally {
     if (Test-Path -LiteralPath 'Function:\Stop-RuntimeConstruction') {
         Stop-RuntimeConstruction
+    }
+}
+} finally {
+    if ($transactionMutex) {
+        [void]$transactionMutex.ReleaseMutex()
+        $transactionMutex.Dispose()
     }
 }
