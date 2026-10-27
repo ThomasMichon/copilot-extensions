@@ -4,6 +4,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -133,3 +134,102 @@ def test_native_action_waits_before_lifecycle_side_effects(tmp_path: Path, host:
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert changed.read_text() == "called"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows task-elevation admission")
+@pytest.mark.parametrize("host", ("powershell.exe", "pwsh"))
+@pytest.mark.parametrize(
+    "mode", ("switch", "environment", "already-elevated", "not-opted-in", "refused"),
+)
+def test_task_elevation_parent_does_not_hold_child_transaction(
+    tmp_path: Path, host: str, mode: str,
+) -> None:
+    shell = shutil.which(host)
+    if shell is None:
+        pytest.skip(f"{host} unavailable")
+    root, env = fixture_environment(tmp_path)
+    env["INDEX_TEST_RUNTIME_ROOT"] = str(root)
+    env["INDEX_TEST_EVENTS"] = str(tmp_path / "events")
+    env["INDEX_TEST_PARENT"] = str(tmp_path / "parent")
+    env["INDEX_TEST_HANDOFF"] = str(tmp_path / "handoff")
+    env["INDEX_TEST_REFUSE"] = "1" if mode == "refused" else "0"
+    env["AGENT_INDEX_ALLOW_TASK_ELEVATION"] = "1" if mode == "environment" else "0"
+    source = (SCRIPTS / "install.ps1").read_text(encoding="utf-8-sig")
+    functions = []
+    for name in (
+        "New-IndexMutex", "Enter-IndexStampLock", "Test-TaskElevationOptIn",
+        "Invoke-RegisterTasks",
+    ):
+        match = re.search(rf"(?ms)^function {name} \{{.*?^\}}$", source)
+        assert match is not None, name
+        functions.append(match.group())
+    admission = source.split("$transactionMutex = $null\ntry {\n", 1)[1].split(
+        "$ScriptDir = $PSScriptRoot", 1,
+    )[0]
+    wrapper = tmp_path / "task-admission.ps1"
+    wrapper.write_text(
+        "param([switch]$Child,[switch]$AllowTaskElevation,[switch]$AlreadyElevated)\n"
+        "$ErrorActionPreference='Stop'\n$Action='register-tasks'\n"
+        "$InstallDir=$env:INDEX_TEST_RUNTIME_ROOT\n$DryRun=$false\n"
+        "$TaskName='fixture-service';$EngineTaskName='fixture-engine'\n"
+        "if (-not $Child) { [IO.File]::WriteAllText($env:INDEX_TEST_PARENT, \"$PID\") }\n"
+        "function Test-Elevated { return [bool]($Child -or $AlreadyElevated) }\n"
+        "function Write-Warn { param($Message) }\n"
+        "function Record-TaskStep {\n"
+        " if ($null -eq $transactionMutex) { throw 'Task mutation without transaction' }\n"
+        " [IO.File]::AppendAllText($env:INDEX_TEST_EVENTS, \"$PID`n\")\n"
+        "}\n"
+        "function Remove-LogonAutostart { param($Name);Record-TaskStep }\n"
+        "function Register-EngineDaemon { Record-TaskStep }\n"
+        "function Install-Service { Record-TaskStep }\n"
+        "function Invoke-ScopedElevation {\n"
+        " param($ElevAction)\n"
+        " if ($ElevAction -ne 'register-tasks') { throw 'Wrong elevated action' }\n"
+        " [IO.File]::WriteAllText($env:INDEX_TEST_HANDOFF, \"$PID\")\n"
+        " if ($env:INDEX_TEST_REFUSE -eq '1') { return $false }\n"
+        " $start=New-Object Diagnostics.ProcessStartInfo\n"
+        " $start.FileName=(Get-Process -Id $PID).Path\n"
+        " $start.Arguments='-NoProfile -NonInteractive -File \"'+$PSCommandPath+'\" -Child -AllowTaskElevation'\n"
+        " $start.UseShellExecute=$false;$start.CreateNoWindow=$true\n"
+        " $start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true\n"
+        " $process=[Diagnostics.Process]::Start($start)\n"
+        " $out=$process.StandardOutput.ReadToEndAsync();$err=$process.StandardError.ReadToEndAsync()\n"
+        " $process.WaitForExit()\n"
+        " if ($process.ExitCode -ne 0) { throw ($out.Result+$err.Result) }\n"
+        " return $true\n"
+        "}\n"
+        + "\n".join(functions)
+        + "\n$transactionMutex=$null\ntry {\n"
+        + admission
+        + "\nInvoke-RegisterTasks\n} finally {\n"
+        " if ($null -ne $transactionMutex) {\n"
+        "  [void]$transactionMutex.ReleaseMutex();$transactionMutex.Dispose()\n"
+        " }\n}\n",
+        encoding="utf-8",
+    )
+    arguments = ["-AllowTaskElevation"] if mode in ("switch", "refused") else []
+    if mode == "already-elevated":
+        arguments = ["-AllowTaskElevation", "-AlreadyElevated"]
+    result = subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-File", str(wrapper), *arguments],
+        env=env, cwd=tmp_path, capture_output=True, text=True, timeout=30, **FLAGS,
+    )
+    if mode == "refused":
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert "Task-scheduling elevation did not complete" in result.stdout + result.stderr
+        assert Path(env["INDEX_TEST_HANDOFF"]).exists()
+        assert not Path(env["INDEX_TEST_EVENTS"]).exists()
+        assert (root / "operator.txt").read_bytes() == b"retained operator state"
+        return
+    assert result.returncode == 0, result.stdout + result.stderr
+    parent = Path(env["INDEX_TEST_PARENT"]).read_text()
+    mutations = Path(env["INDEX_TEST_EVENTS"]).read_text().splitlines()
+    assert len(mutations) == 4
+    if mode in ("switch", "environment"):
+        assert Path(env["INDEX_TEST_HANDOFF"]).read_text() == parent
+        assert set(mutations) != {parent}
+        assert len(set(mutations)) == 1
+    else:
+        assert not Path(env["INDEX_TEST_HANDOFF"]).exists()
+        assert set(mutations) == {parent}
+    assert (root / "operator.txt").read_bytes() == b"retained operator state"

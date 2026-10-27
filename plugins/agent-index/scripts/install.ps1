@@ -2276,7 +2276,9 @@ function Invoke-RegisterTasks {
     # missed-trigger recovery. Opt-in via -AllowTaskElevation /
     # AGENT_INDEX_ALLOW_TASK_ELEVATION=1.
     if ((Test-TaskElevationOptIn) -and -not (Test-Elevated)) {
-        [void](Invoke-ScopedElevation -ElevAction 'register-tasks')
+        if (-not (Invoke-ScopedElevation -ElevAction 'register-tasks')) {
+            throw 'Task-scheduling elevation did not complete; tasks were not registered'
+        }
         return
     }
     Remove-LogonAutostart -Name $TaskName
@@ -2807,6 +2809,11 @@ function Invoke-Uninstall {
 
 $transactionMutex = $null
 try {
+if ($Action -eq 'register-tasks' -and (Test-TaskElevationOptIn) -and -not (Test-Elevated)) {
+    # The elevated child owns admission; its waiting parent must not hold the mutex.
+    Invoke-RegisterTasks
+    return
+}
 if ($Action -ne 'status' -and
     -not ($Action -eq 'uninstall' -and ($DryRun -or -not (Test-Path -LiteralPath $InstallDir)))) {
     $transactionTimeout = 20

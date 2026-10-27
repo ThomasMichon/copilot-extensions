@@ -956,8 +956,10 @@ do_uninstall() {
             [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]] && echo "[dry-run] would stop + disable + remove: $SYSTEMD_UNIT"
         else
             if [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]]; then
-                systemctl --user stop "$SYSTEMD_UNIT" || return 1
-                systemctl --user disable "$SYSTEMD_UNIT" || return 1
+                if [[ "${_vault_uninstall_unit_state:-}" == loaded ]]; then
+                    systemctl --user stop "$SYSTEMD_UNIT" || return 1
+                    systemctl --user disable "$SYSTEMD_UNIT" || return 1
+                fi
                 rm -f "$UNIT_DIR/$SYSTEMD_UNIT" || return 1
             fi
             systemctl --user daemon-reload 2>/dev/null || true
@@ -985,14 +987,22 @@ do_uninstall() {
 }
 
 _vault_uninstall_preflight() {
-    local unit
+    local unit properties
+    _vault_uninstall_unit_state=unloaded
     unit="$UNIT_DIR/$SYSTEMD_UNIT"
     if [[ -e "$unit" || -L "$unit" ]]; then
         _finite_stop_tool check-unit --unit "$unit" || return 1
         if command -v systemctl >/dev/null 2>&1; then
-            local fragment
-            fragment="$(systemctl --user show --property=FragmentPath --value "$SYSTEMD_UNIT")" || return 1
-            [[ "$fragment" == "$unit" ]] || { _fail "Vault loaded unit is not this installation"; return 1; }
+            properties="$(systemctl --user show --all --no-pager --property=LoadState,ActiveState,FragmentPath,DropInPaths,ExecStart,WorkingDirectory -- "$SYSTEMD_UNIT")" || return 1
+            _vault_uninstall_unit_state="$(printf '%s\n' "$properties" |
+                _finite_stop_tool check-effective-unit --unit "$unit")" || return 1
+            case "$_vault_uninstall_unit_state" in
+                loaded|unloaded) ;;
+                *) _fail "Effective Vault service ownership was not admitted"; return 1 ;;
+            esac
+        else
+            _fail "Cannot verify effective Vault service ownership without systemctl"
+            return 1
         fi
     fi
     _finite_owned_pids >/dev/null

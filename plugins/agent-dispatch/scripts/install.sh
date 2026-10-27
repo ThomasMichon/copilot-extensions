@@ -2542,12 +2542,18 @@ do_uninstall() {
             local unit_path
             for unit_path in "$UNIT_DIR/$SUPERVISOR_UNIT" "$UNIT_DIR/$SUPERVISOR_UNIT_BASE"-*.service; do
                 [[ -f "$unit_path" ]] || continue
-                _remove_supervisor_unit "${unit_path##*/}" || return 1
+                if [[ " ${_dispatch_uninstall_loaded_units[*]:-} " == *" ${unit_path##*/} "* ]]; then
+                    _remove_supervisor_unit "${unit_path##*/}" || return 1
+                else
+                    rm -f -- "$unit_path" || return 1
+                fi
             done
             _ok "Embody supervisor services removed"
             if [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]]; then
-                systemctl --user stop "$SYSTEMD_UNIT" || return 1
-                systemctl --user disable "$SYSTEMD_UNIT" || return 1
+                if [[ " ${_dispatch_uninstall_loaded_units[*]:-} " == *" $SYSTEMD_UNIT "* ]]; then
+                    systemctl --user stop "$SYSTEMD_UNIT" || return 1
+                    systemctl --user disable "$SYSTEMD_UNIT" || return 1
+                fi
                 rm -f "$UNIT_DIR/$SYSTEMD_UNIT" || return 1
             fi
             systemctl --user daemon-reload 2>/dev/null || true
@@ -2575,14 +2581,23 @@ do_uninstall() {
 }
 
 _dispatch_uninstall_preflight() {
-    local unit
+    local unit properties state
+    _dispatch_uninstall_loaded_units=()
     for unit in "$UNIT_DIR/$SYSTEMD_UNIT" "$UNIT_DIR/$SUPERVISOR_UNIT" "$UNIT_DIR/${SUPERVISOR_UNIT%.service}-"*.service; do
         [[ -e "$unit" || -L "$unit" ]] || continue
         _finite_stop_tool check-unit --unit "$unit" || return 1
         if command -v systemctl >/dev/null 2>&1; then
-            local fragment
-            fragment="$(systemctl --user show --property=FragmentPath --value "${unit##*/}")" || return 1
-            [[ "$fragment" == "$unit" ]] || { _fail "Dispatch loaded unit is not this installation"; return 1; }
+            properties="$(systemctl --user show --all --no-pager --property=LoadState,ActiveState,FragmentPath,DropInPaths,ExecStart,WorkingDirectory -- "${unit##*/}")" || return 1
+            state="$(printf '%s\n' "$properties" |
+                _finite_stop_tool check-effective-unit --unit "$unit")" || return 1
+            case "$state" in
+                loaded) _dispatch_uninstall_loaded_units+=("${unit##*/}") ;;
+                unloaded) ;;
+                *) _fail "Effective Dispatch service ownership was not admitted"; return 1 ;;
+            esac
+        else
+            _fail "Cannot verify effective Dispatch service ownership without systemctl"
+            return 1
         fi
     done
     _finite_owned_pids >/dev/null

@@ -1991,7 +1991,9 @@ do_uninstall() {
         if $DRY_RUN; then
             echo "[dry-run] would disable + remove systemd unit: $SYSTEMD_UNIT"
         else
-            systemctl --user disable "$SYSTEMD_UNIT" 2>/dev/null || true
+            if [[ "${_bridge_uninstall_unit_state:-}" == loaded ]]; then
+                systemctl --user disable "$SYSTEMD_UNIT" 2>/dev/null || true
+            fi
             rm -f "$HOME/.config/systemd/user/$SYSTEMD_UNIT"
             systemctl --user daemon-reload 2>/dev/null || true
             _ok "systemd unit removed"
@@ -2033,13 +2035,21 @@ _bridge_uninstall_tool() {
 }
 
 _bridge_uninstall_preflight() {
-    local unit="$HOME/.config/systemd/user/$SYSTEMD_UNIT"
+    local unit="$HOME/.config/systemd/user/$SYSTEMD_UNIT" properties
+    _bridge_uninstall_unit_state=unloaded
     if [[ -e "$unit" || -L "$unit" ]]; then
         _bridge_uninstall_tool check-unit --unit "$unit" || return 1
         if command -v systemctl >/dev/null 2>&1; then
-            local fragment
-            fragment="$(systemctl --user show --property=FragmentPath --value "$SYSTEMD_UNIT")" || return 1
-            [[ "$fragment" == "$unit" ]] || { _fail "Bridge loaded unit is not this installation"; return 1; }
+            properties="$(systemctl --user show --all --no-pager --property=LoadState,ActiveState,FragmentPath,DropInPaths,ExecStart,WorkingDirectory -- "$SYSTEMD_UNIT")" || return 1
+            _bridge_uninstall_unit_state="$(printf '%s\n' "$properties" |
+                _bridge_uninstall_tool check-effective-unit --unit "$unit")" || return 1
+            case "$_bridge_uninstall_unit_state" in
+                loaded|unloaded) ;;
+                *) _fail "Effective Bridge service ownership was not admitted"; return 1 ;;
+            esac
+        else
+            _fail "Cannot verify effective Bridge service ownership without systemctl"
+            return 1
         fi
     fi
     _bridge_uninstall_processes >/dev/null
@@ -2055,7 +2065,11 @@ _bridge_uninstall_stop_owned() {
         _bridge_uninstall_processes >/dev/null || return 1
     fi
     if command -v systemctl >/dev/null 2>&1 && [[ -f "$HOME/.config/systemd/user/$SYSTEMD_UNIT" ]]; then
-        systemctl --user stop "$SYSTEMD_UNIT" || return 1
+        case "${_bridge_uninstall_unit_state:-}" in
+            loaded) systemctl --user stop "$SYSTEMD_UNIT" || return 1 ;;
+            unloaded) ;;
+            *) _fail "Bridge service ownership was not admitted"; return 1 ;;
+        esac
     fi
     _bridge_uninstall_tool stop --admission "$_bridge_uninstall_admission"
 }

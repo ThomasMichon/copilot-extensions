@@ -2463,12 +2463,26 @@ Before service control, unit admission validates the active `[Service]`
 executable/launcher and root-bound working directory together. Comments cannot
 establish ownership. Dispatch's coordinator and supervisor registrations have
 separate exact writer forms; a supervisor registration must name its own unit.
+The loaded manager's command, working directory, fragment and load/activity
+state must also agree; checking the on-disk main unit alone is insufficient.
+Drop-in overrides and unparseable effective properties refuse explicitly.
+Proven inactive, unloaded legacy registrations may be removed without issuing
+service stop/disable against an unverified loaded registration. Effective
+command values are passed through stdin and are not printed in diagnostics.
 
 CodeSpaces, SSH and Pull Requests removal select only an already available
 interpreter whose executable, prefix, base prefix and base interpreter remain
 outside the removable root. Admission-only and dry-run paths use that same
 non-provisioning selector; absence refuses without invoking `uv` or downloading
 Python. Construction's bootstrap resolver retains its separate behavior.
+
+CodeSpaces' native POSIX whole-action transaction can use an existing `flock`
+capability on the same persistent install inode without Python, including cold
+stamping. Its existing-Python fallback uses attached, Bash-3.2-compatible
+transport; EOF settles an owner waiting for admission as well as a holder.
+When neither capability exists, mutation refuses without provisioning.
+MSYS retains the native Windows inode owner rather than assuming a POSIX
+`flock` port is interoperable. Read-only status needs neither lock capability.
 
 Installation-cell/managed roots, mutable development claims, linked ancestry,
 unrecognized legacy venv directories, foreign ownership, conflicting leases

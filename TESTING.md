@@ -24,6 +24,12 @@ programs, independently executable cmd forms and delegating-peer refusal.
 The native STOP packet derives daemon commands from actual unit writers,
 preserves original admission across service-stop/PID-reuse controls, and runs
 real Linux pidfd termination and birth-mismatch refusal against owned fixtures.
+Index's transaction packet exercises the real admission and mutex code across
+separate simulated elevation processes, without UAC or host task registration.
+CodeSpaces' `test_cold_native_transaction.py` accepts `NATIVE_UNINSTALL_BASH`
+for actual Bash 3.2 qualification. It checks read-only status without lock
+capabilities, Python-free cold stamping, same-inode contention, attached-owner
+EOF and the exact declared first-party snapshot-library closure.
 `tools/test_budget_packaged_installer.py` additionally starts the actual
 materialized standalone Budget status entrypoints without a repository library
 tree; this detects a packaged caller that still sources repository-only helpers.

@@ -99,6 +99,21 @@ def admits_argv(argv: list[str], root: str | Path, plugin: str) -> bool:
     return False
 
 
+def _owns_unit_argv(argv: list[str], unit: Path, root: str | Path, plugin: str) -> bool:
+    owned = admits_argv(argv, root, plugin)
+    if plugin == "agent-dispatch":
+        coordinator = (
+            bool(argv) and _runtime_path(argv[0], root, {"python", "python3"})
+            and argv[1:] == ["-m", "agent_dispatch", "serve"]
+        )
+        supervisor = (
+            len(argv) == 3 and _posix(argv[0]) == _posix(root) / "supervise-service.sh"
+            and argv[1:] == ["--systemd-unit", unit.name]
+        )
+        owned = coordinator or supervisor
+    return owned
+
+
 def check_unit(unit: Path, root: str | Path, plugin: str) -> None:
     """Validate the installed registration against the same argv admission."""
     if not _posix(root).is_absolute() or ".." in _posix(root).parts:
@@ -114,26 +129,59 @@ def check_unit(unit: Path, root: str | Path, plugin: str) -> None:
         elif section == "[Service]":
             lines.append(line)
     starts = [line.removeprefix("ExecStart=") for line in lines if line.startswith("ExecStart=")]
-    if len(starts) != 1:
-        raise StopRefused("The service unit does not name this installation's daemon")
-    argv = shlex.split(starts[0])
-    owned = admits_argv(argv, root, plugin)
-    if plugin == "agent-dispatch":
-        coordinator = (
-            bool(argv) and _runtime_path(argv[0], root, {"python", "python3"})
-            and argv[1:] == ["-m", "agent_dispatch", "serve"]
-        )
-        supervisor = (
-            len(argv) == 3 and _posix(argv[0]) == _posix(root) / "supervise-service.sh"
-            and argv[1:] == ["--systemd-unit", unit.name]
-        )
-        owned = coordinator or supervisor
-    if not owned:
+    if len(starts) != 1 or not _owns_unit_argv(shlex.split(starts[0]), unit, root, plugin):
         raise StopRefused("The service unit does not name this installation's daemon")
     directories = [line.removeprefix("WorkingDirectory=") for line in lines
                    if line.startswith("WorkingDirectory=")]
     if len(directories) != 1 or _posix(directories[0]) != _posix(root):
         raise StopRefused("The service unit working directory names another root")
+
+
+def check_effective_unit(unit: Path, root: str | Path, plugin: str, properties: str) -> str:
+    """Check one manager property snapshot; never expose its potentially secret argv."""
+    check_unit(unit, root, plugin)
+    required = {"LoadState", "ActiveState", "FragmentPath", "DropInPaths", "ExecStart", "WorkingDirectory"}
+    values = {}
+    for line in properties.splitlines():
+        if not line:
+            continue
+        key, separator, value = line.partition("=")
+        if not separator or key not in required or key in values:
+            raise StopRefused("Ambiguous effective service properties")
+        values[key] = value
+    if values.keys() != required:
+        raise StopRefused("Incomplete effective service properties")
+    if values["DropInPaths"]:
+        raise StopRefused("Service drop-in overrides are unsupported for native uninstall")
+    if values["LoadState"] == "not-found" and values["ActiveState"] == "inactive":
+        if any(values[key] for key in ("FragmentPath", "ExecStart", "WorkingDirectory")):
+            raise StopRefused("An unloaded service retains ambiguous effective registration")
+        return "unloaded"
+    if (values["LoadState"] != "loaded" or values["ActiveState"] not in {
+        "active", "inactive", "failed", "activating", "deactivating", "reloading",
+    }):
+        raise StopRefused("Effective service load/activity state is unverified")
+    if any("\\" in values[key] for key in ("FragmentPath", "WorkingDirectory", "ExecStart")):
+        raise StopRefused("Escaped effective service properties are unsupported")
+    if _posix(values["FragmentPath"]) != _posix(unit):
+        raise StopRefused("The effective service fragment names another unit")
+    if _posix(values["WorkingDirectory"]) != _posix(root):
+        raise StopRefused("The effective service working directory names another root")
+    # systemctl show serializes ExecStart's command array as brace-delimited
+    # records. The native writers use one simple command; multiple commands,
+    # escaped arguments and unknown shapes are deliberately not inferred.
+    command = re.fullmatch(
+        r"\{\s*path=([^;{}\r\n]+?)\s*;\s*argv\[\]=([^;{}\r\n]+?)\s*;"
+        r"\s*ignore_errors=(?:yes|no)\s*;[^{}\r\n]*\}",
+        values["ExecStart"],
+    )
+    if command is None:
+        raise StopRefused("Unsupported effective service command array")
+    argv = shlex.split(command[2])
+    if (not argv or _posix(command[1]) != _posix(argv[0])
+            or not _owns_unit_argv(argv, unit, root, plugin)):
+        raise StopRefused("The effective service command names another daemon")
+    return "loaded"
 
 
 def _root(value: str) -> Path:
@@ -294,7 +342,7 @@ def stop(root: Path, plugin: str, admission: dict[str, Any], timeout: float = 15
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("capture", "pids", "check-unit", "stop"))
+    parser.add_argument("action", choices=("capture", "pids", "check-unit", "check-effective-unit", "stop"))
     parser.add_argument("--root", required=True)
     parser.add_argument("--plugin", required=True, choices=("agent-bridge", "agent-dispatch", "agent-vault"))
     parser.add_argument("--admission")
@@ -302,10 +350,13 @@ def main() -> int:
     parser.add_argument("--unit", type=Path)
     args = parser.parse_args()
     try:
-        if args.action == "check-unit":
+        if args.action in {"check-unit", "check-effective-unit"}:
             if args.unit is None:
                 raise StopRefused("Service unit inspection requires its exact path")
-            check_unit(args.unit, args.root, args.plugin)
+            if args.action == "check-effective-unit":
+                print(check_effective_unit(args.unit, args.root, args.plugin, sys.stdin.read()))
+            else:
+                check_unit(args.unit, args.root, args.plugin)
         elif args.action == "pids":
             admission = json.loads(args.admission)
             for identity in admission["identities"]:

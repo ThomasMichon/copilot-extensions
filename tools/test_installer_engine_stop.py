@@ -67,17 +67,15 @@ def test_actual_unit_writer_is_accepted_by_daemon_admission(tmp_path: Path, plug
         "SERVICE_SUFFIX=''; INSTALLATION_ID=fixture; PORT_ENV_LINE=''; NO_SERVICE=0",
         _function(scripts / "install.sh", writer),
         writer,
-        *([
-            f"PY={shlex.quote(_posix(Path(sys.executable)))};STOP_HELPER={shlex.quote(_posix(SOURCE))}",
-            '_bridge_uninstall_tool() { "$PY" -I -B "$STOP_HELPER" "$@" --root "$INSTALL_DIR" --plugin agent-bridge; }',
-            "_bridge_uninstall_processes() { :; }",
-            _function(scripts / "install.sh", "_bridge_uninstall_preflight"),
-            "_bridge_uninstall_preflight",
-        ] if plugin == "agent-bridge" else []),
     ))
     result = _shell(tmp_path, body)
     assert result.returncode == 0, result.stdout + result.stderr
     STOP.check_unit(unit, _posix(root), plugin)
+    checked, inspected, control = _run_preflight(
+        tmp_path, unit, root, scripts / "install.sh", plugin, _effective_properties(unit),
+    )
+    assert checked.returncode == 0, checked.stdout + checked.stderr
+    assert inspected.exists() and not control.exists()
     start = next(line[10:] for line in unit.read_text().splitlines() if line.startswith("ExecStart="))
     argv = shlex.split(start)
     assert STOP.admits_argv(argv, _posix(root), plugin)
@@ -93,18 +91,23 @@ def test_actual_unit_writer_is_accepted_by_daemon_admission(tmp_path: Path, plug
 
 
 def _written_unit(tmp_path: Path, kind: str) -> tuple[Path, Path, Path, str]:
-    plugin = "agent-vault" if kind == "vault" else "agent-dispatch"
+    plugin = "agent-bridge" if kind == "bridge" else (
+        "agent-vault" if kind == "vault" else "agent-dispatch"
+    )
     source = REPO / "plugins" / plugin / "scripts" / "install.sh"
     root = tmp_path / "runtime"
     root.mkdir()
-    units = tmp_path / "units"
-    units.mkdir()
+    home = tmp_path / "home"
+    units = home / ".config" / "systemd" / "user"
+    units.mkdir(parents=True)
     supervisor = kind == "supervisor"
     name = "fixture-supervisor.service" if supervisor else "fixture.service"
-    writer = "_install_supervisor_unit" if supervisor else "_install_service"
+    writer = "_install_systemd_unit" if kind == "bridge" else (
+        "_install_supervisor_unit" if supervisor else "_install_service"
+    )
     invoke = (
         '_install_supervisor_unit fixture-supervisor.service "$INSTALL_DIR/supervisor.env" fixture'
-        if supervisor else "_install_service"
+        if supervisor else writer
     )
     result = _shell(tmp_path, "\n".join((
         "set -euo pipefail",
@@ -114,6 +117,7 @@ def _written_unit(tmp_path: Path, kind: str) -> tuple[Path, Path, Path, str]:
         "_supervisor_labels_configured() { return 1; }; _supervisor_action() { :; }",
         "_supervisor_audit() { :; }",
         f"INSTALL_DIR={shlex.quote(_posix(root))};UNIT_DIR={shlex.quote(_posix(units))}",
+        f"HOME={shlex.quote(_posix(home))}",
         'VENV_DIR="$INSTALL_DIR/versions/1.0"; VENV_PYTHON="$VENV_DIR/bin/python"',
         'ENV_FILE="$INSTALL_DIR/service.env"',
         'LINK_PYTHON="$VENV_PYTHON"; SYSTEMD_UNIT=fixture.service; NO_SERVICE=0',
@@ -128,6 +132,61 @@ def _written_unit(tmp_path: Path, kind: str) -> tuple[Path, Path, Path, str]:
     return units / name, root, source, plugin
 
 
+def _effective_properties(unit: Path, **changes: str) -> str:
+    lines = unit.read_text(encoding="utf-8").splitlines()
+    start = next(line[10:] for line in lines if line.startswith("ExecStart="))
+    directory = next(line[17:] for line in lines if line.startswith("WorkingDirectory="))
+    values = {
+        "LoadState": "loaded", "ActiveState": "inactive", "FragmentPath": _posix(unit),
+        "DropInPaths": "", "WorkingDirectory": directory,
+        "ExecStart": (
+            f"{{ path={shlex.split(start)[0]} ; argv[]={start} ; ignore_errors=no ; "
+            "start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }"
+        ),
+    }
+    values.update(changes)
+    return "".join(f"{key}={value}\n" for key, value in values.items())
+
+
+def _run_preflight(tmp_path: Path, unit: Path, root: Path, source: Path, plugin: str,
+                   properties: str, *, query_fails: bool = False,
+                   ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
+    inspected = tmp_path / "process-inspected"
+    control = tmp_path / "unexpected-native-control"
+    captured = tmp_path / "effective-properties"
+    captured.write_text(properties, encoding="utf-8", newline="\n")
+    suffix = plugin.removeprefix("agent-")
+    preflight = f"_{suffix}_uninstall_preflight"
+    tool = "_bridge_uninstall_tool" if suffix == "bridge" else "_finite_stop_tool"
+    census = "_bridge_uninstall_processes" if suffix == "bridge" else "_finite_owned_pids"
+    state = (
+        'if [[ " ${_dispatch_uninstall_loaded_units[*]:-} " == *" $EXPECTED_UNIT "* ]]; '
+        'then echo admission=loaded; else echo admission=unloaded; fi'
+        if suffix == "dispatch" else f'echo "admission=${{_{suffix}_uninstall_unit_state}}"'
+    )
+    result = _shell(tmp_path, "\n".join((
+        "set -euo pipefail",
+        f"INSTALL_DIR={shlex.quote(_posix(root))};UNIT_DIR={shlex.quote(_posix(unit.parent))}",
+        f"HOME={shlex.quote(_posix(unit.parents[3]))};EXPECTED_UNIT={shlex.quote(unit.name)}",
+        "SYSTEMD_UNIT=fixture.service;SUPERVISOR_UNIT=fixture-supervisor.service",
+        f"PY={shlex.quote(_posix(Path(sys.executable)))};STOP_HELPER={shlex.quote(_posix(SOURCE))}",
+        f"INSPECTED={shlex.quote(_posix(inspected))};CONTROL={shlex.quote(_posix(control))}",
+        f"PROPERTIES={shlex.quote(_posix(captured))};QUERY_FAILS={int(query_fails)}",
+        '_fail() { echo "$1" >&2; }',
+        'systemctl() { if [[ "${2:-}" != show ]]; then : > "$CONTROL"; return 99; fi; '
+        '[[ " $* " == *" --all "* && " $* " == *" --no-pager "* && '
+        '" $* " == *" --property=LoadState,ActiveState,FragmentPath,DropInPaths,ExecStart,WorkingDirectory "* '
+        '&& "${@: -1}" == "$EXPECTED_UNIT" ]] || return 97; '
+        '[[ "$QUERY_FAILS" -eq 0 ]] || return 23; cat "$PROPERTIES"; }',
+        f'{tool}() {{ "$PY" -I -B "$STOP_HELPER" "$@" --root "$INSTALL_DIR" --plugin {plugin}; }}',
+        f'{census}() {{ : > "$INSPECTED"; }}',
+        _function(source, preflight),
+        preflight,
+        state,
+    )))
+    return result, inspected, control
+
+
 @pytest.mark.parametrize("kind", ("coordinator", "supervisor", "vault"))
 @pytest.mark.parametrize("mutation", (
     "none", "foreign-executable-comment", "foreign-workdir", "wrong-module",
@@ -138,6 +197,7 @@ def test_real_uninstall_preflight_binds_generated_unit_not_comment(
 ) -> None:
     unit, root, source, plugin = _written_unit(tmp_path, kind)
     original = unit.read_text(encoding="utf-8")
+    properties = _effective_properties(unit)
     start = next(line for line in original.splitlines() if line.startswith("ExecStart="))
     changed = original
     if mutation == "foreign-executable-comment":
@@ -159,23 +219,7 @@ def test_real_uninstall_preflight_binds_generated_unit_not_comment(
         changed = original.replace(start, "#" + start)
     unit.write_text(changed, encoding="utf-8")
     before = unit.read_bytes(), unit.stat().st_mtime_ns
-    inspected = tmp_path / "process-inspected"
-    control = tmp_path / "unexpected-native-control"
-    preflight = "_vault_uninstall_preflight" if kind == "vault" else "_dispatch_uninstall_preflight"
-    result = _shell(tmp_path, "\n".join((
-        "set -euo pipefail",
-        f"INSTALL_DIR={shlex.quote(_posix(root))};UNIT_DIR={shlex.quote(_posix(unit.parent))}",
-        "SYSTEMD_UNIT=fixture.service;SUPERVISOR_UNIT=fixture-supervisor.service",
-        f"PY={shlex.quote(_posix(Path(sys.executable)))};STOP_HELPER={shlex.quote(_posix(SOURCE))}",
-        f"INSPECTED={shlex.quote(_posix(inspected))};CONTROL={shlex.quote(_posix(control))}",
-        '_fail() { echo "$1" >&2; }',
-        'systemctl() { if [[ "${2:-}" != show ]]; then : > "$CONTROL"; return 99; fi; '
-        'local name="${@: -1}"; printf "%s\\n" "$UNIT_DIR/$name"; }',
-        f'_finite_stop_tool() {{ "$PY" -I -B "$STOP_HELPER" "$@" --root "$INSTALL_DIR" --plugin {plugin}; }}',
-        '_finite_owned_pids() { : > "$INSPECTED"; }',
-        _function(source, preflight),
-        preflight,
-    )))
+    result, inspected, control = _run_preflight(tmp_path, unit, root, source, plugin, properties)
     assert (result.returncode == 0) is (mutation == "none"), result.stdout + result.stderr
     assert inspected.exists() is (mutation == "none")
     assert not control.exists(), "Preflight must never stop, disable, restart, or remove a service"
@@ -189,6 +233,67 @@ def test_dispatch_supervisor_registration_cannot_name_another_unit(tmp_path: Pat
     ))
     with pytest.raises(RuntimeError, match="does not name"):
         STOP.check_unit(unit, _posix(root), plugin)
+
+
+@pytest.mark.parametrize("kind", ("bridge", "coordinator", "supervisor", "vault"))
+@pytest.mark.parametrize("effective", (
+    "active", "inactive", "unloaded", "foreign-executable", "foreign-workdir",
+    "foreign-fragment", "drop-in", "multiple-commands", "different-path",
+    "missing-property", "duplicate-property", "unloaded-active", "unloaded-stale",
+    "query-failure", "secret-argument",
+))
+def test_real_preflight_checks_manager_effective_service_ownership(
+    tmp_path: Path, kind: str, effective: str,
+) -> None:
+    unit, root, source, plugin = _written_unit(tmp_path, kind)
+    before = unit.read_bytes(), unit.stat().st_mtime_ns
+    values = dict(line.split("=", 1) for line in _effective_properties(unit).splitlines())
+    if effective == "active":
+        values["ActiveState"] = "active"
+    elif effective.startswith("unloaded"):
+        values.update(LoadState="not-found", ActiveState="inactive",
+                      FragmentPath="", ExecStart="", WorkingDirectory="")
+        if effective == "unloaded-active":
+            values["ActiveState"] = "active"
+        elif effective == "unloaded-stale":
+            values["WorkingDirectory"] = _posix(root)
+    elif effective == "foreign-executable":
+        values["ExecStart"] = values["ExecStart"].replace(
+            _posix(root) + "/", _posix(root) + "-foreign/",
+        )
+    elif effective == "foreign-workdir":
+        values["WorkingDirectory"] = _posix(root) + "-foreign"
+    elif effective == "foreign-fragment":
+        values["FragmentPath"] = _posix(unit) + "-foreign"
+    elif effective == "drop-in":
+        values["DropInPaths"] = _posix(unit.parent / "fixture.service.d" / "override.conf")
+    elif effective == "multiple-commands":
+        values["ExecStart"] += " " + values["ExecStart"]
+    elif effective == "different-path":
+        values["ExecStart"] = values["ExecStart"].replace(
+            "{ path=" + _posix(root), "{ path=" + _posix(root) + "-foreign", 1,
+        )
+    elif effective == "missing-property":
+        del values["ExecStart"]
+    elif effective == "secret-argument":
+        values["ExecStart"] = values["ExecStart"].replace(
+            " ; ignore_errors=", " --token fixture-secret ; ignore_errors=", 1,
+        )
+    properties = "".join(f"{key}={value}\n" for key, value in values.items())
+    if effective == "duplicate-property":
+        properties += f"WorkingDirectory={_posix(root)}\n"
+    result, inspected, control = _run_preflight(
+        tmp_path, unit, root, source, plugin, properties, query_fails=effective == "query-failure",
+    )
+    accepted = effective in {"active", "inactive", "unloaded"}
+    assert (result.returncode == 0) is accepted, result.stdout + result.stderr
+    assert inspected.exists() is accepted
+    assert not control.exists(), "Foreign or unknown loaded properties must never authorize native control"
+    assert (unit.read_bytes(), unit.stat().st_mtime_ns) == before
+    if accepted:
+        expected = "unloaded" if effective == "unloaded" else "loaded"
+        assert f"admission={expected}" in result.stdout
+    assert "fixture-secret" not in result.stdout + result.stderr
 
 
 @pytest.mark.parametrize("historical", ("venv", ".venv"))
@@ -396,6 +501,7 @@ def test_native_caller_carries_original_identity_through_pid_reuse(
         f"PY={shlex.quote(_posix(Path(sys.executable)))};MODEL={shlex.quote(_posix(model))}",
         f"HOME={shlex.quote(_posix(home))};INSTALL_DIR={shlex.quote(_posix(root))}",
         'PID_FILE="$INSTALL_DIR/service.pid"; SYSTEMD_UNIT=fixture.service',
+        "_bridge_uninstall_unit_state=loaded",
         f'{tool}() {{ "$PY" -B "$MODEL" "$@" --root "$INSTALL_DIR" --plugin {plugin}; }}',
         f"systemctl() {{ {call if phase == 'after-service-stop' else ':'}; }}",
         *[_function(source, name) for name in names],

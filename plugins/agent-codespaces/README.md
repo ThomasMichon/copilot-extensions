@@ -197,6 +197,12 @@ the first stamp. POSIX drift detection retains its existing Python metadata
 reader. The hook uses its own canonical installed payload and default legacy
 root, not the deployment manifest's potentially different source.
 
+Direct POSIX installer mutation requires either native `flock` or an already
+available bootstrap Python for the same install-inode transaction. Native
+`flock` permits Python-free cold stamping; the Python fallback supports Bash
+3.2. If neither capability exists, the installer refuses without provisioning
+one. Read-only `status` requires neither capability.
+
 The existing 15-second hook returns `{}` after bounded native launch admission.
 Its diagnostic acknowledgement identifies a supervisor and log, **not** durable
 queue acceptance or installation success. Read the ordinary request receipt
