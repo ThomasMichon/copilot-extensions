@@ -374,8 +374,11 @@ onboarded merely because its source is published.
   originating claim and actual receiving identity across uncertainty; allocation
   remains distinct from agent launch.
 - [x] Land the protected origin/receiving provider foundation for that prerequisite.
-  Ordinary selectors, restart-safe asynchronous linkage, consumers and installed
+  Ordinary selectors, consumers and installed
   qualification remain in the open allocation item above.
+- [x] Land bounded asynchronous reconciliation under the existing elected
+  Worktrees resident. Ordinary startup alongside linkage and installed
+  acceptance remain in the open allocation item above.
 
 ### Phase 2 - Driver and directional policy
 
@@ -506,6 +509,26 @@ setup/apply, enrollment, live rollout, lifecycle takeover or implementation
 completion is asserted.
 
 ## Journal
+
+### 2026-10-26 - Resident-owned asynchronous linkage source merged
+
+- #9214 merged to `dev` as `ce469bffe906be5aad7b72b0b4047c206fb61387`.
+  Exact head `ddea184dca4abd2d4f95c8106f8db996f50f22d1` received current-head
+  Copilot approval with no active findings and passed required CI before
+  managed completion. The source vessel remains responsible for the effort.
+- Re-read the Plan and Validation Plan. Resolve only bounded resident
+  reconciliation: current-ledger restart discovery, finite same-allocation
+  requests, non-blocking network waits, current governance and election fences,
+  visible damaged inventory and mandatory retirement settlement.
+- The final isolated discovery/runtime/wake selection passed 39 cases,
+  including opaque-ledger repair, five newly registered projects under a
+  four-project sweep budget and scan-scoped configuration reuse for both active
+  and retained-closed claims. The exact committed required no-effects packet
+  passed 2,435 cases with production coverage recorded once.
+- Next implement ordinary `create` destination selection with CWD origin
+  capture and negotiated runtime capabilities, then migrate Bridge/Dispatch.
+  Agent startup alongside delayed linkage, actual promotion, authorized
+  installation, native qualification and the parent delivery gates remain open.
 
 ### 2026-10-26 - Allocation provider foundation merged
 

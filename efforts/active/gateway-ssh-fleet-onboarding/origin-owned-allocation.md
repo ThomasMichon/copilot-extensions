@@ -109,7 +109,7 @@ never a fallback to an unowned checkout.
   ownership journal are durable. Link the origin's exact child claim
   asynchronously while the agent boots, without adding an acknowledgement gate.
   Interrupted linkage cannot create another child or permit a second parent.
-- [ ] Keep bounded linkage reconciliation with the existing responsible owner
+- [x] Keep bounded linkage reconciliation with the existing responsible owner
   and durable original operation across restart. Do not rely on an unowned
   background coroutine, reverse callback or new scheduler/daemon.
 
@@ -183,10 +183,18 @@ without recarving. The required unit packet adds only pure custody/proof decisio
 with production coverage; actual receiving CLI and synthetic SSH/interpreter
 boundaries remain separately selected integration tests.
 
-Ordinary destination selectors, the origin's restart-safe asynchronous linker,
-Bridge/Dispatch migration, real outbound-only/native qualification and release/
-installed acceptance remain open. No source-only checkbox establishes those
-outcomes or closes #5839.
+The restart-safe asynchronous linker merged in #9214 as
+`ce469bffe906be5aad7b72b0b4047c206fb61387`. The existing elected resident
+owns strict current-ledger discovery, finite receiving requests, current
+governance rechecks and mandatory worker settlement. Its validation covers
+malformed inventory, later project registration, same-claim restart recovery,
+non-blocking locks and drain/retirement boundaries.
+
+Ordinary destination selectors, Bridge/Dispatch migration, startup alongside
+delayed linkage, real outbound-only/native qualification and release/installed
+acceptance remain open. No source-only checkbox establishes those outcomes
+or closes #5839. The next source slice is the ordinary creation coordinator,
+not another linkage service or an acknowledgement-dependent startup gate.
 
 ## Validation Plan
 
