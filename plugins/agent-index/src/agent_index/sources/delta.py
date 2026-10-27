@@ -90,3 +90,35 @@ class AcquisitionPage:
             or len(self.cursor.encode()) > 65536
         ):
             raise ValueError("Connector acquisition cursor must be a bounded nonempty string")
+
+
+@dataclass
+class SnapshotPage:
+    """One unit of an immutable, complete source-family snapshot.
+
+    ``discover_snapshot_page(snapshot, cursor, cancel_check=None)`` opts in with
+    ``snapshot_page_versions = (1,)``. The first call selects a nonsecret snapshot
+    token; continuations must read that same snapshot, including every descendant
+    stream. A terminal cursor certifies complete coverage, not just an API page
+    ending. Mutable offset pagination cannot implement this contract.
+    """
+
+    snapshot: str
+    upserts: list[FileEntry] = field(default_factory=list)
+    commit: str | None = None
+    cursor: str | None = None
+    version: int = 1
+
+    def validate(self, family: str) -> None:
+        if type(self.version) is not int or self.version != 1:
+            raise ValueError("Unsupported connector snapshot-page version")
+        if (
+            not isinstance(self.snapshot, str) or not self.snapshot
+            or len(self.snapshot.encode()) > 65536
+        ):
+            raise ValueError("Connector snapshot token must be a bounded nonempty string")
+        if not isinstance(self.upserts, list) or len(self.upserts) > 256:
+            raise ValueError("Connector snapshot page must contain at most 256 items")
+        AcquisitionPage(
+            SourceDelta(upserts=self.upserts, commit=self.commit), self.cursor,
+        ).validate(family)
