@@ -132,17 +132,23 @@ def _run(fixture, environment, host, *arguments):
 
 def _refusal_snapshot(home):
     snapshot = _snapshot(home)
-    # Even an empty Windows PowerShell host rewrites this CLR startup profile.
-    snapshot.pop(
-        "AppData/Local/Microsoft/Windows/PowerShell/StartupProfileData-NonInteractive",
-        None,
-    )
+    # Empty Desktop and Core hosts each rewrite their own CLR startup profile.
+    for directory in ("Windows/PowerShell", "PowerShell"):
+        snapshot.pop(
+            f"AppData/Local/Microsoft/{directory}/StartupProfileData-NonInteractive",
+            None,
+        )
     return snapshot
 
 
-@pytest.mark.parametrize("change", ("product-state", "unexpected-write"))
-def test_refusal_snapshot_preserves_every_other_home_entry(tmp_path, change):
-    profile = tmp_path / "AppData/Local/Microsoft/Windows/PowerShell/StartupProfileData-NonInteractive"
+@pytest.mark.parametrize(("change", "profile_directory"), (
+    pytest.param("product-state", "Windows/PowerShell", id="product-state"),
+    pytest.param("unexpected-write", "Windows/PowerShell", id="unexpected-write"),
+    pytest.param("product-state", "PowerShell", id="core-product-state"),
+    pytest.param("unexpected-write", "PowerShell", id="core-unexpected-write"),
+))
+def test_refusal_snapshot_preserves_every_other_home_entry(tmp_path, change, profile_directory):
+    profile = tmp_path / f"AppData/Local/Microsoft/{profile_directory}/StartupProfileData-NonInteractive"
     profile.parent.mkdir(parents=True)
     profile.write_bytes(b"first runtime profile")
     product = tmp_path / ".copilot-extensions/installation-mode.json"
@@ -154,7 +160,7 @@ def test_refusal_snapshot_preserves_every_other_home_entry(tmp_path, change):
     if change == "product-state":
         product.write_bytes(b"changed product state")
     else:
-        (tmp_path / "unexpected-write").write_bytes(b"new")
+        profile.with_name("unexpected-write").write_bytes(b"new")
     assert _refusal_snapshot(tmp_path) != before
 
 
