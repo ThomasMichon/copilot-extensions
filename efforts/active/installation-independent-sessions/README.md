@@ -143,6 +143,16 @@ and live charter retain that ordering. Migration is not same-process survival;
 the qualified replacement's later uninstall/reinstall test must preserve its
 own original processes.
 
+**Latest execution direction (summary):** continue burning down this same
+effort to the selected-host live test. Admission is per worktree, only until
+its mux is discoverable; contenders join that mux and different worktrees
+launch in parallel. Record the active native conversations, close legacy
+muxes, uninstall and clean installation leftovers, freshly install and restore
+the exact active set using the new system, then uninstall, clean and reinstall
+again around those replacement sessions. Cleanup explicitly excludes runtime
+state and configuration. The [literal follow-up](inception-transcript.md#operator---per-worktree-admission-and-two-cycle-live-test)
+retains these constraints; private host identity stays outside this repository.
+
 ## Plan
 
 ### Phase 1 - Reviewed contract and shared ownership
@@ -173,6 +183,12 @@ own original processes.
 
 ### Phase 3 - Production launch-owned wrapper and boundary hooks
 
+- [ ] Remove both deferred-setup and final-backend runtime-Python waiters.
+  Reuse finite seed preparation, existing seed custody and execution receipts;
+  the native shell owns the actual child handle and wait.
+- [ ] Fence only same-worktree check/create races until mux discoverability.
+  Recheck and join on contention; distinct worktrees remain parallel and no
+  launch lock survives for Copilot's lifetime.
 - [ ] Prepare launch arguments/environment before the stable wrapper; copy
   its self-contained platform shell into launch-owned storage outside both
   removable runtime/config roots, with installer/pruning ownership explicit.
@@ -231,6 +247,20 @@ own original processes.
   selected active worktrees and associated native sessions. Verify attached
   `worktrees copilot` and detached `worktrees embody` share create-or-resume
   semantics with the qualified wrapper and never duplicate a live execution.
+- [ ] Before the first cycle, record the current exact active worktree/native
+  conversation/mux set privately and verify restorable backups and fresh
+  independent protected SSH-Gateway connectivity.
+- [ ] First cycle: gracefully close recorded legacy muxes, use supported
+  uninstallers, classify and remove only in-scope straggler processes and
+  installation detritus, record the clean middle and freshly install the
+  qualified release without removing state or configuration.
+- [ ] Restore exactly the recorded active set through the new system and
+  verify the associated native conversation IDs, both command entry points,
+  terminal behavior and replacement mux/wrapper/Copilot process identities.
+- [ ] Second cycle: uninstall, clean identified installation leftovers and
+  reinstall again while those replacement sessions remain the same running
+  processes. Verify interactive continuation, state/config preservation,
+  protected connectivity and final current-handler lifecycle delivery.
 - [ ] Re-read every Plan/Validation item, promote durable truth to owner docs,
   settle owned test/PR resources, mark Done and archive through normal review.
 
@@ -244,6 +274,9 @@ operator's installation-survival contract.
   unchanged literal argument/environment/exit propagation.
 - [ ] A simple subprocess integration test invokes the real copied shell and
   real redirectable handler; mocks cannot bypass the resolution being tested.
+- [ ] Real overlapping same-worktree attempts create one mux and join it;
+  different-worktree launches overlap independently. Admission releases when
+  the mux is discoverable, not when Copilot exits.
 - [ ] Linux clean room: install A, launch an interactive owned session,
   actually uninstall both systems, prove their runtime roots are gone, install
   B, and exit. The same mux, wrapper and Copilot processes remain interactive;
@@ -288,6 +321,10 @@ operator's installation-survival contract.
   SSH-Gateway and the same mux/Copilot processes remain usable at every phase;
   owned runtime/services are absent at the clean middle with explicit protected
   exceptions; reinstall preserves durable state and pending-effect custody.
+- [ ] Both selected-host installation cycles are recorded separately: legacy
+  closure/restoration is migration evidence, while the replacement's later
+  same-process survival is installation-independence evidence. Manual scrub
+  never deletes runtime state or configuration.
 
 ## Proposal
 
@@ -904,3 +941,87 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
 - Launch-owned wrappers/current boundary handlers, native Windows survival,
   maintenance-aware YAML standby and released installed acceptance remain
   open. This effort stays Active.
+
+### 2026-10-27 - Copied-shell prerequisite merged; seed boundary continues
+
+- #9150 merged as `a7680d0ecc7b387ca66110a590bce36a88b0d069` after
+  exact-head review `5662297754` and green required checks. The review reported
+  no inline code findings and correctly retained POSIX signal/terminal and
+  containment qualification as an open concern. The maintainer assessment
+  records that this preparatory merge is not a migration or survival witness.
+- Re-read the complete Plan and Validation Plan. No broad implementation or
+  native-acceptance checkbox is closed by this prerequisite: both deferred
+  setup and final `--invoke` runtime waiters still remain. Installed source
+  release, cold/warm timing, literal removal, native Copilot/TTY, standby and
+  exact active-set restoration remain continuing gates.
+- Pulled the owning worktree onto the confirmed squash merge, retaining the
+  pre-sync recovery refs. Continue the seed/admission boundary in this same
+  effort, outside #5579's retained front-door forwarding/shim ownership. No
+  host installation, runtime update or session retirement was performed.
+
+### 2026-10-27 - Finite seed preparation seam
+
+- Separated the existing finite policy/argv/seed-claim preparation from
+  `launch_seed_exec`'s process invocation and wait. The legacy caller still
+  owns the same admission guard, spawn, finish/restore and wait sequence;
+  no native adapter or capability is activated by this refactor.
+- The native integration must reuse that policy, not reproduce it in shell.
+  Preparation retains the claimed handoff until actual spawn and neither
+  finishes it nor automatically restores an uncertain outcome. Existing
+  execution correlation and stale native-hint removal remain in that owner.
+- Both runtime waiters remain present until the native integration and its
+  complete consumer/containment/terminal acceptance pass.
+- The preparation, execution and attempt suites passed 29, 29 and 128 tests.
+  The remaining seed-delivery suite timed out in a real PowerShell consumer:
+  killing only its immediate subprocess left descendants holding capture pipes.
+  Its test now uses the existing finite process-tree owner so a timeout yields
+  diagnostics and cleanup instead of blocking the entire suite.
+- Launch exclusion is explicitly per worktree and ends when its mux becomes
+  discoverable. Same-worktree contenders join; different worktrees remain
+  parallel. The native integration must not preserve the legacy admission-only
+  wrapper's session-lifetime lock.
+- The approved live validation is a two-cycle installation round trip: capture
+  active native conversations, close legacy muxes, remove tools/services,
+  reinstall and restore using the new launch path, then repeat removal and
+  reinstall around those durable sessions. Manual cleanup covers only
+  identified process/installation leftovers, never durable state or config.
+  Backups, protected connectivity and exact restoration remain prerequisites.
+- Current implementation focus moves to Phase 3's finite native seed/backend
+  boundary. Earlier reproduction and full native-acceptance items remain open;
+  this slice transition does not mark them complete.
+- The internal finite backend provider now reuses existing execution and seed
+  records without spawning or waiting for Copilot. Initial controls passed 15
+  tests after correcting two test expectations for placement before literal
+  `--`. Current-runtime CLI refusal and a dormant, dot-sourced Windows native
+  adapter are being added; no production caller or capability is activated.
+- Revalidating the complete 128-case seed-state file reached its 300-second
+  suite budget. A focused launch/admission partition passed 93 tests in 217.77
+  seconds with 35 pair-GC cases explicitly deselected. The earlier complete
+  packet had passed all 128 before the shared request-validation extraction;
+  neither timeout is relabeled as a green full-suite run.
+- #5579 coordination was refreshed for the finite seed slice, preserving its
+  forwarding/shim ownership and whole-chain acceptance. The absence of a peer
+  response does not transfer custody.
+- Current-completed-runtime refusal controls passed with the finite provider:
+  20 tests. The first four-case Windows adapter run exposed real output loss
+  for a consoleless child. Explicit redirected output handles and asynchronous
+  byte forwarding now preserve original stdin as well; the expanded native
+  packet passed all five cases, including exact stdin/stdout/stderr, literal
+  argv, actual PID/birth and exit, definite start refusal and absent end.
+- The adapter is dot-sourced into an existing lifetime owner, not another
+  persistent shell. This is a dormant Windows provider-first slice: production
+  callers, copied-asset integration, POSIX native adaptation, real terminal/
+  Ctrl+C/Job acceptance, per-worktree mux-create fencing and both removal
+  cycles remain open. No target installation or session changed.
+- Review found two concrete adapter defects: a failed redirected sink could
+  stop draining and block its child, and PowerShell's selected location could
+  differ from the inherited process directory. Finite callbacks and backend
+  start now set the selected filesystem location explicitly. Redirected streams
+  use event-driven child/task waits; a failed destination drains to null without
+  losing the actual exit and correlated return. No polling helper was added.
+- The expanded Windows packet passed nine tests, including actual closed
+  stdout and stderr sinks with output exceeding pipe capacity, and distinct
+  PowerShell/OS-directory controls for both finite and backend execution.
+  The launch-site census also classifies both adapter process starts as
+  caller-contained; its source guard passes. These corrections do not activate
+  callers or close native terminal/installation-survival acceptance.

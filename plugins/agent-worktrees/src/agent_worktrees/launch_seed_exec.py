@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import os
 import subprocess
 import sys
@@ -169,17 +170,11 @@ def _admitted_launch(
     admission_only: bool, preserve_seed_id: str | None, native_resume_session: str | None,
     execution: launch_execution.Execution | None,
 ) -> int:
-    from . import agent_policy
-
-    try:
-        agent_policy.require_record(record_path)
-    except (OSError, ValueError) as exc:
-        print(str(exc), file=sys.stderr)
+    if not _valid_request(
+        record_path, invoke=invoke, seed_id=seed_id, admission_only=admission_only,
+        preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
+    ):
         return 3
-    if (preserve_seed_id and not admission_only) or (admission_only and (seed_id or invoke)):
-        raise ValueError("Admission-only launch cannot claim a prompt")
-    if native_resume_session and not admission_only:
-        raise ValueError("Native resume requires owner-held admission-only execution")
     if admission_only:
         with launch_admission.guard(record_path):
             return _launch(
@@ -191,12 +186,38 @@ def _admitted_launch(
     return _launch(record_path, command, invoke=invoke, seed_id=seed_id, execution=execution)
 
 
-def _launch(
+def _valid_request(
+    record_path: Path, *, invoke: bool, seed_id: str | None,
+    admission_only: bool = False, preserve_seed_id: str | None = None,
+    native_resume_session: str | None = None,
+) -> bool:
+    from . import agent_policy
+
+    try:
+        agent_policy.require_record(record_path)
+    except (OSError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return False
+    if (preserve_seed_id and not admission_only) or (admission_only and (seed_id or invoke)):
+        raise ValueError("Admission-only launch cannot claim a prompt")
+    if native_resume_session and not admission_only:
+        raise ValueError("Native resume requires owner-held admission-only execution")
+    return True
+
+
+@dataclass(frozen=True)
+class PreparedLaunch:
+    argv: list[str]
+    receipt: dict | None
+    environment: dict[str, str] | None
+
+
+def _prepare(
     record_path: Path, command: list[str], *, invoke: bool, seed_id: str | None,
     admission_only: bool = False, preserve_seed_id: str | None = None,
     native_resume_session: str | None = None,
     execution: launch_execution.Execution | None = None,
-) -> int:
+) -> PreparedLaunch | int:
     try:
         record = tracking.load_record(record_path)
     except (OSError, ValueError) as exc:
@@ -250,7 +271,6 @@ def _launch(
             file=sys.stderr,
         )
         return 3
-    seed = None
     receipt = None
     argv = command
     if invoke and current is not None:
@@ -291,6 +311,23 @@ def _launch(
     if child_environment is None and launch_execution.NATIVE_HINT_ENV in os.environ:
         child_environment = os.environ.copy()
         child_environment.pop(launch_execution.NATIVE_HINT_ENV)
+    return PreparedLaunch(argv, receipt, child_environment)
+
+
+def _launch(
+    record_path: Path, command: list[str], *, invoke: bool, seed_id: str | None,
+    admission_only: bool = False, preserve_seed_id: str | None = None,
+    native_resume_session: str | None = None,
+    execution: launch_execution.Execution | None = None,
+) -> int:
+    prepared = _prepare(
+        record_path, command, invoke=invoke, seed_id=seed_id, admission_only=admission_only,
+        preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
+        execution=execution,
+    )
+    if isinstance(prepared, int):
+        return prepared
+    argv, receipt, child_environment = prepared.argv, prepared.receipt, prepared.environment
     try:
         if os.name != "nt" and not invoke and not admission_only and execution is None:
             if child_environment is not None:
