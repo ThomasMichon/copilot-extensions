@@ -45,6 +45,7 @@ def test_actual_lazy_capability_dispatch_needs_no_full_cluster(monkeypatch, comm
             "version": 1, "destination_selectors": ["machine", "repo"],
             "creation_key": "opaque-v1", "result": "ordinary-worktree+allocation-v1",
             "recovery_request_id": True,
+            "kinds": ["session", "bridge"], "caller_worktree": True, "creator_identity": True,
             "claim_linkage": "non-blocking", "agent_launch": False,
         }
 

@@ -379,6 +379,9 @@ onboarded merely because its source is published.
 - [x] Land bounded asynchronous reconciliation under the existing elected
   Worktrees resident. Ordinary startup alongside linkage and installed
   acceptance remain in the open allocation item above.
+- [x] Land the ordinary origin-owned destination coordinator and original
+  receiving-result contract. Consumer integration and installed/native
+  qualification remain in the open allocation prerequisite.
 
 ### Phase 2 - Driver and directional policy
 
@@ -509,6 +512,27 @@ setup/apply, enrollment, live rollout, lifecycle takeover or implementation
 completion is asserted.
 
 ## Journal
+
+### 2026-10-26 - Ordinary destination coordinator source merged
+
+- #9230 merged to `dev` as `f3d11b3bcd07805ebfaa3db22b4dfdf30535bb42`.
+  Exact head `325e311a70e22dc759f6add014311df362f72cd5` received Copilot
+  approval with no active findings and required green checks before managed
+  completion. The retained source vessel continues the open allocation slice.
+- The ordinary coordinator captures the original CWD owner before destination
+  selection, negotiates actual origin/resident/receiver capabilities and
+  returns the original sessionless receiving result with linkage reported
+  separately. Request-ID recovery survives lost stdout without reconstructing
+  a generated opaque key. Unresolved linked origins, including unregistered
+  repositories, and unsupported environment requests refuse before effects.
+- The final focused container packet passed 63 cases, including fresh
+  receiving CLI/result recovery and local/remote ownership refusals. The
+  exact-head required packet passed 2,440 no-effects units with coverage.
+  These are source/process results, not native startup or an installation.
+- Re-read the Plan and Validation Plan. Close only ordinary-coordinator source;
+  continue narrow Bridge/Dispatch consumption without a second allocator,
+  foreign origin-ledger writes or a linkage-acknowledgement startup gate.
+  Actual outbound-only, native, release and installed acceptance remain open.
 
 ### 2026-10-26 - Original receiving creation-result source merged
 

@@ -196,6 +196,9 @@ class _SessionStartMixin:
         if caller_owner_ref is not None and target.caller_owner_ref is None:
             target = replace(target, caller_owner_ref=caller_owner_ref)
         session_id = creation_session_id or str(uuid.uuid4())[:12]
+        from .owned_workspace import arm
+
+        target = arm(target, session_id)
         if session_id in self._sessions:
             raise ValueError("creation session already exists; reconcile its original start")
         prepared_local_launch = None
@@ -679,6 +682,9 @@ class _SessionStartMixin:
                 # ThomasMichon/copilot-extensions#566), so this is their only
                 # path. It is NOT reachable for a local target. Emits per-stage
                 # checkpoints (auth-env, ssh-connect, worktree) into the event log.
+                from .owned_workspace import prepare_session
+
+                await prepare_session(session, self._db)
                 core = _core()
                 agent_proc = await core.spawn(
                     target,

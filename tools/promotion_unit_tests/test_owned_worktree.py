@@ -282,6 +282,13 @@ def test_destination_options_keep_no_launch_and_refuse_unsupported_seed(destinat
         "kind": "session", "no_pair": True, "interface": "acp", "origin": "delegate",
         "bound_agent": "worker", "dispatch_attempt": attempt,
     }
+    args.bridge, args.caller_worktree = True, "caller"
+    assert destination._remote_options(args, attempt)["kind"] == "bridge"
+    assert destination._remote_options(args, attempt)["caller_worktree"] == "caller"
+    args.system = True
+    with pytest.raises(ValueError, match="different worktree kinds"):
+        destination.creation_kind(args)
+    args.system = False
     args.seed = "must not silently disappear"
     with pytest.raises(ValueError, match="--seed"):
         destination._remote_options(args, attempt)

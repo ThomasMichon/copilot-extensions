@@ -41,6 +41,7 @@ def _bounded_log_text(text: str | None, limit: int) -> str | None:
 
 async def worktree_command(
     args: list[str], project: str | None, *, before_spawn: Callable[[], None] | None = None,
+    timeout: float = 120,
 ) -> dict[str, Any]:
     try:
         prefix = _agent_worktrees_launch_prefix()
@@ -90,7 +91,7 @@ async def worktree_command(
             # awaits this owner before releasing its operation files/locks.
             stdout, stderr = await proc.communicate()
         else:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), 120)
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout)
     except (TimeoutError, asyncio.TimeoutError) as exc:
         # The owner may still be launching. Never terminate it or retry a launch.
         log_failure("owner_operation_pending")

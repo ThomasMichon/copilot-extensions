@@ -15,6 +15,7 @@ from repository_policy import AgentHostingError
 from .session_preferences import client_preferences
 from .cold_outages import admitted_recovery, guarded_resume
 from .models import SessionStatus
+from .owned_workspace import prepare_session as prepare_owned_workspace
 from .startup_progress import lifecycle_lock, observed, phase
 from .transport import SpawnTarget
 from .privileged_plugins import CONTEXT_KEY, PrivilegedLaunchRefused, relay_agent, start_client
@@ -349,6 +350,7 @@ class _SessionResumeMixin:
                     client = host_result[0] if host_result is not None else None
                     if client is None:
                         with phase("process-preparation"):
+                            await prepare_owned_workspace(session, self._db)
                             agent_proc = await core.spawn(session.target)
                         client = core.AcpClient(
                             on_event=on_acp_event,
@@ -562,6 +564,7 @@ class _SessionResumeMixin:
                     if host_result is not None:
                         recreate_client, new_acp = host_result
                     else:
+                        await prepare_owned_workspace(session, self._db)
                         agent_proc = await core.spawn(session.target)
                         recreate_client = core.AcpClient(
                             on_event=on_acp_event,
@@ -768,6 +771,7 @@ class _SessionResumeMixin:
             client: AcpClient | None = None
             try:
                 core = _core()
+                await prepare_owned_workspace(session, self._db)
                 agent_proc = await core.spawn(session.target)
                 client = core.AcpClient(
                     on_event=on_capture,
