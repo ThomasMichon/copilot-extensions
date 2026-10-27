@@ -112,6 +112,7 @@ def _aw_fixture_rooted_diagnostic(
                 "bodyMatch": arguments[1:4] == ["-c", body, "bash"],
                 "commandFlagMatch": arguments[1] == "-c",
                 "commandBodyMatch": arguments[2] == body,
+                "quotedHeredocContinuationMatch": arguments[2] == body.replace("\\\n", ""),
                 "zeroNameMatch": arguments[3] == "bash",
                 "commandBodyWithoutFinalNewlinesMatch": arguments[2].rstrip("\n") == body,
                 "commandBodyWithFinalNewlinesMatch": arguments[2] == body + "\n",
