@@ -72,7 +72,7 @@ refuse it rather than interpreting partial acquisition as a complete manifest.
 Finish pending work before rollback or switching to hints, full reconciliation
 or a connector without paged support. An explicit caller-authorized
 `indexing.paged_crawl.discard_acquisition` repair may instead abandon only an
-**unapplied v2** acquisition. It requires the original actual connector,
+**unapplied v2 or v4** acquisition. It requires the original actual connector,
 configuration scope, path database and exact observed payload; the owning
 journal compares those under its existing SQLite transaction before removing
 the row. Concurrent progress or promotion to a complete v1 manifest refuses
@@ -86,6 +86,36 @@ manifests carrying polling-refresh generations are likewise mandatory replay,
 never eligible for acquisition discard; ordinary manifests retain v1 encoding.
 This adds no external-provider CLI flag;
 CLI delta-v1 providers retain their existing complete-result contract.
+
+Full reconciliation has a separate opt-in Python contract:
+`discover_snapshot_page.snapshot_page_versions = (1,)`. The method receives
+`(snapshot, cursor, *, cancel_check=None)`; both inputs are `None` initially.
+Its `SnapshotPage` selects a bounded, nonsecret immutable snapshot token,
+returns at most 256 `FileEntry` values and a target checkpoint, and uses a
+terminal cursor only when the **entire canonical family, including descendant
+streams**, is covered. Every continuation receives and must retain that token
+and target. A mutable API offset or a delta's `complete=True` is not snapshot
+evidence. Expired snapshots fail visibly; they never become empty coverage.
+
+The shared engine saves these units under the same journal key, configuration
+scope, generation and compare-and-save guard. Only after terminal provider
+coverage does it compare stored identities in keyset-ordered pages of at most
+256. A full invocation has a separate 128-unit budget counting both provider
+and comparison pages. Retry resumes the provider cursor or comparison keyset;
+it never re-enumerates acknowledged provider pages. Partial full work uses v4,
+which older readers reject. It cannot reach indexing or source-state publication
+until promotion to the existing completed v1/v3 envelope; retained hinted files
+and history are explicitly covered before v3 promotion and acknowledged only
+after durable state publication. Changing mode, account, family or base
+checkpoint refuses pending full work. Explicit discard leaves canonical data
+and source state untouched.
+
+This bounds acquisition/comparison units, **not** whole-manifest memory,
+serialization bytes or wall time: the journal still accumulates a complete
+manifest. Connectors without full-snapshot support retain the existing legacy
+full path. No built-in or external CLI provider advertises this new full contract
+yet; their immutable snapshot acquisition is separate adapter work. There are
+no new CLI flags, state cursor owners, source locks or automatic full repairs.
 
 GitHub ordinary polls use a fresh, **single page of at most 100 identities**
 updated since their committed timestamp, replaying the existing 60-second
@@ -103,9 +133,10 @@ GitHub's list API is not an immutable snapshot or a deleted-item feed. This
 polling path does not prove complete reconciliation or capture edits invisible
 to the provider's `updated_at` semantics. Explicit full discovery retains the
 legacy reconciliation path and captures a timestamp **before** discovery.
-Budgeted full reconciliation, external paged CLI support and durable recovery
-within one item's comment pages remain separate work; they are not supplied by
-this bounded polling contract.
+The shared full-reconciliation contract above does not implement a pinned
+GitHub snapshot. GitHub full acquisition, external paged CLI support and durable
+recovery within one item's comment pages remain separate adapter work; they are
+not supplied by this bounded polling contract.
 
 An external provider's existing `content-current-commit --source SOURCE` reply
 may add `source_delta` with contract `agent-index.source-delta`, explicit
