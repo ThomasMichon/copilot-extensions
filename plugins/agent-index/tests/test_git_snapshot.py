@@ -65,7 +65,8 @@ def test_snapshot_matches_legacy_and_never_uses_whole_corpus_helpers(repo, monke
     history = [args for args in commands if "log" in args]
     assert history
     assert all(
-        "--max-count=2" in args and "--topo-order" in args and target in args
+        ("--max-count=2" in args or "--max-count=3" in args)
+        and "--topo-order" in args and target in args
         and any(arg.startswith("--skip=") for arg in args)
         for args in history
     )
@@ -154,6 +155,8 @@ def test_excluded_files_still_consume_page_budget(repo, monkeypatch):
 
 @pytest.mark.parametrize("bad", [
     "", "[]", '{"history":true}', '{"history":-1}', '{"files":[]}',
+    '{"history":true,"previous":null}', '{"history":-1,"previous":null}',
+    '{"history":1,"previous":null}', '{"history":0,"previous":"invalid"}',
     '{"files":[["",0],["../escape",0]]}', '{"files":[["",0],["a/b",0]]}',
     '{"files":[["",0],["child",-1]]}', '{"files":[["",false]]}',
     '{"files":[["other",0]]}', '{"files":[["",0]],"history":0}',
@@ -421,6 +424,40 @@ def test_restored_parent_frame_must_point_immediately_after_its_active_child(
     journal.compare_and_save("alias", scope=scope, payload=corrupted, expected=before, family=family)
     monkeypatch.setattr(git_snapshot, "_PAGE_SIZE", 128)
     with pytest.raises(ValueError, match="parent continuation"):
+        acquire_snapshot("alias", **kwargs)
+    assert journal.read_payload("alias", scope) == corrupted
+    assert journal.load("alias", scope) is None
+    assert paths.count() == 1
+
+
+@pytest.mark.parametrize("offset,wrong_predecessor", [(100, False), (1, True)])
+def test_invalid_history_ordinal_cannot_certify_terminal_coverage(
+    repo, tmp_path, monkeypatch, offset, wrong_predecessor,
+):
+    source = connector(repo)
+    target = source.current_commit()
+    discover = source.discover_snapshot_page
+    assert discover is not None
+    paths = PathIndex(tmp_path / "paths.db")
+    family = source.source_name
+    paths.mark_indexed_batch([(family + ":commits", f"commits/{target}.txt", "old", 1)])
+    journal = PendingCrawls(paths)
+    scope = recovery_scope("alias", source)
+    monkeypatch.setattr(git_snapshot, "_PAGE_SIZE", 1)
+    kwargs = dict(
+        family=family, stored_family=None, scope=scope, last_commit="base",
+        journal=journal, discover=discover, unit_budget=1,
+    )
+    with pytest.raises(RuntimeError, match="unit budget"):
+        acquire_snapshot("alias", **kwargs)
+    before = journal.read_payload("alias", scope)
+    data = json.loads(before)
+    data["cursor"] = json.dumps({
+        "history": offset, "previous": "a" * 40 if wrong_predecessor else target,
+    })
+    corrupted = json.dumps(data)
+    journal.compare_and_save("alias", scope=scope, payload=corrupted, expected=before, family=family)
+    with pytest.raises(ValueError, match="pinned predecessor"):
         acquire_snapshot("alias", **kwargs)
     assert journal.read_payload("alias", scope) == corrupted
     assert journal.load("alias", scope) is None

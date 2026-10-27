@@ -224,7 +224,12 @@ filename cannot become an invented entry. Each directory object is limited to
 16,000,000 bytes, checked before loading; exceeding it fails visibly rather
 than silently dropping a directory. Immutable blob reads retain the existing
 file-size/text filters. History pages return at most 128 entries with explicit
-topological ordering against the pinned commit. A terminal page certifies both
+topological ordering against the pinned commit. Their continuation carries the
+last acknowledged commit identity as well as the ordinal. A resumed native log
+window reads that predecessor plus at most 128 new entries (129 total), and
+must match the predecessor before accepting a terminal result. Out-of-range
+ordinals or shifted ordinal/identity pairs cannot certify empty history.
+A terminal page certifies both
 streams, after which the existing bounded stored-identity comparison can infer
 tombstones. Missing objects and unavailable coverage retain pending progress
 without advancing state or falling back to an empty snapshot.

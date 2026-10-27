@@ -25,9 +25,13 @@ _PREFIX = "git-snapshot-v1:"
 class _Cursor:
     files: list[tuple[str, int]] | None = None
     history: int = 0
+    previous: str | None = None
 
     def encode(self) -> str:
-        return json.dumps({"files": self.files} if self.files else {"history": self.history})
+        return json.dumps(
+            {"files": self.files} if self.files
+            else {"history": self.history, "previous": self.previous}
+        )
 
 
 def _cursor(value: str | None) -> _Cursor:
@@ -38,10 +42,13 @@ def _cursor(value: str | None) -> _Cursor:
     data = json.loads(value)
     if not isinstance(data, dict):
         raise ValueError("Invalid Git snapshot cursor")
-    if set(data) == {"history"}:
-        if type(data["history"]) is not int or data["history"] < 0:
+    if set(data) == {"history", "previous"}:
+        offset, previous = data["history"], data["previous"]
+        if type(offset) is not int or offset < 0 or (
+            previous is not None if offset == 0 else not immutable_oid(previous)
+        ):
             raise ValueError("Invalid Git snapshot history offset")
-        return _Cursor(history=data["history"])
+        return _Cursor(history=offset, previous=previous)
     if set(data) != {"files"} or not isinstance(data["files"], list) or not data["files"]:
         raise ValueError("Invalid Git snapshot tree cursor")
     frames: list[tuple[str, int]] = []
@@ -191,12 +198,19 @@ def discover_git_snapshot(
     else:
         offset = data.history
         entries = connector._discover_commits(
-            None, target_commit=target, max_count=_PAGE_SIZE, skip=offset,
+            None, target_commit=target, max_count=_PAGE_SIZE + int(offset > 0),
+            skip=max(0, offset - 1),
             cancel_check=cancel_check, strict=True,
         )
+        if offset:
+            if not entries or entries[0].path != f"commits/{data.previous}.txt":
+                raise ValueError("Git snapshot history cursor does not match its pinned predecessor")
+            entries = entries[1:]
         if len(entries) > _PAGE_SIZE:
             raise ValueError("Git snapshot history exceeded its requested page")
-        next_cursor = _Cursor(history=offset + len(entries)).encode() if (
+        next_cursor = _Cursor(
+            history=offset + len(entries), previous=entries[-1].metadata["sha"],
+        ).encode() if (
             len(entries) == _PAGE_SIZE
         ) else None
         page = SnapshotPage(_PREFIX + target, entries, target, next_cursor)
