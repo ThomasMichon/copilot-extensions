@@ -211,6 +211,43 @@ text decoder.
 Native Windows OpenSSH and Git for Windows retain their respective proxy-command
 quoting and shell semantics.
 
+Profile-derived Windows `ProxyJump` chains are resolved before transport starts.
+Each hop uses the selected SSH executable and its own configured account, port,
+identity and host trust, behind the same owned byte-transparent broker.
+Comma-separated and profile-nested jumps are supported; cycles, malformed
+specifications and chains exceeding eight hops refuse before a transport starts.
+Hop configuration reads use the existing bounded profile resolver. Resolved
+direct stages explicitly disable native proxy execution, so a later config read
+cannot reintroduce an unowned jump. POSIX retains native jump handling.
+Explicit `-J` and `-o ProxyJump` options are consumed into the owned route
+before adding its `ProxyCommand`; other options and remote-command arguments
+remain intact. Destination overrides retain SSH's first-value precedence and
+`HostName` expansion of `%h` and `%%`, including options after the destination
+but before the remote command. Cycle identity uses declared aliases, not resolved addresses,
+so different network scopes may legitimately reuse an endpoint.
+CLI `ProxyCommand`/`ProxyJump` selection retains its first-selected precedence.
+Jump host/user tokens share the proxy token expander: `%%`, `%h`, `%n`, `%p`
+and `%r` use the destination identity before hop-profile lookup. URI components
+are decoded before token expansion, and earlier comma-separated hops receive
+the same destination context before passing to the next stage.
+Every Windows launch resolves its effective root through the existing
+bounded selected-client resolver using the original argv, even with a cached
+config and unchanged filename, or a plain programmatic configuration without
+an explicit file. The implicit native profile can still supply routing for
+that plain configuration; partial CLI overrides are not proof of a direct route.
+Native profile matching and explicit overrides remain authoritative; every hop
+uses the selected configuration file. This adds one fresh local root query per
+Windows launch, including plain programmatic configurations.
+With an unchanged profile selection, explicit programmatic fields and proxy
+options remain overrides rather than cached file values. CLI selections take
+precedence; choosing another `-F` file does not resurrect the previous
+profile's programmatic overrides.
+The imported runtime advertises this bounded selected-client probe contract as
+`ssh_manager.proxy.WINDOWS_OWNED_PROBE_VERSION = 1`, independently of its package
+version. Older consumers retain their existing API; a new Windows probe caller
+must refuse an unavailable contract rather than guess that an older lookup/
+launcher enforces it. Other commands and POSIX operation remain available.
+
 Windows SSH roots and broker-owned proxy children omit Win32-OpenSSH's inherited
 `c28fc6f98a2c44abbbd89d6a3037d0d9_POSIX_FD_STATE` environment key. That metadata
 describes an ancestor's file descriptors, not the new redirected handles; passing
@@ -228,6 +265,10 @@ Renamed or relocated physical GUI targets are accepted based on that selection
 intent, not a filename check; an unavailable GUI interpreter is refused rather
 than substituting the ordinary console fallback.
 POSIX transports retain native ProxyCommand execution.
+
+The opt-in actual-client visibility and retirement lane is documented in
+[the testing guide](../../TESTING.md#optional-owned-windows-jump-probes).
+Source contracts and a selected-client lane do not establish an installed rollout.
 
 ## As a Dependency
 

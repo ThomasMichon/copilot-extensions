@@ -367,6 +367,9 @@ def test_failed_clean_store_receipt_cannot_publish_source_state(application, mon
     f = application
     if not f.selected:
         pytest.skip("legacy layout has no participating clean receipt")
+    from agent_index.store.ingestion_index import prepare_ingestion_indices
+
+    prepare_ingestion_indices(f.store, max_rows=0)
     domain = f.store._source_domain
     save = domain.save
 
@@ -385,6 +388,94 @@ def test_failed_clean_store_receipt_cannot_publish_source_state(application, mon
     assert PendingCrawls(f.paths).load("sample:repo", f.scope) is not None
     with pytest.raises(SourceLayoutError):
         f.store.projection_snapshot()
+
+
+def test_ordinary_selected_publication_covers_all_point_and_file_indices(application):
+    f = application
+    if not f.selected:
+        pytest.skip("legacy layout does not opt into source-owned scalar upkeep")
+    from agent_index.store.scalar_index import inspect_index
+
+    f.run()
+    before = f.store._source_domain.receipt()["logical_projection"]["generation"]
+    f.delta = SourceDelta(upserts=[replace(f.files[0], content="Changed first file.")], commit="next")
+    f.run()
+    assert f.store._source_domain.receipt()["logical_projection"]["generation"] == before + 1
+    for owner, columns in [
+        (f.store.content_store, ("chunk_id", "file_path")),
+        *((f.store.get_vector_table(model), ("chunk_id",)) for model in f.store.model_ids),
+    ]:
+        for column in columns:
+            state, _ = inspect_index(owner._get_or_create_table(), column=column)
+            assert state.prepared and state.physical_unindexed_rows == 0
+
+
+def test_ordinary_nonempty_unprepared_store_requires_explicit_preparation(application):
+    f = application
+    if not f.selected:
+        pytest.skip("legacy layout does not opt into source-owned scalar upkeep")
+    from agent_index.chunking.base import Chunk
+    from agent_index.store.scalar_index import ScalarIndexPreparationRequired
+
+    f.store.upsert_content([
+        Chunk("Existing data.", "existing.md", "text", "markdown", 1, 1, "other:repo"),
+    ])
+    before = f.store._source_domain.receipt()
+    with pytest.raises(ScalarIndexPreparationRequired, match="budget"):
+        f.run()
+    assert not f.calls
+    assert f.store._source_domain.receipt() == before
+    assert f.state.sources == {}
+    assert f.paths.get_all_entries() == {}
+    assert PendingCrawls(f.paths).load("sample:repo", f.scope) is not None
+
+
+def test_ordinary_segment_limit_refuses_before_mutation(application, monkeypatch):
+    f = application
+    if not f.selected:
+        pytest.skip("legacy layout does not opt into source-owned scalar upkeep")
+    from agent_index.store import ingestion_index
+    from agent_index.store.scalar_index import ScalarIndexPreparationRequired, inspect_index
+
+    f.run()
+    domain = f.store._source_domain
+    before = domain.receipt()
+    prior_paths = f.paths.get_all_entries()
+    state, _ = inspect_index(f.store.content_store._get_or_create_table(), column="chunk_id")
+    monkeypatch.setattr(ingestion_index, "MAX_SEGMENTS", state.segments)
+    f.delta = SourceDelta(upserts=[replace(f.files[0], content="Changed first file.")], commit="next")
+    with pytest.raises(ScalarIndexPreparationRequired, match="consolidation"):
+        f.run()
+    assert domain.receipt() == before
+    assert f.paths.get_all_entries() == prior_paths
+    assert f.state.sources["sample:repo"].last_commit == "pinned"
+    assert PendingCrawls(f.paths).load("sample:repo", f.scope) is not None
+
+
+def test_failed_tail_upkeep_cannot_publish_source_progress(application, monkeypatch):
+    f = application
+    if not f.selected:
+        pytest.skip("legacy layout does not opt into source-owned scalar upkeep")
+    from agent_index.store import ingestion_index
+
+    prepare = ingestion_index.prepare_ingestion_indices
+
+    def fail_tail(store, *, max_rows, reserve_segment=False):
+        if max_rows:
+            raise RuntimeError("fixture index upkeep failed")
+        prepare(store, max_rows=max_rows, reserve_segment=reserve_segment)
+
+    monkeypatch.setattr(ingestion_index, "prepare_ingestion_indices", fail_tail)
+    with pytest.raises(RuntimeError, match="upkeep failed"):
+        f.run()
+    assert len(f.calls) == 4
+    assert f.store._source_domain.receipt()["state"] == "dirty"
+    assert f.store._source_domain.receipt()["uncertain_effect"]
+    assert not f.config.state_file.exists()
+    assert f.state.sources == {}
+    assert PendingCrawls(f.paths).load("sample:repo", f.scope) is not None
+    with pytest.raises(SourceLayoutError):
+        initialize_source_store(f.config)
 
 
 @pytest.mark.parametrize("shape", ["short", "dimension", "nan"])

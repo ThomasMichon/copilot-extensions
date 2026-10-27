@@ -59,6 +59,10 @@ on:
         description: Run read-only SSH snapshot, native session writer and same-cell peer acceptance
         type: boolean
         default: false
+      ssh_headless:
+        description: Qualify owned SSH jump probes with the pinned ARM64 native client
+        type: boolean
+        default: false
       wheel_inputs:
         description: Exercise bounded wheel-byte inspection and trusted promotion validation
         type: boolean
@@ -77,7 +81,7 @@ permissions:
 
 jobs:
   derived-diagnostics-posix:
-    if: ${{ !inputs.interactive_completion && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics }}
+    if: ${{ !inputs.interactive_completion && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics }}
     name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: ubuntu-latest
     timeout-minutes: 4
@@ -98,7 +102,7 @@ jobs:
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
 
   derived-diagnostics-windows:
-    if: ${{ !inputs.interactive_completion && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics }}
+    if: ${{ !inputs.interactive_completion && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics }}
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: windows-latest
     timeout-minutes: 4
@@ -121,6 +125,103 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  ssh-headless-linux:
+    if: ${{ inputs.ssh_headless }}
+    name: Portable SSH jump and probe contracts (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      UV_PYTHON: "3.13.7"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13.7"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Retain shared portable process and proxy behavior
+        run: python tools/run-plugin-tests.py ssh-manager
+      - name: Probe and qualification scope contracts
+        run: >-
+          python tools/run-plugin-tests.py agent-ssh
+          --test-file tests/test_probe.py
+          --test-file tests/test_probe_windows.py
+          --test-file tests/test_headless_workflow.py
+
+  ssh-headless-windows:
+    if: ${{ inputs.ssh_headless }}
+    name: Owned SSH jump probes (Windows ARM64, Python ${{ matrix.python_arch }})
+    runs-on: windows-11-arm
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python_arch: [arm64, x64]
+    env:
+      SSH_MANAGER_WINDOWS_JUMP_TEST: "1"
+      SSH_MANAGER_EXPECTED_PYTHON_ARCH: ${{ matrix.python_arch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: "3.13"
+          architecture: ${{ matrix.python_arch }}
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Record exact qualification source
+        shell: pwsh
+        run: |
+          $actual = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $actual -cne $env:GITHUB_SHA) {
+            throw 'Qualification source does not match its immutable dispatch SHA'
+          }
+          Write-Output "source=$actual"
+      - name: Prepare the pinned native ARM64 client without installation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $directory = Join-Path $env:RUNNER_TEMP ("ssh-headless-" + [Guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $directory -ErrorAction Stop | Out-Null
+          $archive = Join-Path $directory 'OpenSSH-ARM64.zip'
+          $url = 'https://github.com/PowerShell/Win32-OpenSSH/releases/download/10.0.0.0p2-Preview/OpenSSH-ARM64.zip'
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $expected = '698c6aec31c1dd0fb996206e8741f4531a97355686b5431ef347d531b07fcd42'
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected) {
+            throw 'Native client archive digest differs from the pinned public release'
+          }
+          $extracted = Join-Path $directory 'extracted'
+          [IO.Compression.ZipFile]::ExtractToDirectory($archive, $extracted)
+          $client = Join-Path $extracted 'OpenSSH-ARM64\ssh.exe'
+          $digest = (Get-FileHash -LiteralPath $client -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($digest -cne 'fd87ccdfbd8be33d22b67fa3f1c94bb2327a3e7d24355bf7fd2485d356f1976d') {
+            throw 'Selected native client bytes differ from the qualification target'
+          }
+          $signature = Get-AuthenticodeSignature -LiteralPath $client
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'CN=Microsoft Corporation,') {
+            throw 'Selected native client is not validly Microsoft-signed'
+          }
+          "SSH_MANAGER_SELECTED_CLIENT=$client" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Output "selected_client_sha256=$digest"
+      - name: Prepare source-bound isolated probe tooling
+        env:
+          UV_PYTHON: ${{ steps.python.outputs.python-path }}
+        run: python tools/run-plugin-tests.py agent-ssh --prepare-only
+      - name: Qualify two parent shapes, timeout, cancellation and native retirement
+        env:
+          UV_PYTHON: ${{ steps.python.outputs.python-path }}
+        run: >-
+          python tools/run-plugin-tests.py agent-ssh --allow-explicit-tiers
+          --test-file tests/test_headless_probe_windows.py
 
   update-diagnostics-linux:
     if: ${{ inputs.update_diagnostics }}

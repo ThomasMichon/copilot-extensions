@@ -16,8 +16,16 @@ import pytest
 from agent_procutil import no_window_kwargs, windowless_python
 
 from ssh_manager import SSHConfig
-from ssh_manager import proxy
+from ssh_manager import proxy, proxy_jump
 from ssh_manager.process import register_process_cleanup, run_process_cleanup
+
+
+@pytest.fixture(autouse=True)
+def isolate_native_profile_resolution(monkeypatch):
+    monkeypatch.setattr(
+        proxy_jump, "SSHProfileSource",
+        lambda host, **kwargs: SimpleNamespace(get_ssh_config=lambda: SSHConfig(host)),
+    )
 
 
 @pytest.mark.asyncio

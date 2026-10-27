@@ -649,9 +649,12 @@ def _index_source(
 
     def prepare(*, manifest: CrawlManifest, full: bool) -> ApplyManifest:
         from agent_index.indexing.prepared_application import PreparedApplication
+        from agent_index.store.ingestion_index import prepare_ingestion_indices
 
         if manifest.is_empty:
             return application
+        if multi_store._source_domain is not None:
+            prepare_ingestion_indices(multi_store, max_rows=0)
         prepared = PreparedApplication(
             manifest, scope=scope, config=config, paths=path_index, store=multi_store,
             clients=multi_clients, full=full, resume_since=resume_since,
@@ -682,13 +685,23 @@ def _publish_prepared_manifest(
 ) -> tuple[int, int, int]:
     from contextlib import nullcontext
 
+    from agent_index.store.ingestion_index import prepare_ingestion_indices
+
     domain = store._source_domain
     with domain.operation(store.content_store.db) if domain is not None else nullcontext():
         prepared.require_current_checkpoints()
         if prepared.batch_count == 0 and not manifest.deletions:
             return application(manifest=manifest, full=full, prepared=prepared)
+        planned_rows = (
+            sum(len(batch.chunks) for batch in prepared.batches()) if domain is not None else 0
+        )
+        if domain is not None:
+            prepare_ingestion_indices(store, max_rows=0, reserve_segment=planned_rows > 0)
         with domain.write(store.content_store.db) if domain is not None else nullcontext():
-            return application(manifest=manifest, full=full, prepared=prepared)
+            result = application(manifest=manifest, full=full, prepared=prepared)
+            if domain is not None:
+                prepare_ingestion_indices(store, max_rows=planned_rows)
+            return result
 
 
 def _apply_source_manifest(

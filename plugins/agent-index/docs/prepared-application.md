@@ -14,6 +14,13 @@ Compatible file checkpoints skip preparation. For selected pairs, the engine
 reuses existing vectors only after qualifying their embedding-coverage receipts
 and actual bytes. Missing vectors invoke the configured engine lazily.
 
+For a nonempty selected-layout manifest, the existing owner first checks the
+canonical `chunk_id`/`file_path` and registered-model `chunk_id` B-trees.
+It can create missing indices on empty tables with a zero-row preparation
+budget. Existing nonempty unindexed data requires explicit budgeted preparation
+through `store.scalar_index.prepare_index()`; an ordinary round never disguises
+that corpus build as a delta. Readers do not prepare indices.
+
 Prepared chunks, file fingerprints and vectors live in `prepared_crawl_rows`,
 a subordinate table in the existing path-index SQLite database. Construction
 compares the parent pending row's exact source, account scope and acquired
@@ -42,6 +49,17 @@ writes, stale-chunk cleanup and explicit tombstones for that application.
 Nested mutation methods retain their existing effect/coverage checks.
 Application reads prepared vectors, never invokes an embedding client, and
 requalifies current vector coverage before omitting a pair write.
+
+Before mutation, index metadata must still be fully covered, with room for one
+additional segment when chunks are planned. At the end of the same writer,
+point/file upkeep covers at most the application's prepared chunk count in
+physical unindexed rows per index. The existing scalar helper appends only the
+named index's tail, without consolidation, data compaction or version cleanup.
+It verifies real fragment/row coverage and preserves the logical generation of
+physical-only transitions. The 32-segment ceiling refuses a future row-writing
+application before mutation; explicit owner-coordinated consolidation remains
+separate work. A failure during post-write upkeep retains the dirty/uncertain
+latch and pending acquisition, not an acknowledged source cursor.
 
 Each file checkpoint still follows its completed vector coverage and stale
 cleanup. The domain publishes its clean receipt before source-state save;

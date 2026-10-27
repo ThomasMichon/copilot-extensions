@@ -7,7 +7,7 @@ import os
 import signal
 import subprocess
 import sys
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -20,6 +20,20 @@ class _ProcessCleanup:
 
 
 _CLEANUPS: dict[int, _ProcessCleanup] = {}
+_WINDOWS_DESCRIPTOR_STATE = "c28fc6f98a2c44abbbd89d6a3037d0d9_POSIX_FD_STATE".casefold()
+
+
+def redirected_ssh_env(
+    environment: Mapping[str, str] | None, *, windows: bool,
+) -> Mapping[str, str] | None:
+    """Ancestor descriptor metadata must not describe newly redirected handles."""
+    current = os.environ if environment is None else environment
+    if windows and any(key.casefold() == _WINDOWS_DESCRIPTOR_STATE for key in current):
+        return {
+            key: value for key, value in current.items()
+            if key.casefold() != _WINDOWS_DESCRIPTOR_STATE
+        }
+    return environment
 
 
 def register_process_cleanup(

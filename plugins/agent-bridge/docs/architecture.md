@@ -671,6 +671,14 @@ a reattachable loopback protocol (`session_host/`). On Windows the host breaks
 away from the daemon's job; on POSIX it runs in its own session, so a daemon
 restart does not inherently close the child's pipes.
 
+The legacy version-1 Session Host connection reads and validates the complete
+`ATTACH` cursor and configured connect nonce before displacing its current
+frontend or changing reap timers, detach state or the acknowledgement cursor.
+An incomplete connection leaves the current frontend serving; a refused
+connection closes only itself. A validated replacement still takes over the
+single frontend and receives replay after its supplied cursor. This ordering
+does not change the separate private-ticket attachment protocol.
+
 - **Idle / stopped sessions survive transparently.** Session metadata, turns,
   events, and host connection data are persisted to SQLite/host state. On startup
   the daemon reattaches to compatible surviving Session Hosts; otherwise it can

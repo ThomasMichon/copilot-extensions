@@ -68,7 +68,8 @@ def boundary(monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleType, ColdManager, 
 
     root = ROOT / "plugins/agent-bridge/src/agent_bridge"
     module(PACKAGE, __path__=[str(root)])
-    config_name = "promotion_ssh_profile_source"
+    module("promotion_ssh_manager", __path__=[str(ROOT / "libs/ssh-manager/src/ssh_manager")])
+    config_name = "promotion_ssh_manager.config_sources"
     config_spec = importlib.util.spec_from_file_location(
         config_name, ROOT / "libs/ssh-manager/src/ssh_manager/config_sources.py",
     )
@@ -200,7 +201,7 @@ def test_real_profile_resolution_failure_is_a_hosting_refusal(
     boundary: tuple, monkeypatch: pytest.MonkeyPatch, condition: str,
 ) -> None:
     policy, manager, _commands = boundary
-    config = sys.modules["promotion_ssh_profile_source"]
+    config = sys.modules["promotion_ssh_manager.config_sources"]
     monkeypatch.setattr(
         config.shutil, "which", lambda _name: None if condition == "missing-client" else "ssh-fixture",
     )

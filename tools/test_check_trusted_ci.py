@@ -249,7 +249,7 @@ def test_sibling_workflow_recognized_github_hosted_labels_are_accepted(
     # as an "unauthorized self-hosted runner route", a false positive.
     trusted = _workflow(tmp_path, lambda text: text)
     sibling = tmp_path / "other.yml"
-    for index, runs_on in enumerate(("ubuntu-latest", "ubuntu-slim")):
+    for index, runs_on in enumerate(("ubuntu-latest", "ubuntu-slim", "windows-11-arm")):
         sibling.write_text(
             f"""
 name: Other

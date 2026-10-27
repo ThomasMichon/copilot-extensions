@@ -5,9 +5,15 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+
 import ssh_manager
 import ssh_manager.config_sources as config_sources
-from ssh_manager.config_sources import ConfigSource, SSHConfig, SSHProfileResolutionError, SSHProfileSource
+from ssh_manager.config_sources import (
+    ConfigSource,
+    SSHConfig,
+    SSHProfileResolutionError,
+    SSHProfileSource,
+)
 
 
 class TestSSHConfig:
@@ -67,6 +73,30 @@ class TestSSHConfig:
 
 class TestSSHProfileSource:
     """SSHProfileSource tests."""
+
+    def test_cli_snapshot_uses_complete_original_native_arguments(self, monkeypatch):
+        captured = {}
+
+        def run(args, **kwargs):
+            captured.update(argv=args, options=kwargs)
+            return SimpleNamespace(
+                returncode=0, stdout="hostname selected.example\nport 2200\n", stderr="",
+            )
+
+        monkeypatch.setattr(config_sources.subprocess, "run", run)
+        arguments = ("-F", "selected.conf", "-p", "2200", "-Jgateway", "target")
+        config = SSHProfileSource(
+            "target", config_file="selected.conf", ssh_executable="selected-ssh",
+            resolve_timeout=15, resolve_cwd="caller-work", process_env={},
+            resolve_args=arguments,
+        ).get_ssh_config()
+        assert captured["argv"] == ["selected-ssh", "-G", *arguments]
+        assert captured["options"]["cwd"] == "caller-work"
+        assert captured["options"]["env"] == {}
+        assert captured["options"]["timeout"] == 15
+        assert config.config_file == "selected.conf"
+        assert ("hostname", "selected.example") in config.effective_config
+        assert ("port", "2200") in config.effective_config
 
     @pytest.mark.parametrize("condition", ["missing-client", "invalid-config", "empty-config"])
     def test_operational_resolution_failure_has_public_compatible_type(
@@ -153,3 +183,66 @@ class TestSSHProfileSource:
         assert first is second
         assert second is refreshed
         assert calls == 1
+
+    def test_explicit_client_is_used_with_a_bounded_configuration_query(self, monkeypatch):
+        captured = {}
+
+        def run(args, **kwargs):
+            captured.update(argv=args, kwargs=kwargs)
+            return SimpleNamespace(
+                returncode=0, stdout="hostname target.example\nport 22\n", stderr="",
+            )
+
+        monkeypatch.setattr(config_sources.subprocess, "run", run)
+        config = SSHProfileSource(
+            "target", resolve_timeout=7, ssh_executable="selected-ssh", resolve_cwd="caller-work",
+        ).get_ssh_config()
+        assert captured["argv"][:2] == ["selected-ssh", "-G"]
+        assert captured["kwargs"]["timeout"] == 7
+        assert captured["kwargs"]["cwd"] == "caller-work"
+        assert config.host_alias == "target"
+
+    def test_explicit_client_keeps_the_existing_positional_timeout(self, monkeypatch):
+        captured = {}
+
+        def run(args, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(returncode=0, stdout="hostname target.example\n", stderr="")
+
+        monkeypatch.setattr(config_sources.subprocess, "run", run)
+        monkeypatch.setattr(config_sources.shutil, "which", lambda name: "ssh")
+        SSHProfileSource("target", None, None, None, 6).get_ssh_config()
+        assert captured["timeout"] == 6
+
+    def test_explicit_client_configuration_drops_only_ancestor_descriptors(self, monkeypatch):
+        key = "c28fc6f98a2c44abbbd89d6a3037d0d9_POSIX_FD_STATE"
+        captured = {}
+
+        def run(args, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(returncode=0, stdout="hostname target.example\n", stderr="")
+
+        monkeypatch.setenv(key, "ancestor-descriptors")
+        monkeypatch.setenv("EXAMPLE_KEEP", "keep")
+        monkeypatch.setattr(config_sources.subprocess, "run", run)
+        SSHProfileSource("target", ssh_executable="selected-ssh").get_ssh_config()
+        if config_sources.sys.platform == "win32":
+            assert key not in captured["env"]
+            assert captured["env"]["EXAMPLE_KEEP"] == "keep"
+        else:
+            assert captured["env"] is None
+        assert config_sources.os.environ[key] == "ancestor-descriptors"
+
+    def test_explicit_client_configuration_preserves_empty_environment(self, monkeypatch):
+        captured = {}
+
+        def run(args, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(returncode=0, stdout="hostname target.example\n", stderr="")
+
+        monkeypatch.setattr(config_sources.subprocess, "run", run)
+        config = SSHProfileSource(
+            "target", ssh_executable="selected-ssh", process_env={},
+        ).get_ssh_config()
+        assert captured["env"] == {}
+        assert config.process_env == {}
