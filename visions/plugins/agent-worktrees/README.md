@@ -442,12 +442,16 @@ A caller acting from a managed worktree can allocate another worktree on a
 selected machine and repository through the ordinary allocation authority.
 The originating worktree remains responsible even when the destination
 repository differs. A successful owned allocation means both the actual remote
-workspace and the originating worktree's matching obligation are durable.
+workspace and the originating worktree's allocation responsibility are durable.
+Exact child-claim linkage proceeds asynchronously without holding up a composing
+host's agent startup once the receiving workspace is durably established.
 
 Responsibility is recoverable before allocation effects begin. Interrupted
 creation or acknowledgement remains an explicit unresolved obligation, never
 an unowned success or permission to create a replacement. Parent completion
 cannot strand an allocation whose outcome is still uncertain.
+Pending linkage remains visible and recoverable independently of the child's
+execution; unavailable claim acknowledgement is not an agent-launch dependency.
 
 SSH and an explicitly adopted Gateway route reach the same receiving owner;
 they do not introduce competing allocators. Correctness does not depend on

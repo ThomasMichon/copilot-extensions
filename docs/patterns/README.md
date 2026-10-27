@@ -133,7 +133,8 @@ core of the principles above; a reviewer checks a change against these.
   and code targets do not replace its selected execution repository. Logical
   creation identity survives retries separately from prompt-delivery identity.
   Owned remote allocation is coordinated from the originating worktree;
-  success requires the receiving workspace and the origin's matching claim.
+  allocation requires the receiving workspace and durable originating
+  responsibility. Exact claim linkage is asynchronous, not an agent-startup gate.
   SSH and adopted Gateway routes share this owner boundary, without mandatory
   reverse connectivity or a second Bridge/Dispatch allocator.
   See [workspace allocation and session acquisition](workspace-allocation-and-session-acquisition.md).

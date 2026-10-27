@@ -64,11 +64,13 @@ establishes responsibility; merely observing a directory does not.
   execution-environment resolver. Preserve explicit environment selection and
   refuse ambiguity rather than infer ledger locality from a physical host name.
   If omitted, preserve ordinary local creation.
-- A successful exit and JSON result mean the receiving worktree exists and the
-  originating worktree records its matching, qualified claim. Return the actual
+- A successful allocation exit and JSON result mean the receiving worktree
+  exists and the originating worktree retains durable allocation responsibility.
+  Report exact child-claim linkage separately as pending or linked. Return the actual
   owner-selected machine/environment, repository, worktree identity and path,
   together with the creation/ownership result needed for recovery. Do not return
-  a planned path or transport acknowledgement as completed allocation.
+  a planned path or transport acknowledgement as completed allocation, or
+  pending claim linkage as completed linkage.
 
 The command allocates a worktree only. It does not launch a Copilot session,
 deliver a prompt or imply agent-hosting permission. Source-only allocation and
@@ -82,8 +84,18 @@ The origin's `agent-worktrees` allocation operation coordinates responsibility
 and remote creation. It records a durable pending obligation before requesting
 receiving-side effects. The receiving `agent-worktrees` owner creates and tracks
 the child through its own allocation boundary, retaining the qualified origin
-and logical creation identity. The origin confirms the exact returned identity
-and durably binds its claim before reporting successful owned allocation.
+and logical creation identity. Once the receiver has durably created and
+journaled the child, a composing host may start the agent under its ordinary
+hosting, task and session admission rules. The origin asynchronously binds the
+exact returned identity while the agent boots; linkage or acknowledgement
+failure must not hold up, terminate or recreate that agent.
+
+The pending origin obligation and receiving journal retain enough original
+request and identity evidence to recover linkage after interruption. The existing
+responsible owner continues bounded reconciliation independently of startup and
+resumes it from durable state after restart; a fire-and-forget coroutine is not
+the recovery contract. This introduces neither a second allocator nor a separate
+scheduler or daemon. A confirmed link is reported only after it is durable.
 
 Each owner mutates only its own state through its existing named operation
 boundary. This is not a shared registry, a cross-machine filesystem lock, or
@@ -94,7 +106,8 @@ SSH initially carries the receiving operation; an explicitly adopted Gateway
 manager may later route that same operation. The transport owns connectivity,
 not worktree allocation or claim semantics. No mandatory receiving-to-origin SSH
 connection is needed: the origin consumes the receiving owner's retained result.
-Optional notifications cannot substitute for durable ownership acknowledgement.
+Optional notifications cannot substitute for durable allocation responsibility
+or completed-link evidence.
 Bridge and Dispatch use this same origin-coordinated allocator rather than
 maintaining separate remote-create or callback-to-claims implementations.
 
@@ -106,16 +119,21 @@ authority, machine/environment and repository. Retain the identity before effect
 even when the caller did not supply a key; expose it for recovery. A deliberate
 fresh invocation and recovery of an existing invocation remain different actions.
 
-An interrupted request, missing reply or lost claim acknowledgement leaves a
-pending or unknown operation, not success. Recover the receiving owner's same
+An interrupted request or missing creation reply leaves allocation pending or
+unknown until receiving creation is proven. A lost claim acknowledgement leaves
+linkage pending, without reclassifying proven receiving creation or blocking
+ordinary child execution. Recover the receiving owner's same
 allocation and the origin's same claim; do not generate a replacement creation
 identity, drop owner metadata, or delete an uncertain child to make a retry pass.
 Parent finalization must remain blocked while allocation responsibility is
 unresolved. Explicit ownership transfer must carry that pending responsibility,
 not leave it behind.
 
-Only confirmed allocation ownership permits a composing host to begin
-embodiment. Later child conclusion settles the originating obligation through
+Receiving creation must be durable before embodiment; exact origin-claim
+linkage is explicitly not an additional launch-time gate or callback. Neither
+this separation nor pending linkage bypasses ordinary hosting permission,
+session-head, holder, prompt or task admission. Later child conclusion settles
+the originating obligation through
 the same recorded authorities and existing lifecycle operations. Lost settlement
 responses remain reconcilable without a second writer or mandatory reverse
 reachability. Unsupported peers refuse before effects; no compatibility fallback
@@ -198,11 +216,17 @@ Before enabling origin-owned remote allocation, additionally prove:
   the caller's ledger remains the owner, including a different destination repo,
   omitted repo/machine selectors and independent Windows/WSL environments.
 - Real owner command boundaries preserve the pending obligation before effects,
-  receiving-side creation before completed claim acknowledgement, and both
-  durable records before a successful public result or agent launch.
+  receiving-side creation before agent startup, and asynchronous exact claim
+  linkage while startup proceeds. Both the pending origin obligation and
+  receiving journal must be durable before reporting successful allocation;
+  completed linkage is a separate observed result.
 - Concurrent/restarted requests, crashes before and after receiving creation,
   and lost creation/claim replies recover one child and one matching claim.
   An unresolved operation blocks parent finalization and unauthorized transfer.
+- A delayed, unavailable or lost linkage acknowledgement does not delay a
+  durably allocated child's startup. Recovery links that same child without
+  starting another session or delivering another prompt, including after the
+  originating coordinator restarts.
 - A caller reachable only through outbound transport still completes allocation
   and later settlement; neither path requires a reverse SSH session.
 - Bridge and Dispatch exercise the same allocator; SSH and a synthetic adopted
