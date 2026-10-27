@@ -31,7 +31,7 @@ def forbidden(*args, **kwargs):
 
 @pytest.mark.parametrize("case", [
     "full", "wrong-source", "alias", "unconfigured", "duplicate-config", "unsupported",
-    "module-only", "account", "family", "wrong-type",
+    "module-only", "account", "family", "wrong-type", "unsupported-poll-refresh",
 ])
 def test_preflight_refuses_before_storage_or_clients(tmp_path, monkeypatch, case):
     config = IndexConfig(data_dir=tmp_path / "untouched")
@@ -71,6 +71,9 @@ def test_preflight_refuses_before_storage_or_clients(tmp_path, monkeypatch, case
         envelope = replace(envelope, canonical_family="github:other/repo")
     elif case == "wrong-type":
         envelope = envelope.to_dict()
+    elif case == "unsupported-poll-refresh":
+        provider.hint_poll_refresh = True
+        provider.discover_delta = lambda *a, **k: forbidden()
     monkeypatch.setattr("agent_index.sources.get_connector", lambda *a, **k: provider)
     monkeypatch.setattr("agent_index.indexing.embedding_runtime.open_embedding_clients", forbidden)
     monkeypatch.setattr("agent_index.store.multi_model_store.MultiModelStore", forbidden)

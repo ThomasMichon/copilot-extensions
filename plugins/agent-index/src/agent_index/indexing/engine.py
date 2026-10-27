@@ -260,6 +260,8 @@ def _connector_kwargs(spec: SourceSpec) -> dict[str, object]:
             # docstring), so proceed unauthenticated rather than failing the
             # whole source.
             token = _resolve_gh_token(spec.auth_account)
+            kwargs["hint_account"] = spec.auth_account
+            kwargs["hint_credentials_available"] = bool(token)
             if token:
                 kwargs["token"] = token
         return kwargs

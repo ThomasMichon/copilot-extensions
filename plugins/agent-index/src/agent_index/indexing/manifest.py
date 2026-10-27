@@ -24,6 +24,15 @@ class CrawlStats:
 
 
 @dataclass
+class PollRefresh:
+    """Candidate generations retained by hints or covered by an ordinary poll."""
+
+    retain: bool
+    paths: dict[str, str]
+    history: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
 class CrawlManifest:
     """The complete output of a source crawl.
 
@@ -41,6 +50,7 @@ class CrawlManifest:
     stats: CrawlStats = field(default_factory=CrawlStats)
     stored_family: str | None = None
     accounting_family: str | None = None
+    poll_refresh: PollRefresh | None = None
 
     @property
     def is_empty(self) -> bool:

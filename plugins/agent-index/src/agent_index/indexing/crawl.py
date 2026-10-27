@@ -51,6 +51,17 @@ def collect_source_changes(
     discover_delta = getattr(connector, "discover_delta", None)
     discover_page = getattr(connector, "discover_delta_page", None)
     journal = PendingCrawls(path_index)
+    refresh = journal.refresh_candidates(source_name, scope, connector.source_name)
+    if refresh is not None and change_hints is None and not full:
+        from agent_index.indexing.poll_refresh import require_refresh_support
+
+        require_refresh_support(discover_delta)
+    track_refresh = False
+    if change_hints is not None and getattr(connector, "hint_poll_refresh", False):
+        from agent_index.indexing.poll_refresh import require_refresh_support
+
+        require_refresh_support(discover_delta)
+        track_refresh = True
     pending = journal.read_payload(source_name, scope)
     pages_selected = (
         not full and change_hints is None and callable(discover_page)
@@ -59,6 +70,8 @@ def collect_source_changes(
     if pending is not None and not pages_selected:
         raise ValueError("Complete pending paged acquisition before changing acquisition mode")
     if pages_selected and callable(discover_page):
+        if refresh is not None:
+            raise ValueError("Selected paged connector cannot refresh outstanding hinted candidates")
         from agent_index.indexing.paged_crawl import acquire_pages
 
         return acquire_pages(
@@ -76,15 +89,28 @@ def collect_source_changes(
         if not isinstance(delta, SourceDelta) or delta.commit != last_commit:
             raise ValueError("Hinted acquisition must preserve the polling cursor")
     elif not full and callable(discover_delta) and getattr(connector, "delta_available", True):
-        delta = discover_delta(last_commit, cancel_check=cancel_check)
+        if refresh is not None:
+            from agent_index.indexing.poll_refresh import require_refresh_support
+
+            discover = require_refresh_support(discover_delta)
+            delta = discover(
+                last_commit, cancel_check=cancel_check, refresh_paths=tuple(sorted(refresh.paths)),
+                refresh_commits=tuple(sorted(refresh.history)),
+            )
+        else:
+            delta = discover_delta(last_commit, cancel_check=cancel_check)
         if not isinstance(delta, SourceDelta):
             raise ValueError("Connector returned an incompatible delta result")
     else:
+        if refresh is not None and not full:
+            raise ValueError("Refresh hinted candidates with their original capable connector")
         delta = None
     if delta is not None:
         delta.validate(connector.source_name)
         if cancel_check:
             cancel_check()
+        from agent_index.indexing.poll_refresh import retained_candidates
+
         return CrawlManifest(
             source=source_name,
             upserts=delta.upserts,
@@ -92,6 +118,10 @@ def collect_source_changes(
             commit=delta.commit,
             stored_family=canonical,
             accounting_family=connector.source_name,
+            poll_refresh=(
+                retained_candidates(delta, connector.source_name) if track_refresh
+                else refresh if change_hints is None else None
+            ),
             stats=CrawlStats(
                 files_scanned=len(delta.upserts) + len(delta.deletions),
                 files_changed=len(delta.upserts),
@@ -121,6 +151,16 @@ def collect_source_changes(
         for source, stored_paths in stored_by_source.items()
         for path in stored_paths - current_by_source.get(source, set())
     ]
+    if refresh is not None:
+        deleted = {(item.source, item.path) for item in deletions}
+        for source, candidates in (
+            (connector.source_name, refresh.paths),
+            (connector.source_name + ":commits", refresh.history),
+        ):
+            deletions.extend(
+                DeletedFile(source, path) for path in candidates
+                if path not in current_by_source.get(source, set()) and (source, path) not in deleted
+            )
     scanned = sum(len(paths) for paths in current_by_source.values())
     return CrawlManifest(
         source=source_name,
@@ -129,6 +169,7 @@ def collect_source_changes(
         commit=commit,
         stored_family=canonical,
         accounting_family=connector.source_name,
+        poll_refresh=refresh,
         stats=CrawlStats(
             files_scanned=scanned,
             files_changed=len(upserts),

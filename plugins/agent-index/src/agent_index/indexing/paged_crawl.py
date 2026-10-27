@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Protocol
 
 from agent_index.indexing.manifest import CrawlManifest, CrawlStats
@@ -60,6 +60,8 @@ def decode_acquisition(payload: str, source: str) -> AcquisitionState:
     if not isinstance(generation, str) or uuid.UUID(generation).hex != generation:
         raise ValueError("Invalid pending acquisition generation")
     manifest = PendingCrawls.decode_manifest(data["manifest"], source)
+    if manifest.poll_refresh is not None:
+        raise ValueError("Paged acquisition cannot carry polling-refresh coverage")
     AcquisitionPage(SourceDelta(commit=manifest.commit), data["cursor"]).validate(
         manifest.accounting_family or manifest.stored_family or source,
     )
@@ -116,7 +118,7 @@ def acquire_pages(
         )
         envelope: dict[str, object] = {
             "version": 1 if page.cursor is None else 2, "full": False,
-            "manifest": asdict(manifest),
+            "manifest": journal.manifest_data(manifest),
         }
         if page.cursor is not None:
             envelope.update(base_commit=last_commit, cursor=page.cursor, generation=generation)

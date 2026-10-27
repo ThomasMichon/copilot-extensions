@@ -224,6 +224,95 @@ def test_git_rewritten_history_requests_explicit_repair(repo: Path) -> None:
         source.discover_delta(base)
 
 
+@pytest.mark.parametrize("prior_is_target", [False, True])
+def test_poll_refresh_checks_hinted_history_before_any_file_or_log_read(
+    repo, monkeypatch, prior_is_target,
+):
+    base = git(repo, "rev-parse", "HEAD")
+    hinted = commit(repo)
+    git(repo, "checkout", "-b", "sibling", base)
+    git(repo, "commit", "--allow-empty", "-m", "Sibling revision")
+    target = git(repo, "rev-parse", "HEAD")
+    git(repo, "update-ref", "refs/heads/main", target)
+    source = connector(repo)
+    source.current_commit()
+    monkeypatch.setattr(source, "_git_bytes", forbidden)
+    monkeypatch.setattr(source, "_discover_commits", forbidden)
+    with pytest.raises(GitReconciliationRequired, match="Hinted Git history"):
+        source.discover_delta(
+            target if prior_is_target else base,
+            refresh_commits=(f"commits/{hinted}.txt",), refresh_paths=("edit.md",),
+        )
+
+
+@pytest.mark.parametrize("prior_is_target", [False, True])
+def test_older_reachable_hint_history_is_point_read_not_enumerated(repo, monkeypatch, prior_is_target):
+    base = git(repo, "rev-parse", "HEAD")
+    middle = commit(repo)
+    target = commit(repo)
+    source = connector(repo)
+    source.current_commit()
+    logs = []
+    read = source._git
+
+    def measured(args):
+        if args[0] == "log":
+            logs.append(args)
+        return read(args)
+
+    monkeypatch.setattr(source, "_git", measured)
+    delta = source.discover_delta(
+        target if prior_is_target else middle, refresh_commits=(f"commits/{base}.txt",),
+    )
+    assert {item.path for item in delta.upserts} == {
+        f"commits/{base}.txt", *(() if prior_is_target else (f"commits/{target}.txt",)),
+    }
+    assert len(logs) == 2 and "--max-count=1" in logs[1] and logs[1][-1] == base
+    assert delta.commit == target
+
+
+def test_reachable_hint_in_normal_range_is_not_read_twice(repo, monkeypatch):
+    base = git(repo, "rev-parse", "HEAD")
+    target = commit(repo)
+    source = connector(repo)
+    source.current_commit()
+    logs = []
+    read = source._git
+
+    def measured(args):
+        if args[0] == "log":
+            logs.append(args)
+        return read(args)
+
+    monkeypatch.setattr(source, "_git", measured)
+    delta = source.discover_delta(base, refresh_commits=(f"commits/{target}.txt",))
+    assert [item.path for item in delta.upserts] == [f"commits/{target}.txt"]
+    assert len(logs) == 1
+
+
+@pytest.mark.parametrize("identity", [
+    "f" * 40, "commits/HEAD.txt", "commits/" + "f" * 40 + ".txt",
+    "commits/" + "f" * 40 + ".txt/extra",
+])
+def test_bad_or_unavailable_hint_history_requires_reconciliation_before_acquisition(
+    repo, monkeypatch, identity,
+):
+    base = git(repo, "rev-parse", "HEAD")
+    source = connector(repo)
+    source.current_commit()
+    monkeypatch.setattr(source, "_git_bytes", forbidden)
+    with pytest.raises(GitReconciliationRequired, match="explicit full reindex"):
+        source.discover_delta(base, refresh_commits=(identity,))
+
+
+def test_point_history_read_requires_exact_complete_commit_entry(repo, monkeypatch):
+    base = git(repo, "rev-parse", "HEAD")
+    source = connector(repo)
+    monkeypatch.setattr(source, "_discover_commits", lambda *args, **kwargs: [])
+    with pytest.raises(GitReconciliationRequired, match="Incomplete hinted Git history"):
+        source.discover_delta(base, refresh_commits=(f"commits/{base}.txt",))
+
+
 def test_git_delta_blob_failure_never_authorizes_a_checkpoint(
     repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

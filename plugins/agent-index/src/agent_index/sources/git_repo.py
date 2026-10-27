@@ -35,6 +35,7 @@ from pathlib import Path
 
 from agent_procutil import no_window_kwargs
 
+from agent_index.indexing.change_hints import ChangeHints
 from agent_index.sources.base import FileEntry, nonsecret_target
 from agent_index.sources.delta import SourceDelta
 from agent_index.sources.git_records import commit_records, decode_git_path, nul_git_paths
@@ -157,6 +158,8 @@ class GitRepoConnector:
     working tree; see the module docstring for the configuration and fallback.
     """
 
+    hint_poll_refresh = True
+
     def __init__(
         self,
         source: str = "git",
@@ -167,7 +170,17 @@ class GitRepoConnector:
         fetch: bool | None = None,
         token: str | None = None,
         token_provider: TokenProvider | None = None,
+        hint_account: str | None = None,
+        hint_credentials_available: bool = True,
     ):
+        if hint_account is not None and (
+            not isinstance(hint_account, str) or not hint_account.strip()
+        ):
+            raise ValueError("Git hint account must be an explicit nonempty identity")
+        if type(hint_credentials_available) is not bool:
+            raise ValueError("Git hint credential availability must be explicit")
+        self._hint_account = hint_account
+        self._hint_credentials_available = hint_credentials_available
         self._requested_source = source
         self.repo_path = Path(repo_path or os.environ.get("AGENT_INDEX_GIT_REPO") or os.getcwd())
         self.repo_path = self.repo_path.expanduser().resolve()
@@ -247,7 +260,24 @@ class GitRepoConnector:
     def recovery_identity(self) -> tuple[str, ...]:
         """Effective local target/ref/remote without credentials or transient tokens."""
         remote = self._git_quiet(["remote", "get-url", self._remote]).strip()
-        return str(self.repo_path), self._remote, self._ref, nonsecret_target(remote) or "local-only"
+        identity = (str(self.repo_path), self._remote, self._ref, nonsecret_target(remote) or "local-only")
+        return identity if self._hint_account is None else (*identity, self._hint_account)
+
+    @property
+    def hint_scope(self) -> tuple[str, str]:
+        if self._hint_account is None:
+            raise ValueError("Git hints require an explicit configured account binding")
+        if not self._hint_credentials_available:
+            raise ValueError("Git hints require resolved configured account credentials")
+        return self.source_name, self._hint_account
+
+    def discover_hints(
+        self, hints: ChangeHints, last_commit: str | None,
+        *, cancel_check: Callable[[], None] | None = None,
+    ) -> SourceDelta:
+        from agent_index.sources.git_hints import acquire_hints
+
+        return acquire_hints(self, hints, last_commit, cancel_check=cancel_check)
 
     # -- revision resolution -------------------------------------------------
 
@@ -428,10 +458,16 @@ class GitRepoConnector:
         self,
         last_commit: str | None,
         cancel_check: Callable[[], None] | None = None,
+        *,
+        refresh_paths: tuple[str, ...] = (),
+        refresh_commits: tuple[str, ...] = (),
     ) -> SourceDelta:
         from agent_index.sources.git_delta import discover_git_delta
 
-        return discover_git_delta(self, last_commit, cancel_check)
+        return discover_git_delta(
+            self, last_commit, cancel_check,
+            refresh_paths=refresh_paths, refresh_commits=refresh_commits,
+        )
 
     def discover(self, cancel_check: Callable[[], None] | None = None) -> list[FileEntry]:
         """Discover current tracked files plus commit-history entries."""
@@ -570,6 +606,8 @@ class GitRepoConnector:
         *,
         cancel_check: Callable[[], None] | None,
         strict: bool = False,
+        target_commit: str | None = None,
+        max_count: int | None = None,
     ) -> list[FileEntry]:
         args = [
             "log",
@@ -578,10 +616,13 @@ class GitRepoConnector:
             "--date=iso-strict",
             "--format=%H%x00%an%x00%ae%x00%aI%x00%s%x00%b",
         ]
+        if max_count is not None:
+            args.append(f"--max-count={max_count}")
+        revision = target_commit or self._index_rev()
         if last_commit:
-            args.append(f"{last_commit}..{self._index_rev()}")
+            args.append(f"{last_commit}..{revision}")
         else:
-            args.append(self._index_rev())
+            args.append(revision)
         output = self._git(args)
         entries: list[FileEntry] = []
         for fields in commit_records(output):
@@ -713,3 +754,7 @@ class GitRepoConnector:
             return _INDEXABLE_FILENAMES[name]
         suffix = Path(path).suffix.lower()
         return _LANGUAGES.get(suffix, "unknown")
+
+
+setattr(GitRepoConnector.discover_hints, "change_hints_versions", (1,))
+setattr(GitRepoConnector.discover_delta, "poll_refresh_versions", (1,))

@@ -26,6 +26,10 @@ def require_hint_connector(connector: SourceConnector, hints: ChangeHints) -> Hi
     discover = getattr(connector, "discover_hints", None)
     if not callable(discover) or not execution_versions(discover):
         raise ValueError("Selected connector does not support change-hints v1")
+    if getattr(connector, "hint_poll_refresh", False):
+        from agent_index.indexing.poll_refresh import require_refresh_support
+
+        require_refresh_support(getattr(connector, "discover_delta", None))
     if connector.source_name != hints.canonical_family or getattr(
         connector, "hint_scope", None,
     ) != (hints.canonical_family, hints.account_id):
