@@ -5,6 +5,7 @@ from __future__ import annotations
 import functools
 import inspect
 import json
+import logging
 import os
 import threading
 import uuid
@@ -19,6 +20,7 @@ FTS_LOCK = ".source-fts.lock"
 _domains: dict[tuple[int, int], SourceDomain] = {}
 _registry = threading.Lock()
 _child_guards = []
+log = logging.getLogger(__name__)
 
 def _open_receipt(path: Path) -> BinaryIO:
     """Keep an atomic snapshot readable without preventing its replacement."""
@@ -184,10 +186,17 @@ class SourceDomain:
         return value
 
     def save(self, value: dict) -> None:
+        payload = json.dumps(value, sort_keys=True)
+        if len(payload.encode("utf-8")) > 65536 and "logical_projection" in value:
+            value = {key: item for key, item in value.items() if key != "logical_projection"}
+            payload = json.dumps(value, sort_keys=True)
+            log.warning("Logical projection metadata exceeds the receipt budget; retaining physical coverage")
+        if len(payload.encode("utf-8")) > 65536:
+            raise SourceLayoutError("source-layout receipt exceeds its size limit")
         temporary = self.path / f".source-layout-{uuid.uuid4().hex}.tmp"
         try:
             with temporary.open("w", encoding="utf-8", newline="\n") as stream:
-                json.dump(value, stream, sort_keys=True)
+                stream.write(payload)
                 stream.flush()
                 os.fsync(stream.fileno())
             _replace_receipt(temporary, self.path / MARKER)

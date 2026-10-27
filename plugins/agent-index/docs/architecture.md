@@ -602,7 +602,9 @@ Participating source-aware writers also publish optional
 `logical_projection` version-1 metadata in the **existing** clean source-layout
 receipt. A logical generation advances once per outer committed write with
 changed projection tables; nested content/vector writes share that commit.
-Per-table generations identify content and individual model changes. Strict
+Per-table generations identify content and individual model changes.
+Changed-table counters use the monotonic commit generation, so removing and
+recreating a table cannot resurrect its old coverage key. Strict
 identical-content skips change neither physical nor logical versions. Explicitly
 annotated scalar-index preparation, FTS building and compaction preserve logical
 generations for their existing tables. Other effects conservatively count changed
@@ -618,6 +620,10 @@ dirty/uncertain under the existing recovery rules; no generation is published
 before its successful clean commit. Receipt work scales with table count, not
 stored items, and adds no source enumeration, row reads, processes or network
 requests.
+Every receipt publication, including intermediate effects and FTS handoffs,
+evicts optional logical metadata if needed to fit the existing 64 KiB reader
+limit. Oversized mandatory receipt state is refused before replacing readable
+state.
 
 Legacy stores retain conservative physical-version coverage. These generations
 are derived-artifact reuse evidence, not source cursors, checkpoint advancement,

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from pathlib import Path
@@ -43,7 +42,8 @@ def current_projection(
             or not isinstance(value.get("tables"), dict)
             or not isinstance(value.get("witness"), dict)
             or value["tables"].keys() != value["witness"].keys()
-            or any(not isinstance(name, str) or type(generation) is not int or generation < 0
+            or any(not isinstance(name, str) or type(generation) is not int
+                   or not 0 <= generation <= value["generation"]
                    for name, generation in value["tables"].items())):
         log.warning("Invalid logical projection metadata; retaining physical coverage")
         return None
@@ -79,16 +79,13 @@ def commit_projection(
         and before[name]["version"] <= after[name]["version"]
     } if before is not None else set()
     logical = changed - preserved
+    generation = (previous["generation"] if previous is not None else 0) + bool(logical)
     receipt["logical_projection"] = {
         "version": 1,
         "epoch": previous["epoch"] if previous is not None else uuid.uuid4().hex,
-        "generation": (previous["generation"] if previous is not None else 0) + bool(logical),
+        "generation": generation,
         "tables": {
-            name: generations.get(name, 0) + (name in logical) for name in after
+            name: generation if name in logical else generations.get(name, 0) for name in after
         },
         "witness": after,
     }
-    # The optional coverage cache must not exceed the existing receipt reader's limit.
-    if len(json.dumps(receipt, sort_keys=True).encode()) > 65536:
-        receipt.pop("logical_projection")
-        log.warning("Logical projection metadata exceeds the receipt budget; retaining physical coverage")

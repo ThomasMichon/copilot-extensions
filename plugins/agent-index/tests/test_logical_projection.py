@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 
 import numpy as np
 import pytest
@@ -19,8 +20,9 @@ from agent_index.store.source_layout import (
 )
 
 
-def item(path="one.md", text="sample text"):
-    return Chunk(text, path, "text", "markdown", 1, 1, "git:sample")
+def item(path="one.md", text=None):
+    return Chunk(text if text is not None else f"sample text for {path}",
+                 path, "text", "markdown", 1, 1, "git:sample")
 
 
 @pytest.fixture
@@ -29,11 +31,13 @@ def corpus(tmp_path, monkeypatch):
     config = IndexConfig(
         data_dir=tmp_path / "data",
         model_profiles={
-            name: ModelProfile(name, f"fixture-{name}", dim=2) for name in ("small", "other")
+            name: ModelProfile(name, f"fixture-{name}", dim=2, table_name=f"vectors_{name}")
+            for name in ("small", "other")
         },
         cluster_enabled=True,
     )
     store = initialize_source_store(config)
+    assert len({table.table_name for table in store._vector_tables.values()}) == 2
     chunks = [item(), item("two.md")]
     for model in store.model_ids:
         store.upsert(model, chunks, np.array([[1, 0], [1, 0]], np.float32))
@@ -53,7 +57,7 @@ def test_nested_writes_publish_one_generation_only_at_clean_commit(corpus):
     after = domain.receipt()["logical_projection"]
     assert after["epoch"] == before["epoch"]
     assert after["generation"] == before["generation"] + 1
-    assert all(after["tables"][name] == generation + 1 for name, generation in before["tables"].items())
+    assert set(after["tables"].values()) == {after["generation"]}
 
 
 def test_identical_content_is_no_logical_or_physical_mutation(corpus):
@@ -74,7 +78,8 @@ def test_vector_only_write_advances_only_its_model_table(corpus):
     model_table = config.model_profiles["other"].table_name
     assert after["generation"] == before["generation"] + 1
     assert after["tables"] == {
-        name: generation + (name == model_table) for name, generation in before["tables"].items()
+        name: after["generation"] if name == model_table else generation
+        for name, generation in before["tables"].items()
     }
     assert cluster_signature(store, config) != signature
 
@@ -86,7 +91,7 @@ def test_tombstone_advances_content_and_affected_model_generations(corpus):
     assert store.delete_by_file("git:sample", "one.md") == [item().chunk_id]
     after = store._source_domain.receipt()["logical_projection"]
     assert after["generation"] == before["generation"] + 1
-    assert all(after["tables"][name] == generation + 1 for name, generation in before["tables"].items())
+    assert set(after["tables"].values()) == {after["generation"]}
     assert cluster_signature(store, config) != signature
     assert engine._refresh_clusters(store, config)["clusters"] == 0
 
@@ -146,7 +151,7 @@ def test_unknown_effect_overrides_physical_only_exemption(corpus):
         domain.effect("unknown-writer")
     after = domain.receipt()["logical_projection"]
     assert after["generation"] == before["generation"] + 1
-    assert after["tables"][table.name] == before["tables"][table.name] + 1
+    assert after["tables"][table.name] == after["generation"]
 
 
 def test_writer_without_effect_does_not_inherit_physical_only_exemption(corpus):
@@ -157,7 +162,8 @@ def test_writer_without_effect_does_not_inherit_physical_only_exemption(corpus):
     with domain.write(store.content_store.db):
         table.update(values={"indexed_at": 1.0})
     after = domain.receipt()["logical_projection"]
-    assert after["tables"][table.name] == before["tables"][table.name] + 1
+    assert after["generation"] == before["generation"] + 1
+    assert after["tables"][table.name] == after["generation"]
 
 
 def test_older_writer_witness_drift_invalidates_then_starts_new_epoch(corpus):
@@ -198,7 +204,69 @@ def test_failed_effect_does_not_publish_generation_or_relax_recovery(corpus):
         validate_source_store(store)
 
 
-@pytest.mark.parametrize("damage", ["missing", "malformed", "identity"])
+def test_table_remove_recreate_cannot_reuse_old_cluster_coverage(corpus):
+    config, store = corpus
+    assert engine._refresh_clusters(store, config)["clusters"] == 2
+    signature = cluster_signature(store, config)
+    domain = store._source_domain
+    vector = store.get_vector_table("small")
+    previous = domain.receipt()["logical_projection"]
+    with domain.write(store.content_store.db):
+        domain.effect("fixture-drop")
+        store.content_store.db.drop_table(vector.table_name)
+        vector._table = None
+    with domain.write(store.content_store.db):
+        vector._get_or_create_table()
+        store.upsert_vectors(
+            "small", [item(), item("two.md")], np.array([[1, 0], [0, 1]], np.float32),
+        )
+    after = domain.receipt()["logical_projection"]
+    assert after["epoch"] == previous["epoch"]
+    assert after["tables"][vector.table_name] > previous["tables"][vector.table_name]
+    assert cluster_signature(store, config) != signature
+    refreshed = engine._refresh_clusters(store, config)
+    assert refreshed["clusters"] == 1 and "maintenance_skipped" not in refreshed
+    assert engine._refresh_clusters(store, config)["maintenance_skipped"] == 1
+
+
+@pytest.mark.parametrize("phase,spare", [("clean", -1), ("effect", 16), ("handoff", 80)])
+def test_optional_metadata_is_evicted_at_every_receipt_publication(corpus, phase, spare):
+    _config, store = corpus
+    domain = store._source_domain
+    value = domain.receipt()
+    value["fixture_padding"] = ""
+    size = len(json.dumps(value, sort_keys=True).encode())
+    value["fixture_padding"] = "x" * (65536 - size - spare)
+    domain.save(value)
+    if phase == "clean":
+        assert "logical_projection" not in domain.receipt()
+    else:
+        assert "logical_projection" in domain.receipt()
+        with domain.write(store.content_store.db):
+            if phase == "effect":
+                domain.effect("fixture-effect-" + "x" * 40)
+                assert "logical_projection" not in domain.receipt()
+            else:
+                with domain.fts_handoff(table_name=store.content_store._table_name):
+                    pending = domain.receipt()
+                    assert pending["fts_pending"] and "logical_projection" not in pending
+                    pending.pop("fts_pending")
+                    domain.save(pending)
+    assert domain.receipt()["state"] == "clean"
+    assert (domain.path / ".source-layout.json").stat().st_size <= 65536
+
+
+def test_mandatory_receipt_overflow_refuses_without_overwriting_readable_state(corpus):
+    _config, store = corpus
+    domain = store._source_domain
+    before = domain.receipt()
+    value = dict(before, fixture_padding="x" * 65536)
+    with pytest.raises(SourceLayoutError, match="size limit"):
+        domain.save(value)
+    assert domain.receipt() == before
+
+
+@pytest.mark.parametrize("damage", ["missing", "malformed", "identity", "counter"])
 def test_unproven_logical_metadata_uses_physical_key(corpus, damage):
     config, store = corpus
     domain = store._source_domain
@@ -208,6 +276,10 @@ def test_unproven_logical_metadata_uses_physical_key(corpus, damage):
         value.pop("logical_projection")
     elif damage == "malformed":
         value["logical_projection"]["tables"] = []
+    elif damage == "counter":
+        value["logical_projection"]["tables"][config.content_table] = (
+            value["logical_projection"]["generation"] + 1
+        )
     else:
         witness = value["logical_projection"]["witness"][config.content_table]
         witness["storage"][1] += 1
@@ -217,7 +289,7 @@ def test_unproven_logical_metadata_uses_physical_key(corpus, damage):
     assert initialize_source_store(config).projection_snapshot() == store.projection_snapshot()
 
 
-def test_logical_metadata_budget_and_new_table_are_conservative():
+def test_logical_new_table_and_physical_only_witness_are_conservative():
     before = {"content": {"version": 1, "storage": [1, 2, 3]}}
     receipt = {}
     commit_projection(receipt, {}, before, physical_only={"content"})
@@ -228,9 +300,6 @@ def test_logical_metadata_budget_and_new_table_are_conservative():
     assert receipt["logical_projection"]["tables"] == old["tables"]
     assert current_projection(receipt, after) is not None
     assert current_projection(receipt, before) is None
-    receipt["fixture_padding"] = "x" * 65536
-    commit_projection(receipt, after, after, physical_only=set())
-    assert "logical_projection" not in receipt
 
 
 @pytest.mark.parametrize("after", [
