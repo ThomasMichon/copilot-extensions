@@ -1,4 +1,4 @@
-"""Native consumer ABI and cleanup, not independent interpreter admission."""
+"""Native PATH evaluator consumers, SDK contracts and finite cleanup."""
 from __future__ import annotations
 
 import json
@@ -64,13 +64,13 @@ def _fixture(fixture, *, route="selected", namespaced=False):
         environment["COPILOT_EXTENSIONS_CONTEXT"] = str(context)
     (scripts / "bootstrap-python.ps1").write_text(
         "function Resolve-EvaluatorBootstrapPython {\n"
-        " param([string[]]$ExcludedRoots)\n"
-        " [IO.File]::WriteAllText($env:TEST_EXCLUDED, "
-        "(ConvertTo-Json -InputObject @($ExcludedRoots) -Compress))\n"
+        " param([string[]]$ExcludedRoots = @())\n"
         " if ($env:TEST_ROUTE -eq 'error') { throw 'fixture selector failure' }\n"
         " if ($env:TEST_ROUTE -eq 'unavailable') {\n"
         "  return [pscustomobject]@{Status='unavailable';Reason='fixture-absent';Python=$null;Guard=$null}\n"
         " }\n"
+        " [IO.File]::WriteAllText($env:TEST_EXCLUDED, "
+        "(ConvertTo-Json -InputObject @($ExcludedRoots) -Compress))\n"
         " $guard = [pscustomobject]@{}\n"
         " $guard | Add-Member ScriptMethod Dispose {\n"
         "  [IO.File]::WriteAllText($env:TEST_DISPOSED, 'disposed')\n"
@@ -130,6 +130,40 @@ def _run(fixture, environment, host, *arguments):
     return result, reads
 
 
+def _refusal_snapshot(home):
+    snapshot = _snapshot(home)
+    # Empty Desktop and Core hosts each rewrite their own CLR startup profile.
+    for directory in ("Windows/PowerShell", "PowerShell"):
+        snapshot.pop(
+            f"AppData/Local/Microsoft/{directory}/StartupProfileData-NonInteractive",
+            None,
+        )
+    return snapshot
+
+
+@pytest.mark.parametrize(("change", "profile_directory"), (
+    pytest.param("product-state", "Windows/PowerShell", id="product-state"),
+    pytest.param("unexpected-write", "Windows/PowerShell", id="unexpected-write"),
+    pytest.param("product-state", "PowerShell", id="core-product-state"),
+    pytest.param("unexpected-write", "PowerShell", id="core-unexpected-write"),
+))
+def test_refusal_snapshot_preserves_every_other_home_entry(tmp_path, change, profile_directory):
+    profile = tmp_path / f"AppData/Local/Microsoft/{profile_directory}/StartupProfileData-NonInteractive"
+    profile.parent.mkdir(parents=True)
+    profile.write_bytes(b"first runtime profile")
+    product = tmp_path / ".copilot-extensions/installation-mode.json"
+    product.parent.mkdir()
+    product.write_bytes(b"original product state")
+    before = _refusal_snapshot(tmp_path)
+    profile.write_bytes(b"second runtime profile")
+    assert _refusal_snapshot(tmp_path) == before
+    if change == "product-state":
+        product.write_bytes(b"changed product state")
+    else:
+        profile.with_name("unexpected-write").write_bytes(b"new")
+    assert _refusal_snapshot(tmp_path) != before
+
+
 @pytest.mark.parametrize("namespaced", (False, True))
 def test_selected_evaluator_is_fresh_isolated_and_releases_before_runtime(
     binding_fixture, host, namespaced,
@@ -178,32 +212,48 @@ def test_selected_evaluator_is_fresh_isolated_and_releases_before_runtime(
             "--expected-payload-root", str(binding_fixture["payload"]),
         ]
     assert reads[0]["args"] == expected
-    assert json.loads(Path(environment["TEST_EXCLUDED"]).read_text()) == [
-        str(binding_fixture["legacy"]), str(durable / "marketplaces"),
-    ]
+    assert json.loads(Path(environment["TEST_EXCLUDED"]).read_text()) == []
     assert Path(environment["TEST_DISPOSED"]).read_text() == "disposed"
 
 
-@pytest.mark.parametrize("route", ("unavailable", "missing", "missing-sdk", "native-path"))
-def test_unavailable_bootstrap_selects_native_before_evaluation(binding_fixture, host, route):
+@pytest.mark.parametrize("route", ("unavailable", "missing", "missing-sdk"))
+def test_missing_prerequisites_refuse_without_any_evaluator(binding_fixture, host, route):
     environment = _fixture(binding_fixture, route=route)
     if route == "missing":
         (binding_fixture["payload"] / "scripts/bootstrap-python.ps1").unlink()
     elif route == "missing-sdk":
         (binding_fixture["payload"] / "scripts/installation-context/installation_context.py").unlink()
-    elif route == "native-path":
-        environment[binding_fixture["consumer"].upper().replace("-", "_") + "_HOME"] = (
-            r"%USERPROFILE%\." + binding_fixture["consumer"]
-        )
     result, reads = _run(binding_fixture, environment, host)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert reads == [{"route": "native"}]
+    assert result.returncode == 126, result.stdout + result.stderr
+    assert result.stdout == ""
+    assert reads == []
+    assert (
+        "Python 3.10+ must be available as python on PATH" if route == "unavailable"
+        else "payload Python evaluator is unavailable"
+    ) in result.stderr
     assert not Path(environment["TEST_DISPOSED"]).exists()
     if route != "unavailable":
         assert not Path(environment["TEST_EXCLUDED"]).exists()
 
 
-def test_relative_exclusions_use_child_location_without_rewriting_sdk_arguments(binding_fixture, host):
+def test_native_path_semantics_still_require_the_python_prerequisite(binding_fixture, host):
+    environment = _fixture(binding_fixture, route="native-path")
+    environment[binding_fixture["consumer"].upper().replace("-", "_") + "_HOME"] = (
+        r"%USERPROFILE%\." + binding_fixture["consumer"]
+    )
+    result, reads = _run(binding_fixture, environment, host)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert reads == [{"route": "native"}]
+    assert json.loads(Path(environment["TEST_EXCLUDED"]).read_text()) == []
+    assert Path(environment["TEST_DISPOSED"]).read_text() == "disposed"
+    environment["TEST_ROUTE"] = "unavailable"
+    result, subsequent_reads = _run(binding_fixture, environment, host)
+    assert result.returncode == 126, result.stdout + result.stderr
+    assert subsequent_reads == reads
+    assert "Python 3.10+ must be available as python on PATH" in result.stderr
+
+
+def test_path_lookup_does_not_normalize_or_filter_relative_sdk_arguments(binding_fixture, host):
     environment = _fixture(binding_fixture)
     environment[binding_fixture["consumer"].upper().replace("-", "_") + "_HOME"] = r".\relative runtime"
     script = binding_fixture["payload"] / "scripts/runtime-gate.ps1"
@@ -217,15 +267,14 @@ def test_relative_exclusions_use_child_location_without_rewriting_sdk_arguments(
         text=True, encoding="utf-8", timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    exclusions = json.loads(Path(environment["TEST_EXCLUDED"]).read_text())
-    assert exclusions[0] == str(binding_fixture["home"] / "relative runtime")
+    assert json.loads(Path(environment["TEST_EXCLUDED"]).read_text()) == []
     read = json.loads(Path(environment["TEST_READ_LOG"]).read_text())
     assert read["args"][-1] == r".\relative runtime"
 
 
 @pytest.mark.parametrize("namespaced", (False, True))
 def test_absent_userprofile_preserves_powershell_home_fallback(binding_fixture, host, namespaced):
-    environment = _fixture(binding_fixture, route="unavailable", namespaced=namespaced)
+    environment = _fixture(binding_fixture, namespaced=namespaced)
     environment.pop("USERPROFILE", None)
     environment["TEST_FALLBACK_HOME"] = str(binding_fixture["home"])
     script = binding_fixture["payload"] / "scripts/runtime-gate.ps1"
@@ -239,13 +288,16 @@ def test_absent_userprofile_preserves_powershell_home_fallback(binding_fixture, 
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) == ["version"]
-    assert result.stderr == ""
-    assert json.loads(Path(environment["TEST_EXCLUDED"]).read_text()) == [
-        str(binding_fixture["legacy"]),
-        str(binding_fixture["home"] / ".copilot-extensions/marketplaces"),
-    ]
+    assert "fixture evaluator diagnostic" in result.stderr
+    assert json.loads(Path(environment["TEST_EXCLUDED"]).read_text()) == []
     reads = [json.loads(line) for line in Path(environment["TEST_READ_LOG"]).read_text().splitlines()]
-    assert reads == [{"route": "native"}] * (2 if namespaced else 1)
+    assert [read["args"][0] for read in reads] == (
+        ["status", "validate"] if namespaced else ["status"]
+    )
+    for read in reads:
+        assert read["route"] == "portable"
+        home_index = read["args"].index("--copilot-home") + 1
+        assert read["args"][home_index] == str(binding_fixture["home"] / ".copilot")
 
 
 @pytest.mark.parametrize("forwarded", (
@@ -406,35 +458,31 @@ def test_actual_sdk_routes_preserve_complete_status_and_refusals(binding_fixture
             "schema": "copilot-extensions.installation-mode", "version": 1,
             "installationMode": {"enabled": "true"},
         })
-    results = []
-    resolutions = []
-    for route in ("selected", "unavailable"):
-        environment["TEST_ROUTE"] = route
-        runtime_before = _snapshot(binding_fixture["legacy"])
-        result, _ = _run(binding_fixture, environment, host, "version")
-        assert _snapshot(binding_fixture["legacy"]) == runtime_before
-        results.append(result)
-        if state in {"legacy", "namespaced", "deactivation"}:
-            assert result.returncode == 0, result.stdout + result.stderr
-            resolutions.append(json.loads(Path(environment["TEST_RESOLUTION"]).read_text()))
-        else:
-            assert result.returncode == 126, result.stdout + result.stderr
-            assert not Path(environment["TEST_RESOLUTION"]).exists()
-    assert results[0].returncode == results[1].returncode
-    assert results[0].stdout == results[1].stdout
-    assert results[0].stderr == results[1].stderr
-    if resolutions:
-        assert resolutions[0] == resolutions[1]
-        assert resolutions[0]["schema"] == "copilot-extensions.installation-resolution"
-        assert resolutions[0]["actualMode"] == ("legacy" if state == "legacy" else "namespaced")
-        assert resolutions[0]["status"] == ("deactivation-required" if state == "deactivation" else "ready")
+    runtime_before = _snapshot(binding_fixture["legacy"])
+    result, _ = _run(binding_fixture, environment, host, "version")
+    assert _snapshot(binding_fixture["legacy"]) == runtime_before
+    resolution_path = Path(environment["TEST_RESOLUTION"])
+    if state in {"legacy", "namespaced", "deactivation"}:
+        assert result.returncode == 0, result.stdout + result.stderr
+        resolution = json.loads(resolution_path.read_text())
+        assert resolution["schema"] == "copilot-extensions.installation-resolution"
+        assert resolution["actualMode"] == ("legacy" if state == "legacy" else "namespaced")
+        assert resolution["status"] == ("deactivation-required" if state == "deactivation" else "ready")
+    else:
+        assert result.returncode == 126, result.stdout + result.stderr
+        assert not resolution_path.exists()
+    before_refusal = _refusal_snapshot(binding_fixture["home"])
+    environment["TEST_ROUTE"] = "unavailable"
+    result, reads = _run(binding_fixture, environment, host, "version")
+    assert result.returncode == 126, result.stdout + result.stderr
+    assert result.stdout == ""
+    assert reads == []
+    assert "Python 3.10+ must be available as python on PATH" in result.stderr
+    assert _refusal_snapshot(binding_fixture["home"]) == before_refusal
 
 
 @pytest.mark.portfolio_tier("T3")
-def test_real_admitted_base_runs_actual_sdk_and_guard_is_released(binding_fixture, host):
-    python = os.environ.get("EVALUATOR_BOOTSTRAP_TEST_PYTHON")
-    if not python:
-        pytest.skip("requires an explicit independently signed CPython fixture")
+def test_real_path_python_runs_actual_sdk_without_attestation_or_guard(binding_fixture, host):
     environment = _fixture(binding_fixture)
     plugin = binding_fixture["consumer"]
     scripts = binding_fixture["payload"] / "scripts"
@@ -444,19 +492,16 @@ def test_real_admitted_base_runs_actual_sdk_and_guard_is_released(binding_fixtur
             scripts / "installation-context" / name,
         )
     helper = scripts / "bootstrap-python.ps1"
-    helper.write_text(
-        (ROOT / "libs/installer-engine/bootstrap-python.ps1").read_text()
-        + "\nfunction Get-EvaluatorBootstrapRegistrySnapshot {\n"
-        " [pscustomobject]@{Root=$env:TEST_SIGNED_BASE;Python=$null;"
-        "Tag='fixture';Rank=0;Arguments=$null}\n}\n",
-        encoding="utf-8",
+    shutil.copyfile(
+        ROOT / "libs/installer-engine/bootstrap-python.ps1", helper,
     )
-    environment["TEST_SIGNED_BASE"] = str(Path(python).parent)
+    environment["PATH"] = str(Path(sys.executable).parent) + os.pathsep + environment["PATH"]
     (scripts / "resolve-runtime.ps1").write_text(
         "# Trace contract: normal/read-only/ready-v1\n"
         "if ($bootstrap.Status -cne 'selected' -or "
-        "$bootstrap.Reason -cne 'registered-signed-base') { throw 'fixture base was not admitted' }\n"
-        "if ($bootstrap.Guard.CanRead) { throw 'real bootstrap guard was not disposed' }\n"
+        "$bootstrap.Reason -cne 'path-python') { throw 'PATH Python was not selected' }\n"
+        "if ($null -ne $bootstrap.Guard) { throw 'PATH discovery must not pin the interpreter' }\n"
+        "if ($bootstrap.Python -ine $env:TEST_BOOTSTRAP_PYTHON) { throw 'PATH order was not preserved' }\n"
         "$script:AgentRtPy=$env:TEST_RUNTIME_PYTHON\n", encoding="utf-8",
     )
     result, _ = _run(binding_fixture, environment, host, "version")

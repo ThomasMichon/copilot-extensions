@@ -2995,61 +2995,48 @@ delegate to the canonical `install.*` rather than duplicate the deploy logic.
 
 ## Shared installer-engine helpers (`libs/installer-engine/`)
 
-### Independent Windows evaluator bootstrap
+### PATH Python evaluator bootstrap
 
-The selector below is the current compiled implementation, not the target
-prerequisite policy. The [compiler-free amendment](../efforts/active/lean-runtime-dependencies/compiler-free-execution.md#python-prerequisite-boundary)
-requires replacing its signature, registry and physical-path interpreter
-admission with ordinary setup-provided PATH Python. Setup owns supported Python
-and durable PATH hygiene; missing/incompatible Python is a prerequisite error,
-not a reason to compile a fallback or introduce another interpreter installer.
-Process containment, lifetime, endpoint, lock and cleanup guarantees remain.
-
-`bootstrap-python.ps1` is a standalone, read-only selector for an existing
-external CPython base that can evaluate the owning payload's stdlib SDK.
+`bootstrap-python.ps1` is a standalone, read-only selector for the existing
+`python` application on PATH that evaluates the owning payload's stdlib SDK.
 `sync-installer-engine.py` delivers byte-identical copies only to the declared
 Containers and Codespaces adopters. Loading the file or delivering a copy does
 not opt a caller into another evaluator or change its installer selection.
 
-`Resolve-EvaluatorBootstrapPython -ExcludedRoots <runtime/cell roots>` reads
-PEP 514 `PythonCore` registration as data, honoring current-user shadowing
-without interpreting opaque tags as versions or executing a launcher.
-It admits only ordinary, fixed-local-drive, non-venv bases: no remote or
-redirected paths, embedded path overrides or addressed runtime. Actual PE
-version/architecture, offline Windows Authenticode trust and the verified
-signer's CPython publisher establish admission before any Python runs.
-Final native paths and guarded metadata prevent a short-path alias or changed
-file from substituting for an independent executable.
-Candidate and addressed-root ancestors are inspected from the drive downward,
-before descending through any reparse point. A remote or redirected addressed
-root cannot establish independence and leaves the optional bootstrap unavailable;
-a genuinely missing local root suffix remains valid for first use.
-Native drive-root handle identity also rejects DOS-device/SUBST aliases on
-candidate or addressed-root drives, including missing suffixes beneath an alias.
+`Resolve-EvaluatorBootstrapPython` uses ordinary application-only `Get-Command`
+lookup, preserving PATH order without executing candidates, compiling native
+code, consulting the registry, verifying signatures or pinning interpreter files.
+Aliases and functions do not override the application. The compatibility
+`-ExcludedRoots` parameter is accepted but does not filter interpreters.
+The [compiler-free amendment](../efforts/active/lean-runtime-dependencies/compiler-free-execution.md#python-prerequisite-boundary)
+assigns supported Python provisioning and durable PATH hygiene to upfront harness
+setup; standalone use retains an explicit Python 3.10+ prerequisite. Temporary
+and worktree interpreters should not be placed on durable PATH by setup, not
+rejected by a per-launch interpreter allowlist.
 
-The result has `Status`, `Reason`, `Python` and `Guard`. `selected` retains a
-read-only file guard; the caller must dispose it after its finite SDK reads.
-`unavailable` has no executable or guard. Unexpected I/O or native-verifier
-errors throw rather than becoming successful absence. There is no persistent
-path/admission cache, state write, interpreter acquisition or Manager dependency.
-The native verifier uses System32 libraries, no UI and cache-only URL retrieval.
-
-The selector never invokes Python itself. An opting-in caller chooses native
-PowerShell before evaluation when no independently admitted bootstrap exists.
-Once evaluation starts, interpreter/SDK failures remain terminal, not reasons
-to try another authority. SDK execution uses isolated no-site startup in a fresh
-process; ordinary plugin package-site initialization remains unchanged.
-Selection and evaluation together, including native compilation, still need
-the caller's real cold/first-touch and refusal qualification.
+The result retains `Status`, `Reason`, `Python` and `Guard` for caller
+compatibility. `selected` / `path-python` returns the resolved application path
+and a null guard; `unavailable` / `python-not-on-path` has neither. Only command
+absence becomes `unavailable`; unexpected discovery errors propagate.
+There is no interpreter acquisition, state write, persistent admission cache
+or mandatory Manager dependency. Missing Python produces a prerequisite
+diagnostic directing users to the existing setup flow, not an installer or
+compiled evaluator fallback. Actual interpreter/SDK startup failures remain
+terminal and visible. SDK execution retains isolated no-site startup in a fresh
+process; ordinary plugin package-site initialization is unchanged. OS code
+integrity enforcement and package integrity are separate and remain intact.
+Process containment, lifetime, endpoint, lock and cleanup guarantees also remain.
 
 Codespaces' and Containers' Windows runtime gates opt in for their initial
 `status` and selected-context `validate` reads. They pass the same explicit SDK
 expectations and the native evaluator's explicit Copilot home, even when `HOME`
-differs from `USERPROFILE`. They retain complete JSON and generation checks, and dispose the executable guard before
-resolving the ordinary plugin runtime. Missing optional bootstrap support,
-unavailable admission, or path inputs requiring native environment/drive
-semantics select PowerShell before evaluation. Publication probes and installer
-selection remain on their existing paths. POSIX dispatch is unchanged.
+differs from `USERPROFILE`. They retain complete JSON and generation checks.
+Missing payload evaluator support fails explicitly. Path inputs requiring native
+environment/drive semantics still select the legacy PowerShell SDK **after**
+the PATH prerequisite is satisfied; migrating that SDK path and the existing
+publication/installer paths remains open compiler-free work. This selector
+change does not qualify the whole dispatcher as compiler-free. POSIX dispatch
+is unchanged.
 
 `libs/installer-engine/bootstrap-file-guard.ps1` is an **unused, repository-only**
 building block for the compiler-free migration. Its stock .NET

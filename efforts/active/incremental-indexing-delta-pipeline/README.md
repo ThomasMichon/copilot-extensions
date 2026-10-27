@@ -173,7 +173,7 @@ After the reviewed proposal, the operator admitted execution:
   checkpoint advancement, interrupted-run recovery and source/account isolation.
 - [x] Demonstrate duplicate and active-round event bursts are losslessly
   coalesced with bounded unique-item fetches.
-- [ ] Prove no-op rounds produce zero embedding requests, content/vector writes
+- [x] Prove no-op rounds produce zero embedding requests, content/vector writes
   and derived-maintenance runs.
 - [ ] Exercise both built-in and external-provider compatibility, including
   old producers/consumers and incomplete-page refusal.
