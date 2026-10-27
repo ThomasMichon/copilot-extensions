@@ -98,3 +98,38 @@ def test_unknown_cli_syntax_is_rejected_without_state_effect(state_path):
         cli.main(["pretool-killswitch", "on", "--unknown-option"])
     assert failure.value.code == 2
     assert not state_path.exists()
+
+
+def test_relative_override_is_refused_without_effect_in_different_directories(
+    tmp_path, monkeypatch, capsys,
+):
+    project = tmp_path / "project"
+    home = tmp_path / "home"
+    project.mkdir()
+    home.mkdir()
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("PRETOOL_KILLSWITCH_STATE_FILE", "stop.json")
+    monkeypatch.chdir(project)
+    assert cli.main(["pretool-killswitch", "on", "--json"]) == 2
+    assert "absolute path" in json.loads(capsys.readouterr().out)["error"]
+    monkeypatch.chdir(home)
+    assert not switch.is_active()
+    assert "guards remain enabled" in capsys.readouterr().err
+    assert not (project / "stop.json").exists()
+    assert not (home / "stop.json").exists()
+
+
+def test_absolute_override_is_shared_by_cli_and_hook_despite_different_cwd(
+    state_path, tmp_path, monkeypatch,
+):
+    project = tmp_path / "project"
+    home = tmp_path / "home"
+    project.mkdir()
+    home.mkdir()
+    monkeypatch.chdir(project)
+    assert cli.main(["pretool-killswitch", "on", "absolute override"]) == 0
+    monkeypatch.chdir(home)
+    assert switch.is_active()
+    assert cli.main(["pretool-killswitch", "off"]) == 0
+    monkeypatch.chdir(project)
+    assert not switch.is_active()

@@ -127,7 +127,10 @@ The state is `~/.copilot-extensions/pretool-killswitch.json` with `active`,
 only this state file and restores normal guard evaluation on the next call.
 Missing, corrupt or non-boolean state leaves guards enabled; corrupt state is
 reported on stderr and `status` fails visibly. `PRETOOL_KILLSWITCH_STATE_FILE`
-selects an explicit alternative state path, principally for isolated testing.
+selects an explicit **absolute** alternative state path, principally for isolated
+testing. Relative overrides are refused by the CLI without effects; hooks report
+the invalid configuration and continue normal guard evaluation. Thus CLI and
+hook working-directory differences cannot silently select different state files.
 Namespaced `COPILOT_EXTENSIONS_CONTEXT` cells never consult this default-install
 flag, even with an override; the management command refuses in a cell.
 

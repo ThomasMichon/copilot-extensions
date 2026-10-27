@@ -24,8 +24,12 @@ def state_file() -> Path:
     if os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
         raise ValueError("pretool-killswitch supports the default installation only")
     override = os.environ.get("PRETOOL_KILLSWITCH_STATE_FILE")
-    return (Path(override).expanduser() if override else
-            Path.home() / ".copilot-extensions" / "pretool-killswitch.json")
+    if override:
+        path = Path(override).expanduser()
+        if not path.is_absolute():
+            raise ValueError("PRETOOL_KILLSWITCH_STATE_FILE must be an absolute path")
+        return path
+    return Path.home() / ".copilot-extensions" / "pretool-killswitch.json"
 
 
 def read_state(path: Path) -> tuple[dict, str | None]:
@@ -56,7 +60,13 @@ def is_active() -> bool:
     # A default-installation flag must never govern a namespaced cell.
     if os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
         return False
-    state, error = read_state(state_file())
+    try:
+        path = state_file()
+    except ValueError as exc:
+        print(f"[pretool-killswitch] invalid configuration; guards remain enabled: {exc}",
+              file=sys.stderr)
+        return False
+    state, error = read_state(path)
     if error:
         print(f"[pretool-killswitch] invalid state; guards remain enabled: {error}",
               file=sys.stderr)

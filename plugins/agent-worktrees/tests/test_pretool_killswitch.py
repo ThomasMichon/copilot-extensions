@@ -158,3 +158,19 @@ def test_cached_manifest_command_hot_stop_and_restore_without_restart(tmp_path):
         assert marker.exists()
     finally:
         server.close()
+
+
+def test_relative_override_diagnostic_does_not_skip_normal_guard_evaluation(monkeypatch, capsys):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("PRETOOL_KILLSWITCH_STATE_FILE", "relative-stop.json")
+    client = load_client()
+    calls = []
+    monkeypatch.setattr(client, "decide", lambda kind, payload: calls.append(kind) or {
+        "permissionDecision": "deny", "permissionDecisionReason": "workflow policy",
+    })
+    monkeypatch.setattr(client.sys, "stdin", io.StringIO("{}"))
+    assert client.main(["preToolUse"]) == 0
+    result = capsys.readouterr()
+    assert calls == ["preToolUse"]
+    assert json.loads(result.out)["permissionDecision"] == "deny"
+    assert "absolute path" in result.err
