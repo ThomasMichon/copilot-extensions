@@ -216,8 +216,11 @@ the shared snapshot journal. The token pins a peeled commit object, not a branch
 name; file blobs and the complete `:commits` stream retain that commit even when
 a retry constructs a fresh connector after the configured ref moves. File
 pages traverse one immutable directory object at a time using a durable
-directory-stack/byte-offset cursor, counting at most 128 raw tree records per
-page, including non-indexable entries. Each directory object is limited to
+component-stack/byte-offset cursor, advancing at most 128 new raw tree records
+per page, including non-indexable entries. Components are stored once per
+level, avoiding quadratic growth from repeated ancestor paths. Restored offsets
+are validated against actual record boundaries, so a mode-like substring in a
+filename cannot become an invented entry. Each directory object is limited to
 16,000,000 bytes, checked before loading; exceeding it fails visibly rather
 than silently dropping a directory. Immutable blob reads retain the existing
 file-size/text filters. History pages return at most 128 entries with explicit
@@ -235,7 +238,8 @@ checkpoint or provider storage is introduced.
 
 These are **result-page and tree-object bounds**, not a whole-source
 CPU/I/O/time guarantee: a resumed directory page rereads its bounded tree
-object, native `log --skip` may revisit ancestors internally, and commit
+object and reparses its acknowledged prefix to validate the offset, native
+`log --skip` may revisit ancestors internally, and commit
 messages and the accumulated journal manifest are not byte-bounded here.
 Git full acquisition's traversal-cost qualification remains open; this is not
 evidence that a 100,000-item full repair has constant work.

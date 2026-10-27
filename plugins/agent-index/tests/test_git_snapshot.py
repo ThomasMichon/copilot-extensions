@@ -7,6 +7,7 @@ import os
 import subprocess
 
 import pytest
+from agent_procutil import no_window_kwargs
 from test_git_delta import commit, connector, forbidden, git, repo as _repo
 
 from agent_index.indexing.path_index import PathIndex
@@ -295,3 +296,61 @@ def test_snapshot_decodes_sha256_tree_object_ids(tmp_path):
     assert all(page.commit == target for page in result)
     entries = [entry for page in result for entry in page.upserts]
     assert {entry.path for entry in entries} == {"readme.md", f"commits/{target}.txt"}
+
+
+def test_restored_offset_inside_mode_like_filename_cannot_complete_acquisition(
+    repo, tmp_path, monkeypatch,
+):
+    real_path = "prefix100644 victim.md"
+    (repo / real_path).write_text("Must not be replaced by an invented identity.\n", encoding="utf-8")
+    target = commit(repo)
+    source = connector(repo)
+    discover = source.discover_snapshot_page
+    assert discover is not None
+    paths = PathIndex(tmp_path / "paths.db")
+    family = source.source_name
+    paths.mark_indexed_batch([(family, real_path, "old", 1)])
+    journal = PendingCrawls(paths)
+    scope = recovery_scope("alias", source)
+    monkeypatch.setattr(git_snapshot, "_PAGE_SIZE", 1)
+    kwargs = dict(
+        family=family, stored_family=None, scope=scope, last_commit="base",
+        journal=journal, discover=discover, unit_budget=1,
+    )
+    with pytest.raises(RuntimeError, match="unit budget"):
+        acquire_snapshot("alias", **kwargs)
+    before = journal.read_payload("alias", scope)
+    tree = source._git_bytes(["cat-file", "tree", target + ":"])
+    bad_offset = tree.index(b"100644 victim.md")
+    data = json.loads(before)
+    data["cursor"] = json.dumps({"files": [["", bad_offset]]})
+    corrupted = json.dumps(data)
+    journal.compare_and_save("alias", scope=scope, payload=corrupted, expected=before, family=family)
+    with pytest.raises(ValueError, match="tree-record boundary"):
+        acquire_snapshot("alias", **kwargs)
+    assert journal.read_payload("alias", scope) == corrupted
+    assert journal.load("alias", scope) is None
+    assert paths.count() == 1
+
+
+def test_deep_git_tree_cursor_grows_linearly_and_finishes(repo):
+    source = connector(repo)
+
+    def input_git(args, content):
+        return subprocess.run(
+            source._git_command(args), cwd=repo, input=content, capture_output=True,
+            check=True, **no_window_kwargs(),
+        ).stdout.decode().strip()
+
+    blob = git(repo, "rev-parse", "HEAD:keep.md")
+    tree = input_git(["mktree", "-z"], f"100644 blob {blob}\tleaf.md\0".encode())
+    names = [f"segment{index:04d}" for index in range(104)]
+    for name in reversed(names):
+        tree = input_git(["mktree", "-z"], f"040000 tree {tree}\t{name}\0".encode())
+    target = input_git(["commit-tree", tree], b"Deep synthetic snapshot\n")
+    result = list(pages(GitRepoConnector(repo_path=repo, ref=target, fetch=False)))
+    assert max(len(page.cursor.encode()) for page in result if page.cursor) < 7000
+    entries = [entry for page in result for entry in page.upserts]
+    assert {entry.path for entry in entries} == {
+        "/".join([*names, "leaf.md"]), f"commits/{target}.txt",
+    }

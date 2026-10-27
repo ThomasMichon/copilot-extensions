@@ -44,7 +44,6 @@ def _cursor(value: str | None) -> _Cursor:
         return _Cursor(history=data["history"])
     if set(data) != {"files"} or not isinstance(data["files"], list) or not data["files"]:
         raise ValueError("Invalid Git snapshot tree cursor")
-    parent = ""
     frames: list[tuple[str, int]] = []
     for index, frame in enumerate(data["files"]):
         if (
@@ -53,17 +52,13 @@ def _cursor(value: str | None) -> _Cursor:
             or type(frame[1]) is not int or not 0 <= frame[1] <= _MAX_TREE_BYTES
         ):
             raise ValueError("Invalid Git snapshot tree frame")
-        directory = frame[0]
-        if index == 0:
-            valid = directory == ""
-        else:
-            prefix = parent + "/" if parent else ""
-            child = directory.removeprefix(prefix)
-            valid = directory.startswith(prefix) and child not in {"", ".", ".."} and "/" not in child
+        component = frame[0]
+        valid = component == "" if index == 0 else (
+            component not in {"", ".", ".."} and "/" not in component
+        )
         if not valid:
             raise ValueError("Invalid Git snapshot directory ancestry")
-        frames.append((directory, frame[1]))
-        parent = directory
+        frames.append((component, frame[1]))
     return _Cursor(files=frames)
 
 
@@ -90,42 +85,55 @@ def _tree(connector: GitRepoConnector, target: str, directory: str) -> bytes:
     return raw
 
 
+def _record(raw: bytes, offset: int, oid_bytes: int) -> tuple[str, bytes, str, int]:
+    separator = raw.find(b" ", offset)
+    end = raw.find(b"\0", separator + 1)
+    following = end + 1 + oid_bytes
+    if separator < offset or end < separator or following > len(raw):
+        raise ValueError("Invalid Git snapshot tree record")
+    mode = raw[offset:separator].decode("ascii")
+    name = raw[separator + 1:end]
+    if mode not in {"40000", "100644", "100755", "120000", "160000"} or (
+        not name or b"/" in name or name in {b".", b".."}
+    ):
+        raise ValueError("Invalid Git snapshot tree entry")
+    return mode, name, raw[end + 1:following].hex(), following
+
+
+def _restore_offset(raw: bytes, offset: int, oid_bytes: int) -> None:
+    boundary = 0
+    while boundary < offset:
+        _, _, _, boundary = _record(raw, boundary, oid_bytes)
+    if boundary != offset:
+        raise ValueError("Git snapshot offset is not a tree-record boundary")
+
+
 def _files(
     connector: GitRepoConnector, target: str, stack: list[tuple[str, int]],
     cancel_check: Callable[[], None] | None,
 ) -> SnapshotPage:
-    directory, offset = stack[-1]
+    component, offset = stack[-1]
+    directory = "/".join(name for name, _ in stack[1:])
     raw = _tree(connector, target, directory)
     if offset > len(raw):
         raise ValueError("Git snapshot tree offset exceeds its pinned object")
     entries = []
     oid_bytes = len(target) // 2
+    _restore_offset(raw, offset, oid_bytes)
     for _ in range(_PAGE_SIZE):
         if cancel_check:
             cancel_check()
         if offset == len(raw):
             stack.pop()
             break
-        separator = raw.find(b" ", offset)
-        end = raw.find(b"\0", separator + 1)
-        following = end + 1 + oid_bytes
-        if separator < offset or end < separator or following > len(raw):
-            raise ValueError("Invalid Git snapshot tree record")
-        mode = raw[offset:separator].decode("ascii")
-        name = raw[separator + 1:end]
-        if mode not in {"40000", "100644", "100755", "120000", "160000"} or (
-            not name or b"/" in name or name in {b".", b".."}
-        ):
-            raise ValueError("Invalid Git snapshot tree entry")
-        blob = raw[end + 1:following].hex()
-        offset = following
-        stack[-1] = (directory, offset)
+        mode, name, blob, offset = _record(raw, offset, oid_bytes)
+        stack[-1] = (component, offset)
         decoded = decode_git_path(name)
         if decoded is None:
             continue
         path = f"{directory}/{decoded}" if directory else decoded
         if mode == "40000":
-            stack.append((path, 0))
+            stack.append((decoded, 0))
             break
         if connector._is_indexable_path(path):
             entry = read_delta_file(
