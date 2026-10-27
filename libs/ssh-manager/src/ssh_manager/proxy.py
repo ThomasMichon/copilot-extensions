@@ -415,7 +415,10 @@ async def _create_prepared_ssh(
     if not proxy and isinstance(config, SSHConfig):
         proxy = _option(config, "proxycommand")
     if not _is_windows() or (route is None and (not proxy or proxy.casefold() == "none")):
-        if _is_windows() and (config.effective_config or config.proxy_command is not None):
+        if _is_windows() and (
+            config.effective_config or config.proxy_command is not None
+            or _option(config, "proxyjump") is not None
+        ):
             args = _broker_args(args, "none")
         process, job_handle = await spawn_in_kill_on_close_job(
             *args, **ssh_subprocess_kwargs(**kwargs)

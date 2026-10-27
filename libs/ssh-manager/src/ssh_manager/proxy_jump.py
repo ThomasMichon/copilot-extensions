@@ -79,6 +79,7 @@ def prepare_jump_arguments(
     """Consume native jump options while preserving their route and remote argv."""
     prepared = [args[0]]
     jump: str | None = None
+    overrides: dict[str, str] = {}
     index = 1
     while index < len(args):
         argument = args[index]
@@ -97,6 +98,7 @@ def prepare_jump_arguments(
                     raise ValueError(f"SSH option -{option} requires a value")
                 value = args[index]
             consumed = option == "J"
+            key, setting = {"p": "port", "l": "user"}.get(option, ""), value
             if option == "o":
                 key, separator, setting = value.partition("=")
                 if not separator:
@@ -106,6 +108,9 @@ def prepare_jump_arguments(
                     key, setting = fields[0], fields[1] if len(fields) == 2 else ""
                 if key.strip().casefold() == "proxyjump":
                     consumed, value = True, setting.strip()
+            normalized = key.strip().casefold()
+            if normalized in {"hostname", "port", "user"}:
+                overrides.setdefault(normalized, setting.strip())
             if consumed:
                 if not value:
                     raise ValueError("SSH jump option requires a value")
@@ -123,6 +128,28 @@ def prepare_jump_arguments(
         else:
             prepared.append(argument)
         index += 1
+    if overrides:
+        port = int(overrides["port"]) if "port" in overrides else config.port
+        if port is not None and not 1 <= port <= 65535:
+            raise ValueError("Invalid SSH destination port")
+        if any(not value for value in overrides.values()):
+            raise ValueError("SSH destination override requires a value")
+        config = replace(
+            config,
+            hostname=overrides.get("hostname", config.hostname),
+            user=overrides.get("user", config.user),
+            port=port,
+            extra_options={
+                **{key: value for key, value in config.extra_options.items()
+                   if key.casefold() not in overrides},
+                **overrides,
+            },
+            effective_config=(
+                *[(key, value) for key, value in config.effective_config
+                  if key.casefold() not in overrides],
+                *overrides.items(),
+            ),
+        )
     return tuple(prepared), _override_jump(config, jump) if jump is not None else config
 
 

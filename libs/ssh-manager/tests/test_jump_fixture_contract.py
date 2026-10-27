@@ -54,6 +54,9 @@ def test_native_jump_profile_has_two_hops_without_credentials():
 def _canary_boundary(monkeypatch, frames):
     module = _fixture()
     monkeypatch.setattr(module, "require_hosted_windows", lambda: None)
+    monkeypatch.setattr(module, "subprocess", SimpleNamespace(
+        CREATE_NEW_CONSOLE=0x10, PIPE=-1, DEVNULL=-3,
+    ))
     clock = iter(range(100))
     monkeypatch.setattr(module, "time", SimpleNamespace(
         monotonic=lambda: next(clock), sleep=lambda _: None,

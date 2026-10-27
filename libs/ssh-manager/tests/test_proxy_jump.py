@@ -239,6 +239,7 @@ async def test_windows_consumes_explicit_jump_before_installing_its_proxy(monkey
     assert arguments == ("ssh", "-p", "2200", *expected_options, "target", "-J", "remote-argument")
     assert proxy_jump.ssh_option(config, "proxyjump") == "jump"
     assert route is not None and route.argv[-1] == "jump"
+    assert route.argv[-2] == "target:2200"
     assert [host for host, _options in calls] == ["jump"]
 
 
@@ -247,6 +248,39 @@ def test_jump_projection_preserves_other_options_and_explicit_disable():
     projected, config = proxy_jump.prepare_jump_arguments(args, _profile("target", "profile-jump"))
     assert projected == ("ssh", "-Fconfig", "-o", "BatchMode=yes", "--", "-target", "-Jremote")
     assert proxy_jump.ssh_option(config, "proxyjump") == "none"
+
+
+@pytest.mark.parametrize("options,endpoint", [
+    (("-p2200",), "target:2200"),
+    (("-o", "Port=2200"), "target:2200"),
+    (("-oPort=2200", "-p2300"), "target:2200"),
+    (("-p2200", "-oPort=2300"), "target:2200"),
+    (("-o", "HostName=endpoint.example"), "endpoint.example:22"),
+    (("-oHostName=2001:db8::1", "-o", "Port 2200"), "[2001:db8::1]:2200"),
+])
+async def test_cli_endpoint_overrides_bind_the_owned_forward(monkeypatch, options, endpoint):
+    _profiles(monkeypatch, {"jump": _profile("jump")})
+    args, config = proxy_jump.prepare_jump_arguments(
+        ("ssh", *options, "-Jjump", "target"), _profile("target"),
+    )
+    assert args == ("ssh", *options, "target")
+    route = await proxy_jump.resolve_jump_route(config, "ssh")
+    assert route is not None and route.argv[-2] == endpoint
+
+
+@pytest.mark.parametrize("options", [("-Jnone",), ("-o", "ProxyJump=none")])
+async def test_plain_config_cannot_reenable_an_explicitly_disabled_jump(monkeypatch, options):
+    process = SimpleNamespace(wait=AsyncMock(return_value=0))
+    spawn = AsyncMock(return_value=(process, None))
+    monkeypatch.setattr(proxy, "_is_windows", lambda: True)
+    monkeypatch.setattr(proxy, "spawn_in_kill_on_close_job", spawn)
+    try:
+        await proxy.create_ssh_subprocess(
+            "ssh", *options, "target", config=SSHConfig("target"),
+        )
+        assert spawn.await_args.args == ("ssh", "-o", "ProxyCommand=none", "target")
+    finally:
+        await run_process_cleanup(process)
 
 
 @pytest.mark.parametrize("args", [
