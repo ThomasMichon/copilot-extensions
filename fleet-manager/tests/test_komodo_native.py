@@ -154,7 +154,12 @@ def _docker_protocol(args: list[str], directory: str) -> tuple[int, str]:
                         "PortBindings": {"9120/tcp": [
                             {"HostIp": "127.0.0.1", "HostPort": service["ports"][0]["published"]},
                         ]} if name == "core" else {},
-                    }, "Mounts": mounts, "State": {"Status": "running", "Running": True},
+                    }, "Mounts": mounts, "State": {
+                        "Status": "running", "Running": True, "Paused": False,
+                        "Restarting": False, "Dead": False,
+                        "Pid": 1000 + sequence * 10 + ("core", "mongo", "periphery").index(name),
+                        "StartedAt": "fixture-start-" + str(sequence),
+                    },
                     "NetworkSettings": {"Networks": {
                         network["Name"]: {"NetworkID": network["Id"]},
                     }},

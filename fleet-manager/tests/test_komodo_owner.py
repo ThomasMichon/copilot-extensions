@@ -45,6 +45,10 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux host subs
     "mixed-core", "mixed-periphery", "mixed-partial", "mixed-incumbent-drift", "mixed-replacement-drift",
     "first-empty-lost-metadata", "stale-before-apply",
     "retire-stale-before-stop", "retire-stale-before-remove", "retire-revoked-before-remove",
+    "stopped-after-health", "key-drift-after-health", "restart-after-health",
+    "repeat-stopped-after-health", "status-stopped-after-health", "repeat-key-drift-after-health",
+    "status-stopped-periphery", "missing-key-evidence",
+    "status-paused-periphery", "status-restarting-core",
 ])
 def test_composed_owner_preserves_original_operation_and_real_native_custody(
     native_rig: Any, keys: Any, scenario: str, monkeypatch: Any,
@@ -68,6 +72,8 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
         current = []
         health_failure = [False]
         health_requests = []
+        health_changes = []
+        health_armed = [not scenario.startswith(("repeat-", "status-"))]
         token = "local-owner-fixture-token"
 
         async def handler(request: web.Request) -> web.Response:
@@ -86,7 +92,7 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
             core_version = "2.0.1" if actual["core"]["Image"] == "sha256:" + "f" * 64 else "2.0.0"
             periphery_version = ("2.0.1" if actual["periphery"]["Image"] == "sha256:" + "1" * 64
                                  else "2.0.0")
-            return web.json_response({
+            response = {
                 "/read/GetVersion": {"version": "9.0.0" if health_failure[0]
                                     else core_version},
                 "/read/GetServer": {
@@ -98,7 +104,21 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                     "version": periphery_version,
                     "public_key": "fixture-public-key-periphery", "docker_connected": True,
                 },
-            }[request.path])
+            }[request.path]
+            if (request.path == "/read/GetPeripheryInformation" and not health_changes and health_armed[0]
+                    and scenario.endswith(("stopped-after-health", "key-drift-after-health",
+                                           "restart-after-health"))):
+                health_changes.append(True)
+                if scenario.endswith("key-drift-after-health"):
+                    (rig["material"].keys / "core.pub").write_text("changed-after-health")
+                else:
+                    changed = live()
+                    if scenario.endswith("stopped-after-health"):
+                        changed["core"]["State"] = {"Status": "exited", "Running": False}
+                    else:
+                        changed["core"]["State"]["StartedAt"] = "fixture-new-native-process"
+                    (rig["directory"] / "live.json").write_text(json.dumps(changed))
+            return web.json_response(response)
 
         app = web.Application()
         app.router.add_post("/{tail:.*}", handler)
@@ -338,7 +358,7 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                 if scenario == "stopped-core":
                     assert len(health_requests) == before_http
                 return
-            if scenario in ("lost-reply", "unsettled-restart"):
+            if scenario in ("lost-reply", "unsettled-restart", "missing-key-evidence"):
                 (rig["directory"] / "lost-reply").touch()
                 original = request()
                 with pytest.raises(PlanError, match="uncertain"):
@@ -353,6 +373,15 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                     "native-network-custody-changed-or-unproved",
                 ]
                 assert effects() == 1 and status["native_mutations_performed"] is False
+                if scenario == "missing-key-evidence":
+                    with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
+                        record = state.read()
+                        record["attempt"].pop("public_keys_before")
+                        state.save(record)
+                    with pytest.raises(PlanError, match="identity evidence is unavailable"):
+                        await invoke(owner(), original)
+                    assert effects() == 1 and not health_requests
+                    return
                 if scenario == "unsettled-restart":
                     with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
                         record = state.read()
@@ -379,6 +408,19 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
 
             first = owner()
             original = request()
+            if scenario in ("stopped-after-health", "key-drift-after-health", "restart-after-health"):
+                with pytest.raises(PlanError, match="readiness|runtime|identity|process"):
+                    await invoke(first, original)
+                assert effects() == 1
+                with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
+                    assert state.read()["good"] is None
+                    assert state.read()["attempt"]["native_settled"] is True
+                if scenario == "key-drift-after-health":
+                    before_http = len(health_requests)
+                    with pytest.raises(PlanError, match="identity"):
+                        await invoke(owner(), original)
+                    assert len(health_requests) == before_http and effects() == 1
+                return
             if scenario == "fresh-repeat":
                 status = await invoke(first, original, status=True)
                 assert status["installed"] is False and status["accepted"] is None
@@ -412,6 +454,31 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
             status = await invoke(owner(), original, status=True)
             assert status["installed"] is status["currently_healthy"] is status["converged"] is True
             assert status["state"] == "converged" and effects() == 1
+            if scenario.startswith(("repeat-", "status-")):
+                health_armed[0] = True
+                before_http = len(health_requests)
+                if scenario in ("status-stopped-periphery", "status-paused-periphery", "status-restarting-core"):
+                    changed = live()
+                    if scenario == "status-stopped-periphery":
+                        changed["periphery"]["State"] = {"Status": "exited", "Running": False}
+                    elif scenario == "status-paused-periphery":
+                        changed["periphery"]["State"].update(Status="paused", Paused=True)
+                    else:
+                        changed["core"]["State"].update(Status="restarting", Restarting=True, Pid=0)
+                    (rig["directory"] / "live.json").write_text(json.dumps(changed))
+                if scenario.startswith("repeat-"):
+                    with pytest.raises(PlanError, match="readiness|runtime|identity|process"):
+                        await invoke(owner(), original)
+                else:
+                    status = await invoke(owner(), original, status=True)
+                    assert not status["converged"] and status["currently_healthy"] is not True
+                    if scenario in ("status-stopped-periphery", "status-paused-periphery", "status-restarting-core"):
+                        assert status["blockers"] == (["owned-core-not-running"]
+                                                      if scenario == "status-restarting-core"
+                                                      else ["owned-substrate-not-running"])
+                        assert len(health_requests) == before_http
+                assert effects() == 1
+                return
             if scenario in ("missing-core-key", "missing-periphery-key", "adoption-missing-key"):
                 key = rig["material"].keys / (
                     "periphery.pub" if scenario == "missing-periphery-key" else "core.pub")

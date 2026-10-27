@@ -93,6 +93,7 @@ def retire_owner(owner: KomodoOwner, request: OperationIntent, permit: Permit) -
                 def checkpoint() -> None:
                     nonlocal permit
                     owner._selected(request, content)
+                    owner._preserved_material(record, selected)
                     permit = owner.admission.revalidate(permit, request)
                     state.check()
 

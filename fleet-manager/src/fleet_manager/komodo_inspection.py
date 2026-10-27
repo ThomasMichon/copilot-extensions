@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 from typing import TYPE_CHECKING, Any
 
 from .komodo_declaration import KomodoDeclaration, SERVICES
-from .komodo_health import current_health, identity_digest
+from .komodo_health import identity_digest
 from .komodo_native import KomodoNative
 from .komodo_network import retained_network, verify_network
-from .komodo_owner import native_fingerprint, verify_candidate
+from .komodo_owner import native_fingerprint, native_running, verify_candidate
 from .komodo_state import KomodoState
 from .node_journal import NodeJournal
 from .operations import OperationIntent
@@ -111,8 +110,9 @@ def inspect_owner(owner: KomodoOwner, request: OperationIntent, permit: Permit) 
                 installed = False
             else:
                 blockers.append("native-resources-differ-from-current-or-retained-owner")
+            network = None
             try:
-                verify_network(owner.native.network(
+                network = verify_network(owner.native.network(
                     selected.declaration, selected.material, deadline=deadline),
                     selected, containers,
                     attempt["network_before"] if candidate else retained_network(record, selected),
@@ -128,11 +128,14 @@ def inspect_owner(owner: KomodoOwner, request: OperationIntent, permit: Permit) 
             absent = selected.declaration.to_dict().get("desired_state", "present") == "absent"
             if installed is False and not absent:
                 blockers.append("owned-substrate-resources-absent-or-incomplete")
-            if observed_declaration is not None and containers["core"]["State"].get("Running") is not True:
+            if observed_declaration is not None and not native_running(containers["core"]):
                 blockers.append("owned-core-not-running")
+            elif observed_declaration is not None and not all(map(native_running, containers.values())):
+                blockers.append("owned-substrate-not-running")
             elif observed_declaration is not None:
                 try:
-                    asyncio.run(current_health(observed_declaration, selected.material, deadline=deadline))
+                    owner._ready(selected, containers, network, deadline=deadline,
+                                 declaration=observed_declaration, identity=identity)
                 except PlanError as error:
                     healthy, detail = False, str(error)
                     blockers.append("authenticated-current-health-unavailable")
