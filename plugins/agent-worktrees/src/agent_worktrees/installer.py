@@ -425,6 +425,7 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
     sd.mkdir(parents=True, exist_ok=True)
     for name in (
         "default-setup.ps1",
+        "native-seed-boundary.ps1",
         "default-setup.sh",
         "launch-command.ps1",
         "launch-command.sh",

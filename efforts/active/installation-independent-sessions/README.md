@@ -183,6 +183,9 @@ retains these constraints; private host identity stays outside this repository.
 
 ### Phase 3 - Production launch-owned wrapper and boundary hooks
 
+- [x] Land finite seed/backend provider groundwork and the dormant Windows
+  adapter with existing seed/execution authorities (#9242). This prerequisite
+  does not activate callers or remove either production runtime waiter.
 - [ ] Remove both deferred-setup and final-backend runtime-Python waiters.
   Reuse finite seed preparation, existing seed custody and execution receipts;
   the native shell owns the actual child handle and wait.
@@ -1025,3 +1028,242 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   The launch-site census also classifies both adapter process starts as
   caller-contained; its source guard passes. These corrections do not activate
   callers or close native terminal/installation-survival acceptance.
+
+### 2026-10-27 - Finite native provider prerequisite merged
+
+- #9242 merged as `19b238586593af584381d0926b22a6abad096596` after
+  exact-head Copilot approval `5663664248`, both fixed review threads resolved
+  and required green CI. Managed completion used the authorized additional
+  CODEOWNER-review exception, not a CI bypass.
+- Re-read the canonical Plan and Validation Plan. Only the finite-provider
+  groundwork milestone is complete: production consumers, both runtime
+  waiters, per-worktree mux check/create fencing, native terminal/containment,
+  maintenance standby, release and both live cycles remain open.
+- Preserved recovery refs, then synchronized only the provider-confirmed merged
+  range onto current `dev`. The next slice integrates the finite boundary into
+  existing lifetime owners and copied assets; it must not replace the two
+  Python waiters with two additional persistent PowerShell waiters.
+
+### 2026-10-27 - Normalized Windows consumer integration in progress
+
+- The candidate runs native-capable normalized PowerShell 7 setup directly
+  from launch-owned storage. It reuses that existing host for finite outer
+  admission/preparation and actual backend handle/wait ownership; no second
+  resident shell replaces either removed Python waiter.
+- Provider, copying, correlation and original adapter controls first passed
+  87 tests. An expanded packet passed 88 but exposed four whole-consumer
+  fixture encoding failures; capturing literal arguments in an explicit UTF-8
+  file corrected those fixtures, and all four consumer controls then passed.
+  A broad launch-regression selection hit runner time budgets and is not
+  counted as green.
+- Real windowless Windows terminal qualification is being added, including
+  the actual pane kill-on-close Job. Its retained child-handle teardown
+  control passes. The interrupt fixture still needs to exercise a real
+  console input reader; a non-reading child cannot prove turn cancellation.
+  Neither caller activation nor these partial controls qualify live migration.
+- Use `/exit` and verify actual pane/backend exit for controlled migration.
+  Single Ctrl+C, backend-owned rapid-repeat termination, attach loss and real
+  child exit remain distinct. The latest literal direction is preserved in
+  [the inception transcript](inception-transcript.md#operator---graceful-exit-and-repeated-interrupt-behavior).
+- Batch/custom/old-host and POSIX parity, concurrent mux admission, actual
+  installed runtime/terminal acceptance, release, standby and both live cycles
+  remain open. No target installation or session changed.
+- The production builder always includes `launch-command.ps1`; direct-setup
+  fixtures alone would have missed that consumer. The candidate now relocates
+  that existing wrapper with its sibling setup and keeps its existing
+  same-host dot-source fast path, with typed correlation inserted inside the
+  wrapper transport. It does not take over #5579's forwarding-layer work.
+- The combined packet passed 101 tests and exposed a real outer-wrapper
+  defect: after one interrupt, child survival and its exit code were preserved,
+  but PowerShell cancellation skipped post-child handling. The candidate now
+  copies the engine-owned console helper beside a capable canonical pane
+  wrapper and protects that existing owner's child wait too. An old peer
+  retains the legacy command; this new activation fence and the copied-pane
+  correction are under native regression.
+- The copied-pane fix passes the single-interrupt post-child diagnostic.
+  Synthetic keyboard-reader controls proved unreliable, so the native
+  wait-owner packet now delivers actual Windows control events through a
+  bounded helper attached only to its owned ConPTY. All six direct/outer-pane
+  controls and ten selected existing normalized-launch regressions passed
+  together: 16 tests, 154 explicitly deselected. This validates console event
+  handling, not physical keyboard delivery or a real mux/Copilot installation.
+- Existing creation/resume coverage passed 15 tests. The 93-case seed-delivery
+  run initially had 92 passes and one Windows raw-capture timeout at the
+  admission-refusal boundary. Both coupled admission tests now use the existing
+  finite process-tree capture owner with the same 15-second deadline. The full
+  file then passed all 93 tests; this is not a claim that arbitrary cold
+  startup latency was fixed. Real current-runtime/CLI integration and installed
+  qualification remain the next gate, before publication or live migration.
+
+### 2026-10-27 - Current-runtime consumer qualification
+
+- The independent local production review found no significant issues and
+  retained the unproved seeded cold-start, real Copilot/keyboard/mux and
+  uninstall/reinstall gates. It is not a provider review or rollout receipt.
+- Added a disposable source-attributed runtime/consumer lane using the existing
+  canonical construction fixture. It does not replace the finite provider or
+  current-runtime selector. The initial run timed out during construction,
+  before a consumer assertion; it is not acceptance evidence. The diagnostic
+  run retains the existing 300-second construction deadline with file-backed
+  installer output and the construction portfolio's existing outer test budget.
+  No production deadline was increased.
+- The new lane initially separates no-seed backend dispatch, admission-only
+  copied setup and foreign-root refusal from seeded/mux qualification.
+  Publication, host installation and both live cycles remain pending.
+- Stack diagnostics subsequently located the stall in retained local-source
+  copying and repeated byte verification, not the governance lock. The
+  consumer fixture now makes an independently committed runtime-only source
+  payload, omitting test suites but retaining the real installer and policy.
+  The full-source construction timed out at 300 seconds on this worker; no
+  full-source latency improvement or successful consumer outcome is implied.
+- The runtime-only source also reached the 300-second construction test
+  deadline before consumer dispatch. Read-only inspection found exactly the
+  expected 16 local inputs and no inherited UV project override. Since stack
+  samples showed source-copy/hash progress, the diagnostic construction test
+  now allows 600 seconds with a 900-second item budget to measure the eventual
+  outcome. Production constructor, child, policy and native callback deadlines
+  are unchanged. Neither earlier timeout becomes green retrospectively.
+- The measured run constructed and selected the real runtime successfully.
+  Its following metadata probe failed because this new test passed `-c` to
+  the module-only retention bootstrap. Metadata and fixture initialization
+  now use the actual installed interpreter directly; production native
+  callbacks still use their unmodified retained `-m` bootstrap contract.
+  The backend fixture waits for its real spawn receipt before returning, so
+  a fixture's immediate exit cannot race the provider's PID/birth admission.
+  Consumer assertions have not yet passed.
+- The next packet reached consumer dispatch: foreign-root refusal passed;
+  direct backend capture timed out at 30 seconds; copied setup propagated
+  exit 7 but encountered an ambient compatibility shim during optional
+  project-name lookup. The fixture now binds its actual selected runtime,
+  excludes host command shims from the driver's PATH, and uses the existing
+  finite process-tree capture owner at the same 30-second deadline. Timeout
+  diagnostics retain the actual execution observations rather than hiding
+  the boundary behind a capture exception. Both consumer cases remain red
+  until the rerun verifies them.
+- Corrected a test-only capture-helper API mismatch. With direct bootstrap
+  diagnostics both backends then received the literal arguments and returned
+  exit 7; copied setup passed, but direct backend lacked its final receipt.
+  The preliminary provider invocation made that warm-path evidence, not cold
+  acceptance, and has been removed.
+- A fresh-interpreter sample showed the finite module importing preparation
+  and status-daemon dependencies in 3.674 seconds. Return-only callbacks now
+  defer those imports to preparation or actual seed handling; a second local
+  sample took 0.509 seconds and did not load either subsystem. These are local
+  samples, not a cross-run latency guarantee. A subprocess import-graph
+  regression and the actual cold consumer packet are under validation with
+  the original five-second native phase deadline unchanged.
+- The lean-callback packet passed all 30 cases: 27 finite-provider/import
+  controls and three real-runtime no-seed consumer/foreign-root controls.
+  The preliminary warming probe was absent. The next packet extends actual
+  dispatch to staged new and resume seeds on both backend and copied-setup
+  paths, including literal seed insertion, completion and parent/child
+  execution correlation. It remains a no-mux synthetic-backend test, not
+  actual Copilot or either live installation cycle.
+- The expanded packet exposed intermittent five-second finite phase timeouts,
+  including no-seed controls, so the earlier 30-case pass is not robust
+  qualification. Temporary test-owned diagnostics caught timeouts in setup,
+  spawn observation and return; finite-process stack dumps located a full
+  `__main__` import through the receipt writer's monitor lock-path lookup.
+- Monitor runtime helper lookup now consults only an already-loaded command
+  module for compatibility overrides; otherwise it uses the existing local
+  implementation. New controls cover both no-command-import paths and
+  preserved loaded-CLI overrides. All temporary copied-helper instrumentation
+  and bootstrap warming probes have been removed for the clean packet.
+  The original five-second native deadline remains unchanged.
+- The synthetic PowerShell backend uses generic-host seed append semantics;
+  its expected argv now reflects that actual boundary. Copilot-executable
+  delimiter insertion remains separately covered by the provider controls.
+  This fixture correction does not change production argument handling.
+- The clean CLI-free packet passed 31 controls but still failed five actual
+  consumer cases. Receipt dispatch also loaded the entire mutation-owner
+  roster, as the finite stack diagnostics had shown. Direct fallbacks for
+  the six existing seed/receipt verbs now import their declared canonical
+  writer only; all other and unknown direct verbs retain full-roster
+  discovery, and daemon capability/registration paths remain unchanged.
+- The canonical registered handlers, authority fencing, versions, logging and
+  ambiguous-write behavior are unchanged. Added controls verify the six
+  owner identities, unchanged malformed receipt rejection and full discovery
+  for unknown finite-looking names. The tracking-writer suite, finite-provider
+  suite and clean actual consumer matrix are under combined validation;
+  no production phase deadline was increased.
+- The combined writer/provider/runtime packet passed 82 cases and failed
+  four real-runtime consumers under the five-second cap. At this observed
+  contract crossroads, the operator explicitly selected `review-ten`: revise
+  native Windows phase calls to a ten-second cap through normal review and
+  validation. The literal decision is retained in the inception transcript.
+- Updated the native adapter and launch contract accordingly. Separate pane
+  lifecycle calls remain five seconds, mux queries remain two seconds, and
+  retries or resident Python waiters are still forbidden. A new real stalled
+  child control measures the ten-second cutoff, checks the child is stopped
+  before the owner returns and checks a single launch. It joins the adapter,
+  writer, provider and real-runtime seeded matrix in the current validation
+  packet; approval of a deadline is not acceptance of an unrun test.
+- The approved-bound packet passed all 100 tests: the real stalled-child
+  watchdog, provider and writer controls, adapter cases and all seven
+  completed-runtime consumer cases. New/resume seeds retain literal payloads,
+  actual PID/birth and exit observations, one-time completion and correlated
+  outer/backend receipts. This is still a synthetic backend without a mux.
+- Publication review moved the expensive construction matrix into the existing
+  opt-in `tests/native/` lane instead of growing unconditional unit CI. Only
+  its discovery location and docstring changed; collection at the explicit
+  path is being verified. F/E9 and the 13-plugin install-contract gate pass.
+  The parent Plan and Validation Plan remain open.
+- All seven cases collect successfully at the explicit native path. Final
+  F/E9, the full module-size ceiling check, headless launch census, native
+  adapter PowerShell parsing and the 13-plugin install contract pass.
+  Documentation, contract and performance impact were rechecked against the
+  candidate; publication remains PR-gated, and nothing is deployed.
+
+### 2026-10-27 - Consumer PR review
+
+- Opened #9288 through the managed flow after preserving a recovery branch and
+  rebasing onto current `dev`. The only conflict was documentation; both the
+  concurrent fleet paragraph and the native test guidance were retained.
+  The independent installer/removal work remains with #9253's owner.
+- Exact-head Copilot review `5673353889` identified one Medium issue:
+  admission-only setup clears the seed fields and bypasses the adapter's
+  console-control guard through its direct backend branch. The outer pane
+  protects a different process and does not close that gap.
+- The candidate now guards that existing host's direct native wait, retaining
+  same-host PowerShell-script execution and unchanged legacy behavior. New
+  full copied-setup ConPTY cases use the actual completed runtime/provider
+  and canonical outer pane Job, checking first-interrupt survival, actual
+  nonzero exit and the correlated return receipt. Validation and thread
+  resolution are pending; the review is not yet a merge gate pass.
+- Two local review-fix packets each passed five controls and failed one before
+  terminal-backend readiness/preparation; each backend mode passed separately,
+  but that is not a combined passing result. Corrected the test's working
+  directory to the recorded checkout and bounded whole-pipeline observation
+  separately from the unchanged ten-second native phase cap.
+- Added a default-off Windows-only selector to the existing manual acceptance
+  workflow for independent exact-dispatch-SHA qualification of the six focused
+  controls. The strict workflow catalogue tests pass all 87 cases after
+  accounting for already-declared inputs/jobs and the new lane. Required unit
+  CI and unrelated default diagnostics are not expanded.
+- #9288 is draft while that native proof is pending. Local failed attempts
+  remain failures, the Medium thread remains unresolved, and there is no
+  installed rollout or live-host effect.
+
+### 2026-10-27 - Consumer review corrections and independent qualification
+
+- Windows acceptance run `40584656272`, job `122472827124`, exercised exact
+  head `6c6737f38d540b11d365dcf5dba0a8f71baf1a5c`: all six focused controls
+  passed, with 16 deselected and no skips. Both full copied-setup terminal
+  modes passed through the completed runtime/provider and canonical pane Job.
+  The admission-only interrupt finding's thread is resolved. Earlier local
+  startup refusals remain failed measurements, not evidence of a latency fix.
+- Fresh Copilot review `5674644985` confirmed that correction but identified
+  another Medium issue: a normally returning PowerShell backend can leave
+  `$LASTEXITCODE` unset, incorrectly producing an interruption receipt.
+  Normalize that code to zero only on the normal-completion tail; preserve
+  the unset sentinel for early exits.
+- The new same-owner script regression has no explicit `exit` and requires
+  actual zero exit plus the correlated `returned` receipt. It and all four
+  existing copied-setup controls passed together (five passed, ten deselected).
+  PowerShell parsing and staged F/E9 lint passed.
+- Preserved the fix on a recovery branch, then rebased the same PR onto
+  `3666cd4098`. The only conflict was the installer declaration digest;
+  recomputed it from the merged installer, retaining both the concurrent
+  installer changes and this PR's native helper deployment entry. Rebased
+  validation and fresh review remain pending. No runtime was updated, no live
+  session was stopped, and the parent Plan and Validation Plan remain open.

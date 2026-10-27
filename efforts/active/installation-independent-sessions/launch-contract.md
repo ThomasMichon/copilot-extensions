@@ -71,9 +71,11 @@ provisional receipt, so the receipt's grace interval cannot run while a start
 callback is pending. Windows command-invocation failures reach teardown with
 an explicit failure result.
 Missing, unsupported or unconfirmed callbacks remain quiet and do not claim
-delivery. Boundary child calls retain a five-second deadline and native mux
-queries a two-second deadline; these are containment limits, not performance
-qualification.
+delivery. Pane lifecycle child calls retain a five-second deadline and native
+mux queries a two-second deadline. Windows native setup/seed/execution phase
+calls have the operator-approved ten-second deadline, including current-runtime
+startup; they never retry or become resident waiters. These are containment
+limits, not performance qualification.
 
 Preparation reads one tracking record and copies one POSIX asset or two Windows
 assets once per constructed pane. Start/end use finite current-selection reads,
@@ -88,8 +90,19 @@ rechecked on attach by the existing owner rather than reusing stale native
 incarnation evidence. Native cold/warm end-to-end launch latency and tail
 qualification remain unmeasured; fixture help preparation is not that baseline.
 
-This candidate does **not** qualify removal or migration: both deferred setup
-and final `launch_seed_exec --invoke` still retain runtime-Python waiters.
+This candidate does **not** qualify removal or migration. Native-capable
+normalized Windows/PowerShell 7 setup now runs directly from launch-owned
+storage and uses finite preparation, recording the existing setup host and
+passing its operation ID to the actual backend. Its direct-executable and
+PowerShell-script backend path uses the same existing shell's native child
+handle and wait, not either runtime-Python waiter. Admission-only preflight
+releases its seed-authority guard before running the child. Resolution
+correlation and the literal native argument envelope stay separate.
+Old scripts/Windows PowerShell, custom launchers, batch backends and POSIX
+still retain their legacy path. Current-root finite calls refuse unsupported
+providers rather than provisioning, falling through to a foreign installation
+or starting an uncorrelated backend. This bounded normalized consumer
+integration is not full launch-path parity or concurrent mux admission proof.
 Copied assets are retained, not reclaimed on age or inferred liveness. Their
 terminal reclamation, missed-boundary recovery, actual installed consumer
 parity and the literal clean-middle round trip remain this effort's obligations.
@@ -108,6 +121,13 @@ separate seed-delivery and lifecycle authorities without extending this lock's
 scope or nesting a seed mutation under its own already-held admission lock.
 Acceptance must include overlapping same-worktree attempts, parallel
 different-worktree launches and release at mux discoverability.
+
+Use the native CLI's `/exit` for controlled live migration, then verify actual
+pane/backend exit. Ctrl+C is not an exit receipt: a first press can cancel a
+turn, repeated presses within the backend's own window can terminate it, and
+an attach client can disappear while its pane keeps running. Signal validation
+must preserve that backend-owned distinction without inventing a fixed Copilot
+count or duration. Detach never authorizes end handling or replacement.
 
 The copied shell owns only immutable launch data, native child execution,
 terminal/containment lifetime and two bounded handler invocations. It does not

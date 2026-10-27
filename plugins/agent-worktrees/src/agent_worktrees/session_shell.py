@@ -12,6 +12,8 @@ from uuid import uuid4
 
 from . import launch_attempt, tracking
 
+NATIVE_CONSOLE_MARKER = "# worktree-manager:native-console-owner-v1"
+
 
 @dataclass(frozen=True)
 class SessionShell:
@@ -62,12 +64,26 @@ def prepare(
     names = {
         "pane-wrapper.ps1": ("pane-wrapper.ps1", "pane-launch.ps1"),
         "pane-wrapper.sh": ("pane-wrapper.sh",),
+        "default-setup.ps1": (
+            "default-setup.ps1", "launch-command.ps1",
+            "native-seed-boundary.ps1", "reconcile-machine-settings.ps1",
+        ),
     }.get(wrapper.name)
     if names is None:
         raise ValueError("Unsupported session shell asset")
-    sources = tuple(wrapper.with_name(name) for name in names)
+    sources = [wrapper.with_name(name) for name in names]
     for source in sources:
         _plain(source)
+    if wrapper.name == "pane-wrapper.ps1" and NATIVE_CONSOLE_MARKER in wrapper.read_text(
+        encoding="utf-8-sig",
+    ).splitlines():
+        from . import installer
+
+        helper = installer.install_dir() / "scripts" / "native-seed-boundary.ps1"
+        if not helper.is_file():
+            helper = Path(__file__).resolve().parents[2] / "scripts" / helper.name
+        _plain(helper)
+        sources.append(helper)
     directory = launch_attempt._path(
         record_path.parent, attempt_id or uuid4().hex, uuid4().hex,
     ).with_suffix(".shell")

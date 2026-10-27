@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import os
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from agent_procutil import no_window_kwargs
 
@@ -17,6 +17,7 @@ from . import launch_execution
 
 BOUNDARY_MARKER = "# agent-worktrees:launch-seed-boundary-v1"
 ATTEMPT_BOUNDARY_MARKER = "# agent-worktrees:launch-attempt-boundary-v1"
+NATIVE_SETUP_MARKER = "# agent-worktrees:native-setup-owner-v1"
 
 
 def _interactive_console() -> bool:
@@ -53,7 +54,15 @@ def deferred_command(
     admission_only: bool = False, preserve_seed_id: str | None = None,
     native_resume_session: str | None = None,
     correlation: launch_execution.Correlation | None = None,
+    prepare_native: bool = True,
 ) -> list[str]:
+    native = _native_setup_command(
+        command, record_path, seed_id=seed_id, admission_only=admission_only,
+        preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
+        correlation=correlation,
+    ) if prepare_native else None
+    if native is not None:
+        return native
     prefix = [
         sys.executable, "-m", "agent_worktrees.launch_seed_exec",
         "--record", str(record_path),
@@ -69,6 +78,102 @@ def deferred_command(
     if correlation:
         prefix += correlation.options()
     return [*prefix, "--", *command]
+
+
+def native_setup_index(command: list[str]) -> int | None:
+    """Recognize the typed native setup envelope, not arbitrary Copilot argv."""
+    index = _script_index(command)
+    if index is not None and Path(command[index]).name == "launch-command.ps1":
+        delimiter = _wrapper_delimiter(command, index)
+        if delimiter is not None:
+            inner = native_setup_index(command[delimiter + 1:])
+            return delimiter + 1 + inner if inner is not None else None
+    if (
+        index is not None and Path(command[index]).name == "default-setup.ps1"
+        and "-LaunchSeedPreparation" in command[index + 1:]
+        and "-LaunchSeedNativeRoot" in command[index + 1:]
+    ):
+        return index
+    return None
+
+
+def _wrapper_delimiter(command: list[str], index: int) -> int | None:
+    delimiter = index + 1
+    if command[delimiter:delimiter + 1] == ["--recovery"]:
+        delimiter += 1
+    return delimiter if command[delimiter:delimiter + 1] == ["--"] else None
+
+
+def _native_setup_command(
+    command: list[str], record_path: Path, *, seed_id: str | None,
+    admission_only: bool, preserve_seed_id: str | None, native_resume_session: str | None,
+    correlation: launch_execution.Correlation | None,
+) -> list[str] | None:
+    if os.name != "nt" or not command or PureWindowsPath(command[0]).stem.casefold() != "pwsh":
+        return None
+    from .process_launcher import _normalized_setup_index
+
+    outer = _script_index(command)
+    wrapper = installer.install_dir() / "scripts" / "launch-command.ps1"
+    if outer is not None and Path(command[outer]).resolve() == wrapper.resolve():
+        delimiter = _wrapper_delimiter(command, outer)
+        if delimiter is None:
+            return None
+        inner = _native_setup_command(
+            command[delimiter + 1:], record_path, seed_id=seed_id, admission_only=admission_only,
+            preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
+            correlation=correlation,
+        )
+        if inner is None:
+            return None
+        copied_setup = Path(inner[_script_index(inner)])
+        return [
+            *command[:outer], str(copied_setup.with_name("launch-command.ps1")),
+            *command[outer + 1:delimiter + 1], *inner,
+        ]
+    index = _normalized_setup_index(command)
+    if index is None or Path(command[index]).name != "default-setup.ps1":
+        return None
+    script = Path(command[index])
+    if not script.is_file() or NATIVE_SETUP_MARKER not in script.read_text(
+        encoding="utf-8-sig",
+    ).splitlines():
+        return None
+    from . import session_shell
+    from .manager_launch_cli import _usable_worktree_manager_launcher_dir, _worktree_manager_root
+
+    launch_dir = _usable_worktree_manager_launcher_dir()
+    peer = launch_dir / "pane-wrapper.ps1" if launch_dir else None
+    if peer is None or not peer.is_file() or session_shell.NATIVE_CONSOLE_MARKER not in peer.read_text(
+        encoding="utf-8-sig",
+    ).splitlines():
+        return None
+
+    prepared = session_shell.prepare(
+        record_path.absolute(), script.absolute(),
+        installation_roots=(installer.install_dir().absolute(), _worktree_manager_root().absolute()),
+        attempt_id=correlation.attempt_id if correlation else None,
+    )
+    flags = [
+        "-LaunchSeedPreparation", "admission" if admission_only else "seed",
+        "-LaunchSeedNativeRoot", str(installer.install_dir()),
+        "-LaunchSeedRecord", str(record_path),
+    ]
+    for name, value in (
+        ("LaunchSeedId", seed_id), ("LaunchSeedPreserveId", preserve_seed_id),
+        ("LaunchNativeResumeSession", native_resume_session),
+    ):
+        if value is not None:
+            flags += ["-" + name, value]
+    if correlation:
+        for name, value in (
+            ("LaunchAttemptId", correlation.attempt_id),
+            ("LaunchResolutionId", correlation.resolution_id),
+            ("LaunchParentId", correlation.parent_id),
+        ):
+            if value is not None:
+                flags += ["-" + name, value]
+    return [*command[:index], str(prepared.wrapper), *flags, *command[index + 1:]]
 
 
 def _script_index(command: list[str]) -> int | None:
@@ -210,6 +315,7 @@ class PreparedLaunch:
     argv: list[str]
     receipt: dict | None
     environment: dict[str, str] | None
+    setup_seed_id: str | None = None
 
 
 def _prepare(
@@ -311,7 +417,9 @@ def _prepare(
     if child_environment is None and launch_execution.NATIVE_HINT_ENV in os.environ:
         child_environment = os.environ.copy()
         child_environment.pop(launch_execution.NATIVE_HINT_ENV)
-    return PreparedLaunch(argv, receipt, child_environment)
+    return PreparedLaunch(
+        argv, receipt, child_environment, current.seed_id if current is not None and not invoke else None,
+    )
 
 
 def _launch(

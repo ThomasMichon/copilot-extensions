@@ -241,6 +241,37 @@ def test_closed_wheel_file_uri_never_emits_an_extended_path_authority(path, uri)
     assert file_uri(PureWindowsPath(path)) == uri
 
 
+@pytest.mark.parametrize("certificates", [
+    ["b", "a"], ["a", "b", "a"], ["b", "b", "a", "a"],
+], ids=["order", "duplicate", "repeated"])
+def test_native_transport_identity_canonicalizes_only_certificate_multiplicity(monkeypatch, certificates):
+    import installer_native_feed as native
+
+    original = list(certificates)
+    record = {"certificates": certificates, "minimum": 771, "verify_flags": 32, "ciphers": "selected"}
+    monkeypatch.setattr(native, "_tls_record", lambda _context: dict(record))
+    assert native._transport_identity(object()) == {
+        **record, "certificates": ["a", "b"],
+    }
+    assert record["certificates"] == original
+
+
+@pytest.mark.parametrize("change", ["added", "removed", "verify-flags"])
+def test_native_transport_identity_preserves_real_trust_and_transport_changes(monkeypatch, change):
+    import installer_native_feed as native
+
+    record = {"certificates": ["a", "b"], "verify_flags": 32}
+    monkeypatch.setattr(native, "_tls_record", lambda _context: dict(record))
+    original = native._transport_identity(object())
+    if change == "added":
+        record["certificates"] = ["a", "b", "c"]
+    elif change == "removed":
+        record["certificates"] = ["a"]
+    else:
+        record["verify_flags"] += 1
+    assert native._transport_identity(object()) != original
+
+
 def test_source_closure_propagates_transitive_extras_and_marker_cycles():
     wheels = {
         "app": {"requires_dist": ["helper[metrics]>=1", "unused; python_version < '2'"]},

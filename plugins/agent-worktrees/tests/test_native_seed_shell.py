@@ -177,7 +177,12 @@ def test_native_failed_output_sink_is_drained_and_keeps_correlated_exit(tmp_path
 
 def test_finite_phase_uses_powershell_location_not_environment_cwd(tmp_path):
     bootstrap = tmp_path / "fixture-bootstrap.py"
-    bootstrap.write_text("import json,os\nprint(json.dumps({'cwd':os.getcwd()}))\n", encoding="utf-8")
+    bootstrap.write_text(
+        "import json,os\n"
+        "print(json.dumps({'cwd':os.getcwd(),'argv':['2026-01-01T00:00:00Z',''],"
+        "'environment':{'DATE_LITERAL':'2026-01-01T00:00:00Z'}}))\n",
+        encoding="utf-8",
+    )
     selected = tmp_path / "selected worktree"
     selected.mkdir()
     driver = tmp_path / "phase-cwd.ps1"
@@ -199,4 +204,130 @@ def test_finite_phase_uses_powershell_location_not_environment_cwd(tmp_path):
         cwd=tmp_path,
     )
     assert result.returncode == 0, result.stderr
-    assert Path(json.loads(result.stdout)["cwd"]) == selected
+    reply = json.loads(result.stdout)
+    assert Path(reply["cwd"]) == selected
+    assert reply["argv"] == ["2026-01-01T00:00:00Z", ""]
+    assert reply["environment"] == {"DATE_LITERAL": "2026-01-01T00:00:00Z"}
+
+
+def test_finite_phase_kills_a_stalled_child_at_the_ten_second_bound(tmp_path):
+    started = tmp_path / "started.jsonl"
+    bootstrap = tmp_path / "stalled.py"
+    bootstrap.write_text(
+        "import os,time\nfrom pathlib import Path\n"
+        f"with Path({str(started)!r}).open('a',encoding='utf-8') as output:\n"
+        "    output.write(str(os.getpid())+'\\n')\n"
+        "time.sleep(30)\n",
+        encoding="utf-8",
+    )
+    driver = tmp_path / "deadline.ps1"
+    driver.write_text(
+        f". {_literal(SCRIPT)}\n"
+        "function Get-AwNativeSeedRuntime { param([string]$Root)\n"
+        f"return @{{Python={_literal(Path(sys.executable))};Bootstrap={_literal(bootstrap)}}}\n"
+        "}\n"
+        "$watch=[Diagnostics.Stopwatch]::StartNew()\n"
+        f"$reply=Invoke-AwNativeSeedPhase {_literal(tmp_path)} @('--phase','prepare')\n"
+        "$watch.Stop()\n"
+        "$stopped=$false\ntry {\n"
+        f"  $child=[Diagnostics.Process]::GetProcessById([int]([IO.File]::ReadAllText({_literal(started)}).Trim()))\n"
+        "  $stopped=$child.HasExited\n  $child.Dispose()\n"
+        "} catch [ArgumentException] { $stopped=$true }\n"
+        "@{elapsed=$watch.Elapsed.TotalSeconds;reply=$reply;stopped=$stopped} | ConvertTo-Json -Compress\n",
+        encoding="utf-8",
+    )
+    result = run_caller_owned(
+        [shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-File", str(driver)],
+        timeout=30, max_stdout_bytes=65536, max_stderr_bytes=65536, cwd=tmp_path,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    reply = json.loads(result.stdout)
+    assert reply["reply"] is None
+    assert reply["stopped"] is True
+    assert 10 <= reply["elapsed"] < 15
+    assert len(started.read_text(encoding="utf-8").splitlines()) == 1
+    assert not result.stderr
+
+
+def _run_real_copied_setup(tmp_path, *, admission, absent_end=False, explicit_exit=True):
+    scripts = tmp_path / "launch-owned"
+    scripts.mkdir()
+    for name in ("default-setup.ps1", "native-seed-boundary.ps1", "reconcile-machine-settings.ps1"):
+        shutil.copy2(SCRIPT.with_name(name), scripts / name)
+    observed = tmp_path / "consumer-phases.jsonl"
+    setup_seed = "$null" if admission else "'fixture'"
+    with (scripts / SCRIPT.name).open("a", encoding="utf-8") as fixture:
+        # Substitute only finite policy replies; run the whole copied consumer,
+        # its parameter binder, real native backend, byte pumps and actual wait.
+        fixture.write(
+            "\nfunction Invoke-AwNativeSeedPhase {\n"
+            "param([string]$Root, [string[]]$Arguments)\n"
+            f"[IO.File]::AppendAllText({_literal(observed)}, "
+            "((ConvertTo-Json -InputObject @($Arguments) -Compress) + \"`n\"))\n"
+            "$phase = $Arguments[1]\n"
+            "if ($phase -eq 'setup') {\n"
+            "return @{version=1; attempt_id=('a'*32); resolution_id=('b'*32); "
+            f"operation_id=('c'*32); parent_id=$null; setup_seed_id={setup_seed}}}\n"
+            "}\n"
+            "if ($phase -eq 'prepare') {\n"
+            "$delimiter = [Array]::IndexOf($Arguments,'--')\n"
+            "return @{version=1; argv=@($Arguments[($delimiter+1)..($Arguments.Count-1)]); "
+            "attempt_id=('a'*32); resolution_id=('b'*32); operation_id=('d'*32); parent_id=('c'*32)}\n"
+            "}\n"
+            + ("if ($phase -eq 'returned') { return $null }\n" if absent_end else "")
+            + "return @{recorded=$true}\n}\n",
+        )
+    backend = tmp_path / "backend.ps1"
+    captured = tmp_path / "backend-arguments.json"
+    backend.write_text(
+        "$reply=@{args=@($args); pid=$PID; owner=[int]$env:FIXTURE_SETUP_PID} | ConvertTo-Json -Compress\n"
+        f"[IO.File]::WriteAllText({_literal(captured)}, $reply)\n"
+        "Write-Output 'backend-returned'\n" + ("exit 7\n" if explicit_exit else ""),
+        encoding="utf-8",
+    )
+    argv = ["", "single ' quote", 'double " quote', "; $literal", "\u03a9", "2026-01-01T00:00:00Z", "--", "--allow-all"]
+    envelope = json.dumps({"args": argv})
+    driver = tmp_path / "consumer.ps1"
+    driver.write_text(
+        "$env:FIXTURE_SETUP_PID = [string]$PID\n"
+        f"$env:PATH = {_literal(Path(shutil.which('pwsh')).parent)}\n"
+        f"& {_literal(scripts / 'default-setup.ps1')} -Recovery "
+        f"-LaunchSeedPreparation {'admission' if admission else 'seed'} "
+        f"-LaunchSeedNativeRoot {_literal(tmp_path / 'engine')} -LaunchSeedRecord {_literal(tmp_path / 'wt-a.yaml')} "
+        f"-CopilotPath {_literal(backend)} -RuntimePython {_literal(tmp_path / 'absent-runtime.exe')} "
+        f"-NativeArgumentsJson '{envelope.replace(chr(39), chr(39)*2)}'\n"
+        "exit $LASTEXITCODE\n",
+        encoding="utf-8",
+    )
+    result = run_caller_owned(
+        [shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-File", str(driver)],
+        timeout=30, max_stdout_bytes=1024 * 1024, max_stderr_bytes=1024 * 1024, cwd=tmp_path,
+    )
+    expected_exit = 7 if explicit_exit else 0
+    assert result.returncode == expected_exit, result.stdout + result.stderr
+    assert result.stdout.splitlines()[-1] == "backend-returned"
+    backend_reply = json.loads(captured.read_text(encoding="utf-8"))
+    assert backend_reply["args"] == argv
+    assert (backend_reply["pid"] == backend_reply["owner"]) is admission
+    events = [json.loads(line) for line in observed.read_text(encoding="utf-8").splitlines()]
+    assert [event[1] for event in events] == (
+        ["setup", "returned"] if admission else ["setup", "prepare", "spawned", "returned", "returned"]
+    )
+    if not admission:
+        prepare = events[1]
+        assert prepare[prepare.index("--launch-parent-id") + 1] == "c" * 32
+        child_return, setup_return = events[-2:]
+        assert child_return[child_return.index("--operation-id") + 1] == "d" * 32
+        assert setup_return[setup_return.index("--operation-id") + 1] == "c" * 32
+    assert events[-1][events[-1].index("--exit-code") + 1] == str(expected_exit)
+    assert not result.stderr
+
+
+@pytest.mark.parametrize("admission", [False, True])
+@pytest.mark.parametrize("absent_end", [False, True])
+def test_real_copied_setup_uses_existing_owner_and_finite_child_boundaries(tmp_path, admission, absent_end):
+    _run_real_copied_setup(tmp_path, admission=admission, absent_end=absent_end)
+
+
+def test_real_copied_setup_records_normal_script_return_without_explicit_exit(tmp_path):
+    _run_real_copied_setup(tmp_path, admission=True, explicit_exit=False)

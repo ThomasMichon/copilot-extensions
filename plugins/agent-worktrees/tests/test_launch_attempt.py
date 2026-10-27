@@ -68,6 +68,30 @@ def test_resolution_binds_only_allowlisted_returned_evidence(receipts, plan, pha
     assert "remote_command" not in json.dumps(saved)
 
 
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_native_setup_owner_gets_exact_resolution_correlation_without_outer_waiter(receipts, wrapped):
+    attempt_id = uuid4().hex
+    command = [
+        "pwsh.exe", "-NoProfile", "-File", str(receipts / "default-setup.ps1"),
+        "-LaunchSeedPreparation", "admission", "-LaunchSeedNativeRoot", str(receipts / "engine"),
+        "-NativeArgumentsJson", json.dumps({"args": ["--", "literal"]}),
+    ]
+    if wrapped:
+        command = [
+            "pwsh.exe", "-NoProfile", "-File", str(receipts / "launch-command.ps1"), "--", *command,
+        ]
+    code, returned = _run(attempt_id, {"action": "exec", "cmd": command})
+    assert code == 0
+    result = returned["cmd"]
+    start = 9 if wrapped else 4
+    assert result[:start] == command[:start] and result[-2:] == command[-2:]
+    assert result[start:start + 4] == [
+        "-LaunchAttemptId", attempt_id, "-LaunchResolutionId",
+        returned["launch_attempt_receipt"]["operation_id"],
+    ]
+    assert "agent_worktrees.launch_seed_exec" not in result
+
+
 def test_initial_receipt_is_required_before_effects(receipts, monkeypatch):
     monkeypatch.setattr(attempts, "_append", lambda *a, **kw: (_ for _ in ()).throw(OSError("private")))
     with output.capture_json_output() as captured:

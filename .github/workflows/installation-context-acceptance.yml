@@ -23,6 +23,10 @@ on:
         description: Exercise owned foreground completion on Linux, macOS and Windows
         type: boolean
         default: false
+      native_launch:
+        description: Qualify copied Windows setup interrupt handling against a real current runtime
+        type: boolean
+        default: false
       watch_owner:
         description: Run PR-owner native-account and contained owner-boundary acceptance instead
         type: boolean
@@ -80,8 +84,44 @@ permissions:
   contents: read
 
 jobs:
+  native-launch-windows:
+    if: ${{ inputs.native_launch }}
+    name: Copied Windows setup terminal acceptance
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Verify native prerequisites and exact source
+        shell: pwsh
+        run: |
+          Get-Command pwsh, uv, git -ErrorAction Stop | Out-Null
+          $actual = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $actual -cne $env:GITHUB_SHA) {
+            throw 'Native launch acceptance source does not match the dispatch SHA'
+          }
+      - name: Qualify full copied setup and same-host script waits
+        shell: pwsh
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/native/test_native_seed_console.py
+          --test-file tests/test_native_seed_shell.py
+          --allow-explicit-tiers
+          -k "copied_setup_admission or real_copied_setup"
+          --timeout 1000 --plugin-timeout 1600 --test-timeout 30
+
   derived-diagnostics-posix:
-    if: ${{ !inputs.interactive_completion && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics }}
+    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics }}
     name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: ubuntu-latest
     timeout-minutes: 4
@@ -102,7 +142,7 @@ jobs:
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
 
   derived-diagnostics-windows:
-    if: ${{ !inputs.interactive_completion && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics }}
+    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics }}
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: windows-latest
     timeout-minutes: 4
