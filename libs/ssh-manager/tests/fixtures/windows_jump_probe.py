@@ -231,7 +231,7 @@ async def verify_cached_profile_refresh(root: Path, client: Path) -> dict:
     _args, extra = await prepare_windows_launch(
         arguments, replace(cached, extra_options={"ProxyCommand": command}), str(client),
     )
-    _args, cli = await prepare_windows_launch(
+    cli_args, cli = await prepare_windows_launch(
         (*arguments[:-1], "-oProxyCommand=none", arguments[-1]), explicit, str(client),
     )
     evidence = {
@@ -242,7 +242,12 @@ async def verify_cached_profile_refresh(root: Path, client: Path) -> dict:
         "refreshed_jump": ssh_option(refreshed, "proxyjump"),
         "programmatic_proxy_preserved": programmatic.proxy_command == command,
         "programmatic_proxy_option_preserved": extra.proxy_command == command,
-        "cli_proxy_override_preserved": ssh_option(cli, "proxycommand") == "none",
+        "cli_proxy_override_preserved": (
+            "-oProxyCommand=none" in cli_args
+            and cli.proxy_command in (None, "none")
+            and ssh_option(cli, "proxycommand") in (None, "none")
+            and ssh_option(cli, "proxyjump") in (None, "none")
+        ),
     }
     if not (
         evidence["same_file"] and evidence["source_cache_unchanged"]
@@ -253,7 +258,11 @@ async def verify_cached_profile_refresh(root: Path, client: Path) -> dict:
         and evidence["programmatic_proxy_option_preserved"]
         and evidence["cli_proxy_override_preserved"]
     ):
-        raise RuntimeError(f"Native cached-profile refresh failed: {evidence}")
+        raise RuntimeError(
+            f"Native cached-profile refresh failed: {evidence}; "
+            f"CLI proxy={cli.proxy_command!r}/{ssh_option(cli, 'proxycommand')!r}, "
+            f"jump={ssh_option(cli, 'proxyjump')!r}",
+        )
     return evidence
 
 

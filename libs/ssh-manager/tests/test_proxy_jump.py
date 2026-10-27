@@ -445,6 +445,18 @@ async def test_cli_proxy_choice_beats_programmatic_proxy_after_refresh(monkeypat
     assert (route is not None) is jump
 
 
+async def test_cli_proxy_disable_survives_native_none_normalization(monkeypatch):
+    _profiles(monkeypatch, {"target": _profile("target", config_file="same.conf")})
+    args, selected = await proxy_jump.prepare_windows_launch(
+        ("ssh", "-Fsame.conf", "-oProxyCommand=none", "target"),
+        SSHConfig("target", config_file="same.conf", proxy_command="old-proxy"), "ssh",
+    )
+    assert "-oProxyCommand=none" in args
+    assert selected.proxy_command is None
+    assert proxy_jump.ssh_option(selected, "proxycommand") is None
+    assert proxy_jump.ssh_option(selected, "proxyjump") is None
+
+
 async def test_changed_file_does_not_restore_the_previous_programmatic_proxy(monkeypatch):
     _profiles(monkeypatch, {
         "target": _profile("target", "gateway", config_file="selected.conf"),
