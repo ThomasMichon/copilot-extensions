@@ -147,6 +147,7 @@ from .task_query_cli import (  # noqa: F401 -- re-exported for existing call sit
     _cmd_find,
     _cmd_inbox,
     _cmd_list,
+    register_list_command,
     _cmd_lookup,
     _cmd_mcp,
     _cmd_payload,
@@ -679,24 +680,7 @@ def build_parser() -> argparse.ArgumentParser:
     from .category_cli import register_category_commands
     register_category_commands(sub, client_factory=_client, scope_repo=_scope_repo)
 
-    p = sub.add_parser("list", help="list tasks (scoped to the calling repo by default)")
-    p.add_argument("--category", choices=("work", "maintenance", "all"), default="work")
-    p.add_argument("--repo", help="lane to list (local name or remote URL); default: calling repo")
-    p.add_argument(
-        "--status",
-        help="filter by status; comma-separate for several (e.g. queued,started)",
-    )
-    p.add_argument("--target-machine")
-    p.add_argument("--target-repo")
-    p.add_argument("--label")
-    p.add_argument("--evaluator-ref")
-    p.add_argument("--limit", type=int, default=200)
-    p.add_argument(
-        "--machine",
-        help="read another machine's queue over the SSH mesh (peer browse); "
-        "default: this machine's local coordinator",
-    )
-    p.set_defaults(func=_cmd_list)
+    register_list_command(sub, handler=_cmd_list)
 
     p = sub.add_parser(
         "doctor",
