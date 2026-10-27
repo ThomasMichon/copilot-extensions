@@ -73,6 +73,18 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
 
+function Resolve-InstallerProjectName {
+    param([AllowEmptyString()][string]$Name)
+    if (-not $Name -and (Get-Location).Path -match '[\\/]([^\\/]+)$') {
+        $cwdName = $Matches[1]
+        if ($cwdName -ne 'agent-worktrees') {
+            $candidateConf = Join-Path $env:USERPROFILE ".$cwdName\config.yaml"
+            if (Test-Path $candidateConf) { $Name = $cwdName }
+        }
+    }
+    return $Name
+}
+
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
 function Copy-InstallerStageDirectory {
     param([string]$Source, [string]$Destination)
@@ -169,6 +181,10 @@ if ($InstallDir) {
     $InstallDir = Join-Path $env:USERPROFILE '.agent-worktrees'
 }
 $ContextualInstall = [bool]$env:COPILOT_EXTENSIONS_CONTEXT
+if ($Action -eq 'uninstall' -and -not $ContextualInstall -and -not $ProjectName) {
+    $ProjectName = Resolve-InstallerProjectName -Name $ProjectName
+    if ($ProjectName) { $PSBoundParameters['ProjectName'] = $ProjectName }
+}
 if ($ProvisionMissingRuntime -and (
     $Action -ne 'update' -or $ContextualInstall -or -not $InstallDirSpecified -or
     -not $env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE
@@ -199,8 +215,13 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
         $previousErrorAction = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         try {
-            $output = & $Candidate @Prefix -I -S -B -X utf8 -c `
-                'import json,sys; sys.exit(1) if sys.version_info < (3, 10) else print(json.dumps(sys.executable, ensure_ascii=True))' 2>$null
+            if ($Action -eq 'uninstall') {
+                $output = & $Candidate @Prefix -I -S -B -X utf8 `
+                    (Join-Path $PSScriptRoot 'uninstall-state.py') --probe-python $InstallDir 2>$null
+            } else {
+                $output = & $Candidate @Prefix -I -S -B -X utf8 -c `
+                    'import json,sys; sys.exit(1) if sys.version_info < (3, 10) else print(json.dumps(sys.executable, ensure_ascii=True))' 2>$null
+            }
             $code = $LASTEXITCODE
         } catch {
             return $null
@@ -238,7 +259,7 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
             throw 'The supplied bootstrap Python must be a working Python 3.10+ executable.'
         }
     }
-    $admissionLauncher = if (-not $admissionPython) {
+    $admissionLauncher = if (-not $admissionPython -and $Action -ne 'uninstall') {
         Get-Command py -CommandType Application -ErrorAction SilentlyContinue |
             Select-Object -First 1
     } else { $null }
@@ -272,6 +293,29 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
             foreach ($candidate in @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue)) {
                 if ($candidate.Source -match '[\\/]WindowsApps[\\/]') { continue }
                 $admissionPython = & $probeAdmissionPython -Candidate $candidate.Source
+                if ($admissionPython) { break }
+            }
+            if ($admissionPython) { break }
+        }
+    }
+    if (-not $admissionPython -and $Action -eq 'uninstall') {
+        foreach ($launcher in @(Get-Command py -All -CommandType Application -ErrorAction SilentlyContinue |
+                Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' })) {
+            $listingPreference = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                $listed = @(& $launcher.Source -0p 2>$null)
+                $listingCode = $LASTEXITCODE
+            } catch {
+                $listed = @()
+                $listingCode = 1
+            } finally { $ErrorActionPreference = $listingPreference }
+            if ($listingCode -ne 0) { continue }
+            foreach ($entry in [regex]::Matches(($listed -join "`n"),
+                    '(?m)([A-Za-z]:[\\/].*python(?:[0-9.]*)?\.exe)"?\s*$')) {
+                $candidate = $entry.Groups[1].Value
+                if (-not [IO.File]::Exists($candidate)) { continue }
+                $admissionPython = & $probeAdmissionPython -Candidate $candidate
                 if ($admissionPython) { break }
             }
             if ($admissionPython) { break }
@@ -727,6 +771,28 @@ if ($ContextualInstall) {
     }
 }
 
+if ($Action -eq 'uninstall') {
+    $uninstallArgs = @('-I', '-S', '-B', '-X', 'utf8',
+        (Join-Path $PSScriptRoot 'uninstall-state.py'),
+        '--payload-root', $admissionPayload, '--plugin-id', 'agent-worktrees',
+        '--root', $InstallDir, '--shell', (Get-Process -Id $PID).Path,
+        '--profile', (Join-Path $PSScriptRoot 'uninstall-profile.json'))
+    if ($RemoveConfig) { $uninstallArgs += '--purge' }
+    if ($ProjectName -and $ProjectName -ne 'agent-worktrees') {
+        $uninstallArgs += @('--project-name', $ProjectName)
+    }
+    $uninstallPreflight = @(& $admissionPython @uninstallArgs --check --check-consumers)
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $uninstallStatus = ($uninstallPreflight -join "`n") | ConvertFrom-Json -ErrorAction Stop
+    if ($uninstallStatus.status -notin @('absent', 'ready')) {
+        throw 'Finite uninstall returned an invalid admission decision.'
+    }
+    if ($uninstallStatus.status -eq 'absent' -and -not $RemoveConfig) {
+        Write-Output ($uninstallPreflight -join "`n")
+        exit 0
+    }
+}
+
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
@@ -933,25 +999,8 @@ $LegacyBinstubs = @(
 # RepoDir: detect from existing config, then CWD.
 $RepoDir = $null
 
-# Infer project name: explicit parameter > existing config matching CWD
-if (-not $ProjectName) {
-    # Try to infer from existing config directories (find any .{name}/config.yaml).
-    # Never infer the reserved runtime name itself: ~/.agent-worktrees/config.yaml
-    # is the TOOL's OWN runtime config (always present once installed), not a
-    # user-created project -- inferring it whenever the CWD happens to be a
-    # directory literally named `agent-worktrees` (e.g. this plugin's own
-    # checkout/payload dir) is a guaranteed false positive, not something to
-    # warn about on every routine invocation. Skip inference for it entirely so
-    # the noisy warning below is reserved for a genuine explicit -ProjectName
-    # mistake.
-    if ((Get-Location).Path -match '[\\/]([^\\/]+)$') {
-        $cwdName = $Matches[1]
-        if ($cwdName -ne 'agent-worktrees') {
-            $candidateConf = Join-Path $env:USERPROFILE ".$cwdName\config.yaml"
-            if (Test-Path $candidateConf) { $ProjectName = $cwdName }
-        }
-    }
-}
+# Infer project name: explicit parameter > existing config matching CWD.
+$ProjectName = Resolve-InstallerProjectName -Name $ProjectName
 # Don't auto-adopt the CWD repo -- project association is explicit.
 # Runtime installs fine without a project name.
 # Reserved-name guard: `agent-worktrees` is the runtime's own global command
@@ -4180,8 +4229,10 @@ function Invoke-Stamp {
     Write-ServiceOk 'Stamped: agent-worktrees tool binstub on PATH; runtime provisions on first use.'
 }
 
-Initialize-SourceRuntime
-Assert-SourceRuntime
+if ($Action -ne 'uninstall') {
+    Initialize-SourceRuntime
+    Assert-SourceRuntime
+}
 
 if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision', 'stamp', 'uninstall', 'repair', 'dev', 'dev-release', 'publish-runtime-helpers')) {
     & $admissionPython @admissionArgs --check-lifecycle --lifecycle-operation $admissionOperation
@@ -4368,25 +4419,36 @@ switch ($Action) {
 
     'uninstall' {
         Write-ServiceHeader "Uninstalling $ServiceName"
+        & $admissionPython @uninstallArgs --check --check-consumers
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-        Remove-Binstub
-        Remove-LegacyBinstubs
+        if ($HasProject) {
+            $projectPython = @(& $admissionPython -I -S -B -X utf8 `
+                (Join-Path $ScriptDir 'uninstall-state.py') --project-python $InstallDir $ProjectName)
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $VenvPython = ($projectPython -join "`n") | ConvertFrom-Json -ErrorAction Stop
+        }
+
+        if ($HasProject -and $VenvPython -and (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
+            $savedPayloadRoot = $env:AGENT_WORKTREES_PAYLOAD_ROOT
+            try {
+                $env:AGENT_WORKTREES_PAYLOAD_ROOT = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
+                    $env:COPILOT_PLUGIN_STAGED_FROM
+                } else { $PluginDir }
+                & $VenvPython -m agent_worktrees reconcile-binstubs --remove $ProjectName
+                if ($LASTEXITCODE -ne 0) {
+                    Write-ServiceWarn 'Project binstub preserved (ownership check failed)'
+                }
+            } finally { $env:AGENT_WORKTREES_PAYLOAD_ROOT = $savedPayloadRoot }
+        }
 
         # Remove Windows Terminal fragment
         $fragDir = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\AgentWorktrees'
-        if (Test-Path $fragDir) {
+        if ($RemoveConfig -and (Test-Path $fragDir)) {
             Remove-Item $fragDir -Recurse -Force
             Write-ServiceChanged "Removed Windows Terminal fragment: $fragDir"
         }
 
-        # Remove the deployed terminal scripts. ~/.psmux.conf is intentionally
-        # left alone: agent-worktrees no longer owns it (sessions are configured
-        # per-session at launch), so uninstall must not delete a file that may
-        # now be the user's own (or an opt-in apply-mux-keybinds.ps1 block).
-        foreach ($script in @('session-options.ps1', 'apply-mux-keybinds.ps1', 'psmux-passthrough.conf')) {
-            $sp = Join-Path $BinDir $script
-            if (Test-Path $sp) { Remove-Item $sp -Force; Write-ServiceChanged "Removed terminal script: $script" }
-        }
         $psmuxConf = Join-Path $env:USERPROFILE '.psmux.conf'
         if (Test-Path $psmuxConf) {
             Write-ServiceSkipped "Left ~/.psmux.conf in place (no longer managed by agent-worktrees)"
@@ -4394,43 +4456,18 @@ switch ($Action) {
 
         # Remove shortcuts
         $displayName = ($ProjectName -replace '-', ' ') -replace '(^| )(.)', { $_.Value.ToUpper() }
-        foreach ($lnk in @("$displayName.lnk", "$displayName (WSL).lnk")) {
-            $lnkPath = Join-Path $LocalBin $lnk
-            if (Test-Path $lnkPath) { Remove-Item $lnkPath -Force }
-        }
-        # Also remove distro-specific WSL shortcuts (e.g. "Test Chamber (WSL: Ubuntu).lnk")
-        Get-ChildItem -Path $LocalBin -Filter "$displayName (WSL: *).lnk" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
-        Write-ServiceChanged "Removed shortcuts"
-
-        # Remove Python runtime (venv + package). Versioned: the `.venv` link +
-        # the whole versions/ tree; otherwise the single real venv dir.
-        if ($VersionedRuntime) {
-            if ((Test-Path $LinkDir) -and ((Get-Item $LinkDir -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-                & cmd /c rmdir "$LinkDir" 2>$null
-            } elseif (Test-Path $LinkDir) {
-                Remove-Item $LinkDir -Recurse -Force -ErrorAction SilentlyContinue
+        if ($RemoveConfig) {
+            foreach ($lnk in @("$displayName.lnk", "$displayName (WSL).lnk")) {
+                $lnkPath = Join-Path $LocalBin $lnk
+                if (Test-Path $lnkPath) { Remove-Item $lnkPath -Force }
             }
-            $verRoot = Join-Path $InstallDir 'versions'
-            if (Test-Path $verRoot) { Remove-Item $verRoot -Recurse -Force -ErrorAction SilentlyContinue }
-            Write-ServiceChanged "Removed versioned venv (.venv link + versions/)"
-        } elseif (Test-Path $VenvDir) {
-            Remove-Item $VenvDir -Recurse -Force
-            Write-ServiceChanged "Removed venv: $VenvDir"
-        }
-        if (Test-Path $LibDir) {
-            Remove-Item $LibDir -Recurse -Force
-            Write-ServiceChanged "Removed package: $LibDir"
+            Get-ChildItem -Path $LocalBin -Filter "$displayName (WSL: *).lnk" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+            Write-ServiceChanged "Removed shortcuts"
         }
 
-        # Remove wrappers (legacy cleanup: earlier versions deployed the
-        # in-plugin mux launch scripts here; they are no longer deployed by
-        # this installer, but a stale copy from a pre-cutover version is
-        # still cleaned up on uninstall).
-        foreach ($wrapper in @('launch-session.cmd', 'launch-session.ps1', 'pane-wrapper.ps1')) {
-            $path = Join-Path $BinDir $wrapper
-            if (Test-Path $path) { Remove-Item $path -Force }
-        }
-        Write-ServiceChanged "Removed wrappers from $BinDir"
+        & $admissionPython @uninstallArgs --remove-runtime
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        Write-ServiceChanged 'Removed finite owned runtime content'
 
         if ($RemoveConfig) {
             if (Test-Path $ProjectDir) {
@@ -4442,10 +4479,6 @@ switch ($Action) {
                 Write-ServiceChanged "Removed runtime dir $InstallDir"
             }
         } else {
-            $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
-            if (Test-Path $manifestPath) {
-                Remove-Item $manifestPath -Force
-            }
             Write-ServiceSkipped "Config and session metadata preserved at $ProjectDir"
             Write-Host "    Use -RemoveConfig to delete everything"
         }

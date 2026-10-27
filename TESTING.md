@@ -88,6 +88,7 @@ The existing `native` discovery exclusion keeps it out of ordinary unit CI.
 The optional native runtime-removal portfolio includes
 `tools/test_installer_engine_uninstall.py`,
 `tools/test_installer_engine_commands.py`,
+`tools/test_worktrees_uninstall_custody.py`,
 `tools/test_installer_engine_stop.py`,
 `tools/test_runtime_uninstall_process.py`, CodeSpaces'
 `tests/native_uninstall/`, Machines' `test_legacy_runtime_uninstall.py` and
@@ -102,7 +103,48 @@ construction/retention/publication contention, default nested-engine removal,
 managed/foreign-root refusal and live/reconnect transport negatives.
 The command packet derives current native writer bodies from trusted sources
 and covers exact owned forms, custom/foreign roots, comments and modified
-programs, independently executable cmd forms and delegating-peer refusal.
+programs, recorded unavailable publisher paths, independently executable cmd
+forms and delegating-peer refusal. Common removal controls include finite nested
+helpers and their own bytecode with unknown siblings retained, CodeSpaces'
+root resolver modules, and explicit pre-mutation consumer/custody admission.
+The Worktrees custody packet runs actual publisher/remover contention in both
+directions against the existing whole-action command lifecycle, not a second
+root-lock authority.
+Worktrees' `test_native_uninstall_footprint.py` drives the complete native
+entrypoints, staged typed/unattributed source custody, cold/unknown retry,
+generation contention and pre-mutation refusal. A literal unrelated-module
+refusal in a non-quiescent host namespace is a qualification skip only after
+all fixture bytes and inodes are verified unchanged; it is not positive native
+Windows evidence. Run the actual positive packet in an isolated process
+namespace. Partition the Windows cases by removal/retry, refusal and remaining
+candidate/custody controls rather than increasing their finite runner deadline.
+Worktrees' `test_uninstall_project_commands.py` uses a real completed fixture
+environment to exercise selected-source interpreter resolution without runtime
+construction, exact owned-project command retirement and foreign-command
+preservation. Copied account lookups are isolated before publishing ownership.
+Explicit-name and actual-CWD inference controls cover missing-runtime refusal,
+stamp-only cleanup, explicit precedence and completed source-qualified cleanup
+through staging.
+`tools/test_installer_engine_uninstall_darwin.py` covers bounded libproc/sysctl
+inspection, incarnation/ownership/ABI/partial-read refusal and literal arguments,
+including empty strings. Its native live-process case requires actual macOS.
+The manual `installation-context-acceptance.yml` `runtime_removal` selection
+runs that backend and the complete Worktrees entrypoint/project-command packets
+on macOS at the dispatch SHA, under finite process containment. Mocked native
+API controls on another OS are not native macOS qualification.
+The hosted lane creates an ephemeral unprivileged account and an exact tracked
+source copy, verifies its real/effective/saved credentials, and runs both packets
+under that account. The runner account's mixed-privilege services remain outside
+that census; production ownership refusals are unchanged. Elevated setup is
+limited to the disposable hosted VM, whose teardown reclaims the account/copy.
+Darwin resource polling uses the stdlib libproc sampler in
+`tools/plugin_test_containment_darwin.py`, not a spawning `ps` observer that
+can introduce a privileged candidate into the uninstall census. Unknown or
+partial observations still fail explicitly; memory/process limits and owned
+group cleanup remain enforced. Its focused controls include a real 32 MiB
+resident child, independent RSS comparison, and unreaped-zombie versus
+live-member accounting. Other POSIX adapters retain their existing behavior
+through `tools/plugin_test_containment_posix.py`.
 The native STOP packet derives daemon commands from actual unit writers,
 preserves original admission across service-stop/PID-reuse controls, and runs
 real Linux pidfd termination and birth-mismatch refusal against owned fixtures.

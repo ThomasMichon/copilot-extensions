@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "root_entries": [".venv", "current-version", "last-known-good", "running-version.json", "payload-dir", "stamped-version", "deploy-manifest.json", ".provision-status"],
+  "root_entries": [".venv", "current-version", "last-known-good", "running-version.json", "payload-dir", "stamped-version", "deploy-manifest.json", ".provision-status", "versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py", "versioned_runtime_source.py", "versioned_runtime_publication.py"],
   "bin_entries": ["resolve-runtime.ps1", "resolve-runtime.sh"],
   "script_entries": [],
   "local_bin_entries": ["agent-codespaces", "agent-codespaces.ps1", "agent-codespaces.cmd"],

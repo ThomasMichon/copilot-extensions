@@ -79,6 +79,10 @@ on:
         description: Qualify native update auth, queue and diagnostic front doors without deployment
         type: boolean
         default: false
+      runtime_removal:
+        description: Qualify bounded native macOS runtime removal and process inspection
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -121,7 +125,7 @@ jobs:
           --timeout 1000 --plugin-timeout 1600 --test-timeout 30
 
   derived-diagnostics-posix:
-    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics }}
+    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal }}
     name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: ubuntu-latest
     timeout-minutes: 4
@@ -142,7 +146,7 @@ jobs:
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
 
   derived-diagnostics-windows:
-    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics }}
+    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal }}
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: windows-latest
     timeout-minutes: 4
@@ -165,6 +169,160 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  runtime-removal-macos:
+    if: ${{ inputs.runtime_removal }}
+    name: Native macOS finite runtime removal
+    runs-on: macos-latest
+    timeout-minutes: 12
+    env:
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Record exact native qualification source
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import os
+          import platform
+          import subprocess
+          import sys
+
+          actual = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          if actual != os.environ["EXPECTED_SHA"] or sys.platform != "darwin":
+              raise SystemExit("Native removal qualification requires the selected macOS source")
+          print(f"Checkout: {actual}; Python: {sys.version}; OS: {platform.platform()}", flush=True)
+          PY
+      - name: Prepare seasoned native-inspection tooling
+        run: >-
+          python tools/seasoned_uv.py --uv uv --registry-only --
+          --system pytest "pytest-timeout>=2.3,<3"
+      - name: Prepare an isolated native qualification account
+        run: |
+          python - <<'PY'
+          import io
+          import os
+          from pathlib import Path
+          import pwd
+          import shutil
+          import subprocess
+          import sys
+          import tarfile
+          import tempfile
+          import uuid
+
+          if sys.platform != "darwin" or os.environ.get("GITHUB_ACTIONS") != "true":
+              raise SystemExit("Dedicated-account setup is only for hosted macOS qualification")
+          used = {entry.pw_uid for entry in pwd.getpwall()}
+          uid = next(value for value in range(60000, 65000) if value not in used)
+          user = "cr-removal-" + uuid.uuid4().hex[:12]
+          directory = Path(tempfile.mkdtemp(
+              prefix="runtime-removal-account-", dir=os.environ["RUNNER_TEMP"],
+          )).resolve()
+          home, source, binaries = (directory / name for name in ("home", "source", "bin"))
+          home.mkdir()
+          binaries.mkdir()
+          archive = subprocess.check_output(["git", "archive", "HEAD"], timeout=60)
+          with tarfile.open(fileobj=io.BytesIO(archive)) as stream:
+              stream.extractall(source, filter="data")
+          uv = shutil.which("uv")
+          if uv is None:
+              raise SystemExit("The pinned uv executable is unavailable")
+          shutil.copy2(uv, binaries / "uv")
+          for field, value in (
+              ("UniqueID", str(uid)), ("PrimaryGroupID", "20"),
+              ("NFSHomeDirectory", str(home)), ("UserShell", "/bin/bash"),
+          ):
+              subprocess.run(
+                  ["sudo", "-n", "/usr/bin/dscl", ".", "-create", "/Users/" + user, field, value],
+                  check=True, timeout=30,
+              )
+          subprocess.run(
+              ["sudo", "-n", "/usr/sbin/chown", "-R", f"{uid}:20", str(directory)],
+              check=True, timeout=60,
+          )
+          python = str(Path(sys.executable).resolve())
+          probe = (
+              "import ctypes,os,pwd,struct,sys;"
+              "data=ctypes.create_string_buffer(136);"
+              "lib=ctypes.CDLL('/usr/lib/libproc.dylib',use_errno=True);"
+              "lib.proc_pidinfo.argtypes=[ctypes.c_int,ctypes.c_int,ctypes.c_uint64,ctypes.c_void_p,ctypes.c_int];"
+              "assert lib.proc_pidinfo(os.getpid(),3,0,data,136)==136;"
+              "assert tuple(struct.unpack_from('=I',data.raw,offset)[0] for offset in (20,28,36))"
+              "==(int(sys.argv[1]),)*3;"
+              "assert pwd.getpwuid(os.getuid()).pw_dir==sys.argv[2];"
+              "print('Verified isolated real/effective/saved credentials',flush=True)"
+          )
+          subprocess.run(
+              ["sudo", "-n", "-H", "-u", user, python, "-I", "-S", "-B", "-c",
+               probe, str(uid), str(home)], check=True, timeout=30,
+          )
+          values = {
+              "REMOVAL_USER": user, "REMOVAL_HOME": str(home),
+              "REMOVAL_SOURCE": str(source), "REMOVAL_PYTHON": python,
+              "REMOVAL_PATH": os.pathsep.join((str(binaries), str(Path(python).parent),
+                                             "/usr/bin", "/bin", "/usr/sbin", "/sbin")),
+          }
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              for key, value in values.items():
+                  output.write(f"{key}={value}\n")
+          print("Prepared exact-source, private account fixture; hosted VM owns final reclamation")
+          PY
+      - name: Bounded libproc and exact-argv inspection
+        run: |
+          sudo -n -H -u "$REMOVAL_USER" -- env -i \
+            "HOME=$REMOVAL_HOME" "PATH=$REMOVAL_PATH" \
+            "$REMOVAL_PYTHON" -B - "$REMOVAL_SOURCE" <<'PY'
+          import os
+          from pathlib import Path
+          import shutil
+          import sys
+          import tempfile
+
+          os.chdir(sys.argv[1])
+          root = Path.cwd()
+          sys.path.insert(0, str(root / "tools"))
+          from plugin_test_containment import Limits, isolated_environment, run_contained
+
+          sandbox = Path(tempfile.mkdtemp(prefix=".runtime-removal-", dir=root))
+          env = isolated_environment(os.environ, sandbox)
+          env["PYTHONPATH"] = os.pathsep.join((str(root / "tools"),))
+          result = run_contained(
+              [sys.executable, "-B", "-m", "pytest", "-q", "--noconftest",
+               "-p", "pytest_portfolio_guard", "--timeout=30",
+               f"--basetemp={sandbox / 'pytest'}",
+               "tools/test_installer_engine_uninstall_darwin.py",
+               "tools/test_plugin_test_containment_darwin.py"],
+              cwd=root, env=env, sandbox=sandbox, limits=Limits(wall_seconds=240),
+          )
+          shutil.rmtree(sandbox)
+          raise SystemExit(result)
+          PY
+      - name: Complete native Worktrees uninstall entrypoints
+        run: |
+          sudo -n -H -u "$REMOVAL_USER" -- env -i \
+            "HOME=$REMOVAL_HOME" "PATH=$REMOVAL_PATH" \
+            "UV_PYTHON=$REMOVAL_PYTHON" \
+            "UV_CACHE_DIR=$REMOVAL_HOME/.cache/uv" \
+            "UV_PYTHON_INSTALL_DIR=$REMOVAL_HOME/.cache/python" \
+            "PYTEST_ADDOPTS=--maxfail=1 --tb=short" \
+            /bin/bash -c 'cd "$1" &&
+            printf "Native qualification controller pid=%s; system_ps_setuid=" "$$" &&
+            if [[ -u "$(command -v ps)" ]]; then printf "1\n"; else printf "0\n"; fi &&
+            exec "$2" -B tools/run-plugin-tests.py agent-worktrees \
+            --test-file tests/test_native_uninstall_footprint.py \
+            --test-file tests/test_uninstall_project_commands.py' \
+            bash "$REMOVAL_SOURCE" "$REMOVAL_PYTHON"
 
   ssh-headless-linux:
     if: ${{ inputs.ssh_headless }}

@@ -2451,6 +2451,39 @@ redirect custody through selective native deletion. Its `--check` performs
 structural admission only; deletion repeats ownership, inventory, guards and
 current-user process attribution under custody. A matching deploy manifest is
 removed last and retained as retry proof on cleanup failure.
+An explicit `--check --check-consumers` additionally acquires that removal
+custody and checks consumers before a non-daemon caller's first mutation;
+ordinary daemon adapters retain their owned service-STOP ordering. Finite
+`bin_entries` and `script_entries` may name nested files: every path segment
+is validated, only declared immediate children and their own bytecode are
+selected, and unknown siblings are retained.
+Worktrees uses its existing whole-action command lifecycle and the standard
+self-stage/re-exec path. Its pre-stage admission returns early for a genuinely
+absent default footprint without creating a runtime. Staged ownership resolves
+at the original source only through the inherited live lifecycle. Process
+inspection recognizes that exact teardown owner, native caller and canonical
+staging watchdog, never arbitrary Python ancestors. A nonempty legacy Worktrees
+`lib` refuses until its ownership has an explicit migration path.
+Watchdog matching accepts only the trusted literal body or its exact Bash 3.2
+quoted-heredoc backslash-newline rendering, not arbitrary whitespace/code changes.
+When project commands or receipts exist, cleanup resolves an already completed,
+selected-source-qualified interpreter read-only; it never constructs a runtime
+to uninstall one. A stamp-only project with neither candidate needs no runtime.
+Missing or foreign ownership still refuses before project-command mutation.
+Uninstall resolves the existing CWD-based project policy before admission and
+forwards that effective name through lifecycle and staging re-execution.
+An explicit project name retains precedence.
+Worktrees also checks exact owned global/update commands before accepting a
+finite `absent` result, including a missing or durable-only runtime root.
+Orphaned owned commands without runtime ownership evidence refuse without
+creating staging or deleting their bytes; foreign/custom-root commands remain.
+Process attribution preserves native argument boundaries rather than reparsing
+a display command. On macOS, the co-packaged stdlib-only
+`installer_engine_uninstall_darwin.py` uses libproc and sysctl to inspect a bounded
+current-user census, verifying process incarnation and executable identity
+around exact-argument capture. Unavailable inspection, ambiguous ownership,
+partial native results and excessive census churn refuse explicitly. This
+observation does not replace transaction custody or qualify session survival.
 Shell-only adopters also co-package `installer_engine_process.py`: POSIX finite
 deletion uses its bounded child owner even without the Python installer facade.
 Global command selection uses the co-packaged
@@ -2460,6 +2493,9 @@ remain. Cmd wrappers that delegate to PowerShell require their exact owned
 peer; independently executable MCP/Machines cmd programs are checked against
 their complete native templates. Index separately admits its exact installed
 and product-verified session-stamped lifecycle-gate forms at the default root.
+Source-bearing legacy commands may also match the installed deployment's
+recorded artifact path, rendered through the current trusted writer. That path
+is literal template data, never a source to execute or project-command ownership.
 
 Native Linux daemon STOP uses the separate co-packaged
 `installer_engine_stop.py`; the finite-removal helper still never stops a

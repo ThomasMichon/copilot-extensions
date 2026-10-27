@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "module": "agent_worktrees",
+  "guard_module": "uninstall-state.py",
+  "root_entries": [
+    ".venv", "venv", "versions", "snapshots",
+    "current-version", "last-known-good", "payload-dir", "payload-origin",
+    "stamped-version", "running-version.json", "deploy-manifest.json",
+    "versioned_runtime.py", "versioned_runtime_leases.py",
+    "versioned_runtime_construction.py", "versioned_runtime_source.py",
+    "versioned_runtime_publication.py"
+  ],
+  "bin_entries": [
+    "resolve-runtime.ps1", "resolve-runtime.sh", "psmux-path.ps1",
+    "session-conduct.ps1", "session-conduct.sh", "session-machine.ps1", "session-machine.sh",
+    "bootstrap-check.ps1", "bootstrap-check.sh",
+    "bootstrap-killswitch-guard.ps1", "bootstrap-killswitch-guard.sh",
+    "project-hooks.ps1", "project-hooks.sh",
+    "register-nudge.ps1", "register-nudge.sh",
+    "register-session.ps1", "register-session.sh",
+    "deregister-session.ps1", "deregister-session.sh",
+    "anchor-hygiene-check.ps1", "anchor-hygiene-check.sh",
+    "provision-check.ps1", "provision-check.sh",
+    "statelessness_guard.py", "cross_repo_guard.py", "anchor_shell_parser.py",
+    "anchor_write_guard.py", "pr_supersede_guard.py", "registry_root.py",
+    "nudge_status.py", "bind_nudge.py", "hook_runtime.py", "hook_process_identity.py",
+    "hook_pre_relevance.py", "hook_lifecycle_runtime.py", "native_source_context.py",
+    "pretool_killswitch.py", "hook_client.py", "post-tool-hook.ps1", "terminal_probe.py",
+    "bind-nudge.sh", "bind-nudge.ps1",
+    "conduct/account-conduct.md", "conduct/worktree-conduct.md"
+  ],
+  "script_entries": [
+    "default-setup.ps1", "default-setup.sh", "launch-command.ps1", "launch-command.sh",
+    "native-seed-boundary.ps1",
+    "reconcile-machine-settings.ps1", "reconcile-machine-settings.sh",
+    "versioned_runtime.py", "versioned_runtime_leases.py",
+    "versioned_runtime_construction.py", "versioned_runtime_source.py",
+    "versioned_runtime_publication.py"
+  ],
+  "local_bin_entries": [
+    "agent-worktrees", "agent-worktrees.cmd", "agent-worktrees.ps1",
+    "agent-worktrees-update-entry.sh", "agent-worktrees-update-entry.ps1",
+    "agent-worktrees-update-json.awk"
+  ]
+}

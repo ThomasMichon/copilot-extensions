@@ -78,6 +78,12 @@ def _leaf(value: str) -> str:
     return value
 
 
+def _helper_entry(value: str) -> str:
+    if not isinstance(value, str):
+        raise UninstallRefused(f"Not a finite reconstructible helper: {value!r}")
+    return "/".join(_leaf(part) for part in value.split("/"))
+
+
 def _plain(path: Path, *, file: bool = False) -> None:
     for candidate in (path, *path.parents):
         try:
@@ -141,7 +147,8 @@ def profile_for(payload: Path, plugin: str, path: Path | None = None) -> Profile
         for key in ("root_entries", "bin_entries", "script_entries", "local_bin_entries"):
             if not isinstance(record[key], list):
                 raise UninstallRefused(f"Profile {key} must be a finite list")
-            arrays[key] = tuple(_leaf(value) for value in record[key])
+            validate = _helper_entry if key in {"bin_entries", "script_entries"} else _leaf
+            arrays[key] = tuple(validate(value) for value in record[key])
             if len(set(arrays[key])) != len(arrays[key]):
                 raise UninstallRefused("Duplicate finite uninstall entry")
         profile = Profile(**arrays, **{key: record[key] for key in (
@@ -230,6 +237,18 @@ def _project_name(snapshot: Path, plugin: str) -> None:
         raise UninstallRefused("Stamped ownership belongs to another product")
 
 
+def _authority_payload(payload: Path) -> Path:
+    """Keep staged source identity at its origin; custody validates the ticket."""
+    source = os.environ.get("COPILOT_PLUGIN_STAGED_FROM")
+    if not source or not os.environ.get("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE"):
+        return payload
+    authority = Path(source)
+    if not authority.is_absolute() or ".." in authority.parts:
+        raise UninstallRefused("The staged lifecycle source must be an absolute ordinary payload")
+    _plain(authority)
+    return authority
+
+
 def _ownership(payload: Path, plugin: str, root: Path) -> tuple[Any, Any, Any, dict[str, Any]]:
     manifest = root / "deploy-manifest.json"
     _plain(manifest, file=True)
@@ -255,8 +274,9 @@ def _ownership(payload: Path, plugin: str, root: Path) -> tuple[Any, Any, Any, d
                   "source": {"plugin": plugin, "kind": "local", "path": str(payload)}}
     binding = _load(payload / "scripts" / "command_binding.py")
     primitive = binding._load_primitive(payload)  # noqa: SLF001 - payload-owned binding API
-    arguments = dict(payload_root=payload, plugin_id=plugin, legacy_root=root,
-                     project_root=Path.cwd(), environment={**os.environ, "COPILOT_PLUGIN_ROOT": str(payload)})
+    authority = _authority_payload(payload)
+    arguments = dict(payload_root=authority, plugin_id=plugin, legacy_root=root,
+                     project_root=Path.cwd(), environment={**os.environ, "COPILOT_PLUGIN_ROOT": str(authority)})
     decision = primitive.probe_legacy_entrypoint(**{
         key: arguments[key] for key in ("payload_root", "plugin_id", "legacy_root", "project_root")
     })
@@ -406,7 +426,21 @@ def _local_bindings(payload: Path, root: Path, profile: Profile) -> tuple[Path, 
             selected.remove("agent-index.cmd")
         return directory, tuple(selected)
     commands = _load(_dependency(payload, "installer_engine_commands.py"))
-    return directory, commands.owned_local_names(payload, root, profile.module, contents)
+    publisher = None
+    if profile.module in {"agent_bridge", "agent_dispatch", "agent_containers"}:
+        manifest = root / "deploy-manifest.json"
+        _plain(manifest, file=True)
+        if manifest.is_file():
+            record = json.loads(manifest.read_text(encoding="utf-8-sig"))
+            source = record.get("source", {})
+            path = source.get("path") if isinstance(source, dict) else None
+            if path is not None:
+                if not isinstance(path, str) or not path:
+                    raise UninstallRefused("Invalid installed command publisher")
+                publisher = Path(path)
+    return directory, commands.owned_local_names(
+        payload, root, profile.module, contents, publisher_root=publisher,
+    )
 
 
 def _plan(payload: Path, root: Path, profile: Profile, targets: tuple[Target, ...]) -> list[tuple[Path, tuple[str, ...]]]:
@@ -441,17 +475,21 @@ def _plan(payload: Path, root: Path, profile: Profile, targets: tuple[Target, ..
                                    ("bin", profile.bin_entries if current == root else RESOLVERS),
                                    ("scripts", profile.script_entries if current == root else RUNTIME_MODULES),
                                    ("tool", ("uv", "uvx", "uv.exe", "uvx.exe"))):
-            folder = current / directory
-            selected = _helper_names(folder, helpers) if directory else ()
-            operations.append((folder, selected))
-            cache = folder / "__pycache__"
-            if cache.exists():
-                _plain(cache)
-                stems = {Path(name).stem for name in helpers if name.endswith(".py")}
-                compiled = tuple(path.name for path in cache.iterdir() if any(re.fullmatch(
-                    re.escape(stem) + r"\.(?:cpython|pypy)-[0-9]+(?:\.opt-[0-9]+)?\.pyc", path.name,
-                ) for stem in stems))
-                operations.append((cache, _helper_names(cache, compiled)))
+            groups: dict[Path, list[str]] = {}
+            for name in helpers:
+                relative = Path(name)
+                groups.setdefault(current / directory / relative.parent, []).append(relative.name)
+            for folder, entries in groups.items():
+                selected = _helper_names(folder, tuple(entries)) if directory else ()
+                operations.append((folder, selected))
+                cache = folder / "__pycache__"
+                if cache.exists():
+                    _plain(cache)
+                    stems = {Path(name).stem for name in entries if name.endswith(".py")}
+                    compiled = tuple(path.name for path in cache.iterdir() if any(re.fullmatch(
+                        re.escape(stem) + r"\.(?:cpython|pypy)-[0-9]+(?:\.opt-[0-9]+)?\.pyc", path.name,
+                    ) for stem in stems))
+                    operations.append((cache, _helper_names(cache, compiled)))
         context = current / "bin" / "installation-context"
         if context.exists():
             operations.append((context, _helper_names(context, CONTEXT)))
@@ -515,20 +553,42 @@ def _run(payload: Path, command: list[str], *, timeout: float = 45) -> str:
 
 
 def _argv(command: str, image: str) -> list[str]:
-    arguments = [value.strip("\"'") for value in shlex.split(command, posix=os.name != "nt")]
+    if os.name == "nt":
+        import ctypes
+        shell = ctypes.WinDLL("shell32", use_last_error=True)
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        shell.CommandLineToArgvW.argtypes = (ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_int))
+        shell.CommandLineToArgvW.restype = ctypes.POINTER(ctypes.c_wchar_p)
+        kernel.LocalFree.argtypes = (ctypes.c_void_p,)
+        kernel.LocalFree.restype = ctypes.c_void_p
+        count = ctypes.c_int()
+        values = shell.CommandLineToArgvW(command, ctypes.byref(count))
+        if not values:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            arguments = [values[index] for index in range(count.value)]
+        finally:
+            kernel.LocalFree(values)
+    else:
+        arguments = shlex.split(command)
     if os.name == "nt" and Path(image).stem.lower() in {"bash", "sh"}:
         arguments = [re.sub(r"^/(?:cygdrive/)?([A-Za-z])/", r"\1:/", value)
                      for value in arguments]
     return arguments
 
 
+def _arguments(row: dict[str, Any]) -> list[str]:
+    captured = row.get("argv")
+    return _argv(row["command"], row["image"]) if captured is None else captured
+
+
 def _parent(pid: int, image: str, command: str, payload: Path, root: Path, plugin: str,
-            expected_parent: int | None = None) -> bool:
+            expected_parent: int | None = None, *, arguments: list[str] | None = None) -> bool:
     if (pid != (os.getppid() if expected_parent is None else expected_parent)
             or Path(image).stem.lower() not in {"bash", "sh", "pwsh", "powershell"}):
         return False
     try:
-        arguments = _argv(command, image)
+        arguments = _argv(command, image) if arguments is None else arguments
     except ValueError:
         return False
     entries = {payload / "scripts" / name for name in ("install.ps1", "init.ps1", "install.sh", "init.sh")}
@@ -564,7 +624,7 @@ def _transaction_helper(row: dict[str, Any], payload: Path, root: Path,
     if row.get("ppid") not in (parents if parents is not None else {os.getppid()}) or Path(row["image"]).is_relative_to(root):
         return False
     try:
-        argv = _argv(row["command"], row["image"])
+        argv = _arguments(row)
         if (len(argv) != 6 or argv[1:3] != ["-I", "-B"]
                 or Path(argv[3]) != payload / "scripts" / "install-transaction.py"
                 or Path(os.path.abspath(argv[4])) != root):
@@ -576,19 +636,85 @@ def _transaction_helper(row: dict[str, Any], payload: Path, root: Path,
         return False
 
 
+def _lifecycle_controllers(rows: list[dict[str, Any]], payload: Path, root: Path,
+                           plugin: str) -> tuple[list[Path], set[int]]:
+    """Admit only the live teardown owner and its exact native/staging callers."""
+    origins, admitted = [payload], set()
+    if not os.environ.get("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE"):
+        return origins, admitted
+    binding = _load(payload / "scripts" / "command_binding.py")
+    authority = _authority_payload(payload)
+    lease = binding._load_lifecycle().borrowed_lease(  # noqa: SLF001
+        binding._rules(), binding._load_primitive(payload), operation="teardown",  # noqa: SLF001
+        payload_root=authority, plugin_id=plugin, legacy_root=root, project_root=Path.cwd(),
+        environment={**os.environ, "COPILOT_PLUGIN_ROOT": str(authority)},
+    )
+    if lease is None:
+        return origins, admitted
+    if authority != payload and not authority.is_relative_to(root):
+        origins.append(authority)
+    owner = next((row for row in rows if row["pid"] == lease.ticket["pid"]), None)
+    if owner is None or Path(owner["image"]).is_relative_to(root):
+        return origins, admitted
+    argv = _arguments(owner)
+    helpers = [index for index, value in enumerate(argv)
+               if Path(value) in {origin / "scripts" / "command_binding.py" for origin in origins}]
+    if len(helpers) != 1 or "--" not in argv or not re.fullmatch(
+        r"(?:python|pythonw|pypy)[0-9.]*", Path(owner["image"]).stem.lower(),
+    ):
+        return origins, admitted
+    index, separator = helpers[0], argv.index("--")
+    flags, native = argv[index + 1:separator], argv[separator + 1:]
+    if (any(value not in {"-I", "-S", "-B", "-X", "utf8"} for value in argv[1:index])
+            or "--teardown" not in flags or "--run-lifecycle" not in flags or not native
+            or any(flags.count(key) != 1 or flags.index(key) + 1 >= len(flags)
+                   or convert(flags[flags.index(key) + 1]) != value for key, convert, value in (
+                       ("--legacy-root", Path, root), ("--plugin-id", str, plugin),
+                   ))
+            or not any(_parent(owner["pid"], native[0], "", origin, root, plugin,
+                               owner["pid"], arguments=native) for origin in origins)):
+        return origins, admitted
+    admitted.add(owner["pid"])
+    admitted.update(row["pid"] for row in rows if row["pid"] == owner["ppid"] and any(
+        _parent(row["pid"], row["image"], row["command"], origin, root, plugin, row["pid"],
+                arguments=row.get("argv"))
+        for origin in origins
+    ))
+    if payload.parent.parent == Path.home() / ("." + plugin) / ".install-stage":
+        commands = _load(_dependency(payload, "installer_engine_commands.py"))
+        body = commands._sh(commands._read(payload / "scripts/install.sh"), "INSTALL_WATCHDOG").rstrip("\n")
+        # Bash 3.2 joins backslash-newlines in this quoted heredoc substitution.
+        bodies = {body, body.replace("\\\n", "")}
+        for _ in range(2):
+            for row in rows:
+                args = _arguments(row)
+                if (row["ppid"] in admitted and Path(row["image"]).stem.lower() in {"bash", "sh"}
+                        and len(args) > 8 and args[1] == "-c" and args[2] in bodies and args[3] == "bash"
+                        and Path(args[4]) == payload / "scripts/install.sh" and args[5] == plugin
+                        and Path(args[6]) == payload.parent
+                        and re.fullmatch(r"-?[0-9]+", args[7])
+                        and _parent(row["pid"], args[0], "", payload, root, plugin, row["pid"],
+                                    arguments=[args[0], args[4], *args[8:]])):
+                    admitted.add(row["pid"])
+    return origins, admitted
+
+
 def _controllers(rows: list[dict[str, Any]], payload: Path, root: Path,
                  plugin: str) -> tuple[set[int], set[int]]:
     """Recognize exact Python redirectors and the native installer's coproc shell."""
-    controllers = {os.getppid()}
+    origins, admitted = _lifecycle_controllers(rows, payload, root, plugin)
+    controllers = {os.getppid(), *admitted}
     redirectors: set[int] = set()
     for _ in range(4):
         for row in rows:
             if row["pid"] not in controllers:
                 continue
-            if _parent(row["pid"], row["image"], row["command"], payload, root, plugin, row["pid"]):
+            if any(_parent(row["pid"], row["image"], row["command"], origin, root, plugin, row["pid"],
+                           arguments=row.get("argv"))
+                   for origin in origins):
                 controllers.add(row["ppid"])
             try:
-                argv = _argv(row["command"], row["image"])
+                argv = _arguments(row)
                 source = Path(os.path.abspath(sys.argv[0]))
                 trusted = (source == Path(os.path.abspath(__file__))
                            or source == payload / "scripts" / "uninstall-state.py")
@@ -600,14 +726,15 @@ def _controllers(rows: list[dict[str, Any]], payload: Path, root: Path,
                     controllers.add(row["ppid"])
             except ValueError:
                 continue
-    verified = {row["pid"] for row in rows if row["pid"] in controllers and _parent(
-        row["pid"], row["image"], row["command"], payload, root, plugin, row["pid"],
-    )}
+    verified = admitted | {row["pid"] for row in rows if row["pid"] in controllers and any(_parent(
+        row["pid"], row["image"], row["command"], origin, root, plugin, row["pid"],
+        arguments=row.get("argv"),
+    ) for origin in origins)}
     for _ in range(4):
         verified.update(row["pid"] for row in rows if row.get("ppid") in verified
                         and Path(row["image"]).stem.lower() in {"bash", "sh"}
                         and _parent(row["pid"], row["image"], row["command"],
-                                    payload, root, plugin, row["pid"]))
+                                    payload, root, plugin, row["pid"], arguments=row.get("argv")))
     return verified, redirectors
 
 
@@ -661,19 +788,23 @@ ConvertTo-Json -InputObject $rows -Compress
             try:
                 if directory.stat().st_uid != os.getuid():
                     continue
-                command = os.fsdecode((directory / "cmdline").read_bytes()).replace("\0", " ").strip()
+                argv = [os.fsdecode(value) for value in (directory / "cmdline").read_bytes().split(b"\0") if value]
+                command = " ".join(argv)
                 if not command:
                     continue
                 image = os.readlink(directory / "exe")
                 status = (directory / "stat").read_text()
                 parent = int(status[status.rfind(")") + 2:].split()[1])
-                rows.append({"pid": int(directory.name), "ppid": parent, "image": image, "command": command})
+                rows.append({"pid": int(directory.name), "ppid": parent, "image": image,
+                             "command": command, "argv": argv})
             except (FileNotFoundError, ProcessLookupError):
                 continue
             except PermissionError as error:
                 raise UninstallRefused("Cannot inspect a current-user process") from error
+    elif sys.platform == "darwin":
+        rows = _load(_dependency(payload, "installer_engine_uninstall_darwin.py")).inspect_processes()
     else:
-        raise UninstallRefused("Runtime removal requires native Windows or Linux /proc process inspection")
+        raise UninstallRefused("Runtime removal requires native Windows, Linux /proc or Darwin process inspection")
     if not any(row["pid"] == os.getpid() for row in rows):
         raise UninstallRefused("Process inventory did not include its inspector")
     identities = [profile.module]
@@ -752,20 +883,16 @@ def _proof(path: Path, content: bytes) -> None:
 @contextmanager
 def _custody(payload: Path, plugin: str, root: Path, owner: tuple[Any, ...],
              targets: tuple[Target, ...], runtime: Any) -> Iterator[None]:
-    binding, primitive, receipt, _ = owner
-    arguments = dict(payload_root=payload, plugin_id=plugin, legacy_root=root,
-                     project_root=Path.cwd(), environment={**os.environ, "COPILOT_PLUGIN_ROOT": str(payload)})
+    binding, primitive = owner[:2]
+    authority = _authority_payload(payload)
+    arguments = dict(payload_root=authority, plugin_id=plugin, legacy_root=root,
+                     project_root=Path.cwd(), environment={**os.environ, "COPILOT_PLUGIN_ROOT": str(authority)})
     lifecycle = binding._load_lifecycle()  # noqa: SLF001 - exact payload lifecycle
     leases = runtime._leases  # noqa: SLF001 - co-located canonical runtime custody
     with ExitStack() as held:
-        if receipt is not None:
-            held.enter_context(lifecycle.legacy_lifecycle(
-                binding._rules(), primitive, reserve=False, teardown=True, lock_timeout=5, **arguments,  # noqa: SLF001
-            ))
-        else:
-            if os.environ.get(lifecycle.TICKET_ENV):
-                raise UninstallRefused("An unverifiable lifecycle ticket cannot authorize fallback removal")
-            held.enter_context(lifecycle._lock(primitive, arguments, timeout_seconds=5))  # noqa: SLF001
+        held.enter_context(lifecycle.legacy_lifecycle(
+            binding._rules(), primitive, reserve=False, teardown=True, lock_timeout=5, **arguments,  # noqa: SLF001
+        ))
         for target in targets:
             if target.snapshots:
                 held.enter_context(leases.batch_removal_custody(
@@ -783,8 +910,14 @@ def _custody(payload: Path, plugin: str, root: Path, owner: tuple[Any, ...],
 
 def cleanup(payload_root: Path, plugin_id: str, root: Path, shell: str, *,
             profile: Path | None = None, remove_runtime: bool = False,
+            check_consumers: bool = False,
             remover: Callable[[Path, str, Path, tuple[str, ...]], None] | None = None) -> dict[str, Any]:
-    """Validate or remove one finite profile; native caller retains .install.lock."""
+    """Validate or remove a profile under its native whole-install transaction.
+
+    The caller retains its product's .install.lock or command lifecycle; this
+    owner revalidates the latter and holds generation/publication removal custody.
+    Explicit consumer admission uses that same custody without deleting code.
+    """
     payload = payload_root
     _root(payload, root)
     selected = profile_for(payload, plugin_id, profile)
@@ -803,7 +936,7 @@ def cleanup(payload_root: Path, plugin_id: str, root: Path, shell: str, *,
     host = _host(shell)
     _consumer_closure(host, _plan(payload, root, selected, targets))
     _guard(payload, plugin_id, root, selected)
-    if not remove_runtime:
+    if not remove_runtime and not check_consumers:
         return {"status": "ready", "root": str(root)}
     manifest = root / "deploy-manifest.json"
     existing = manifest.read_bytes() if manifest.exists() else None
@@ -824,6 +957,8 @@ def cleanup(payload_root: Path, plugin_id: str, root: Path, shell: str, *,
         refuse_consumers(payload, plugin_id, root, host, selected)
         if selected.nested_engine and len(targets) > 1:
             refuse_consumers(payload, plugin_id, targets[1].root, host, selected)
+        if not remove_runtime:
+            return {"status": "ready", "root": str(root)}
         _proof(manifest, proof)
         try:
             _guard(payload, plugin_id, root, selected)
@@ -842,13 +977,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--shell", required=True)
     parser.add_argument("--profile", type=Path)
+    parser.add_argument("--check-consumers", action="store_true",
+                        help="Also acquire removal custody and refuse consumers during admission")
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument("--check", action="store_true")
     action.add_argument("--remove-runtime", action="store_true")
     arguments = parser.parse_args(argv)
     try:
         result = cleanup(arguments.payload_root, arguments.plugin_id, arguments.root, arguments.shell,
-                         profile=arguments.profile, remove_runtime=arguments.remove_runtime)
+                         profile=arguments.profile, remove_runtime=arguments.remove_runtime,
+                         check_consumers=arguments.check_consumers)
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
         print(f"Runtime uninstall refused: {error}", file=sys.stderr)
         return 1

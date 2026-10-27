@@ -101,15 +101,16 @@ def array(text, values=None):
     return "\n".join(lines)
 
 
-def fixtures(product, root=None, root_text=None, payload_text=None):
+def fixtures(product, root=None, root_text=None, payload_text=None, publisher=None):
     """Render the actual declared output bodies independently of the helper."""
     root = root or Path.home() / ("." + product)
     payload = REPO / "plugins" / product
     root_sh = root_text or str(root)
-    payload_sh = payload_text or str(payload)
+    publisher = publisher or payload
+    payload_sh = payload_text or str(publisher)
     sh, ps = source(product, "sh"), source(product, "ps1")
     module = product.replace("-", "_")
-    root_ps, payload_ps = str(root).replace("'", "''"), str(payload).replace("'", "''")
+    root_ps, payload_ps = str(root).replace("'", "''"), str(publisher).replace("'", "''")
     result = []
     writer = "Deploy-SelfProvisioningBinstub"
     if product in {"agent-vault", "agent-ssh", "agent-pull-requests"}:
@@ -241,11 +242,11 @@ def context(product, name, text):
     return contents
 
 
-def owned(product, contents, root=None, payload=None, module=None):
+def owned(product, contents, root=None, payload=None, module=None, publisher=None):
     return MODULE.owned_local_names(
         payload or REPO / "plugins" / product,
         root or Path.home() / ("." + product),
-        module or product.replace("-", "_"), contents,
+        module or product.replace("-", "_"), contents, publisher_root=publisher,
     )
 
 
@@ -373,6 +374,32 @@ def test_publisher_binding_rejects_another_payload(product):
         changed = changed.replace(quote(str(REPO / "plugins" / product)), quote(str(REPO / "foreign" / product)))
         assert changed != text
         assert owned(product, {name: changed}) == ()
+
+
+@pytest.mark.parametrize("product", ("agent-bridge", "agent-dispatch", "agent-containers"))
+def test_installed_publisher_is_literal_data_not_an_available_source(tmp_path, product):
+    publisher = tmp_path / "removed publisher's $artifact & (source)"
+    assert not publisher.exists()
+    for name, text in fixtures(product, publisher=publisher):
+        contents = {name: text}
+        if name.endswith(".cmd"):
+            contents[name[:-4] + ".ps1"] = next(
+                body for command, body in fixtures(product, publisher=publisher)
+                if command == name[:-4] + ".ps1"
+            )
+        assert name in owned(product, contents, publisher=publisher)
+        if not name.endswith(".cmd"):
+            assert name not in owned(product, contents)
+            assert name not in owned(product, contents, publisher=tmp_path / "foreign")
+            assert name not in owned(product, {name: text + "\n# customization\n"},
+                                     publisher=publisher)
+    assert not publisher.exists()
+
+
+@pytest.mark.parametrize("publisher", ("relative", "../other", "line\nbreak"))
+def test_installed_publisher_requires_absolute_nontraversing_path(publisher):
+    with pytest.raises(ValueError, match="publisher"):
+        owned("agent-bridge", dict(fixtures("agent-bridge")), publisher=Path(publisher))
 
 
 def test_containers_namespaced_binding_is_not_legacy_ownership():
