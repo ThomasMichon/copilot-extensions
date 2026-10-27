@@ -195,3 +195,40 @@ def test_exact_wire_capacity_includes_transport_newline(api):
     value["value"] += "x"
     with pytest.raises(ValueError, match="wire response"):
         api.allocation.wire_json(value)
+
+
+def test_reconcile_recovers_each_original_phase_without_allocating(api):
+    claim = SimpleNamespace(producer=metadata(), ref="", state="active")
+    assert api.writer._reconcile(claim, observation())
+    assert claim.producer["phase"] == "bound" and claim.ref == identity()["ref"]
+    assert api.writer._reconcile(claim, observation(status="confirmed"))
+    assert claim.producer["phase"] == "confirmed"
+    assert api.writer._reconcile(claim, observation(status="archived"))
+    assert claim.producer["phase"] == "closed" and claim.state == "released"
+    assert api.allocation.valid_metadata(claim.producer)
+    cancelled = SimpleNamespace(producer=metadata(), ref="", state="active")
+    assert api.writer._reconcile(cancelled, {**observation(status="cancelled"), "identity": None})
+    assert cancelled.producer["phase"] == "closed"
+    assert api.allocation.valid_metadata(cancelled.producer)
+
+
+def test_reconcile_preserves_active_claim_until_exact_conclusion(api):
+    value = {**metadata(), "phase": "confirmed", "identity": identity()}
+    claim = SimpleNamespace(producer=value, ref=identity()["ref"], state="active")
+    before = copy.deepcopy(vars(claim))
+    assert api.writer._reconcile(claim, observation()) is False
+    assert vars(claim) == before
+
+
+def test_reconcile_rejects_uncertain_or_changed_proof_without_mutation(api):
+    for changed in (
+        {"status": "unknown", "allocation_finished": False},
+        {"request_id": "replacement"},
+        {"identity": {**identity(), "creation_nonce": "replacement"}},
+    ):
+        value = {**metadata(), "phase": "bound", "identity": identity()}
+        claim = SimpleNamespace(producer=value, ref=identity()["ref"], state="active")
+        before = copy.deepcopy(vars(claim))
+        with pytest.raises(ValueError, match="unresolved"):
+            api.writer._reconcile(claim, {**observation(), **changed})
+        assert vars(claim) == before

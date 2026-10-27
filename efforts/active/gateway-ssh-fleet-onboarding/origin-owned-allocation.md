@@ -172,6 +172,9 @@ protected origin transactions, first-save receiving receipts, original-operation
 recovery, sealed cancellation and retained actual child conclusion. Receiving
 creation is sessionless and local admission does not require claim acknowledgement.
 This is provider preparation, not installed or end-to-end remote allocation.
+The source foundation merged in #9186 as
+`0050dd33e6fce80e21a7e6808fb6eca624c66c4c`; the parent Journal records its
+current-head review and exact qualification boundary.
 
 Focused isolated tests cover the original first-save and ready-checkpoint crash
 boundaries, a live operation owner in another process, omitted versus malformed

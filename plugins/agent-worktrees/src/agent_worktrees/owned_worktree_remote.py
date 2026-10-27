@@ -6,6 +6,8 @@ import json
 import re
 import subprocess
 import unicodedata
+from contextlib import nullcontext
+from typing import ContextManager
 
 from agent_procutil.owned_process import run_caller_owned
 from machine_transport import resolve_machine_selection, resolve_ssh_target
@@ -41,12 +43,7 @@ def _unique(pairs: list[tuple[str, object]]) -> dict:
     return result
 
 
-def request(operation: str, metadata: dict) -> dict:
-    """Address only the original target operation with its protected request facts."""
-    if operation not in {"inspect", "confirm", "cancel", "create"}:
-        raise ValueError("unsupported receiving allocation operation")
-    if not allocation.valid_metadata(metadata) or metadata["phase"] == "closed":
-        raise ValueError("receiving allocation requires valid unsettled responsibility")
+def _destination(metadata: dict, operation: str) -> tuple[str, str]:
     target = metadata["recovery"]
     _, project, _ = allocation.qualified_ref(metadata["creator"])
     config = cfg.load_project_config(project)
@@ -60,10 +57,21 @@ def request(operation: str, metadata: dict) -> dict:
     alias, shell = resolve_ssh_target(entry)
     if not alias or alias.startswith("-"):
         raise ValueError("allocation target has no safe SSH alias")
-    command = shell_command(
+    return alias, shell_command(
         shell, target["project"],
         ["worktree-allocation-receive", operation, "--json"],
     )
+
+
+def request(operation: str, metadata: dict, *, context_lock: ContextManager | None = None) -> dict:
+    """Address only the original target operation with its protected request facts."""
+    if operation not in {"inspect", "confirm", "cancel", "create"}:
+        raise ValueError("unsupported receiving allocation operation")
+    if not allocation.valid_metadata(metadata) or metadata["phase"] == "closed":
+        raise ValueError("receiving allocation requires valid unsettled responsibility")
+    with context_lock or nullcontext():
+        alias, command = _destination(metadata, operation)
+    target = metadata["recovery"]
     payload = {
         "schema": allocation.SCHEMA, "version": allocation.VERSION,
         "origin": metadata["creator"], "request_id": metadata["request_id"],

@@ -11,7 +11,7 @@ from . import claims_cli, config as cfg, output, owned_worktree as allocation
 from . import resource_producer as producer, tracking_write
 from .resource_producer_cli import read_input
 
-ORIGIN_OPERATIONS = ("reserve", "inspect", "bind", "confirm", "close", "cancel")
+ORIGIN_OPERATIONS = ("reserve", "inspect", "bind", "confirm", "close", "cancel", "reconcile")
 RECEIVING_OPERATIONS = ("create", "inspect", "confirm", "cancel")
 
 

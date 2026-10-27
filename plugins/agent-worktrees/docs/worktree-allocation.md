@@ -5,8 +5,8 @@ and optional exact-claim acknowledgement. It uses the existing worktree resource
 ledger and workspace-creation journal, not a second allocator or service.
 It is the provider foundation for the
 [origin-owned allocation pattern](../../../docs/patterns/workspace-allocation-and-session-acquisition.md#origin-owned-remote-allocation).
-The ordinary `create --machine/--repo` coordinator, restart-driven asynchronous
-linker and Bridge/Dispatch consumer migration are separate work; these provider
+The ordinary `create --machine/--repo` coordinator and Bridge/Dispatch
+consumer migration are separate work; these provider
 commands do not implement or advertise those consumers.
 
 ## Source ABI and negotiation
@@ -47,6 +47,7 @@ key, including custom keys that differ from their physical host's name.
 | `confirm` | `token` | Request optional acknowledgement of that bound identity |
 | `close` | `token` | Observe and retain actual receiving child finality |
 | `cancel` | `token` | Seal the original pre-identity receiving operation, then close responsibility |
+| `reconcile` | `token` | Inspect/link/acknowledge or settle the original allocation without creating or cancelling |
 
 `target` contains `machine`, `project`, and optional bounded `options` and
 `authority`. A request ID is stable per creator: replay retains the same token
@@ -65,6 +66,35 @@ Remote observations happen outside the origin record lock. Before committing,
 the original owner and complete protected metadata snapshot are checked again.
 Terminal or frozen owners do not reopen; handoff reservations and ref collisions
 refuse mutation. Transfer is not supported by this provider.
+
+### Resident-owned asynchronous reconciliation
+
+The existing elected status monitor owns linkage, not a new daemon or scheduler.
+Its private observer receives current tracking records before public roster
+projection; protected tokens and recovery facts never enter public roster rows.
+On restart it discovers registered repositories, including source-only repos,
+and adopted projects through their current ledgers, not retained creation history.
+Discovery is bounded per sweep; unavailable ledgers remain visible and retry
+without starving other projects.
+
+At most one finite receiving request runs at a time, outside the monitor's
+project-context and record locks. The registered `reconcile` transaction binds
+finished receiving creation, optionally acknowledges a bound exact identity,
+and retains exact finality or a previously sealed cancellation. It never invokes
+receiving creation or cancellation, launches an agent, or converts missing
+evidence into absence. Failed linkage retains the original claim with bounded
+volatile backoff; restart reconstructs responsibility from the original ledger.
+
+The resident's elected authority and admission epoch are checked before remote
+work and before local commit. Drain/rollback cannot admit a prior epoch's result.
+In-flight linkage participates in drain diagnostics, unresolved responsibility
+prevents false idle exit, and mandatory retirement waits for the concrete finite
+worker before releasing the resident route, including interrupted cleanup.
+The existing authenticated health response advertises
+`worktree-allocation-linker-v1` and aggregate `allocationLinker` admission,
+pending, active, discovery and error facts without private allocation tokens.
+Current-roster demand already provides the project discovery/wake path; there
+is no second notification listener or reverse callback.
 
 Admission reserves capacity for the entire lifecycle, including the duplicated
 exact receiving proof and the actual origin response envelope, within the

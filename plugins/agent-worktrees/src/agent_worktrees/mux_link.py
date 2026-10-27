@@ -975,3 +975,22 @@ class InProcessRuntime:
                     except KeyboardInterrupt:
                         pass
                 raise error
+
+    def shutdown_and_wait(self) -> None:
+        """Settle the retained generation's admission before the host returns."""
+        with self._lifecycle_lock:
+            owner, error = self._retirement, None
+            try:
+                self.shutdown()
+            except BaseException as exc:
+                error = exc
+        if owner is not None:
+            while not owner.settled.is_set():
+                try:
+                    owner.settled.wait(0.05)
+                except BaseException as exc:
+                    if error is None:
+                        error = exc
+            owner.thread.join()
+        if error is not None:
+            raise error

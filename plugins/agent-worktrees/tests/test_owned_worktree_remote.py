@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import base64
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
@@ -46,6 +48,30 @@ def test_real_transport_resolver_uses_exact_custom_execution_key(transport, monk
 
     monkeypatch.setattr(remote, "run_caller_owned", run)
     assert remote.request(operation, transport) == {"status": "pending"}
+
+
+def test_context_resolution_is_serialized_but_actual_transport_wait_is_not(transport, monkeypatch):
+    lock = threading.RLock()
+    load = remote.cfg.load_project_config
+
+    def project(name):
+        assert lock._is_owned()
+        return load(name)
+
+    def acquire_elsewhere():
+        acquired = lock.acquire(timeout=1)
+        if acquired:
+            lock.release()
+        return acquired
+
+    def run(argv, **kwargs):
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            assert pool.submit(acquire_elsewhere).result(timeout=2)
+        return SimpleNamespace(returncode=0, stdout='{"status":"pending"}', stderr="")
+
+    monkeypatch.setattr(remote.cfg, "load_project_config", project)
+    monkeypatch.setattr(remote, "run_caller_owned", run)
+    assert remote.request("inspect", transport, context_lock=lock) == {"status": "pending"}
 
 
 @pytest.mark.parametrize("stdout,stderr,expected", [
