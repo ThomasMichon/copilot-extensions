@@ -163,13 +163,20 @@ def observe_canary(console_python: Path) -> dict:
         raise RuntimeError("Observer canary has no native Job custody")
     try:
         deadline = time.monotonic() + 5
-        while not (visible := set(terminal_windows()) - baseline):
+        visible: dict[int, dict] = {}
+        while not visible:
+            for window in set(terminal_windows()) - baseline:
+                identity = window_identity(window)
+                if identity["pid"] == process.pid:
+                    visible[window] = identity
+            if visible:
+                break
             if process.poll() is not None or time.monotonic() >= deadline:
                 raise RuntimeError("Visible-window observer did not detect its owned canary")
             time.sleep(0.01)
         evidence = {
             "process": process.pid,
-            "windows": [window_identity(window) for window in sorted(visible)],
+            "windows": [visible[window] for window in sorted(visible)],
         }
     finally:
         try:
@@ -181,7 +188,7 @@ def observe_canary(console_python: Path) -> dict:
             job.terminate_and_wait(5)
             job.close()
     deadline = time.monotonic() + 5
-    while set(terminal_windows()) - baseline:
+    while set(terminal_windows()) & visible.keys():
         if time.monotonic() >= deadline:
             raise RuntimeError("Owned observer canary window did not retire")
         time.sleep(0.01)

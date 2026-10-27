@@ -47,6 +47,10 @@ def test_selected_client_jump_chain_is_headless_and_reaped(tmp_path, capsys, par
     assert evidence["parent_console_handle"] == 0
     assert evidence["parent_python_version"] == platform.python_version()
     assert evidence["observer_control_detected_and_retired"] is True
+    canary = evidence["observer_canary"]
+    assert canary["windows"] and all(
+        window["pid"] == canary["process"] for window in canary["windows"]
+    )
     expected_arch = os.environ["SSH_MANAGER_EXPECTED_PYTHON_ARCH"]
     assert evidence["parent_platform"] == {
         "arm64": "win-arm64", "x64": "win-amd64",

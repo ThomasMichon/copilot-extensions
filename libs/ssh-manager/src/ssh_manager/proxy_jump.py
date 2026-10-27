@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from urllib.parse import unquote, urlsplit
 
@@ -71,6 +71,59 @@ def _override_jump(config: SSHConfig, value: str) -> SSHConfig:
     return replace(
         config, proxy_command=None, extra_options=options, effective_config=effective,
     )
+
+
+def prepare_jump_arguments(
+    args: Sequence[str], config: SSHConfig,
+) -> tuple[tuple[str, ...], SSHConfig]:
+    """Consume native jump options while preserving their route and remote argv."""
+    prepared = [args[0]]
+    jump: str | None = None
+    index = 1
+    while index < len(args):
+        argument = args[index]
+        if argument == "--" or not argument.startswith("-") or argument == "-":
+            prepared.extend(args[index:])
+            break
+        for offset, option in enumerate(argument[1:], 1):
+            if option not in "BbcDEeFIiJLlmOopQRSWw":
+                continue
+            attached = argument[offset + 1:]
+            if attached:
+                value = attached
+            else:
+                index += 1
+                if index == len(args):
+                    raise ValueError(f"SSH option -{option} requires a value")
+                value = args[index]
+            consumed = option == "J"
+            if option == "o":
+                key, separator, setting = value.partition("=")
+                if not separator:
+                    fields = value.split(None, 1)
+                    if not fields:
+                        raise ValueError("SSH option -o requires a setting")
+                    key, setting = fields[0], fields[1] if len(fields) == 2 else ""
+                if key.strip().casefold() == "proxyjump":
+                    consumed, value = True, setting.strip()
+            if consumed:
+                if not value:
+                    raise ValueError("SSH jump option requires a value")
+                if option == "J" and jump is not None:
+                    raise ValueError("Duplicate SSH jump option")
+                if jump is None:
+                    jump = value
+                if offset > 1:
+                    prepared.append(argument[:offset])
+            else:
+                prepared.append(argument)
+                if not attached:
+                    prepared.append(value)
+            break
+        else:
+            prepared.append(argument)
+        index += 1
+    return tuple(prepared), _override_jump(config, jump) if jump is not None else config
 
 
 async def resolve_jump_route(

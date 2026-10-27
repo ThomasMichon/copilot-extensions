@@ -219,6 +219,10 @@ specifications and chains exceeding eight hops refuse before a transport starts.
 Hop configuration reads use the existing bounded profile resolver. Resolved
 direct stages explicitly disable native proxy execution, so a later config read
 cannot reintroduce an unowned jump. POSIX retains native jump handling.
+Explicit `-J` and `-o ProxyJump` options are consumed into the owned route
+before adding its `ProxyCommand`; other options and remote-command arguments
+remain intact. Cycle identity uses declared aliases, not resolved addresses,
+so different network scopes may legitimately reuse an endpoint.
 The imported runtime advertises this bounded selected-client probe contract as
 `ssh_manager.proxy.WINDOWS_OWNED_PROBE_VERSION = 1`, independently of its package
 version. Older consumers retain their existing API; a new Windows probe caller

@@ -220,6 +220,44 @@ async def test_resolved_direct_route_cannot_reenable_native_jump(monkeypatch):
         await run_process_cleanup(process)
 
 
+@pytest.mark.parametrize("options", [
+    ("-J", "jump"), ("-Jjump",), ("-vJjump",),
+    ("-o", "ProxyJump=jump"), ("-oProxyJump=jump",),
+    ("-o", "ProxyJump jump"),
+])
+async def test_windows_consumes_explicit_jump_before_installing_its_proxy(monkeypatch, options):
+    calls = _profiles(monkeypatch, {"jump": _profile("jump")})
+    prepared = AsyncMock(return_value=SimpleNamespace())
+    monkeypatch.setattr(proxy, "_is_windows", lambda: True)
+    monkeypatch.setattr(proxy, "_create_prepared_ssh", prepared)
+    await proxy.create_ssh_subprocess(
+        "ssh", "-p", "2200", *options, "target", "-J", "remote-argument",
+        config=_profile("target", "profile-jump"),
+    )
+    arguments, config, route, _kwargs = prepared.await_args.args
+    expected_options = ("-v",) if options == ("-vJjump",) else ()
+    assert arguments == ("ssh", "-p", "2200", *expected_options, "target", "-J", "remote-argument")
+    assert proxy_jump.ssh_option(config, "proxyjump") == "jump"
+    assert route is not None and route.argv[-1] == "jump"
+    assert [host for host, _options in calls] == ["jump"]
+
+
+def test_jump_projection_preserves_other_options_and_explicit_disable():
+    args = ("ssh", "-Fconfig", "-o", "BatchMode=yes", "-Jnone", "--", "-target", "-Jremote")
+    projected, config = proxy_jump.prepare_jump_arguments(args, _profile("target", "profile-jump"))
+    assert projected == ("ssh", "-Fconfig", "-o", "BatchMode=yes", "--", "-target", "-Jremote")
+    assert proxy_jump.ssh_option(config, "proxyjump") == "none"
+
+
+@pytest.mark.parametrize("args", [
+    ("ssh", "-J"), ("ssh", "-J", ""), ("ssh", "-o", ""),
+    ("ssh", "-Jfirst", "-Jsecond", "target"),
+])
+def test_malformed_jump_options_refuse_before_native_launch(args):
+    with pytest.raises(ValueError):
+        proxy_jump.prepare_jump_arguments(args, _profile("target"))
+
+
 async def test_posix_keeps_its_native_jump_arguments(monkeypatch):
     process = SimpleNamespace(wait=AsyncMock(return_value=0))
     spawn = AsyncMock(return_value=(process, None))

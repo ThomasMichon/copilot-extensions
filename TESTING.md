@@ -79,7 +79,9 @@ and cancellation. Native Job members are pinned before teardown; evidence
 requires their retirement, zero visible terminal windows or focus changes,
 and no inherited descriptor metadata in the proxy. An intentionally visible,
 test-owned canary must first be observed and retire, so an unavailable desktop
-cannot pass as zero windows. The fixture refuses shared hosts before native
+cannot pass as zero windows. Its window owner must match the spawned canary
+PID; an unrelated terminal cannot validate observer sensitivity.
+The fixture refuses shared hosts before native
 work. Run no desktop reproduction of an unqualified path.
 
 Mocked route/probe contracts are available through the contained `ssh-manager`

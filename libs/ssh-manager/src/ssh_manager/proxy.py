@@ -36,7 +36,7 @@ from .process import (
     ssh_subprocess_kwargs,
     terminate_ssh_process_tree,
 )
-from .proxy_jump import JumpRoute, resolve_jump_route
+from .proxy_jump import JumpRoute, prepare_jump_arguments, resolve_jump_route
 
 log = logging.getLogger("ssh-manager.proxy")
 _DRAIN_TIMEOUT = 2.0
@@ -398,6 +398,7 @@ async def create_ssh_subprocess(
     """Launch SSH, owning any Windows native proxy outside OpenSSH's child spawn."""
     route: JumpRoute | None = None
     if _is_windows():
+        args, config = prepare_jump_arguments(args, config)
         route = await resolve_jump_route(
             config, kwargs.get("executable") or args[0], cwd=kwargs.get("cwd"),
             environment=_redirected_environment(config, kwargs.get("env")),
