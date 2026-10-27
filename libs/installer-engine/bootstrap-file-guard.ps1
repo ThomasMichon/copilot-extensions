@@ -222,6 +222,16 @@ function Open-BootstrapStockFileGuard {
     $ErrorActionPreference = 'Stop'
     Assert-BootstrapStockOrdinaryPath -Path $Path
     $bindings = Get-BootstrapStockFileBindings
+    New-BootstrapStockFileGuard -Path $Path -Directory:$Directory -Bindings $bindings
+}
+
+function New-BootstrapStockFileGuard {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [switch]$Directory,
+        [Parameter(Mandatory)]$Bindings
+    )
+    $ErrorActionPreference = 'Stop'
     # Attribute-only opens do not participate in sharing checks; include FILE_LIST_DIRECTORY.
     $access = if ($Directory) { 0x81 } else { -2147483648 }
     # Read sharing only: no write/delete sharing; do not follow a final reparse point.
