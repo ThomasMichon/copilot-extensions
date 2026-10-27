@@ -1,0 +1,334 @@
+"""Private stock-framework custody, not complete interpreter admission."""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from agent_procutil import no_window_kwargs
+
+ROOT = Path(__file__).resolve().parents[3]
+HELPER = ROOT / "libs/installer-engine/bootstrap-file-guard.ps1"
+_CAPTURE_IDENTITY_HANDLE = r"""
+$script:observedHandle=$null
+$script:identityReader=${function:Get-BootstrapStockFileIdentity}
+function Get-BootstrapStockFileIdentity {
+    param($Handle, $Bindings)
+    $script:observedHandle=$Handle
+    & $script:identityReader -Handle $Handle -Bindings $Bindings
+}
+"""
+
+
+def test_guard_is_not_an_enabled_bootstrap_or_compilation_path():
+    text = HELPER.read_text(encoding="utf-8")
+    for forbidden in ("Add-Type", "Reflection.Emit", "GetDelegateForFunctionPointer", "Process.Start"):
+        assert forbidden not in text
+    assert "Resolve-EvaluatorBootstrapPython" not in text
+    for plugin in ("agent-codespaces", "agent-containers"):
+        caller = ROOT / "plugins" / plugin / "scripts/runtime-gate.ps1"
+        assert HELPER.name not in caller.read_text(encoding="utf-8")
+
+
+@pytest.fixture
+def host():
+    if os.name != "nt":
+        pytest.skip("native Windows stock-framework guard")
+    executable = shutil.which("powershell")
+    if not executable:
+        pytest.skip("Windows PowerShell is unavailable")
+    return executable
+
+
+def _run(host, tmp_path, body, *, success=True, environment=None):
+    script = tmp_path / "guard-probe.ps1"
+    script.write_text(
+        "$ErrorActionPreference='Stop'\n"
+        "$OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)\n"
+        ". $env:GUARD_HELPER\n" + body,
+        encoding="utf-8-sig",
+    )
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-File", str(script)],
+        capture_output=True, text=True, encoding="utf-8", timeout=20,
+        env={**os.environ, "GUARD_HELPER": str(HELPER), **(environment or {})},
+        **no_window_kwargs(),
+    )
+    if success:
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
+        return json.loads(result.stdout)
+    return result
+
+
+@pytest.mark.parametrize("directory", (False, True))
+def test_stock_guard_pins_identity_and_releases_the_same_handle(host, tmp_path, directory):
+    path = tmp_path / "guard's \u00e9"
+    if directory:
+        path.mkdir()
+    else:
+        path.write_bytes(b"guard fixture")
+    result = _run(host, tmp_path, r"""
+$guard=Open-BootstrapStockFileGuard -Path $env:FIXTURE_PATH -Directory:($env:IS_DIRECTORY -eq '1')
+$handle=$guard.Handle
+try {
+    $same=Get-BootstrapStockFileIdentity -Handle $handle -Bindings (Get-BootstrapStockFileBindings)
+    $writerBlocked=$false
+    if ($env:IS_DIRECTORY -ne '1') {
+        try {
+            $writer=[IO.File]::Open($guard.Path, [IO.FileMode]::Open,
+                [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
+            $writer.Dispose()
+        } catch [IO.IOException] {
+            if (($_.Exception.HResult -band 0xffff) -ne 32) { throw }
+            $writerBlocked=$true
+        }
+    }
+    $renameBlocked=$false
+    try {
+        if ($env:IS_DIRECTORY -eq '1') {
+            [IO.Directory]::Move($guard.Path, $guard.Path + '-moved')
+        } else {
+            [IO.File]::Move($guard.Path, $guard.Path + '-moved')
+        }
+    } catch [IO.IOException] {
+        if (($_.Exception.HResult -band 0xffff) -ne 32) { throw }
+        $renameBlocked=$true
+    }
+    $deleteBlocked=$false
+    try {
+        if ($env:IS_DIRECTORY -eq '1') {
+            [IO.Directory]::Delete($guard.Path)
+        } else {
+            [IO.File]::Delete($guard.Path)
+        }
+    } catch [IO.IOException] {
+        if (($_.Exception.HResult -band 0xffff) -ne 32) { throw }
+        $deleteBlocked=$true
+    }
+    [pscustomobject]@{
+        first=$guard.Identity
+        second=$same
+        closed=$handle.IsClosed
+        invalid=$handle.IsInvalid
+        writerBlocked=$writerBlocked
+        renameBlocked=$renameBlocked
+        deleteBlocked=$deleteBlocked
+    } | ConvertTo-Json -Compress
+} finally { $handle.Dispose() }
+if (-not $handle.IsClosed) { throw 'Guard handle did not close.' }
+if ($env:IS_DIRECTORY -eq '1') {
+    [IO.Directory]::Move($env:FIXTURE_PATH, $env:FIXTURE_PATH + '-released')
+    [IO.Directory]::Move($env:FIXTURE_PATH + '-released', $env:FIXTURE_PATH)
+} else {
+    $writer=[IO.File]::Open($env:FIXTURE_PATH, [IO.FileMode]::Open,
+        [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
+    $writer.Dispose()
+    [IO.File]::Move($env:FIXTURE_PATH, $env:FIXTURE_PATH + '-released')
+    [IO.File]::Move($env:FIXTURE_PATH + '-released', $env:FIXTURE_PATH)
+}
+""", environment={"FIXTURE_PATH": str(path), "IS_DIRECTORY": str(int(directory))})
+    assert result["first"] == result["second"]
+    assert bool(result["first"]["Attributes"] & 0x10) is directory
+    assert not result["first"]["Attributes"] & 0x400
+    assert result["closed"] is False
+    assert result["invalid"] is False
+    assert result["renameBlocked"] is True
+    assert result["deleteBlocked"] is True
+    if not directory:
+        assert result["writerBlocked"] is True
+        with path.open("r+b"):
+            pass
+
+
+@pytest.mark.parametrize("directory", (False, True))
+def test_stock_guard_refuses_wrong_kind_and_releases_failed_open(host, tmp_path, directory):
+    path = tmp_path / "wrong-kind"
+    if directory:
+        path.mkdir()
+    else:
+        path.write_bytes(b"unchanged")
+    result = _run(host, tmp_path, _CAPTURE_IDENTITY_HANDLE + r"""
+$message=$null
+try {
+    $null=Open-BootstrapStockFileGuard -Path $env:FIXTURE_PATH -Directory:($env:EXPECT_DIRECTORY -eq '1')
+} catch { $message=$_.Exception.Message }
+if ($message -cne 'Bootstrap file guard object kind does not match the requested kind.') {
+    throw 'Wrong-kind refusal was lost.'
+}
+if ($null -eq $script:observedHandle -or -not $script:observedHandle.IsClosed) {
+    throw 'Wrong-kind admission did not close its handle before returning.'
+}
+if ($env:EXPECT_DIRECTORY -eq '1') {
+    [IO.File]::Move($env:FIXTURE_PATH, $env:FIXTURE_PATH + '-released')
+    [IO.File]::Move($env:FIXTURE_PATH + '-released', $env:FIXTURE_PATH)
+} else {
+    [IO.Directory]::Move($env:FIXTURE_PATH, $env:FIXTURE_PATH + '-released')
+    [IO.Directory]::Move($env:FIXTURE_PATH + '-released', $env:FIXTURE_PATH)
+}
+[pscustomobject]@{closed=$script:observedHandle.IsClosed} | ConvertTo-Json -Compress
+""", environment={
+        "FIXTURE_PATH": str(path), "EXPECT_DIRECTORY": str(int(not directory)),
+    })
+    assert result == {"closed": True}
+
+
+@pytest.mark.parametrize("path", (
+    "relative", r"\\server\share\file", r"C:\base\..\file", r"C:\base\file:stream",
+    r"C:\base\file.", "C:\\base\\file ", "C:/base/file",
+))
+def test_stock_guard_refuses_nonordinary_path_before_native_open(host, tmp_path, path):
+    result = _run(host, tmp_path, r"""
+function Get-BootstrapStockFileBindings { throw 'Unfit path reached native bindings.' }
+Open-BootstrapStockFileGuard -Path $env:FIXTURE_PATH
+""", success=False, environment={"FIXTURE_PATH": path})
+    assert result.returncode != 0
+    assert "Unfit path reached native bindings" not in result.stderr
+    assert "Bootstrap file guard" in result.stderr
+
+
+def test_stock_guard_missing_file_is_error_not_unavailable_selection(host, tmp_path):
+    result = _run(host, tmp_path, r"""
+Open-BootstrapStockFileGuard -Path $env:FIXTURE_PATH
+""", success=False, environment={"FIXTURE_PATH": str(tmp_path / "missing")})
+    assert result.returncode != 0
+    assert "Bootstrap file guard open failed" in result.stderr
+    assert "unavailable" not in result.stdout
+
+
+def test_stock_guard_refuses_existing_writer_without_retry(host, tmp_path):
+    path = tmp_path / "existing-writer"
+    path.write_bytes(b"untouched")
+    result = _run(host, tmp_path, r"""
+$writer=[IO.File]::Open($env:FIXTURE_PATH, [IO.FileMode]::Open,
+    [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
+try {
+    Open-BootstrapStockFileGuard -Path $env:FIXTURE_PATH
+} finally { $writer.Dispose() }
+""", success=False, environment={"FIXTURE_PATH": str(path)})
+    assert result.returncode != 0
+    assert "Bootstrap file guard open failed" in result.stderr
+    assert path.read_bytes() == b"untouched"
+
+
+def test_stock_guard_releases_handle_when_identity_query_throws(host, tmp_path):
+    path = tmp_path / "query-refusal"
+    path.write_bytes(b"untouched")
+    result = _run(host, tmp_path, r"""
+$script:observedHandle=$null
+function Get-BootstrapStockFileIdentity {
+    param($Handle, $Bindings)
+    $script:observedHandle=$Handle
+    throw 'synthetic identity inspection refusal'
+}
+$message=$null
+try { $null=Open-BootstrapStockFileGuard -Path $env:FIXTURE_PATH }
+catch { $message=$_.Exception.Message }
+if ($message -cne 'synthetic identity inspection refusal') { throw 'Identity refusal was lost.' }
+if ($null -eq $script:observedHandle) { throw 'Open did not reach identity inspection.' }
+[pscustomobject]@{closed=$script:observedHandle.IsClosed} | ConvertTo-Json -Compress
+""", environment={"FIXTURE_PATH": str(path)})
+    assert result == {"closed": True}
+    with path.open("r+b"):
+        pass
+
+
+def test_stock_guard_closed_handle_is_not_queried_or_reopened(host, tmp_path):
+    path = tmp_path / "closed-guard"
+    path.write_bytes(b"untouched")
+    result = _run(host, tmp_path, r"""
+$guard=Open-BootstrapStockFileGuard -Path $env:FIXTURE_PATH
+$guard.Handle.Dispose()
+Get-BootstrapStockFileIdentity -Handle $guard.Handle -Bindings (Get-BootstrapStockFileBindings)
+""", success=False, environment={"FIXTURE_PATH": str(path)})
+    assert result.returncode != 0
+    assert "DangerousAddRef" in result.stderr
+
+
+def test_stock_guard_refuses_final_junction_without_opening_its_target(host, tmp_path):
+    target = tmp_path / "junction-target"
+    target.mkdir()
+    junction = tmp_path / "junction"
+    creation = subprocess.run(
+        ["cmd.exe", "/d", "/c", "mklink", "/J", str(junction), str(target)],
+        capture_output=True, text=True, timeout=10, **no_window_kwargs(),
+    )
+    assert creation.returncode == 0, creation.stderr
+    result = _run(host, tmp_path, _CAPTURE_IDENTITY_HANDLE + r"""
+$message=$null
+try { $null=Open-BootstrapStockFileGuard -Path $env:FIXTURE_PATH -Directory }
+catch { $message=$_.Exception.Message }
+if ($message -cne 'Bootstrap file guard refuses a final reparse point.') {
+    throw 'Reparse-point refusal was lost.'
+}
+if ($null -eq $script:observedHandle -or -not $script:observedHandle.IsClosed) {
+    throw 'Reparse-point admission did not close its handle before returning.'
+}
+[pscustomobject]@{closed=$script:observedHandle.IsClosed} | ConvertTo-Json -Compress
+""", environment={"FIXTURE_PATH": str(junction)})
+    assert result == {"closed": True}
+    assert target.is_dir()
+    assert list(target.iterdir()) == []
+
+
+def test_attribute_only_directory_handle_does_not_establish_custody(host, tmp_path):
+    path = tmp_path / "metadata-only"
+    path.mkdir()
+    result = _run(host, tmp_path, r"""
+$bindings=Get-BootstrapStockFileBindings
+$handle=$bindings.Open.Invoke($null, [object[]]@(
+    $env:FIXTURE_PATH, [int]0x80, [int]1, [IntPtr]::Zero, [int]3, [int]0x02200000, [IntPtr]::Zero
+))
+try {
+    if ($handle.IsInvalid) { throw 'Metadata-only control did not open.' }
+    $before=Get-BootstrapStockFileIdentity -Handle $handle -Bindings $bindings
+    [IO.Directory]::Move($env:FIXTURE_PATH, $env:FIXTURE_PATH + '-moved')
+    if ([IO.Directory]::Exists($env:FIXTURE_PATH) -or
+        -not [IO.Directory]::Exists($env:FIXTURE_PATH + '-moved')) {
+        throw 'Metadata-only control did not observe the rename.'
+    }
+    $after=Get-BootstrapStockFileIdentity -Handle $handle -Bindings $bindings
+    [IO.Directory]::Move($env:FIXTURE_PATH + '-moved', $env:FIXTURE_PATH)
+    [pscustomobject]@{before=$before; after=$after; closed=$handle.IsClosed} | ConvertTo-Json -Compress
+} finally { $handle.Dispose() }
+""", environment={"FIXTURE_PATH": str(path)})
+    assert result["before"] == result["after"]
+    assert result["closed"] is False
+    assert path.is_dir()
+
+
+def test_stock_guard_dot_source_and_bindings_do_not_emit_or_compile(host, tmp_path):
+    result = _run(host, tmp_path, r"""
+function Add-Type { throw 'Compilation is forbidden.' }
+$tokens=$null
+$errors=$null
+$ast=[Management.Automation.Language.Parser]::ParseFile($env:GUARD_HELPER, [ref]$tokens, [ref]$errors)
+if ($errors.Count) { throw 'Guard helper must parse cleanly.' }
+$forbidden=@($ast.FindAll({
+    param($node)
+    $node -is [Management.Automation.Language.CommandAst] -and
+    ($node.GetCommandName() -in @('Add-Type', 'Invoke-Expression', 'Start-Process', 'Get-Command') -or
+     $node.InvocationOperator -ne [Management.Automation.Language.TokenKind]::Unknown)
+}, $true))
+$bindings=Get-BootstrapStockFileBindings
+[pscustomobject]@{forbidden=$forbidden.Count; open=$bindings.Open.Name} | ConvertTo-Json -Compress
+""")
+    assert result == {"forbidden": 0, "open": "CreateFile"}
+
+
+def test_unqualified_powershell_core_refuses_before_native_open(host, tmp_path):
+    core = shutil.which("pwsh")
+    if not core:
+        pytest.skip("PowerShell Core is unavailable; parity remains unqualified")
+    path = tmp_path / "not-opened"
+    path.write_bytes(b"untouched")
+    result = _run(core, tmp_path, r"""
+Open-BootstrapStockFileGuard -Path $env:FIXTURE_PATH
+""", success=False, environment={"FIXTURE_PATH": str(path)})
+    assert result.returncode != 0
+    assert "require qualified 64-bit Windows PowerShell" in result.stderr

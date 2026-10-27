@@ -2941,6 +2941,26 @@ unavailable admission, or path inputs requiring native environment/drive
 semantics select PowerShell before evaluation. Publication probes and installer
 selection remain on their existing paths. POSIX dispatch is unchanged.
 
+`libs/installer-engine/bootstrap-file-guard.ps1` is an **unused, repository-only**
+building block for the compiler-free migration. Its qualified stock .NET
+Framework/Windows PowerShell adapter opens a no-follow file or directory handle
+with read sharing only, queries the same retained handle's volume/file identity,
+and returns the `SafeFileHandle` to the caller for disposal. Directory guards
+include directory-list access: attribute-only opens do not enforce sharing
+exclusion. Native errors,
+unsupported binding shapes, reparse points and object-kind mismatches throw;
+none becomes an unavailable-interpreter result. PowerShell Core and 32-bit
+hosts refuse explicitly pending separate qualification. The file is not
+distributed by the installer synchronizer and no runtime gate invokes it.
+
+This primitive does **not** establish canonical final paths, ordinary ancestors,
+drive mapping, publisher trust, complete Python/source closure or a safe helper
+handoff. Its native tests cover held-file write/rename/delete exclusion,
+directory rename/delete exclusion and release/error controls, not interpreter
+admission. The existing selector and its compiled verifier remain unchanged
+until the [compiler-free prerequisite gates](../efforts/active/lean-runtime-dependencies/compiler-free-execution.md#python-prerequisite-boundary)
+are satisfied.
+
 ### Binstub publication failures
 
 The simple binstub writers reject unavailable supplied resolver sources and
