@@ -56,125 +56,6 @@ def _run(arguments, home, *, env=None, input=None, timeout=60):
     )
 
 
-_ROOTED_DIAGNOSTIC_SOURCE = r'''
-def _aw_fixture_rooted_diagnostic(
-    row: dict[str, Any], payload: Path, root: Path, rows: list[dict[str, Any]],
-    controllers: set[int], gates: set[int], redirectors: set[int],
-) -> None:
-    """Copied-fixture diagnostics only; never grant or change admission."""
-    record = {"pid": row.get("pid"), "ppid": row.get("ppid")}
-    try:
-        arguments = _arguments(row)
-        original = _authority_payload(payload)
-        names = ("install.sh", "install.ps1", "init.sh", "init.ps1")
-        original_entries = {original / "scripts" / name for name in names}
-        staged_entries = {payload / "scripts" / name for name in names}
-        original_matches, staged_matches = [], []
-        original_real, staged_real = False, False
-        for index, value in enumerate(arguments):
-            candidate = Path(os.path.abspath(value))
-            if candidate.name not in names:
-                continue
-            if candidate in original_entries:
-                original_matches.append(index)
-            if candidate in staged_entries:
-                staged_matches.append(index)
-            try:
-                physical = candidate.resolve()
-                original_real |= physical in {entry.resolve() for entry in original_entries}
-                staged_real |= physical in {entry.resolve() for entry in staged_entries}
-            except (OSError, ValueError):
-                pass
-        by_pid = {value["pid"]: value for value in rows}
-
-        def ancestry(pid: int) -> list[int]:
-            result = []
-            while pid and pid not in result and len(result) < 12:
-                result.append(pid)
-                pid = by_pid.get(pid, {}).get("ppid", 0)
-            return result
-
-        image = Path(row["image"]).name
-        if not re.fullmatch(
-            r"(?:bash|sh|dash|zsh|pwsh|powershell|pythonw?[0-9.]*|pypy[0-9.]*)(?:\.exe)?",
-            image, re.I,
-        ):
-            image = "other"
-        inspector_ancestry = ancestry(os.getpid())
-        _, lifecycle = _lifecycle_controllers(rows, payload, root, "agent-worktrees")
-        staged_home = payload.parent.parent == Path.home() / ".agent-worktrees/.install-stage"
-        watchdog = {}
-        if staged_home and len(arguments) > 8:
-            commands = _load(_dependency(payload, "installer_engine_commands.py"))
-            body = commands._sh(commands._read(payload / "scripts/install.sh"), "INSTALL_WATCHDOG").rstrip("\n")
-            watchdog = {
-                "parentAdmitted": row["ppid"] in lifecycle,
-                "bodyMatch": arguments[1:4] == ["-c", body, "bash"],
-                "commandFlagMatch": arguments[1] == "-c",
-                "commandBodyMatch": arguments[2] == body,
-                "quotedHeredocContinuationMatch": arguments[2] == body.replace("\\\n", ""),
-                "zeroNameMatch": arguments[3] == "bash",
-                "commandBodyWithoutFinalNewlinesMatch": arguments[2].rstrip("\n") == body,
-                "commandBodyWithFinalNewlinesMatch": arguments[2] == body + "\n",
-                "commandBodyLength": len(arguments[2]),
-                "expectedBodyLength": len(body),
-                "entryMatch": Path(arguments[4]) == payload / "scripts/install.sh",
-                "pluginMatch": arguments[5] == "agent-worktrees",
-                "stageMatch": Path(arguments[6]) == payload.parent,
-                "deadlineMatch": re.fullmatch(r"-?[0-9]+", arguments[7]) is not None,
-                "nativeTailMatch": _parent(
-                    row["pid"], arguments[0], "", payload, root, "agent-worktrees", row["pid"],
-                    arguments=[arguments[0], arguments[4], *arguments[8:]],
-                ),
-            }
-        record.update({
-            "imageBasename": image,
-            "capturedArgv": row.get("argv") is not None,
-            "argvCount": len(arguments),
-            "hasDashC": "-c" in arguments,
-            "originalEntryMatch": bool(original_matches),
-            "stagedEntryMatch": bool(staged_matches),
-            "originalEntryResolvedMatch": original_real,
-            "stagedEntryResolvedMatch": staged_real,
-            "originalEntryIndex": original_matches[0] if original_matches else None,
-            "stagedEntryIndex": staged_matches[0] if staged_matches else None,
-            "controller": row["pid"] in controllers,
-            "gate": row["pid"] in gates,
-            "redirector": row["pid"] in redirectors,
-            "ancestryPids": ancestry(row["pid"]),
-            "inspectorAncestryPids": inspector_ancestry,
-            "candidateIsInspectorAncestor": row["pid"] in inspector_ancestry,
-            "lifecycleAdmittedPids": sorted(lifecycle),
-            "stagedHome": staged_home,
-            "watchdog": watchdog,
-        })
-    except Exception as error:
-        record["diagnosticError"] = type(error).__name__
-    try:
-        print("AW_FIXTURE_ROOTED_CONSUMER " + json.dumps(record, sort_keys=True), file=sys.stderr)
-    except Exception:
-        pass
-'''
-
-
-def _instrument_copied_rooted_refusal(payload: Path) -> None:
-    assert payload.resolve() != PLUGIN.resolve()
-    path = payload / "scripts/installer_engine_uninstall.py"
-    source = path.read_text(encoding="utf-8")
-    marker = '            raise UninstallRefused(f"Active rooted runtime consumer (pid={row[\'pid\']})")'
-    assert source.count(marker) == 1
-    assert source.count("\ndef refuse_consumers(") == 1
-    source = source.replace(
-        marker,
-        "            _aw_fixture_rooted_diagnostic(row, payload, root, rows, controllers, gates, redirectors)\n"
-        + marker,
-    )
-    source = source.replace(
-        "\ndef refuse_consumers(", _ROOTED_DIAGNOSTIC_SOURCE + "\n\ndef refuse_consumers(", 1,
-    )
-    path.write_text(source, encoding="utf-8")
-
-
 @pytest.fixture
 def native_install(tmp_path, tmp_path_factory, request):
     parameter = getattr(request, "param", "home")
@@ -202,7 +83,6 @@ def native_install(tmp_path, tmp_path_factory, request):
     for path in (REPO / "libs/installer-engine").iterdir():
         if path.is_file() and path.suffix in {".py", ".sh", ".ps1"}:
             shutil.copyfile(path, payload / "scripts" / path.name)
-    _instrument_copied_rooted_refusal(payload)
     isolate_account_profile(
         payload, home,
         runtime_package="agent_worktrees" if parameter == "short-project-home" else None,
@@ -269,49 +149,6 @@ def native_install(tmp_path, tmp_path_factory, request):
         path.write_bytes(b"operator witness")
         durable[path] = (path.read_bytes(), path.stat().st_dev, path.stat().st_ino)
     return home, payload, root, owned, durable
-
-
-@pytest.mark.parametrize("empty_argv", [False, True])
-def test_copied_rooted_diagnostics_are_sanitized_and_preserve_argument_boundary(
-    native_install, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
-    empty_argv: bool,
-) -> None:
-    home, payload, root, _, _ = native_install
-    monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
-    module = _load(payload / "scripts/installer_engine_uninstall.py")
-    original = _load(SCRIPTS / "installer_engine_uninstall.py")
-    argv = ["bash", "-c", "PRIVATE_ARGUMENT_VALUE", str(payload / "scripts/install.sh"),
-            "uninstall", "--install-dir", str(root)]
-    row = {
-        "pid": 101, "ppid": 100, "image": str(home / "private-user/bin/bash"),
-        "command": "PRIVATE_COMMAND_VALUE", "argv": [] if empty_argv else argv,
-    }
-    rows = [row, {"pid": 100, "ppid": 0}]
-    module._aw_fixture_rooted_diagnostic(row, payload, root, rows, set(), set(), set())
-    output = capsys.readouterr().err
-    assert output.startswith("AW_FIXTURE_ROOTED_CONSUMER ")
-    value = json.loads(output.removeprefix("AW_FIXTURE_ROOTED_CONSUMER "))
-    assert set(value) == {
-        "pid", "ppid", "imageBasename", "capturedArgv", "argvCount", "hasDashC",
-        "originalEntryMatch", "stagedEntryMatch", "originalEntryResolvedMatch",
-        "stagedEntryResolvedMatch", "originalEntryIndex", "stagedEntryIndex",
-        "controller", "gate", "redirector", "ancestryPids", "inspectorAncestryPids",
-        "candidateIsInspectorAncestor",
-        "lifecycleAdmittedPids", "stagedHome", "watchdog",
-    }
-    assert value["argvCount"] == (0 if empty_argv else len(argv))
-    assert value["capturedArgv"] is True
-    assert value["stagedEntryMatch"] is (not empty_argv)
-    assert value["ancestryPids"] == [101, 100]
-    assert value["imageBasename"] == "bash"
-    for private in (str(home), str(payload), str(root), "private-user", "PRIVATE_ARGUMENT_VALUE",
-                    "PRIVATE_COMMAND_VALUE"):
-        assert private not in output
-    arguments = dict(
-        pid=101, image="bash", command="", payload=payload, root=root,
-        plugin="agent-worktrees", expected_parent=101, arguments=row["argv"],
-    )
-    assert module._parent(**arguments) == original._parent(**arguments) is False
 
 
 def _native_arguments(shell, executable, payload, root):

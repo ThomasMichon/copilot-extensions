@@ -683,11 +683,13 @@ def _lifecycle_controllers(rows: list[dict[str, Any]], payload: Path, root: Path
     if payload.parent.parent == Path.home() / ("." + plugin) / ".install-stage":
         commands = _load(_dependency(payload, "installer_engine_commands.py"))
         body = commands._sh(commands._read(payload / "scripts/install.sh"), "INSTALL_WATCHDOG").rstrip("\n")
+        # Bash 3.2 joins backslash-newlines in this quoted heredoc substitution.
+        bodies = {body, body.replace("\\\n", "")}
         for _ in range(2):
             for row in rows:
                 args = _arguments(row)
                 if (row["ppid"] in admitted and Path(row["image"]).stem.lower() in {"bash", "sh"}
-                        and len(args) > 8 and args[1:4] == ["-c", body, "bash"]
+                        and len(args) > 8 and args[1] == "-c" and args[2] in bodies and args[3] == "bash"
                         and Path(args[4]) == payload / "scripts/install.sh" and args[5] == plugin
                         and Path(args[6]) == payload.parent
                         and re.fullmatch(r"-?[0-9]+", args[7])

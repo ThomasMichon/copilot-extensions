@@ -2464,6 +2464,8 @@ at the original source only through the inherited live lifecycle. Process
 inspection recognizes that exact teardown owner, native caller and canonical
 staging watchdog, never arbitrary Python ancestors. A nonempty legacy Worktrees
 `lib` refuses until its ownership has an explicit migration path.
+Watchdog matching accepts only the trusted literal body or its exact Bash 3.2
+quoted-heredoc backslash-newline rendering, not arbitrary whitespace/code changes.
 Project-command cleanup resolves an already completed, selected-source-qualified
 interpreter read-only; it never constructs a runtime to uninstall one. Missing
 or foreign ownership refuses before project-command mutation.

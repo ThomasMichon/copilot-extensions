@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -633,6 +634,68 @@ def test_controller_argv_preserves_native_quoted_program_and_arguments(tmp_path:
         str(tmp_path / "runtime's directory" / "runtime.py"),
     ]
     assert MODULE._argv(subprocess.list2cmdline(arguments), arguments[0]) == arguments
+
+
+@pytest.mark.parametrize("mutation", (
+    "literal", "bash32-continuations", "modified", "comment", "leading-space",
+    "wrong-flag", "wrong-zero", "foreign-parent",
+))
+def test_staging_watchdog_accepts_only_exact_native_heredoc_renderings(
+    installation: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, mutation: str,
+) -> None:
+    original, root = installation
+    plugin = "agent-bridge"
+    payload = Path.home() / ("." + plugin) / ".install-stage" / "fixture" / plugin
+    (payload / "scripts").mkdir(parents=True)
+    shutil.copyfile(REPO / "plugins" / plugin / "scripts/install.sh", payload / "scripts/install.sh")
+    commands = MODULE._load(SOURCE.parent / "installer_engine_commands.py")
+    body = commands._sh(
+        commands._read(REPO / "plugins" / plugin / "scripts/install.sh"), "INSTALL_WATCHDOG",
+    ).rstrip("\n")
+    assert "\\\n" in body
+    rendered = body.replace("\\\n", "") if mutation == "bash32-continuations" else body
+    if mutation == "modified":
+        rendered = rendered.replace("shift 4", "shift 3")
+    elif mutation == "comment":
+        rendered += "\n# not the exact writer"
+    elif mutation == "leading-space":
+        rendered = " " + rendered
+    owner_pid, native_pid, watchdog_pid = 9001, 9002, 9003
+    native = ["/bin/bash", str(original / "scripts/install.sh"),
+              "uninstall", "--install-dir", str(root)]
+    owner_args = [
+        sys.executable, "-I", "-S", "-B", str(original / "scripts/command_binding.py"),
+        "--plugin-id", plugin, "--legacy-root", str(root),
+        "--teardown", "--run-lifecycle", "--", *native,
+    ]
+    watchdog_args = [
+        "/bin/bash", "-x" if mutation == "wrong-flag" else "-c", rendered,
+        "other" if mutation == "wrong-zero" else "bash",
+        str(payload / "scripts/install.sh"), plugin, str(payload.parent), "60",
+        "uninstall", "--install-dir", str(root),
+    ]
+    lease = SimpleNamespace(ticket={"pid": owner_pid})
+    binding = SimpleNamespace(
+        _load_lifecycle=lambda: SimpleNamespace(borrowed_lease=lambda *_a, **_k: lease),
+        _rules=lambda: None, _load_primitive=lambda _payload: None,
+    )
+    load = MODULE._load
+    monkeypatch.setenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", "fixture")
+    monkeypatch.setattr(MODULE, "_authority_payload", lambda _payload: original)
+    monkeypatch.setattr(MODULE, "_dependency", lambda _payload, name: SOURCE.parent / name)
+    monkeypatch.setattr(MODULE, "_load", lambda path: binding if path.name == "command_binding.py" else load(path))
+    rows = [
+        {"pid": owner_pid, "ppid": native_pid, "image": sys.executable,
+         "command": "", "argv": owner_args},
+        {"pid": native_pid, "ppid": 1, "image": "/bin/bash", "command": "", "argv": native},
+        {"pid": watchdog_pid, "ppid": 9999 if mutation == "foreign-parent" else owner_pid,
+         "image": "/bin/bash", "command": "", "argv": watchdog_args},
+    ]
+    _, admitted = MODULE._lifecycle_controllers(rows, payload, root, plugin)
+    expected = {owner_pid, native_pid}
+    if mutation in {"literal", "bash32-continuations"}:
+        expected.add(watchdog_pid)
+    assert admitted == expected
 
 
 @pytest.mark.parametrize("name", (
