@@ -799,6 +799,11 @@ def test_worktree_source_failure_is_not_a_blank_success_or_machine_offline():
     assert failed_worktree_reads(screen) == [
         ("Display A Win", "machine-ssh:host-a:win", "initial current-read deadline exceeded"),
     ]
+    screen.source_tabs[1]["local"] = True
+    assert failed_worktree_reads(screen) == [
+        ("Display A Win", "local execution (no SSH) / machine-ssh:host-a:win",
+         "initial current-read deadline exceeded"),
+    ]
 
 
 def test_terminal_registered_error_footer_does_not_claim_global_loading():

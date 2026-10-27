@@ -77,6 +77,17 @@ def test_current_feed_initial_update_deletes_and_empty_are_atomic():
     assert receiver.head["revision"] == 3
 
 
+def test_local_feed_error_names_resident_without_changing_source_identity():
+    source = data_ssh.Source("host", "Win", None, local=True)
+    loader = data_ssh.LiveLoader([source])
+    loader._feed_error(source, 0, "timed out")
+    assert source.source_id == "machine-ssh:host:win"
+    assert loader.error_for_source(source.source_id) == (
+        "Local resident current-roster read failed: timed out"
+    )
+    assert loader.state_for_source(source.source_id) == "failed"
+
+
 def test_current_feed_preserves_reorder_and_front_insertion_without_reemitting_unchanged_rows():
     receiver = CurrentFeed()
     initial = [{"id": f"row-{i}"} for i in range(300)]
