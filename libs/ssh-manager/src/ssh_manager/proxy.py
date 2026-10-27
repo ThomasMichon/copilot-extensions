@@ -5,19 +5,17 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import ctypes
-import getpass
 import hmac
 import logging
 import os
-import re
 import secrets
+import shlex
+import shutil
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from functools import lru_cache
 from pathlib import Path
-import shlex
-import shutil
 from typing import Any
 
 from agent_procutil import (
@@ -28,30 +26,24 @@ from agent_procutil import (
 )
 
 from .config_sources import SSHConfig
+from .config_sources import ssh_option as _option
 from .process import (
+    redirected_ssh_env,
     register_process_cleanup,
     run_process_cleanup,
     ssh_subprocess_kwargs,
     terminate_ssh_process_tree,
 )
+from .proxy_jump import JumpRoute, prepare_windows_launch, resolve_jump_route
+from .proxy_jump import expand_proxy_tokens as _expand_tokens
 
 log = logging.getLogger("ssh-manager.proxy")
 _DRAIN_TIMEOUT = 2.0
-_WINDOWS_FD_STATE_ENV_KEY_FOLD = "c28fc6f98a2c44abbbd89d6a3037d0d9_POSIX_FD_STATE".casefold()
+WINDOWS_OWNED_PROBE_VERSION = 1
 
 
 def _is_windows() -> bool:
     return sys.platform == "win32"
-
-
-def _option(config: SSHConfig, name: str) -> str | None:
-    for key, value in config.extra_options.items():
-        if key.casefold() == name:
-            return str(value)
-    for key, value in config.effective_config:
-        if key.casefold() == name:
-            return str(value)
-    return None
 
 
 def _split_windows_command(command: str) -> list[str]:
@@ -73,24 +65,6 @@ def _split_windows_command(command: str) -> list[str]:
         return [argv[index] for index in range(count.value)]
     finally:
         kernel.LocalFree(argv)
-
-
-def _expand_tokens(value: str, config: SSHConfig) -> str:
-    tokens = {
-        "%": "%",
-        "h": config.hostname or _option(config, "hostname") or config.host_alias,
-        "n": config.host_alias,
-        "p": str(config.port or _option(config, "port") or 22),
-        "r": config.user or _option(config, "user") or getpass.getuser(),
-    }
-
-    def expand(match: re.Match[str]) -> str:
-        token = match.group(1)
-        if token not in tokens:
-            raise ValueError(f"Unsupported SSH proxy token %{token}")
-        return tokens[token]
-
-    return re.sub(r"%(.)", expand, value)
 
 
 @lru_cache(maxsize=8)
@@ -156,10 +130,12 @@ class _ProxyBroker:
     def __init__(
         self, command: list[str], env: dict[str, str] | None, *, cwd: str | None = None,
         capability: str | None = None,
+        ssh_route: JumpRoute | None = None,
     ) -> None:
         self._command = command
         self._env = env
         self._cwd = cwd
+        self._ssh_route = ssh_route
         self.capability = capability or secrets.token_hex(32)
         self._server: asyncio.Server | None = None
         self._clients: set[asyncio.Task] = set()
@@ -181,6 +157,24 @@ class _ProxyBroker:
         task = asyncio.create_task(self._serve(reader, writer))
         self._clients.add(task)
         task.add_done_callback(self._clients.discard)
+
+    async def _spawn_child(self) -> tuple[asyncio.subprocess.Process, JobHandle | None]:
+        options = {
+            "stdin": asyncio.subprocess.PIPE,
+            "stdout": asyncio.subprocess.PIPE,
+            "stderr": asyncio.subprocess.PIPE,
+            "env": self._env,
+            "cwd": self._cwd,
+        }
+        if self._ssh_route is not None:
+            process = await _create_prepared_ssh(
+                self._command, self._ssh_route.config, self._ssh_route.upstream, options,
+            )
+            return process, None
+        return await spawn_in_kill_on_close_job(
+            *self._command, **options,
+            **(no_window_kwargs() if _is_windows() else ssh_subprocess_kwargs()),
+        )
 
     async def _serve(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
@@ -204,15 +198,7 @@ class _ProxyBroker:
             ):
                 raise RuntimeError("Invalid SSH proxy connection capability")
             self._used = True
-            process, child_job = await spawn_in_kill_on_close_job(
-                *self._command,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=self._env,
-                cwd=self._cwd,
-                **(no_window_kwargs() if _is_windows() else ssh_subprocess_kwargs()),
-            )
+            process, child_job = await self._spawn_child()
             if child_job is not None:
                 self._child_jobs.add(child_job)
             if process.stdin is None or process.stdout is None or process.stderr is None:
@@ -379,42 +365,65 @@ def ssh_process_env(
     return env
 
 
+def _redirected_environment(
+    config: SSHConfig, environment: Mapping[str, str] | None,
+) -> Mapping[str, str] | None:
+    if environment is None:
+        environment = ssh_process_env(config)
+    return redirected_ssh_env(environment, windows=_is_windows())
+
+
 async def create_ssh_subprocess(
     *args: str, config: SSHConfig, **kwargs: Any,
 ) -> asyncio.subprocess.Process:
     """Launch SSH, owning any Windows native proxy outside OpenSSH's child spawn."""
-    if kwargs.get("env") is None:
-        # A caller that names no environment still gets the target's pinned one.
-        kwargs["env"] = ssh_process_env(config)
+    route: JumpRoute | None = None
     if _is_windows():
-        # OpenSSH's inherited descriptor metadata describes an ancestor's handles,
-        # not the newly redirected stdio owned by this subprocess.
-        environment = kwargs.get("env")
-        if environment is None:
-            environment = os.environ
-        if any(key.casefold() == _WINDOWS_FD_STATE_ENV_KEY_FOLD for key in environment):
-            kwargs["env"] = {
-                key: value for key, value in environment.items()
-                if key.casefold() != _WINDOWS_FD_STATE_ENV_KEY_FOLD
-            }
+        args, config = await prepare_windows_launch(
+            args, config, kwargs.get("executable") or args[0], cwd=kwargs.get("cwd"),
+            environment=_redirected_environment(config, kwargs.get("env")),
+        )
+        route = await resolve_jump_route(
+            config, kwargs.get("executable") or args[0], cwd=kwargs.get("cwd"),
+            environment=_redirected_environment(config, kwargs.get("env")),
+        )
+    return await _create_prepared_ssh(args, config, route, kwargs)
+
+
+async def _create_prepared_ssh(
+    args: Sequence[str], config: SSHConfig, route: JumpRoute | None,
+    kwargs: dict[str, Any],
+) -> asyncio.subprocess.Process:
+    kwargs["env"] = _redirected_environment(config, kwargs.get("env"))
     proxy = getattr(config, "proxy_command", None)
     if not proxy and isinstance(config, SSHConfig):
         proxy = _option(config, "proxycommand")
-    if not _is_windows() or not proxy or proxy.casefold() == "none":
+    if not _is_windows() or (route is None and (not proxy or proxy.casefold() == "none")):
+        if _is_windows() and (
+            config.effective_config or config.proxy_command is not None
+            or _option(config, "proxyjump") is not None
+        ):
+            args = _broker_args(args, "none")
         process, job_handle = await spawn_in_kill_on_close_job(
             *args, **ssh_subprocess_kwargs(**kwargs)
         )
         _track_owner_job(process, job_handle)
         return process
     shell = await _resolve_shell(kwargs.get("executable") or args[0])
-    expanded = _expand_tokens(proxy, config)
-    command = [shell, "-c", expanded] if shell else _split_windows_command(expanded)
+    if route is not None:
+        command = list(route.argv)
+    else:
+        if proxy is None:
+            raise ValueError("SSH proxy command is unavailable")
+        expanded = _expand_tokens(proxy, config)
+        command = [shell, "-c", expanded] if shell else _split_windows_command(expanded)
     if not command:
         raise ValueError("SSH proxy command is empty")
     capability = secrets.token_hex(32)
-    broker = _ProxyBroker(
-        command, kwargs.get("env"), cwd=kwargs.get("cwd"), capability=capability,
-    )
+    broker_options: dict[str, Any] = {"cwd": kwargs.get("cwd"), "capability": capability}
+    if route is not None:
+        broker_options["ssh_route"] = route
+    broker = _ProxyBroker(command, kwargs.get("env"), **broker_options)
     try:
         port = await broker.start()
         process, job_handle = await spawn_in_kill_on_close_job(

@@ -106,8 +106,31 @@ class RoundFixture:
             store.register_model(profile)
         return store
 
-    def seed(self, size: int) -> list[Chunk]:
+    def seed(
+        self, size: int, *, via_engine: bool = False,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> list[Chunk]:
         """Setup is deliberately unmeasured, using the real mutation APIs."""
+        if via_engine:
+            chunks = [
+                Chunk("Unchanged fixture content.", "bulk.md", "text", "markdown", i, i, SOURCE)
+                for i in range(size)
+            ]
+
+            class CorpusChunker:
+                def chunk(self, *_args: Any, **_kwargs: Any) -> list[Chunk]:
+                    return chunks
+
+            config = self.config
+            self.config = replace(config, stream_batch_size=size)
+            self.delta = SourceDelta(upserts=[
+                FileEntry("bulk.md", "Synthetic corpus.", "markdown", SOURCE),
+            ], commit="seeded")
+            with monkeypatch.context() as patch:
+                patch.setattr("agent_index.chunking.get_chunker", lambda _path: (CorpusChunker(), "markdown"))
+                self.run()
+            self.config = config
+            return chunks
         chunks = [
             Chunk("Unchanged fixture content.", f"old-{i}.md", "text", "markdown", 1, 1, SOURCE)
             for i in range(size)
@@ -172,12 +195,15 @@ def assert_reference(
 @pytest.mark.skipif(sys.platform != "linux", reason="process I/O counter qualification is Linux-only")
 @pytest.mark.parametrize("selected", [False, True], ids=["legacy", "source-aware"])
 @pytest.mark.parametrize("model_count", [1, 2])
+@pytest.mark.parametrize("seed_via_engine", [False, True], ids=["prepared", "ordinary"])
 def test_prepared_native_finite_delta_matrix(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selected: bool, model_count: int,
-    capsys: pytest.CaptureFixture[str],
+    capsys: pytest.CaptureFixture[str], seed_via_engine: bool,
 ) -> None:
     from lancedb.query import LanceEmptyQueryBuilder
 
+    if seed_via_engine and not selected:
+        pytest.skip("legacy ingestion does not opt into source-owned scalar upkeep")
     monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT if selected else "")
     profiles = {
         model: ModelProfile(model, "fixture", dim=2, table_name=f"vectors_{model}")
@@ -196,7 +222,7 @@ def test_prepared_native_finite_delta_matrix(
         monkeypatch.setattr("agent_index.sources.get_connector", lambda *_a, **_k: fixture)
         fixture.delta = SourceDelta(upserts=[active], commit="initial")
         fixture.run()
-        unchanged = fixture.seed(size)
+        unchanged = fixture.seed(size, via_engine=seed_via_engine, monkeypatch=monkeypatch)
         cases = [
             ("noop", SourceDelta(commit="initial"), [active], set()),
             ("edit", SourceDelta(upserts=[changed], commit="edit"), [changed], set()),
@@ -245,7 +271,8 @@ def test_prepared_native_finite_delta_matrix(
             with capsys.disabled():
                 print("NATIVE_DELTA_WORK " + json.dumps({
                     "size": size, "layout": "source-aware" if selected else "legacy",
-                    "models": model_count, "prepared": True, "case": name,
+                    "models": model_count, "setup": "ordinary" if seed_via_engine else "prepared",
+                    "case": name,
                     "native": measurement["native"], "io": measurement["io"],
                 }, sort_keys=True))
             if size == 100:
@@ -267,7 +294,9 @@ def test_prepared_native_finite_delta_matrix(
             for model in profiles:
                 vectors = store.get_vector_table(model).get_vectors(sentinel_ids, strict=True)
                 for cid in sentinel_ids:
-                    np.testing.assert_array_equal(vectors[cid], [1, 1])
+                    np.testing.assert_array_equal(vectors[cid], [
+                        len(unchanged[0].content) if seed_via_engine else 1, 1,
+                    ])
         all_measurements[size] = measurements
 
     # Check after collecting every size/case so one native amplification cannot

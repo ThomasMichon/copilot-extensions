@@ -14,6 +14,7 @@ EXTERNAL_TEST_ROOTS = {
     "repository-policy": Path("libs/repository-policy"),
     "update-driver": Path("libs/update-driver"),
     "agent-procutil": Path("libs/agent-procutil"),
+    "ssh-manager": Path("libs/ssh-manager"),
 }
 
 

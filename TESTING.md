@@ -82,6 +82,37 @@ acceptance evidence for those platforms. These tests do not qualify abrupt
 caller death, whole-suite removal around a running Copilot mux, fresh SSH/Gateway
 reconnection or deployment, and do not enlarge the required unit-only packet.
 
+## Optional owned Windows jump probes
+
+The manual `installation-context-acceptance.yml` selection `ssh_headless=true`
+runs the focused Linux portable suite and Windows ARM64 lane, with native ARM64
+and emulated x64 Python parents, when other selectors remain false.
+The Windows lane downloads the pinned public OpenSSH 10.0p2 ARM64 archive, verifies
+archive and client hashes plus Microsoft signing, and runs the bounded
+`agent-ssh` `test_headless_probe_windows.py` packet. It installs no SSH service,
+enrolls no keys and contacts no SSH host.
+
+Each console/GUI parent drives the actual probe through two resolved SSH jump
+hops to an inert console-subsystem proxy. Two cycles cover transport deadline
+and cancellation. Native Job members are pinned before teardown; evidence
+requires their retirement, zero visible terminal windows or focus changes,
+and no inherited descriptor metadata in the proxy. An intentionally visible,
+test-owned canary must first be observed and retire, so an unavailable desktop
+cannot pass as zero windows. Its window owner must match the spawned canary
+PID; an unrelated terminal cannot validate observer sensitivity.
+The fixture refuses shared hosts before native
+work. Run no desktop reproduction of an unqualified path.
+Each native parent also edits one controlled profile in place while retaining
+the original cached config. The real selected client's metadata must observe
+the new hostname and jump route without mutating that cache or dialing a host.
+The same real metadata boundary also preserves explicit programmatic proxy
+fields/options while allowing a CLI proxy selection to override them.
+
+Mocked route/probe contracts are available through the contained `ssh-manager`
+and `agent-ssh` targets. This lane establishes only its exact source/client/
+parent combination, not authenticated remote reach, a released payload or an
+authorized installed rollout.
+
 The opt-in `installation-context-acceptance.yml` dependency-compile selection
 also runs independent registered-marketplace provider and inventory partitions
 on Linux and Windows, each retaining a six-minute job ceiling.

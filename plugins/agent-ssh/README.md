@@ -74,6 +74,18 @@ The profile core manages SSH aliases. Once `ssh <name>` works, sibling plugins s
 as agent-bridge or agent-codespaces can use that OpenSSH surface, but agent-ssh
 does not import their runtimes or require them to be installed.
 
+On Windows, `verify` and `refresh-mesh` resolve the selected client's profile and
+use the shared owned SSH launcher, including its jump/proxy chain. The transport
+wait is finite, and timeout/cancellation awaits the existing cleanup owner.
+Configuration and cleanup errors remain explicit rather than being classified
+as an unreachable target. An unpaired older shared library refuses before
+transport instead of falling back to the legacy launcher.
+Windows probe timeouts must be positive integers; zero does not request an
+unbounded subprocess.
+POSIX probe behavior is unchanged.
+See [native qualification](../../TESTING.md#optional-owned-windows-jump-probes);
+source changes do not silently replace an installed runtime.
+
 ### Session topology and profile evidence
 
 `session-snapshot` captures fresh declared aliases and this client's managed

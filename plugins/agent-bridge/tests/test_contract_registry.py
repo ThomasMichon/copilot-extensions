@@ -263,7 +263,8 @@ async def test_startup_golden_replays_through_public_http_and_durable_inbox(
 
 
 @pytest.mark.parametrize("mode", ["acp", "cli"])
-def test_native_resume_fixture_selects_mode_qualified_client_route(monkeypatch, mode):
+@pytest.mark.parametrize("allow_retry", [True, False])
+def test_native_resume_fixture_selects_mode_qualified_client_route(monkeypatch, mode, allow_retry):
     from agent_bridge.client import BridgeClient
     from unittest.mock import Mock
 
@@ -273,11 +274,11 @@ def test_native_resume_fixture_selects_mode_qualified_client_route(monkeypatch, 
     monkeypatch.setattr(client, "daemon_supports", lambda version: version <= 40)
     request = Mock(return_value={"durable_session_id": "native-example-head", "mode": mode})
     monkeypatch.setattr(client, "_request", request)
-    result = client.resume_worktree("example-worktree", mode=mode)
+    result = client.resume_worktree("example-worktree", mode=mode, allow_retry=allow_retry)
     request.assert_called_once_with(
         fixture["request"]["method"],
         fixture["request"]["path"].format(mode=mode),
-        params=None, request_timeout=None,
+        params=None, request_timeout=None, allow_retry=allow_retry,
     )
     assert result["durable_session_id"] == fixture["identity"]["durable_session_id"]
     assert fixture["capability"]["native_history_replacement"] is False
