@@ -66,6 +66,12 @@ scope and snapshot support. Legacy full syntax remains unchanged when absent.
 The existing pending-crawl journal owns replay, complete-family coverage and
 deletion comparison; see :mod:`agent_index.sources.provider_snapshot`.
 
+Optional ``source_delta.acquisition_page_versions`` similarly selects ordinary
+``content-discover-changed --delta-version 1 --acquisition-page-version 1``
+units. Continuations pass the original ``--last-commit`` and opaque ``--cursor``.
+The existing pending-crawl journal pins the target and persists each complete
+unit before requesting the next; see :mod:`agent_index.sources.provider_acquisition`.
+
 A response's own ``"source"`` field(s) (in ``entries`` or ``content-list-
 paths``' keys) are **verified against the requested ``--source``** -- an
 entry must claim exactly that source or a strict descendant of it
@@ -104,7 +110,7 @@ from agent_procutil import no_window_kwargs
 from dropin_registry import EntryDecision, Finding, scan_directory
 
 from agent_index.sources.base import FileEntry
-from agent_index.sources.delta import SnapshotPage, SourceDelta
+from agent_index.sources.delta import AcquisitionPage, SnapshotPage, SourceDelta
 from agent_index.sources.provider_delta import (
     CONTRACT,
     DeltaDeclaration,
@@ -114,6 +120,7 @@ from agent_index.sources.provider_delta import (
 )
 
 if TYPE_CHECKING:
+    from agent_index.indexing.paged_crawl import DiscoverPage
     from agent_index.indexing.snapshot_crawl import DiscoverSnapshotPage
 
 log = logging.getLogger(__name__)
@@ -546,6 +553,39 @@ class CliSourceConnector:
         self._validate_acquisition_scope(data)
         return self._entries(data, "content-discover-changed")
 
+    @property
+    def discover_delta_page(self) -> DiscoverPage | None:
+        """Expose ordinary pages only when the executing provider advertises v1."""
+        self._negotiate()
+        if self._declaration is not None and self._declaration.acquisition_page_available:
+            return self._discover_delta_page
+        return None
+
+    def _discover_delta_page(
+        self, last_commit: str | None, cursor: str | None,
+        *, cancel_check: Callable[[], None] | None = None,
+    ) -> AcquisitionPage:
+        from agent_index.sources.provider_acquisition import parse_acquisition_page
+        from agent_index.sources.provider_snapshot import validate_cli_tokens
+
+        declaration = self._declaration
+        if declaration is None or not declaration.acquisition_page_available:
+            raise ProviderError("acquisition-page v1 not negotiated; use ordinary delta acquisition")
+        AcquisitionPage(SourceDelta(commit=last_commit), cursor).validate(declaration.family)
+        validate_cli_tokens(last_commit, cursor)
+        args = (
+            *((f"--last-commit={last_commit}",) if last_commit is not None else ()),
+            *((f"--cursor={cursor}",) if cursor is not None else ()),
+        )
+        data = self._run(
+            "content-discover-changed", "--source", self._source, "--delta-version", "1",
+            "--acquisition-page-version", "1", *args, cancel_check=cancel_check,
+        )
+        try:
+            return parse_acquisition_page(data, declaration, self._entries)
+        except ValueError as exc:
+            raise ProviderError(f"content-domain provider returned invalid acquisition page: {exc}") from exc
+
     def _validate_acquisition_scope(self, data: object) -> None:
         declaration = self._declaration
         if not self._negotiated or declaration is None or not declaration.available:
@@ -648,6 +688,7 @@ class CliSourceConnector:
 
 
 setattr(CliSourceConnector._discover_snapshot_page, "snapshot_page_versions", (1,))
+setattr(CliSourceConnector._discover_delta_page, "acquisition_page_versions", (1,))
 
 
 def _prefixes_overlap(a: str, b: str) -> bool:
