@@ -8,7 +8,7 @@ import subprocess
 from threading import Lock
 
 from .companion_pane import _call
-from .mux_mapping_registry import get_mapping
+from .mux_mapping_registry import _same_mux_executable, get_mapping
 
 _PANE = re.compile(r"%[0-9]+\Z")
 _INCARNATION = re.compile(r"\$[0-9]+:[0-9]+\Z")
@@ -57,6 +57,10 @@ def _finished(key: tuple[str, str, str]) -> bool:
     with _lock:
         _ended.add(key)
     return False
+
+
+def _same_owner(left: tuple, right: tuple) -> bool:
+    return left[1:] == right[1:] and _same_mux_executable(left[0], right[0])
 
 
 def cli_alive(
@@ -115,7 +119,7 @@ def cli_alive(
         return None
     with _lock:
         original = _bindings.get(key)
-    if original is not None and original != identity:
+    if original is not None and not _same_owner(original, identity):
         return _finished(key)
     panes = mapping.get("panes")
     if panes is None and original is not None:
@@ -125,9 +129,17 @@ def cli_alive(
     candidates = [pane for pane in panes if pane.get("role") == "cli"]
     if not candidates and original is not None:
         candidates = [{"pane_id": cli_pane, "role": "cli", "live": True}]
-    if len(candidates) != 1:
+    if any(
+        not isinstance(pane.get("pane_id"), str) or not _PANE.fullmatch(pane["pane_id"])
+        for pane in candidates
+    ):
         return None
-    registered = candidates[0]
+    matches = [pane for pane in candidates if pane["pane_id"] == cli_pane]
+    if not matches:
+        return _finished(key) if candidates else None
+    if len(matches) != 1:
+        return None
+    registered = matches[0]
     pane_id = registered.get("pane_id")
     if not isinstance(pane_id, str) or not _PANE.fullmatch(pane_id):
         return None
@@ -137,7 +149,7 @@ def cli_alive(
         return None
     with _lock:
         original = _bindings.setdefault(key, identity)
-    if original != identity:
+    if not _same_owner(original, identity):
         return _finished(key)
     try:
         raw = _call(

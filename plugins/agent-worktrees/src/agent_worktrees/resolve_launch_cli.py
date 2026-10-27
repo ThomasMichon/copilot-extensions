@@ -665,6 +665,8 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         "cmd": launch_cmd,
         "env": merged_env,
         "worktree_id": record.worktree_id,
+        "record_path": str(record.yaml_path),
+        "pane_shell_version": 1,
         "post_exit": True,
         "no_mux": getattr(args, "no_mux", False),
         "seed_claimed": False,

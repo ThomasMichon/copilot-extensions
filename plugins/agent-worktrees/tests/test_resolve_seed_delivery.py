@@ -315,6 +315,9 @@ def test_explicit_resume_seed_is_staged_with_history_and_provenance(
     cmd = payload["launch"]["cmd"]
     assert payload["launch"]["seed_pending"] is True
     assert payload["launch"]["seed_kind"] == "resume"
+    assert payload["launch"]["record_path"] == str(tmp_path / "wt-a.yaml")
+    assert type(payload["launch"]["pane_shell_version"]) is int
+    assert payload["launch"]["pane_shell_version"] == 1
     assert launch_seed_state.peek(tmp_path / "wt-a.yaml").text == "do the thing"
     assert "--resume=history-s1" in cmd
     assert tracking.load_record(tmp_path / "wt-a.yaml").pending_seed is None
@@ -493,7 +496,9 @@ def test_cold_resume_plan_executes_with_exact_prompt_at_powershell_boundary(
         lambda *_a, **_k: [
             shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-File",
             str(Path(__file__).resolve().parents[1] / "scripts/default-setup.ps1"),
-            "-RuntimePython", sys.executable, "-CopilotPath", str(consumer),
+            # Seed execution gets its explicit interpreter from the plan.
+            # This fixture has no installed runtime for optional activity logging.
+            "-CopilotPath", str(consumer),
         ],
     )
     monkeypatch.setattr(m.sessions, "find_latest_session_id_fast", lambda *_a, **_k: "history-s1")
@@ -501,12 +506,15 @@ def test_cold_resume_plan_executes_with_exact_prompt_at_powershell_boundary(
     with output.capture_json_output() as captured:
         assert resolve_cli.cmd_resolve(_args(seed=seed, no_mux=True)) == 0
     plan = json.loads(captured.getvalue())["launch"]
-    proc = subprocess.run(
-        plan["cmd"], capture_output=True, text=True, check=True, timeout=20,
-        cwd=work_dir,
-        env={**os.environ, "AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED": "1"},
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
+    try:
+        proc = subprocess.run(
+            plan["cmd"], capture_output=True, text=True, check=True, timeout=20,
+            cwd=work_dir,
+            env={**os.environ, "AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED": "1"},
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+    except subprocess.TimeoutExpired as error:
+        pytest.fail(f"Native seed handoff timed out: stdout={error.stdout!r}; stderr={error.stderr!r}")
     assert json.loads(proc.stdout.splitlines()[-1]) == ["--resume=history-s1", "--interactive", seed]
     assert tracking.load_record(tmp_path / "wt-a.yaml").pending_seed is None
     assert launch_seed_state.peek(tmp_path / "wt-a.yaml") is None

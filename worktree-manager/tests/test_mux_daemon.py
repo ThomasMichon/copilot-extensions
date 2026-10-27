@@ -1915,26 +1915,60 @@ def test_ensure_daemon_running_end_to_end_with_a_real_subprocess(tmp_path):
             proc.kill()
 
 
+@contextlib.contextmanager
+def _prepared_mux_cli(arguments, *, cwd, env):
+    import sys
+
+    # Keep import preparation separate from the admission/rendezvous deadlines.
+    command = [
+        sys.executable, "-u", "-c",
+        "from worktree_manager import __main__, mux_daemon_cli, mux_daemon; "
+        "print('prepared', flush=True); input(); __main__.console_entry()",
+        *arguments,
+    ]
+    with subprocess.Popen(
+        command, cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, text=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    ) as process:
+        ready = []
+        reader = threading.Thread(target=lambda: ready.append(process.stdout.readline()), daemon=True)
+        reader.start()
+        try:
+            reader.join(timeout=10)
+            if ready != ["prepared\n"]:
+                process.kill()
+                process.wait(timeout=5)
+                reader.join(timeout=1)
+                pytest.fail("CLI fixture imports did not become ready: " + process.stderr.read())
+            process.stdin.write("\n")
+            process.stdin.flush()
+            yield process
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+            reader.join(timeout=1)
+
+
 @pytest.mark.parametrize("root_source", ["cli", "environment"])
 @pytest.mark.parametrize("relative_root", ["relative-runtime", "../relative-runtime"])
 def test_relative_root_cli_starts_an_admitted_daemon(tmp_path, root_source, relative_root):
     """Exercise argument parsing, admission and the real resident rendezvous."""
     import os
-    import sys
-
     cwd = tmp_path / "caller" if relative_root.startswith("..") else tmp_path
     cwd.mkdir(exist_ok=True)
     root = tmp_path / "relative-runtime"
     env = dict(os.environ, WORKTREE_MANAGER_ROOT=relative_root)
-    command = [sys.executable, "-m", "worktree_manager", "mux-daemon", "run"]
+    command = ["mux-daemon", "run"]
     if root_source == "cli":
         env["WORKTREE_MANAGER_ROOT"] = "not-the-selected-root"
         command.append(f"--root={relative_root}")
-    proc = subprocess.Popen(
-        command, cwd=cwd, env=env,
-        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-    )
-    try:
+    with _prepared_mux_cli(command, cwd=cwd, env=env) as proc:
         deadline = time.monotonic() + 10
         live = False
         while time.monotonic() < deadline and proc.poll() is None:
@@ -1943,23 +1977,13 @@ def test_relative_root_cli_starts_an_admitted_daemon(tmp_path, root_source, rela
                 live = True
                 break
             time.sleep(0.05)
-        detail = proc.stderr.read().decode(errors="replace") if proc.poll() is not None else ""
+        detail = proc.stderr.read() if proc.poll() is not None else ""
         assert live, f"{root_source} relative-root startup never became ready: {detail}"
-    finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait(timeout=5)
-        proc.stderr.close()
 
 
 @pytest.mark.parametrize("root_source", ["cli", "environment"])
 def test_relative_root_keeps_redirected_runtime_admission_held(tmp_path, root_source):
     import os
-    import sys
-
     target = tmp_path / "runtime"
     target.mkdir()
     alias = tmp_path / "alias"
@@ -1975,15 +1999,14 @@ def test_relative_root_keeps_redirected_runtime_admission_held(tmp_path, root_so
     cwd = tmp_path / "caller"
     cwd.mkdir()
     env = dict(os.environ, WORKTREE_MANAGER_ROOT="../alias")
-    command = [sys.executable, "-m", "worktree_manager", "mux-daemon", "run"]
+    command = ["mux-daemon", "run"]
     if root_source == "cli":
         env["WORKTREE_MANAGER_ROOT"] = str(tmp_path / "unselected")
         command.append("--root=../alias")
-    result = subprocess.run(
-        command, cwd=cwd, env=env, capture_output=True, text=True, timeout=15,
-    )
-    assert result.returncode != 0
-    assert "daemon runtime anchor is redirected" in result.stderr
+    with _prepared_mux_cli(command, cwd=cwd, env=env) as process:
+        _stdout, stderr = process.communicate(timeout=15)
+        assert process.returncode != 0
+        assert "daemon runtime anchor is redirected" in stderr
     assert list(target.iterdir()) == []
 
 

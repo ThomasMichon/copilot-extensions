@@ -1,4 +1,5 @@
 #Requires -Version 7.0
+# worktree-manager:pane-boundary-v1
 # pane-wrapper.ps1 -- Windows counterpart of pane-wrapper.sh. Wraps the psmux
 # pane command so the child's real exit code is observable (the launcher cannot
 # see it -- the child runs inside the pane), records a durable `pane_exited`
@@ -108,6 +109,7 @@ $awWt = ''
 $awProject = ''
 $awMuxSession = ''
 $awPsmuxBin = ''
+$awManagerRoot = ''
 $initialPromptB64 = ''
 $initialPromptReceiptB64 = ''
 $ahpTokenFile = ''
@@ -121,6 +123,8 @@ while ($rest.Count -ge 2) {
         $awMuxSession = [string]$rest[1]
     } elseif ($key -eq '-AwPsmuxBin') {
         $awPsmuxBin = [string]$rest[1]
+    } elseif ($key -eq '-AwManagerRoot') {
+        $awManagerRoot = [string]$rest[1]
     } elseif ($key -eq '--aw-prompt-b64') {
         $initialPromptB64 = [string]$rest[1]
     } elseif ($key -eq '--aw-prompt-receipt-b64') {
@@ -146,6 +150,114 @@ while ($rest.Count -ge 2) {
 
 if ($rest.Count -eq 0) { exit 0 }
 
+function Invoke-AwPaneBoundaryProcess {
+    param([string]$FileName, [string[]]$Arguments, [int]$TimeoutMs = 5000)
+    $process = $null
+    $script:AwPaneBoundaryProcessStatus = 'unavailable'
+    try {
+        $info = [Diagnostics.ProcessStartInfo]::new($FileName)
+        $info.UseShellExecute = $false
+        $info.CreateNoWindow = $true
+        $info.RedirectStandardInput = $true
+        $info.RedirectStandardOutput = $true
+        $info.RedirectStandardError = $true
+        foreach ($name in @('PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV', '__PYVENV_LAUNCHER__',
+                             'GH_TOKEN', 'GITHUB_TOKEN', 'AGENT_WORKTREES_AHP_AUTH_TOKEN')) {
+            $null = $info.Environment.Remove($name)
+        }
+        $info.Environment['WORKTREE_MANAGER_ROOT'] = $awManagerRoot
+        foreach ($argument in $Arguments) { $info.ArgumentList.Add($argument) }
+        $process = [Diagnostics.Process]::Start($info)
+        $process.StandardInput.Close()
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutMs)) {
+            $script:AwPaneBoundaryProcessStatus = 'timeout'
+            $process.Kill($true)
+            $null = $process.WaitForExit(1000)
+            return $null
+        }
+        if (-not [Threading.Tasks.Task]::WaitAll(
+            [Threading.Tasks.Task[]]@($stdout, $stderr), 1000
+        )) {
+            $script:AwPaneBoundaryProcessStatus = 'output-unconfirmed'
+            return $null
+        }
+        if ($process.ExitCode -ne 0) {
+            $script:AwPaneBoundaryProcessStatus = "exit:$($process.ExitCode)"
+            return $null
+        }
+        $script:AwPaneBoundaryProcessStatus = 'completed'
+        return $stdout.Result
+    } catch {
+        if ($process) {
+            try { if (-not $process.HasExited) { $process.Kill($true) } } catch {}
+        }
+        return $null
+    } finally {
+        if ($process) { $process.Dispose() }
+    }
+}
+
+function Invoke-AwPaneBoundary {
+    param([string]$Action, [string]$Installation, [int]$ObservedExit = 0)
+    try {
+        if (-not [IO.Path]::IsPathRooted($awManagerRoot)) { return $null }
+        $version = [IO.File]::ReadAllText((Join-Path $awManagerRoot 'current-version')).Trim()
+        if ($version -notmatch '^[A-Za-z0-9][A-Za-z0-9._+-]{0,255}$') { return $null }
+        $slot = Join-Path (Join-Path $awManagerRoot 'versions') $version
+        $python = Join-Path $slot 'Scripts\python.exe'
+        $bootstrap = Join-Path $slot '.runtime-bootstrap\runtime_launcher.py'
+        foreach ($path in @($python, $bootstrap, (Join-Path $slot '.install-complete.json'))) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+        }
+        $boundaryArgs = @(
+            '-I', '-S', '-B', '-X', 'utf8', $bootstrap,
+            '-m', 'worktree_manager.pane_lifecycle', $Action,
+            '--contract-version', '1',
+            '--root', $awManagerRoot, '--project', $awProject, '--worktree-id', $awWt,
+            '--mux-session', $awMuxSession, '--session-incarnation', $awSessionIncarnation,
+            '--pane-id', $awNativePane
+        )
+        if ($Action -eq 'start') {
+            $boundaryArgs += @('--worktree-path', $PWD.ProviderPath, '--mux-bin', $awPsmuxBin)
+        } else {
+            $boundaryArgs += @('--expected-installation', $Installation)
+            if ($Action -eq 'end') {
+                $boundaryArgs += @('--exit-code', "$ObservedExit", '--runtime', "$runtime")
+                if ($env:WORKTREE_LAUNCH_ID) { $boundaryArgs += @('--launch-id', $env:WORKTREE_LAUNCH_ID) }
+            }
+        }
+        $raw = Invoke-AwPaneBoundaryProcess $python $boundaryArgs
+        if (-not $raw) { return $null }
+        $reply = ConvertFrom-Json -InputObject $raw -ErrorAction Stop
+        if (
+            $reply.schema -ne 'worktree-manager.pane-lifecycle' -or $reply.version -ne 1 -or
+            $reply.action -ne $Action -or $reply.installation -notmatch '^[0-9a-f]{64}$' -or
+            $reply.result.applied -ne $true
+        ) { return $null }
+        return $reply
+    } catch { return $null }
+}
+
+$awSessionIncarnation = ''
+$awNativePane = ''
+$awBoundaryInstallation = ''
+$awChildAttempted = $false
+if ($awManagerRoot -and $awProject -and $awWt -and $awMuxSession -and $awPsmuxBin) {
+    $native = Invoke-AwPaneBoundaryProcess $awPsmuxBin @(
+        'display-message', '-p', '#{session_id}:#{session_created}|#{pane_id}'
+    ) 2000
+    if ($native -and $native.Trim() -match '^(\$[0-9]+:[0-9]+)\|(%[0-9]+)$') {
+        $awSessionIncarnation = $Matches[1]
+        $awNativePane = $Matches[2]
+        $admitted = Invoke-AwPaneBoundary 'start'
+        if ($admitted) { $awBoundaryInstallation = $admitted.installation }
+    }
+}
+
+# Retire validation failures without claiming an observed child exit.
+try {
 $ahpChildToken = $null
 $ahpChildFeatures = $null
 if (-not [string]::IsNullOrWhiteSpace($ahpTokenFile)) {
@@ -219,6 +331,7 @@ if (-not [string]::IsNullOrWhiteSpace($initialPromptB64)) {
 }
 
 $start = Get-Date
+$awChildAttempted = $true
 if ($ahpChildToken) {
     try {
         $startInfo = [Diagnostics.ProcessStartInfo]::new()
@@ -246,8 +359,16 @@ if ($ahpChildToken) {
         $exitCode = 1
     }
 } else {
-    & $rest[0] @($rest[1..($rest.Count - 1)])
-    $exitCode = $LASTEXITCODE
+    $LASTEXITCODE = $null
+    try {
+        & $rest[0] @($rest[1..($rest.Count - 1)])
+        $commandSucceeded = $?
+        $exitCode = $LASTEXITCODE
+        if (-not $commandSucceeded -and $null -eq $exitCode) { $exitCode = 127 }
+    } catch {
+        [Console]::Error.WriteLine("[agent-worktrees] child launch failed: $($_.Exception.Message)")
+        $exitCode = 127
+    }
 }
 if ($null -eq $exitCode) { $exitCode = 0 }
 $runtime = [int]((Get-Date) - $start).TotalSeconds
@@ -265,6 +386,12 @@ if ($receiptPath -and (
     } catch {}
 }
 
+if ($awManagerRoot) {
+    if ($awBoundaryInstallation) {
+        $null = Invoke-AwPaneBoundary 'end' $awBoundaryInstallation $exitCode
+    }
+} else {
+# Legacy callers retain their prior callbacks until migrated to copied shells.
 # Durable pane-exit mark (Tier-A): the only place the psmux pane's real exit code
 # is observable. Best-effort, detached, fail-silent -- must never delay pane
 # teardown. Correlates to the launch flow via WORKTREE_LAUNCH_ID (inherited from
@@ -348,6 +475,7 @@ if (
         Invoke-ManagerMuxCallback -PayloadRoot $managerRoot -CallbackArguments $removeArgs
     } catch {}
 }
+}
 
 # Intentional interrupt -- exit silently so post-exit finalization runs.
 if ($exitCode -eq 130) { exit 0 }
@@ -384,3 +512,8 @@ try {
     Start-Sleep -Seconds $waitTimeout
 }
 exit 0
+} finally {
+    if (-not $awChildAttempted -and $awBoundaryInstallation) {
+        $null = Invoke-AwPaneBoundary 'cancel' $awBoundaryInstallation
+    }
+}

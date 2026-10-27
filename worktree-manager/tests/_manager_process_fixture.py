@@ -2,12 +2,14 @@
 
 import os
 import shutil
+import subprocess
 import sysconfig
 import sys
 import venv
 from pathlib import Path
 
 from worktree_manager import self_install as si
+from agent_procutil import no_window_kwargs
 
 
 def stub_runtime(slot: Path) -> Path:
@@ -20,6 +22,48 @@ def stub_runtime(slot: Path) -> Path:
     (bootstrap / "runtime_launcher.py").touch()
     si._runtime_installer().runtime.mark_complete(slot.parent.parent, slot.name, payload_hash="a" * 64)
     return python
+
+
+def boundary_runtime(root: Path, version: str, *, diagnostics: bool = False) -> Path:
+    """Real bootstrap plus the stdlib-only pane boundary, not full assembly."""
+    slot = root / "versions" / version
+    venv.EnvBuilder(with_pip=False).create(slot)
+    purelib = slot / ("Lib/site-packages" if os.name == "nt" else
+                      f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages")
+    package = purelib / "worktree_manager"
+    package.mkdir(parents=True)
+    source = Path(__file__).resolve().parents[1]
+    for name in ("__init__.py", "pane_lifecycle.py", "mux_mapping_registry.py",
+                 "mux_file_lock.py", "source_config.py"):
+        shutil.copyfile(source / "src" / "worktree_manager" / name, package / name)
+    bootstrap = slot / ".runtime-bootstrap"
+    bootstrap.mkdir()
+    for name in (
+        "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
+        "versioned_runtime_source.py", "versioned_runtime_construction.py",
+        "versioned_runtime_publication.py",
+    ):
+        shutil.copyfile(source / "scripts" / name, bootstrap / name)
+    if diagnostics:
+        launcher = bootstrap / "runtime_launcher.py"
+        launcher.write_text(launcher.read_text(encoding="utf-8").replace(
+            "from __future__ import annotations\n",
+            "from __future__ import annotations\n"
+            "import faulthandler\nfaulthandler.dump_traceback_later(2, repeat=True)\n",
+        ), encoding="utf-8")
+    si._runtime_installer().runtime.mark_complete(root, version, payload_hash="a" * 64)
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    environment = dict(os.environ, WORKTREE_MANAGER_ROOT=str(root))
+    for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "__PYVENV_LAUNCHER__",
+                 "GH_TOKEN", "GITHUB_TOKEN", "AGENT_WORKTREES_AHP_AUTH_TOKEN"):
+        environment.pop(name, None)
+    health = subprocess.run(
+        [str(python), "-I", "-S", "-B", "-X", "utf8",
+         str(bootstrap / "runtime_launcher.py"), "-m", "worktree_manager.pane_lifecycle", "--help"],
+        env=environment, capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert health.returncode == 0, health.stdout + health.stderr
+    return slot
 
 
 def synthetic_runtime(root: Path, version: str, *, program: str | None = None) -> Path:

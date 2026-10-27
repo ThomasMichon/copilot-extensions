@@ -85,7 +85,8 @@ remain mandatory replay, not eligible for this operation. Expanded v3 completed
 manifests carrying polling-refresh generations are likewise mandatory replay,
 never eligible for acquisition discard; ordinary manifests retain v1 encoding.
 This adds no external-provider CLI flag;
-CLI delta-v1 providers retain their existing complete-result contract.
+CLI delta-v1 providers retain their existing complete-result contract unless
+they additionally negotiate the full-snapshot capability below.
 
 Full reconciliation has a separate opt-in Python contract:
 `discover_snapshot_page.snapshot_page_versions = (1,)`. The method receives
@@ -113,9 +114,10 @@ and source state untouched.
 This bounds acquisition/comparison units, **not** whole-manifest memory,
 serialization bytes or wall time: the journal still accumulates a complete
 manifest. Connectors without full-snapshot support retain the existing legacy
-full path. No built-in or external CLI provider advertises this new full contract
-yet; their immutable snapshot acquisition is separate adapter work. There are
-no new CLI flags, state cursor owners, source locks or automatic full repairs.
+full path. Built-in immutable snapshot acquisition remains separate adapter
+work. External providers can opt into this same journal through the negotiated
+bridge below; no production provider is implicitly upgraded. There are no new
+state cursor owners, source locks or automatic full repairs.
 
 GitHub ordinary polls use a fresh, **single page of at most 100 identities**
 updated since their committed timestamp, replaying the existing 60-second
@@ -154,8 +156,9 @@ so retargeting between metadata and acquisition cannot cross a recovery fence.
 The delta's own cursor owns coverage; metadata cursors and incomplete output
 never authorize tombstones. Invalid replies or process failures do not trigger
 an effectful legacy retry.
-Full reconciliation retains the old syntax and accepts canonical descendant
-sources within the invoked subtree. Once v1 is negotiated, full
+Without an additional snapshot capability, full reconciliation retains the old
+syntax and accepts canonical descendant sources within the invoked subtree.
+Once v1 is negotiated, full
 `content-discover`, legacy-shaped `content-discover-changed` and
 `content-list-paths` responses must also include the same executing-scope echo.
 It is checked before entries or paths are returned, protecting snapshot-derived
@@ -166,6 +169,39 @@ handle supported rollback without guessing new syntax. Provider
 hint consumption remains unadvertised. These providers must retain the baseline
 through the consumer-upgrade and provider-rollback window; retirement requires
 a separate contract revision.
+
+For complete immutable full acquisition, the same `source_delta` declaration may
+add `"snapshot_versions": [1]`. This is an optional capability, independent of
+package versions, and requires delta v1's existing scope contract. Omission,
+`[]` or supported-future-only snapshot versions retain the legacy full syntax;
+malformed declarations refuse negotiation. A capable new caller uses the existing
+`content-discover --source SOURCE --snapshot-version 1` verb and appends
+`--snapshot=TOKEN --cursor=CURSOR` on continuation. Attached values preserve
+opaque tokens that begin with `-`. It does not send these flags
+to a provider that has not advertised support and never retries legacy syntax
+after a failed negotiated call.
+
+Each reply explicitly contains `version: 1`, `snapshot`, `upserts`, `commit`,
+`cursor` and `source_delta`. `upserts` has at most 256 ordinary file-entry objects.
+`snapshot` and non-null `cursor` are bounded nonempty nonsecret strings without
+NUL characters (the subprocess argument boundary cannot represent them); `commit`
+is a NUL-free string or null. `cursor: null` alone certifies terminal coverage of the
+entire negotiated family, including descendants. The scope echo must match
+family/account/target and still advertise snapshot v1. The shared journal checks
+stable snapshot/target, rejects repeated cursors, and infers no deletions before
+terminal coverage. Retry under a fresh connector passes the last acknowledged
+snapshot/cursor even if metadata's informational commit changed. Expiry,
+retargeting, malformed pages and withdrawn capability fail visibly without
+discarding pending acquisition or advancing source state. Providers must supply
+genuinely immutable coverage, not reinterpret mutable API offsets as snapshots.
+
+Providers expanding this capability retain all four baseline verbs and their
+old syntax/output for old consumers and the supported rollback window. No flag
+or baseline is retired here. The contract/process tests exercise old/new callers,
+old/new receivers, strict unknown-flag rejection, interrupted replay, scope drift,
+and two-model native engine composition in both store layouts. This bridge does
+not implement provider-side snapshot storage, built-in snapshots, resumable
+external ordinary deltas, or bounded whole-manifest memory.
 
 Git revision sources use this seam for pinned base-to-target raw diffs and
 bounded new-commit history, without listing unchanged tracked paths, stored

@@ -1280,7 +1280,7 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
                 --worktree-id="$WORKTREE_ID" \
                 --worktree-path="$spath" \
                 --mux-session="$sess" \
-                --mux-bin=tmux \
+                --mux-bin="$(type -P tmux)" \
                 "${cli_pane_args[@]+"${cli_pane_args[@]}"}" \
                 ${incarnation:+--session-incarnation="$incarnation"} \
                 >/dev/null 2>&1 || true
@@ -1392,6 +1392,27 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
         # id for the mark and is consumed by the wrapper (not forwarded).
         SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
         PANE_WRAPPER="$SCRIPT_DIR/pane-wrapper.sh"
+        PANE_MANAGER_ROOT=""
+        RECORD_PATH="$(printf '%s' "$JSON" | "$PYTHON" -c \
+            'import json,sys; print(json.load(sys.stdin).get("record_path") or "")')" || exit 3
+        PANE_SHELL_VERSION="$(printf '%s' "$JSON" | "$PYTHON" -c \
+            'import json,sys; print(json.load(sys.stdin).get("pane_shell_version") or "")')" || exit 3
+        if [[ "$PANE_SHELL_VERSION" == 1 && -n "$RECORD_PATH" \
+              && "$SCRIPT_DIR" == */versions/*/payload/bin \
+              && "$OSTYPE" != msys* && "$OSTYPE" != cygwin* ]]; then
+            PANE_MANAGER_ROOT="${SCRIPT_DIR%/versions/*}"
+            if ! PREPARED_SHELL=$(
+                "$PYTHON" -I -m agent_worktrees.session_shell \
+                    --record "$RECORD_PATH" --wrapper "$PANE_WRAPPER" \
+                    --installation-root "$RUNTIME_DIR" --installation-root "$PANE_MANAGER_ROOT"
+            ); then
+                setup_log ERROR "Could not prepare installation-independent pane assets"
+                exit 3
+            fi
+            PANE_WRAPPER="$(printf '%s' "$PREPARED_SHELL" | "$PYTHON" -c \
+                'import json,sys; print(json.load(sys.stdin)["wrapper"])')" || exit 3
+            [[ -r "$PANE_WRAPPER" ]] || exit 3
+        fi
         AHP_TOKEN_FILE=""
         if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then
             if [[ ! -r "$PANE_WRAPPER" ]]; then
@@ -1418,6 +1439,9 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
         fi
         if [[ -r "$PANE_WRAPPER" ]]; then
             PANE_CONTROL=(--aw-wt "${WORKTREE_ID:-}")
+            if [[ -n "$PANE_MANAGER_ROOT" ]]; then
+                PANE_CONTROL+=(--aw-manager-root "$PANE_MANAGER_ROOT" --aw-mux-bin "$(type -P tmux)")
+            fi
             if [[ -n "${LAUNCH_PROJECT:-}" ]]; then
                 PANE_CONTROL+=(--aw-project "$LAUNCH_PROJECT")
             fi

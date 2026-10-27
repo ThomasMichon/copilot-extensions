@@ -269,7 +269,6 @@
       "wm:new_window_spawn.py::_windows_spawn::Popen": 2,
       "wm:relocated_launch.py::_run_relocated_mux_launch::Popen": 1,
       "wm:production_picker/picker_tui/engine_worker_actions.py::PickerScreenWorkerActionsMixin._open_venue_window::Popen": 1,
-      "r:worktree-manager/bin/pane-wrapper.ps1::<script>::Process.Start": 1,
       "t:clean-room/Dockerfile::<script>::ENTRYPOINT": 1,
       "t:clean-room/Dockerfile::<script>::CMD": 1,
       "t:clean-room/Dockerfile.pristine::<script>::ENTRYPOINT": 1,
@@ -323,6 +322,7 @@
       "t:clean-room/scenarios/plugin-process-hygiene-convergence/fixtures/plugin_process_hygiene_convergence.py::_spawn::Popen": 1
     },
     "caller-contained": {
+      "r:worktree-manager/bin/pane-wrapper.ps1::<script>::Process.Start": 2,
       "r:worktree-manager/bin/launch-session.ps1::<script>::Process.Start": 1,
       "r:fleet-manager/src/fleet_manager/host_profile.py::_parser::Popen": 1,
       "fm:gateway_transport.py::_addresses::Popen": 1,

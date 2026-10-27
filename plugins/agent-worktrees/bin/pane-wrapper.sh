@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# worktree-manager:pane-boundary-v1
 # pane-wrapper.sh -- wraps the tmux/psmux pane command to handle exit
 # codes gracefully.
 #
@@ -23,6 +24,8 @@ PROMPT_STARTUP_GRACE="${WORKTREE_PROMPT_STARTUP_GRACE:-3}"
 AW_WT=""
 AW_PROJECT=""
 AW_MUX_SESSION=""
+AW_MANAGER_ROOT=""
+AW_MUX_BIN=""
 INITIAL_PROMPT_B64=""
 INITIAL_PROMPT_RECEIPT_B64=""
 AHP_TOKEN_FILE=""
@@ -31,6 +34,8 @@ while [[ $# -ge 2 ]]; do
         --aw-wt) AW_WT="$2" ;;
         --aw-project) AW_PROJECT="$2" ;;
         --aw-mux-session) AW_MUX_SESSION="$2" ;;
+        --aw-manager-root) AW_MANAGER_ROOT="$2" ;;
+        --aw-mux-bin) AW_MUX_BIN="$2" ;;
         --aw-prompt-b64) INITIAL_PROMPT_B64="$2" ;;
         --aw-prompt-receipt-b64) INITIAL_PROMPT_RECEIPT_B64="$2" ;;
         --aw-ahp-token-file) AHP_TOKEN_FILE="$2" ;;
@@ -38,6 +43,97 @@ while [[ $# -ge 2 ]]; do
     esac
     shift 2
 done
+[[ $# -gt 0 ]] || exit 0
+
+# The callback job has its own process group and no terminal or credentials.
+# Keep the deadline and cleanup in this copied OS shell, not in a runtime waiter.
+aw_pane_boundary_process() (
+    local ticks="$1" output helper="" result i
+    shift
+    output="$(mktemp "${BASH_SOURCE[0]%/*}/.pane-boundary.XXXXXX")" || return 1
+    trap 'if [[ -n "$helper" ]]; then kill -KILL -- "-$helper" 2>/dev/null || true; fi;
+          rm -f -- "$output" "$output.err"' EXIT
+    set -m
+    "$@" </dev/null >"$output" 2>"$output.err" &
+    helper=$!
+    set +m
+    for ((i=0; i<ticks; i++)); do
+        kill -0 "$helper" 2>/dev/null || break
+        sleep 0.05
+    done
+    if kill -0 "$helper" 2>/dev/null; then
+        kill -TERM -- "-$helper" 2>/dev/null || true
+        sleep 0.05
+        kill -KILL -- "-$helper" 2>/dev/null || true
+        wait "$helper" 2>/dev/null || true
+        helper=""
+        return 1
+    fi
+    wait "$helper"
+    result=$?
+    helper=""
+    [[ "$result" -eq 0 ]] || return 1
+    cat -- "$output"
+) 2>/dev/null
+
+aw_pane_boundary() {
+    local action="$1" version slot python bootstrap
+    [[ "$AW_MANAGER_ROOT" == /* && -f "$AW_MANAGER_ROOT/current-version" ]] || return 1
+    IFS= read -r version < "$AW_MANAGER_ROOT/current-version" || [[ -n "$version" ]] || return 1
+    [[ "$version" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,255}$ ]] || return 1
+    slot="$AW_MANAGER_ROOT/versions/$version"
+    python="$slot/bin/python"
+    bootstrap="$slot/.runtime-bootstrap/runtime_launcher.py"
+    [[ -x "$python" && -f "$bootstrap" && -f "$slot/.install-complete.json" ]] || return 1
+    local -a arguments=(
+        -I -S -B -X utf8 "$bootstrap" -m worktree_manager.pane_lifecycle "$action" --shell
+        --contract-version 1
+        --root "$AW_MANAGER_ROOT" --project "$AW_PROJECT" --worktree-id "$AW_WT"
+        --mux-session "$AW_MUX_SESSION" --session-incarnation "$AW_SESSION_INCARNATION"
+        --pane-id "$AW_NATIVE_PANE"
+    )
+    if [[ "$action" == start ]]; then
+        arguments+=(--worktree-path "$PWD" --mux-bin "$AW_MUX_BIN")
+    else
+        arguments+=(--expected-installation "$AW_BOUNDARY_INSTALLATION")
+        if [[ "$action" == end ]]; then
+            arguments+=(--exit-code "$EXIT_CODE" --runtime "$RUNTIME")
+            if [[ -n "${WORKTREE_LAUNCH_ID:-}" ]]; then
+                arguments+=(--launch-id "$WORKTREE_LAUNCH_ID")
+            fi
+        fi
+    fi
+    aw_pane_boundary_process 100 env \
+        -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV -u __PYVENV_LAUNCHER__ \
+        -u GH_TOKEN -u GITHUB_TOKEN -u AGENT_WORKTREES_AHP_AUTH_TOKEN \
+        WORKTREE_MANAGER_ROOT="$AW_MANAGER_ROOT" "$python" "${arguments[@]}"
+}
+
+AW_SESSION_INCARNATION=""
+AW_NATIVE_PANE=""
+AW_BOUNDARY_INSTALLATION=""
+AW_CHILD_ATTEMPTED=0
+aw_pane_failed_start() {
+    local status=$?
+    if [[ "$AW_CHILD_ATTEMPTED" -eq 0 && -n "$AW_BOUNDARY_INSTALLATION" ]]; then
+        aw_pane_boundary cancel >/dev/null 2>&1 || true
+    fi
+    return "$status"
+}
+trap aw_pane_failed_start EXIT
+if [[ -n "$AW_MANAGER_ROOT" && -n "$AW_PROJECT" && -n "$AW_WT" \
+      && -n "$AW_MUX_SESSION" && -n "$AW_MUX_BIN" ]]; then
+    if native="$(aw_pane_boundary_process 40 "$AW_MUX_BIN" display-message -p \
+        '#{session_id}:#{session_created}|#{pane_id}')" \
+        && [[ "$native" =~ ^(\$[0-9]+:[0-9]+)\|(%[0-9]+)$ ]]; then
+        AW_SESSION_INCARNATION="${BASH_REMATCH[1]}"
+        AW_NATIVE_PANE="${BASH_REMATCH[2]}"
+        if reply="$(aw_pane_boundary start)" \
+            && [[ "$reply" =~ ^worktree-pane-boundary-v1$'\t'start$'\t'([0-9a-f]{64})$'\t'1$ ]]; then
+            AW_BOUNDARY_INSTALLATION="${BASH_REMATCH[1]}"
+        fi
+    fi
+fi
 
 if [[ -n "$AHP_TOKEN_FILE" ]]; then
     if [[ -L "$AHP_TOKEN_FILE" || ! -f "$AHP_TOKEN_FILE" ]]; then
@@ -110,6 +206,7 @@ if [[ -n "$INITIAL_PROMPT_B64" ]]; then
 fi
 
 START_TIME=$(date +%s)
+AW_CHILD_ATTEMPTED=1
 if [[ -n "${AHP_CHILD_TOKEN:-}" ]]; then
     GH_TOKEN="$AHP_CHILD_TOKEN" \
     COPILOT_CLI_ENABLED_FEATURE_FLAGS="$AHP_CHILD_FEATURES" \
@@ -138,6 +235,12 @@ fi
 # Best-effort, fully detached, fail-silent -- must never delay pane teardown.
 # Correlates to the launch flow via WORKTREE_LAUNCH_ID (inherited from the mux
 # server env). Fires on every exit path, before the interrupt/clean shortcuts.
+if [[ -n "$AW_MANAGER_ROOT" ]]; then
+    if [[ -n "$AW_BOUNDARY_INSTALLATION" ]]; then
+        aw_pane_boundary end >/dev/null 2>&1 || true
+    fi
+else
+# Legacy callers retain their prior callbacks until migrated to copied shells.
 if command -v agent-worktrees >/dev/null 2>&1; then
     ( agent-worktrees activity-log pane_exited --source launcher \
         ${AW_WT:+--worktree-id "$AW_WT"} \
@@ -181,6 +284,7 @@ if [[ -n "$AW_PROJECT" && -n "$AW_WT" ]]; then
             ${AW_SESSION_INCARNATION:+--session-incarnation="$AW_SESSION_INCARNATION"} \
             >/dev/null 2>&1 || true
     fi
+fi
 fi
 
 # Intentional interrupt -- exit silently so post-exit finalization runs

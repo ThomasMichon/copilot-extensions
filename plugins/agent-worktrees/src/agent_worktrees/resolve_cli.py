@@ -891,6 +891,8 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         "cmd": launch_cmd,
         "env": env,
         "worktree_id": record.worktree_id,
+        "record_path": str(yaml_path),
+        "pane_shell_version": 1,
         "post_exit": True,
         "no_mux": True,
         # The delegated hop carries the exact staged identity, never text

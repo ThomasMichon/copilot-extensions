@@ -1719,7 +1719,7 @@ function Invoke-ManagedMuxRegister {
             "--worktree-id=$([string]$plan.worktree_id)",
             "--worktree-path=$WorkDir",
             "--mux-session=$Session",
-            '--mux-bin=psmux'
+            "--mux-bin=$($script:AwPsmuxBin)"
         )
         if (-not [string]::IsNullOrWhiteSpace([string]$incarnation)) {
             $registerArgs += "--session-incarnation=$incarnation"
@@ -1952,6 +1952,36 @@ if (-not $noMux) {
     $paneCmd = $cmd
     $paneWrapper = Join-Path $PSScriptRoot 'pane-wrapper.ps1'
     $paneLaunch = Join-Path $PSScriptRoot 'pane-launch.ps1'
+    $paneManagerRoot = $null
+    $managerPayload = Split-Path -Parent $PSScriptRoot
+    $managerSlot = Split-Path -Parent $managerPayload
+    $managerVersions = Split-Path -Parent $managerSlot
+    if (
+        ($plan.pane_shell_version -is [int] -or $plan.pane_shell_version -is [long]) -and
+        $plan.pane_shell_version -eq 1 -and $plan.record_path -and
+        (Split-Path -Leaf $managerPayload) -eq 'payload' -and
+        (Split-Path -Leaf $managerVersions) -eq 'versions'
+    ) {
+        $paneManagerRoot = Split-Path -Parent $managerVersions
+        try {
+            $shellPython = Resolve-RuntimePython
+            if (-not $shellPython) { throw 'Launch-shell preparation runtime is unavailable.' }
+            $prepared = & $shellPython -I -m agent_worktrees.session_shell `
+                --record ([string]$plan.record_path) --wrapper $paneWrapper `
+                --installation-root $RuntimeDir --installation-root $paneManagerRoot
+            if ($LASTEXITCODE -ne 0) { throw 'Launch-shell preparation failed.' }
+            $shell = ConvertFrom-Json -InputObject ($prepared -join "`n") -ErrorAction Stop
+            if (-not $shell.wrapper -or -not (Test-Path -LiteralPath $shell.wrapper -PathType Leaf)) {
+                throw 'Launch-shell preparation returned no wrapper.'
+            }
+            $paneWrapper = [string]$shell.wrapper
+            $paneLaunch = Join-Path ([string]$shell.directory) 'pane-launch.ps1'
+        } catch {
+            Write-SetupLog 'Could not prepare installation-independent pane assets.' 'ERROR'
+            Write-Error $_ -ErrorAction Continue
+            exit 3
+        }
+    }
     if (
         (Test-Path -LiteralPath $paneWrapper) -and
         -not (Test-Path -LiteralPath $paneLaunch -PathType Leaf)
@@ -1986,6 +2016,7 @@ if (-not $noMux) {
     }
     if (Test-Path -LiteralPath $paneWrapper) {
         $wrapperArgs = @()
+        if ($paneManagerRoot) { $wrapperArgs += @('-AwManagerRoot', $paneManagerRoot) }
         if (-not [string]::IsNullOrWhiteSpace($plan.worktree_id)) {
             $wrapperArgs += @('-AwWt', [string]$plan.worktree_id)
         }

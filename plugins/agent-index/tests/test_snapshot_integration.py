@@ -97,3 +97,68 @@ def test_native_full_retry_preserves_data_until_complete_and_then_reconciles(
     assert state.sources["alias"].last_commit == "target"
     assert IndexState.load(config.state_file).sources["alias"].last_commit == "target"
     assert PendingCrawls(paths).sources() == []
+
+
+@pytest.mark.parametrize("selected", [False, True], ids=["legacy", "source-aware"])
+def test_external_snapshot_resumes_through_native_two_model_engine(
+    tmp_path, monkeypatch, selected,
+):
+    from test_provider_snapshot import snapshot_receiver
+    from test_provider_delta import ENTRY, FAMILY
+    from agent_index.sources.providers import ProviderError
+
+    if selected:
+        monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    else:
+        monkeypatch.delenv("AGENT_INDEX_STORE_LAYOUT", raising=False)
+    receiver = snapshot_receiver(tmp_path)
+    receiver.config["delta"] = {
+        "version": 1, "commit": "base", "complete": True, "deletions": [],
+        "upserts": [
+            {**ENTRY, "path": "gone.md"},
+            {**ENTRY, "source": FAMILY + ":commits", "path": "old-history"},
+        ],
+    }
+    profiles = {
+        name: ModelProfile(name, "fixture", dim=2, table_name=f"vectors_{name}")
+        for name in ("a", "b")
+    }
+    config = IndexConfig(data_dir=tmp_path / "data", model_profiles=profiles, cluster_enabled=False)
+    config.ensure_dirs()
+    store = initialize_source_store(config) if selected else MultiModelStore(config.lance_dir)
+    for profile in profiles.values():
+        store.register_model(profile)
+    clients = {name: Client(name, []) for name in profiles}
+    paths = PathIndex(tmp_path / "paths.db")
+    state = IndexState()
+
+    def run(full):
+        return engine._index_source(
+            "alias", config=config, state=state, path_index=paths, multi_store=store,
+            multi_clients=clients, full=full, connector=receiver.connector(),
+        )
+
+    run(False)
+    before = store.projection_snapshot()
+    requests = [list(client.texts) for client in clients.values()]
+    receiver.config["fail_snapshot"] = True
+    with pytest.raises(ProviderError, match="temporarily unavailable"):
+        run(True)
+    assert store.projection_snapshot() == before
+    assert [client.texts for client in clients.values()] == requests
+    assert paths.count() == 2
+    assert IndexState.load(config.state_file).sources["alias"].last_commit == "base"
+    receiver.config["fail_snapshot"] = False
+    paths = PathIndex(tmp_path / "paths.db")
+    state = IndexState.load(config.state_file)
+    run(True)
+    assert store.get_document(FAMILY, "new.md").content == ENTRY["content"]
+    assert store.get_document(FAMILY + ":commits", "history") is not None
+    assert store.get_document(FAMILY, "gone.md") is None
+    assert store.get_document(FAMILY + ":commits", "old-history") is None
+    assert paths.count() == 2
+    assert IndexState.load(config.state_file).sources["alias"].last_commit == "snapshot-tip"
+    assert PendingCrawls(paths).sources() == []
+    assert sum(not any(arg.startswith("--snapshot=") for arg in call)
+               and "--snapshot-version" in call
+               for call in receiver.calls()) == 1

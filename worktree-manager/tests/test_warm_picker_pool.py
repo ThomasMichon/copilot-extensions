@@ -13,6 +13,20 @@ from worktree_manager import engine_client, warm_picker_pool as warm
 
 
 @pytest.fixture
+def worker_ui_imports(monkeypatch):
+    import sys
+    from types import ModuleType
+
+    from worktree_manager.production_picker import picker_tui
+
+    # Worker custody tests replace runner.run; UI construction has its own suite.
+    for name in ("engine", "data_local", "data_ssh"):
+        module = ModuleType(f"{picker_tui.__name__}.{name}")
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+        monkeypatch.setattr(picker_tui, name, module, raising=False)
+
+
+@pytest.fixture
 def pool(tmp_path, monkeypatch):
     from worktree_manager.warm_picker_contract import worker_environment
 
@@ -56,6 +70,65 @@ def request():
         "cwd": os.getcwd(),
         "handoff": {"bootstrap": {"project": "sample", "headless": False}},
     }
+
+
+def test_unused_pool_never_discovers_the_optional_mux(pool, tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        warm.shutil, "which", lambda _name: pytest.fail("unused pool performed blocking discovery"),
+    )
+    value = warm.WarmPickerPool(tmp_path)
+    value.pump()
+    value.pump()
+    value.close()
+    assert value.mux is None
+    assert not value.directory.exists()
+
+
+def test_admitted_demand_resolves_once_then_warms_and_attaches(pool, monkeypatch):
+    value, _ = pool
+    lookups = []
+    monkeypatch.setattr(
+        warm.shutil, "which", lambda name: lookups.append(name) or "demand-selected-mux",
+    )
+    monkeypatch.setattr(value, "_spawn", lambda: spare(pool))
+    payload = request()
+    assert value.acquire(payload) == {"available": False, "reason": "warming"}
+    assert lookups == ["psmux" if os.name == "nt" else "tmux"]
+    value.pump()
+    result = value.acquire(payload)
+    assert result["available"]
+    assert result["attach_command"] == [
+        "demand-selected-mux", *value.mux_args, "attach-session", "-t", "owned-ui",
+    ]
+    assert len(lookups) == 1
+    value.close()
+
+
+@pytest.mark.parametrize("refusal", ["scope-mismatch", "draining"])
+def test_refused_demand_never_discovers_the_optional_mux(pool, monkeypatch, refusal):
+    value, _ = pool
+    monkeypatch.setattr(
+        warm.shutil, "which", lambda _name: pytest.fail("refused demand performed discovery"),
+    )
+    payload = request()
+    if refusal == "draining":
+        value.pause()
+    else:
+        payload["engine"] = ["foreign-engine"]
+    assert value.acquire(payload) == {"available": False, "reason": refusal}
+    value.pump()
+    assert value.mux is None
+
+
+def test_missing_mux_is_cached_without_background_discovery(pool, monkeypatch):
+    value, _ = pool
+    lookups = []
+    monkeypatch.setattr(warm.shutil, "which", lambda name: lookups.append(name))
+    monkeypatch.setattr(value, "_spawn", lambda: pytest.fail("missing mux was spawned"))
+    assert value.acquire(request()) == {"available": False, "reason": "warming"}
+    value.pump()
+    assert value.acquire(request()) == {"available": False, "reason": "warming"}
+    assert len(lookups) == 1
 
 
 def test_spare_is_consumed_once_with_a_complete_atomic_handoff(pool):
@@ -212,6 +285,7 @@ def test_unattached_claim_has_a_finite_lifetime(pool, monkeypatch):
 def test_spawn_failure_is_bounded_and_does_not_break_resident_maintenance(pool, monkeypatch):
     value, _ = pool
     monkeypatch.setattr(value, "_spawn", lambda: (_ for _ in ()).throw(OSError("unavailable mux")))
+    assert value.acquire(request())["reason"] == "warming"
     value.pump()
     assert not value.busy
     assert value.acquire(request())["reason"] == "warming"
@@ -239,6 +313,7 @@ def test_session_replacement_is_never_killed_by_stale_ui_cleanup(pool, monkeypat
     value, calls = pool
     slot = spare(pool)
     monkeypatch.setattr(value, "_incarnation", lambda _: "$2:456")
+    assert not value.acquire(request())["available"]
     value.pause()
     value.pump()
     assert not calls and slot.directory.exists()
@@ -281,7 +356,9 @@ def test_invalid_invocation_cwd_cannot_claim_a_ui(pool, cwd):
 
 
 @pytest.mark.parametrize("stale_worker_environment", [False, True])
-def test_single_use_worker_enters_caller_cwd_before_binding(pool, tmp_path, monkeypatch, stale_worker_environment):
+def test_single_use_worker_enters_caller_cwd_before_binding(
+    pool, tmp_path, monkeypatch, stale_worker_environment, worker_ui_imports,
+):
     from worktree_manager import resident_picker, warm_picker_worker as worker
     from worktree_manager.production_picker import runner
 
@@ -325,7 +402,7 @@ def test_single_use_worker_enters_caller_cwd_before_binding(pool, tmp_path, monk
 @pytest.mark.parametrize("loss", ["dead", "replaced", "cancelled"])
 @pytest.mark.parametrize("retained_evidence", [False, True])
 def test_owner_loss_after_binding_never_publishes_a_decision(
-    pool, monkeypatch, tmp_path, loss, retained_evidence,
+    pool, monkeypatch, tmp_path, loss, retained_evidence, worker_ui_imports,
 ):
     from zdd import diagnostics
     from worktree_manager import resident_picker, warm_picker_worker as worker
@@ -515,6 +592,7 @@ def test_selected_nondefault_mux_socket_is_used_for_spawn_probe_cleanup_and_atta
         lambda command, **kwargs: commands.append(command) or subprocess.CompletedProcess(command, 0, stdout=""),
     )
     monkeypatch.setattr(value, "_mux", lambda *args: warm.WarmPickerPool._mux(value, *args))
+    assert value.acquire(request())["reason"] == "warming"
     spare(pool)
     value._spawn()
     result = value.acquire(request())
@@ -630,6 +708,7 @@ def test_spare_launch_uses_isolation_before_importing_worker_module(pool, monkey
         warm.subprocess, "run",
         lambda command, **kwargs: commands.append(command) or subprocess.CompletedProcess(command, 0),
     )
+    assert value.acquire(request())["reason"] == "warming"
     value._spawn()
     command = commands[0]
     script = (

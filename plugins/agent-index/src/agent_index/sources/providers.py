@@ -59,6 +59,13 @@ or rotating tokens. Full reconciliation retains old syntax and may return
 canonical descendant sources inside the requested subtree. Direct acquisition
 on an unnegotiated connector retains the old behavior without a metadata probe.
 
+An optional ``source_delta.snapshot_versions`` declaration additionally selects
+full ``content-discover --snapshot-version 1`` pages. Continuations pass the
+original ``--snapshot`` and ``--cursor``; every response echoes its executing
+scope and snapshot support. Legacy full syntax remains unchanged when absent.
+The existing pending-crawl journal owns replay, complete-family coverage and
+deletion comparison; see :mod:`agent_index.sources.provider_snapshot`.
+
 A response's own ``"source"`` field(s) (in ``entries`` or ``content-list-
 paths``' keys) are **verified against the requested ``--source``** -- an
 entry must claim exactly that source or a strict descendant of it
@@ -91,13 +98,13 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agent_procutil import no_window_kwargs
 from dropin_registry import EntryDecision, Finding, scan_directory
 
 from agent_index.sources.base import FileEntry
-from agent_index.sources.delta import SourceDelta
+from agent_index.sources.delta import SnapshotPage, SourceDelta
 from agent_index.sources.provider_delta import (
     CONTRACT,
     DeltaDeclaration,
@@ -105,6 +112,9 @@ from agent_index.sources.provider_delta import (
     parse_delta,
     validate_scope_echo,
 )
+
+if TYPE_CHECKING:
+    from agent_index.indexing.snapshot_crawl import DiscoverSnapshotPage
 
 log = logging.getLogger(__name__)
 
@@ -489,6 +499,41 @@ class CliSourceConnector:
         self._validate_acquisition_scope(data)
         return self._entries(data, "content-discover")
 
+    @property
+    def discover_snapshot_page(self) -> DiscoverSnapshotPage | None:
+        """Expose the optional Python method only after runtime negotiation."""
+        self._negotiate()
+        if self._declaration is not None and self._declaration.snapshot_available:
+            return self._discover_snapshot_page
+        return None
+
+    def _discover_snapshot_page(
+        self, snapshot: str | None, cursor: str | None,
+        *, cancel_check: Callable[[], None] | None = None,
+    ) -> SnapshotPage:
+        from agent_index.sources.provider_snapshot import parse_snapshot, validate_cli_tokens
+
+        declaration = self._declaration
+        if declaration is None or not declaration.snapshot_available:
+            raise ProviderError("snapshot v1 not negotiated; use legacy reconciliation")
+        if snapshot is None and cursor is not None:
+            raise ValueError("Snapshot continuation requires a pinned snapshot")
+        if snapshot is not None:
+            SnapshotPage(snapshot, cursor=cursor).validate(declaration.family)
+            validate_cli_tokens(snapshot, cursor)
+        args = (
+            *((f"--snapshot={snapshot}",) if snapshot is not None else ()),
+            *((f"--cursor={cursor}",) if cursor is not None else ()),
+        )
+        data = self._run(
+            "content-discover", "--source", self._source, "--snapshot-version", "1",
+            *args, cancel_check=cancel_check,
+        )
+        try:
+            return parse_snapshot(data, declaration, self._entries)
+        except ValueError as exc:
+            raise ProviderError(f"content-domain provider returned invalid snapshot: {exc}") from exc
+
     def discover_changed(
         self,
         last_commit: str | None,
@@ -600,6 +645,9 @@ class CliSourceConnector:
         self._commit = commit
         self._declaration = declaration
         self._negotiated = True
+
+
+setattr(CliSourceConnector._discover_snapshot_page, "snapshot_page_versions", (1,))
 
 
 def _prefixes_overlap(a: str, b: str) -> bool:

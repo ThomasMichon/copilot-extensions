@@ -53,6 +53,26 @@ This migration is not same-process survival evidence. Record the legacy
 baseline separately; the qualified replacement launch must retain its own
 identities throughout the later actual uninstall/reinstall experiment.
 
+Before that migration, capture the exact selected active worktree set, each
+worktree's associated native Copilot session, and its current mux/pane/process
+identity in the private operational record. Restore that same set through the
+existing detached create-or-resume owner, verifying the resumed session IDs;
+do not enumerate every tracked worktree and start them all. A changed head,
+unknown pending effect or still-live predecessor needs reconciliation before
+replacement, not a fresh conversation or an automatic replay.
+
+The existing command pair is the intended public entry point:
+
+```text
+<repo> worktrees copilot --worktree-id <id>
+<repo> worktrees embody --worktree-id <id> --json
+```
+
+The former ensures/resumes and attaches the caller's terminal. The latter
+ensures/resumes without attaching; repeated calls reuse a live mux. Validate
+both against the qualified wrapper rather than adding a second launch path.
+Detached creation is not itself proof that the native conversation resumed.
+
 ## Acceptance
 
 - Backups are verified restorable before the first removal. Durable identities,

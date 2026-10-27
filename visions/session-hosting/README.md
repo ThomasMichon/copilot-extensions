@@ -215,6 +215,19 @@ A human control plane can present launch, resume, join, and handoff actions
 across available providers while preserving the user's preferred Copilot
 experience.
 
+### idempotent-worktree-session-restoration
+
+A worktree has one straightforward terminal entry point: reattach its existing
+execution when it is live, or restore its associated conversation when it is
+stopped. Ensuring that execution exists is independently available without
+attaching the caller's terminal, so automation and human presentation share the
+same admission and resume semantics rather than creating competing sessions.
+
+An intentional migration can preserve and restore an explicitly selected set of
+active worktrees and their associated conversations. Restoring that set does
+not start unrelated dormant worktrees, silently substitute fresh conversations,
+or treat replacement processes as evidence that the original processes survived.
+
 ### control-independent-terminal-attachment
 
 How a caller requests a launch is independent of how a human attaches to its
