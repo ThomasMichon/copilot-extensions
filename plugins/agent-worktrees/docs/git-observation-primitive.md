@@ -45,7 +45,13 @@ global cache or renewed deadline.
 Retain it strongly until `try_settle()` positively completes. False/error is
 still pending. Do not discard it in a broad catch, render it as fresh facts,
 start another observation of the affected scope, or report successful shutdown.
-Preserve cancellation during both the operation and cleanup phases.
+Preserve cancellation during both the operation and cleanup phases. A delayed
+outer catch must not attach an already-settled error to a newer active ticket.
+Pending snapshots display UNKNOWN without replacing cached bytes or ages;
+a previous bundle with a different project/worktree identity cannot be reused.
+Windows standalone updater discovery starts only after its lease is held;
+contenders recheck live owner/session/runtime rather than lingering behind a
+current winner. Required replacements still wait for retained cleanup release.
 
 The Windows classifier, segment/cache, monitor/producer and standalone updater
 use this boundary under their admitted instance-owned custody contract. The

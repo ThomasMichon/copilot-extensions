@@ -211,3 +211,10 @@ def test_native_route_race_is_fenced_at_effect(provider, request):
         caller.join(timeout=5)
         if writer is not None:
             writer.join(timeout=5)
+
+
+def test_native_legacy_client_keeps_old_undrain_contract_on_new_provider(provider):
+    root, data, route, _ = provider
+    client = control.ControlClient(route.base_url, token=data["token"], config_dir=root, timeout=3)
+    assert client.undrain() == {"draining": False}
+    assert client.health()["opened"] == 1 and recovery.active_endpoint(root) == route

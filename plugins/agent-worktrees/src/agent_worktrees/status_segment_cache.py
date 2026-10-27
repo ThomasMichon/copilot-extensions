@@ -41,10 +41,7 @@ class _StatusSegmentCache:
         return "UNKNOWN (cleanup pending)"
 
     def pending_segment_for_path(self, path: str) -> str:
-        with self._lock:
-            key = self._key(path)
-            key = self._aliases.get(key, key)
-            return self._entries.get(key, (0.0, self.pending_segment()))[1]
+        return self.pending_segment()
 
     def _blocked(self, project: str, path: str | None = None) -> bool:
         if self._closing_observations:
@@ -109,6 +106,8 @@ class _StatusSegmentCache:
 
     def retain_unclaimed_cleanup(self, project, path, error):
         with self._lock:
+            if getattr(error, "_settled", False):
+                return
             for ticket in self._observations.values():
                 if ticket.cleanup is error or any(item is error for item in ticket.additional):
                     return
@@ -204,6 +203,10 @@ class _StatusSegmentCache:
 
     @staticmethod
     def degraded_bundle(project, worktree_id, previous=None):
+        if not isinstance(previous, dict) or (
+            previous.get("project") != project or previous.get("worktree_id") != worktree_id
+        ):
+            previous = None
         bundle = copy.deepcopy(previous) if previous is not None else {
             "project": project, "worktree_id": worktree_id, "machine": "",
             "started_at": 0.0, "as_of": 0.0,

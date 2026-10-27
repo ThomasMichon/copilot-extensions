@@ -360,7 +360,7 @@ def _spawn_status_updater(worktree_id: str, path: str | None) -> bool:
         return False
 
 
-def _with_updater_lease(session, compute):
+def _with_updater_lease(session, compute, *, still_needed=None):
     from . import git_ops
     if not git_ops._windows_observation():
         return compute()
@@ -372,13 +372,19 @@ def _with_updater_lease(session, compute):
     lease = SingleInstance(
         _aw_runtime_home(), service="status-updater", lock_name=f"status-updater-{name}.lock",
     )
+    contended = False
     while True:
+        if contended and still_needed is not None and not still_needed():
+            return 0
         try:
             lease.acquire()
             break
         except AlreadyRunningError:
+            contended = True
             time.sleep(1.0)
     try:
+        if contended and still_needed is not None and not still_needed():
+            return 0
         return compute()
     finally:
         lease.release()
@@ -495,8 +501,13 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
     # status-updater is a no-project command, so main() never resolved a
     # project for us -- but the status renderers need one to find the
     # worktree's tracking record (repo:id locus + session title).  Resolve it
-    # git-like from --path before rendering anything.
-    _core_helper("_activate_project_for_path", _activate_project_for_path)(path)
+    # git-like from --path before rendering anything. Windows discovery also
+    # observes Git, so its native custody lease must already be held.
+    from . import git_ops
+
+    bounded_windows = git_ops._windows_observation()
+    if not bounded_windows:
+        _core_helper("_activate_project_for_path", _activate_project_for_path)(path)
 
     def _mux(*a: str) -> subprocess.CompletedProcess[str] | None:
         try:
@@ -557,16 +568,21 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
     # a dark bar.
     from . import update_stage as _upd
 
-    _owner = _mux("display-message", "-t", sess, "-p", "#{@aw_updater}")
-    if _owner is not None and _owner.returncode == 0:
-        _tok = (_owner.stdout or "").strip()
-        if _tok.isdigit() and int(_tok) != os.getpid() and _upd._pid_alive(int(_tok)):
-            _op = _mux("display-message", "-t", sess, "-p", "#{@aw_updater_prefix}")
-            _owner_prefix = (
-                (_op.stdout or "").strip() if (_op is not None and _op.returncode == 0) else ""
-            )
-            if _owner_prefix and not _runtime_superseded(prefix=_owner_prefix):
-                return 0
+    def _current_owner_live() -> bool:
+        owner = _mux("display-message", "-t", sess, "-p", "#{@aw_updater}")
+        if owner is not None and owner.returncode == 0:
+            token = (owner.stdout or "").strip()
+            if token.isdigit() and int(token) != os.getpid() and _upd._pid_alive(int(token)):
+                prefix = _mux("display-message", "-t", sess, "-p", "#{@aw_updater_prefix}")
+                value = (prefix.stdout or "").strip() if prefix is not None and prefix.returncode == 0 else ""
+                return bool(value and not _runtime_superseded(prefix=value))
+        return False
+
+    if _current_owner_live():
+        return 0
+
+    def _still_needed() -> bool:
+        return not _runtime_superseded() and _session_state() != "gone" and not _current_owner_live()
 
     # Single-instance guard.  The launcher may (re)spawn an updater on every
     # attach/join, so each updater claims @aw_updater with its own token; a
@@ -582,6 +598,8 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
         return r.stdout.strip() == token
 
     def publish_and_run():
+        if bounded_windows:
+            _core_helper("_activate_project_for_path", _activate_project_for_path)(path)
         _set("@aw_updater", token)
         _set("@aw_updater_prefix", os.path.realpath(sys.prefix))
         try:
@@ -592,7 +610,7 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
             path, interval, _session_state, _owns, _runtime_superseded, _set,
         )
 
-    return _with_updater_lease(sess, publish_and_run)
+    return _with_updater_lease(sess, publish_and_run, still_needed=_still_needed)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

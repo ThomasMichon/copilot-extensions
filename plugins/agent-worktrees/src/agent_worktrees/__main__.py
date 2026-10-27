@@ -3275,6 +3275,9 @@ def _monitor_sweep(
             _wait_for_lifecycle_priority(lifecycle_priority)
             with project_lock if project_lock is not None else contextlib.nullcontext():
                 try:
+                    if (segment_cache is not None and git_ops._windows_observation()
+                            and segment_cache.observation_blocked(project)):
+                        continue
                     cfg.set_active_project(project)
                     config_scope = _config_cache.project_scope(config_cache_for_project, project)
                     # One per-project config cache for the listing AND the handoff
@@ -3300,6 +3303,9 @@ def _monitor_sweep(
                                 if not sessions.has_mux_session(record.worktree_id):
                                     continue
                             except Exception:
+                                continue
+                            if (segment_cache is not None and git_ops._windows_observation()
+                                    and segment_cache.observation_blocked(project, worktree_path)):
                                 continue
                             _monitor_maybe_process_handoff_record(record, governance=governance)
                 except _StatusMonitorGovernanceDeferred:
