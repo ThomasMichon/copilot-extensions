@@ -4,6 +4,7 @@ import hashlib
 import io
 from pathlib import Path
 import stat
+import struct
 import sys
 import time
 import zipfile
@@ -204,3 +205,59 @@ def test_bundle_refuses_source_replacement_before_open(tmp_path, monkeypatch):
     with pytest.raises(snapshots.WheelError, match="changed"):
         with retain(root, source, expected, digest):
             pytest.fail("replaced bundle source admitted")
+
+
+@pytest.mark.parametrize("compression", [zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED])
+def test_bundle_refuses_hidden_output_beyond_forged_member_size(tmp_path, compression):
+    source, expected, _digest = bundle(tmp_path)
+    with zipfile.ZipFile(source, "w", compression=compression) as archive:
+        archive.writestr("wheels/one-1-py3-none-any.whl", b"first" + b"hidden" * 1000)
+        archive.writestr("wheels/two-1-py3-none-any.whl", b"second")
+    data = bytearray(source.read_bytes())
+    central = data.index(b"PK\x01\x02")
+    crc = zipfile.crc32(b"first")
+    for offset, checksum, size in ((0, 14, 22), (central, 16, 24)):
+        struct.pack_into("<L", data, offset + checksum, crc)
+        struct.pack_into("<L", data, offset + size, len(b"first"))
+    source.write_bytes(data)
+    digest = "sha256:" + hashlib.sha256(data).hexdigest()
+    root = tmp_path / "private"
+    root.mkdir()
+    with pytest.raises(snapshots.WheelError):
+        with retain(root, source, expected, digest):
+            pytest.fail("forged prefix hid unselected decompressed bytes")
+
+
+def test_bundle_bounds_actual_directory_before_zipfile_indexing(tmp_path, monkeypatch):
+    source, expected, _digest = bundle(tmp_path, change="extra")
+    data = bytearray(source.read_bytes())
+    footer = data.rindex(b"PK\x05\x06")
+    struct.pack_into("<2H", data, footer + 8, 2, 2)
+    source.write_bytes(data)
+    digest = "sha256:" + hashlib.sha256(data).hexdigest()
+    root = tmp_path / "private"
+    root.mkdir()
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("ZipFile allocated its index before actual entry-count preflight")
+
+    monkeypatch.setattr(zipfile, "ZipFile", forbidden)
+    with pytest.raises(snapshots.WheelError, match="count"):
+        with retain(root, source, expected, digest):
+            pytest.fail("forged footer hid an extra central-directory entry")
+
+
+def test_bundle_maps_malformed_utf8_names_to_wheel_error(tmp_path):
+    source, expected, _digest = bundle(tmp_path)
+    data = bytearray(source.read_bytes())
+    central = data.index(b"PK\x01\x02")
+    for offset, flags, name in ((0, 6, 30), (central, 8, 46)):
+        struct.pack_into("<H", data, offset + flags, 0x800)
+        data[offset + name] = 0xFF
+    source.write_bytes(data)
+    digest = "sha256:" + hashlib.sha256(data).hexdigest()
+    root = tmp_path / "private"
+    root.mkdir()
+    with pytest.raises(snapshots.WheelError, match="invalid"):
+        with retain(root, source, expected, digest):
+            pytest.fail("invalid UTF-8 filename escaped the adapter")

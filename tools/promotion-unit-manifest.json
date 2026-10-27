@@ -25,6 +25,10 @@
         "tools/promotion_unit_tests/test_bundle_snapshot.py::test_bundle_never_extracts_before_digest_verification",
         "tools/promotion_unit_tests/test_bundle_snapshot.py::test_bundle_cannot_renew_deadline_during_member_copy",
         "tools/promotion_unit_tests/test_bundle_snapshot.py::test_bundle_refuses_source_replacement_before_open",
+        "tools/promotion_unit_tests/test_bundle_snapshot.py::test_bundle_refuses_hidden_output_beyond_forged_member_size[0]",
+        "tools/promotion_unit_tests/test_bundle_snapshot.py::test_bundle_refuses_hidden_output_beyond_forged_member_size[8]",
+        "tools/promotion_unit_tests/test_bundle_snapshot.py::test_bundle_bounds_actual_directory_before_zipfile_indexing",
+        "tools/promotion_unit_tests/test_bundle_snapshot.py::test_bundle_maps_malformed_utf8_names_to_wheel_error",
         "tools/promotion_unit_tests/test_wheel_acquisition_budget.py::test_worker_policy_keeps_serial_and_bounded_parallel_selection[1]",
         "tools/promotion_unit_tests/test_wheel_acquisition_budget.py::test_worker_policy_keeps_serial_and_bounded_parallel_selection[4]",
         "tools/promotion_unit_tests/test_wheel_acquisition_budget.py::test_worker_policy_keeps_serial_and_bounded_parallel_selection[8]",
@@ -2558,7 +2562,7 @@
         "tools/promotion_unit_tests/test_owned_workspace.py::test_bridge_receiving_result_is_usable_while_linkage_is_pending_but_not_unknown_creation"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_bundle_snapshot.py": "881bc2efde36f0c8003d63038e02c5482b502ce7b53a6233313993e3b2590a82",
+        "tools/promotion_unit_tests/test_bundle_snapshot.py": "4122e4030eb49d3748acc70ae4360c597f273a224a2d257c8e7fd2825b3c48da",
         "tools/promotion_unit_tests/test_wheel_acquisition_budget.py": "3b84b0f4dde389f1a31c1b8d684576a29fb62e53b9696064749cf20c37ca0cf6",
         "tools/promotion_unit_tests/test_artifact_license_notices.py": "65956a73f5582f8c82876a7cf7b833d9f70f70789e72b78fb1de3476c830f76e",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_clock.py": "6036e8400b8250d7c745907025dd48a99a2441e07e9ffebb8ee0f751c6a2c43c",
@@ -2631,7 +2635,7 @@
         "libs/installer-engine/installer_packaging_seed.py": "1cdca7036d87411d2e30428d717b85dde62c265f69c24989a1a7b8e868266b74",
         "libs/installer-engine/installer_wheel_acquisition.py": "7292db0e5d4331448e3ab94f80b7a5844813673be5cfea4e04a694f0d5ec7337",
         "libs/installer-engine/installer_wheel_inputs.py": "9bed756f0f00f61dce1d8745800c67eb79c49fcdf81e28cb7150b00200fd3070",
-        "libs/installer-engine/installer_wheel_snapshot.py": "944e54d50fca71344a2bd05b0bf33901407e67ac54b386bf8f29355d1e416373",
+        "libs/installer-engine/installer_wheel_snapshot.py": "09b32e399e65611b977baa4c97451d8f8a49e72ef843c9ed206b3b5a4ad510db",
         "libs/lazy-cli-dispatch/src/lazy_cli_dispatch/__init__.py": "3730c088eec04121051bdc6780ad833f5ca32d8142e1593d25e78f4028bf76d6",
         "libs/lazy-cli-dispatch/tests/test_dispatch.py": "d8e724cd6ff798e1c4b47b02e94953eb2e21480e1308c9fa63e7321f066d5416",
         "libs/peer-launch/peer_launch.py": "863a8edc20690b981fcd1d75fd60fb2916122a4e2da231fda54f8d7608e25ac5",

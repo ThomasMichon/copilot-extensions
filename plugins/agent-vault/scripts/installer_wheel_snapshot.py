@@ -16,7 +16,8 @@ import zipfile
 import zlib
 
 from installer_wheel_inputs import (
-    WheelError, _check_deadline, _identity, _ordinary, _unsafe_windows_component,
+    WheelError, WheelLimits, _check_deadline, _identity, _member_chunks, _ordinary,
+    _unsafe_windows_component, preflight_archive,
 )
 
 
@@ -97,6 +98,13 @@ def open_wheel_bundle_snapshot(
             if _digest(stream, max_bundle_bytes, deadline) != (bundle_sha256, before.st_size):
                 raise WheelError("wheel bundle digest or size mismatch")
             _unchanged(bundle, before, stream, opened=opened)
+            preflight_archive(
+                stream, limits=WheelLimits(
+                    max_archive_bytes=max_bundle_bytes, max_expanded_bytes=max_total_bytes,
+                    max_member_bytes=max_archive_bytes, max_metadata_bytes=max_bundle_bytes,
+                    max_members=max_wheels, max_tags=1, max_metadata_member_bytes=max_bundle_bytes,
+                ), deadline=deadline,
+            )
             with zipfile.ZipFile(stream) as archive:
                 members = archive.infolist()
                 if (
@@ -123,13 +131,19 @@ def open_wheel_bundle_snapshot(
                     _check_deadline(deadline)
                     name = member.filename.removeprefix("wheels/")
                     destination = directory / name
-                    with archive.open(member) as incoming, destination.open("xb") as output:
-                        observed = _digest(incoming, member.file_size, deadline, output)
-                    if observed != (hashes[name], member.file_size):
+                    digest, size = hashlib.sha256(), 0
+                    with destination.open("xb") as output:
+                        for chunk in _member_chunks(
+                            stream, archive, member, limit=member.file_size, deadline=deadline,
+                        ):
+                            digest.update(chunk)
+                            size += len(chunk)
+                            output.write(chunk)
+                    if ("sha256:" + digest.hexdigest(), size) != (hashes[name], member.file_size):
                         raise WheelError("wheel bundle member digest or size mismatch")
                     paths[name] = destination
             _unchanged(bundle, before, stream, opened=opened)
-    except (zipfile.BadZipFile, zlib.error, EOFError, NotImplementedError) as error:
+    except (zipfile.BadZipFile, zlib.error, EOFError, NotImplementedError, UnicodeError) as error:
         raise WheelError("wheel bundle archive is invalid") from error
     with open_wheel_snapshot(
         root, paths, hashes, max_wheels=max_wheels, max_archive_bytes=max_archive_bytes,
