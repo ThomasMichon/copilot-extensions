@@ -197,6 +197,42 @@ def test_new_and_deleted_buckets_leave_explicit_empty_slice_coverage(corpus):
     assert refresh_clusters(initialize_source_store(config), config)["maintenance_skipped"] == 1
 
 
+@pytest.mark.parametrize("deleted", [False, True], ids=["unembedded-only", "deleted"])
+def test_full_seed_covers_witnessed_zero_buckets_without_later_unrelated_reads(
+    corpus, monkeypatch, deleted,
+):
+    config, store, chunks = corpus
+    empty = [chunk("empty:items", f"{index}.md") for index in range(3)]
+    store.upsert_content(empty)
+    if deleted:
+        for row in empty:
+            store.delete_by_file(row.source, row.file_path)
+    for _ in range(2):
+        assert refresh_clusters(store, config, force=True)["items"] == 4
+        manifest = ClusterStore(config.clusters_db).slice_manifest()
+        assert dict(manifest.bucket_items)["empty:items"] == 0
+        assert {entry.model_id for entry in manifest.slices if entry.bucket == "empty:items"} == {"a", "b"}
+    prepare(store, 7)
+    fresh = initialize_source_store(config)
+    fresh.upsert_vectors("a", [chunks[0]], np.array([[0, 1]], np.float32))
+    prepare_chunk_id_index(fresh.get_vector_table("a"), max_rows=1)
+    iterate = fresh.iter_bucket_item_representations
+    calls = []
+
+    def bounded(bucket, **kwargs):
+        assert bucket == "forge:issues" and kwargs["model_ids"] == ("a",)
+        calls.append(bucket)
+        yield from iterate(bucket, **kwargs)
+
+    monkeypatch.setattr(fresh, "iter_bucket_item_representations", bounded)
+    monkeypatch.setattr(fresh, "iter_item_representations", forbidden)
+    monkeypatch.setattr(fresh.get_vector_table("b"), "get_vectors", forbidden)
+    result = refresh_clusters(fresh, config)
+    assert result["slices_refreshed"] == result["buckets_refreshed"] == 1
+    assert result["items"] == 4 and calls == ["forge:issues"]
+    assert dict(ClusterStore(config.clusters_db).slice_manifest().bucket_items)["empty:items"] == 0
+
+
 @pytest.mark.parametrize("cause", ["policy", "coarse", "roster", "missing", "corrupt", "raw"])
 def test_unqualified_invalidation_refuses_without_full_enumeration_or_publication(
     corpus, monkeypatch, cause,

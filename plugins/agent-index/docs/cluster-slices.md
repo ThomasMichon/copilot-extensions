@@ -21,6 +21,9 @@ force=True)`. That request performs the existing complete pass, without the
 ordinary bucket-row budget, then publishes global and slice coverage together.
 It does not initialize a legacy domain or repair invalid source receipts.
 It refuses an unrepresentable manifest rather than publishing partial coverage.
+The seed includes zero-count slices for witnessed sparse buckets without eligible
+centroids, including unembedded-only and deleted buckets. Later unrelated
+updates do not rediscover those unchanged buckets as new input.
 
 Before an ordinary update, explicitly prepare the canonical source B-tree and
 the selected vector tables' chunk-ID indices using the

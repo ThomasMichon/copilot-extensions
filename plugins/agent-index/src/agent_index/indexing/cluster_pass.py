@@ -85,10 +85,13 @@ def run_clustering_pass(
         if cluster_slice_inputs(multi_store, config) != slice_inputs:
             raise RuntimeError("Projection changed during clustering; slice coverage was not published")
         cluster_counts = Counter((cluster.bucket, cluster.model_id) for cluster in all_clusters)
+        seeded_items = {
+            bucket: bucket_items.get(bucket, 0) for bucket in set(bucket_items) | slice_inputs.buckets
+        }
         manifest = slice_manifest(slice_inputs, {
             (bucket, model): (len(slices.get((bucket, model), ())), cluster_counts[(bucket, model)])
-            for bucket in bucket_items for model in slice_inputs.models
-        }, dict(bucket_items))
+            for bucket in seeded_items for model in slice_inputs.models
+        }, seeded_items)
         if manifest.coverage != coverage:
             raise ValueError("Full cluster coverage does not match the slice seed")
     if manifest is None:
