@@ -314,7 +314,10 @@ jobs:
             "UV_PYTHON=$REMOVAL_PYTHON" \
             "UV_CACHE_DIR=$REMOVAL_HOME/.cache/uv" \
             "UV_PYTHON_INSTALL_DIR=$REMOVAL_HOME/.cache/python" \
-            /bin/bash -c 'cd "$1" && exec "$2" -B tools/run-plugin-tests.py agent-worktrees \
+            /bin/bash -c 'cd "$1" &&
+            printf "Native qualification controller pid=%s; sampler_setuid=" "$$" &&
+            if [[ -u "$(command -v ps)" ]]; then printf "1\n"; else printf "0\n"; fi &&
+            exec "$2" -B tools/run-plugin-tests.py agent-worktrees \
             --test-file tests/test_native_uninstall_footprint.py \
             --test-file tests/test_uninstall_project_commands.py' \
             bash "$REMOVAL_SOURCE" "$REMOVAL_PYTHON"

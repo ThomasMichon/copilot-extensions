@@ -642,6 +642,9 @@ def test_bsd_diagnostics_do_not_decode_unverified_record(kernel, mode):
     assert evidence["bsd3_valid"] == evidence["bsd13_valid"] == 0
     assert "bsd3_uid" not in evidence
     assert "bsd13_uid" not in evidence
+    assert "bsd13_ppid" not in evidence
+    assert "bsd13_pgid" not in evidence
+    assert "bsd13_comm_is_ps" not in evidence
 
 
 def test_bsd_diagnostics_preserve_uid_transition_without_names_or_argv(kernel):
@@ -657,6 +660,63 @@ def test_bsd_diagnostics_preserve_uid_transition_without_names_or_argv(kernel):
     assert all(type(value) is int for value in evidence.values())
     assert "PRIVATE_NAME" not in json.dumps(evidence)
     assert kernel.info_calls == {}
+    assert kernel.path_calls == 0
+
+
+@pytest.mark.parametrize("comm,expected", [
+    (b"ps", 1), (b"", 0), (b"psx", 0), (b"xps", 0), (b"PS", 0),
+    (b"ps -eo", 0), (b"PRIVATE_NAME", 0), (b"\xff", 0),
+])
+def test_bsd13_sampler_metadata_is_exact_numeric_and_privacy_allowlisted(kernel, comm, expected):
+    native = darwin._Native()
+    def credentials(pid, flavor, data):
+        data.ppid = 12345
+        data.pgid = 23456
+        data.comm = comm
+    kernel.bsd_hook = credentials
+    evidence = darwin._failure_evidence(native, 90001)
+    assert evidence["bsd13_ppid"] == 12345
+    assert evidence["bsd13_pgid"] == 23456
+    assert evidence["bsd13_comm_is_ps"] == expected
+    permitted = {"census_uid", "caller_ruid", "caller_uid"}
+    for prefix in ("uid_inventory", "ruid_inventory"):
+        permitted.update(prefix + "_" + key for key in ("member", "self", "errno"))
+    for prefix in ("bsd3", "bsd13"):
+        permitted.update(prefix + "_" + key for key in (
+            "bytes", "errno", "valid", "uid", "ruid", "svuid", "flags", "status",
+        ))
+    permitted.update({"bsd13_ppid", "bsd13_pgid", "bsd13_comm_is_ps"})
+    assert set(evidence) == permitted
+    assert all(type(value) is int for value in evidence.values())
+    assert "PRIVATE_NAME" not in json.dumps(evidence)
+    assert "bsd3_ppid" not in evidence
+
+
+def test_privileged_ps_metadata_does_not_change_guard_or_failure_phase(kernel):
+    target = 90001
+    native = darwin._Native()
+    def denied(pid, call, data):
+        ctypes.set_errno(errno.EPERM)
+        return 0
+    def credentials(pid, flavor, data):
+        data.uid, data.ruid, data.svuid = 0, 1000, 0
+        data.ppid, data.pgid = 12345, 23456
+        data.comm = b"ps"
+    kernel.info_hook = denied
+    kernel.bsd_hook = credentials
+    with pytest.raises(darwin._ReadRefused) as caught:
+        darwin._row(native, target)
+    error = caught.value
+    assert error.pid == target
+    assert error.phase == "identity-before"
+    assert error.native_errno == errno.EPERM
+    assert "phase=identity-before " in str(error)
+    assert error.evidence["bsd13_uid"] == error.evidence["bsd13_svuid"] == 0
+    assert error.evidence["bsd13_ruid"] == 1000
+    assert error.evidence["bsd13_comm_is_ps"] == 1
+    assert error.evidence["bsd13_ppid"] == 12345
+    assert error.evidence["bsd13_pgid"] == 23456
+    assert kernel.info_calls[target] == 2
     assert kernel.path_calls == 0
 
 

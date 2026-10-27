@@ -425,7 +425,7 @@ def test_native_uninstall_refuses_before_mutation(native_install, shell, obstacl
         if child is not None:
             assert child.poll() is None
             _skip_unrelated_module_consumer(result, snapshot, durable, child)
-            assert f"pid={child.pid}" in result.stdout + result.stderr
+            assert f"pid={child.pid}" in result.stdout + result.stderr, result.stdout + result.stderr
     finally:
         if child is not None:
             child.communicate(input=b"", timeout=10)

@@ -281,6 +281,10 @@ def _failure_evidence(native: _Native, pid: int) -> dict[str, int]:
         if valid:
             for name in ("uid", "ruid", "svuid", "flags", "status"):
                 evidence[prefix + "_" + name] = int(getattr(data, name))
+            if flavor == 13:
+                evidence["bsd13_ppid"] = int(data.ppid)
+                evidence["bsd13_pgid"] = int(data.pgid)
+                evidence["bsd13_comm_is_ps"] = int(bytes(data.comm) == b"ps")
     return evidence
 
 
