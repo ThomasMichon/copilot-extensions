@@ -1,0 +1,9 @@
+{
+  "comment": "Add confirmed exact-attempt cancellation for durably unpublished local PR reservations without weakening finalization gates",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

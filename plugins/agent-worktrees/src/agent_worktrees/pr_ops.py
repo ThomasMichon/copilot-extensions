@@ -17,7 +17,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from . import claim_history, config as cfg
-from . import git_ops, hooks, obligations, output, pr_authority, pr_publication_checks, pr_publication_state, pr_publish, publication_deadline, push_diagnostics, tracking
+from . import git_ops, hooks, obligations, output, pr_authority, pr_creation_state, pr_publication_checks, pr_publication_state, pr_publish, publication_deadline, push_diagnostics, tracking
 from .config import Config, SourceAttribution
 from .pr_patch_ids import (
     _commit_patch_ids as _commit_patch_ids,
@@ -804,6 +804,7 @@ def create_pr(
                 ),
             )
             record.prs.append(target_pr)
+            pr_creation_state.reserve(record, target_pr, publish_remote, prcfg)
         tracking.save_record(record)
 
     # `eff_title` and the persisted record title were normalized together above.
@@ -886,6 +887,7 @@ def create_pr(
     if reusing and not lease_expect and provisional is None:
         return {**base, "error": push_diagnostics.missing_expected_sha_error(
             feature_branch=feature_branch, retry_command="agent-worktrees create-pr")}
+    pr_creation_state.start_publication(record, target_pr)
     expected_publication = replace(target_pr) if target_pr is not None else None
     push_lease = provisional if provisional is not None else (lease_expect or None)
 
@@ -2157,7 +2159,8 @@ def pr_status(worktree_id: str, *, all_prs: bool = False,
         except pr_authority.PublicationAuthorityBusy as exc:
             reconciliation = exc.status_result()
     active = record.active_pr()
-    result = {**base, "has_pr": active is not None, "pr_count": len(record.prs)}
+    result = {**base, "has_pr": active is not None, "pr_count": len(record.prs),
+              "creation_cancellation_contract": pr_creation_state.CONTRACT}
     if active is not None:
         result.update(_pr_to_dict(active))
         rec = _pull_forward_recommendation(record, active, config, live=live)
@@ -2251,6 +2254,7 @@ from .pr_pull_forward import pull_forward_recommendation as _pull_forward_recomm
 
 def _pr_to_dict(pr: PRRecord) -> dict:
     return {
+        "pr_id": pr.pr_id, "pr_revision": pr.pr_revision, "creation": dict(pr.creation),
         "state": pr.state,
         "branch": pr.branch,
         "base_sha": pr.base_sha,
@@ -2318,6 +2322,7 @@ def _push_existing_feature(
     if existing_target is not None and not lease_expect and provisional is None:
         return {**base, "error": push_diagnostics.missing_expected_sha_error(
             feature_branch=feature_branch, retry_command="agent-worktrees create-pr")}
+    pr_creation_state.start_publication(record, target)
     expected_publication = replace(target) if target is not None else None
     with hooks.allow_pr_push():
         pushed = pr_publish.push_checked(
