@@ -249,9 +249,7 @@ def test_finite_phase_kills_a_stalled_child_at_the_ten_second_bound(tmp_path):
     assert not result.stderr
 
 
-@pytest.mark.parametrize("admission", [False, True])
-@pytest.mark.parametrize("absent_end", [False, True])
-def test_real_copied_setup_uses_existing_owner_and_finite_child_boundaries(tmp_path, admission, absent_end):
+def _run_real_copied_setup(tmp_path, *, admission, absent_end=False, explicit_exit=True):
     scripts = tmp_path / "launch-owned"
     scripts.mkdir()
     for name in ("default-setup.ps1", "native-seed-boundary.ps1", "reconcile-machine-settings.ps1"):
@@ -284,7 +282,7 @@ def test_real_copied_setup_uses_existing_owner_and_finite_child_boundaries(tmp_p
     backend.write_text(
         "$reply=@{args=@($args); pid=$PID; owner=[int]$env:FIXTURE_SETUP_PID} | ConvertTo-Json -Compress\n"
         f"[IO.File]::WriteAllText({_literal(captured)}, $reply)\n"
-        "Write-Output 'backend-returned'\nexit 7\n",
+        "Write-Output 'backend-returned'\n" + ("exit 7\n" if explicit_exit else ""),
         encoding="utf-8",
     )
     argv = ["", "single ' quote", 'double " quote', "; $literal", "\u03a9", "2026-01-01T00:00:00Z", "--", "--allow-all"]
@@ -305,7 +303,8 @@ def test_real_copied_setup_uses_existing_owner_and_finite_child_boundaries(tmp_p
         [shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-File", str(driver)],
         timeout=30, max_stdout_bytes=1024 * 1024, max_stderr_bytes=1024 * 1024, cwd=tmp_path,
     )
-    assert result.returncode == 7, result.stdout + result.stderr
+    expected_exit = 7 if explicit_exit else 0
+    assert result.returncode == expected_exit, result.stdout + result.stderr
     assert result.stdout.splitlines()[-1] == "backend-returned"
     backend_reply = json.loads(captured.read_text(encoding="utf-8"))
     assert backend_reply["args"] == argv
@@ -320,5 +319,15 @@ def test_real_copied_setup_uses_existing_owner_and_finite_child_boundaries(tmp_p
         child_return, setup_return = events[-2:]
         assert child_return[child_return.index("--operation-id") + 1] == "d" * 32
         assert setup_return[setup_return.index("--operation-id") + 1] == "c" * 32
-    assert events[-1][events[-1].index("--exit-code") + 1] == "7"
+    assert events[-1][events[-1].index("--exit-code") + 1] == str(expected_exit)
     assert not result.stderr
+
+
+@pytest.mark.parametrize("admission", [False, True])
+@pytest.mark.parametrize("absent_end", [False, True])
+def test_real_copied_setup_uses_existing_owner_and_finite_child_boundaries(tmp_path, admission, absent_end):
+    _run_real_copied_setup(tmp_path, admission=admission, absent_end=absent_end)
+
+
+def test_real_copied_setup_records_normal_script_return_without_explicit_exit(tmp_path):
+    _run_real_copied_setup(tmp_path, admission=True, explicit_exit=False)

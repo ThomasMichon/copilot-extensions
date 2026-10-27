@@ -477,6 +477,7 @@ try {
     }
 }
 
+if ($null -eq $copilotExitCode) { $copilotExitCode = 0 }
 $nativeSetupExit = $copilotExitCode
 exit $copilotExitCode
 } finally {
