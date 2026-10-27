@@ -5,7 +5,7 @@
 # rationale; this file must stay behaviorally equivalent.
 #
 # State lives in ONE shared, cross-plugin file:
-#   $HOME/.copilot-extensions/bootstrap-killswitch.json
+#   $HOME/.copilot-extensions/killSwitches/bootstrap-killswitch.json
 #   {"active": true, "reason": "...", "set_by": "...", "set_at": "..."}
 #
 # Primary usage -- from the FIRST lines of any bootstrap-check.ps1:
@@ -41,14 +41,21 @@ param(
 $ErrorActionPreference = "Stop"
 
 $StateFile = $env:BOOTSTRAP_KILLSWITCH_STATE_FILE
+$LegacyStateFile = $null
 if (-not $StateFile) {
-  $StateFile = Join-Path $HOME ".copilot-extensions\bootstrap-killswitch.json"
+  $StateFile = Join-Path $HOME ".copilot-extensions\killSwitches\bootstrap-killswitch.json"
+  $LegacyStateFile = Join-Path $HOME ".copilot-extensions\bootstrap-killswitch.json"
+}
+$ReadStateFile = $StateFile
+if ($LegacyStateFile -and -not (Test-Path -LiteralPath $StateFile) -and
+    (Test-Path -LiteralPath $LegacyStateFile)) {
+  $ReadStateFile = $LegacyStateFile
 }
 
 function Read-KillswitchState {
-  if (-not (Test-Path -LiteralPath $StateFile)) { return $null }
+  if (-not (Test-Path -LiteralPath $ReadStateFile)) { return $null }
   try {
-    return (Get-Content -LiteralPath $StateFile -Raw | ConvertFrom-Json)
+    return (Get-Content -LiteralPath $ReadStateFile -Raw | ConvertFrom-Json)
   } catch {
     return $null
   }
@@ -139,8 +146,8 @@ switch ($Command) {
     exit 1
   }
   "status" {
-    if (Test-Path -LiteralPath $StateFile) {
-      Get-Content -LiteralPath $StateFile -Raw
+    if (Test-Path -LiteralPath $ReadStateFile) {
+      Get-Content -LiteralPath $ReadStateFile -Raw
     } else {
       Write-Output '{"active": false}'
     }
@@ -176,7 +183,9 @@ switch ($Command) {
     Write-Output "Reset with: agent-machines bootstrap-killswitch off"
   }
   "off" {
-    if (Test-Path -LiteralPath $StateFile) { Remove-Item -LiteralPath $StateFile -Force }
+    foreach ($path in @($StateFile, $LegacyStateFile)) {
+      if ($path -and (Test-Path -LiteralPath $path)) { Remove-Item -LiteralPath $path -Force }
+    }
     Write-Output "[bootstrap-killswitch] cleared. Plugins resume normal sessionStart reconcile."
   }
   default {

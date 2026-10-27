@@ -34,7 +34,6 @@ _SESSION_GUIDANCE_MAX_BYTES = 4 * 1024
 _COMMAND_CATALOG_HEADING = "## agent-worktrees session command catalog"
 _GUIDANCE_HEADER = "# Agent Worktrees session guidance\n\n"
 
-
 def _read_json(path: Path) -> dict | None:
     try:
         value = json.loads(path.read_text("utf-8"))
@@ -174,7 +173,6 @@ def _request(kind: str, payload: dict, home: Path) -> dict | None:
         return lifecycle.unavailable(kind) if source_aware or kind == "sessionEnd" else None
     result = value.get("result")
     return result if isinstance(result, dict) else {}
-
 
 def _plugin_version() -> str:
     try:
@@ -526,8 +524,10 @@ def _bootstrap_first_install(payload: dict) -> dict:
         if shell and installer.is_file() and binding.is_file():
             state_path = Path(
                 os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE")
-                or Path.home() / ".copilot-extensions" / "bootstrap-killswitch.json"
+                or Path.home() / ".copilot-extensions" / "killSwitches" / "bootstrap-killswitch.json"
             )
+            if not os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE") and not state_path.exists():
+                state_path = Path.home() / ".copilot-extensions" / "bootstrap-killswitch.json"
             try:
                 state = json.loads(state_path.read_text(encoding="utf-8-sig"))
             except (OSError, UnicodeError, ValueError):
@@ -577,21 +577,10 @@ def _bootstrap_first_install(payload: dict) -> dict:
                 f"[agent-worktrees] Bootstrap stamp failed (exit {completed.returncode}).\n"
             )
         return {"_stderr": diagnostic} if diagnostic else {}
-    result: dict = {}
-    stdout = (completed.stdout or "").strip()
-    if stdout:
-        try:
-            value = json.loads(stdout)
-        except (TypeError, ValueError):
-            result["additionalContext"] = stdout
-        else:
-            if isinstance(value, dict):
-                result.update(value)
-            else:
-                result["additionalContext"] = stdout
-    if completed.stderr:
-        result["_stderr"] = completed.stderr
-    return result
+    helper = _load_sibling("hook_lifecycle_runtime.py")
+    if helper is None:
+        return {"_stderr": "[agent-worktrees] Bootstrap result helper unavailable.\n"}
+    return helper.bootstrap_result(completed)
 
 
 def _fallback_legacy_session_start(payload: dict, *, skip_reconcile: bool = False) -> dict:
@@ -933,6 +922,11 @@ def decide(kind: str, payload: dict, *, home: Path | None = None) -> dict:
         payload = _enrich_session_payload(payload)
     if kind == "sessionEnd" and not isinstance(payload.get("_agentWorktrees"), dict):
         payload = _enrich_session_end_payload(payload)
+    if kind == "preToolUse" and (payload.get("toolName") or payload.get("tool_name")) in ("view", "rg", "glob", "bash", "sh", "shell", "powershell", "pwsh", "cmd", "run", "run_command", "execute", "exec", "terminal"):
+        helper = _load_sibling("hook_pre_relevance.py")
+        irrelevant = getattr(helper, "is_irrelevant", None)
+        if callable(irrelevant) and irrelevant(payload, contextual, _load_sibling):
+            return {}
     remote = _request(kind, payload, home)
     if remote is not None:
         return remote
@@ -954,6 +948,12 @@ def main(argv: list[str] | None = None) -> int:
     kind = argv[0] if argv else ""
     if kind not in {"preToolUse", "postToolUse", "sessionStart", "sessionEnd"}:
         return 0
+    if kind == "preToolUse":
+        switch = _load_sibling("pretool_killswitch.py")
+        if switch is None:
+            print("[pretool-killswitch] helper unavailable; guards remain enabled", file=sys.stderr)
+        elif switch.is_active():
+            return 0
     try:
         raw = sys.stdin.read()
         payload = json.loads(raw) if raw.strip() else {}

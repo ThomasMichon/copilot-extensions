@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 
 import pytest
@@ -21,8 +22,16 @@ def fake_repo(tmp_path, monkeypatch):
     canonical_dir.mkdir(parents=True)
     (canonical_dir / "bootstrap-killswitch-guard.sh").write_text("canonical sh\n", encoding="utf-8")
     (canonical_dir / "bootstrap-killswitch-guard.ps1").write_text("canonical ps1\n", encoding="utf-8")
+    (canonical_dir / "pretool_killswitch.py").write_text("canonical pretool\n", encoding="utf-8")
+    for entry, marker in (
+        ("plugins/agent-worktrees/scripts/hook_client.py", "switch.is_active()"),
+        ("plugins/copilot-extensions-harness/scripts/copilot-mention-guard.py", "switch.is_active()"),
+        ("plugins/agent-machines/src/agent_machines/__main__.py", "pretool_killswitch.register_parser(sub)"),
+    ):
+        target = tmp_path / entry
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(marker, encoding="utf-8")
     plugins_dir = tmp_path / "plugins"
-    plugins_dir.mkdir()
     monkeypatch.setattr(sync_bootstrap_killswitch, "REPO", tmp_path)
     monkeypatch.setattr(sync_bootstrap_killswitch, "CANONICAL_DIR", canonical_dir)
     monkeypatch.setattr(sync_bootstrap_killswitch, "PLUGINS_DIR", plugins_dir)
@@ -66,6 +75,7 @@ def test_sync_writes_both_guard_files_for_each_adopter(fake_repo):
     assert (scripts / "bootstrap-killswitch-guard.ps1").read_text() == "canonical ps1\n"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows does not expose POSIX executable mode bits")
 def test_sh_guard_is_made_executable(fake_repo):
     scripts = _mk_adopter(fake_repo, "agent-example")
     sync_bootstrap_killswitch.main([])
@@ -151,3 +161,31 @@ def test_main_fails_when_canonical_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(sync_bootstrap_killswitch, "CANONICAL_DIR", tmp_path / "libs" / "bootstrap-killswitch")
     monkeypatch.setattr(sync_bootstrap_killswitch, "PLUGINS_DIR", plugins_dir)
     assert sync_bootstrap_killswitch.main([]) == 1
+
+
+@pytest.mark.parametrize("target", [
+    "plugins/agent-worktrees/scripts/pretool_killswitch.py",
+    "plugins/copilot-extensions-harness/scripts/pretool_killswitch.py",
+    "plugins/agent-machines/src/agent_machines/pretool_killswitch.py",
+])
+def test_pretool_helper_copies_are_checked_for_drift(fake_repo, capsys, target):
+    _mk_adopter(fake_repo, "agent-example")
+    assert sync_bootstrap_killswitch.main([]) == 0
+    path = fake_repo / target
+    assert path.read_text() == "canonical pretool\n"
+    path.write_text("drift", encoding="utf-8")
+    assert sync_bootstrap_killswitch.main(["--check"]) == 1
+    assert target in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("entry", [
+    "plugins/agent-worktrees/scripts/hook_client.py",
+    "plugins/copilot-extensions-harness/scripts/copilot-mention-guard.py",
+    "plugins/agent-machines/src/agent_machines/__main__.py",
+])
+def test_pretool_control_must_be_wired_not_merely_copied(fake_repo, capsys, entry):
+    _mk_adopter(fake_repo, "agent-example")
+    assert sync_bootstrap_killswitch.main([]) == 0
+    (fake_repo / entry).write_text("no call site", encoding="utf-8")
+    assert sync_bootstrap_killswitch.main(["--check"]) == 1
+    assert entry in capsys.readouterr().err

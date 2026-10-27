@@ -378,11 +378,12 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
     for name in ("resolve-runtime.ps1", "resolve-runtime.sh",
                  "session-conduct.ps1", "session-conduct.sh",
                  "session-machine.ps1", "session-machine.sh",
+                 "bootstrap-killswitch-guard.ps1", "bootstrap-killswitch-guard.sh",
                  "bootstrap-check.ps1", "bootstrap-check.sh",
                  "statelessness_guard.py", "cross_repo_guard.py", "anchor_shell_parser.py",
                  "anchor_write_guard.py", "pr_supersede_guard.py", "registry_root.py",
-                 "nudge_status.py", "bind_nudge.py", "hook_runtime.py", "hook_lifecycle_runtime.py",
-                 "native_source_context.py", "hook_client.py",
+                 "nudge_status.py", "bind_nudge.py", "hook_runtime.py", "hook_pre_relevance.py", "hook_lifecycle_runtime.py",
+                 "native_source_context.py", "pretool_killswitch.py", "hook_client.py",
                  "post-tool-hook.ps1", "terminal_probe.py"):
         src = scripts / name
         if name == "native_source_context.py":

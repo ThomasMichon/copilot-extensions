@@ -34,7 +34,20 @@ def _state_file() -> Path:
     override = os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE")
     if override:
         return Path(override).expanduser()
+    return Path.home() / ".copilot-extensions" / "killSwitches" / "bootstrap-killswitch.json"
+
+
+def _legacy_state_file() -> Path:
     return Path.home() / ".copilot-extensions" / "bootstrap-killswitch.json"
+
+
+def _read_state_file() -> Path:
+    path = _state_file()
+    if not os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE") and not path.exists():
+        legacy = _legacy_state_file()
+        if legacy.exists():
+            return legacy
+    return path
 
 
 def _live_reconciling_plugins() -> list[str]:
@@ -93,7 +106,7 @@ def _read_state(path: Path) -> tuple[dict, str | None]:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    path = _state_file()
+    path = _read_state_file()
     state, error = _read_state(path)
     if getattr(args, "json", False):
         payload = {"path": str(path), **state}
@@ -164,9 +177,12 @@ def cmd_on(args: argparse.Namespace) -> int:
 
 def cmd_off(args: argparse.Namespace) -> int:
     path = _state_file()
-    existed = path.exists()
-    if existed:
-        path.unlink()
+    paths = [path]
+    if not os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE"):
+        paths.append(_legacy_state_file())
+    existed = any(candidate.exists() for candidate in paths)
+    for candidate in paths:
+        candidate.unlink(missing_ok=True)
     if getattr(args, "json", False):
         print(json.dumps({"ok": True, "cleared": existed, "path": str(path)}, indent=2))
         return 0

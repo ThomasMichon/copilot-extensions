@@ -2052,6 +2052,8 @@ def test_session_start_catalog_exists_before_lifecycle_decision(
 def test_first_install_preserves_bootstrap_output(monkeypatch, tmp_path):
     scripts = tmp_path / "scripts"
     scripts.mkdir()
+    shutil.copyfile(_SCRIPT.with_name("hook_lifecycle_runtime.py"),
+                    scripts / "hook_lifecycle_runtime.py")
     for name in ("bootstrap-check.ps1", "bootstrap-check.sh"):
         (scripts / name).touch()
     monkeypatch.setattr(hook_client, "__file__", str(scripts / "hook_client.py"))
@@ -2080,6 +2082,8 @@ def test_first_install_preserves_bootstrap_output(monkeypatch, tmp_path):
 def test_first_install_preserves_non_object_json_output(monkeypatch, tmp_path):
     scripts = tmp_path / "scripts"
     scripts.mkdir()
+    shutil.copyfile(_SCRIPT.with_name("hook_lifecycle_runtime.py"),
+                    scripts / "hook_lifecycle_runtime.py")
     for name in ("bootstrap-check.ps1", "bootstrap-check.sh"):
         (scripts / name).touch()
     monkeypatch.setattr(hook_client, "__file__", str(scripts / "hook_client.py"))

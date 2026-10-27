@@ -11,14 +11,14 @@ import versioned_runtime as runtime
 
 HOOKS = (
     "session-conduct.ps1", "session-conduct.sh", "session-machine.ps1", "session-machine.sh",
-    "bootstrap-check.ps1", "bootstrap-check.sh", "bootstrap-killswitch-guard.ps1",
-    "bootstrap-killswitch-guard.sh", "project-hooks.ps1", "project-hooks.sh",
+    "bootstrap-killswitch-guard.ps1", "bootstrap-killswitch-guard.sh",
+    "bootstrap-check.ps1", "bootstrap-check.sh", "project-hooks.ps1", "project-hooks.sh",
     "register-nudge.ps1", "register-nudge.sh", "register-session.ps1", "register-session.sh",
     "deregister-session.ps1", "deregister-session.sh", "anchor-hygiene-check.ps1",
     "anchor-hygiene-check.sh", "provision-check.ps1", "provision-check.sh", "statelessness_guard.py",
     "cross_repo_guard.py", "anchor_shell_parser.py", "anchor_write_guard.py", "pr_supersede_guard.py",
-    "registry_root.py", "nudge_status.py", "bind_nudge.py", "hook_runtime.py",
-    "hook_lifecycle_runtime.py", "native_source_context.py", "hook_client.py",
+    "registry_root.py", "nudge_status.py", "bind_nudge.py", "hook_runtime.py", "hook_pre_relevance.py",
+    "hook_lifecycle_runtime.py", "native_source_context.py", "pretool_killswitch.py", "hook_client.py",
     "post-tool-hook.ps1", "terminal_probe.py", "bind-nudge.sh", "bind-nudge.ps1",
 )
 SETUP = (

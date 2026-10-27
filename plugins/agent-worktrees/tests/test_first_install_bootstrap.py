@@ -453,7 +453,7 @@ def test_context_install_revalidates_generations_before_cutover() -> None:
         "runtime.activate(root, version"
     )
     assert ps1.index("Set-Location -LiteralPath $env:USERPROFILE") < ps1.index(
-        "$validatedJson = & $contextHelper"
+        "$validatedJson = Invoke-InstallerContextQuery"
     )
     assert sh.index('cd "$HOME"') < sh.index("__aw_validated_context=")
 

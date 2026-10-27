@@ -26,6 +26,7 @@ the topic (this very module and its docs are exempt for that reason).
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
@@ -577,6 +578,21 @@ def command_publishes_copilot_mention(
 
 
 def main() -> int:
+    spec = importlib.util.spec_from_file_location(
+        "pretool_killswitch", Path(__file__).with_name("pretool_killswitch.py"),
+    )
+    if spec is None or spec.loader is None:
+        print("[pretool-killswitch] helper unavailable; guard remains enabled", file=sys.stderr)
+    else:
+        switch = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(switch)
+        except (OSError, ImportError) as exc:
+            print(f"[pretool-killswitch] helper unavailable; guard remains enabled: {exc}",
+                  file=sys.stderr)
+        else:
+            if switch.is_active():
+                return 0
     deadline = time.monotonic() + DECISION_BUDGET_SECONDS
     try:
         data = json.load(sys.stdin)
