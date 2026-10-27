@@ -144,7 +144,9 @@ class KomodoNative:
         self.verify_host(declaration, material, deadline=deadline)
         version = self._call(material, ["compose", "version", "--short"], deadline=deadline).strip()
         if not (re.fullmatch(r"v?2\.[0-9]+\.[0-9]+(?:[-+][a-zA-Z0-9.-]+)?", version)
-                or re.fullmatch(r"v?5\.[0-9]+\.[0-9]+(?:\+[a-zA-Z0-9.-]+)?", version)):
+                or re.fullmatch(
+                    r"v?5\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+                    r"(?:\+[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*)?", version)):
             raise PlanError("Komodo requires an admitted Compose 2 or stable Compose 5 toolchain")
         return self.selected_images(declaration, material, deadline=deadline)
 

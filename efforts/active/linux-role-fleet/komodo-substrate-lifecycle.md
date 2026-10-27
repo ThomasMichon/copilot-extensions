@@ -200,6 +200,10 @@ a host plugin. Its contained native/owner packet passes 164 cases, including
 every owner scenario with both Compose 2.39.4 and 5.1.4 version responses,
 plus early refusal of unsupported versions. These are native-protocol fixtures,
 not actual Compose or official-image deployment qualification.
+The review correction tightens stable 5.x semantic-version syntax: numeric
+components have no leading zeroes and build identifiers are nonempty.
+All 54 native boundary cases pass after that correction, including the
+malformed examples and valid zero/build-identifier controls.
 Actual installed adopter composition and official-image
 acceptance remain the following delivery gates, not consequences of this merge.
 
