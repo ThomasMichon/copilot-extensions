@@ -139,7 +139,7 @@ After the reviewed proposal, the operator admitted execution:
 
 - [x] Skip identical content/vector upserts; support targeted metadata updates
   and batched stale/deleted chunk cleanup.
-- [ ] Publish a logical mutation result/generation once per committed delta.
+- [x] Publish a logical mutation result/generation once per committed delta.
   Only actual projection changes mark FTS or cluster slices dirty.
 - [x] Preserve the existing incremental FTS path; coalesce work and distinguish
   ordinary updates from first-build/recovery rebuilds.
@@ -148,6 +148,9 @@ After the reviewed proposal, the operator admitted execution:
   claiming every maintenance algorithm can be strictly local.
 - [ ] Coordinate store-reader freshness with #8733 and missing-vector repair
   with #5302; do not invent parallel authorities.
+- [ ] Connect explicitly budgeted point/file-index preparation and bounded
+  upkeep/consolidation to ordinary ingestion. Equal API counts and a prepared
+  fixture do not qualify an unprepared store or an ever-growing unindexed tail.
 
 ### Phase 5 - Consumer integration and qualification
 

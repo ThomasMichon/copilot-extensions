@@ -688,6 +688,11 @@ Source-aware stores use their existing domain receipt and durable index;
 legacy stores use Lance's actual unindexed-row metadata. Unknown coverage keeps
 maintenance due. Explicit full builds still run, and new content versions remain
 eligible for incremental maintenance and the existing failure/retry path.
+The source-aware incremental child updates only the content FTS index through
+the native index-only SDK, appending delta segments without compaction, version
+cleanup or unrelated scalar-index consolidation. Full builds and legacy workers
+retain their existing path. Scalar preparation and amortized consolidation stay
+explicit; FTS freshness does not prove prepared point/file lookup coverage.
 
 Similarity clusters persist their coverage key and result counts in the same
 SQLite transaction as the artifact. The key covers refreshed versions of the

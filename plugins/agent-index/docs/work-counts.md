@@ -109,5 +109,47 @@ tombstones, interrupted embedding/recovery, HTTP retries and scope isolation.
 `tests/test_hinted_crawl.py` checks real hosted identity acquisition and worker
 serialization of the nested counts.
 
+## Prepared native round qualification
+
+The opt-in Linux T3 `tests/test_native_delta_matrix.py` composes the actual
+`run_reindex()` entry point, synthetic delta connector, injected one/two-model
+clients, path-index SQLite and native stores in both layouts. It runs no-op,
+one-item text edit, replay, metadata-only edit, rename, model-profile revision
+gap and tombstone against 100, 10,000 and 100,000 unchanged items. Setup explicitly
+prepares canonical `chunk_id`/`file_path` and model `chunk_id` B-trees; this is
+**not qualification of an unprepared default store or automatic bootstrap**.
+No real provider, engine service or consumer deployment is involved.
+
+Each round compares stage counts across sizes. Native empty-query plans execute
+the actual query objects, and Linux `/proc/self/io` records process read/write
+characters, including cached I/O and waited-for children. Diagnostic plan replay
+is included conservatively in that I/O, not subtracted. These counters are not
+physical disk traffic or CPU bounds. The measured region includes final FTS
+maintenance; setup, reference rebuilds and correctness reads are outside it.
+Changed projections match clean engine reference builds; counts and unchanged
+sentinels retain the base corpus. Native query totals must remain below 64
+scanned rows and 64 read I/O operations per finite round. Process reads may grow
+by at most 2 MiB and writes by at most 512 KiB above the 100-item baseline to
+allow native manifest/index metadata, rather than a corpus-proportional scan.
+
+The initial unprepared-store experiment failed these physical-work budgets even
+though stage counts were equal and projection correctness passed. At 100,000
+unchanged items, a one-item edit read about 40/57 MB in legacy single/two-model
+stores and 84/116 MB in source-aware stores. This remains an open acquisition/
+storage preparation item under the active incremental-indexing effort (#9023).
+An explicit prepared fixture must not silently waive that remaining gate.
+Prepared source-aware FTS refresh also exposed unrelated scalar-index rewrites
+from combined `optimize()`; the incremental child now appends only the FTS delta.
+The native helper regression separately forbids compaction, version cleanup and
+full FTS rebuilding, retains scalar segment/fragment identities and old versions,
+and verifies fresh replacement text and absence of deleted old hits.
+
+The broader acceptance matrix remains open: unprepared-store adoption, bounded
+upkeep/consolidation over many rounds, hosted pagination/body accounting,
+cluster-enabled composition, source/account isolation at scale, interrupted
+native composition, consumer provenance and authorized rollout are separate
+qualification work. The native FTS-only path does not prepare missing scalar
+indices or make an ever-growing unindexed tail bounded.
+
 See [architecture](architecture.md) and the
 [consumer migration recipe](consumer-migration.md).
