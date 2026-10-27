@@ -10,7 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Cached Source Wheel Assembly](active/cached-source-wheel-assembly/README.md) | Draft; measured cache-safe source-assembly proposal before constructor changes | #9290; preserves #8873/#8949 verification, #5851 staging and #6937/#6941 release-lock owners |
+| [Cached Source Wheel Assembly](active/cached-source-wheel-assembly/README.md) | Active; proposal reviewed in #9291, content-bound reuse and native qualification remain | #9290; preserves #8873/#8949 verification, #5851 staging and #6937/#6941 release-lock owners |
 | [Consolidated Core Runtime Bundle](active/runtime-bundle/README.md) | Draft; reviewed composition contract before isolated artifact/CLI proof | Core composition only; reuses #6937/#4876/#6234/#6707 owners, no new authority or rollout |
 | [Leased Daemon Instances](active/leased-daemon-instances/README.md) | Active; original custody source delivered, compiler-free Python amendment reviewed in #9120; replacement open | #8403; preserves identity, leases, descendant settlement and installer owners; no rollout |
 | [Instruction Source Resolution](active/instruction-source-resolution/README.md) | Draft; review the compatibility repair before implementation | #9097; effective enabled-source verification, exact generated output, unchanged trust/maintenance boundaries; no rollout |
