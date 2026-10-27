@@ -171,12 +171,16 @@ class GitRepoConnector:
         token: str | None = None,
         token_provider: TokenProvider | None = None,
         hint_account: str | None = None,
+        hint_credentials_available: bool = True,
     ):
         if hint_account is not None and (
             not isinstance(hint_account, str) or not hint_account.strip()
         ):
             raise ValueError("Git hint account must be an explicit nonempty identity")
+        if type(hint_credentials_available) is not bool:
+            raise ValueError("Git hint credential availability must be explicit")
         self._hint_account = hint_account
+        self._hint_credentials_available = hint_credentials_available
         self._requested_source = source
         self.repo_path = Path(repo_path or os.environ.get("AGENT_INDEX_GIT_REPO") or os.getcwd())
         self.repo_path = self.repo_path.expanduser().resolve()
@@ -263,6 +267,8 @@ class GitRepoConnector:
     def hint_scope(self) -> tuple[str, str]:
         if self._hint_account is None:
             raise ValueError("Git hints require an explicit configured account binding")
+        if not self._hint_credentials_available:
+            raise ValueError("Git hints require resolved configured account credentials")
         return self.source_name, self._hint_account
 
     def discover_hints(

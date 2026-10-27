@@ -297,7 +297,7 @@ def test_account_binding_is_part_of_recovery_identity_but_not_inferred(repo):
 
 
 @pytest.mark.parametrize("token", [None, "explicit-account-token"])
-def test_configured_static_account_binds_only_after_explicit_credential_resolution(
+def test_configured_static_account_identity_survives_credential_resolution_failure(
     repo, monkeypatch, token,
 ):
     monkeypatch.setattr(engine, "_resolve_gh_token", lambda account: token)
@@ -305,7 +305,70 @@ def test_configured_static_account_binds_only_after_explicit_credential_resoluti
         "git:sample", repo_path=str(repo), auth_account="selected", ref="refs/heads/main",
     )
     kwargs = engine._connector_kwargs(spec)
-    assert kwargs.get("hint_account") == ("selected" if token else None)
+    assert kwargs["hint_account"] == "selected"
+    assert kwargs["hint_credentials_available"] is bool(token)
+    source = GitRepoConnector(spec.name, **kwargs, fetch=False)
+    assert source.recovery_identity[-1] == "selected"
+    base = git(repo, "rev-parse", "HEAD")
+    if token:
+        assert require_hint_connector(source, hints((base, base))) == source.discover_hints
+    else:
+        monkeypatch.setattr(source, "_resolve", forbidden)
+        with pytest.raises(ValueError, match="resolved configured account credentials"):
+            require_hint_connector(source, hints((base, base)))
+
+
+def test_token_resolution_failure_replays_pending_hints_and_polls_without_scope_repair(
+    repo, tmp_path, monkeypatch,
+):
+    from agent_index.indexing.crawl import collect_source_changes
+    from agent_index.indexing.pending_crawl import PendingCrawls, recover_source
+
+    spec = engine.SourceSpec(
+        "git:sample", repo_path=str(repo), auth_account="selected", ref="refs/heads/main",
+    )
+    base = git(repo, "rev-parse", "HEAD")
+    (repo / "edit.md").write_text("delivered\n")
+    target = commit(repo)
+    monkeypatch.setattr(engine, "_resolve_gh_token", lambda _: "synthetic-token")
+    first = GitRepoConnector(spec.name, **engine._connector_kwargs(spec), fetch=False)
+    scope = recovery_scope(engine.source_scope_hash(spec), first)
+    state = IndexState(sources={spec.name: SourceState(
+        last_commit=base, acquisition_scope=scope,
+    )})
+    paths = PathIndex(tmp_path / "paths.db")
+    pending = PendingCrawls(paths)
+    hint = collect_source_changes(
+        spec.name, state=state, path_index=paths, full=False, source_aware=False,
+        connector=first, source_scope=engine.source_scope_hash(spec),
+        change_hints=hints((base, target)),
+    )
+    pending.save(hint, scope=scope, full=False)
+    monkeypatch.setattr(engine, "_resolve_gh_token", lambda _: None)
+    fallback = GitRepoConnector(spec.name, **engine._connector_kwargs(spec), fetch=False)
+    assert recovery_scope(engine.source_scope_hash(spec), fallback) == scope
+    assert fallback._token is None
+    seen = []
+
+    def apply(*, manifest, full):
+        assert full is False
+        seen.append(manifest)
+        state.sources[spec.name].last_commit = manifest.commit
+        return (0, 0, 0)
+
+    recover_source(
+        spec.name, scope=scope, state=state, state_file=tmp_path / "state.json",
+        paths=paths, full=False, family=spec.name, apply=apply,
+        acquire=lambda: collect_source_changes(
+            spec.name, state=state, path_index=paths, full=False, source_aware=False,
+            connector=fallback, source_scope=engine.source_scope_hash(spec),
+        ),
+    )
+    assert seen[0] == hint and len(seen) == 2 and seen[1].commit == target
+    assert pending.sources() == []
+    saved = IndexState.load(tmp_path / "state.json")
+    assert saved.sources[spec.name].last_commit == target
+    saved.require_acquisition_scope(spec.name, scope, full=False)
 
 
 @pytest.fixture(params=[False, True], ids=["legacy", "source-aware"])

@@ -685,7 +685,10 @@ External CLI providers do not yet support hinted acquisition.
 Git implements ref-range hints with immutable full hexadecimal commit identities.
 It requires the exact configured source and an explicit nonsecret `hint_account`;
 configured gateway/relay Git credentials carry their existing account binding,
-and static configured accounts bind only after credential resolution succeeds.
+and static configured accounts retain that binding even when token resolution
+temporarily fails. The separate `hint_credentials_available` flag then refuses
+hinted acquisition, while ordinary polling retains its nonfatal credential
+fallback and pending work can replay under the unchanged recovery identity.
 Direct connector users must supply that binding themselves. It is not inferred
 from the remote owner or credential bytes, nor is it a Git protocol principal
 probe. Bound accounts participate in recovery identity. Finish pending work
