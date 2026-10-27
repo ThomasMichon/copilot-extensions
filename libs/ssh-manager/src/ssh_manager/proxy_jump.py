@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from urllib.parse import unquote, urlsplit
@@ -73,6 +74,16 @@ def _override_jump(config: SSHConfig, value: str) -> SSHConfig:
     )
 
 
+def _expand_hostname(value: str, alias: str) -> str:
+    def expand(match: re.Match[str]) -> str:
+        token = match.group(1)
+        if token not in {"h", "%"}:
+            raise ValueError("Unsupported SSH HostName token")
+        return alias if token == "h" else "%"
+
+    return re.sub(r"%(.)|%$", expand, value)
+
+
 def prepare_jump_arguments(
     args: Sequence[str], config: SSHConfig,
 ) -> tuple[tuple[str, ...], SSHConfig]:
@@ -80,12 +91,21 @@ def prepare_jump_arguments(
     prepared = [args[0]]
     jump: str | None = None
     overrides: dict[str, str] = {}
+    destination_seen = False
     index = 1
     while index < len(args):
         argument = args[index]
-        if argument == "--" or not argument.startswith("-") or argument == "-":
+        if argument == "--":
             prepared.extend(args[index:])
             break
+        if not argument.startswith("-") or argument == "-":
+            if destination_seen:
+                prepared.extend(args[index:])
+                break
+            prepared.append(argument)
+            destination_seen = True
+            index += 1
+            continue
         for offset, option in enumerate(argument[1:], 1):
             if option not in "BbcDEeFIiJLlmOopQRSWw":
                 continue
@@ -136,7 +156,10 @@ def prepare_jump_arguments(
             raise ValueError("SSH destination override requires a value")
         config = replace(
             config,
-            hostname=overrides.get("hostname", config.hostname),
+            hostname=(
+                _expand_hostname(overrides["hostname"], config.host_alias)
+                if "hostname" in overrides else config.hostname
+            ),
             user=overrides.get("user", config.user),
             port=port,
             extra_options={

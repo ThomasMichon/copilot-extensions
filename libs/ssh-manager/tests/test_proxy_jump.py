@@ -231,12 +231,14 @@ async def test_windows_consumes_explicit_jump_before_installing_its_proxy(monkey
     monkeypatch.setattr(proxy, "_is_windows", lambda: True)
     monkeypatch.setattr(proxy, "_create_prepared_ssh", prepared)
     await proxy.create_ssh_subprocess(
-        "ssh", "-p", "2200", *options, "target", "-J", "remote-argument",
+        "ssh", "-p", "2200", *options, "target", "remote-command", "-J", "remote-argument",
         config=_profile("target", "profile-jump"),
     )
     arguments, config, route, _kwargs = prepared.await_args.args
     expected_options = ("-v",) if options == ("-vJjump",) else ()
-    assert arguments == ("ssh", "-p", "2200", *expected_options, "target", "-J", "remote-argument")
+    assert arguments == (
+        "ssh", "-p", "2200", *expected_options, "target", "remote-command", "-J", "remote-argument",
+    )
     assert proxy_jump.ssh_option(config, "proxyjump") == "jump"
     assert route is not None and route.argv[-1] == "jump"
     assert route.argv[-2] == "target:2200"
@@ -250,12 +252,23 @@ def test_jump_projection_preserves_other_options_and_explicit_disable():
     assert proxy_jump.ssh_option(config, "proxyjump") == "none"
 
 
+def test_jump_options_after_destination_precede_remote_command_arguments():
+    args, config = proxy_jump.prepare_jump_arguments(
+        ("ssh", "target", "-p2200", "-Jjump", "remote-command", "-J", "literal"),
+        _profile("target"),
+    )
+    assert args == ("ssh", "target", "-p2200", "remote-command", "-J", "literal")
+    assert config.port == 2200 and proxy_jump.ssh_option(config, "proxyjump") == "jump"
+
+
 @pytest.mark.parametrize("options,endpoint", [
     (("-p2200",), "target:2200"),
     (("-o", "Port=2200"), "target:2200"),
     (("-oPort=2200", "-p2300"), "target:2200"),
     (("-p2200", "-oPort=2300"), "target:2200"),
     (("-o", "HostName=endpoint.example"), "endpoint.example:22"),
+    (("-oHostName=%h.example",), "target.example:22"),
+    (("-oHostName=%h.%%.example",), "target.%.example:22"),
     (("-oHostName=2001:db8::1", "-o", "Port 2200"), "[2001:db8::1]:2200"),
 ])
 async def test_cli_endpoint_overrides_bind_the_owned_forward(monkeypatch, options, endpoint):
@@ -286,6 +299,8 @@ async def test_plain_config_cannot_reenable_an_explicitly_disabled_jump(monkeypa
 @pytest.mark.parametrize("args", [
     ("ssh", "-J"), ("ssh", "-J", ""), ("ssh", "-o", ""),
     ("ssh", "-Jfirst", "-Jsecond", "target"),
+    ("ssh", "-oHostName=%p.example", "target"),
+    ("ssh", "-oHostName=target%", "target"),
 ])
 def test_malformed_jump_options_refuse_before_native_launch(args):
     with pytest.raises(ValueError):
