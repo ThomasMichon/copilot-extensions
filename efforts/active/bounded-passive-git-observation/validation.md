@@ -2,9 +2,10 @@
 
 Back to [the effort](README.md). Commands below are run from the owned source
 worktree root with a working Python 3 selected by normal repository tooling.
-Historical planned native files below remain proposals until separately
-admitted. The current Windows-first source checkpoint has pure/injected tests,
-not native/process-survival or installed qualification.
+Historical planned native files below remain proposals except for the exact
+Windows R1a and guarded-recovery fixtures named in the current receipt below.
+Native fixture/process-survival qualification is now recorded; source
+acceptance, installed qualification and nominal performance remain open.
 
 ## Windows-first caller-custody checkpoint
 
@@ -299,3 +300,46 @@ spawn-rate versus peak-live budgets and release/installed acceptance remain
 with `process-spawn-reduction`. Completing this matrix does not complete
 those campaigns. No remote venue or rollout is authorized for this slice;
 source/native-fixture proof is not deployed-system proof.
+
+## 2026-10-26 scoped native receipt
+
+Explicit admission: `AGENT_WORKTREES_NATIVE_RECOVERY=1`. Run the following
+files through `tools/run-plugin-tests.py agent-worktrees --test-file ...`,
+with the existing contained state/Job owner; item/group/plugin test budgets
+are 90/900/2700 seconds. These runner budgets do not change production D.
+
+- `test_status_monitor_guarded_recovery_native.py`: 14 passed, real native
+  PID/start, control transport, strict parser, capability and route/lock races.
+- `test_status_monitor_guarded_cutover_native.py`: 6 passed, actual installer
+  helper and shared orchestrator, typed/lost/untyped receipt, uncertain visible
+  publication and successor-exit refusal. No production monitor is launched.
+- `test_git_observation_native.py`: 6 passed, actual Git alias plus inherited
+  stdout/stderr descendants; held native process handles prove exact exits.
+  The outer fixture Job remains open during caller-death checks, including
+  death before the first resume. The unchanged D is 15 seconds, with a
+  five-second cleanup reserve and verified Job/root/reader settlement.
+- `test_windows_observation_custody.py`: 44 passed, including actual monitor
+  guarded dispatch/legacy callback and mandatory retained-custody retirement.
+- `test_status_monitor.py`: 184 passed after correcting the eight broader
+  packet failures. Windows identity lookup is no longer imposed on POSIX
+  cache callers; cache controls cover both branches.
+- Canonical shared procutil/ZDD packet: 290 passed, 3 Linux-only skips
+  (directory fsync, flock and fork), executed with `plugin_test_containment.run_contained`, isolated state
+  and canonical source on `PYTHONPATH`, not raw host pytest.
+
+All fixture descendants are contained and settled by their owning Jobs. No
+name-based kill, global Git rewrite, installed update, live session/mux change
+or service restart occurred. Native fresh temporary roots exercise first-touch
+publication/control and process creation. Full fresh installation is not
+claimed: this slice changes the opt-in execution/recovery contract, not first-
+provisioning policy. Linux/container qualification is unavailable on the
+Windows worker; ordinary POSIX unit controls remain separate compatibility
+proof, not a POSIX observation-containment implementation.
+
+Final combined current-source packet: **498 passed, zero skipped**, 149.75
+seconds inside the contained runner (156.89 seconds including preparation and
+cleanup). This includes all 26 explicitly admitted native cases and the pure
+R1a/compatibility/core-handler/lifecycle regressions. Current-head review/CI,
+original draft publication/merge, release and separately authorized installed
+proof remain open. None of these timings is a full-harness or process-economy
+pass.

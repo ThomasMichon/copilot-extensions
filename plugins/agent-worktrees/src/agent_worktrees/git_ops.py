@@ -150,6 +150,7 @@ def git(
             return push_timeout.run_bounded(
                 cmd, cwd=cwd, env=env, timeout=timeout,
                 observation_deadline=observation_deadline,
+                **({"binary": True, "input": input_data} if input_data is not None else {}),
             )
         if kill_tree and timeout is not None:
             return push_timeout.run_bounded(

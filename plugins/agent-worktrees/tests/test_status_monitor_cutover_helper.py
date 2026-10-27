@@ -40,6 +40,11 @@ def test_installer_wrapper_preserves_unsuccessful_monitor_outcomes(
     assert "rollback kept serving state" not in output
 
 
+@pytest.fixture(autouse=True)
+def legacy_or_posix_cutover_contract(monkeypatch):
+    monkeypatch.setattr(smc.guarded_recovery, "enabled", lambda: False)
+
+
 class _Handle:
     def __init__(self, daemon):
         self.daemon = daemon

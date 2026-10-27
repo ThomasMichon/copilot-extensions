@@ -459,7 +459,7 @@ def test_served_snapshot_and_warm_roster_share_one_carrier(owner, monkeypatch, h
 
 @pytest.mark.parametrize("ignore_custody", [False, True])
 def test_actual_monitor_shutdown_retains_custody_and_negative_control(
-    owner, monkeypatch, ignore_custody, operation="shutdown",
+    owner, monkeypatch, ignore_custody, operation="shutdown", recovery_directory=None,
 ):
     import shutil
     import single_instance_lease
@@ -517,12 +517,16 @@ def test_actual_monitor_shutdown_retains_custody_and_negative_control(
 
         def health(self):
             return {
-                "worktrees": {"status": "shutdown"},
+                "worktrees": {"status": "unready" if operation == "guarded" else "shutdown"},
                 "repositories": {"admitting": False, "refreshing": False},
+                "capabilities": [],
             }
 
         def shutdown(self):
-            assert settled[0], "early native custody release"
+            pass
+
+        def shutdown_and_wait(self):
+            self.shutdown()
 
     class Control:
         port = 1234
@@ -531,6 +535,30 @@ def test_actual_monitor_shutdown_retains_custody_and_negative_control(
             self.handle = handle
 
         def start(self):
+            if operation == "guarded":
+                import os
+                from zdd import routing
+                from agent_worktrees import status_monitor_recovery_contract as recovery
+
+                owner.close_observation_admission()
+                health = self.handle("health", {})
+                assert recovery.CAPABILITY in health["capabilities"]
+                route = routing.publish_active(
+                    recovery_directory, bind="127.0.0.1", port=self.port, pid=os.getpid(),
+                    process_start_time=locks.process_start_time(os.getpid()), version="fixture",
+                )
+                receiver = recovery.ReceiverIdentity(
+                    route.pid, route.process_start_time, health["runtime_generation"],
+                )
+                payload = {"contractVersion": 1, "expectedReceiver": receiver.to_dict(),
+                           "expectedRoute": route.to_dict()}
+                wrong = copy.deepcopy(payload)
+                wrong["expectedReceiver"]["runtimeGeneration"] += "-wrong"
+                assert self.handle(recovery.ACTION, wrong)["status"] == "refused"
+                assert owner._closing_observations
+                result = self.handle(recovery.ACTION, payload)
+                assert result["status"] == "undrained" and result["receiver"] == receiver.to_dict()
+                assert result["route"] == route.to_dict() and not owner._closing_observations
             if operation == "undrain":
                 owner.close_observation_admission()
                 assert self.handle("undrain", {}) == {"draining": False}
@@ -567,12 +595,16 @@ def test_actual_monitor_shutdown_retains_custody_and_negative_control(
             return 0
 
         def close(self):
-            assert settled[0], "early native control close"
+            pass
 
     receipts = SimpleNamespace(
         close_admission=lambda: None, active_count=lambda: 0, wait_idle=lambda: None,
         open_admission=lambda: None,
+        health=lambda: {"capabilities": [], "promptReceipt": {}},
     )
+    if recovery_directory is not None:
+        monkeypatch.setattr("agent_worktrees.runtime_identity.PROCESS_GENERATION", "fixture-runtime")
+        monkeypatch.setattr(status_monitor_cutover, "routing_dir", lambda: recovery_directory)
     monkeypatch.setattr(shutil, "which", lambda name: None)
     monkeypatch.setattr(single_instance_lease, "SingleInstance", Lease)
     monkeypatch.setattr(status_monitor_runtime, "_aw_runtime_home", lambda: Path("unused"))
@@ -594,7 +626,10 @@ def test_actual_monitor_shutdown_retains_custody_and_negative_control(
     monkeypatch.setattr(status_monitor_cutover, "ControlServer", Control)
     monkeypatch.setattr(status_monitor_cutover, "active_generation_for_pid", lambda pid: None)
     monkeypatch.setattr(status_monitor_cutover, "publish_route", lambda *a, **k: None)
-    monkeypatch.setattr(status_monitor_cutover, "clear_route_if_owner", lambda *a: None)
+    def clear_route(*args):
+        assert settled[0], "early native custody release"
+
+    monkeypatch.setattr(status_monitor_cutover, "clear_route_if_owner", clear_route)
     monkeypatch.setattr(resident_push, "bind", lambda *a: None)
     monkeypatch.setattr(resident_push, "reset", lambda: None)
     monkeypatch.setattr(locks, "read_lock", lambda *a: None)
@@ -905,3 +940,9 @@ def test_two_updater_generations_do_not_lose_replacement_during_supersession(mon
         worker.join(15)
     assert not worker.is_alive() and not failures
     assert events == ["previous-cleanup-confirmed", "release", "replacement", "release"]
+
+
+def test_actual_monitor_guarded_dispatch_uses_existing_undrain_and_native_route(owner, monkeypatch, tmp_path):
+    test_actual_monitor_shutdown_retains_custody_and_negative_control(
+        owner, monkeypatch, False, operation="guarded", recovery_directory=tmp_path,
+    )

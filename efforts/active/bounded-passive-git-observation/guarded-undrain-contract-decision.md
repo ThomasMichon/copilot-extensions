@@ -1,11 +1,18 @@
 # Guarded undrain: bounded wire decision
 
-Back to [the effort](README.md). **Proposal only.** No ZDD, receiver, parser,
-client ordering or recovery implementation is authorized by this packet.
-The independent atomic observation implementation does not depend on admitting
-this new operation. Preserve both failing probes at `01c80dcbb`.
+Back to [the effort](README.md). **Admitted implementation candidate; source
+acceptance and installed qualification remain open.** The current integration
+admission covers this new operation and the bounded existing ZDD rollback
+checks. It does not authorize unrelated control-plane or producer work.
 
-## Existing binding: none
+The original design rationale below describes why legacy undrain cannot supply
+owner-bound recovery. The implementation is
+`status_monitor_recovery_contract.py`, the existing control transport and the
+monitor's existing state/undrain handler. Native fixture receipts and remaining
+gates are recorded in [validation.md](validation.md). The two original failing
+probes remain causal regression tests and now pass.
+
+## Legacy binding: none
 
 Actual `ControlClient` retains `host`, `port`, `base_url`, a runtime-root token,
 `config_dir`, timeout and optional transition custody. `_request` sends
@@ -110,13 +117,12 @@ identity inside a retry.
   exit:** retain existing reconciliation custody/breadcrumbs and fail. No
   service repair, deployment or new controller is implied.
 
-## Exact decision scope and tests
+## Admitted decision scope and tests
 
-Separate approval would cover only the capability/strict new-action parser,
+The admitted amendment covers only the capability/strict new-action parser,
 the guarded receiver handler, an expected-owner client operation, and the
-existing cutover adapter's negotiation/result interpretation. ZDD integration
-is a separate decision if its current undrain/result seam cannot propagate
-these semantics; do not modify ZDD under this proposal. No F1 schema, new
+existing cutover adapter's negotiation/result interpretation. The separately admitted existing ZDD integration adds predecessor refusal
+checks at restoration publication and before undrain, without a new API. No F1 schema, new
 controller or generic control-plane redesign is included.
 
 Required injected tests pair the actual helper/orchestrator/client/receiver:
@@ -126,4 +132,5 @@ health/publication/undrain boundaries cause zero unauthorized reopening;
 legitimate restored election generation succeeds for the retained process;
 lost/malformed/failed reply and unconfirmed exit retain failure/breadcrumbs.
 Keep the two existing unbound-client probes as component evidence, not an
-end-to-end fence test. No native run or implementation is claimed here.
+end-to-end fence test. Current native fixture results are recorded in validation.md; those results
+do not establish installed or broader performance acceptance.

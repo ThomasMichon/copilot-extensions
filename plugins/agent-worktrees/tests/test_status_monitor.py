@@ -1091,6 +1091,7 @@ def test_sweep_ctx_rendered_once(tmp_path, monkeypatch):
 
 
 def test_sweep_reuses_segment_and_skips_unchanged_mux_values(tmp_path, monkeypatch):
+    monkeypatch.setattr(m.git_ops, "_windows_observation", lambda: False)
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
     m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
@@ -1118,6 +1119,7 @@ def test_sweep_reuses_segment_and_skips_unchanged_mux_values(tmp_path, monkeypat
 
 
 def test_sweep_reuses_session_project_resolution(tmp_path, monkeypatch):
+    monkeypatch.setattr(m.git_ops, "_windows_observation", lambda: False)
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
     m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
@@ -1216,7 +1218,11 @@ def test_sweep_republishes_for_recreated_mux_session(tmp_path, monkeypatch):
     assert len([call for call in calls if call[1] == "@aw_ctx"]) == 2
 
 
-def test_segment_cache_throttles_and_invalidates(monkeypatch):
+@pytest.mark.parametrize("bounded_windows", [False, True])
+def test_segment_cache_throttles_and_invalidates(monkeypatch, bounded_windows):
+    monkeypatch.setattr(m.git_ops, "_windows_observation", lambda: bounded_windows)
+    monkeypatch.setattr(m.cfg, "project_name",
+                        lambda: "fixture" if bounded_windows else pytest.fail("legacy required project"))
     renders = []
     lookups = []
     monkeypatch.setattr(
@@ -1239,7 +1245,11 @@ def test_segment_cache_throttles_and_invalidates(monkeypatch):
     assert lookups == ["/w/a", "/w/a"]
 
 
-def test_segment_cache_reuses_canonical_target_before_record_lookup(monkeypatch):
+@pytest.mark.parametrize("bounded_windows", [False, True])
+def test_segment_cache_reuses_canonical_target_before_record_lookup(monkeypatch, bounded_windows):
+    monkeypatch.setattr(m.git_ops, "_windows_observation", lambda: bounded_windows)
+    monkeypatch.setattr(m.cfg, "project_name",
+                        lambda: "fixture" if bounded_windows else pytest.fail("legacy required project"))
     lookups = []
     renders = []
     monkeypatch.setattr(
@@ -1266,7 +1276,8 @@ def test_segment_cache_reuses_canonical_target_before_record_lookup(monkeypatch)
     assert renders == ["/w/a", "/w/a"]
 
 
-def test_segment_cache_get_works_without_full_command_surface_loaded(monkeypatch):
+@pytest.mark.parametrize("bounded_windows", [False, True])
+def test_segment_cache_get_works_without_full_command_surface_loaded(monkeypatch, bounded_windows):
     """Real-bug regression (#4341): resident status-monitor's fast-dispatch
     path never calls `_load_full_command_surface()`, so the bare
     `_find_record_for_path`/`_render_status_segment` globals this method used
@@ -1277,6 +1288,9 @@ def test_segment_cache_get_works_without_full_command_surface_loaded(monkeypatch
     is exactly why this went unnoticed -- delete the bare globals to
     reproduce the real unloaded state, and confirm `.get()` still resolves
     correctly via the `status_bar_cli` import + `_self_override`."""
+    monkeypatch.setattr(m.git_ops, "_windows_observation", lambda: bounded_windows)
+    monkeypatch.setattr(m.cfg, "project_name",
+                        lambda: "fixture" if bounded_windows else pytest.fail("legacy required project"))
     from agent_worktrees import status_bar_cli
 
     monkeypatch.delattr(m, "_find_record_for_path", raising=False)
@@ -4088,6 +4102,7 @@ def test_installer_after_update_schedules_even_on_an_unexpected_cutover_exceptio
     would leave an ambiguous daemon state unhealed, exactly the failure
     mode this backstop exists to cover."""
     from agent_worktrees import status_monitor_cutover as smc
+    monkeypatch.setattr(smc.guarded_recovery, "enabled", lambda: False)
 
     scheduled = {"n": 0}
     monkeypatch.setattr(
@@ -4126,6 +4141,7 @@ def test_installer_after_update_schedules_even_when_lease_release_itself_raises(
     blocks, not sequentially in the same one, or a release exception would
     propagate past the scheduler call and leave it never invoked."""
     from agent_worktrees import status_monitor_cutover as smc
+    monkeypatch.setattr(smc.guarded_recovery, "enabled", lambda: False)
 
     scheduled = {"n": 0}
     monkeypatch.setattr(
@@ -4862,6 +4878,7 @@ def test_self_retire_softly_closes_admission_before_hard_closing_on_final_exit(
 def test_sweep_rechecks_before_publish_and_retains_registered_session_on_generation_change(
     tmp_path, monkeypatch
 ):
+    monkeypatch.setattr(m.git_ops, "_windows_observation", lambda: False)
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
     m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")

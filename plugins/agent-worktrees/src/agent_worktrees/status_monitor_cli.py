@@ -627,19 +627,13 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         ) or tracking_write.has_inflight_write()
 
     def _cleanup_retired_request_surfaces() -> None:
+        from .status_monitor_retirement import prune_retired_surfaces
+
         with state_lock:
-            retired_hook_servers[:] = [
-                server for server in retired_hook_servers if server.active_handler_count() > 0
-            ]
-            retired_classify_servers[:] = [
-                server for server in retired_classify_servers if server.active_handler_count() > 0
-            ]
-            if not tracking_write.has_inflight_write():
-                retired_tracking_write_servers[:] = [
-                    server
-                    for server in retired_tracking_write_servers
-                    if server.active_handler_count() > 0
-                ]
+            prune_retired_surfaces(
+                retired_hook_servers, retired_classify_servers, retired_tracking_write_servers,
+                tracking_write.has_inflight_write,
+            )
 
     def _drain_busy_reasons() -> list[str]:
         reasons: list[str] = []
@@ -699,16 +693,14 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     empty_strikes = 0
     max_empty_strikes = 3
 
+    from . import status_monitor_recovery_contract as guarded_recovery
+
     def _handle_control(action: str, payload: dict) -> dict:
         nonlocal admission_closed, published_lock
         if action == "health":
-            from .status_monitor_health import response
-
-            return response(
-                worktrees=worktrees_runtime, receipts=receipts,
-                repositories=repositories_runtime, allocations=allocation_linker,
-                admission_closed=admission_closed, published=published_lock,
-                shutdown=shutdown_requested.is_set(),
+            return guarded_recovery.monitor_health(
+                worktrees_runtime, receipts, repositories_runtime, allocations=allocation_linker,
+                shutdown=shutdown_requested.is_set(), draining=admission_closed, published=published_lock,
             )
         if action == receipt_control.ACTION:
             return receipts.handle(payload)
@@ -758,6 +750,15 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 repositories_runtime.close_admission("shutdown")
             wake_event.set()
             return {"shutdown": True}
+        if action == guarded_recovery.ACTION:
+            with state_lock:
+                return guarded_recovery.handle(
+                    payload, directory=status_monitor_cutover.routing_dir(),
+                    generation=PROCESS_GENERATION, port=control_server.port,
+                    reopen=lambda: _handle_control("undrain", {}),
+                    close_on_failure=_enter_drain_only_state,
+                    lock_timeout=status_monitor_cutover._READ_TIMEOUT_S,
+                )
         if action == "undrain":
             trace = DrainTrace(
                 status_monitor_cutover.routing_dir(), role="daemon",
@@ -774,6 +775,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     with trace.stage("activate-publisher"):
                         published_lock = _start_request_surfaces()
                     if not published_lock:
+                        _enter_drain_only_state()
                         trace.emit("undrain-refused", "fail")
                         wake_event.set()
                         return {"draining": True, "error": "current-roster authority unavailable"}

@@ -22,52 +22,43 @@ performance-measurement, headless-launch and process-containment patterns.
 
 ### Current admitted slice
 
-**Independent atomic checkpoint:** the private Windows spawn now has the
-admitted opt-in absolute cleanup deadline and pre-unwind stream transfer.
-R1a consumes creation-time Job assignment through its local binary-reader/root
-facade; legacy generic spawn/POSIX and no-opt-in behavior are unchanged.
-Injected tests include the actual consumer → private atomic adapter → local
-facade chain. This is not native caller-death qualification.
+The Windows-first R1a amendment includes local deadline propagation, atomic
+creation-time Job ownership, retained reader/root custody, and the narrowly
+admitted guarded recovery integration. It does not admit R1b lock separation,
+R2 passive-fsmonitor policy, POSIX observation containment, or any F1/P/H2
+redesign. Ordinary POSIX and genuinely absent-predecessor branches retain
+compatibility behavior.
 
-Recovery remains a separate hold. The
-[guarded-undrain decision packet](guarded-undrain-contract-decision.md)
-identifies the missing old-target request binding and proposes a capability-
-negotiated versioned operation, without implementation or fallback permission.
+The receiver-bound `guarded-undrain/v1` operation now exists on the existing
+authenticated control transport. Preflight retains one existing token and
+requires the capability before drain/spawn/publication. The receiver checks
+its PID, native start, runtime generation, exact restored route and listening
+port under the monitor state lock followed by the existing routing lock;
+only then may the existing undrain callback reopen admission. A strictly typed
+positive receipt is required. There is no legacy-undrain fallback.
 
-**Recovery-only stop:** the caller-only guarded recovery amendment is admitted,
-but two injected guarded-rollback/actual-client boundary cases still issue
-unbound undrain after PID/start reuse or a third-owner publication. The
-counterexample and exact receiving-side fence candidate are at the top of
-the [recovery proposal](atomic-creation-and-drain-review-proposal.md).
-The new regression cases intentionally fail locally; they are not published
-or waived. No recovery/client implementation or native qualification is claimed.
+The shared ZDD rollback checks predecessor identity during restoration and
+again before undrain. Those caller checks do not replace the receiver's atomic
+route fence. The two retained counterexamples now pass. Canonical and existing
+physical vendored rollback source remain identical; no dependency-layout
+migration or new ZDD API is part of this slice.
 
-The implementation amendment is **Windows first; keep POSIX work open**.
-The draft #8458 now includes the exact instance-owned caller-custody and
-nonblocking Windows Job settlement design in
-[caller-custody-and-platform-slice.md](caller-custody-and-platform-slice.md).
-This supersedes the planning-only status of those named hunks, not the wider
-R1b/R2 or campaign gates. Ordinary POSIX classification/default probes retain
-their baseline behavior; explicit Windows bounded APIs refuse POSIX before
-launch. No POSIX containment substitute, global census or helper is introduced.
+Separate opt-in native tests use only disposable, no-breakaway Job-owned
+fixtures. They exercise the real installer helper/orchestrator/client/parser/
+receiver pairing, capability skew, malformed frames, identity/route mismatch,
+third-owner and routing-lock barriers, legitimate restored election generation,
+lost/untyped replies, uncertain publication and unconfirmed successor exit.
+Actual Git alias descendants additionally prove fixed 15-second D with the
+five-second cleanup reserve, a dead Git root with held output pipes, caller
+death during execution and before first native resume, verified empty Jobs,
+closed native root/readers, cwd/env/text output and ordinary binary input.
 
-The current checkpoint is pure/injected source validation only. Native child,
-held-pipe, caller-death, shutdown and installed qualification remain open.
-Keep #8458 draft, the implementation task active, and #7944/#7945 open.
-
-The current eight open review threads prevent source acceptance. The
-[atomic-creation and handoff proposal](atomic-creation-and-drain-review-proposal.md)
-identifies the fresh existing Job-list adapter, its missing deadline/reader
-contract and the separate client promotion-before-drain boundary. Neither
-new shared creation behavior nor that client hunk is implemented or admitted.
-
-The next exact atomic/client amendments were subsequently admitted, but
-caller recovery exposed the additional unadmitted `activate_after_update`
-owner-fencing hunk documented in that proposal. Client/native implementation
-remains pending that explicit stop. Six independent contained corrections
-now have captured fail-first tests and a **133-pass** bounded source receipt;
-neither that local result nor the resolved census Medium accepts the source
-or closes the two remaining native/client boundaries.
+These are source/native-fixture receipts, not source acceptance, installed
+qualification, a nominal CPU/process benchmark or broader campaign completion.
+Keep #8458 draft until current-head review and CI accept it; keep #7944/#7945
+and the unadmitted R1b/R2/platform/integration work open. Earlier hold and
+fail-first journal entries below are historical and remain evidence, not the
+current implementation status.
 
 ## Participants
 
@@ -351,3 +342,23 @@ review-gated platform slice, not disabling ordinary POSIX classification.
   merge or issue closure is claimed. Source review must reassess the new High
   and blocking Medium against this amendment; local units do not resolve
   either review obligation on their own.
+
+### 2026-10-26 - Guarded recovery and isolated native qualification
+- Admitted the strict receiver operation and bounded existing ZDD integration;
+  retained legacy/POSIX/default-absence behavior and all other scope holds.
+- Real native transport fixtures: 14 passed; full installer/orchestrator
+  ambiguity/rollback fixtures: 6 passed. Actual monitor handler/custody packet:
+  44 passed. Real Git/descendant/pipe/caller-death/cancellation and I/O controls: 6 passed.
+- A broader combined packet exposed eight old monitor-fixture mismatches,
+  including an unintended POSIX cache project lookup. The cache now resolves
+  observation identity only for the Windows opt-in. Baseline cache tests run
+  both platform branches, legacy doubles explicitly select the legacy contract,
+  and the complete affected monitor file passes 184 cases.
+- Canonical procutil/ZDD selection passed 290 cases, with three existing
+  Linux-only skips (directory fsync, flock and fork); no new native case is
+  waived. The final combined source/native packet passed 498 cases in 149.75
+  seconds with no skips. Current-head publication gates remain pending.
+- Module size initially failed at 1,022 monitor CLI lines. Cohesive health
+  contract and retired-surface pruning moved to their owning helpers; the
+  CLI is 998 lines without a baseline increase. Focused Ruff and install
+  contract pass. No service, installed runtime or production session changed.

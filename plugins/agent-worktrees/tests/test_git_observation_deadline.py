@@ -392,3 +392,10 @@ def test_segment_preserves_cleanup_failure_custody(monkeypatch, checkout, clock,
             sb._status_segment_json(checkout)
     assert error.value is failure
     assert error.value.process is failure.process and error.value.job is failure.job
+
+
+@pytest.mark.parametrize("input_data", [b"", b"\x00\xff"])
+def test_git_observation_rejects_binary_stdin_before_any_spawn(monkeypatch, input_data):
+    monkeypatch.setattr(pt, "_run_observation", lambda *a, **k: pytest.fail("observation spawned"))
+    with pytest.raises(ValueError, match="text capture and independent containment"):
+        go.git("cat-file", "--batch", input_data=input_data, observation_deadline=115.0)
