@@ -173,6 +173,7 @@ GITHUB_HOSTED_LABELS = {
     "windows-latest",
     "windows-2025",
     "windows-2022",
+    "windows-11-arm",
     "macos-latest",
     "macos-15",
     "macos-14",
