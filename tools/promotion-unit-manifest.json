@@ -2524,7 +2524,7 @@
         "tools/promotion_unit_tests/test_owned_workspace.py::test_bridge_receiving_result_is_usable_while_linkage_is_pending_but_not_unknown_creation"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_wheel_acquisition_budget.py": "8ef9fc64b8deb93077c73034501cee8b4fb8dba265e08d0e0c99226802b52523",
+        "tools/promotion_unit_tests/test_wheel_acquisition_budget.py": "3b84b0f4dde389f1a31c1b8d684576a29fb62e53b9696064749cf20c37ca0cf6",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_clock.py": "6036e8400b8250d7c745907025dd48a99a2441e07e9ffebb8ee0f751c6a2c43c",
         "tools/promotion_unit_tests/test_daemon_clock.py": "8dd13337618d5bf7648124bbe20fba9a8c35e06c0b3fb5db6231859406f187f9",
         "plugins/agent-machines/src/agent_machines/gh_account_prerequisite.py": "d8bada832bbbb3b5bba1aa317efdadd9ab4e65c0fa8862ef25f75e8bcdec9d2f",
