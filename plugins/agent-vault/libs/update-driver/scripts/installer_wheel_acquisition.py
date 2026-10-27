@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
@@ -14,6 +15,7 @@ import re
 import ssl
 import subprocess
 import sys
+import threading
 import time
 from types import ModuleType
 from urllib.error import HTTPError, URLError
@@ -41,10 +43,13 @@ class AcquisitionLimits:
     max_wheel_bytes: int
     max_closure_bytes: int
     max_temporary_bytes: int
+    max_workers: int = 8
 
     def verify(self) -> None:
         if any(type(value) is not int or value <= 0 for value in vars(self).values()):
             raise WheelError("wheel acquisition needs explicit positive finite limits")
+        if self.max_workers > 8:
+            raise WheelError("wheel acquisition concurrency exceeds eight workers")
 
 
 @dataclass(frozen=True)
@@ -234,22 +239,73 @@ class _NoRedirect(HTTPRedirectHandler):
         return None
 
 
+class _Budget:
+    def __init__(self, limits, deadline, control_bytes=0):
+        self.deadline = deadline
+        self.maximums = {
+            "requests": limits.max_requests, "redirects": limits.max_redirects,
+            "metadata_bytes": limits.max_total_metadata_bytes,
+            "wheel_bytes": min(limits.max_closure_bytes, limits.max_temporary_bytes - control_bytes),
+        }
+        self.counts = dict.fromkeys(self.maximums, 0)
+        self.lock = threading.Lock()
+        self.failed = threading.Event()
+        self.failure = None
+
+    def check(self):
+        _check_deadline(self.deadline)
+        if self.failed.is_set():
+            raise WheelError("wheel acquisition cancelled after a transfer failure")
+
+    def current(self, kind):
+        with self.lock:
+            return self.counts[kind]
+
+    def reserve(self, kind, amount):
+        with self.lock:
+            self.check()
+            if self.counts[kind] + amount > self.maximums[kind]:
+                label = {"requests": "request", "redirects": "redirect"}.get(kind, "byte")
+                raise WheelError(f"wheel acquisition {label} budget exceeded")
+            self.counts[kind] += amount
+
+    def fail(self, error):
+        with self.lock:
+            if self.failure is None:
+                self.failure = error
+            self.failed.set()
+
+
 class _Client:
-    def __init__(self, limits, deadline, context, proxies):
+    def __init__(self, limits, deadline, context, proxies, budget=None):
         self.limits, self.deadline = limits, deadline
-        self.requests = self.redirects = self.metadata_bytes = self.wheel_bytes = 0
+        self.budget = budget or _Budget(limits, deadline)
         self.opener = build_opener(ProxyHandler(proxies), HTTPSHandler(context=context), _NoRedirect())
+
+    @property
+    def requests(self):
+        return self.budget.current("requests")
+
+    @property
+    def redirects(self):
+        return self.budget.current("redirects")
+
+    @property
+    def metadata_bytes(self):
+        return self.budget.current("metadata_bytes")
+
+    @property
+    def wheel_bytes(self):
+        return self.budget.current("wheel_bytes")
 
     def request(self, location, feed, origins, accept):
         chain = []
         while True:
-            _check_deadline(self.deadline)
+            self.budget.check()
             location, origin = _url(location)
             if origin not in origins:
                 raise WheelError(f"wheel acquisition location is outside selected source trust: {origin}")
-            if self.requests >= self.limits.max_requests:
-                raise WheelError("wheel acquisition request budget exceeded")
-            self.requests += 1
+            self.budget.reserve("requests", 1)
             headers = {"Accept": accept, "Accept-Encoding": "identity"}
             if origin == _url(feed.index_url)[1]:
                 headers.update(feed.headers)
@@ -269,12 +325,10 @@ class _Client:
                         if error.code == 404:
                             raise AcquisitionUnavailable("selected feed input is unavailable") from None
                         raise WheelError("wheel feed request failed") from None
-                    if self.redirects >= self.limits.max_redirects:
-                        raise WheelError("wheel acquisition redirect budget exceeded") from None
+                    self.budget.reserve("redirects", 1)
                     redirect = error.headers.get("Location")
                     if not redirect:
                         raise WheelError("wheel feed redirect has no location") from None
-                    self.redirects += 1
                     location = urljoin(location, redirect)
                 finally:
                     error.close()
@@ -282,7 +336,7 @@ class _Client:
                 raise WheelError("wheel feed request failed or timed out") from None
 
     def read(self, response, limit, *, output=None):
-        _check_deadline(self.deadline)
+        self.budget.check()
         if (
             len(response.headers.get_all("Content-Length", [])) > 1
             or len(response.headers.get_all("Content-Encoding", [])) > 1
@@ -297,7 +351,7 @@ class _Client:
             raise WheelError("wheel acquisition response exceeds its byte budget")
         size, chunks, digest = 0, [], hashlib.sha256()
         while True:
-            _check_deadline(self.deadline)
+            self.budget.check()
             if length is not None and size == int(length):
                 break
             try:
@@ -311,6 +365,7 @@ class _Client:
             size += len(chunk)
             if size > limit:
                 raise WheelError("wheel acquisition response exceeds its byte budget")
+            self.budget.reserve("metadata_bytes" if output is None else "wheel_bytes", len(chunk))
             digest.update(chunk)
             if output is None:
                 chunks.append(chunk)
@@ -421,73 +476,87 @@ def acquire_wheel_inputs(
             )
 
 
-def _download(root, expected, feeds, origins, cutoffs, limits, deadline, context, control_bytes):
-    client = _Client(limits, deadline, context, {})
-    root.mkdir()
-    records = []
-    for item in expected:
-        _check_deadline(deadline)
-        name = _name(item["name"])
-        chosen = None
-        for feed in feeds:
-            parsed = urlsplit(feed.index_url)
-            project = urlunsplit((
-                parsed.scheme, parsed.netloc, parsed.path.rstrip("/") + "/" + name + "/",
-                parsed.query, "",
-            ))
-            origin = _url(project)[1]
-            response = None
-            try:
-                response, base, chain = client.request(
-                    project, feed, {origin}, "application/vnd.pypi.simple.v1+json, text/html",
-                )
-            except AcquisitionUnavailable:
-                continue
-            try:
-                content, _, size = client.read(response, min(
-                    limits.max_index_bytes, limits.max_total_metadata_bytes - client.metadata_bytes,
-                ))
-                client.metadata_bytes += size
-                entries = _entries(
-                    content, response.headers.get_content_type(), name, limits.max_candidates_per_project,
-                )
-            finally:
-                if response is not None:
-                    response.close()
-            # The first configured feed owning this project owns selection.
-            if entries:
-                location, uploaded, hint = _selected(entries, item, base, cutoffs[name])
-                chosen = feed, origin, location, uploaded, hint, chain
-                break
-        if chosen is None:
-            raise AcquisitionUnavailable("selected exact project is unavailable on permitted feeds")
-        feed, origin, location, uploaded, hint, chain = chosen
+def _download_one(root, item, feeds, origins, cutoffs, limits, deadline, context, budget):
+    client = _Client(limits, deadline, context, {}, budget)
+    budget.check()
+    name = _name(item["name"])
+    chosen = None
+    for feed in feeds:
+        parsed = urlsplit(feed.index_url)
+        project = urlunsplit((
+            parsed.scheme, parsed.netloc, parsed.path.rstrip("/") + "/" + name + "/",
+            parsed.query, "",
+        ))
+        origin = _url(project)[1]
         response = None
         try:
-            response, _, downloads = client.request(
-                location, feed, {origin, *origins}, "application/octet-stream",
+            response, base, chain = client.request(
+                project, feed, {origin}, "application/vnd.pypi.simple.v1+json, text/html",
             )
-            destination = root / item["filename"]
-            with destination.open("xb") as output:
-                _, digest, size = client.read(response, min(
-                    limits.max_wheel_bytes, limits.max_closure_bytes - client.wheel_bytes,
-                    limits.max_temporary_bytes - control_bytes - client.wheel_bytes,
-                ), output=output)
-            if digest != item["sha256"]:
-                raise WheelError("acquired wheel digest differs from the exact lock")
-            client.wheel_bytes += size
-            records.append({
-                "filename": item["filename"], "sha256": digest, "size": size,
-                "feed": feed.identity, "uploaded": uploaded,
-                "source_origins": [*chain, *downloads], "yanked": False, "withdrawn": False,
-                **({"requires_python": hint} if hint not in (None, "") else {}),
-            })
+        except AcquisitionUnavailable:
+            continue
+        try:
+            content, _, _size = client.read(response, limits.max_index_bytes)
+            entries = _entries(
+                content, response.headers.get_content_type(), name, limits.max_candidates_per_project,
+            )
         finally:
             if response is not None:
                 response.close()
+        # The first configured feed owning this project owns selection.
+        if entries:
+            location, uploaded, hint = _selected(entries, item, base, cutoffs[name])
+            chosen = feed, origin, location, uploaded, hint, chain
+            break
+    if chosen is None:
+        raise AcquisitionUnavailable("selected exact project is unavailable on permitted feeds")
+    feed, origin, location, uploaded, hint, chain = chosen
+    response = None
+    try:
+        response, _, downloads = client.request(
+            location, feed, {origin, *origins}, "application/octet-stream",
+        )
+        destination = root / item["filename"]
+        with destination.open("xb") as output:
+            _, digest, size = client.read(response, limits.max_wheel_bytes, output=output)
+        if digest != item["sha256"]:
+            raise WheelError("acquired wheel digest differs from the exact lock")
+        return {
+            "filename": item["filename"], "sha256": digest, "size": size,
+            "feed": feed.identity, "uploaded": uploaded,
+            "source_origins": [*chain, *downloads], "yanked": False, "withdrawn": False,
+            **({"requires_python": hint} if hint not in (None, "") else {}),
+        }
+    finally:
+        if response is not None:
+            response.close()
+
+
+def _download(root, expected, feeds, origins, cutoffs, limits, deadline, context, control_bytes):
+    budget = _Budget(limits, deadline, control_bytes)
+    root.mkdir()
+
+    def transfer(item):
+        try:
+            return _download_one(root, item, feeds, origins, cutoffs, limits, deadline, context, budget)
+        except BaseException as error:
+            budget.fail(error)
+            raise
+
+    try:
+        if limits.max_workers == 1 or len(expected) < 2:
+            records = [transfer(item) for item in expected]
+        else:
+            with ThreadPoolExecutor(max_workers=min(limits.max_workers, len(expected))) as executor:
+                records = list(executor.map(transfer, expected))
+    except BaseException:
+        if budget.failure is not None:
+            raise budget.failure
+        raise
     return {
-        "files": records, "metadata_bytes": client.metadata_bytes, "wheel_bytes": client.wheel_bytes,
-        "request_count": client.requests, "redirect_count": client.redirects, "control_bytes": control_bytes,
+        "files": records, "metadata_bytes": budget.current("metadata_bytes"),
+        "wheel_bytes": budget.current("wheel_bytes"), "request_count": budget.current("requests"),
+        "redirect_count": budget.current("redirects"), "control_bytes": control_bytes,
     }
 
 

@@ -3780,6 +3780,16 @@ long selected wheel names. The same deadline caps closed-wheel constructor child
 retry waits through installed health; ordinary source child defaults are
 unchanged.
 
+The same worker overlaps up to eight package transfers, bounded by the selected
+`AcquisitionLimits.max_workers`; one selects serial acquisition. Request,
+redirect, aggregate metadata, closure and temporary-file limits are shared
+atomically, never multiplied by concurrency. Each transfer keeps the existing
+per-project feed precedence and origin-scoped credentials. Failed transfers
+cancel further work; the pool settles before the worker reports its original
+failure or releases private inputs. The outer owned-process deadline remains
+the bound for blocked native DNS or socket operations. Evidence preserves the
+selected input order, regardless of completion order.
+
 The shared `installer_native_feed.py` captures a caller's retained native UV
 settings using only the standard-library installer resources. It owns parsing,
 captured credential/OS-trust inputs and supported feed-policy refusals, not
