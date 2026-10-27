@@ -508,6 +508,45 @@ def test_unchanged_native_policy_identity_excludes_retained_paths_and_current_cu
     assert state["requests"] == []
 
 
+@pytest.mark.parametrize("change,equivalent", [
+    ("duplicate", True), ("order", True), ("added", False), ("removed", False), ("transport", False),
+])
+def test_native_trust_identity_uses_certificate_sets_but_preserves_real_changes(
+    adopter, selected, feeds, tmp_path, monkeypatch, change, equivalent,
+):
+    import installer_native_feed as native
+
+    state = feeds()
+    env = environment(adopter, state, tmp_path)
+    original = native._tls_record
+    certificates = ["certificate-a", "certificate-b"]
+    changed_transport = False
+
+    def record(context):
+        result = original(context)
+        result["certificates"] = list(certificates)
+        if changed_transport:
+            result["verify_flags"] += 1
+        return result
+
+    monkeypatch.setattr(native, "_tls_record", record)
+    with capture(selected, adopter, env) as first:
+        identity = first.policy_id
+    if change == "duplicate":
+        certificates.append("certificate-a")
+    elif change == "order":
+        certificates.reverse()
+    elif change == "added":
+        certificates.append("certificate-c")
+    elif change == "removed":
+        certificates.pop()
+    else:
+        changed_transport = True
+    with capture(selected, adopter, env) as second:
+        assert (second.policy_id == identity) is equivalent
+    assert state["requests"] == []
+
+
 def test_changed_relative_seasoning_changes_effective_policy_identity(
     adopter, selected, feeds, tmp_path,
 ):

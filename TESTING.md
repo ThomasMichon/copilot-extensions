@@ -1216,6 +1216,11 @@ with poisoned ambient CA/proxy/resolver/cache settings. Source selection,
 supported native configuration, stable policy identity and unsupported-provider/
 constraint refusals are distinct controls. Release-verifier backend responses
 remain synthetic; no live-feed or production approval is claimed.
+Native capture additionally compares equivalent ordered/duplicated certificate
+exports and proves that actual certificate additions/removals or changed
+transport verification flags still invalidate policy identity. Pure transport
+canonicalization controls live in `test_source_profile_derivation.py`; no
+machine certificate-store write or identity override is involved.
 The existing opt-in `wheel_inputs=true` Linux/Windows jobs include both suites;
 their six-minute budget and required unit-only CI roster are unchanged.
 Native deployment-reader cases also cover `downloadOrigins` parity. A real

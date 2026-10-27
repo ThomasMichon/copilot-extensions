@@ -3755,6 +3755,13 @@ rejection policy is shared with the existing build-tool trust owner through
 owner. Canonical installer synchronization ships both helpers with each Python
 adopter. Their presence does not enable artifact/profile consumption.
 
+The native policy identity treats exported certificate DER values as a set:
+ordering and repeated identical certificates do not change trust. Other
+transport fields and any genuinely added, removed or replaced certificate
+remain invalidating. This does not rewrite existing receipts or force a stale
+profile to match; profiles whose previous representation produced another
+identity require normal independent current-policy admission.
+
 An owner may supply its independently selected first-party package tuple to
 native capture. The only admitted constraint exception is the single ordinary
 file retained under that transaction's configuration root, named by its exact
