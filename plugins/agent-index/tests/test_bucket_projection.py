@@ -16,6 +16,7 @@ from agent_index.store.bucket_projection import (
 )
 from agent_index.store.chunk_id_index import prepare_chunk_id_index
 from agent_index.store.logical_projection import current_projection
+from agent_index.store.projection_snapshot import cluster_signature
 from agent_index.store.source_bucket_index import prepare_source_index
 from agent_index.store.source_layout import LAYOUT, SourceLayoutError, initialize_source_store
 
@@ -143,6 +144,29 @@ def test_contiguous_mixed_maintenance_and_mutations_keep_unrelated_keys(corpus):
         prepare_source_index(store.content_store, max_rows=3)
     after = keys(store)
     assert {key for key in before if before[key] != after[key]} == {("vectors_a", "forge:issues")}
+
+
+@pytest.mark.parametrize("position", ["before", "after"])
+def test_noop_bucket_scope_does_not_revoke_physical_maintenance_exemption(corpus, position):
+    config, store, _chunks = corpus
+    domain = store._source_domain
+    before = keys(store)
+    signature = cluster_signature(store, config)
+    generation = domain.receipt()["logical_projection"]["generation"]
+
+    def noop():
+        with domain.bucket_mutation("vectors_a", "fixture-noop", ["forge:issues"]):
+            pass
+
+    with domain.write(store.content_store.db):
+        if position == "before":
+            noop()
+        prepare_chunk_id_index(store.get_vector_table("a"), max_rows=3)
+        if position == "after":
+            noop()
+    assert keys(store) == before
+    assert domain.receipt()["logical_projection"]["generation"] == generation
+    assert cluster_signature(store, config) == signature
 
 
 @pytest.mark.parametrize("kind", ["effect", "id-delete", "stale-delete"])

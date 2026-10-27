@@ -271,6 +271,8 @@ class SourceDomain:
         self._persist_effect(operation)
         yield
         after = self._table_identity(table_name)
+        if before is not None and before == after:
+            return
         changes = self._local.bucket_changes.setdefault(table_name, set())
         if changes is not None:
             changes.update(buckets)
