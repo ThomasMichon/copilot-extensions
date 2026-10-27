@@ -17,6 +17,7 @@ import yaml
 
 from agent_worktrees import creation_requests, execution_spaces, tracking, worktree_creation
 from agent_worktrees import receiving_allocation as receiving
+from agent_worktrees.state_root import resolve_state_root as real_resolve_state_root
 from agent_worktrees.worktree_allocation_receiver import receive
 from test_receiving_allocation import receiver as receiver
 from test_worktree_allocation_receiver import request
@@ -74,6 +75,42 @@ def test_crash_after_tail_checkpoint_does_not_repeat_pairing(receiver, monkeypat
         lambda *a, **k: pytest.fail("durably completed tail must not run again"),
     )
     assert receive("inspect", request(receiver), config)["status"] == "allocated"
+
+
+def test_pairing_recovery_uses_configured_anchor_across_invocation_checkouts(receiver, monkeypatch, tmp_path):
+    from agent_procutil.owned_process import run_caller_owned
+    from agent_worktrees import state_root
+
+    config, admission, records = receiver
+    admission.target["options"]["no_pair"] = False
+    other = tmp_path / "other-checkout"
+    for checkout in (Path(config.default_repo.anchor), other):
+        result = run_caller_owned(
+            ["git", "init", "--quiet", str(checkout)],
+            timeout=5, max_stdout_bytes=1024, max_stderr_bytes=4096,
+        )
+        assert result.returncode == 0, result.stderr
+    monkeypatch.setattr(state_root, "resolve_state_root", real_resolve_state_root)
+    monkeypatch.chdir(config.default_repo.anchor)
+    original = tracking.create_new_record
+
+    def first_save(**kwargs):
+        original(**kwargs)
+        raise OSError("interrupted before companion tail")
+
+    monkeypatch.setattr(tracking, "create_new_record", first_save)
+    with pytest.raises(OSError, match="before companion"):
+        receive("create", request(receiver), config)
+    row = creation_requests.inspect(config, admission.key)
+    assert row["worktree"]["receiving_recovery"]["pairing"]["path"] == config.default_repo.anchor
+    record = tracking.load_record(next(records.glob("*.yaml")))
+    monkeypatch.setattr(tracking, "create_new_record", original)
+    monkeypatch.chdir(other)
+    assert real_resolve_state_root(config).path == str(other)
+    recovered = receive("inspect", request(receiver), config)
+    assert recovered["status"] == "allocated"
+    assert recovered["identity"] == receiving.record_identity(record).to_dict()
+    assert len(list(records.glob("*.yaml"))) == 1
 
 
 @pytest.mark.parametrize("failure", ["lookup", "no-pair-env", "env-before-reserve"])

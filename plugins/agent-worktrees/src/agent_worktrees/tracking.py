@@ -3174,8 +3174,8 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
     deferred by a contended lock or changed pair -- callers retry on a later
     reap pass. Raises ``ValueError`` for unsettled responsibility.
     """
-    from . import paired_claims
-    from .retirement_safety import require_retirable, retirement_blocker, same_pair
+    from . import paired_claims, receiving_allocation
+    from .retirement_safety import delete_retired_pair, require_retirable, retirement_blocker, same_pair
 
     path = tracking_path / f"{record.worktree_id}.yaml"
     sibling_path: Path | None = None
@@ -3204,6 +3204,7 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
                 return True
 
             latest = load_record(path)
+            receiving_allocation.recover_missing(latest, tracking_path)
             require_retirable(latest)
             if not same_pair(record, latest):
                 return False
@@ -3225,10 +3226,7 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
                     hard_delete_sibling = True
 
             if hard_delete_sibling:
-                if sibling_path is not None:
-                    sibling_path.unlink(missing_ok=True)
-                path.unlink(missing_ok=True)
-                return True
+                return delete_retired_pair(record, sibling, path, sibling_path)
 
             def _write_tombstone(status: WorktreeStatus) -> bool:
                 # A refused paired conclusion must retain its responsibility.
@@ -3242,8 +3240,9 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
                     record.reaped_at = now
                     save_record(record, path=path)
                     return True
-                except Exception:
-                    if record.is_paired:
+                except Exception as exc:
+                    if record.is_paired or record.receiving_allocation_present:
+                        logging.getLogger(__name__).warning("Record retirement deferred; record retained: %s", exc)
                         return False
                     path.unlink(missing_ok=True)
                     return True

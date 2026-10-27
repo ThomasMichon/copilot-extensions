@@ -15,7 +15,7 @@ from .receiving_allocation import ReceivingAllocation, parsed_receipt
 def pairing_facts(config: cfg.Config) -> dict:
     from . import state_root
 
-    resolved = state_root.resolve_state_root(config)
+    resolved = state_root.resolve_state_root(config, cwd=config.default_repo.anchor)
     return {
         "repo": resolved.repo, "path": str(resolved.path) if resolved.path is not None else None,
         "source": resolved.source, "requires_external": resolved.requires_external,

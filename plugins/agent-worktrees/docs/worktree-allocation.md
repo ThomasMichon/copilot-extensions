@@ -132,6 +132,8 @@ required carve or composition stays pending and cannot earn a ready checkpoint.
 Identical create retries reuse the original effective pairing option even if the
 process's no-pair environment override changes, while still comparing the exact
 request/target and current source configuration against the original journal.
+Self-hosted pairing facts are resolved from the configured anchor, not the
+invoking process's current checkout.
 
 If an older generic writer omits the new top-level receiving receipt, the
 receiver can reconstruct it only from the exact retained original local journal,
@@ -156,6 +158,9 @@ an older active snapshot cannot reopen a concluded child, and archived state
 cannot be downgraded to finalized, with or without a preserved receipt field.
 Conclusion transactions also enforce this ordering after taking the SQLite
 writer lock, so a delayed finalized observer cannot overwrite archived evidence.
+Retirement retains receiving-owned YAML if conclusion persistence fails. Paired
+hard deletion verifies both receiving conclusions first, including retirement
+initiated from the companion, so a retry can finish persisting terminal evidence.
 
 The current transport invokes only the named receiver over the existing selected
 SSH alias/shell with finite caller-owned process custody. It requires no reverse
