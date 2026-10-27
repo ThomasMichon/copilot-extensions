@@ -157,3 +157,19 @@ mute, or treats the repository's stated test strategy as optional.
 
 Do not project the kernel live on a mixed or negative result. Revise the
 wording and repeat the comparison.
+
+## Prompt comparison scorecard
+
+Recorded 2026-10-26. This was an explicit prompt, not an always-on
+instruction file in a session. It does not authorize projection.
+
+| Shape | Guided | Control |
+|---|---|---|
+| Reproduce in the stated venue | Used that venue. No new harness. | Same. No delta. |
+| Make an existing installer path faster | Changed the existing path. No new framework or unrequired checks. Answered without a long investigation. | Same destination, after extended exploration. |
+| Contract cannot express the check | Proposed the extension and waited. | Same. No delta. |
+
+Destinations did not diverge. Process cost diverged only on the open-ended
+speed task. The guided condition was told to follow the kernel, so this is
+not evidence that an ambient file would produce the same bound. Hold
+projection until a session-injection comparison says otherwise.
