@@ -122,6 +122,9 @@ Comparison request (verbatim):
   registration or default-runtime pointer changes.
 
 ### Later slices - Explicitly retained, not completed by the first proof
+- [ ] Retain an independently selected aggregate transport through the existing
+  wheel snapshot owner, then exercise the same inspected-profile and numbered
+  constructor/reuse path with original transport inputs unavailable.
 - [ ] Expand core plus optional heavy environments and the required platform/ABI
   matrix through the same admission contract.
 - [ ] Integrate install/update/no-op/rollback with the existing governor and
@@ -249,3 +252,16 @@ choose the wheel path, not a reason to relax source identity.
   invalidation boundary and qualify the older refusal before ordinary adoption.
   Changed-dependency updates, cache retention, publication and multi-platform
   service migration remain open under the existing owners.
+
+### 2026-10-27 - Aggregate transport custody adapter
+- The below-altitude adapter advances Runtime Assembly's
+  `one-verified-acquisition-path` without another resolver, provenance record,
+  approval service or constructor. A caller-selected ZIP must contain exactly
+  the selected wheels, pass its independent aggregate digest, and preserve all
+  member hashes under explicit inclusive budgets and one absolute deadline.
+- The result is the existing `WheelSnapshot`; the normal inspected-profile
+  adapter and numbered constructor remain unchanged. Actual native construction
+  and reuse cover both loose files and a ZIP with originals unavailable.
+- This is byte custody, not acquisition policy, license/source-material
+  qualification, release publication, ordinary installer enabling or service
+  migration. Those retained parent gates remain open.
