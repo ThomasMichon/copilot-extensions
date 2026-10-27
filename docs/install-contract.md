@@ -2475,6 +2475,11 @@ interpreter whose executable, prefix, base prefix and base interpreter remain
 outside the removable root. Admission-only and dry-run paths use that same
 non-provisioning selector; absence refuses without invoking `uv` or downloading
 Python. Construction's bootstrap resolver retains its separate behavior.
+Other finite native adapters use the same executable/prefix/base closure
+checks and enumerate all available PATH candidates. An activated removable
+venv, broken first executable or physical alias cannot hide a later eligible
+external interpreter. Windows legacy adapters enumerate installed launcher
+targets without asking the launcher to provision one.
 
 CodeSpaces' native POSIX whole-action transaction can use an existing `flock`
 capability on the same persistent install inode without Python, including cold

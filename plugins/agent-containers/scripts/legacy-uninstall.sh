@@ -9,14 +9,35 @@ if [[ ! -f "$helper" ]]; then
     printf '%s\n' 'Required canonical finite removal helper is unavailable; refusing any purge fallback' >&2
     exit 1
 fi
-python=""
-for candidate in python3 python; do
-    if command -v "$candidate" >/dev/null 2>&1 &&
-        "$candidate" -I -B -c 'import sys; assert sys.version_info >= (3,10)' >/dev/null 2>&1; then
-        python="$(command -v "$candidate")"
-        break
-    fi
-done
+_uninstall_external_python() {
+    local root="${1:?runtime root required}" candidate selected probe
+    probe='import sys
+from pathlib import Path
+assert sys.version_info >= (3, 10)
+root = Path(sys.argv[1]).absolute()
+assert ".." not in root.parts
+roots = (root, root.resolve())
+paths = (sys.argv[2], sys.executable, sys.prefix, sys.base_prefix,
+         getattr(sys, "_base_executable", sys.executable))
+for value in paths:
+    path = Path(value).absolute()
+    for actual in (path, path.resolve(strict=True)):
+        assert all(not actual.is_relative_to(boundary) for boundary in roots)
+sys.stdout.write(str(Path(sys.executable).resolve(strict=True)))'
+    while IFS= read -r candidate; do
+        case "$candidate" in "$root"/*|*WindowsApps*) continue ;; esac
+        case "${OSTYPE:-}" in
+            msys*|cygwin*) [[ "$candidate" == *.exe || ! -f "$candidate.exe" ]] || candidate="$candidate.exe" ;;
+        esac
+        selected="$("$candidate" -I -B -c "$probe" "$root" "$candidate" 2>/dev/null)" || continue
+        [[ -n "$selected" && -x "$selected" ]] || continue
+        printf '%s' "$selected"
+        return 0
+    done < <(type -aP python3 python 2>/dev/null)
+    printf '%s\n' 'Uninstall requires an existing external Python outside runtime and prefix closure' >&2
+    return 1
+}
+python="$(_uninstall_external_python "$root")" || exit 1
 [[ -n "$python" ]] || { printf '%s\n' 'Legacy uninstall requires an existing external Python 3.10+ interpreter' >&2; exit 1; }
 arguments=(-I -B "$helper" --payload-root "$(dirname -- "$SCRIPT_DIR")" \
     --plugin-id agent-containers --root "$root" --shell "$(command -v bash)" \

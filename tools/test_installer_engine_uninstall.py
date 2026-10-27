@@ -200,6 +200,43 @@ def _cleanup(payload: Path, root: Path, **arguments: Any) -> dict[str, Any]:
         pytest.skip("Native host unavailable")
     return MODULE.cleanup(payload, "agent-bridge", root, HOST, **arguments)
 
+
+@pytest.mark.parametrize(
+    "mutation", ("broken-json", "non-object", "binding", "lifecycle", "source"),
+)
+@pytest.mark.parametrize("remove_runtime", (False, True))
+def test_malformed_ownership_preserves_recovery_evidence_before_native_cleanup(
+    installation: tuple[Path, Path], mutation: str, remove_runtime: bool,
+) -> None:
+    payload, root = installation
+    manifest = root / "deploy-manifest.json"
+    record = json.loads(manifest.read_text(encoding="utf-8-sig"))
+    if mutation == "broken-json":
+        manifest.write_bytes(b"\xef\xbb\xbf{")
+    elif mutation == "non-object":
+        manifest.write_text("[]", encoding="utf-8")
+    else:
+        if mutation == "binding":
+            record["commandBinding"] = {"version": "invalid"}
+        elif mutation == "lifecycle":
+            record["commandLifecycle"] = {"version": 1, "state": "complete", "owner": None}
+        else:
+            record["source"] = []
+        manifest.write_text(json.dumps(record), encoding="utf-8")
+    before = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    operations: list[tuple[Path, tuple[str, ...]]] = []
+
+    def observe(_payload: Path, _shell: str, directory: Path, names: tuple[str, ...]) -> None:
+        operations.append((directory, names))
+
+    with pytest.raises((OSError, RuntimeError, ValueError)):
+        _cleanup(payload, root, remove_runtime=remove_runtime, remover=observe)
+    assert not operations, "Malformed ownership must refuse before any native cleanup"
+    assert {
+        path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()
+    } == before
+
+
 @pytest.mark.parametrize("mutation", ("none", "cell", "managed", "foreign-service",
                                      "foreign-source", "incomplete"))
 def test_nested_index_inventory_revalidates_ownership(

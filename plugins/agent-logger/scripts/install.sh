@@ -386,9 +386,37 @@ _normalize_install_root() {
     done
     printf '%s\n' "${normalized:-/}"
 }
+_uninstall_external_python() {
+    local root="${1:?runtime root required}" candidate selected probe
+    probe='import sys
+from pathlib import Path
+assert sys.version_info >= (3, 10)
+root = Path(sys.argv[1]).absolute()
+assert ".." not in root.parts
+roots = (root, root.resolve())
+paths = (sys.argv[2], sys.executable, sys.prefix, sys.base_prefix,
+         getattr(sys, "_base_executable", sys.executable))
+for value in paths:
+    path = Path(value).absolute()
+    for actual in (path, path.resolve(strict=True)):
+        assert all(not actual.is_relative_to(boundary) for boundary in roots)
+sys.stdout.write(str(Path(sys.executable).resolve(strict=True)))'
+    while IFS= read -r candidate; do
+        case "$candidate" in "$root"/*|*WindowsApps*) continue ;; esac
+        case "${OSTYPE:-}" in
+            msys*|cygwin*) [[ "$candidate" == *.exe || ! -f "$candidate.exe" ]] || candidate="$candidate.exe" ;;
+        esac
+        selected="$("$candidate" -I -B -c "$probe" "$root" "$candidate" 2>/dev/null)" || continue
+        [[ -n "$selected" && -x "$selected" ]] || continue
+        printf '%s' "$selected"
+        return 0
+    done < <(type -aP python3 python 2>/dev/null)
+    printf '%s\n' 'Uninstall requires an existing external Python outside runtime and prefix closure' >&2
+    return 1
+}
 INSTALL_DIR="$(_normalize_install_root "$INSTALL_DIR")"
 if [[ "$ACTION" == uninstall ]]; then
-    py="$(_bootstrap_python)" || {
+    py="$(_uninstall_external_python "$INSTALL_DIR")" || {
         printf '%s\n' 'Cannot validate Logger uninstall ownership without a bootstrap Python' >&2
         exit 1
     }
@@ -1654,7 +1682,7 @@ case "${ACTION}" in
     ok "package + units updated"
     ;;
   uninstall)
-    py="$(_bootstrap_python)" || {
+    py="$(_uninstall_external_python "$INSTALL_DIR")" || {
       _fail "Cannot validate Logger uninstall ownership without a bootstrap Python"; exit 1;
     }
     "$py" -I -B "$SCRIPT_DIR/uninstall_guard.py" --root "$INSTALL_DIR" || exit 1

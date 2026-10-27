@@ -30,6 +30,11 @@ CodeSpaces' `test_cold_native_transaction.py` accepts `NATIVE_UNINSTALL_BASH`
 for actual Bash 3.2 qualification. It checks read-only status without lock
 capabilities, Python-free cold stamping, same-inode contention, attached-owner
 EOF and the exact declared first-party snapshot-library closure.
+`tools/test_uninstall_path_candidates.py` exercises activated runtime venvs
+ahead of eligible external interpreters, broken/aliased candidates and explicit
+no-external refusal across native metadata callers. The common finite-removal
+packet also checks that malformed deployment/binding/lifecycle/source records
+refuse before any cleanup and retain every recovery/state byte.
 `tools/test_budget_packaged_installer.py` additionally starts the actual
 materialized standalone Budget status entrypoints without a repository library
 tree; this detects a packaged caller that still sources repository-only helpers.
