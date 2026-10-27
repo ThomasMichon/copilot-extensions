@@ -4925,6 +4925,33 @@ fixture. Set
 `INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS=1` to restore the full CLI and
 exemplar cross-products when changing an adapter implementation:
 
+`test_posix_path_capture.py` covers lossless output assignment, comparison
+failures, fast/fallback resolution and native symlink targets. Its synthetic
+provider controls run under Git Bash too; native filename cases explicitly
+require POSIX. Directory resolution, receipt-root validation and helper
+bootstrap regressions in `test_installation_context_posix.py` compare actual
+CLI results with the Python reference for one or multiple trailing linefeeds.
+Windows skips those filename cases rather than claiming native qualification;
+the on-demand `context` portfolio below supplies the native adapter lane.
+The `path-captures` portfolio supplies bounded Linux/Windows path/reference,
+bootstrap, digest and exemplar diagnostics. The unchanged selectors are
+partitioned into `paths`, `producers` and `slots` jobs per OS, each with two
+pytest workers and the same 20-minute bound; no case is omitted or duplicated
+between those three families. Its POSIX receipt-validation
+control compares the contribution base with the candidate and retains both
+timings, so worker parallelism cannot silently substitute for investigating a
+candidate-specific slowdown. It does not replace the exhaustive collection.
+The complete `context` collection and manual-only `context-windows` collection
+each use two isolated pytest workers with the same exhaustive adapter setting
+and 90-minute bound. No test selector or failure limit shrinks those collections.
+Installed exemplar fixtures use the release materializer for canonical
+dependencies; completion controls hold real construction ownership and inject
+failure only at the actual marker writer, with a positive downstream control.
+Bootstrap drift fixtures explicitly model the publication decision as well as
+context selection, including a denied-publication control. No-write PowerShell
+hook checks use the bounded initialized host and retain every fixture file in
+their byte comparison; console output is captured separately from its protocol.
+
 ```bash
 INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS=1 \
   python -m pytest -q libs/installation-context/tests

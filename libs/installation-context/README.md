@@ -40,12 +40,16 @@ its whole working set rolled back.
   `probe-plugin-publication` and `probe-legacy` support stock macOS Bash 3.2;
   installation-management actions still require Bash 4.4+. Native dependencies
   include `awk`, `sh` and a SHA-256 command (`sha256sum`, `shasum`, or `openssl`).
-  Physical-path resolution uses `realpath -m`, `readlink -f` or the canonical
-  shell fallback. Directory-marketplace source lookup parses each catalog once,
-  returning only hex-encoded candidate fields to the existing shell path checks.
-  It still validates the entire JSON document, all inspected name fields and
-  selected source fields; duplicate/ambiguous entries and containment violations
-  remain refusals. No source identity or readiness result is cached.
+  Physical-path resolution uses `realpath -m`, `readlink -fn` or the canonical
+  shell fallback. Path captures preserve every trailing linefeed through
+  comparisons, receipt roots, directory source identities and emitted JSON.
+  Basename/dirname captures remove only their printer delimiter; dangling
+  symlink targets use `readlink -n` without a delimiter.
+  Directory-marketplace source lookup parses each catalog once, returning only
+  hex-encoded candidate fields to the existing shell path checks. It still
+  validates the entire JSON document, all inspected name fields and selected
+  source fields; duplicate/ambiguous entries and containment violations remain
+  refusals. No source identity or readiness result is cached.
 - `installation-context.ps1` provides the PowerShell 5.1+/pwsh bootstrap.
   Missing native types compile in one batch to bound cold diagnostic startup;
   re-entry retains already-loaded types rather than recompiling them.
@@ -608,6 +612,26 @@ contributes exactly
 `F\0<UTF-8 relative path>\0<lowercase file SHA-256>\n`. Empty directories do
 not contribute. A link, reparse point, device, pipe, socket, or other
 non-regular entry fails closed.
+
+Windows native handle opens use extended-length names at the legacy
+260-UTF-16-unit boundary, independently of the PowerShell host manifest.
+Recorded receipt paths are unchanged; regular-file and no-reparse checks
+still apply. Long snapshot directories use the same native-path conversion.
+Atomic no-replacement moves use that conversion for both operands; native
+directory creation uses its earlier 248-unit boundary. Existing destinations
+are never replaced, including at either long-path boundary.
+
+Native qualification distinguishes Windows sharing refusals from POSIX
+replacement of an open file. Windows race fixtures require denied replacement
+to preserve the opened receipt, or a precisely identified read-sharing refusal
+with no completion marker followed by a successful quiescent control. POSIX
+fixtures retain successful replacement and immutable identity-change refusal.
+Concurrent writers must demonstrate actual replacements; unexpected worker
+errors still fail the fixture.
+
+The no-Python POSIX JSON reader builds its C-locale byte lookup once per
+invocation, rather than scanning the byte alphabet for every character.
+Strict UTF-8, scalar bytes and duplicate-key refusal are unchanged.
 
 Hashing is bounded to 100,000 non-root entries, a 4,096-byte UTF-8 relative
 path, and 4,294,967,296 total regular-file bytes. Each boundary is inclusive.

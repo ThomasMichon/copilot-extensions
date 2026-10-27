@@ -442,12 +442,14 @@ set -- "${ORIGINAL_ARGS[@]}"
 # The dependency-light cell-slot runner does not need the legacy installer's
 # payload self-stage, whose staging root is itself legacy state.
 __cell_slot_direct=0
+__cell_slot_action=0
 if [[ "$ACTION" == "slot-provision" ||
       "$ACTION" == "slot-validate" ||
       "$ACTION" == "slot-complete" ||
       "$ACTION" == "slot-completion-validate" ||
       "$ACTION" == "slot-cutover" ||
       "$ACTION" == "cell-provision" ]]; then
+    __cell_slot_action=1
     cd "$HOME"
     if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ]]; then
         export COPILOT_PLUGIN_INSTALL_STAGED=cell-slot-action
@@ -455,6 +457,7 @@ if [[ "$ACTION" == "slot-provision" ||
     fi
 fi
 
+if [[ "$__cell_slot_action" -eq 0 ]]; then
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
@@ -594,6 +597,7 @@ INSTALL_WATCHDOG
     esac
 fi
 # === end install-contract:v4 self-stage ===
+fi
 if [[ "$__cell_slot_direct" -eq 1 ]]; then
     unset COPILOT_PLUGIN_INSTALL_STAGED
 fi

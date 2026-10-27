@@ -49,9 +49,11 @@ def _assembled_python_source() -> str:
 
 def _posix_source() -> str:
     source = POSIX_SCRIPT.read_text(encoding="utf-8")
-    assignment = 'SCRIPT_DIR="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"'
-    assert source.count(assignment) == 1
-    return source.replace(assignment, f"SCRIPT_DIR={shlex.quote(str(LIB))}", 1)
+    initialization = 'dirname_into SCRIPT_DIR "${BASH_SOURCE[0]}"\n'
+    assert source.count(initialization) == 1
+    start = source.index(initialization)
+    end = source.index("JSON_QUERY=", start)
+    return source[:start] + f"SCRIPT_DIR={shlex.quote(str(LIB))}\n" + source[end:]
 
 
 def _powershell_source() -> str:
@@ -136,6 +138,145 @@ def test_powershell_darwin_stat_abi_selects_by_process_architecture() -> None:
     assert "[IO.File]::Move" not in publication
 
 
+@pytest.mark.skipif(os.name != "nt" or POWERSHELL is None, reason="native Windows PowerShell")
+@pytest.mark.parametrize("path_units", (259, 260, 280))
+def test_powershell_safe_open_preserves_extended_length_file_reads(
+    tmp_path: Path, path_units: int,
+) -> None:
+    directory = tmp_path / "long-open"
+    prefix_units = lambda value: len(str(value).encode("utf-16le")) // 2
+    while path_units - prefix_units(directory) - 1 > 240:
+        directory /= "component"
+    filename_units = path_units - prefix_units(directory) - 1
+    assert 5 <= filename_units <= 255
+    filename = ("x" * (filename_units - 4)) + ".txt"
+    directory.mkdir(parents=True)
+    target = directory / filename
+    target.write_text("native long-path contents\n", encoding="utf-8")
+    assert prefix_units(target) == path_units
+    source, marker, _ = _powershell_source().partition("\ntry {\n    Assert-ExactChoice")
+    assert marker
+    probe = tmp_path / "long-open.ps1"
+    probe.write_text(
+        source + """
+$opened = [CeSafeFile]::Open($env:CE_LONG_OPEN_TEST_PATH)
+try {
+    $reader = [IO.StreamReader]::new($opened.Stream, [Text.Encoding]::UTF8, $true, 1024, $true)
+    try { [Console]::Write($reader.ReadToEnd()) } finally { $reader.Dispose() }
+} finally { $opened.Dispose() }
+""",
+        encoding="utf-8-sig",
+    )
+    result = subprocess.run(
+        (str(POWERSHELL), "-NoProfile", "-File", str(probe), "probe"),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={**os.environ, "CE_LONG_OPEN_TEST_PATH": str(target)},
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "native long-path contents\n"
+
+
+@pytest.mark.skipif(os.name != "nt" or POWERSHELL is None, reason="native Windows PowerShell")
+@pytest.mark.parametrize("path_units", (247, 248, 260, 280))
+def test_powershell_atomic_directory_preserves_extended_length_paths(
+    tmp_path: Path, path_units: int,
+) -> None:
+    parent = tmp_path / "atomic-directory"
+    prefix_units = lambda value: len(str(value).encode("utf-16le")) // 2
+    while path_units - prefix_units(parent) - 1 > 240:
+        parent /= "component"
+    parent.mkdir(parents=True)
+    target = parent / ("d" * (path_units - prefix_units(parent) - 1))
+    assert prefix_units(target) == path_units
+    source, marker, _ = _powershell_source().partition("\ntry {\n    Assert-ExactChoice")
+    assert marker
+    probe = tmp_path / "atomic-directory.ps1"
+    probe.write_text(
+        source + """
+$path = $env:CE_ATOMIC_TEST_PATH
+if ([CeAtomicDirectory]::CreateWindows($path) -ne 1) { throw 'Directory not created' }
+if ([CeAtomicDirectory]::CreateWindows($path) -ne 0) { throw 'Directory replaced' }
+""",
+        encoding="utf-8-sig",
+    )
+    result = subprocess.run(
+        (str(POWERSHELL), "-NoProfile", "-File", str(probe), "probe"),
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "CE_ATOMIC_TEST_PATH": str(target)},
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        timeout=30, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert target.is_dir()
+
+
+@pytest.mark.skipif(os.name != "nt" or POWERSHELL is None, reason="native Windows PowerShell")
+@pytest.mark.parametrize("path_units", (259, 260, 280))
+def test_powershell_atomic_move_preserves_long_paths_without_replacement(
+    tmp_path: Path, path_units: int,
+) -> None:
+    parent = tmp_path / "atomic-move"
+    prefix_units = lambda value: len(str(value).encode("utf-16le")) // 2
+    while path_units - prefix_units(parent) - 1 > 240:
+        parent /= "component"
+    parent.mkdir(parents=True)
+    filename_units = path_units - prefix_units(parent) - 1
+    original = parent / ("s" * filename_units)
+    destination = parent / ("d" * filename_units)
+    original.write_bytes(b"original completion\n")
+    assert prefix_units(original) == prefix_units(destination) == path_units
+    source, marker, _ = _powershell_source().partition("\ntry {\n    Assert-ExactChoice")
+    assert marker
+    probe = tmp_path / "atomic-move.ps1"
+    probe.write_text(
+        source + """
+$source = $env:CE_ATOMIC_TEST_SOURCE
+$destination = $env:CE_ATOMIC_TEST_DESTINATION
+if ([CeAtomicDirectory]::MoveWindows($source, $destination) -ne 1) { throw 'File not moved' }
+[IO.File]::WriteAllText($source, 'must not replace')
+if ([CeAtomicDirectory]::MoveWindows($source, $destination) -ne 0) { throw 'File replaced' }
+""",
+        encoding="utf-8-sig",
+    )
+    result = subprocess.run(
+        (str(POWERSHELL), "-NoProfile", "-File", str(probe), "probe"),
+        capture_output=True, text=True, encoding="utf-8",
+        env={
+            **os.environ,
+            "CE_ATOMIC_TEST_SOURCE": str(original),
+            "CE_ATOMIC_TEST_DESTINATION": str(destination),
+        },
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        timeout=30, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert original.read_bytes() == b"must not replace"
+    assert destination.read_bytes() == b"original completion\n"
+
+
+@pytest.mark.skipif(os.name != "nt" or POWERSHELL is None, reason="native Windows PowerShell")
+def test_powershell_long_snapshot_directory_matches_reference(tmp_path: Path) -> None:
+    root = tmp_path / "snapshot"
+    while len(str(root).encode("utf-16le")) // 2 < 280:
+        root /= "component"
+    root.mkdir(parents=True)
+    (root / "a").write_bytes(b"x")
+    expected = _load_python_module()._snapshot_content_sha256(
+        root, max_entries=1, max_path_bytes=1, max_content_bytes=1,
+    )
+    result = _run_canonical_shell_digest(
+        "powershell", root, tmp_path / "digest",
+        max_entries=1, max_path_bytes=1, max_content_bytes=1,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == expected
+
+
 def test_shell_metadata_tokens_retain_posix_subsecond_precision() -> None:
     powershell = POWERSHELL_SCRIPT.read_text(encoding="utf-8")
     posix = POSIX_SCRIPT.read_text(encoding="utf-8")
@@ -150,6 +291,7 @@ def test_shell_metadata_tokens_retain_posix_subsecond_precision() -> None:
     assert "digest_safe_file_fd_into verification_digest" in posix
 
 
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX executable probe")
 def test_posix_cache_hit_hashes_same_size_same_second_rewrite(
     tmp_path: Path,
 ) -> None:

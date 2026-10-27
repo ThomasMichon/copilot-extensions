@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from powershell_test_host import PowerShellTestHost
 
 REPO = Path(__file__).resolve().parents[3]
 CONTEXT_TOOL = REPO / "libs" / "installation-context" / "installation_context.py"
@@ -333,6 +334,7 @@ def _run_stubbed_active_bootstrap(
     runtime_version: str = "0.1.0-dev1",
     source_path: Path | None = None,
     runtime_path: Path | None = None,
+    allow_publication: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     payload = tmp_path / f"payload-{runner_name}"
     shutil.copytree(REPO / "plugins" / "agent-machines", payload)
@@ -362,6 +364,10 @@ def _run_stubbed_active_bootstrap(
             "runtimeRoot": str(plugin_root),
             "context": str(context).replace("\\", "/"),
             "marketplaceId": marketplace_id,
+            "deployment": {
+                "allowPluginPublication": allow_publication,
+                "path": str(plugin_root / "runtime-deployment.json"),
+            },
         }
     )
     environment = _environment(home, context)
@@ -389,7 +395,7 @@ def _run_stubbed_active_bootstrap(
         pytest.skip("PowerShell is unavailable")
     resolver = payload / "scripts" / "installation-context" / "installation-context.ps1"
     resolver.write_text(
-        "Write-Output '" + status.replace("'", "''") + "'\n",
+        "Write-Output '" + status.replace("'", "''") + "'\nexit 0\n",
         encoding="utf-8",
     )
     (payload / "scripts" / "init.ps1").write_text("exit 0\n", encoding="utf-8")
@@ -405,6 +411,18 @@ def _run_stubbed_active_bootstrap(
         env=environment,
         check=False,
     )
+
+
+@pytest.mark.parametrize("runner_name", ("shell", "powershell"))
+def test_agent_machines_bootstrap_refuses_unadmitted_publication(
+    tmp_path: Path, runner_name: str
+) -> None:
+    result = _run_stubbed_active_bootstrap(
+        tmp_path, runner_name, source_version="0.0.0", allow_publication=False,
+    )
+    assert result.returncode == 3
+    assert "Runtime publication refused" in result.stdout + result.stderr
+    assert "reconciling in background" not in result.stdout + result.stderr
 
 
 @pytest.mark.parametrize("runner_name", ("shell", "powershell"))
@@ -510,14 +528,25 @@ def test_agent_index_compatibility_bootstrap_never_reads_or_mutates_context(tmp_
     if receipt != "missing":
         context.write_text("{" if receipt == "malformed" else '{"pluginId":"foreign"}', encoding="utf-8")
     def evidence():
-        # PowerShell itself writes startup profiling data in the redirected
-        # profile; that is not plugin installation state.
         return {
             path: path.read_bytes() for path in home.rglob("*")
-            if path.is_file() and path.relative_to(home).parts[:4] != ("AppData", "Local", "Microsoft", "PowerShell")
+            if path.is_file()
         }
     before = evidence()
-    result = runner("agent-index", _environment(home, context))
+    if runner is _run_powershell:
+        if POWERSHELL is None:
+            pytest.skip("PowerShell is unavailable")
+        host = PowerShellTestHost(
+            POWERSHELL,
+            Path(__file__).with_name("powershell-test-host.ps1"),
+            REPO / "plugins" / "agent-index" / "scripts" / "bootstrap-check.ps1",
+        )
+        try:
+            result = host.run((), _environment(home, context))
+        finally:
+            host.close()
+    else:
+        result = runner("agent-index", _environment(home, context))
     assert result.returncode == 0
     # Agent Index's compatibility hook is an unconditional no-op that always
     # emits "{}" on stdout (the hooks.json session-start contract requires
