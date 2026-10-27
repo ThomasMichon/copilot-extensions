@@ -114,8 +114,8 @@ and source state untouched.
 This bounds acquisition/comparison units, **not** whole-manifest memory,
 serialization bytes or wall time: the journal still accumulates a complete
 manifest. Connectors without full-snapshot support retain the existing legacy
-full path. Built-in immutable snapshot acquisition remains separate adapter
-work. External providers can opt into this same journal through the negotiated
+full path. Built-in Git revision snapshots use this journal as described below.
+External providers can opt into this same journal through the negotiated
 bridge below; no production provider is implicitly upgraded. There are no new
 state cursor owners, source locks or automatic full repairs.
 
@@ -200,7 +200,7 @@ old syntax/output for old consumers and the supported rollback window. No flag
 or baseline is retired here. The contract/process tests exercise old/new callers,
 old/new receivers, strict unknown-flag rejection, interrupted replay, scope drift,
 and two-model native engine composition in both store layouts. This bridge does
-not implement provider-side snapshot storage, built-in snapshots, resumable
+not implement provider-side snapshot storage, other built-in snapshots, resumable
 external ordinary deltas, or bounded whole-manifest memory.
 
 Git revision sources use this seam for pinned base-to-target raw diffs and
@@ -211,6 +211,62 @@ Blob reads use immutable object IDs and enforce the size bound before loading
 content. A missing/unavailable cursor or rewritten history explicitly requests
 a full reindex rather than silently performing an unlimited repair.
 Full reindexing remains the initial reconciliation path.
+For immutable Git revision sources, explicit full reconciliation now opts into
+the shared snapshot journal. The token pins a peeled commit object, not a branch
+name; file blobs and the complete `:commits` stream retain that commit even when
+a retry constructs a fresh connector after the configured ref moves. File
+pages traverse one immutable directory object at a time using a durable
+component-stack/byte-offset cursor, advancing at most 128 new raw tree records
+per page, including non-indexable entries. Components are stored once per
+level, avoiding quadratic growth from repeated ancestor paths. Restored offsets
+are validated against actual record boundaries, so a mode-like substring in a
+filename cannot become an invented entry. Each directory object is limited to
+16,000,000 bytes, checked before loading; exceeding it fails visibly rather
+than silently dropping a directory. Immutable blob reads retain the existing
+file-size/text filters. History pages return at most 128 entries with explicit
+topological ordering against the pinned commit. Their continuation carries the
+last acknowledged commit identity as well as the ordinal. A resumed native log
+window reads that predecessor plus at most 128 new entries (129 total), and
+must match the predecessor before accepting a terminal result. Out-of-range
+ordinals or shifted ordinal/identity pairs cannot certify empty history.
+A terminal page certifies both
+streams, after which the existing bounded stored-identity comparison can infer
+tombstones. Missing objects and unavailable coverage retain pending progress
+without advancing state or falling back to an empty snapshot.
+Before returning from a child directory, the restored parent offset must point
+immediately after that child's tree record. An inconsistent parent/child stack
+therefore cannot silently skip a sibling and complete authoritative coverage.
+This return check reads at most one additional bounded parent object.
+Both full snapshots and ordinary discovery use the resolver's peeled commit
+identity, so an unchanged annotated-tag source does not flip its checkpoint
+between a commit object and a tag object.
+
+Git replacement refs are disabled at the connector's one Git invocation owner,
+consistently across full snapshots, deltas, hints and old direct discovery
+methods. This deliberately indexes canonical objects rather than a mutable
+local replacement overlay; otherwise a snapshot could use one tree view and a
+following poll silently advance over changes in another. The effective recovery
+identity includes `git-objects:canonical-v1`. Checkpoints from before this policy
+therefore require explicit full reconciliation before ordinary acquisition,
+even when no replacement refs currently exist; their old object view was not
+recorded. Finish pending acquisition under its original binding before upgrade
+or use the existing explicit repair flow. No upgrade implicitly starts a full
+crawl or rewrites an old journal.
+
+Shallow repositories and mutable history grafts refuse this snapshot path because
+pinning only a commit cannot freeze those external graph boundaries. Normal
+working-tree fallback retains its legacy discovery path, as do old consumers
+calling the unchanged `discover` methods; the canonical-object policy above
+applies to their Git history reads too. No new CLI flag, source journal,
+checkpoint or provider storage is introduced.
+
+These are **result-page and tree-object bounds**, not a whole-source
+CPU/I/O/time guarantee: a resumed directory page rereads its bounded tree
+object and reparses its acknowledged prefix to validate the offset, native
+`log --skip` may revisit ancestors internally, and commit
+messages and the accumulated journal manifest are not byte-bounded here.
+Git full acquisition's traversal-cost qualification remains open; this is not
+evidence that a 100,000-item full repair has constant work.
 Connectors whose current mode cannot prove delta coverage can expose
 `delta_available=False`; Git's working-tree fallback retains its existing
 snapshot path and logs that legacy reconciliation selection. Remote/ref reads
