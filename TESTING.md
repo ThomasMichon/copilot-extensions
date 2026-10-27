@@ -49,8 +49,16 @@ This tests the native control-event path without depending on a synthetic
 stdin reader's scheduling; physical keyboard input in a real mux remains open.
 The fixture excludes pytest's captured std handles before creating the fresh
 terminal and checks native console handles, not `isatty()` alone (which accepts
-Windows `NUL`). It substitutes finite policy replies and is not actual Copilot,
-real installer removal, installed-runtime or live mux detach/reattach acceptance.
+Windows `NUL`). The six adapter/outer-pane controls substitute finite policy replies.
+Full copied-setup admission controls instead use an actual completed runtime
+and check executable and same-host PowerShell-script backends through one
+interrupt, child survival, nonzero exit and the correlated return receipt.
+Neither lane is actual Copilot, real installer removal or live mux
+detach/reattach acceptance.
+The existing manual acceptance workflow's `native_launch` input selects only
+the focused Windows copied-setup packet at the immutable dispatch SHA. It is
+default-off, uses contained test roots without host-state opt-in, and does not
+expand required PR CI or select unrelated derived-diagnostic matrices.
 
 The explicit `tests/native/test_native_seed_runtime.py` lane constructs a real
 source-attributed runtime in a disposable installation and invokes its current-slot bootstrap from copied

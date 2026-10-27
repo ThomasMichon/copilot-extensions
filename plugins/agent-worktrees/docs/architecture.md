@@ -615,6 +615,9 @@ Admission-only preparation takes the existing worktree lease only for its
 preflight; seeded preparation uses the seed authority's own guards. Neither
 holds a seed-admission lease through the child lifetime. This does not yet
 qualify the separate concurrent mux check/create/join contract.
+Admission-only setup protects its direct backend wait with the same native
+console-control helper, including same-host PowerShell-script execution.
+The outer pane's handler does not substitute for this setup-host protection.
 
 The Windows `scripts/native-seed-boundary.ps1` adapter is dot-sourced
 into that existing setup owner. It retains the actual child handle and wait, selecting

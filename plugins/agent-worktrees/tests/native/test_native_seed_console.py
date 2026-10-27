@@ -17,6 +17,11 @@ import pytest
 
 from agent_procutil.owned_process import run_caller_owned
 
+import test_native_seed_runtime as runtime_fixture
+
+installed_native_runtime = runtime_fixture.installed_native_runtime
+native_runtime_source = runtime_fixture.native_runtime_source
+
 pytestmark = [
     pytest.mark.guard,
     pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Native Windows required"),
@@ -197,8 +202,8 @@ def _literal(path):
     return "'" + str(path).replace("'", "''") + "'"
 
 
-def _wait(predicate, console, reason, *, allow_exited=False):
-    deadline = time.monotonic() + 15
+def _wait(predicate, console, reason, *, allow_exited=False, timeout=15):
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if predicate():
             return
@@ -337,6 +342,144 @@ def test_native_terminal_keeps_child_decision_and_pane_job(tmp_path, monkeypatch
             console.api.TerminateProcess(console.process.process, 99)
             console.api.WaitForSingleObject(console.process.process, 5000)
             assert console.api.WaitForSingleObject(child_handle, 5000) == 0
+    finally:
+        console.close()
+        if child_handle:
+            console.api.CloseHandle(child_handle)
+
+
+@pytest.mark.timeout(900)
+@pytest.mark.parametrize("script_backend", [False, True], ids=["executable", "same-host-script"])
+def test_copied_setup_admission_preserves_interrupt_and_actual_return(
+    tmp_path, monkeypatch, installed_native_runtime, script_backend,
+):
+    from agent_worktrees import locks
+
+    root, plugin, prefix, environment = installed_native_runtime
+    for key, value in environment.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("WORKTREE_PANE_MIN_RUNTIME", "0")
+    monkeypatch.setenv("WORKTREE_PANE_WAIT_TIMEOUT", "0")
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    initialize = (
+        "import json,sys;from pathlib import Path;from uuid import uuid4;"
+        "from agent_worktrees import tracking,session_shell,config as cfg;"
+        "checkout,source,root=map(Path,sys.argv[1:]);"
+        "project=cfg.project_dir('native-admission');project.mkdir(parents=True,exist_ok=True);"
+        "(project/'config.yaml').write_text(json.dumps({'repo_name':'native-admission','machine':'fixture',"
+        "'repos':{'native-admission':{'anchor':str(checkout),'default_branch':'dev'}}}),encoding='utf-8');"
+        f"record=tracking.create_new_record({tmp_path.name!r},'worktree/native-admission',"
+        "str(checkout),'native-admission','fixture','win32',checkout);"
+        "attempt,resolution=uuid4().hex,uuid4().hex;"
+        "shell=session_shell.prepare(record.yaml_path,source,installation_roots=(root,),attempt_id=attempt);"
+        "print(json.dumps({'record':str(record.yaml_path),'copied':str(shell.directory),"
+        "'attempt':attempt,'resolution':resolution}))"
+    )
+    prepared = run_caller_owned(
+        [*prefix, "-c", initialize, str(checkout), str(plugin / "scripts/default-setup.ps1"), str(root)],
+        env=environment, cwd=checkout, timeout=30, max_stdout_bytes=65536, max_stderr_bytes=65536,
+    )
+    assert prepared.returncode == 0, prepared.stdout + prepared.stderr
+    preparation = json.loads(prepared.stdout)
+    copied = Path(preparation["copied"])
+    ready, interrupted, stop = (tmp_path / name for name in ("ready", "interrupt", "stop"))
+    backend = tmp_path / "admission-backend.py"
+    backend.write_text(
+        "import json,os,pathlib,sys\n"
+        f"pathlib.Path({str(checkout / 'console-probe.json')!r}).write_text(json.dumps("
+        "{'pid':os.getpid(),'parent':os.getppid(),'cwd':os.getcwd(),'argv':sys.argv}))\n"
+        "import ctypes,signal,time\n"
+        f"def interrupted(*_): pathlib.Path({str(interrupted)!r}).write_text('received')\n"
+        "signal.signal(signal.SIGINT,interrupted)\n"
+        "api=ctypes.WinDLL('kernel32',use_last_error=True)\n"
+        "api.GetStdHandle.restype=ctypes.c_void_p\n"
+        "api.GetConsoleMode.argtypes=[ctypes.c_void_p,ctypes.POINTER(ctypes.c_ulong)]\n"
+        "handle=api.GetStdHandle(-10)\nmode=ctypes.c_ulong()\n"
+        "assert api.GetConsoleMode(handle,ctypes.byref(mode))\n"
+        f"ready=pathlib.Path({str(ready)!r})\ntemporary=ready.with_suffix('.tmp')\n"
+        "temporary.write_text(json.dumps({'pid':os.getpid(),'parent':os.getppid(),"
+        "'tty':sys.stdin.isatty(),'cwd':os.getcwd()}))\n"
+        "temporary.replace(ready)\n"
+        f"while not pathlib.Path({str(stop)!r}).exists(): time.sleep(.02)\n"
+        "sys.exit(7)\n",
+        encoding="utf-8",
+    )
+    script_pid = tmp_path / "script-pid"
+    backend_python = Path(getattr(sys, "_base_executable", sys.executable))
+    if script_backend:
+        executable = tmp_path / "backend.ps1"
+        executable.write_text(
+            f"[IO.File]::WriteAllText({_literal(script_pid)},[string]$PID)\n"
+            f"& {_literal(backend_python)} -I {_literal(backend)}\nexit $LASTEXITCODE\n",
+            encoding="utf-8",
+        )
+        arguments = []
+    else:
+        executable = backend_python
+        arguments = ["-I", str(backend)]
+    driver = tmp_path / "copied-setup-owner.ps1"
+    driver.write_text(
+        f"$env:PATH={_literal(Path(shutil.which('pwsh')).parent)}\n"
+        f"[IO.File]::WriteAllText({_literal(checkout / 'owner-probe.json')},"
+        "(@{pid=$PID;cwd=$PWD.ProviderPath} | ConvertTo-Json -Compress))\n"
+        f"& {_literal(copied / 'default-setup.ps1')} -Recovery "
+        f"-LaunchSeedPreparation admission -LaunchSeedNativeRoot {_literal(root)} "
+        f"-LaunchSeedRecord {_literal(preparation['record'])} -CopilotPath {_literal(executable)} "
+        f"-RuntimePython {_literal(tmp_path / 'absent-python.exe')} "
+        f"-LaunchAttemptId {_literal(preparation['attempt'])} "
+        f"-LaunchResolutionId {_literal(preparation['resolution'])} "
+        f"-NativeArgumentsJson {_literal(json.dumps({'args': arguments}))}\n"
+        "exit $LASTEXITCODE\n",
+        encoding="utf-8",
+    )
+    pane = Path(__file__).resolve().parents[4] / "worktree-manager/bin/pane-wrapper.ps1"
+    outer = tmp_path / "copied-pane"
+    outer.mkdir()
+    shutil.copy2(pane, outer / pane.name)
+    shutil.copy2(plugin / "scripts/native-seed-boundary.ps1", outer / "native-seed-boundary.ps1")
+    command = [
+        shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-File", str(outer / pane.name),
+        "-AwManagerRoot", str(tmp_path / "absent-manager"),
+        shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-File", str(driver),
+    ]
+    console = _Console(command, checkout)
+    child_handle = None
+    try:
+        _wait(ready.is_file, console, "Copied admission setup did not start its terminal backend", timeout=30)
+        child = json.loads(ready.read_text(encoding="utf-8"))
+        assert child["tty"] is True
+        assert Path(child["cwd"]) == checkout
+        birth = locks.process_start_time(child["pid"])
+        owner_birth = locks.process_start_time(child["parent"])
+        assert birth and owner_birth
+        child_handle = console.api.OpenProcess(0x100000 | 0x1000, False, child["pid"])
+        console._check(child_handle)
+        if script_backend:
+            assert int(script_pid.read_text(encoding="utf-8")) == child["parent"]
+        console.interrupt()
+        _wait(interrupted.is_file, console, "Admission setup swallowed the backend's interrupt")
+        assert not console.exited()
+        assert console.api.WaitForSingleObject(child_handle, 0) == 258
+        assert locks.process_start_time(child["pid"]) == birth
+        assert locks.process_start_time(child["parent"]) == owner_birth
+        stop.write_text("exit", encoding="utf-8")
+        _wait(console.exited, console, "Admission setup did not finish after actual child exit", timeout=30)
+        files = list(copied.parent.glob("*.execution.json"))
+        assert len(files) == 1
+        receipt = json.loads(files[0].read_text(encoding="utf-8"))
+        assert receipt["attempt_id"] == preparation["attempt"]
+        assert receipt["resolution_id"] == preparation["resolution"]
+        assert [event["phase"] for event in receipt["events"]] == [
+            "execution-requested", "process-spawned", "execution-returned",
+        ]
+        assert receipt["events"][1]["details"]["pid"] == child["parent"]
+        assert receipt["events"][-1]["details"]["process_exit_code"] == 7
+        assert receipt["events"][-1]["details"]["exit_code"] == 7
+        _wait(
+            lambda: b"Session exited with code 7" in console.output,
+            console, "Outer pane did not observe the setup's nonzero exit", allow_exited=True,
+        )
     finally:
         console.close()
         if child_handle:

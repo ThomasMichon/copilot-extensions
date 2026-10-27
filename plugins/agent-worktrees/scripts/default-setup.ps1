@@ -377,7 +377,16 @@ function Resolve-CopilotApplication {
 function Invoke-CopilotBackend {
     param([string]$Executable, [string[]]$LeadingArgs = @())
     if (-not $LaunchSeedRecord) {
-        & $Executable @LeadingArgs @CopilotArgs
+        $consoleControl = $null
+        try {
+            if ($nativeSetup) { $consoleControl = Register-AwNativeSeedConsoleControl }
+            & $Executable @LeadingArgs @CopilotArgs
+        } finally {
+            if ($consoleControl) {
+                $null = [AwNativeSeed.ConsoleControl]::SetConsoleCtrlHandler($consoleControl.Pointer, $false)
+                [GC]::KeepAlive($consoleControl.Callback)
+            }
+        }
         return
     }
     if ($LaunchSeedNativeRoot -and [IO.Path]::GetExtension($Executable) -notin @('.cmd', '.bat')) {

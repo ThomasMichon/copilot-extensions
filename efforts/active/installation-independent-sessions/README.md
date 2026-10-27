@@ -1213,3 +1213,33 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   adapter PowerShell parsing and the 13-plugin install contract pass.
   Documentation, contract and performance impact were rechecked against the
   candidate; publication remains PR-gated, and nothing is deployed.
+
+### 2026-10-27 - Consumer PR review
+
+- Opened #9288 through the managed flow after preserving a recovery branch and
+  rebasing onto current `dev`. The only conflict was documentation; both the
+  concurrent fleet paragraph and the native test guidance were retained.
+  The independent installer/removal work remains with #9253's owner.
+- Exact-head Copilot review `5673353889` identified one Medium issue:
+  admission-only setup clears the seed fields and bypasses the adapter's
+  console-control guard through its direct backend branch. The outer pane
+  protects a different process and does not close that gap.
+- The candidate now guards that existing host's direct native wait, retaining
+  same-host PowerShell-script execution and unchanged legacy behavior. New
+  full copied-setup ConPTY cases use the actual completed runtime/provider
+  and canonical outer pane Job, checking first-interrupt survival, actual
+  nonzero exit and the correlated return receipt. Validation and thread
+  resolution are pending; the review is not yet a merge gate pass.
+- Two local review-fix packets each passed five controls and failed one before
+  terminal-backend readiness/preparation; each backend mode passed separately,
+  but that is not a combined passing result. Corrected the test's working
+  directory to the recorded checkout and bounded whole-pipeline observation
+  separately from the unchanged ten-second native phase cap.
+- Added a default-off Windows-only selector to the existing manual acceptance
+  workflow for independent exact-dispatch-SHA qualification of the six focused
+  controls. The strict workflow catalogue tests pass all 87 cases after
+  accounting for already-declared inputs/jobs and the new lane. Required unit
+  CI and unrelated default diagnostics are not expanded.
+- #9288 is draft while that native proof is pending. Local failed attempts
+  remain failures, the Medium thread remains unresolved, and there is no
+  installed rollout or live-host effect.

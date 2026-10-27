@@ -122,6 +122,35 @@ def test_native_jobs_do_not_reenter_required_unit_only_ci(retired_job: str) -> N
     assert not execution.get("continue-on-error", False)
 
 
+def test_native_launch_acceptance_is_explicit_windows_only_and_source_pinned() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert set(trigger) == {"workflow_dispatch"}
+    assert trigger["workflow_dispatch"]["inputs"]["native_launch"] == {
+        "description": "Qualify copied Windows setup interrupt handling against a real current runtime",
+        "type": "boolean", "default": False,
+    }
+    job = workflow["jobs"]["native-launch-windows"]
+    assert job["if"] == "${{ inputs.native_launch }}"
+    assert job["runs-on"] == "windows-latest"
+    assert job["timeout-minutes"] == 30
+    assert job["steps"][0]["with"] == {
+        "ref": "${{ github.sha }}", "persist-credentials": False,
+    }
+    preflight = next(step for step in job["steps"] if step.get("name", "").startswith("Verify native"))
+    assert "$actual -cne $env:GITHUB_SHA" in preflight["run"]
+    execution = job["steps"][-1]["run"]
+    assert "tests/native/test_native_seed_console.py" in execution
+    assert "tests/test_native_seed_shell.py" in execution
+    assert '-k "copied_setup_admission or real_copied_setup"' in execution
+    assert "--allow-host-state" not in execution
+    assert not any(step.get("continue-on-error", False) for step in job["steps"])
+    for name in ("derived-diagnostics-posix", "derived-diagnostics-windows"):
+        assert "!inputs.native_launch" in workflow["jobs"][name]["if"]
+
+
 def test_displaced_native_sources_and_unavailable_portfolio_remain_explicit() -> None:
     root = HERE.parent
     for source in (
@@ -429,7 +458,8 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "guardian_followthrough", "guardian_ref",
         "runtime_profiles", "chat_construction",
         "immutable_runtime", "immutable_runtime_ref",
-        "interactive_completion", "ssh_service",
+        "interactive_completion", "native_launch", "ssh_service",
+        "ssh_headless", "update_diagnostics",
     }
     assert inputs["watch_owner"]["type"] == "boolean"
     assert inputs["watch_owner"]["default"] is False
@@ -449,6 +479,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "source-build-linux", "source-build-windows",
         "marketplace-source-linux", "marketplace-source-windows",
         "installer-latency-linux", "installer-latency-windows",
+        "packaging-seed-linux", "packaging-seed-windows",
         "logger-installer-latency-linux", "logger-installer-latency-windows",
         "candidate-profiles-linux", "candidate-profiles-windows",
         "chat-construction-linux", "chat-construction-windows",
@@ -461,16 +492,19 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "immutable-runtime-linux", "immutable-runtime-macos",
         "interactive-completion-linux", "interactive-completion-macos",
         "interactive-completion-windows",
+        "native-launch-windows",
+        "ssh-headless-linux", "ssh-headless-windows",
+        "update-diagnostics-linux", "update-diagnostics-windows",
     }
     for name, runner in routes.items():
         job = workflow["jobs"][name]
         assert job["if"] == (
-            "${{ !inputs.interactive_completion && !inputs.immutable_runtime "
+            "${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime "
             "&& !inputs.guardian_followthrough && !inputs.watch_owner "
             "&& !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service "
             "&& !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles "
-            "&& !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs "
-            "&& !inputs.runtime_profiles }}"
+            "&& !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless "
+            "&& !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics }}"
         )
         assert job["runs-on"] == runner
         assert job["timeout-minutes"] == 4
