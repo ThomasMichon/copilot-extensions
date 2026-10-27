@@ -11,7 +11,7 @@ from . import locks, resident_push, status_monitor_cutover
 def retire_monitor(
     *, close_admission, repositories_runtime, worktrees_runtime,
     close_request_surfaces, control_server, receipts, worktree_status_runtime,
-    managed_mux_runtime, lock, original_error,
+    managed_mux_runtime, lock, original_error, allocation_linker=None,
 ) -> None:
     error = original_error
     traceback = error.__traceback__ if error is not None else None
@@ -35,10 +35,12 @@ def retire_monitor(
     attempt(receipts.wait_idle)
     attempt(resident_push.reset)
     attempt(worktrees_runtime.shutdown)
+    if allocation_linker is not None:
+        attempt(allocation_linker.shutdown_and_wait, retry=False)
     # This domain method guarantees settlement before resurfacing its error.
     # Earlier failures must neither skip it nor replace the original failure.
     attempt(worktree_status_runtime.shutdown_and_wait, retry=False)
-    attempt(managed_mux_runtime.shutdown)
+    attempt(managed_mux_runtime.shutdown_and_wait, retry=False)
 
     # Failed intake/authority cleanup is unknown, not a successful zero count.
     # Retry it only after every independent mandatory cleanup was attempted.
