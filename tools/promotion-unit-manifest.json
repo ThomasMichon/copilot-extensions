@@ -2758,8 +2758,8 @@
         "plugins/agent-worktrees/src/agent_worktrees/resource_relationship.py": "bc4ac5c41a880bc785f0064872cb7f3e81d8530139ce8540b3bd06ba328b9426",
         "plugins/agent-worktrees/src/agent_worktrees/owned_worktree.py": "eaa2eb00a19e6c60dac772cdb1de9d928e1b8a523d313cbe13321fdca80c57f3",
         "plugins/agent-worktrees/src/agent_worktrees/tracking_allocation_write.py": "fc5a2da8d8a3125acd2797c1d2a27bc2af43bfb21be3f55f9faf38e395329d8f",
-        "plugins/agent-machines/src/agent_machines/git_config_transaction.py": "4615fe180944bfa46bf39967284023b03bcc11d7582bffd88935c85bcf768dfe",
-        "tools/promotion_unit_tests/test_git_config_transaction.py": "b4e31d66e9a89f1772ded097113d377e483baedf4e69c2c9e72d1189701c56ff"
+        "plugins/agent-machines/src/agent_machines/git_config_transaction.py": "5b054f3f2c2270672c55bab7de114e5e05541235d94553c4c1de2a06b26fe38d",
+        "tools/promotion_unit_tests/test_git_config_transaction.py": "d47c4b32c9ccbffdda2cc3813ae66871970a068be44fddcbde5449230db4da2b"
     },
     "coverage_targets": [
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_clock.py",

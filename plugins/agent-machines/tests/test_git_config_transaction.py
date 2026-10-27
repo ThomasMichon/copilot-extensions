@@ -259,6 +259,47 @@ def test_backup_failure_does_not_write_and_cleans_only_its_lock(tmp_path, monkey
     assert not target.with_name(target.name + ".lock").exists()
 
 
+@pytest.mark.parametrize("depth", [1, 3])
+@pytest.mark.parametrize("sync_failure", [False, True])
+def test_new_backup_ancestors_are_synced_before_commit(tmp_path, monkeypatch, depth, sync_failure):
+    target = tmp_path / ".gitconfig"
+    original = b"[user]\n\tname = Before\n"
+    target.write_bytes(original)
+    plan = transaction.preview(target, {"user.name": ["After"]})
+    root = tmp_path.joinpath(*(f"new-{index}" for index in range(depth)), "backups")
+    sync_directory = transaction._sync_directory
+    replace = os.replace
+    observed = []
+    committed = []
+    required = [root, *list(root.parents)[:depth + 1]]
+
+    def sync(path):
+        observed.append(path)
+        if sync_failure and path == tmp_path:
+            raise OSError("synthetic backup ancestor sync failure")
+        sync_directory(path)
+
+    def commit(source, destination):
+        assert observed[-len(required):] == required
+        committed.append(True)
+        replace(source, destination)
+
+    monkeypatch.setattr(transaction, "_sync_directory", sync)
+    monkeypatch.setattr(transaction.os, "replace", commit)
+    if sync_failure:
+        with pytest.raises(OSError, match="ancestor sync"):
+            transaction.apply(
+                plan, expected_plan_sha256=plan.plan_sha256, backup_root=root,
+            )
+        assert not committed and target.read_bytes() == original
+    else:
+        assert transaction.apply(
+            plan, expected_plan_sha256=plan.plan_sha256, backup_root=root,
+        ).is_file()
+        assert committed and target.read_bytes() == plan.after
+    assert not target.with_name(target.name + ".lock").exists()
+
+
 def test_read_only_configuration_is_refused_without_side_effects(tmp_path):
     target = tmp_path / ".gitconfig"
     target.write_bytes(b"[user]\n\tname = Before\n")

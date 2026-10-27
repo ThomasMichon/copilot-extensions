@@ -284,6 +284,11 @@ def _owns_lock(path: Path, identity: tuple[int, int]) -> bool:
 
 def _backup(plan: Plan, root: Path) -> Path:
     _check_directory_chain(root)
+    created = []
+    for parent in (root, *root.parents):
+        if parent.exists():
+            break
+        created.append(parent)
     root.mkdir(parents=True, exist_ok=True)
     _check_directory_chain(root)
     directory = root / uuid.uuid4().hex
@@ -305,6 +310,8 @@ def _backup(plan: Plan, root: Path) -> Path:
     _write_private(receipt, json.dumps(payload, sort_keys=True).encode("utf-8"))
     _sync_directory(directory)
     _sync_directory(root)
+    for parent in created:
+        _sync_directory(parent.parent)
     return receipt
 
 

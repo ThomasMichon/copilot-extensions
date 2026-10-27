@@ -250,7 +250,7 @@ def test_git_errors_and_expired_budget_do_not_expose_output_or_retry(
 
 
 def test_real_file_transaction_and_rollback_use_only_the_audited_temp_scope(
-    engine, tmp_path
+    engine, tmp_path, monkeypatch
 ):
     target = tmp_path / ".gitconfig"
     original = b"# preserve bytes\r\n[user]\r\n\tname = Before\r\n"
@@ -258,14 +258,24 @@ def test_real_file_transaction_and_rollback_use_only_the_audited_temp_scope(
     target.write_bytes(original)
     before, identity = engine._snapshot(target)
     plan = engine.Plan(target, before, proposed, identity, '{"user.name":["After"]}')
+    root = tmp_path / "new-parent" / "backups"
+    synced = []
+    sync_directory = engine._sync_directory
+
+    def sync(path):
+        synced.append(path)
+        sync_directory(path)
+
+    monkeypatch.setattr(engine, "_sync_directory", sync)
     with pytest.raises(engine.TransactionError, match="consent"):
         engine.apply(
-            plan, expected_plan_sha256="wrong", backup_root=tmp_path / "backups"
+            plan, expected_plan_sha256="wrong", backup_root=root
         )
     assert target.read_bytes() == original
     receipt = engine.apply(
-        plan, expected_plan_sha256=plan.plan_sha256, backup_root=tmp_path / "backups"
+        plan, expected_plan_sha256=plan.plan_sha256, backup_root=root
     )
+    assert synced[1:4] == [root, root.parent, tmp_path]
     assert target.read_bytes() == proposed
     assert not target.with_name(target.name + ".lock").exists()
     rollback = engine.rollback_preview(target, receipt)
@@ -273,7 +283,7 @@ def test_real_file_transaction_and_rollback_use_only_the_audited_temp_scope(
     engine.apply(
         rollback,
         expected_plan_sha256=rollback.plan_sha256,
-        backup_root=tmp_path / "backups",
+        backup_root=root,
     )
     assert target.read_bytes() == original
 
