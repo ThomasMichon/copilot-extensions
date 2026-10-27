@@ -127,14 +127,43 @@ The explicit agent registry selects the existing test-only stdio ACP peer;
 an exclusively created private executable wrapper places its Python script
 before the ACP flags that Bridge appends. Python itself is not registered as
 the Copilot executable, since those flags would be interpreted by Python.
-its transcript contains only synthetic data. This is not a native Copilot or
+Its transcript contains only synthetic data. This is not a native Copilot or
 model and does not complete a Dispatch task. Credential relay listening is
 disabled and the private provider registry starts empty; the ordinary Bridge
 startup still invokes its HTTP-source registry machinery.
 
-Actual service startup, source/runtime-origin checks, bounded peer ownership,
+Actual service startup, guest runtime-origin qualification, bounded peer ownership,
 the initial-task caller and original-owner recovery/fault lifecycle remain open.
 Preparation is not permission to execute commands or new work after monitor loss.
+
+## Explicit runtime-origin observation
+
+`guest_origins.inspect_runtimes(custody)` uses the existing operation and finite
+process owners to observe the three prepared interpreters. It requires separately
+authorized, qualified resources/image/source, fresh host monitoring and no
+competing runtime writers. Each fixed `bin/python3 -I -B` invocation has ten
+seconds and 16 KiB stream caps. The isolated flag ignores ambient Python paths;
+bytecode writing is disabled. A failure propagates its bounded literal cause,
+without retries, partial-success results, repairs or persisted readiness markers.
+
+The stdlib-only `runtime_origin_probe.py` checks the executing virtualenv prefix
+and executable, distribution location/version and noneditable local-project
+metadata. It compares all main-package `.py` files with the selected source,
+refusing missing, extra, changed or redirected Python paths. Cached `.pyc`/`.pyo`
+files, including those beneath `__pycache__`, refuse before importing; `-B`
+prevents writes, not stale-cache reads. Previously imported main-package modules
+also refuse. No cache is removed or repaired, even if it might be consistent.
+Each inventory has
+4,096 entries, 1 MiB per file and 64 MiB total ceilings. It then imports only the
+verified top-level package and checks its actual origin, never a service/CLI
+entry point. The returned observations name the interpreter, package, version,
+source and compared Python-file/byte counts; they are not installation receipts.
+
+This checks main-package Python bytes, not dependencies, native extensions,
+package data, interpreter authenticity, source-to-image provenance or build
+closure. It is not an atomic snapshot against a competing writer and does not
+qualify commands, services, native START or readiness. The complete image/guest
+still needs actual qualification; source/synthetic results cannot substitute.
 
 ## Controls
 
@@ -161,3 +190,11 @@ declared Python dependencies in its isolated test environment.
 It starts no service or backend and is outside default test discovery. Neither
 lane qualifies the actual image, guest mounts, installed runtimes or ordinary
 Dispatch-to-Bridge execution.
+
+`tools/test_reproducer_lab_origins.py` checks probe rejection and finite caller
+behavior on synthetic paths/metadata. Explicitly selected `origin_local_tests.py`
+runs a real isolated Python child in a temporary empty stdlib venv with only a
+synthetic package and metadata. No actual plugin, build or dependency is installed.
+It checks origin/version/byte/editable rejection and ambient-path exclusion,
+plus rejection of actual timestamp-valid stale initializer/helper bytecode.
+It does not qualify the actual guest recipe, dependency closure or service lifecycle.
