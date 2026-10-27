@@ -171,7 +171,7 @@ After the reviewed proposal, the operator admitted execution:
   unchanged synthetic items without ordinary work growing with corpus size.
 - [ ] Preserve metadata freshness, tombstones/renames, model backfill, complete
   checkpoint advancement, interrupted-run recovery and source/account isolation.
-- [ ] Demonstrate duplicate and active-round event bursts are losslessly
+- [x] Demonstrate duplicate and active-round event bursts are losslessly
   coalesced with bounded unique-item fetches.
 - [ ] Prove no-op rounds produce zero embedding requests, content/vector writes
   and derived-maintenance runs.
