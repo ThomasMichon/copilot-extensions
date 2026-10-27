@@ -55,6 +55,8 @@ def serve(root: Path, mode: str):
             if action == "drain":
                 draining = True
                 return {"drained": True, "clean": True, "forced": False}
+            if action == "undrain":
+                return reopen()
             if action == recovery.ACTION:
                 if mode == "before-gate":
                     (root / "entered").touch()

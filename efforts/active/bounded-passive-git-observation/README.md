@@ -298,3 +298,26 @@ review-gated platform slice, not disabling ordinary POSIX classification.
   contract and retired-surface pruning moved to their owning helpers; the
   CLI is 998 lines without a baseline increase. Focused Ruff and install
   contract pass. No service, installed runtime or production session changed.
+
+### 2026-10-26 - Final retained-continuation review corrections
+- Re-read the still-open original review against current source rather than
+  treating prior green tests as acceptance. Six last-round consumer defects
+  remained real: a fallback handoff gate, delayed settled-error association,
+  cached-bundle identity, pre-lease updater discovery, stale snapshot display
+  and obsolete lease contenders.
+- Twelve exact consumer regressions captured 11 failures and one passing
+  required-replacement control before correction. All 92 affected review,
+  custody and updater cases then passed. The integrated packet passed 546
+  cases, zero skipped, in 146.60 seconds (153.70 including runner cleanup).
+- The cache now keeps stored bytes/ages while displaying pending UNKNOWN,
+  rejects wrong bundle identities, and never attaches an already-settled
+  error to a new ticket. The existing fallback handoff pass uses the same
+  carrier gates; no handoff choreography or authority changed.
+- Windows updater discovery follows the native lease. Contention rechecks
+  current owner, session and runtime; redundant/retired contenders exit,
+  while a required replacement still waits for predecessor cleanup. Ordinary
+  Linux/macOS paths retain baseline activation and no new lease.
+- An additional real legacy-client/new-provider control passed in the full
+  15-case native wire file. This complements new-caller/old-provider refusal;
+  it does not permit legacy fallback in guarded recovery. Source review,
+  current-tip integration, required CI and installed qualification stay open.

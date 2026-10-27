@@ -343,3 +343,21 @@ R1a/compatibility/core-handler/lifecycle regressions. Current-head review/CI,
 original draft publication/merge, release and separately authorized installed
 proof remain open. None of these timings is a full-harness or process-economy
 pass.
+
+### Subsequent last-round consumer corrections
+
+The 498-case receipt above predates six still-open last-round review defects;
+it is not the final candidate's acceptance. `test_observation_review_regressions.py`
+reproduced 11 failures with one required-replacement control already passing.
+After the scoped cache/snapshot/handoff/updater corrections, all 92 affected
+cases passed, followed by **546 passed, zero skipped** in the combined 14-file
+packet (146.60 seconds; 153.70 including preparation/cleanup). The same native
+26-case packet remained included. A separate final wire-file run then passed
+15 cases, adding actual old-client/new-provider compatibility without changing
+the guarded capability refusal or fallback policy. No native case was waived.
+
+The updater now revalidates eligibility only after lease contention; ordinary
+non-contended work does not acquire extra per-tick IPC. No new cache, service,
+process census, production deadline or mutation/publication lock design was
+introduced. Linux and macOS ordinary behavior remains legacy; their new
+observation-containment work is still explicitly open under #7944.
