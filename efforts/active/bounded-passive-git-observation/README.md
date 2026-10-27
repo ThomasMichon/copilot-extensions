@@ -347,5 +347,7 @@ review-gated platform slice, not disabling ordinary POSIX classification.
   not a platform skip. See [validation.md](validation.md).
 - Refreshed one already-admitted procutil source hash in the promotion packet;
   its 2,407 nodes, 129 production targets, 300-second cap and effect prohibitions
-  are unchanged. Actual fixed-packet execution, fresh review and required CI
-  remain gates; no release, installed rollout or broader completion is claimed.
+  are unchanged. The actual fixed packet passed all 2,407 admitted nodes in
+  153.812 seconds with its coverage/effect checks intact at `5c353233e8`.
+  Fresh current-head review and required CI remain gates; no release, installed
+  rollout or broader completion is claimed.
