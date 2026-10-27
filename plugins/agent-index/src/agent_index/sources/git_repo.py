@@ -37,7 +37,7 @@ from agent_procutil import no_window_kwargs
 
 from agent_index.indexing.change_hints import ChangeHints
 from agent_index.sources.base import FileEntry, nonsecret_target
-from agent_index.sources.delta import SourceDelta
+from agent_index.sources.delta import SnapshotPage, SourceDelta
 from agent_index.sources.git_records import commit_records, decode_git_path, nul_git_paths
 from agent_index.sources.credentials import (
     SourceCredentialError,
@@ -260,7 +260,10 @@ class GitRepoConnector:
     def recovery_identity(self) -> tuple[str, ...]:
         """Effective local target/ref/remote without credentials or transient tokens."""
         remote = self._git_quiet(["remote", "get-url", self._remote]).strip()
-        identity = (str(self.repo_path), self._remote, self._ref, nonsecret_target(remote) or "local-only")
+        identity = (
+            str(self.repo_path), self._remote, self._ref, nonsecret_target(remote) or "local-only",
+            "git-objects:canonical-v1",
+        )
         return identity if self._hint_account is None else (*identity, self._hint_account)
 
     @property
@@ -299,7 +302,7 @@ class GitRepoConnector:
                 self._git_quiet(["remote", "set-head", self._remote, "-a"])
             ref = self._resolve_ref()
             if ref is not None:
-                commit = self._git(["rev-parse", ref]).strip()
+                commit = self._git(["rev-parse", f"{ref}^{{commit}}"]).strip()
                 if commit:
                     self._index_ref = ref
                     self._index_commit = commit
@@ -469,6 +472,19 @@ class GitRepoConnector:
             refresh_paths=refresh_paths, refresh_commits=refresh_commits,
         )
 
+    @property
+    def discover_snapshot_page(self) -> Callable[..., SnapshotPage] | None:
+        self._resolve()
+        return None if self._use_worktree else self._discover_snapshot_page
+
+    def _discover_snapshot_page(
+        self, snapshot: str | None, cursor: str | None,
+        *, cancel_check: Callable[[], None] | None = None,
+    ) -> SnapshotPage:
+        from agent_index.sources.git_snapshot import discover_git_snapshot
+
+        return discover_git_snapshot(self, snapshot, cursor, cancel_check=cancel_check)
+
     def discover(self, cancel_check: Callable[[], None] | None = None) -> list[FileEntry]:
         """Discover current tracked files plus commit-history entries."""
         self._resolve()
@@ -608,6 +624,7 @@ class GitRepoConnector:
         strict: bool = False,
         target_commit: str | None = None,
         max_count: int | None = None,
+        skip: int | None = None,
     ) -> list[FileEntry]:
         args = [
             "log",
@@ -618,6 +635,8 @@ class GitRepoConnector:
         ]
         if max_count is not None:
             args.append(f"--max-count={max_count}")
+        if skip is not None:
+            args.extend(["--topo-order", f"--skip={skip}"])
         revision = target_commit or self._index_rev()
         if last_commit:
             args.append(f"{last_commit}..{revision}")
@@ -664,7 +683,7 @@ class GitRepoConnector:
 
     def _git_command(self, args: list[str]) -> list[str]:
         prefix = [f"--git-dir={self.repo_path}"] if self._bare_repository else []
-        return [_GIT, *prefix, *args]
+        return [_GIT, "--no-replace-objects", *prefix, *args]
 
     @staticmethod
     def _authenticated_environment() -> dict[str, str]:
@@ -758,3 +777,4 @@ class GitRepoConnector:
 
 setattr(GitRepoConnector.discover_hints, "change_hints_versions", (1,))
 setattr(GitRepoConnector.discover_delta, "poll_refresh_versions", (1,))
+setattr(GitRepoConnector._discover_snapshot_page, "snapshot_page_versions", (1,))
