@@ -82,6 +82,33 @@ errors or extending the original deadline.
 Expired source-lock consumption retains an active typed subprocess timeout
 and its diagnostics; successful consumption still checks the outer deadline.
 
+## Optional stock Windows bootstrap building blocks
+
+Select `bootstrap_file_guard` or `bootstrap_file_trust` in `agent-codespaces`
+through the bounded plugin runner. These repository-only helpers are not
+distributed or enabled by the existing bootstrap selector. Native tests use
+64-bit Windows PowerShell; the separate Core case checks explicit refusal,
+not positive parity. Linux runs the portable source contract with explicit
+native skips.
+
+The trust packet requires an existing official PSF-signed Python executable.
+Set `EVALUATOR_BOOTSTRAP_TEST_PYTHON` to that file if the test interpreter's base
+executable is not suitable. Tests copy it into a disposable fixture and never
+execute the copy. They query the actual retained file's signature, including
+unsigned/modified and mismatched pathname/handle controls, repeated state
+closure, error cleanup and native-module identity refusals. Each captured,
+windowless PowerShell child has a 20-second timeout within the runner's finite
+Job/process boundary. No compiler, interpreter acquisition, foreign DLL load,
+production registration or desktop positive control is part of this packet.
+
+```text
+python tools/run-plugin-tests.py agent-codespaces -k bootstrap_file_trust --timeout 600 --plugin-timeout 600
+```
+
+These controls do not establish the full prerequisite-to-helper admission,
+canonical path/drive/source closure, PowerShell Core support, production
+headlessness or any compiled-caller replacement.
+
 ## Materialized source-owner SDK readiness
 
 `plugins/agent-worktrees/tests/test_source_portfolio_owners.py` materializes the
