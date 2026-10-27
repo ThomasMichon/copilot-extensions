@@ -21,7 +21,10 @@ persistent-volume/crash qualification remain open.
 Initial synthetic-task/journal gate source merged in #9151; actual guest
 service wiring and persistent-lab qualification remain open.
 Image/runtime preparation source merged in #9161; no image was built or guest
-runtime qualified. Continue the synthetic hosting workspace and owner inputs.
+runtime qualified. Credential-free synthetic hosting/configuration preparation
+merged in #9167; actual guest origin, service/peer lifecycle and initial-case
+execution remain open. The [runtime guide](../../../tools/reproducer-lab/image-runtime.md)
+records bounded main-package origin-observation source and its qualification limits.
 This is an agent-recommended decomposition of the remaining isolated
 failure-reproduction and logging qualification work. It does not authorize
 resource creation, production fault injection, deployment or credential access.
