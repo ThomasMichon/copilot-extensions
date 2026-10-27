@@ -168,3 +168,37 @@ def test_receiving_admission_cannot_skip_original_journal_or_launch_during_creat
                 no_pair=True, **fields,
             )
     assert not list(records.glob("*.yaml"))
+
+
+def test_journal_backed_foreign_creator_is_not_resolved_in_receiving_registry(receiver, monkeypatch):
+    config, admission, _ = receiver
+    _, record = create(receiver)
+    original = execution_spaces.require_owner_identity
+    foreign, _, _ = receiving.allocation.qualified_ref(admission.origin)
+
+    def local_identity(machine, config, **kwargs):
+        if machine == foreign:
+            raise execution_spaces.ExecutionSpaceError("foreign creator is not a receiving registry entry")
+        return original(machine, config, **kwargs)
+
+    monkeypatch.setattr(execution_spaces, "require_owner_identity", local_identity)
+    execution_spaces.require_record_mutation(record, config)
+
+
+def test_explicit_receiving_registry_does_not_need_foreign_creator_entry(receiver):
+    config, admission, _ = receiver
+    _, record = create(receiver)
+    context = execution_spaces.current_execution_context(config)
+    (Path(config.default_repo.anchor) / "machines.yaml").write_text(yaml.safe_dump({
+        "machines": {record.execution_machine: {
+            "hostname": context.hostname, "physical_host": record.machine,
+            "execution_platform": record.platform,
+        }},
+    }))
+    with pytest.raises(execution_spaces.ExecutionSpaceError):
+        execution_spaces.require_owner_identity(admission.origin.split("/")[0], config)
+    execution_spaces.require_record_mutation(record, config)
+    record.receiving_allocation = None
+    record.receiving_allocation_present = False
+    # Missing receipt is still recoverable only from the same original journal.
+    execution_spaces.require_record_mutation(record, config)

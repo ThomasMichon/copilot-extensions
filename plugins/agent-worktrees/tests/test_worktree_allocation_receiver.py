@@ -186,3 +186,16 @@ def test_read_only_unknown_inspection_does_not_create_journal(receiver):
     result = receive("inspect", request(receiver), config)
     assert result["status"] == "unknown" and result["allocation_finished"] is False
     assert not (Path(records).parent / "workspace-creation.sqlite3").exists()
+
+
+@pytest.mark.parametrize("options", [{"no_pair": 1}, {"unknown": True}, {"kind": "unsupported"}])
+def test_invalid_creation_options_do_not_trap_pre_effect_responsibility(receiver, options):
+    config, admission, records = receiver
+    admission.target["options"] = options
+    with pytest.raises(ValueError):
+        receive("create", request(receiver), config)
+    assert receive("inspect", request(receiver), config)["status"] == "unknown"
+    cancelled = receive("cancel", request(receiver), config)
+    assert cancelled["status"] == "cancelled" and cancelled["allocation_finished"]
+    assert receive("inspect", request(receiver), config) == cancelled
+    assert not list(records.glob("*.yaml"))

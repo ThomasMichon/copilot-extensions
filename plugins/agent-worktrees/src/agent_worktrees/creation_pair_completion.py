@@ -36,7 +36,9 @@ def complete_created_pair(
         pair_stamp = None
         composition_ready = False
     composition = stamp(config, record, record.worktree_path, pair_stamp)
-    if not composition_ready or composition and composition.get("action") == "error":
+    if not composition_ready or composition and (
+        composition.get("action") == "error" or composition.get("pair_error")
+    ):
         local_cache_refresh.mark_pair_pending(record.worktree_path)
         if record.receiving_allocation_present:
             raise RuntimeError("receiving allocation pairing remains incomplete; recover the original child")

@@ -28,8 +28,9 @@ def request(operation: str, metadata: dict) -> dict:
     if not allocation.valid_metadata(metadata) or metadata["phase"] == "closed":
         raise ValueError("receiving allocation requires valid unsettled responsibility")
     target = metadata["recovery"]
-    config = cfg.load_config()
-    entries = cfg.load_machines_yaml(config.default_repo.anchor)
+    _, project, _ = allocation.qualified_ref(metadata["creator"])
+    config = cfg.load_project_config(project)
+    entries = cfg.load_machines_yaml(config.default_repo.anchor, config=config)
     selected = resolve_machine_selection(entries, target["machine"])
     entry = selected.entry
     if entry is None or selected.target.logical_machine != target["machine"]:

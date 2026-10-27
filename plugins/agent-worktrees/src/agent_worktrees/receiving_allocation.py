@@ -131,6 +131,24 @@ def require_record(record: tracking.WorktreeRecord, config: cfg.Config) -> None:
         }.items()
     ):
         raise ValueError("receiving allocation conflicts with its journaled child")
+    _require_retained_finality(record, row, admission)
+
+
+def _require_retained_finality(
+    record: tracking.WorktreeRecord, row: dict, admission: ReceivingAllocation,
+) -> None:
+    from .receiving_creation_journal import concluded_identity
+
+    concluded = concluded_identity(row, admission)
+    if concluded is None:
+        return
+    identity, status = concluded
+    if (
+        identity != record_identity(record)
+        or record.status not in {"finalized", "archived"}
+        or status == "archived" and record.status != "archived"
+    ):
+        raise ValueError("receiving allocation is concluded; reopening or downgrading requires new ownership")
 
 
 def recover_missing(record: tracking.WorktreeRecord, records: Path) -> bool:
@@ -176,6 +194,7 @@ def recover_missing(record: tracking.WorktreeRecord, records: Path) -> bool:
         admission = ReceivingAllocation.from_fields(facts["receiving_allocation"])
         if digest != hashlib.sha256(admission.key.encode()).hexdigest():
             raise ValueError("receiving recovery facts are not the original journal key")
+        _require_retained_finality(record, {"facts": facts, "status": status, "worktree": saved}, admission)
         receipt = admission.receipt(record)
         receipt["phase"] = saved.get("receiving_phase", "created")
         matches.append(receipt)
@@ -230,6 +249,19 @@ def preserve(
             record.receiving_allocation_present = True
             record.owner_ref = current.owner_ref
             record.creation_nonce = current.creation_nonce
+        try:
+            admission = parsed_receipt(current)
+        except ValueError:
+            # Generic writes retain malformed bytes; they never grant mutation
+            # authority, which still requires the complete parsed receipt.
+            return
+        from . import creation_requests
+
+        row = creation_requests.inspect_journal(
+            path.parent.parent / "workspace-creation.sqlite3", admission.key,
+        )
+        if row is not None:
+            _require_retained_finality(record, row, admission)
         return
     if record.receiving_allocation_present:
         if current is not None or not authorized:

@@ -341,7 +341,7 @@ def require_record_mutation(record: Any, config: Any) -> None:
             owner = tracking.parse_claim_ref(record.owner_ref)
             if owner is None or not owner.is_qualified:
                 raise ExecutionSpaceError("owned record has an unqualified owner reference")
-            if not require_owner_identity(owner.machine, config) and not has_receiving_allocation:
+            if not has_receiving_allocation and not require_owner_identity(owner.machine, config):
                 raise ExecutionSpaceError(
                     "cross-space parent ownership remains unsupported; settlement is blocked"
                 )
@@ -367,9 +367,9 @@ def require_record_mutation(record: Any, config: Any) -> None:
             if owner is None or not owner.is_qualified:
                 raise ExecutionSpaceError("owned record has an unqualified owner reference")
             if (
-                resolve_legacy_wsl_owner_ref(owner, config) is None
+                not has_receiving_allocation
+                and resolve_legacy_wsl_owner_ref(owner, config) is None
                 and not require_owner_identity(owner.machine, config)
-                and not has_receiving_allocation
             ):
                 raise ExecutionSpaceError(
                     "cross-space parent ownership remains unsupported; settlement is blocked"
@@ -404,7 +404,7 @@ def require_record_mutation(record: Any, config: Any) -> None:
         owner = tracking.parse_claim_ref(record.owner_ref)
         if owner is None or not owner.is_qualified:
             raise ExecutionSpaceError("owned record has an unqualified owner reference")
-        if not require_owner_identity(owner.machine, config) and not has_receiving_allocation:
+        if not has_receiving_allocation and not require_owner_identity(owner.machine, config):
             raise ExecutionSpaceError(
                 "cross-space parent ownership remains unsupported; settlement is blocked"
             )

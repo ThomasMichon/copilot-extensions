@@ -155,6 +155,31 @@ def test_old_writer_terminal_save_retains_actual_conclusion(receiver, status):
     assert receive("inspect", request(receiver), config) == result
 
 
+@pytest.mark.parametrize("concluded,restored", [
+    ("finalized", "active"), ("archived", "active"), ("archived", "finalized"),
+])
+@pytest.mark.parametrize("keep_receipt", [False, True])
+def test_older_snapshot_cannot_reopen_retained_conclusion(receiver, concluded, restored, keep_receipt):
+    config, _, records = receiver
+    created = receive("create", request(receiver), config)
+    path = next(records.glob("*.yaml"))
+    raw = yaml.safe_load(path.read_text())
+    record = tracking.load_record(path)
+    record.status = concluded
+    tracking.save_record(record, path)
+    raw["status"] = restored
+    if not keep_receipt:
+        del raw["receiving_allocation"]
+    path.write_text(yaml.safe_dump(raw))
+    stale = tracking.load_record(path)
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="concluded"):
+        execution_spaces.require_record_mutation(stale, config)
+    with pytest.raises(ValueError, match="concluded"):
+        tracking.save_record(stale, path)
+    evidence = receive("inspect", request(receiver), config)
+    assert evidence["status"] == concluded and evidence["identity"] == created["identity"]
+
+
 @pytest.mark.parametrize("pair_kind,sibling_fault", [
     ("anchor", None), ("worktree", None), ("worktree", "missing"),
     ("worktree", "owner"), ("worktree", "id"), ("worktree", "finalized"), ("worktree", "nonce"),

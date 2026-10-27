@@ -79,6 +79,11 @@ def allocation_facts(config: cfg.Config, **options) -> dict:
 def inspect(config: cfg.Config, key: str) -> dict | None:
     """Read retained original-operation evidence without creating a missing journal."""
     path = cfg.tracking_dir(config.repo_name).parent / "workspace-creation.sqlite3"
+    return inspect_journal(path, key)
+
+
+def inspect_journal(path: Path, key: str) -> dict | None:
+    """Read the exact journal beside an already-resolved child ledger."""
     if not path.exists():
         return None
     digest = hashlib.sha256(key.encode()).hexdigest()

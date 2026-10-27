@@ -6,6 +6,7 @@ import argparse
 import io
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -75,7 +76,23 @@ def test_remote_named_inspect_and_ack_cross_real_finite_interpreter_boundary(rec
         "request_id": admission.request_id, "token": admission.token,
         "recovery": admission.target, "phase": "bound", "identity": identity,
     }
-    monkeypatch.setattr(remote.cfg, "load_machines_yaml", lambda *a, **k: {})
+    origin_config = replace(
+        config, repo_name="parent", repos={"parent": replace(
+            config.default_repo, anchor=str(Path(config.srcroot) / "origin-anchor"),
+        )},
+    )
+
+    def creator_project(project):
+        assert project == "parent"
+        return origin_config
+
+    def creator_registry(anchor, *, config):
+        assert config is origin_config and anchor == origin_config.default_repo.anchor
+        return {}
+
+    monkeypatch.setattr(remote.cfg, "load_config", lambda *a, **k: pytest.fail("ambient project read"))
+    monkeypatch.setattr(remote.cfg, "load_project_config", creator_project)
+    monkeypatch.setattr(remote.cfg, "load_machines_yaml", creator_registry)
     monkeypatch.setattr(remote, "resolve_machine_selection", lambda *a: SimpleNamespace(
         entry=SimpleNamespace(ssh_ready=True),
         target=SimpleNamespace(logical_machine=admission.target["machine"]),

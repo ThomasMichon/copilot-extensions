@@ -31,6 +31,9 @@ project configuration. A session alias, anchor, foreign creator or caller-suppli
 ledger path is not a substitute. The receiver resolves its own actual execution
 space and project; the origin's local configuration never supplies target paths.
 
+Remote origin operations select the protected creator's registered project and
+its machine registry, even when invoked outside a project or from another project.
+
 ## Origin responsibility
 
 | Operation | Input | Effect |
@@ -86,6 +89,9 @@ An acknowledged request supplies `identity` with the exact returned `ref`,
 depends on creator and request ID, **not** token: changing a token conflicts with
 the same operation rather than allocating another child.
 
+Creation-only options are validated for `create`. Invalid options cannot prevent
+exact-request inspection or safe cancellation before identity reservation.
+
 The core reserves the original ID, path, branch and nonce in the existing journal
 before Git creation. Its first saved child record includes the foreign creator
 and a receipt matching those original facts. The receipt starts in `created`;
@@ -129,6 +135,10 @@ directory and record. Cancellation instead atomically seals a request **before**
 identity reservation, fencing a late creator before Git effects. Neither a
 missing directory, missing record, transport failure nor conversation retirement
 is a receiving lifecycle conclusion.
+
+Retained conclusion also fences later record admission and generic saves:
+an older active snapshot cannot reopen a concluded child, and archived state
+cannot be downgraded to finalized, with or without a preserved receipt field.
 
 The current transport invokes only the named receiver over the existing selected
 SSH alias/shell with finite caller-owned process custody. It requires no reverse

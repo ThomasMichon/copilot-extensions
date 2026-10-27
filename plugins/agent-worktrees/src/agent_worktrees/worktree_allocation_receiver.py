@@ -99,7 +99,7 @@ def receive(operation: str, payload: object, config: cfg.Config) -> dict:
     if operation not in {"create", "inspect", "confirm", "cancel"}:
         raise ValueError("unsupported receiving allocation operation")
     admission, expected = _request(payload, config)
-    options = _options(admission)
+    options = _options(admission) if operation == "create" else {}
     if operation == "inspect" and creation_requests.inspect(config, admission.key) is None:
         return _response(admission, status="unknown", finished=False)
     digest = hashlib.sha256(admission.key.encode()).hexdigest()
