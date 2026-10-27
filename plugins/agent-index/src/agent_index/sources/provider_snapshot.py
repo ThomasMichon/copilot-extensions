@@ -13,7 +13,7 @@ from agent_index.sources.provider_delta import DeltaDeclaration, parse_declarati
 def validate_cli_tokens(*values: str | None) -> None:
     """Reject opaque values the subprocess argv boundary cannot represent."""
     if any(value is not None and "\0" in value for value in values):
-        raise ValueError("Snapshot tokens, cursors and checkpoints must not contain NUL characters")
+        raise ValueError("Provider tokens, cursors and checkpoints must not contain NUL characters")
 
 
 def parse_snapshot(

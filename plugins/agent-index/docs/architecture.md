@@ -150,7 +150,7 @@ polling path does not prove complete reconciliation or capture edits invisible
 to the provider's `updated_at` semantics. Explicit full discovery retains the
 legacy reconciliation path and captures a timestamp **before** discovery.
 The shared full-reconciliation contract above does not implement a pinned
-GitHub snapshot. GitHub full acquisition, external paged CLI support and durable
+GitHub snapshot. GitHub full acquisition and durable
 recovery within one item's comment pages remain separate adapter work; they are
 not supplied by this bounded polling contract.
 
@@ -214,8 +214,53 @@ old syntax/output for old consumers and the supported rollback window. No flag
 or baseline is retired here. The contract/process tests exercise old/new callers,
 old/new receivers, strict unknown-flag rejection, interrupted replay, scope drift,
 and two-model native engine composition in both store layouts. This bridge does
-not implement provider-side snapshot storage, other built-in snapshots, resumable
-external ordinary deltas, or bounded whole-manifest memory.
+not implement provider-side snapshot storage, other built-in snapshots, or
+bounded whole-manifest memory.
+
+Ordinary external deltas can independently opt into
+`"acquisition_page_versions": [1]` in the same declaration. Delta v1 support
+remains required. Omission, `[]` or future-only page versions preserve flat
+`--delta-version 1` discovery; malformed arrays refuse negotiation. A capable
+caller invokes the existing
+`content-discover-changed --source SOURCE --delta-version 1 --acquisition-page-version 1`,
+adding `--last-commit=BASE` when a base exists and `--cursor=CURSOR` only on
+continuation. Attached opaque values preserve leading `-`; NUL cannot cross
+the subprocess boundary. A connector instance negotiates once with its actual
+executed provider, not a package version, and exposes the optional Python
+`discover_delta_page` method only after positive negotiation.
+
+Each response contains the flat delta fields (`version: 1`, `upserts`,
+`deletions`, `commit`, `complete: true`, `source_delta`) plus
+`acquisition_page_version: 1` and an explicit `cursor`. There are at most 256
+upserts and tombstones **combined** per unit. `complete: true` certifies that
+unit, not the whole acquisition; only `cursor: null` completes the delta.
+Non-null cursors are bounded nonempty nonsecret strings, and cursors/checkpoints
+must be NUL-free. The executing scope echo must match family/account/target and
+still advertise page v1. Every unit retains the same target checkpoint and
+providers must bind opaque continuations to the original base and effective
+scope; mutable API offsets alone are not coverage evidence.
+
+The existing pending-crawl v2 journal persists each accepted unit before the
+next call, pins base/target/scope, rejects repeated cursors and duplicate or
+contradictory identities, then promotes terminal work to the existing complete
+manifest. The 128-unit invocation budget is unchanged; retry resumes from its
+last acknowledged cursor. No indexing, inferred tombstones or source checkpoint
+advancement occurs during acquisition. Process failure, malformed/incomplete
+output, expiry, scope drift or rollback withdrawing support refuses visibly and
+preserves progress; it never silently retries flat or full acquisition. Before
+work is pending, a supported provider rollback still selects its negotiated
+flat delta or logged legacy baseline.
+
+Expand providers before advertising support, then migrate callers
+conditionally; retain flat deltas and all four baseline verbs through the
+consumer-upgrade **and provider-rollback** window. This change retires no old
+form and upgrades no production provider. The real-process controls cover both
+directions of version skew, exact argv, strict unknown-flag rejection,
+interrupted continuation and native one-/two-model engine replay in both
+layouts. This bounds accepted identities per unit, not response bytes,
+whole-manifest memory/serialization or overall runtime. The existing per-call
+timeout remains; there is no new cursor owner, lock, discard authority or
+automatic full repair.
 
 Git revision sources use this seam for pinned base-to-target raw diffs and
 bounded new-commit history, without listing unchanged tracked paths, stored
