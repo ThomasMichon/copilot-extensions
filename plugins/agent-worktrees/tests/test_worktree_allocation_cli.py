@@ -40,6 +40,13 @@ def test_actual_lazy_capability_dispatch_needs_no_full_cluster(monkeypatch, comm
             "schema": allocation_creation_result.SCHEMA, "version": 1,
             "max_response_bytes": allocation_creation_result.MAX_RESPONSE_BYTES,
         }
+    else:
+        assert result["ordinary_create"] == {
+            "version": 1, "destination_selectors": ["machine", "repo"],
+            "creation_key": "opaque-v1", "result": "ordinary-worktree+allocation-v1",
+            "recovery_request_id": True,
+            "claim_linkage": "non-blocking", "agent_launch": False,
+        }
 
 
 def test_actual_wire_encoding_counts_newline_and_does_not_expand_pretty_printed_input():

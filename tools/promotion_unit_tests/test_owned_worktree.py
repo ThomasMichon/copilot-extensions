@@ -61,7 +61,7 @@ def api(monkeypatch):
     load("resource_relationship")
     allocation = load("owned_worktree")
     writer = load("tracking_allocation_write")
-    return SimpleNamespace(producer=producer, allocation=allocation, writer=writer)
+    return SimpleNamespace(producer=producer, allocation=allocation, writer=writer, load=load, stub=stub)
 
 
 def metadata():
@@ -218,6 +218,127 @@ def test_reconcile_preserves_active_claim_until_exact_conclusion(api):
     before = copy.deepcopy(vars(claim))
     assert api.writer._reconcile(claim, observation()) is False
     assert vars(claim) == before
+
+
+@pytest.fixture
+def destination(api, monkeypatch):
+    transport = ModuleType("machine_transport")
+    transport.resolve_machine_selection = None
+    transport.resolve_ssh_target = None
+    transport.split_machine_environment = None
+    transport.known_environment_label = None
+    monkeypatch.setitem(sys.modules, transport.__name__, transport)
+    for child in ("config", "allocation_link_demand", "claims_cli", "invocation_project", "worktree_identity"):
+        api.stub(child)
+    api.stub("creation_requests", CreationRequestFailure=RuntimeError)
+    api.stub(
+        "allocation_creation_result", SCHEMA="copilot-extensions.worktree-allocation-result",
+        VERSION=1, MAX_RESPONSE_BYTES=81920,
+    )
+    return api.load("create_destination")
+
+
+def test_destination_capability_decisions_require_actual_complete_receiver_contract(destination, api):
+    valid = {
+        "schema": api.allocation.SCHEMA, "version": 1, "role": "receiver",
+        "lifetime": "owned-worktree", "metadata_version": 3, "receiving_receipt": 1,
+        "claim_linkage": "non-blocking", "agent_launch": False, "max_input_bytes": 16384,
+        "max_identity_bytes": 4096, "lifecycle_capacity_reserved": True,
+        "operations": ["create", "result", "inspect", "confirm"],
+        "creation_result": {
+            "schema": "copilot-extensions.worktree-allocation-result", "version": 1,
+            "max_response_bytes": 81920,
+        },
+    }
+    destination.remote.capabilities = lambda *a: valid
+    destination._receiver_capabilities("origin/project/parent", {"machine": "target", "project": "repo"})
+    for change in (
+        {"version": True}, {"receiving_receipt": True}, {"claim_linkage": "blocking"},
+        {"agent_launch": True}, {"metadata_version": 2}, {"operations": ["create", "inspect"]},
+        {"operations": [[]]}, {"creation_result": {"version": 1}},
+    ):
+        destination.remote.capabilities = lambda *a: {**valid, **change}
+        with pytest.raises(ValueError):
+            destination._receiver_capabilities("origin/project/parent", {"machine": "target", "project": "repo"})
+
+
+def test_destination_request_identity_preserves_the_existing_opaque_key_contract(destination):
+    prefix = "a caller / key with spaces "
+    key = prefix + "\u2603" * (1024 - len(prefix))
+    assert len(key) == 1024
+    first = destination.creation_request_id(key)
+    assert first == destination.creation_request_id(key)
+    assert first.startswith("create_") and len(first) == 71
+    assert destination.creation_request_id(key[:-1] + "x") != first
+    for invalid in ("", " ", key + "x", None, True):
+        with pytest.raises(ValueError, match="creation key"):
+            destination.creation_request_id(invalid)
+
+
+def test_destination_options_keep_no_launch_and_refuse_unsupported_seed(destination):
+    args = SimpleNamespace(no_pair=True, seed=None, interface="acp", origin="delegate", bound_agent="worker")
+    attempt = {"task_id": "original-task"}
+    assert destination._remote_options(args, attempt) == {
+        "kind": "session", "no_pair": True, "interface": "acp", "origin": "delegate",
+        "bound_agent": "worker", "dispatch_attempt": attempt,
+    }
+    args.seed = "must not silently disappear"
+    with pytest.raises(ValueError, match="--seed"):
+        destination._remote_options(args, attempt)
+
+
+@pytest.fixture
+def run_composition(api):
+    api.stub("worktree_machine_identity", execution_machine_from_fields=lambda row: row.get("machine"))
+    api.writer.tracking.format_claim_ref = lambda machine, project, worktree: f"{machine}/{project}/{worktree}"
+    return api.load("allocation_run")
+
+
+def _run_response():
+    return {
+        "allocation": {
+            "version": 1, "creator": metadata()["creator"], "request_id": "original",
+            "target": metadata()["recovery"], "receiving_status": "allocated",
+        },
+        "worktree": {
+            "id": "child", "repo": "repo", "machine": "target",
+            "owner_ref": metadata()["creator"], **{
+                key: value for key, value in identity().items() if key != "ref"
+            },
+        },
+    }
+
+
+def test_run_composition_reuses_one_protected_claim_for_complete_and_uncertain_results(api, run_composition):
+    import json
+
+    pending = metadata()
+    claim = SimpleNamespace(kind="worktree", producer=pending, ref=api.allocation.claim_ref(pending))
+    record = SimpleNamespace(execution_machine="origin", repo="project", worktree_id="parent", resources=[claim])
+    value = _run_response()
+    assert run_composition.existing_claim(record, json.dumps(value)) is claim
+    value.pop("worktree")
+    value["allocation"].pop("receiving_status")
+    value["creation"] = {"version": 1, "status": "pending", "repeat_new": False}
+    assert run_composition.existing_claim(record, json.dumps(value)) is claim
+    assert record.resources == [claim] and claim.producer == pending
+
+
+def test_run_composition_refuses_changed_or_unproven_responsibility_without_mutation(api, run_composition):
+    import json
+
+    claim = SimpleNamespace(kind="worktree", producer=metadata(), ref=api.allocation.claim_ref(metadata()))
+    record = SimpleNamespace(execution_machine="origin", repo="project", worktree_id="parent", resources=[claim])
+    for field, value in (
+        ("creator", "target/repo/other"), ("request_id", "other"),
+        ("target", {"machine": "other", "project": "repo"}), ("version", True),
+    ):
+        response = _run_response()
+        response["allocation"][field] = value
+        before = copy.deepcopy(vars(claim))
+        with pytest.raises(ValueError):
+            run_composition.existing_claim(record, json.dumps(response))
+        assert vars(claim) == before and record.resources == [claim]
 
 
 def test_reconcile_rejects_uncertain_or_changed_proof_without_mutation(api):

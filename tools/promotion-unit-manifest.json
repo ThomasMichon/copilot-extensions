@@ -2435,7 +2435,12 @@
         "tools/promotion_unit_tests/test_owned_worktree.py::test_exact_wire_capacity_includes_transport_newline",
         "tools/promotion_unit_tests/test_owned_worktree.py::test_reconcile_recovers_each_original_phase_without_allocating",
         "tools/promotion_unit_tests/test_owned_worktree.py::test_reconcile_preserves_active_claim_until_exact_conclusion",
-        "tools/promotion_unit_tests/test_owned_worktree.py::test_reconcile_rejects_uncertain_or_changed_proof_without_mutation"
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_reconcile_rejects_uncertain_or_changed_proof_without_mutation",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_destination_capability_decisions_require_actual_complete_receiver_contract",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_destination_request_identity_preserves_the_existing_opaque_key_contract",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_destination_options_keep_no_launch_and_refuse_unsupported_seed",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_run_composition_reuses_one_protected_claim_for_complete_and_uncertain_results",
+        "tools/promotion_unit_tests/test_owned_worktree.py::test_run_composition_refuses_changed_or_unproven_responsibility_without_mutation"
     ],
     "sources": {
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_clock.py": "6036e8400b8250d7c745907025dd48a99a2441e07e9ffebb8ee0f751c6a2c43c",
@@ -2730,7 +2735,9 @@
         "libs/ssh-manager/src/ssh_manager/config_sources.py": "27e181d2e93549476e1ef6487f321078e8761c0b4dc1bb383d80bb2587d84753",
         "libs/ssh-manager/src/ssh_manager/__init__.py": "52f1d821423d8f043665cd455c887e7066de6979ea2e0c9282c67f7e4e16d69a",
         "tools/promotion_unit_tests/fixtures/bridge_resume_parser_v0.py": "66723445ed476c265b03dac68af604b85f709dcda1e55ad42e045df29b1586bd",
-        "tools/promotion_unit_tests/test_owned_worktree.py": "dc0062c9cb209b8ce49bdc2c9f2bab4ecfafd7d50ef3aee58c5512782cf0adb5",
+        "tools/promotion_unit_tests/test_owned_worktree.py": "ca5a20ccbdbd96be7eefb913702eabc912ebabeb821bd1dfaae69c4a0c3dcaa4",
+        "plugins/agent-worktrees/src/agent_worktrees/allocation_run.py": "25ad3b7c3d8c9ba5b2d919d44b213cd0dc089fe234c3a0574b358b053ac3f6e2",
+        "plugins/agent-worktrees/src/agent_worktrees/create_destination.py": "36870554bef9cb9cc1fcd3114ae13819023766637333f6a63719dfcd4b8d7031",
         "plugins/agent-worktrees/src/agent_worktrees/resource_producer.py": "af20a7bafb1bba7a4fce8808d2b830253f51287144e60ebd48916d5a933cf51c",
         "plugins/agent-worktrees/src/agent_worktrees/resource_relationship.py": "bc4ac5c41a880bc785f0064872cb7f3e81d8530139ce8540b3bd06ba328b9426",
         "plugins/agent-worktrees/src/agent_worktrees/owned_worktree.py": "eaa2eb00a19e6c60dac772cdb1de9d928e1b8a523d313cbe13321fdca80c57f3",
@@ -2867,7 +2874,9 @@
         "plugins/agent-bridge/src/agent_bridge/client.py",
         "plugins/agent-bridge/src/agent_bridge/client_protocol_floor.py",
         "plugins/agent-worktrees/src/agent_worktrees/owned_worktree.py",
-        "plugins/agent-worktrees/src/agent_worktrees/tracking_allocation_write.py"
+        "plugins/agent-worktrees/src/agent_worktrees/tracking_allocation_write.py",
+        "plugins/agent-worktrees/src/agent_worktrees/create_destination.py",
+        "plugins/agent-worktrees/src/agent_worktrees/allocation_run.py"
     ],
     "max_seconds": 300
 }

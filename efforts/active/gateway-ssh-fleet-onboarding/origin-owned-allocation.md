@@ -115,7 +115,7 @@ never a fallback to an unowned checkout.
 
 ### B. Ordinary CLI and shared consumers
 
-- [ ] Extend ordinary `create` with destination machine/repository selection
+- [x] Extend ordinary `create` with destination machine/repository selection
   while preserving CWD-based origin identity, omitted-selector local behavior,
   source-only allocation and explicit standalone policy.
 - [ ] Use existing machine/environment resolution, attributed command selection
@@ -190,11 +190,24 @@ governance rechecks and mandatory worker settlement. Its validation covers
 malformed inventory, later project registration, same-claim restart recovery,
 non-blocking locks and drain/retirement boundaries.
 
-Ordinary destination selectors, Bridge/Dispatch migration, startup alongside
-delayed linkage, real outbound-only/native qualification and release/installed
-acceptance remain open. No source-only checkbox establishes those outcomes
-or closes #5839. The next source slice is the ordinary creation coordinator,
-not another linkage service or an acknowledgement-dependent startup gate.
+The separately negotiated original creation-result capability merged in #9222
+as `97836c1a5a6b2a710b65fd55d2ce4911f6d887fc`. It returns the actual completed
+receiving journal's ordinary sessionless result and preserves unfinished
+status without a usable result. It neither creates a replacement nor grants
+fresh session admission. The provider reference owns the exact wire contract.
+
+The ordinary destination coordinator now consumes those source contracts. It
+captures the original CWD owner before destination selection, uses the protected
+origin writer and selected receiver, and returns the actual journaled child with
+separate linkage status and stable retry identity. The
+[provider reference](../../../plugins/agent-worktrees/docs/worktree-allocation.md#ordinary-destination-selection)
+owns supported options and explicit pre-effect refusals.
+
+Bridge/Dispatch migration, actual startup alongside delayed linkage, real
+outbound-only/native qualification and release/installed acceptance remain open.
+No source-only checkbox establishes those outcomes or closes #5839. The next
+source slice is consumer integration, not another linkage service or an
+acknowledgement-dependent startup gate.
 
 ## Validation Plan
 
