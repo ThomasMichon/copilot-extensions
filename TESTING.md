@@ -144,8 +144,8 @@ and its diagnostics; successful consumption still checks the outer deadline.
 
 ## Optional stock Windows bootstrap building blocks
 
-Select `bootstrap_file_guard`, `bootstrap_file_trust`, `bootstrap_path_guard`
-or `bootstrap_drive_map` in `agent-codespaces`
+Select `bootstrap_file_guard`, `bootstrap_file_trust`, `bootstrap_path_guard`,
+`bootstrap_drive_map` or `bootstrap_canonical_path` in `agent-codespaces`
 through the bounded plugin runner. These repository-only helpers are not
 distributed or enabled by the existing bootstrap selector. Native tests use
 64-bit Windows PowerShell and PowerShell Core for the file guard and WinTrust.
@@ -192,6 +192,28 @@ failure. Both guard forms reject non-root trailing separators before native
 binding, including existing file/directory inputs; the drive root remains a
 valid directory leaf. This is retained ancestor custody, not canonical-name,
 short-name, drive-mapping or source admission.
+
+The canonical-path candidate consumes one current mapping only when it names a
+direct physical volume, then uses internally derived `GLOBALROOT` addresses
+for every retained open, fixed-drive query and long-name check. It never uses
+the mutable DOS address again. Existing handles reject reparse points and
+wrong kinds; the actual long name must match every component, including
+ancestors. Reserved device names and wildcards refuse before bindings.
+The stock find record is copied into bounded owned memory because Core's name
+getter returns a non-boxable span. Its `SafeFindHandle` uses `FindClose`; both
+search and memory resources close before any name is returned. Tests distinguish
+actual physical opens and short-name refusals from synthetic mapping changes,
+malformed records and release errors. The pass-through memory observer tracks
+live allocations, not all previously freed addresses; a deterministic recycled
+address control retains double-free and unknown-address refusal. An actual short-name control skips
+explicitly when the fixture volume has no short names; that is not qualification
+of short-name refusal on that host. Stock normalization can expand an existing
+alias and reject the original input before opening anything. Separate controls
+retain that full-path refusal and isolate the post-open long-name defense with
+an unexpanded-input validation control; the actual alias and physical lookups
+remain native. That injected normalization case is not an actual DOS-remap race.
+This unused helper does not establish
+interpreter startup, source admission or a complete bootstrap handoff.
 
 The current-drive query calls existing stock declarations without defining or
 removing a DOS mapping. Windows PowerShell uses the existing StringBuilder
