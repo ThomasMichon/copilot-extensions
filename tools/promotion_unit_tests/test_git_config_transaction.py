@@ -286,9 +286,34 @@ def test_cleanup_error_preserves_real_committed_bytes_and_receipt(
     before, identity = engine._snapshot(target)
     plan = engine.Plan(target, before, proposed, identity, '{"user.name":["After"]}')
     owns = engine._owns_lock
+    lock = target.with_name(target.name + ".lock")
+    consumed = []
+    replace_file = engine.os.replace
+
+    def replace_and_create_successor(source, destination):
+        info = source.lstat()
+        replace_file(source, destination)
+        lock.write_bytes(b"successor writer")
+        consumed.append((info.st_dev, info.st_ino))
+
+    def same_identity(path, owner):
+        if consumed:
+            assert owner == consumed[0]
+            return True
+        return owns(path, owner)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(engine.os, "replace", replace_and_create_successor)
+        patch.setattr(engine, "_owns_lock", same_identity)
+        receipt = engine.apply(
+            plan, expected_plan_sha256=plan.plan_sha256, backup_root=tmp_path / "backups",
+        )
+    assert lock.read_bytes() == b"successor writer"
+    lock.unlink()
+    plan = engine.rollback_preview(target, receipt)
 
     def refuse_after_commit(path, owner):
-        if target.exists() and target.read_bytes() == proposed:
+        if not target.exists():
             raise PermissionError("synthetic cleanup observation failure")
         return owns(path, owner)
 
@@ -300,7 +325,7 @@ def test_cleanup_error_preserves_real_committed_bytes_and_receipt(
             backup_root=tmp_path / "backups",
         )
     assert error.value.changed and error.value.receipt.is_file()
-    assert target.read_bytes() == proposed
+    assert not target.exists()
 
 
 def test_lock_identity_failure_closes_the_owned_descriptor(

@@ -353,6 +353,7 @@ def apply(plan: Plan, *, expected_plan_sha256: str, backup_root: Path) -> Path |
             if plan.identity:
                 os.chmod(lock, stat.S_IMODE(plan.identity[-1]))
             os.replace(lock, plan.target)
+            lock_identity = None
         committed = True
         try:
             _sync_directory(plan.target.parent)

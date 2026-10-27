@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
+from types import SimpleNamespace
 import subprocess
 
 import pytest
@@ -192,6 +195,53 @@ def test_a_replaced_lock_is_neither_committed_nor_removed(tmp_path, monkeypatch)
     assert lock.read_bytes() == b"another writer"
 
 
+@pytest.mark.parametrize("verification_failure", [False, True])
+def test_consumed_lock_never_deletes_same_identity_successor(tmp_path, monkeypatch, verification_failure):
+    target = tmp_path / ".gitconfig"
+    target.write_bytes(b"[user]\n\tname = Before\n")
+    plan = transaction.preview(target, {"user.name": ["After"]})
+    lock = target.with_name(target.name + ".lock")
+    replace = os.replace
+    lstat = Path.lstat
+    original = None
+
+    def replace_and_reuse(source, destination):
+        nonlocal original
+        info = lstat(source)
+        replace(source, destination)
+        lock.write_bytes(b"successor writer")
+        original = info
+
+    def same_identity(path, *args, **kwargs):
+        info = lstat(path, *args, **kwargs)
+        if path == lock and original is not None:
+            return SimpleNamespace(
+                st_mode=info.st_mode, st_ino=original.st_ino, st_dev=original.st_dev,
+                st_file_attributes=getattr(info, "st_file_attributes", 0),
+            )
+        return info
+
+    def sync(_path):
+        if verification_failure and original is not None:
+            raise OSError("synthetic postcommit sync failure")
+
+    monkeypatch.setattr(transaction.os, "replace", replace_and_reuse)
+    monkeypatch.setattr(Path, "lstat", same_identity)
+    monkeypatch.setattr(transaction, "_sync_directory", sync)
+    if verification_failure:
+        with pytest.raises(transaction.TransactionError, match="verification") as error:
+            transaction.apply(
+                plan, expected_plan_sha256=plan.plan_sha256, backup_root=tmp_path / "backups",
+            )
+        assert error.value.changed and error.value.receipt.is_file()
+    else:
+        assert transaction.apply(
+            plan, expected_plan_sha256=plan.plan_sha256, backup_root=tmp_path / "backups",
+        ).is_file()
+    assert target.read_bytes() == plan.after
+    assert lock.read_bytes() == b"successor writer"
+
+
 def test_backup_failure_does_not_write_and_cleans_only_its_lock(tmp_path, monkeypatch):
     target = tmp_path / ".gitconfig"
     target.write_bytes(b"[user]\n\tname = Before\n")
@@ -252,12 +302,15 @@ def test_post_write_verification_failure_retains_receipt_and_reports_mutation(
 
 def test_cleanup_failure_after_commit_cannot_hide_the_mutation(tmp_path, monkeypatch):
     target = tmp_path / ".gitconfig"
-    target.write_bytes(b"[user]\n\tname = Before\n")
-    plan = transaction.preview(target, {"user.name": ["After"]})
+    created = transaction.preview(target, {"user.name": ["After"]})
+    receipt = transaction.apply(
+        created, expected_plan_sha256=created.plan_sha256, backup_root=tmp_path / "backups",
+    )
+    plan = transaction.rollback_preview(target, receipt)
     owns = transaction._owns_lock
 
     def fail_after_commit(path, identity):
-        if target.read_bytes() == plan.after:
+        if not target.exists():
             raise PermissionError("synthetic cleanup observation failure")
         return owns(path, identity)
 
@@ -269,7 +322,7 @@ def test_cleanup_failure_after_commit_cannot_hide_the_mutation(tmp_path, monkeyp
             backup_root=tmp_path / "backups",
         )
     assert error.value.changed and error.value.receipt.is_file()
-    assert target.read_bytes() == plan.after
+    assert not target.exists()
 
 
 def test_rollback_rejects_array_shaped_and_duplicate_field_receipts(tmp_path):
