@@ -150,7 +150,7 @@ def test_pending_page_scope_mode_and_corruption_refuse_before_provider(tmp_path,
     )
     payload = json.dumps({
         "version": 2, "full": False, "manifest": asdict(manifest),
-        "base_commit": "base", "cursor": "next",
+        "base_commit": "base", "cursor": "next", "generation": "1" * 32,
     })
     journal.compare_and_save(
         "alias", scope=scope, payload=payload, expected=None, family="forge:repo",

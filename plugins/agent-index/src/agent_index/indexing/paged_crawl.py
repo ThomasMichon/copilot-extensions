@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import Protocol
@@ -26,6 +27,7 @@ class AcquisitionState:
     manifest: CrawlManifest
     base_commit: str | None
     cursor: str
+    generation: str
 
 
 def discard_acquisition(
@@ -49,18 +51,21 @@ def discard_acquisition(
 def decode_acquisition(payload: str, source: str) -> AcquisitionState:
     data = json.loads(payload)
     if not isinstance(data, dict) or set(data) != {
-        "version", "full", "manifest", "base_commit", "cursor",
+        "version", "full", "manifest", "base_commit", "cursor", "generation",
     } or type(data["version"]) is not int or data["version"] != 2 or data["full"] is not False:
         raise ValueError("Invalid pending acquisition envelope")
     if data["base_commit"] is not None and not isinstance(data["base_commit"], str):
         raise ValueError("Invalid pending acquisition base checkpoint")
+    generation = data["generation"]
+    if not isinstance(generation, str) or uuid.UUID(generation).hex != generation:
+        raise ValueError("Invalid pending acquisition generation")
     manifest = PendingCrawls.decode_manifest(data["manifest"], source)
     AcquisitionPage(SourceDelta(commit=manifest.commit), data["cursor"]).validate(
         manifest.accounting_family or manifest.stored_family or source,
     )
     if data["cursor"] is None:
         raise ValueError("Pending acquisition requires a continuation cursor")
-    return AcquisitionState(manifest, data["base_commit"], data["cursor"])
+    return AcquisitionState(manifest, data["base_commit"], data["cursor"], generation)
 
 
 def acquire_pages(
@@ -83,6 +88,7 @@ def acquire_pages(
         source=source, stored_family=stored_family, accounting_family=family,
     )
     cursor = progress.cursor if progress else None
+    generation = progress.generation if progress else uuid.uuid4().hex
     for _ in range(page_budget):
         if cancel_check:
             cancel_check()
@@ -113,7 +119,7 @@ def acquire_pages(
             "manifest": asdict(manifest),
         }
         if page.cursor is not None:
-            envelope.update(base_commit=last_commit, cursor=page.cursor)
+            envelope.update(base_commit=last_commit, cursor=page.cursor, generation=generation)
         payload = json.dumps(envelope)
         journal.compare_and_save(source, scope=scope, payload=payload, expected=raw, family=family)
         raw, cursor = payload, page.cursor

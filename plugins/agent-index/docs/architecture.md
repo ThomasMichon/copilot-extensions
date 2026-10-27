@@ -61,6 +61,10 @@ identities, changed targets and non-progressing cursors refuse. The shared
 engine commits each complete unit and its continuation to the **same**
 `pending_crawls` row before requesting another. Nothing reaches indexing or
 source checkpoint publication until the complete manifest is durably ready.
+Each new acquisition receives a unique generation, retained across resumed
+units and included in progress/promotion/discard comparisons. Discard followed
+by an identical provider plan cannot let a worker from the old generation
+publish into or discard the new acquisition.
 There is a finite 128-unit invocation budget; exhaustion fails visibly and a
 retry continues the saved plan instead of restarting acquisition. A phase-2
 journal envelope is intentionally incompatible with v1-only readers, which

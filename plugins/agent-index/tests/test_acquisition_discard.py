@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import httpx
@@ -142,3 +143,42 @@ def test_explicit_discard_fences_inflight_unit_before_complete_manifest_promotio
         acquire(discover)
     assert journal.sources() == []
     assert journal.load("alias", scope) is None
+
+
+@pytest.mark.parametrize("stale_completes", [False, True])
+def test_identical_recreated_plan_rejects_stale_publication_and_discard(tmp_path, stale_completes):
+    paths, provider, scope, journal, acquire = fixture(tmp_path)
+    original = journal.read_payload("alias", scope)
+    recreated = None
+
+    def stale_unit(*args, **kwargs):
+        nonlocal recreated
+        discard_acquisition(
+            "alias", paths=paths, connector=provider, source_scope="config",
+            expected_payload=original,
+        )
+        with pytest.raises(RuntimeError, match="budget"):
+            acquire(lambda *a, **k: AcquisitionPage(SourceDelta(commit="target"), "next"))
+        recreated = journal.read_payload("alias", scope)
+        old, new = json.loads(original), json.loads(recreated)
+        assert old.pop("generation") != new.pop("generation")
+        assert old == new  # Provider plan, content, cursor and scope are identical.
+        return AcquisitionPage(
+            SourceDelta(commit="target"), None if stale_completes else "later",
+        )
+
+    with pytest.raises(PendingCrawlConflict, match="changed"):
+        acquire(stale_unit)
+    assert journal.read_payload("alias", scope) == recreated
+    with pytest.raises(PendingCrawlConflict, match="changed"):
+        discard_acquisition(
+            "alias", paths=paths, connector=provider, source_scope="config",
+            expected_payload=original,
+        )
+    with pytest.raises(RuntimeError, match="budget"):
+        acquire(lambda *a, **k: AcquisitionPage(SourceDelta(commit="target"), "later"))
+    assert json.loads(journal.read_payload("alias", scope))["generation"] == (
+        json.loads(recreated)["generation"]
+    )
+    completed = acquire(lambda *a, **k: AcquisitionPage(SourceDelta(commit="target")))
+    assert journal.load("alias", scope) == (completed, False)
