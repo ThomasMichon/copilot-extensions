@@ -29,6 +29,7 @@ class PollRefresh:
 
     retain: bool
     paths: dict[str, str]
+    history: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

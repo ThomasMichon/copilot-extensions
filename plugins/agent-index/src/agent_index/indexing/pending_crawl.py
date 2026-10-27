@@ -215,6 +215,11 @@ class PendingCrawls(PollRefreshJournal):
             raise ValueError("Invalid pending crawl manifest")
         if raw["source"] != source:
             raise ValueError("Pending crawl source does not match its journal key")
+        refresh = raw.get("poll_refresh")
+        if refresh is not None and (
+            not isinstance(refresh, dict) or set(refresh) != {"retain", "paths", "history"}
+        ):
+            raise ValueError("Invalid pending polling-refresh metadata")
         manifest = CrawlManifest(
             source=source,
             upserts=[FileEntry(**item) for item in raw["upserts"]],
@@ -231,11 +236,15 @@ class PendingCrawls(PollRefreshJournal):
         validate_refresh(manifest.poll_refresh)
         if manifest.poll_refresh is not None:
             family = manifest.accounting_family or manifest.stored_family or manifest.source
-            acquired = {item.path for item in manifest.upserts if item.source == family} | {
-                item.path for item in manifest.deletions if item.source == family
-            }
-            if not set(manifest.poll_refresh.paths) <= acquired:
-                raise ValueError("Polling refresh did not acquire every retained candidate")
+            for source, candidates in (
+                (family, manifest.poll_refresh.paths),
+                (family + ":commits", manifest.poll_refresh.history),
+            ):
+                acquired = {item.path for item in manifest.upserts if item.source == source} | {
+                    item.path for item in manifest.deletions if item.source == source
+                }
+                if not set(candidates) <= acquired:
+                    raise ValueError("Polling refresh did not acquire every retained candidate")
         SourceDelta(
             upserts=manifest.upserts, deletions=manifest.deletions, commit=manifest.commit,
         ).validate(manifest.accounting_family or manifest.stored_family or manifest.source)

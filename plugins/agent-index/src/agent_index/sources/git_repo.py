@@ -454,10 +454,14 @@ class GitRepoConnector:
         cancel_check: Callable[[], None] | None = None,
         *,
         refresh_paths: tuple[str, ...] = (),
+        refresh_commits: tuple[str, ...] = (),
     ) -> SourceDelta:
         from agent_index.sources.git_delta import discover_git_delta
 
-        return discover_git_delta(self, last_commit, cancel_check, refresh_paths=refresh_paths)
+        return discover_git_delta(
+            self, last_commit, cancel_check,
+            refresh_paths=refresh_paths, refresh_commits=refresh_commits,
+        )
 
     def discover(self, cancel_check: Callable[[], None] | None = None) -> list[FileEntry]:
         """Discover current tracked files plus commit-history entries."""
@@ -597,6 +601,7 @@ class GitRepoConnector:
         cancel_check: Callable[[], None] | None,
         strict: bool = False,
         target_commit: str | None = None,
+        max_count: int | None = None,
     ) -> list[FileEntry]:
         args = [
             "log",
@@ -605,6 +610,8 @@ class GitRepoConnector:
             "--date=iso-strict",
             "--format=%H%x00%an%x00%ae%x00%aI%x00%s%x00%b",
         ]
+        if max_count is not None:
+            args.append(f"--max-count={max_count}")
         revision = target_commit or self._index_rev()
         if last_commit:
             args.append(f"{last_commit}..{revision}")

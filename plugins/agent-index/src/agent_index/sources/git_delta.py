@@ -100,6 +100,7 @@ def discover_git_delta(
     cancel_check: Callable[[], None] | None = None,
     *,
     refresh_paths: tuple[str, ...] = (),
+    refresh_commits: tuple[str, ...] = (),
 ) -> SourceDelta:
     connector._resolve()
     target = connector._index_commit
@@ -110,8 +111,22 @@ def discover_git_delta(
     assert last_commit is not None
     if cancel_check:
         cancel_check()
-    if last_commit == target and not refresh_paths:
+    if last_commit == target and not refresh_paths and not refresh_commits:
         return SourceDelta(commit=target)
+    history: dict[str, str] = {}
+    for path in sorted(set(refresh_commits)):
+        if cancel_check:
+            cancel_check()
+        oid = path.removeprefix("commits/").removesuffix(".txt")
+        if not immutable_oid(oid) or path != f"commits/{oid}.txt":
+            raise GitReconciliationRequired("Invalid hinted Git history; run an explicit full reindex")
+        try:
+            connector._git(["merge-base", "--is-ancestor", oid, target])
+        except subprocess.CalledProcessError as exc:
+            raise GitReconciliationRequired(
+                "Hinted Git history is unavailable or was rewritten; run an explicit full reindex",
+            ) from exc
+        history[path] = oid
     try:
         connector._git(["merge-base", "--is-ancestor", last_commit, target])
     except subprocess.CalledProcessError as exc:
@@ -139,8 +154,19 @@ def discover_git_delta(
             result.deletions.append(DeletedFile(connector.source_name, path))
         else:
             result.upserts.append(entry)
-    result.upserts.extend(connector._discover_commits(
+    commits = {entry.path: entry for entry in connector._discover_commits(
         last_commit, cancel_check=cancel_check, strict=True,
-    ))
+    )}
+    for path in sorted(history.keys() - commits.keys()):
+        entries = connector._discover_commits(
+            None, target_commit=history[path], max_count=1,
+            cancel_check=cancel_check, strict=True,
+        )
+        if len(entries) != 1 or entries[0].path != path:
+            raise GitReconciliationRequired(
+                "Incomplete hinted Git history refresh; run an explicit full reindex",
+            )
+        commits[path] = entries[0]
+    result.upserts.extend(commits.values())
     result.validate(connector.source_name)
     return result

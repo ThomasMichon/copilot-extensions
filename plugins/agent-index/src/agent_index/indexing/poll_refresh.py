@@ -16,10 +16,14 @@ if TYPE_CHECKING:
 
 
 def retained_candidates(delta: SourceDelta, family: str) -> PollRefresh | None:
-    paths = {item.path for item in delta.upserts if item.source == family} | {
-        item.path for item in delta.deletions if item.source == family
-    }
-    return PollRefresh(True, {path: uuid.uuid4().hex for path in sorted(paths)}) if paths else None
+    candidates = []
+    for source in (family, family + ":commits"):
+        identities = {item.path for item in delta.upserts if item.source == source} | {
+            item.path for item in delta.deletions if item.source == source
+        }
+        candidates.append({path: uuid.uuid4().hex for path in sorted(identities)})
+    paths, history = candidates
+    return PollRefresh(True, paths, history) if paths or history else None
 
 
 def require_refresh_support(discover: object) -> Callable[..., SourceDelta]:
@@ -36,10 +40,11 @@ def validate_refresh(refresh: PollRefresh | None) -> None:
         return
     if (
         not isinstance(refresh, PollRefresh) or type(refresh.retain) is not bool
-        or not isinstance(refresh.paths, dict) or not refresh.paths
+        or not isinstance(refresh.paths, dict) or not isinstance(refresh.history, dict)
+        or not (refresh.paths or refresh.history)
     ):
         raise ValueError("Invalid pending polling-refresh candidates")
-    for path, generation in refresh.paths.items():
+    for path, generation in (*refresh.paths.items(), *refresh.history.items()):
         if (
             not isinstance(path, str) or not path or "\0" in path
             or not isinstance(generation, str) or uuid.UUID(generation).hex != generation
@@ -57,19 +62,24 @@ class PollRefreshJournal:
         conn.execute(
             "CREATE TABLE IF NOT EXISTS poll_refresh "
             "(source TEXT NOT NULL, scope TEXT NOT NULL, family TEXT NOT NULL, "
-            "path TEXT NOT NULL, generation TEXT NOT NULL, PRIMARY KEY (source, path))",
+            "kind TEXT NOT NULL CHECK (kind IN ('file', 'history')), "
+            "path TEXT NOT NULL, generation TEXT NOT NULL, PRIMARY KEY (source, kind, path))",
         )
         conn.execute("CREATE INDEX IF NOT EXISTS poll_refresh_family ON poll_refresh (family)")
 
     def refresh_candidates(self, source: str, scope: str, family: str) -> PollRefresh | None:
         with closing(self._paths._connect()) as conn:
             rows = conn.execute(
-                "SELECT scope, family, path, generation FROM poll_refresh WHERE source = ?",
+                "SELECT scope, family, kind, path, generation FROM poll_refresh WHERE source = ?",
                 (source,),
             ).fetchall()
         if any(row["scope"] != scope or row["family"] != family for row in rows):
             raise ValueError("Hinted candidates belong to a different source/account configuration")
-        result = PollRefresh(False, {row["path"]: row["generation"] for row in rows}) if rows else None
+        result = PollRefresh(
+            False,
+            {row["path"]: row["generation"] for row in rows if row["kind"] == "file"},
+            {row["path"]: row["generation"] for row in rows if row["kind"] == "history"},
+        ) if rows else None
         validate_refresh(result)
         return result
 
@@ -85,11 +95,13 @@ class PollRefreshJournal:
         ).fetchone() is not None:
             raise ValueError("Hinted candidates belong to a different source/account configuration")
         conn.executemany(
-            "INSERT INTO poll_refresh (source, scope, family, path, generation) VALUES (?, ?, ?, ?, ?) "
-            "ON CONFLICT(source, path) DO UPDATE SET generation = excluded.generation",
+            "INSERT INTO poll_refresh (source, scope, family, kind, path, generation) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(source, kind, path) DO UPDATE SET generation = excluded.generation",
             [
-                (manifest.source, scope, family, path, generation)
-                for path, generation in refresh.paths.items()
+                (manifest.source, scope, family, kind, path, generation)
+                for kind, candidates in (("file", refresh.paths), ("history", refresh.history))
+                for path, generation in candidates.items()
             ],
         )
 
@@ -99,6 +111,11 @@ class PollRefreshJournal:
         if refresh is None or refresh.retain:
             return
         conn.executemany(
-            "DELETE FROM poll_refresh WHERE source = ? AND scope = ? AND path = ? AND generation = ?",
-            [(manifest.source, scope, path, generation) for path, generation in refresh.paths.items()],
+            "DELETE FROM poll_refresh WHERE source = ? AND scope = ? "
+            "AND kind = ? AND path = ? AND generation = ?",
+            [
+                (manifest.source, scope, kind, path, generation)
+                for kind, candidates in (("file", refresh.paths), ("history", refresh.history))
+                for path, generation in candidates.items()
+            ],
         )

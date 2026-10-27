@@ -708,17 +708,28 @@ manifests use the existing pending-crawl replay before a retry observes newer
 canonical content. Ordinary ref resolution/fetch policy is unchanged: a pinned
 local remote-tracking ref is not proof of remote freshness.
 
-Git also declares `hint_poll_refresh = True`: a hinted edit/deletion must remain
-a candidate even after its pending manifest completes. Otherwise an unhinted
-revert can disappear from the next net polling diff. The existing pending-crawl
-owner therefore transactionally retains each hinted file candidate and a unique
-generation in the same path database **before** indexing effects. An ordinary
+Git also declares `hint_poll_refresh = True`: hinted file and commit-history
+identities must remain candidates even after their pending manifest completes.
+Otherwise an unhinted revert can disappear from the next net polling diff, or a
+force-push can strand an indexed hinted commit while the polling cursor still
+precedes both branches. The existing pending-crawl owner therefore transactionally
+retains each hinted identity and a unique generation, keyed by source/kind/path
+in the same path database **before** indexing effects. An ordinary
 poll snapshots those candidates and unions them with its range diff, reading
 each identity once at its pinned ref even when the net diff is empty. The actual
 `discover_delta` callable advertises `poll_refresh_versions = (1,)` and accepts
-`refresh_paths`; unsupported replacements refuse instead of dropping candidates.
+`refresh_paths` and `refresh_commits`; unsupported replacements refuse instead of dropping candidates.
 Hint preflight checks this support before opening stores/embedding clients.
 This connector requirement survives wrappers around `discover_hints`.
+
+Before acquiring polling content, Git verifies every retained history identity
+is a canonical immutable commit path reachable from the pinned target, even
+when the polling cursor equals that target. Missing or rewritten history
+requires explicit full reconciliation; polling neither advances nor invents
+tombstones. Empty commits retain the same obligation without file candidates.
+Reachable history already in the ordinary range is read only once; older
+retained commits outside the range use bounded one-commit reads, never a
+whole-history walk.
 
 The complete manifest records candidate generations. Only after canonical/
 vector writes and source-state publication does the journal atomically clear
@@ -730,7 +741,9 @@ cannot bypass outstanding candidate ownership.
 
 This is neither another polling cursor nor a source lock. Old readers reject
 required v3 manifest metadata; v1 manifests without this metadata remain byte-
-compatible. Finish both pending acquisition **and** outstanding Git candidate
+compatible. The unreleased v3 metadata requires both file and history maps
+(either may be empty); its ledger distinguishes both kinds even if their path
+strings collide. Finish both pending acquisition **and** outstanding Git candidate
 refresh before rolling back to a reader that does not understand this expansion.
 No automatic discard, broad rebuild or unscoped ledger cleanup is introduced.
 

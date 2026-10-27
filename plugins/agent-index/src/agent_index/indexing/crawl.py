@@ -95,6 +95,7 @@ def collect_source_changes(
             discover = require_refresh_support(discover_delta)
             delta = discover(
                 last_commit, cancel_check=cancel_check, refresh_paths=tuple(sorted(refresh.paths)),
+                refresh_commits=tuple(sorted(refresh.history)),
             )
         else:
             delta = discover_delta(last_commit, cancel_check=cancel_check)
@@ -152,12 +153,14 @@ def collect_source_changes(
     ]
     if refresh is not None:
         deleted = {(item.source, item.path) for item in deletions}
-        deletions.extend(
-            DeletedFile(connector.source_name, path)
-            for path in refresh.paths
-            if path not in current_by_source.get(connector.source_name, set())
-            and (connector.source_name, path) not in deleted
-        )
+        for source, candidates in (
+            (connector.source_name, refresh.paths),
+            (connector.source_name + ":commits", refresh.history),
+        ):
+            deletions.extend(
+                DeletedFile(source, path) for path in candidates
+                if path not in current_by_source.get(source, set()) and (source, path) not in deleted
+            )
     scanned = sum(len(paths) for paths in current_by_source.values())
     return CrawlManifest(
         source=source_name,

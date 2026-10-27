@@ -521,3 +521,117 @@ def test_explicit_full_reconciliation_covers_an_already_deleted_hint_candidate(r
     assert pending.sources() == []
     assert IndexState.load(config.state_file).sources[spec.name].last_commit == target
     assert MultiModelStore(config.lance_dir).get_document(spec.name, "edit.md") is None
+
+
+@pytest.mark.parametrize("empty", [False, True], ids=["file-commit", "empty-commit"])
+def test_native_hint_then_sibling_rewrite_refuses_poll_until_explicit_full_repair(
+    repo, native_git, monkeypatch, empty,
+):
+    from agent_index.indexing.pending_crawl import PendingCrawls
+    from agent_index.store.multi_model_store import MultiModelStore
+
+    config, spec, run, events, _ = native_git
+    base = git(repo, "rev-parse", "HEAD")
+    assert "sources_failed" not in run(full=True)
+    if not empty:
+        (repo / "edit.md").write_text("hinted branch\n")
+    hinted = commit(repo)
+    assert "sources_failed" not in run(change_hints=hints((base, hinted)))
+    journal = PendingCrawls(PathIndex(config.data_dir / "path_index.db"))
+    scope = recovery_scope(engine.source_scope_hash(spec), connector(repo))
+    retained = journal.refresh_candidates(spec.name, scope, spec.name)
+    assert set(retained.history) == {f"commits/{hinted}.txt"}
+    assert bool(retained.paths) is not empty
+    git(repo, "checkout", "-b", "sibling", base)
+    git(repo, "commit", "--allow-empty", "-m", "Sibling revision")
+    target = git(repo, "rev-parse", "HEAD")
+    git(repo, "update-ref", "refs/heads/main", target)
+    git(repo, "merge-base", "--is-ancestor", base, target)
+    store = MultiModelStore(config.lance_dir)
+    assert store.get_document(spec.name + ":commits", f"commits/{hinted}.txt") is not None
+    version = store.content_store._get_or_create_table().version
+    before = len(events)
+    result = run()
+    assert "sources_failed" in result
+    assert IndexState.load(config.state_file).sources[spec.name].last_commit == base
+    assert store.content_store._get_or_create_table().version == version
+    assert events[before:] == ["close:a"]
+    assert journal.load(spec.name, scope) is None
+    assert journal.refresh_candidates(spec.name, scope, spec.name) == retained
+    assert store.get_document(spec.name + ":commits", f"commits/{hinted}.txt") is not None
+    discover = GitRepoConnector.discover
+
+    def interrupted(self, **kwargs):
+        discover(self, **kwargs)
+        raise RuntimeError("interrupted full snapshot")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(GitRepoConnector, "discover", interrupted)
+        assert "sources_failed" in run(full=True)
+    assert journal.refresh_candidates(spec.name, scope, spec.name) == retained
+    assert IndexState.load(config.state_file).sources[spec.name].last_commit == base
+    assert store.get_document(spec.name + ":commits", f"commits/{hinted}.txt") is not None
+    assert "sources_failed" not in run(full=True)
+    assert journal.sources() == []
+    assert IndexState.load(config.state_file).sources[spec.name].last_commit == target
+    current = MultiModelStore(config.lance_dir)
+    assert current.get_document(spec.name + ":commits", f"commits/{hinted}.txt") is None
+    assert current.get_document(spec.name + ":commits", f"commits/{target}.txt") is not None
+    assert current.get_document(spec.name, "edit.md").content == "edit.md\n"
+
+
+def test_native_empty_hint_is_covered_by_reachable_ordinary_poll(repo, native_git, monkeypatch):
+    from agent_index.indexing.pending_crawl import PendingCrawls
+    from agent_index.store.multi_model_store import MultiModelStore
+
+    config, spec, run, _, _ = native_git
+    base = git(repo, "rev-parse", "HEAD")
+    assert "sources_failed" not in run(full=True)
+    target = commit(repo)
+    assert "sources_failed" not in run(change_hints=hints((base, target)))
+    journal = PendingCrawls(PathIndex(config.data_dir / "path_index.db"))
+    scope = recovery_scope(engine.source_scope_hash(spec), connector(repo))
+    retained = journal.refresh_candidates(spec.name, scope, spec.name)
+    assert not retained.paths and set(retained.history) == {f"commits/{target}.txt"}
+    for name in ("discover", "discover_changed", "list_paths", "_tracked_paths", "_commit_shas"):
+        monkeypatch.setattr(GitRepoConnector, name, forbidden)
+    assert "sources_failed" not in run()
+    assert journal.sources() == []
+    assert IndexState.load(config.state_file).sources[spec.name].last_commit == target
+    assert MultiModelStore(config.lance_dir).get_document(
+        spec.name + ":commits", f"commits/{target}.txt",
+    ) is not None
+
+
+def test_full_snapshot_covers_retained_history_even_when_path_store_already_lacks_it(repo, tmp_path):
+    from agent_index.indexing.crawl import collect_source_changes
+    from agent_index.indexing.pending_crawl import PendingCrawls
+
+    base = git(repo, "rev-parse", "HEAD")
+    hinted = commit(repo)
+    paths = PathIndex(tmp_path / "paths.db")
+    source = connector(repo)
+    scope = recovery_scope(source.source_name, source)
+    state = IndexState(sources={source.source_name: SourceState(
+        last_commit=base, acquisition_scope=scope,
+    )})
+    hint = collect_source_changes(
+        source.source_name, state=state, path_index=paths, full=False,
+        source_aware=False, connector=source, change_hints=hints((base, hinted)),
+    )
+    journal = PendingCrawls(paths)
+    journal.save(hint, scope=scope, full=False)
+    journal.clear(source.source_name, manifest=hint, scope=scope)
+    git(repo, "update-ref", "refs/heads/main", base)
+    full = collect_source_changes(
+        source.source_name, state=state, path_index=paths, full=True,
+        source_aware=False, connector=connector(repo),
+    )
+    assert [(item.source, item.path) for item in full.deletions] == [
+        (source.source_name + ":commits", f"commits/{hinted}.txt"),
+    ]
+    assert full.poll_refresh.history == hint.poll_refresh.history
+    journal.save(full, scope=scope, full=True)
+    assert journal.refresh_candidates(source.source_name, scope, source.source_name) is not None
+    journal.clear(source.source_name, manifest=full, scope=scope)
+    assert journal.sources() == []
