@@ -1,10 +1,131 @@
 # Private prerequisite building block; not complete interpreter/source admission.
 # The caller loads bootstrap-file-guard.ps1 and retains its guard through this call.
-function Get-BootstrapStockTrustBindings {
-    if ($PSVersionTable.PSEdition -eq 'Core') {
-        throw 'Stock bootstrap trust bindings require qualified 64-bit Windows PowerShell.'
+function Get-BootstrapCoreTrustBindings {
+    $assembly = [Management.Automation.PSObject].Assembly
+    if ($assembly.FullName -cne 'System.Management.Automation, Version=7.6.0.500, Culture=neutral, PublicKeyToken=31bf3856ad364e35') {
+        throw 'Stock bootstrap Core trust assembly identity is unsupported.'
     }
+    $native = $assembly.GetType('System.Management.Automation.Win32Native.WinTrustMethods', $true)
+    $dataType = $assembly.GetType($native.FullName + '+WINTRUST_DATA', $true)
+    $flags = [Reflection.BindingFlags]'Static,Public,NonPublic'
+    $definitions = @(
+        @{ Key = 'Verify'; Name = 'WinVerifyTrust'; Entry = 'WinVerifyTrust'; Return = [uint32]
+            Parameters = [type[]]@([IntPtr], [Guid].MakeByRefType(), $dataType.MakeByRefType()) },
+        @{ Key = 'Provider'; Name = 'NativeWTHelperProvDataFromStateData'; Entry = 'WTHelperProvDataFromStateData'
+            Return = [IntPtr]; Parameters = [type[]]@([IntPtr]) },
+        @{ Key = 'Signer'; Name = 'NativeWTHelperGetProvSignerFromChain'; Entry = 'WTHelperGetProvSignerFromChain'
+            Return = [IntPtr]; Parameters = [type[]]@([IntPtr], [uint32], [bool], [uint32]) }
+    )
+    $bindings = @{ Core = $true; DataType = $dataType }
+    foreach ($definition in $definitions) {
+        $method = $native.GetMethod($definition.Name, $flags, $null, $definition.Parameters, $null)
+        if ($null -eq $method -or $method.ReturnType -ne $definition.Return -or
+            -not $method.IsStatic -or
+            ($method.Attributes -band [Reflection.MethodAttributes]::PinvokeImpl) -eq 0) {
+            throw 'Stock bootstrap Core trust signature is unsupported.'
+        }
+        $imports = @($method.GetCustomAttributes([Runtime.InteropServices.DllImportAttribute], $false))
+        if ($imports.Count -ne 1 -or $imports[0].Value -cne 'wintrust.dll' -or
+            $imports[0].EntryPoint -cne $definition.Entry -or $imports[0].SetLastError -or
+            -not $imports[0].PreserveSig -or
+            $imports[0].CharSet -ne [Runtime.InteropServices.CharSet]::Unicode -or
+            $imports[0].CallingConvention -ne [Runtime.InteropServices.CallingConvention]::Winapi) {
+            throw 'Stock bootstrap Core trust native declaration is unsupported.'
+        }
+        foreach ($parameter in @($method.ReturnParameter) + @($method.GetParameters())) {
+            if ($parameter.GetCustomAttributes([Runtime.InteropServices.MarshalAsAttribute], $false).Count -ne 0) {
+                throw 'Stock bootstrap Core trust marshalling is unsupported.'
+            }
+        }
+        $bindings[$definition.Key] = $method
+    }
+    $sizeOf = [Runtime.InteropServices.Marshal].GetMethod('SizeOf', [type[]]@([type]))
+    $offsetOf = [Runtime.InteropServices.Marshal].GetMethod('OffsetOf', [type[]]@([type], [string]))
+    $prefix = 'System.Management.Automation.Win32Native.'
+    $layouts = @(
+        @{ Name = 'WINTRUST_FILE_INFO'; Size = 32; Fields = @(
+            @('cbStruct', [uint32], 0), @('pcwszFilePath', [char].MakePointerType(), 8),
+            @('hFile', [IntPtr], 16), @('pgKnownSubject', [IntPtr], 24)) },
+        @{ Name = 'WINTRUST_DATA'; Size = 80; Fields = @(
+            @('cbStruct', [uint32], 0), @('pPolicyCallbackData', [IntPtr], 8),
+            @('pSIPClientData', [IntPtr], 16),
+            @('dwUIChoice', $assembly.GetType($prefix + 'WinTrustUIChoice', $true), 24),
+            @('fdwRevocationChecks', [uint32], 28),
+            @('dwUnionChoice', $assembly.GetType($prefix + 'WinTrustUnionChoice', $true), 32),
+            @('pChoice', [void].MakePointerType(), 40),
+            @('dwStateAction', $assembly.GetType($prefix + 'WinTrustAction', $true), 48),
+            @('hWVTStateData', [IntPtr], 56), @('pwszURLReference', [IntPtr], 64),
+            @('dwProvFlags', $assembly.GetType($prefix + 'WinTrustProviderFlags', $true), 72),
+            @('dwUIContext', [uint32], 76)) }
+    )
+    foreach ($layout in $layouts) {
+        $record = $assembly.GetType($native.FullName + '+' + $layout.Name, $true)
+        if (-not $record.IsValueType -or -not $record.IsLayoutSequential -or
+            $record.StructLayoutAttribute.Pack -ne 0 -or
+            $sizeOf.Invoke($null, [object[]]@($record)) -ne $layout.Size) {
+            throw 'Stock bootstrap Core trust record layout is unsupported.'
+        }
+        foreach ($definition in $layout.Fields) {
+            $field = $record.GetField($definition[0], [Reflection.BindingFlags]'Instance,Public,NonPublic')
+            if ($null -eq $field -or $field.FieldType -ne $definition[1] -or
+                $field.GetCustomAttributes([Runtime.InteropServices.MarshalAsAttribute], $false).Count -ne 0 -or
+                $offsetOf.Invoke($null, [object[]]@($record, $definition[0])).ToInt64() -ne $definition[2]) {
+                throw 'Stock bootstrap Core trust record field is unsupported.'
+            }
+            if ($field.FieldType.IsEnum -and
+                [Enum]::GetUnderlyingType($field.FieldType) -notin @([int], [uint32])) {
+                throw 'Stock bootstrap Core trust enumeration width is unsupported.'
+            }
+        }
+    }
+    $kernel = [object].Assembly.GetType('Interop+Kernel32', $true)
+    foreach ($definition in @(
+        @{ Key = 'Load'; Name = 'LoadLibraryEx'; Entry = 'LoadLibraryExW'; Return = [IntPtr]
+            Parameters = [type[]]@([string], [IntPtr], [int]) },
+        @{ Key = 'Free'; Name = 'FreeLibrary'; Entry = 'FreeLibrary'; Return = [bool]
+            Parameters = [type[]]@([IntPtr]) }
+    )) {
+        $method = $kernel.GetMethod($definition.Name, $flags, $null, $definition.Parameters, $null)
+        if ($null -eq $method -or $method.ReturnType -ne $definition.Return -or
+            -not $method.IsStatic -or -not $method.IsAssembly -or $null -eq $method.GetMethodBody() -or
+            ($method.Attributes -band [Reflection.MethodAttributes]::PinvokeImpl) -ne 0) {
+            throw 'Stock bootstrap Core loader managed wrapper is unsupported.'
+        }
+        $imports = @($method.GetCustomAttributesData() | Where-Object {
+            $_.AttributeType.FullName -ceq 'System.Runtime.InteropServices.LibraryImportAttribute'
+        })
+        if ($imports.Count -ne 1 -or $imports[0].ConstructorArguments[0].Value -cne 'kernel32.dll') {
+            throw 'Stock bootstrap Core loader import is unsupported.'
+        }
+        $properties = @{}
+        foreach ($argument in $imports[0].NamedArguments) { $properties[$argument.MemberName] = $argument.TypedValue.Value }
+        $entry = if ($properties.ContainsKey('EntryPoint')) { $properties.EntryPoint } else { $method.Name }
+        if ($entry -cne $definition.Entry -or $properties.SetLastError -ne $true -or
+            ($definition.Key -ceq 'Load' -and $properties.StringMarshalling -ne 2)) {
+            throw 'Stock bootstrap Core loader native declaration is unsupported.'
+        }
+        $marshalling = @($method.ReturnParameter.GetCustomAttributes([Runtime.InteropServices.MarshalAsAttribute], $false))
+        if (($definition.Key -ceq 'Free' -and
+                ($marshalling.Count -ne 1 -or $marshalling[0].Value -ne [Runtime.InteropServices.UnmanagedType]::Bool)) -or
+            ($definition.Key -ceq 'Load' -and $marshalling.Count -ne 0)) {
+            throw 'Stock bootstrap Core loader return marshalling is unsupported.'
+        }
+        foreach ($parameter in $method.GetParameters()) {
+            if ($parameter.GetCustomAttributes([Runtime.InteropServices.MarshalAsAttribute], $false).Count -ne 0) {
+                throw 'Stock bootstrap Core loader parameter marshalling is unsupported.'
+            }
+        }
+        $bindings[$definition.Key] = $method
+    }
+    $bindings.ReadStruct = [Runtime.InteropServices.Marshal].GetMethod(
+        'PtrToStructure', [type[]]@([IntPtr], [type]))
+    $bindings.StateField = $dataType.GetField('hWVTStateData', [Reflection.BindingFlags]'Instance,Public,NonPublic')
+    return [pscustomobject]$bindings
+}
+
+function Get-BootstrapStockTrustBindings {
     $null = Get-BootstrapStockFileBindings
+    if ($PSVersionTable.PSEdition -eq 'Core') { return Get-BootstrapCoreTrustBindings }
     $assembly = [Management.Automation.PSObject].Assembly
     $native = $assembly.GetType('System.Management.Automation.Security.NativeMethods', $true)
     $flags = [Reflection.BindingFlags]'Static,Public,NonPublic'
@@ -20,7 +141,7 @@ function Get-BootstrapStockTrustBindings {
         @{ Key = 'Free'; Name = 'FreeLibrary'; Return = [bool]; Library = 'kernel32.dll';
             Parameters = [type[]]@([IntPtr]) }
     )
-    $bindings = @{}
+    $bindings = @{ Core = $false }
     foreach ($definition in $definitions) {
         $method = $native.GetMethod($definition.Name, $flags, $null, $definition.Parameters, $null)
         if ($null -eq $method -or $method.ReturnType -ne $definition.Return -or
@@ -85,6 +206,24 @@ function Get-BootstrapStockTrustBindings {
     return [pscustomobject]$bindings
 }
 
+function Invoke-BootstrapStockTrust {
+    param($Bindings, [IntPtr]$Action, [IntPtr]$Data)
+    if (-not $Bindings.Core) {
+        return $Bindings.Verify.Invoke($null, [object[]]@([IntPtr]::new(-1), $Action, $Data))
+    }
+    $arguments = [object[]]@(
+        [IntPtr]::new(-1),
+        $Bindings.ReadStruct.Invoke($null, [object[]]@($Action, [Guid])),
+        $Bindings.ReadStruct.Invoke($null, [object[]]@($Data, $Bindings.DataType))
+    )
+    try {
+        return $Bindings.Verify.Invoke($null, $arguments)
+    } finally {
+        # hWVTStateData is the API's output; retain it even when an invocation fails after VERIFY.
+        [Runtime.InteropServices.Marshal]::WriteIntPtr($Data, 56, $Bindings.StateField.GetValue($arguments[2]))
+    }
+}
+
 function Assert-BootstrapStockTrustModule {
     param([string]$Path, [IntPtr]$Expected = [IntPtr]::Zero)
     $process = [Diagnostics.Process]::GetCurrentProcess()
@@ -112,7 +251,8 @@ function Open-BootstrapStockTrustLibrary {
     )
     Assert-BootstrapStockTrustModule -Path $path
     # Pin our own reference before any stock name-based trust import can bind.
-    $module = $Bindings.Load.Invoke($null, [object[]]@($path, [IntPtr]::Zero, [uint32]0x800))
+    $loadFlags = if ($Bindings.Core) { [int]0x800 } else { [uint32]0x800 }
+    $module = $Bindings.Load.Invoke($null, [object[]]@($path, [IntPtr]::Zero, $loadFlags))
     $errorCode = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
     if ($module -eq [IntPtr]::Zero) {
         throw [ComponentModel.Win32Exception]::new($errorCode, 'Bootstrap trust library load failed.')
@@ -179,14 +319,16 @@ function Get-BootstrapStockFileTrust {
         [Runtime.InteropServices.Marshal]::WriteIntPtr($data, 40, $file)
         [Runtime.InteropServices.Marshal]::WriteInt32($data, 48, 1)
         [Runtime.InteropServices.Marshal]::WriteInt32($data, 72, 0x1000)
-        $status = $bindings.Verify.Invoke($null, [object[]]@([IntPtr]::new(-1), $action, $data))
+        $status = Invoke-BootstrapStockTrust -Bindings $bindings -Action $action -Data $data
         $publisher = $null
         if ($status -eq 0) {
             $state = [Runtime.InteropServices.Marshal]::ReadIntPtr($data, 56)
             if ($state -eq [IntPtr]::Zero) { throw 'Verified bootstrap signer state is unavailable.' }
             $provider = $bindings.Provider.Invoke($null, [object[]]@($state))
             if ($provider -eq [IntPtr]::Zero) { throw 'Verified bootstrap signer provider is unavailable.' }
-            $signer = $bindings.Signer.Invoke($null, [object[]]@($provider, [uint32]0, [uint32]0, [uint32]0))
+            $counterSigner = if ($bindings.Core) { $false } else { [uint32]0 }
+            $signer = $bindings.Signer.Invoke($null, [object[]]@($provider, [uint32]0, $counterSigner, [uint32]0))
+            # The x64 wintrust.h provider ABI is shared by both managed shell adapters.
             if ($signer -eq [IntPtr]::Zero -or
                 [Runtime.InteropServices.Marshal]::ReadInt32($signer, 0) -lt 64 -or
                 [Runtime.InteropServices.Marshal]::ReadInt32($signer, 40) -ne 0 -or
@@ -215,7 +357,7 @@ function Get-BootstrapStockFileTrust {
             if ($stateInitialized -and
                 [Runtime.InteropServices.Marshal]::ReadIntPtr($data, 56) -ne [IntPtr]::Zero) {
                 [Runtime.InteropServices.Marshal]::WriteInt32($data, 48, 2)
-                $closeStatus = $bindings.Verify.Invoke($null, [object[]]@([IntPtr]::new(-1), $action, $data))
+                $closeStatus = Invoke-BootstrapStockTrust -Bindings $bindings -Action $action -Data $data
                 if ($closeStatus -ne 0) {
                     throw ('Bootstrap signer state close failed: 0x{0:X8}.' -f [uint32]$closeStatus)
                 }

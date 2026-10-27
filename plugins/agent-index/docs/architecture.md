@@ -634,6 +634,8 @@ are derived-artifact reuse evidence, not source cursors, checkpoint advancement,
 new reader authority or locks. They describe committed store writes, not an
 atomic whole-source delta. A real change still invokes the global clustering
 pass; model/bucket-local maintenance remains separate work.
+The opt-in [prepared bucket/model item reader](bucket-item-reads.md) supplies
+indexed, explicitly budgeted slice input without changing that default.
 
 ### Durable acquisition hints (queue contract v1)
 

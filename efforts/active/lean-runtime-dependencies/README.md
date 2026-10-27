@@ -331,6 +331,53 @@ transfer without acceptance by a named tracked objective.
 
 ## Journal
 
+### 2026-10-26 - Core held-file signer candidate
+
+- The existing typed Core `WINTRUST_DATA` and `WINTRUST_FILE_INFO` passed a
+  full-byte owned-heap roundtrip through public Marshal APIs, including their
+  pointer fields. All five owned allocations were freed before host exit.
+  That witness made no WinTrust/provider/library calls and is not native
+  signer or interpreter admission.
+- Added an unused Core adapter through those shape-checked existing records
+  and stock by-reference WinTrust imports. Preserve no-UI/cache-only flags,
+  the caller's exact file handle and returned provider state through CLOSE,
+  including exceptions after a real verification call.
+- Source verification rejected the candidate's public loader choice:
+  CoreCLR first tries an altered-search-path load for absolute paths, stripping
+  the requested dependency-search flags even through the three-argument API.
+  A matching loaded module path cannot prove the original System32-only
+  dependency policy. Qualify an existing stock flag-preserving binding before
+  publishing Core signer support; do not emit or compile another binding.
+- Core has no provider signer/certificate records in the inspected managed
+  scope. The shared x64 `wintrust.h` provider ABI remains the extraction
+  contract, with native signed-file/provider-state qualification required;
+  neither scoped absence nor pointer roundtrip is treated as impossibility
+  or positive signature evidence.
+- The candidate's combined dual-shell native packet is pending. No compiled
+  caller, synchronizer or installation path enables the helper; complete
+  canonical path, drive/ancestor/source closure and shell handoff remain open.
+- The first candidate passed 73 combined native-host tests without skips,
+  including actual Core provider extraction and exception-path state cleanup.
+  That did not qualify the rejected public loader's dependency-search policy.
+  A subsequent bounded metadata pass found existing CoreLib managed
+  `LoadLibraryEx(String, IntPtr, Int32)` and BOOL `FreeLibrary` wrappers.
+  The corrected candidate validates those declarations and passes the
+  original flags directly, with exact path/flag/type/module-reference controls.
+  Its native qualification remains pending; no earlier signer pass waives it.
+- The corrected packet passed all 73 controls with zero skips on both shell
+  editions in 48.80 seconds, 64.75 seconds including canonical preparation and
+  cleanup. Read-only inspection of the installed Core wrapper proved that
+  the original flags argument reaches the existing `LoadLibraryExW` thunk
+  unchanged; the actual call-through tests retained `0x800`, its exact integer
+  type and balanced owned references before success. This is installed-wrapper
+  argument-flow evidence, not global OS interception or universal version
+  support. Every owned test handle, provider state, module reference, shell
+  host and Job process settled.
+- The final hardened, network-disconnected portable packet passed two source
+  controls with 71 explicit native skips. Independent review and merge remain
+  gates; complete interpreter/source admission, compiled-caller replacement
+  and production rollout remain open.
+
 ### 2026-10-26 - Core held-file and managed final-path adapter
 
 - Extended the unused file guard with a shape-checked CoreLib 10 adapter:
@@ -355,6 +402,16 @@ transfer without acceptance by a named tracked objective.
   load. Complete path/drive/ancestor/source admission and the compiled-caller
   migration remain open; no production caller, synchronizer or installation
   path enables these primitives. No aggregate Plan or Validation item closes.
+- #9197 merged as `fbb1b5dc4974e82f8bf4379aadd1ef7f506f2064` after
+  exact-head Copilot approval `5661422757`, no open review findings and
+  successful required CI. Both entire owning effort READMEs were re-read
+  after merge; all remaining Plan and Validation Plan obligations stay open.
+  The managed source worktree is reconciled with `dev`; this is neither
+  release attribution nor an installed update.
+  Next qualify the existing Core by-reference WinTrust record marshalling,
+  provider layouts and owned native-library lifetime before implementing
+  Core signer parity. The current explicit Core trust refusal remains until
+  that separate native qualification passes.
 
 ### 2026-10-26 - Stock-framework held-file signer qualification
 - Added an unused, repository-only WinTrust adapter through the existing
