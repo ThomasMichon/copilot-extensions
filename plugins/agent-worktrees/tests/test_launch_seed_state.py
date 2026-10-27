@@ -321,6 +321,39 @@ def test_real_daemon_reports_native_transport_refusal_without_fallback(
 
 
 @pytest.mark.parametrize("kind", ["new", "resume"])
+def test_finite_preparation_claims_but_never_spawns_or_settles_the_seed(tmp_path, monkeypatch, kind):
+    path = _record(tmp_path)
+    seed = state.stage(path, kind=kind, text="next turn")
+    command = ["copilot", "--", "", "literal argument"]
+    monkeypatch.setenv(launch_seed_exec.launch_execution.NATIVE_HINT_ENV, "stale")
+    real_popen = launch_seed_exec.subprocess.Popen
+
+    def spawn(argv, **kwargs):
+        if argv[0] == "copilot":
+            pytest.fail("preparation cannot start or wait for the backend")
+        return real_popen(argv, **kwargs)
+
+    monkeypatch.setattr(launch_seed_exec.subprocess, "Popen", spawn)
+    for name in ("finish", "restore"):
+        monkeypatch.setattr(
+            state, name, lambda *a, **k: pytest.fail("preparation cannot settle a child outcome"),
+        )
+    prepared = launch_seed_exec._prepare(
+        path, command, invoke=True, seed_id=seed.seed_id,
+    )
+    assert isinstance(prepared, launch_seed_exec.PreparedLaunch)
+    assert prepared.argv == ["copilot", "--interactive", "next turn", "--", "", "literal argument"]
+    assert command == ["copilot", "--", "", "literal argument"]
+    assert prepared.receipt["seed"]["handoff_id"]
+    assert state.peek(path).handoff_id == prepared.receipt["seed"]["handoff_id"]
+    assert state.peek(path).text == seed.text
+    assert launch_seed_exec.launch_execution.NATIVE_HINT_ENV not in prepared.environment
+    assert launch_seed_exec._prepare(
+        path, command, invoke=True, seed_id=seed.seed_id,
+    ) == 3
+
+
+@pytest.mark.parametrize("kind", ["new", "resume"])
 def test_seed_is_discarded_after_backend_start_not_before(tmp_path, monkeypatch, kind):
     path = _record(tmp_path)
     seed = state.stage(path, kind=kind, text="next turn")

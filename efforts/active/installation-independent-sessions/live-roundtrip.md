@@ -53,6 +53,15 @@ This migration is not same-process survival evidence. Record the legacy
 baseline separately; the qualified replacement launch must retain its own
 identities throughout the later actual uninstall/reinstall experiment.
 
+The selected live test has two installation cycles. After recording and
+backing up the active set, close the legacy muxes, uninstall and clean
+identified installation leftovers, then perform a fresh install and restore
+that exact set with the new system. Repeat uninstall, cleanup and reinstall
+around those replacement sessions without restarting them. Cleanup means
+straggler processes and installation detritus missed by supported uninstall,
+not runtime state or configuration. Classify leftovers and retain exact
+process custody before any manual cleanup; unknown files remain preserved.
+
 Before that migration, capture the exact selected active worktree set, each
 worktree's associated native Copilot session, and its current mux/pane/process
 identity in the private operational record. Restore that same set through the
