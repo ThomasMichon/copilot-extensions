@@ -36,6 +36,7 @@ import sqlite3
 import threading
 import time
 from collections.abc import Callable
+from contextlib import nullcontext
 from pathlib import Path
 
 #: How long a cached bundle is trusted before an ordinary (non-forced) read
@@ -326,6 +327,9 @@ class WorktreeStatusCache:
         with self._lock:
             return bool(self._entries)
 
+    def _observation_scope(self, project: str):
+        return self._cleanup_owner.observation_scope(project) if self._cleanup_owner is not None else nullcontext(False)
+
     # -- reads / refresh -----------------------------------------------------
 
     def get_or_refresh(
@@ -354,9 +358,9 @@ class WorktreeStatusCache:
         """
         key = (project, worktree_id)
         now = self._now()
-        with self._lock:
+        with self._lock, self._observation_scope(project) as blocked:
             entry = self._entries.get(key)
-            if self._cleanup_owner is not None and self._cleanup_owner.observation_blocked(project):
+            if blocked:
                 return self._cleanup_owner.degraded_bundle(
                     project, worktree_id, entry[0] if entry else None,
                 )
@@ -424,7 +428,12 @@ class WorktreeStatusCache:
         # store a result already expired, immediately triggering another
         # refresh on the very next read.
         completed_at = self._now()
-        with self._lock:
+        with self._lock, self._observation_scope(project) as blocked:
+            if blocked:
+                entry = self._entries.get(key)
+                return self._cleanup_owner.degraded_bundle(
+                    project, worktree_id, entry[0] if entry else None,
+                )
             self._entries[key] = (bundle, completed_at, completed_at)
             self._persist(project, worktree_id, bundle, completed_at, completed_at)
         return bundle
@@ -505,7 +514,9 @@ class WorktreeStatusCache:
             )
             sampled = dict(stalest)
         for project, worktree_id in expired:
-            with self._lock:
+            with self._lock, self._observation_scope(project) as blocked:
+                if blocked:
+                    continue
                 # Re-check at pop time, not just at sampling time: a
                 # concurrent request between the sample above and this pop
                 # could have refreshed (and re-demanded) this exact entry,
@@ -541,11 +552,14 @@ class WorktreeStatusCache:
                 # `_last_attempted` rationale: this is what lets a
                 # persistently-failing entry rotate out of "stalest first"
                 # rather than monopolizing every cap slot forever.
-                with self._lock:
-                    self._last_attempted[(project, worktree_id)] = self._now()
+                with self._lock, self._observation_scope(project) as blocked:
+                    if not blocked:
+                        self._last_attempted[(project, worktree_id)] = self._now()
                 continue
             ts = self._now()
-            with self._lock:
+            with self._lock, self._observation_scope(project) as blocked:
+                if blocked:
+                    continue
                 self._last_attempted[(project, worktree_id)] = ts
                 existing = self._entries.get((project, worktree_id))
                 if existing is not None and existing[1] != sampled_computed_at:

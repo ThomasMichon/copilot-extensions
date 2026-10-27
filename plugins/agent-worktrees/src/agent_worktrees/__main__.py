@@ -4160,7 +4160,6 @@ class _ResidentHookPolicy:
         cwd = _hook_payload_cwd(payload)
         found = None
         try:
-            _activate_project_for_path(cwd, force=True)
             wt_id = tracking.find_worktree_id_by_cwd(cwd)
             path = cfg.tracking_dir() / f"{wt_id}.yaml" if wt_id else None
             if wt_id and path and path.is_file():
@@ -4236,7 +4235,7 @@ def _resident_hook_decision(
         if segment_cache.observation_blocked(retained or "", cwd) or segment_cache.observation_busy():
             return {"segment": segment_cache.pending_segment_for_path(cwd)}
     previous_project = cfg.active_project()
-    _activate_project_for_path(cwd, force=True)
+    segment_cache.activate_hook_project(cwd, _activate_project_for_path)
     try:
         if kind == "preToolUse":
             return policy.pre(payload)
@@ -4248,7 +4247,9 @@ def _resident_hook_decision(
                 for target in targets:
                     segment_cache.invalidate(target)
             advisory = policy.post(payload, deadline)
-            binding = _bind_nudge_decision(cwd, deadline=deadline)
+            binding = _bind_nudge_decision(cwd, deadline=deadline) if (
+                cfg.active_project() or not git_ops._windows_observation()
+            ) else {}
             if advisory and binding:
                 a = str(advisory.get("additionalContext") or "")
                 b = str(binding.get("additionalContext") or "")

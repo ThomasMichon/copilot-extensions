@@ -1,11 +1,19 @@
 """The real local facade with injected native roots and owned pipe readers."""
 
 import io
+import runpy
+import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from agent_worktrees import push_timeout as pt
+
+launch = runpy.run_path(str(
+    Path(__file__).resolve().parents[3] / "libs" / "agent-procutil" / "tests"
+    / "test_windows_observation_spawn.py"
+))["launch"]
 
 
 class Root:
@@ -242,3 +250,70 @@ def test_interruption_before_launch_remains_uncertain_until_completion(monkeypat
     finally:
         if reader.thread.ident is not None:
             reader.thread.join(10)
+
+
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_actual_observation_consumer_reaches_atomic_adapter_and_real_facade(
+    launch, monkeypatch, interrupted,
+):
+    from agent_procutil import owned_process
+
+    launch.kernel.interrupt = interrupted
+    monkeypatch.setattr(pt, "time", SimpleNamespace(monotonic=lambda: launch.clock[0]))
+    monkeypatch.setattr(pt.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(owned_process, "require_caller_owned_support", lambda: None)
+    monkeypatch.setattr(pt, "spawn_sync_in_kill_on_close_job", lambda *a, **k: pytest.fail(
+        "generic post-create assignment factory was used",
+    ))
+    if interrupted:
+        with pytest.raises(pt.ObservationCleanupError) as captured:
+            pt._run_observation(["git"], cwd=r"C:\fixture", env={}, timeout=10, deadline=110)
+        error = captured.value
+        assert error.process.native._handle == 601
+        assert error.process.stdout is launch.streams[0] and not launch.streams[0].closed
+        assert isinstance(error.operation_error, KeyboardInterrupt)
+        assert error.try_settle() is True
+        assert "zero-job" in launch.calls
+    else:
+        result = pt._run_observation(["git"], cwd=r"C:\fixture", env={}, timeout=10, deadline=110)
+        assert result.stdout == result.stderr == "" and result.returncode == 0
+    assert ("close", 601) in launch.calls
+    assert all(stream.closed for stream in launch.streams)
+
+
+@pytest.mark.parametrize("cancellation", [KeyboardInterrupt(), SystemExit(2)])
+def test_cleanup_phase_cancellation_survives_atomic_consumer_settlement(
+    launch, monkeypatch, cancellation,
+):
+    from agent_procutil import owned_process
+
+    launch.kernel.cancel_cleanup = cancellation
+    monkeypatch.setattr(pt, "time", SimpleNamespace(monotonic=lambda: launch.clock[0]))
+    monkeypatch.setattr(pt.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(owned_process, "require_caller_owned_support", lambda: None)
+    with pytest.raises(pt.ObservationCleanupError) as captured:
+        pt._run_observation(["git"], cwd=r"C:\fixture", env={}, timeout=10, deadline=110)
+    error = captured.value
+    assert error.operation_error is cancellation and not error.job.closed
+    assert error.process.native._handle == 601
+    assert error.try_settle() is True
+    assert error.operation_error is cancellation
+
+
+@pytest.mark.parametrize("phase", ["attributes", "created"])
+def test_actual_consumer_propagates_command_cutoff_through_native_setup(launch, monkeypatch, phase):
+    method = "UpdateProcThreadAttribute" if phase == "attributes" else "CreateProcessW"
+    original = getattr(launch.kernel, method)
+
+    def consume_budget(*args):
+        result = original(*args)
+        launch.clock[0] = 106
+        return result
+
+    monkeypatch.setattr(launch.kernel, method, consume_budget)
+    monkeypatch.setattr(pt, "time", SimpleNamespace(monotonic=lambda: launch.clock[0]))
+    monkeypatch.setattr(pt.platform, "system", lambda: "Windows")
+    with pytest.raises(subprocess.TimeoutExpired):
+        pt._run_observation(["git"], cwd=r"C:\fixture", env={}, timeout=10, deadline=110)
+    assert "resume" not in launch.calls
+    assert launch.jobs[0].closed and all(stream.closed for stream in launch.streams)

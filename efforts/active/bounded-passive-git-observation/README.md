@@ -415,3 +415,33 @@ review-gated platform slice, not disabling ordinary POSIX classification.
   153.812 seconds with its coverage/effect checks intact at `5c353233e8`.
   Fresh current-head review and required CI remain gates; no release, installed
   rollout or broader completion is claimed.
+
+
+### 2026-10-27 - Third-round scope and standalone-library corrections
+
+- The next independent review confirmed the previous seven blockers resolved,
+  then found five additional native-budget, standalone-library, hook-discovery,
+  cache-publication and sibling-layout defects. Two native setup controls and
+  eight initial resident continuation controls failed before their fixes.
+- The actual atomic adapter now receives and enforces the command cutoff before
+  create/resume, while failure cleanup retains the original absolute D. Optional
+  legacy callers keep their previous cleanup allowances.
+- Both actual worktrees-consumer pairings now belong to the worktrees suite;
+  its fixture loads the canonical pure library launch fixture. The library has
+  no reverse consumer dependency. Its real standalone managed lane, with only
+  its own declared dependencies, passed 660 cases; 164 existing platform/native
+  opt-in cases were skipped on this Windows worker.
+- Windows resident hook activation uses retained/registered metadata, including
+  default sibling and explicit worktree roots, instead of Git discovery.
+  Permission policy, mutation invalidation, accounting and known-project bind
+  reminders still run. Ordinary POSIX activation remains unchanged.
+- Short cache publication/eviction sections now share the carrier's existing
+  admission lock. Git computation remains outside that lock. Both barrier
+  orderings and actual SQLite bytes/ages have explicit controls. Segment keys
+  retain their project association, so sibling-layout invalidation preserves A
+  while independent B can still invalidate and refresh.
+- The six-file hook/cache/custody selection passed 295 tests. A wider native
+  selection exposed one old untyped monitor fixture (756 passed); that fixture
+  now selects the unchanged legacy contract with the real carrier, and all 184
+  tests in its file pass. Current-base requalification and fresh review remain
+  outstanding; no production or installed state changed.

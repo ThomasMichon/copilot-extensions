@@ -6,6 +6,7 @@ import copy
 import os
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 from . import config as cfg, git_ops, push_timeout
@@ -27,6 +28,7 @@ class _StatusSegmentCache:
         self.ttl = max(15.0, float(ttl))
         self._entries: dict[str, tuple[float, str]] = {}
         self._aliases: dict[str, str] = {}
+        self._entry_projects: dict[str, str] = {}
         self._lock = threading.RLock()
         self._observations: dict[tuple[str, str], _ObservationTicket] = {}
         self._project_scopes: dict[str, set[tuple[str, str]]] = {}
@@ -72,21 +74,56 @@ class _StatusSegmentCache:
         with self._lock:
             return self._blocked(project, path)
 
+    @contextmanager
+    def observation_scope(self, project: str):
+        """Linearize short cache mutations with admission and retained custody."""
+        with self._lock:
+            yield git_ops._windows_observation() and self._blocked(project)
+
     def project_for_observation_path(self, path: str) -> str | None:
         target = self._key(path)
         with self._lock:
+            candidates = [(key, project) for key, project in self._entry_projects.items()]
             for ticket in self._observations.values():
-                candidates = [ticket.path]
-                if ticket.key[0] == "anchor":
-                    candidates.append(ticket.key[1])
-                for candidate in candidates:
-                    if candidate:
-                        try:
-                            if os.path.commonpath((target, candidate)) in (target, candidate):
-                                return ticket.project
-                        except ValueError:
-                            pass
-        return None
+                candidates.append((ticket.path, ticket.project))
+            for project, scopes in self._project_scopes.items():
+                for kind, anchor in scopes:
+                    if kind == "anchor":
+                        candidates.extend((value, project) for value in (
+                            anchor, self._key(cfg.derive_worktree_root(anchor)),
+                        ))
+            matches = set()
+            for candidate, project in candidates:
+                if candidate:
+                    try:
+                        if os.path.commonpath((target, candidate)) == candidate:
+                            matches.add(project)
+                    except ValueError:
+                        pass
+            return next(iter(matches)) if len(matches) == 1 else None
+
+    def activate_hook_project(self, path, activate):
+        if not git_ops._windows_observation():
+            activate(path, force=True)
+            return
+        project = self.project_for_observation_path(path)
+        if project is None:
+            from . import installer
+
+            target = self._key(path)
+            matches = set()
+            for name, entry in installer.read_projects_registry().get("projects", {}).items():
+                if not isinstance(entry, dict) or not entry.get("anchor"):
+                    continue
+                anchor = entry["anchor"]
+                for root in (anchor, entry.get("worktree_root") or cfg.derive_worktree_root(anchor)):
+                    try:
+                        if os.path.commonpath((target, self._key(root))) == self._key(root):
+                            matches.add(name)
+                    except ValueError:
+                        continue
+            project = next(iter(matches)) if len(matches) == 1 else None
+        cfg.set_active_project(project)
 
     def begin_observation(self, project: str, anchor: str | None, path: str | None):
         key = ("anchor", self._key(anchor)) if anchor else ("project", project)
@@ -290,15 +327,17 @@ class _StatusSegmentCache:
                 return self.pending_segment()
             self._aliases[input_key] = key
             self._entries[key] = (time.monotonic(), value)
+            self._entry_projects[key] = project
         return value
 
     def _invalidate_keys(self, keys: set[str]) -> None:
         removed = set()
         for key in set(keys):
-            if self.observation_blocked("", key):
+            if self.observation_blocked(self._entry_projects.get(key, ""), key):
                 self._invalidated.add(key)
                 continue
             self._entries.pop(key, None)
+            self._entry_projects.pop(key, None)
             self._invalidated.discard(key)
             removed.add(key)
         for alias, key in list(self._aliases.items()):

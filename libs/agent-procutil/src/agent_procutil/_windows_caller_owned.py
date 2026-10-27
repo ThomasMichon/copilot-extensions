@@ -317,7 +317,7 @@ def _environment_block(environment):
 
 
 def spawn(
-    argv: list[str], *, budget=None, command_deadline=None, on_settled=None,
+    argv: list[str], *, budget=None, command_deadline: float | None = None, on_settled=None,
     cleanup_deadline: float | None = None, **kwargs,
 ):
     """Create the target in its caller-owned Job atomically, before it can run."""
@@ -338,8 +338,8 @@ def spawn(
     allow_breakaway = kwargs.get("allow_breakaway", False)
     if type(allow_breakaway) is not bool:
         raise ValueError("allow_breakaway must be a boolean")
-    def remaining():
-        seconds = cleanup_deadline - time.monotonic()
+    def remaining(deadline):
+        seconds = deadline - time.monotonic()
         if seconds <= 0:
             raise subprocess.TimeoutExpired(argv, 0)
         return seconds
@@ -347,7 +347,12 @@ def spawn(
     if cleanup_deadline is not None:
         if type(cleanup_deadline) not in (int, float) or not math.isfinite(cleanup_deadline):
             raise ValueError("cleanup_deadline must be a finite monotonic instant")
-        remaining()
+        remaining(cleanup_deadline)
+    if command_deadline is not None and cleanup_deadline is not None and command_deadline > cleanup_deadline:
+        raise ValueError("command_deadline must not exceed the cleanup deadline")
+    launch_deadline = command_deadline if command_deadline is not None else cleanup_deadline
+    if cleanup_deadline is not None and launch_deadline is not None:
+        remaining(launch_deadline)
     job = None
     process = None
     creation_attempted = False
@@ -451,10 +456,8 @@ def spawn(
             try:
                 for fd in child_fds:
                     os.set_handle_inheritable(msvcrt.get_osfhandle(fd), True)
-                if command_deadline is not None and time.monotonic() >= command_deadline:
-                    raise subprocess.TimeoutExpired(argv, 0)
-                if cleanup_deadline is not None:
-                    remaining()
+                if launch_deadline is not None:
+                    remaining(launch_deadline)
                 creation_attempted = True
                 if not kernel.CreateProcessW(
                     None, command, None, None, True,
@@ -464,10 +467,8 @@ def spawn(
                     creation_attempted = False
                     raise ctypes.WinError(ctypes.get_last_error())
                 process = _Process(argv, info, streams)
-                if command_deadline is not None and time.monotonic() >= command_deadline:
-                    raise subprocess.TimeoutExpired(argv, 0)
-                if cleanup_deadline is not None:
-                    remaining()
+                if launch_deadline is not None:
+                    remaining(launch_deadline)
                 if kernel.ResumeThread(info.hThread) == 0xFFFFFFFF:
                     raise ctypes.WinError(ctypes.get_last_error())
             finally:
@@ -493,7 +494,7 @@ def spawn(
             if cleanup_deadline is not None:
                 job_empty_confirmed = False
                 try:
-                    job.terminate_and_wait(remaining())
+                    job.terminate_and_wait(remaining(cleanup_deadline))
                     job_empty_confirmed = True
                     process.wait(max(0.0, cleanup_deadline - time.monotonic()))
                     if failed_preparation or process._thread_handle:

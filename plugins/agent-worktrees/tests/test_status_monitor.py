@@ -1304,6 +1304,7 @@ def test_segment_cache_get_works_without_full_command_surface_loaded(monkeypatch
 
 
 def test_resident_hook_scopes_and_restores_project(monkeypatch):
+    monkeypatch.setattr(m.git_ops, "_windows_observation", lambda: False)
     prior = m.cfg.active_project()
     seen = []
 
@@ -1322,7 +1323,7 @@ def test_resident_hook_scopes_and_restores_project(monkeypatch):
         result = m._resident_hook_decision(
             "preToolUse",
             {"cwd": "/w/a", "toolName": "view"},
-            segment_cache=object(),
+            segment_cache=m._StatusSegmentCache(),
             policy=Policy(),
         )
         assert result == {}

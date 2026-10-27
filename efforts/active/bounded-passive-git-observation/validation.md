@@ -410,3 +410,35 @@ site-packages correctly failed the source-read admission fence. Moving only
 the test tooling to the isolated temporary root resolved that environment
 mismatch; no guard, source closure, node list, effect prohibition or deadline
 was weakened. Tooling matched the declared CI inputs through `seasoned_uv.py`.
+
+
+### 2026-10-27 third-round regression and standalone-library evidence
+
+Before correction, two library-native setup-budget regressions and eight initial
+resident hook/cache/sibling-layout regressions failed for the reported causal
+reasons. The changed six-file hook/cache packet then passed 295 tests in 50.98
+seconds (79.55 seconds including managed preparation/cleanup). Its explicit
+`test_observation_publication_fences.py` controls cover claim-first publication,
+mutation-first publication/expiry barriers, real SQLite preservation, metadata-
+only hook selection and actual `get()` population in the default sibling layout.
+
+The documented standalone command was actually run, not replaced by a paired
+PYTHONPATH environment:
+
+```powershell
+python tools/run-plugin-tests.py agent-procutil --test-timeout 90 --timeout 900 --plugin-timeout 2700
+```
+
+The two independently prepared sub-suites passed **505 + 155 = 660 cases** in
+148.52 seconds including preparation and cleanup. **128 + 36 = 164** existing
+platform/native opt-in cases were skipped. Both actual consumer-pairing test
+functions now live in `test_atomic_observation_process.py`; the standalone
+library tests neither import nor depend on `agent_worktrees`. The new command-
+cutoff tests run as pure, injected native cases on this lane.
+
+The wider 16-file native selection passed 756 tests and exposed one remaining
+old untyped project-scope fixture. After selecting its legacy branch explicitly
+and using the real carrier, its complete `test_status_monitor.py` file passed
+184 cases. This is not a claim that the wider current-base packet, required
+promotion packet, review/CI or installed qualification is complete. Linux Docker
+is unavailable; native opt-in tests retain their existing contained fixture Jobs.

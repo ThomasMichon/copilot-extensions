@@ -162,7 +162,7 @@ def _spawn_observation(cmd, *, cwd, env, deadline, command_deadline):
     process = _ObservationProcess(cmd, command_deadline=command_deadline, cleanup_deadline=deadline)
     try:
         native, job = spawn(
-            cmd, cwd=cwd, env=env, cleanup_deadline=deadline,
+            cmd, cwd=cwd, env=env, cleanup_deadline=deadline, command_deadline=command_deadline,
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
     except OwnedCleanupError as error:

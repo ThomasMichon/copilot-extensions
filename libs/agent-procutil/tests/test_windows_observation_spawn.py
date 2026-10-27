@@ -200,51 +200,24 @@ def test_opt_in_failure_uses_remaining_budget_not_fixed_cleanup_allowance(launch
     assert all(stream.closed for stream in launch.streams)
 
 
-@pytest.mark.parametrize("interrupted", [False, True])
-def test_actual_observation_consumer_reaches_atomic_adapter_and_real_facade(
-    launch, monkeypatch, interrupted,
-):
-    from agent_worktrees import push_timeout as pt
-    from agent_procutil import owned_process
+@pytest.mark.parametrize("phase", ["attributes", "created"])
+def test_command_cutoff_never_spends_reserved_cleanup_on_create_or_resume(launch, monkeypatch, phase):
+    method = "UpdateProcThreadAttribute" if phase == "attributes" else "CreateProcessW"
+    original = getattr(launch.kernel, method)
 
-    launch.kernel.interrupt = interrupted
-    monkeypatch.setattr(pt, "time", SimpleNamespace(monotonic=lambda: launch.clock[0]))
-    monkeypatch.setattr(pt.platform, "system", lambda: "Windows")
-    monkeypatch.setattr(owned_process, "require_caller_owned_support", lambda: None)
-    monkeypatch.setattr(pt, "spawn_sync_in_kill_on_close_job", lambda *a, **k: pytest.fail(
-        "generic post-create assignment factory was used",
-    ))
-    if interrupted:
-        with pytest.raises(pt.ObservationCleanupError) as captured:
-            pt._run_observation(["git"], cwd="C:\\fixture", env={}, timeout=10, deadline=110)
-        error = captured.value
-        assert error.process.native._handle == 601
-        assert error.process.stdout is launch.streams[0] and not launch.streams[0].closed
-        assert isinstance(error.operation_error, KeyboardInterrupt)
-        assert error.try_settle() is True
-        assert "zero-job" in launch.calls
-    else:
-        result = pt._run_observation(["git"], cwd="C:\\fixture", env={}, timeout=10, deadline=110)
-        assert result.stdout == result.stderr == "" and result.returncode == 0
-    assert ("close", 601) in launch.calls
-    assert all(stream.closed for stream in launch.streams)
+    def consume_budget(*args):
+        result = original(*args)
+        launch.clock[0] = 106
+        return result
 
-
-@pytest.mark.parametrize("cancellation", [KeyboardInterrupt(), SystemExit(2)])
-def test_cleanup_phase_cancellation_survives_atomic_consumer_settlement(
-    launch, monkeypatch, cancellation,
-):
-    from agent_worktrees import push_timeout as pt
-    from agent_procutil import owned_process
-
-    launch.kernel.cancel_cleanup = cancellation
-    monkeypatch.setattr(pt, "time", SimpleNamespace(monotonic=lambda: launch.clock[0]))
-    monkeypatch.setattr(pt.platform, "system", lambda: "Windows")
-    monkeypatch.setattr(owned_process, "require_caller_owned_support", lambda: None)
-    with pytest.raises(pt.ObservationCleanupError) as captured:
-        pt._run_observation(["git"], cwd="C:\\fixture", env={}, timeout=10, deadline=110)
-    error = captured.value
-    assert error.operation_error is cancellation and not error.job.closed
-    assert error.process.native._handle == 601
-    assert error.try_settle() is True
-    assert error.operation_error is cancellation
+    monkeypatch.setattr(launch.kernel, method, consume_budget)
+    with pytest.raises(subprocess.TimeoutExpired):
+        native.spawn(["git"], command_deadline=105, cleanup_deadline=110,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert "resume" not in launch.calls
+    created = any(isinstance(item, tuple) and item[0] == "create" for item in launch.calls)
+    assert created is (phase == "created")
+    assert launch.jobs[0].closed and all(stream.closed for stream in launch.streams)
+    if created:
+        assert ("terminate", 4) in launch.calls
+        assert ("close", 601) in launch.calls
