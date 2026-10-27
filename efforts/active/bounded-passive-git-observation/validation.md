@@ -393,3 +393,20 @@ useful pure cases remain portable rather than being skipped on other hosts.
 These receipts do not substitute for the exact required promotion unit packet,
 current-head review/CI, a promoted release or separately authorized installed
 validation. No production service or original interactive session was a fixture.
+
+
+The exact required promotion unit packet subsequently completed at committed
+source `5c353233e87fd1d8151a3652da250e3266c43986`: **2,407 passed**, no skipped
+admitted nodes or forbidden effects, **153.812 seconds** against its unchanged
+300-second whole-run cap. All 129 production coverage targets and the existing
+source/helper closure were enforced; `unit-proof.json`, `unit-manifest.json`
+and `coverage.json` were retained by the executing owner. Ten out-of-packet
+nodes were deselected by the fixed manifest, not waived or newly admitted.
+
+Execution used `TestSandbox`, `isolated_environment` and `run_contained` with a
+fresh tooling venv outside the repository. The first chosen venv lacked
+`coverage`; after restoring the declared dependency, its repo-local
+site-packages correctly failed the source-read admission fence. Moving only
+the test tooling to the isolated temporary root resolved that environment
+mismatch; no guard, source closure, node list, effect prohibition or deadline
+was weakened. Tooling matched the declared CI inputs through `seasoned_uv.py`.
