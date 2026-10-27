@@ -125,3 +125,66 @@ def prepare_index(
             )
             return after
     raise refusal
+
+
+def consolidation_rows(state: ScalarIndexState, dataset: LanceDataset, *, max_rows: int) -> int:
+    """Preflight the whole physical table, not just live rows or an unindexed tail."""
+    if type(max_rows) is not int or max_rows < 0:
+        raise ValueError("Scalar consolidation budget must be a nonnegative integer")
+    if not state.prepared:
+        raise ScalarIndexPreparationRequired("Scalar consolidation requires an existing prepared index")
+    if state.segments <= 1 and state.physical_unindexed_rows == 0:
+        return 0
+    rows = sum(fragment.metadata.physical_rows for fragment in dataset.get_fragments())
+    if rows > max_rows:
+        raise ScalarIndexPreparationRequired(
+            f"Scalar consolidation needs {rows} physical rows; consolidation budget is {max_rows}"
+        )
+    return rows
+
+
+def consolidate_index(
+    owner: ContentStore | VectorTable, *, column: str, max_rows: int,
+) -> ScalarIndexState:
+    """Explicitly merge one named B-tree under its existing source-domain owner."""
+    if type(max_rows) is not int or max_rows < 0:
+        raise ValueError("Scalar consolidation budget must be a nonnegative integer")
+    domain = owner._source_domain
+    if domain is None:
+        raise ScalarIndexPreparationRequired("Consolidation requires a participating source store")
+    with domain.read(owner._db):
+        state, dataset = inspect_index(owner._get_or_create_table(), column=column)
+        consolidation_rows(state, dataset, max_rows=max_rows)
+        if state.segments <= 1 and state.physical_unindexed_rows == 0:
+            return state
+    refusal: ScalarIndexPreparationRequired
+    with domain.write(owner._db):
+        try:
+            table = owner._get_or_create_table()
+            state, dataset = inspect_index(table, column=column)
+            rows = consolidation_rows(state, dataset, max_rows=max_rows)
+        except ScalarIndexPreparationRequired as exc:
+            refusal = exc
+        else:
+            if state.segments <= 1 and state.physical_unindexed_rows == 0:
+                return state
+            covered_fts = domain.receipt().get("fts_coverage", {}).get(owner._table_name) == state.version
+            with domain.physical_maintenance(
+                owner._table_name, "scalar-consolidate:" + owner._table_name,
+            ):
+                dataset.optimize.optimize_indices(
+                    index_names=[f"{column}_idx"],
+                    num_indices_to_merge=state.segments, retrain=False,
+                )
+            table.checkout_latest()
+            after, _ = inspect_index(table, column=column)
+            if not after.prepared or after.physical_unindexed_rows or after.segments != 1:
+                raise RuntimeError("Scalar consolidation did not produce one fully covered segment")
+            if covered_fts:
+                domain.cover_fts(owner)
+            log.info(
+                "Consolidated %s index for %s: %d physical rows, %d segments into %d",
+                column, owner._table_name, rows, state.segments, after.segments,
+            )
+            return after
+    raise refusal
