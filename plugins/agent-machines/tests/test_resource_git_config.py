@@ -307,3 +307,40 @@ def test_explicit_global_target_allows_distinct_windows_home_selection(tmp_path,
     result = resources.apply_resources([package(tmp_path)], "box-1", "windows", ctx)[0]
     assert result.status == "changed" and result.change_plan
     assert not (profile / ".gitconfig").exists()
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_text_rollback_errors_report_actual_mutation_and_new_receipt(
+    tmp_path, monkeypatch, capsys, changed,
+):
+    from agent_machines import __main__ as cli
+
+    root = tmp_path / ".agent-machines" / "backups" / "git-config"
+    original_receipt = root / "original" / "receipt.json"
+    original_receipt.parent.mkdir(parents=True)
+    new_receipt = root / "recovery" / "receipt.json"
+    monkeypatch.setattr(cli.Path, "home", classmethod(lambda _cls: tmp_path))
+    engine = cli.cli_git_config.transaction
+    plan = engine.Plan(tmp_path / ".gitconfig", b"before", b"after", (), "rollback:fixture")
+    monkeypatch.setattr(engine, "rollback_preview", lambda *_args: plan)
+
+    def fail(*_args, **_kwargs):
+        raise engine.TransactionError(
+            "verification failed", changed=changed,
+            receipt=new_receipt if changed else None,
+        )
+
+    monkeypatch.setattr(engine, "apply", fail)
+    result = cli.main([
+        "git-config", "rollback", "--receipt", str(original_receipt),
+        "--apply", "--plan-sha", "1" * 64,
+    ])
+    captured = capsys.readouterr()
+    assert result != 0
+    if changed:
+        assert "changed" in captured.err.lower()
+        assert str(new_receipt) in captured.err
+        assert "refused" not in captured.err.lower()
+    else:
+        assert "refused" in captured.err.lower()
+        assert str(new_receipt) not in captured.err

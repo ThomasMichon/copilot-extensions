@@ -463,6 +463,11 @@ def _cmd_restore(args: argparse.Namespace) -> int:
             cli_git_config.print_plan(r.change_plan)
         if r.status == "error":
             print(f"  resource {label}: ERROR {r.detail}", file=sys.stderr)
+            if r.changed:
+                state = "planned changes" if r.dry_run else "changed before failure"
+                print(f"      {state}", file=sys.stderr)
+            if r.backup_path:
+                print(f"      Recovery backup: {r.backup_path}", file=sys.stderr)
         elif r.blocked_reason:
             print(f"  resource {label}: BLOCKED ({r.blocked_reason})", file=sys.stderr)
             if r.detail:

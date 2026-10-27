@@ -166,6 +166,20 @@ def test_resource_error_makes_human_restore_exit_nonzero(monkeypatch, capsys):
     assert "did error" not in captured.out
 
 
+def test_text_restore_error_includes_mutation_and_recovery_backup(monkeypatch, capsys):
+    result = _resource_error_result()
+    resource = result.resource_results[0]
+    resource.type = "git-config"
+    resource.id = "user-global"
+    resource.detail = "post-write verification failed"
+    resource.backup_path = "retained-recovery/receipt.json"
+    _patch(monkeypatch, result)
+    assert cli.main(["restore", "--machine", "box", "--apply"]) != 0
+    captured = capsys.readouterr()
+    assert "changed" in captured.err.lower()
+    assert resource.backup_path in captured.err
+
+
 def _resource_deferred_result() -> reconcile.RestoreResult:
     result = _fake_result("")
     result.module_results = []

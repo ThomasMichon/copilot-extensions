@@ -49,9 +49,9 @@ def rollback(args: argparse.Namespace) -> int:
             )
         return 0
     except (transaction.TransactionError, OSError, ValueError) as exc:
+        changed = getattr(exc, "changed", False)
+        receipt = getattr(exc, "receipt", None)
         if args.json:
-            changed = getattr(exc, "changed", False)
-            receipt = getattr(exc, "receipt", None)
             print(
                 json.dumps(
                     {
@@ -61,7 +61,12 @@ def rollback(args: argparse.Namespace) -> int:
                     }
                 )
             )
-        print(f"Git configuration rollback refused: {exc}", file=sys.stderr)
+        if changed:
+            print(f"Git configuration rollback changed the file but failed: {exc}", file=sys.stderr)
+            if receipt is not None:
+                print(f"Recovery receipt: {receipt}", file=sys.stderr)
+        else:
+            print(f"Git configuration rollback refused: {exc}", file=sys.stderr)
         return 2
 
 

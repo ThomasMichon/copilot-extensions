@@ -145,6 +145,9 @@ Rollback restores the original bytes, including line endings, or the original
 absence. It does not claim to restore file identity or metadata. A post-write
 verification or unconfirmed-cleanup failure is an error with `changed: true`
 and the retained receipt, not an unchanged/success-shaped result.
+Both text and JSON errors disclose the mutation and recovery backup. A failed
+rollback can itself have changed the file; use its newly retained receipt,
+not the original rollback request's receipt, for recovery.
 
 This contract owns **declared file entries only**. Included files, system and
 repository configuration remain untouched; an included or higher-precedence
