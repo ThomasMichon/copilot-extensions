@@ -4233,6 +4233,13 @@ literal `_SMOKE_PARTITIONS` mapping without executing candidate Python. Its
 receipt binds the normalized workflow and helper bytes. Missing, unsuccessful,
 duplicate or unsupported rows still refuse qualification; both native promotion
 contract lanes also select changes to this scheduling helper.
+The development regression
+`test_isolated_matrix_and_files_cli_need_only_the_single_script` copies only the
+partition script and runs ordinary `matrix`/`files` commands with `python -I -S`,
+without repository helpers or site packages. It checks the matrix and exact
+second-group file arguments using synthetic test paths. This native-process
+witness does not expand required unit-only CI or qualify periodic-container
+enrollment.
 The PR-only coverage-selected dispatch lane below instead requests one matrix
 row through `--single-job-plugin agent-dispatch`. Selection and its evidence
 artifact run once, not once per complete-suite partition. The explicit matrix
