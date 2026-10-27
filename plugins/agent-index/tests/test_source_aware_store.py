@@ -240,6 +240,10 @@ def test_real_queued_git_ingestion_incremental_delete_and_restart(
             chunk("git:repository", "prefixterm", path="prefix.md"),
         ]
         empty.upsert("code", retired, inference(None, ["a", "b"]))
+    from agent_index.store.ingestion_index import prepare_ingestion_indices
+
+    # These direct retirement fixtures are outside ordinary ingestion.
+    prepare_ingestion_indices(empty, max_rows=3)
     queued(True)
     config = IndexConfig()
     store = initialize_source_store(config)
@@ -271,6 +275,7 @@ def test_real_queued_git_ingestion_incremental_delete_and_restart(
             "code", [chunk("git:retired", "incrementalretired", path="retired.md")],
             inference(None, ["x"]),
         )
+        prepare_ingestion_indices(store, max_rows=1)
     queued(False)
     restarted = initialize_source_store(config)
     current = restarted.content_store.get_chunks_for_file("git:repo", "guide.md")
@@ -532,6 +537,9 @@ def test_queued_maintenance_effect_failure_never_completes(
         vector = np.zeros((1, 768), dtype=np.float32)
         vector[:, 0] = 1
         store.upsert("code", [chunk("monorepo", "retirement fixture")], vector)
+        from agent_index.store.ingestion_index import prepare_ingestion_indices
+
+        prepare_ingestion_indices(store, max_rows=1)
         table = store.content_store._get_or_create_table()
         original = type(table).delete
 
