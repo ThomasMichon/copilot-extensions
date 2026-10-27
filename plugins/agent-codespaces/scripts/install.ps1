@@ -1385,52 +1385,12 @@ function Invoke-Install {
     Write-ServiceOk "$ServiceName installed"
 }
 
-function Stop-ManagedSshConnections {
-    <# Stop SSH ControlMaster processes this plugin started. They multiplex
-       connections to CodeSpaces via sockets under ~/.agent-codespaces/sockets.
-       A separate uninstall process can't reach ssh-manager's in-memory state,
-       so close each master via `ssh -O exit` (best-effort) and then kill any
-       lingering ssh.exe bound to the socket dir. #>
-    $socketDir = Join-Path $InstallDir 'sockets'
-    if (Test-Path $socketDir) {
-        Get-ChildItem $socketDir -File -ErrorAction SilentlyContinue | ForEach-Object {
-            $sock = $_.FullName
-            # ssh -O exit needs a host arg; the socket already pins the target,
-            # so any placeholder works to address the existing master.
-            & ssh -o "ControlPath=$sock" -O exit placeholder *> $null 2>&1
-        }
-    }
-    # Kill any ssh process still referencing our socket dir (orphaned masters).
-    $needle = (Join-Path $InstallDir 'sockets') -replace '\\', '\\'
-    Get-CimInstance Win32_Process -Filter "Name = 'ssh.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -and $_.CommandLine -match 'agent-codespaces' } |
-        ForEach-Object {
-            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-            Write-ServiceChanged "Stopped SSH ControlMaster (pid=$($_.ProcessId))"
-        }
-}
-
 function Invoke-Uninstall {
     Write-ServiceHeader "$ServiceName Uninstall"
     if ($DryRun) { Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow }
 
-    if ($DryRun) {
-        if (Get-ScheduledTask -TaskName $OwnerTaskName -ErrorAction SilentlyContinue) {
-            Write-Host "[dry-run] would stop + remove scheduled task: $OwnerTaskName"
-        } else {
-            Write-ServiceSkipped "Connection Owner scheduled task not present: $OwnerTaskName"
-        }
-        $socketDir = Join-Path $InstallDir 'sockets'
-        if (Test-Path $socketDir) {
-            Write-Host "[dry-run] would stop managed SSH connections under: $socketDir"
-        }
-    } else {
-        # Remove the Connection Owner scheduled task (if provisioned).
-        Unregister-ConnectionOwnerService
-
-        # Stop managed SSH ControlMaster connections before removing files.
-        Stop-ManagedSshConnections
-    }
+    . (Join-Path $PSScriptRoot 'uninstall-runtime.ps1')
+    Invoke-StatePreservingUninstall -Preview:$DryRun
 
     # A marketplace invocation self-stages below the runtime tree. Leave that
     # working directory before removing the tree so uninstall never deletes its
@@ -1444,36 +1404,7 @@ function Invoke-Uninstall {
         }
     }
 
-    # Remove binstub
-    $removedStub = $false
-    foreach ($stub in @('agent-codespaces.ps1', 'agent-codespaces.cmd')) {
-        $stubPath = Join-Path $LocalBin $stub
-        if (Test-Path $stubPath) {
-            if ($DryRun) {
-                Write-Host "[dry-run] would remove binstub: $stubPath"
-            } else {
-                Remove-Item $stubPath -Force
-                Write-ServiceChanged "Removed binstub: $stubPath"
-            }
-            $removedStub = $true
-        }
-    }
-    if (-not $removedStub) {
-        Write-ServiceSkipped "Binstub not found"
-    }
-
-    # Remove install directory (config, DB, venv -- agent-codespaces has no
-    # -Purge distinction; uninstall always removes the whole install dir).
-    if (Test-Path $InstallDir) {
-        if ($DryRun) {
-            Write-Host "[dry-run] would remove (config + DB + venv): $InstallDir"
-        } else {
-            Remove-Item $InstallDir -Recurse -Force
-            Write-ServiceChanged "Removed: $InstallDir"
-        }
-    } else {
-        Write-ServiceSkipped "Install directory not found"
-    }
+    if (-not $DryRun) { Write-ServiceChanged "Owned runtime removed; durable and unknown state retained: $InstallDir" }
 
     if ($DryRun) {
         Write-Host "$ServiceName uninstall dry run complete -- nothing was changed" -ForegroundColor Yellow
@@ -1754,9 +1685,14 @@ function Invoke-Stamp {
 
 $lifecycleMutex = $null
 $lifecycleHeld = $false
+$installTransaction = $null
 try {
     $ScriptDir = $PSScriptRoot
     . (Join-Path $ScriptDir 'source-runtime.ps1')
+    if ($Action -eq 'uninstall') {
+        . (Join-Path $ScriptDir 'uninstall-runtime.ps1')
+        Invoke-StatePreservingUninstall -AdmissionOnly
+    }
     if ($Action -in @('install', 'update', 'provision', 'stamp', 'dev')) {
         Initialize-SourceRuntime
         if ($Action -eq 'dev' -and $script:SourceRuntimeIdentity) {
@@ -1786,6 +1722,10 @@ try {
         if (-not $lifecycleHeld) {
             throw 'Timed out waiting for another agent-codespaces lifecycle operation'
         }
+        if (-not $DryRun -or $Action -ne 'uninstall') {
+            . (Join-Path $ScriptDir 'install-transaction.ps1')
+            $installTransaction = Enter-CodespacesInstallTransaction
+        }
     }
     if ($Action -in @('install', 'update', 'provision', 'stamp', 'dev')) { Assert-SourceRuntime }
     if ($Action -in @('install', 'update', 'provision')) {
@@ -1813,6 +1753,7 @@ try {
     if ($lifecycleHeld) {
         try { $lifecycleMutex.ReleaseMutex() } catch { }
     }
+    if ($installTransaction) { $installTransaction.Dispose() }
     if ($lifecycleMutex) { $lifecycleMutex.Dispose() }
     }
 }

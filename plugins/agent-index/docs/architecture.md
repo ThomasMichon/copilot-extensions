@@ -625,7 +625,8 @@ before its successful clean commit. Receipt work scales with table count, not
 stored items, and adds no source enumeration, row reads, processes or network
 requests.
 Every receipt publication, including intermediate effects and FTS handoffs,
-evicts optional logical metadata if needed to fit the existing 64 KiB reader
+evicts optional bucket metadata before table-level logical metadata if needed
+to fit the existing 64 KiB reader
 limit. Oversized mandatory receipt state is refused before replacing readable
 state.
 
@@ -636,6 +637,10 @@ atomic whole-source delta. A real change still invokes the global clustering
 pass; model/bucket-local maintenance remains separate work.
 The opt-in [prepared bucket/model item reader](bucket-item-reads.md) supplies
 indexed, explicitly budgeted slice input without changing that default.
+Its [witnessed bucket generations](bucket-item-reads.md#witnessed-bucket-generations)
+track qualified content/vector mutations and canonical tombstones under the same
+clean commit, with bounded sparse overrides and whole-table fallback for
+unqualified transitions. Partial cluster artifact publication is not yet wired.
 
 ### Durable acquisition hints (queue contract v1)
 

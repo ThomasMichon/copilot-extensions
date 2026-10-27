@@ -34,8 +34,16 @@ provision lock, status writes or a foreground fallback. Explicit installers and
 network-backed retained-source qualification under #5379 remain separate.
 
 The installer's `uninstall` action serializes with install/update. It removes
-runtime/config contents but keeps transaction-lock files and `.install-stage`
-coordination, so the install directory may remain. Normal self-staging reap
+only explicitly named runtime code and selectors, retaining configuration,
+authentication, forward keepers, host/workspace settings, warning state, unknown
+entries, transaction locks and `.install-stage` coordination. It requires a
+matching deployment owner and an installer-engine with entry-list removal.
+Linked roots and configured SSH reconnect closures refuse before removal;
+unowned binstubs remain untouched. The canonical uninstall engine holds runtime, snapshot and
+redirect-publication custody throughout finite native cleanup. Persistent
+lease registries remain in place and do not imply contention; actual held
+leases refuse admission. These refusals do not disconnect SSH or stop keepers.
+Normal self-staging reap
 removes dead-owner stages on later invocations. Its preview takes no transaction lock and removes no contents;
 normal transient payload self-staging still applies.
 

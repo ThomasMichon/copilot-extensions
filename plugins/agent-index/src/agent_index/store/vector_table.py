@@ -164,17 +164,22 @@ class VectorTable:
                 record.update(source=provenance["source"], language=provenance["language"])
 
         chunk_ids = [c.chunk_id for c in chunks]
-        if self._source_domain is not None:
-            self._source_domain.effect(f"vector-upsert:{self._table_name}")
-        try:
-            id_list = ", ".join(f"'{cid}'" for cid in chunk_ids)
-            table.delete(f"chunk_id IN ({id_list})")
-        except Exception:
-            if self._source_domain is not None:
-                raise
-            pass
+        mutation = (
+            self._source_domain.bucket_mutation(
+                self._table_name, f"vector-upsert:{self._table_name}",
+                (record["source"] for record in records),
+            ) if self._source_domain is not None else nullcontext()
+        )
+        with mutation:
+            try:
+                id_list = ", ".join(f"'{cid}'" for cid in chunk_ids)
+                table.delete(f"chunk_id IN ({id_list})")
+            except Exception:
+                if self._source_domain is not None:
+                    raise
+                pass
 
-        table.add(records)
+            table.add(records)
         logger.info("Upserted %d vectors to %s", len(records), self._table_name)
         return len(records)
 

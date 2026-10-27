@@ -260,7 +260,7 @@ def load_manifest(path: Path) -> dict[str, object]:
     if not isinstance(installer_lifecycle, bool):
         raise ValueError(f"{path}: installerLifecycle must be a boolean")
     if installer_lifecycle and (
-        installation_context != "required"
+        (manifest_version != LEGACY_VERSION and installation_context != "required")
         or not (path.parent / "scripts/installation-context/installation_context.py").is_file()
     ):
         raise ValueError(f"{path}: installerLifecycle requires a vendored installation primitive")

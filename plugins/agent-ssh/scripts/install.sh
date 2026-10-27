@@ -980,6 +980,10 @@ _enter_install_lock() {
 
 PACKAGE_VERSION="$SRC_VERSION"
 _initialize_source_runtime || exit 1
+if [[ "$ACTION" == uninstall ]]; then
+    source "$SCRIPT_DIR/uninstall-runtime.sh"
+    uninstall_state_preserving_runtime 1 validate || exit 1
+fi
 case "$ACTION:${DRY_RUN:-0}" in
     uninstall:1) ;;
     install:*|update:*|stamp:*|provision:*|uninstall:*)
@@ -1104,16 +1108,13 @@ if [[ "$ACTION" == "status" ]]; then
 fi
 
 if [[ "$ACTION" == "uninstall" ]]; then
+    source "$SCRIPT_DIR/uninstall-runtime.sh"
+    uninstall_state_preserving_runtime "$DRY_RUN" || exit 1
     if [[ "$DRY_RUN" -eq 1 ]]; then
-        echo '(dry run -- nothing will be changed)'
-        [[ -e "$STUB" ]] && echo "[dry-run] would remove binstub: $STUB"
-        [[ -d "$INSTALL_DIR" ]] && echo "[dry-run] would remove runtime/config contents (coordination retained): $INSTALL_DIR"
         echo "agent-ssh uninstall dry run complete -- nothing was changed"
         exit 0
     fi
-    rm -f "$STUB"
-    remove_install_runtime_content "$INSTALL_DIR" || exit 1
-    _ok 'agent-ssh runtime removed (transaction/staging coordination retained)'
+    _ok 'agent-ssh runtime removed (durable, unknown and coordination state retained)'
     exit 0
 fi
 

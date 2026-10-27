@@ -59,6 +59,23 @@ it directly. `install`/`update` rebuild only the light `[store,server]` service
 slot, then cut traffic over with zdd; the durable engine remains on its separate
 explicit lifecycle and is never rebuilt by a routine service update.
 
+Native legacy `uninstall` stops the registered service/engine and removes owned
+runtime generations, source snapshots, selectors and generated command helpers.
+The default nested engine's code is included; data, configuration, model/cache
+contents, unknown entries and persistent coordination remain by default.
+`--purge` / `-Purge` explicitly removes retained data while keeping the install
+transaction root and lock identity. An external `AGENT_INDEX_ENGINE_HOME`
+refuses this combined removal and requires separate authenticated teardown.
+Native publishers and legacy session stamps serialize on the same whole-action
+transaction; a busy session stamp defers without publishing. Removal holds the
+canonical custody described in the [install contract](../../docs/install-contract.md).
+These controls do not establish live-session or reconnect-transport acceptance.
+Global commands are removed only for the default legacy root and only when
+their bytes match the installed or session-stamped lifecycle-gate launcher.
+Modified commands, foreign payload bindings and commands belonging to a custom
+root remain. Nested engine launchers and generated resolver bytecode are removed;
+unknown helpers and their bytecode remain unless purge is explicitly requested.
+
 The manifest's source-inventory `additionalPythonProjects` declaration names
 `server/pyproject.toml`, so the independently packaged embedding engine cannot
 be omitted from the construction-owner census. This is inert source metadata:

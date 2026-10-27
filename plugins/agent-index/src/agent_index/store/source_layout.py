@@ -9,6 +9,7 @@ import logging
 import os
 import threading
 import uuid
+from collections.abc import Iterable
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import BinaryIO
@@ -187,6 +188,14 @@ class SourceDomain:
 
     def save(self, value: dict) -> None:
         payload = json.dumps(value, sort_keys=True)
+        logical = value.get("logical_projection")
+        if (len(payload.encode("utf-8")) > 65536 and isinstance(logical, dict)
+                and "bucket_generations" in logical):
+            value = {**value, "logical_projection": {
+                key: item for key, item in logical.items() if key != "bucket_generations"
+            }}
+            payload = json.dumps(value, sort_keys=True)
+            log.warning("Bucket generations exceed the receipt budget; retaining table coverage")
         if len(payload.encode("utf-8")) > 65536 and "logical_projection" in value:
             value = {key: item for key, item in value.items() if key != "logical_projection"}
             payload = json.dumps(value, sort_keys=True)
@@ -227,6 +236,9 @@ class SourceDomain:
             self._local.logical_effect = True
         else:
             self._local.physical_only.add(physical_only)
+        self._persist_effect(operation)
+
+    def _persist_effect(self, operation: str) -> None:
         value = self.receipt()
         kind, _, table = operation.partition(":")
         if kind in ("content-upsert", "canonical-delete", "content-compact"):
@@ -234,26 +246,59 @@ class SourceDomain:
         value.update(uncertain_effect=True, operation=operation)
         self.save(value)
 
+    def _table_identity(self, table_name: str):
+        from .logical_projection import physical_tables
+
+        return physical_tables(
+            self.path, {table_name: self._local.db.open_table(table_name).version},
+        )
+
+    @contextmanager
+    def bucket_mutation(
+        self, table_name: str, operation: str, sources: Iterable[str] | None,
+    ):
+        """Qualify only a contiguous, owner-described table transition."""
+        from .bucket_projection import MAX_BUCKETS, mutation_buckets
+
+        if not self.writing:
+            raise SourceLayoutError("bucket mutation requires participating writer ownership")
+        buckets = mutation_buckets(sources)
+        if buckets is None:
+            self.effect(operation)
+            yield
+            return
+        before = self._table_identity(table_name)
+        self._persist_effect(operation)
+        yield
+        after = self._table_identity(table_name)
+        if before is not None and before == after:
+            return
+        changes = self._local.bucket_changes.setdefault(table_name, set())
+        if changes is not None:
+            changes.update(buckets)
+            if len(changes) > MAX_BUCKETS:
+                self._local.bucket_changes[table_name] = None
+                log.warning("Transaction bucket budget exceeded; retaining whole-table invalidation")
+        if (before is not None and after is not None
+                and self._local.bucket_witness.get(table_name) == before[table_name]):
+            self._local.bucket_witness[table_name] = after[table_name]
+
     @contextmanager
     def physical_maintenance(self, table_name: str, operation: str):
         """Exempt only the witnessed transition of this maintenance operation."""
-        from .logical_projection import physical_tables
-
         if not self.writing:
             raise SourceLayoutError("maintenance requires participating writer ownership")
 
-        def snapshot():
-            return physical_tables(
-                self.path, {table_name: self._local.db.open_table(table_name).version},
-            )
-
-        before = snapshot()
+        before = self._table_identity(table_name)
         self.effect(operation, physical_only=table_name)
         yield
-        after = snapshot()
+        after = self._table_identity(table_name)
         if (before is not None and after is not None
                 and self._local.physical_witness.get(table_name) == before[table_name]):
             self._local.physical_witness[table_name] = after[table_name]
+        if (before is not None and after is not None
+                and self._local.bucket_witness.get(table_name) == before[table_name]):
+            self._local.bucket_witness[table_name] = after[table_name]
 
     def cover_fts(self, content) -> None:
         if not self.writing:
@@ -323,6 +368,8 @@ class SourceDomain:
             self._local.logical_effect = False
             self._local.physical_only = set()
             self._local.physical_witness = dict(before or {})
+            self._local.bucket_changes = {}
+            self._local.bucket_witness = dict(before or {})
             try:
                 yield
                 if self.receipt().get("fts_pending"):
@@ -334,10 +381,15 @@ class SourceDomain:
                 value.pop("operation", None)
                 after = physical_tables(self.path, value["versions"])
                 preserved = {
-                    name for name in self._local.physical_only
+                    name for name in self._local.physical_only - self._local.bucket_changes.keys()
                     if after is not None and after.get(name) == self._local.physical_witness.get(name)
                 } if not self._local.logical_effect else set()
-                commit_projection(value, before, after, physical_only=preserved)
+                scoped = {
+                    name: buckets for name, buckets in self._local.bucket_changes.items()
+                    if buckets is not None and after is not None
+                    and after.get(name) == self._local.bucket_witness.get(name)
+                } if not self._local.logical_effect else {}
+                commit_projection(value, before, after, physical_only=preserved, scoped=scoped)
                 self.save(value)
             finally:
                 self._local.depth = 0
@@ -345,6 +397,8 @@ class SourceDomain:
                 self._local.logical_effect = False
                 self._local.physical_only = set()
                 self._local.physical_witness = {}
+                self._local.bucket_changes = {}
+                self._local.bucket_witness = {}
 
 
 def domain_for(path: str | Path) -> SourceDomain | None:

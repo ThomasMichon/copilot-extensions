@@ -2332,9 +2332,20 @@ reconcile, `update`, a session-start bootstrap, and a binstub's first-use
 lock on `<install-dir>/.install.lock` for every mutating action
 (`stamp`/`install`/`update`/`provision`, plus `uninstall` where provided) across its whole
 build + publish transaction (Windows: a `FileShare.None` handle; POSIX: `flock` on
-fd 8 (fd 7 for `agent-ssh`), or a PID-bearing fallback entry
-`<install-dir>/.install.lock.pid` where `flock` is unavailable). In the matching
-agent-vault, agent-mcp, agent-containers and agent-ssh fallback blocks, every
+fd 8 (fd 7 for `agent-ssh`), or the product's fallback below).
+Machines and Containers share their persistent fd-8 transaction gate between
+publishers and legacy removal. Native `flock` and an existing Python's
+`fcntl.flock` acquire the same open file description, never an independent PID
+lock. The parent retains custody after the finite Python acquisition returns;
+closing the final inherited descriptor releases custody without replacing or
+truncating the inode. Neither capability means explicit refusal without
+provisioning. Historical `.install.lock.pid` and `.install.lock.pid.reap`
+receipts refuse unchanged until explicitly settled; their presence does not
+authorize stale-owner deletion.
+
+The PID-bearing fallback entry `<install-dir>/.install.lock.pid` remains for
+other adopters without `flock`. In the matching
+agent-vault, agent-mcp and agent-ssh fallback blocks, every
 acquisition and stale-owner cleanup holds the short, PID-bearing
 `.install.lock.pid.reap` admission mutex. The owner is read and checked while
 that mutex is held, and a confirmed stale link is removed and replaced before
@@ -2344,7 +2355,7 @@ This prevents a delayed reaper from removing a newly admitted live owner.
 A `.reap` link left by a process that died during admission is deliberately
 never reclaimed automatically, even when the main PID link is absent: runs
 fail closed at their deadline until the stale mutex is explicitly repaired.
-The four matching fallback bodies retain one identical protocol. Creation uses
+The three matching fallback bodies retain one identical protocol. Creation uses
 the POSIX `link` utility with a privately staged regular receipt, never bare
 `ln -s` at either shared lock pathname. `link` calls `link(2)` for the exact
 destination: an existing directory or directory symlink fails rather than
@@ -2429,6 +2440,89 @@ returning or propagating a timeout. Its explicit caller-held mode needs no
 runtime process-utility dependency; without a construction descriptor it does
 not establish storage-custody retention after abrupt caller death. Existing
 construction callers retain their descriptor-backed contract.
+
+The state-preserving native adapters share
+`libs/installer-engine/installer_engine_uninstall.py`, packaged through the
+existing installer-engine synchronization/materialization owner. Native callers
+retain their whole-install transaction, service STOP and registration handling.
+The helper owns a finite, payload-declared artifact plan, typed or stamped
+product ownership, read-only policy guards and canonical generation/snapshot/
+redirect custody through selective native deletion. Its `--check` performs
+structural admission only; deletion repeats ownership, inventory, guards and
+current-user process attribution under custody. A matching deploy manifest is
+removed last and retained as retry proof on cleanup failure.
+Shell-only adopters also co-package `installer_engine_process.py`: POSIX finite
+deletion uses its bounded child owner even without the Python installer facade.
+Global command selection uses the co-packaged
+`installer_engine_commands.py` and exact current native-writer templates, not
+root/module strings in comments. Modified, foreign and unrecognized programs
+remain. Cmd wrappers that delegate to PowerShell require their exact owned
+peer; independently executable MCP/Machines cmd programs are checked against
+their complete native templates. Index separately admits its exact installed
+and product-verified session-stamped lifecycle-gate forms at the default root.
+
+Native Linux daemon STOP uses the separate co-packaged
+`installer_engine_stop.py`; the finite-removal helper still never stops a
+process. Before service control, the caller captures each admitted daemon's
+PID, kernel birth ticks, UID, boot identity and command-byte digest. After
+service STOP, it opens a pidfd and verifies that original admission before
+signaling the bound process. A replacement refuses rather than acquiring a
+fresh identity; an already-gone original settles without a numeric-PID signal.
+Unknown child/transport ownership and unavailable kernel-bound signaling refuse.
+Admission records contain no plaintext command arguments. Bridge console
+entrypoints and their shebang-expanded form, and Vault's persistent foreground
+handoff arguments, use the same admission as their actual native unit writers.
+Before service control, unit admission validates the active `[Service]`
+executable/launcher and root-bound working directory together. Comments cannot
+establish ownership. Dispatch's coordinator and supervisor registrations have
+separate exact writer forms; a supervisor registration must name its own unit.
+The loaded manager's command, working directory, fragment and load/activity
+state must also agree; checking the on-disk main unit alone is insufficient.
+Drop-in overrides and unparseable effective properties refuse explicitly.
+Proven inactive, unloaded legacy registrations may be removed without issuing
+service stop/disable against an unverified loaded registration. Effective
+command values are passed through stdin and are not printed in diagnostics.
+
+CodeSpaces, SSH and Pull Requests removal select only an already available
+interpreter whose executable, prefix, base prefix and base interpreter remain
+outside the removable root. Admission-only and dry-run paths use that same
+non-provisioning selector; absence refuses without invoking `uv` or downloading
+Python. Construction's bootstrap resolver retains its separate behavior.
+Other finite native adapters use the same executable/prefix/base closure
+checks and enumerate all available PATH candidates. An activated removable
+venv, broken first executable or physical alias cannot hide a later eligible
+external interpreter. Windows legacy adapters enumerate installed launcher
+targets without asking the launcher to provision one.
+Windows finite selectors require Python 3.10+ and treat a candidate launch
+failure as rejection of that candidate, not an abort of the remaining search.
+
+CodeSpaces' native POSIX whole-action transaction can use an existing `flock`
+capability on the same persistent install inode without Python, including cold
+stamping. Its existing-Python fallback uses attached, Bash-3.2-compatible
+transport; EOF settles an owner waiting for admission as well as a holder.
+When neither capability exists, mutation refuses without provisioning.
+MSYS retains the native Windows inode owner rather than assuming a POSIX
+`flock` port is interoperable. Read-only status needs neither lock capability.
+New POSIX CodeSpaces transaction roots are created with private permissions
+under both backends, independent of a group-writable caller umask. Existing
+unsafe roots still refuse without permission changes.
+Machines/Containers legacy removal accepts only its root override; unsupported
+preview/check/force/context/profile options refuse before staging or admission.
+The private adapters also reject trailing options rather than silently dropping
+them and performing removal.
+
+Installation-cell/managed roots, mutable development claims, linked ancestry,
+unrecognized legacy venv directories, foreign ownership, conflicting leases
+and unattributed live consumers refuse explicitly. Released coordination files
+remain; their existence is not proof of a live holder. Product profiles preserve
+unknown contents, databases, configuration, authentication and transport state
+by default. A transport guard may refuse removal until its active/reconnect
+dependency closure has independent custody. Index's default nested engine is
+included in the same ownership admission, including nested cell/managed/foreign
+metadata refusal under custody; an external engine override is not silently
+enrolled. Explicit purge remains a separate, destructive native caller action.
+Finite writer timeout settlement does not qualify whole-transaction custody
+after abrupt caller death, live Copilot survival or fresh SSH reconnection.
 
 `agent-bridge` holds the same fail-closed lock for `install` and `update` (POSIX:
 `flock` on fd 8; without a `flock` binary, the same `flock(2)` lock taken through

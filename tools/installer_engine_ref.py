@@ -25,11 +25,15 @@ import uv_editable_ref as uer
 REPO = Path(__file__).resolve().parent.parent
 CANONICAL_DIR = REPO / "libs" / "installer-engine"
 FILES = ("installer-engine.ps1", "installer-engine.sh")
-SUPPORT_FILES = ("installer_dependency_policy.py", "installer_dependency_config.py")
+SUPPORT_FILES = (
+    "installer_dependency_policy.py", "installer_dependency_config.py",
+    "installer_engine_uninstall.py", "installer_engine_commands.py", "installer_engine_stop.py",
+    "installer_engine_process.py",
+)
 _NATIVE_BEGIN = "# native-executable:begin"
 _NATIVE_END = "# native-executable:end"
 PYTHON_FILES = (
-    "installer_engine.py", "installer_engine_process.py", "runtime_launcher.py",
+    "installer_engine.py", "runtime_launcher.py",
     "installer_wheel_inputs.py",
     "installer_wheel_snapshot.py",
     "installer_wheel_acquisition.py",
@@ -42,9 +46,13 @@ PYTHON_ADOPTERS = (
     "agent-codespaces", "agent-logger", "agent-bridge",
 )
 STANDALONE_PYTHON_ADOPTERS = ("worktree-manager", "libs/update-driver")
-STANDALONE_NATIVE_ADOPTERS = ("libs/update-driver", "plugins/agent-mcp")
+STANDALONE_NATIVE_ADOPTERS = (
+    "libs/update-driver", "plugins/agent-mcp", "plugins/agent-machines",
+    "plugins/agent-containers", "plugins/budget-guidance",
+)
 STANDALONE_NATIVE_FILES = (
     "installer-engine.ps1", "installer-engine.sh", "installer_engine_process.py",
+    "installer_engine_uninstall.py", "installer_engine_commands.py", "installer_engine_stop.py",
 )
 
 

@@ -14,6 +14,42 @@ container port, key, or SSH daemon is added. The CLI and binstub are owned by
 this plugin and work standalone; without agent-bridge only bridge addressing
 (`container:<name>`) is unavailable.
 
+## Legacy runtime removal
+
+Use `scripts/init.ps1 -Action uninstall -InstallDir <root>` or
+`scripts/init.sh uninstall --install-dir <root>` only for the selected legacy
+runtime. The finite removal action shares install's `.install.lock`, retains
+canonical command/generation/selector custody through removal, and removes the
+owned deploy manifest last. It never purges the root, coordination leases,
+`containers.yaml`, `leases.json`, auth/private data, logs, custom files or
+`AGENT_CONTAINERS_STATE_DIR`. Managed/cell/foreign roots, raw `..`, reparse
+ancestors, unproven runtime ownership and live processes refuse explicitly.
+An older installer-engine without the finite entry-name API refuses; there is
+no purge fallback.
+
+The adapter passes its trusted `scripts/uninstall-profile.json` to canonical
+`installer_engine_uninstall.py`; it does not own a second custody or cleanup
+orchestrator. The helper and native engine must be materialized in this payload's
+own `scripts/`; no ambient or sibling installation is searched.
+Structural `--check` grants no deletion authority. The canonical
+owner repeats ownership, inventory, live-consumer and read-only transport-guard
+checks under all custody immediately before `--remove-runtime` deletion.
+Unexpected outer-owner death is not qualified by that batch custody alone:
+noninherited .NET whole-transaction locks and PID receipts require a native
+lifetime/handle bridge. POSIX kernel-lock release is close-only, preserving any
+inherited finite guardian's open-file-description custody.
+
+SSH files alone are not a retained transport closure: Windows reconnect configs
+depend on the loopback broker's interpreter, imports and Docker children.
+Until that complete dependency closure has independent custody, any nonempty
+`ssh` directory under the addressed root or `AGENT_CONTAINERS_HOME` refuses
+uninstall before runtime removal. Preparation locks, live brokers and dormant
+reconnect configurations are all preserved without stopping a transport.
+Diagnostics distinguish a responsive broker endpoint from stale proxy records
+and unattributed reconnect artifacts. Stale artifacts are not called busy, but
+are not complete idle/dependency-closure proof either. Refusal is a safety
+negative control, never positive proof of a retained active transport closure.
+
 ## Usage path
 
 The [portable CI repair template](templates/ci-repair/README.md) ships an inert,
@@ -68,7 +104,12 @@ the gate. If its source pointer or retained gate is unavailable, it refuses
 rather than running that cell as legacy. A healthy known-legacy runtime can
 still use its co-deployed readiness resolver; cold provisioning and
 explicit-context fallback refuse.
-On POSIX systems without `flock`, stale PID-link recovery serializes reapers
+The POSIX installer's whole-action gate uses native `flock` or an existing
+Python's `fcntl.flock` on the same persistent install-lock descriptor, including
+legacy removal. Missing both refuses without provisioning. Old install PID or
+reaper receipts are retained and require explicit settlement, never automatic
+reclamation by the new gate.
+First-use provisioning's separate stale PID-link recovery serializes reapers
 and only cleans up its own mutex. An unknown/abandoned reaper mutex is not
 deleted: after 30 one-second retries the command refuses with exit 126 and an
 explicit repair diagnostic. Live provisioning owners retain their separate wait.

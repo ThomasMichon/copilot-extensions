@@ -31,19 +31,20 @@ parse_arguments() {
             --force) FORCE=1; shift ;;
             --install-dir) INSTALL_DIR="${2:?--install-dir requires a path}"; shift 2 ;;
             --profile) PROFILE="${2:?--profile requires base or provider-exec}"; shift 2 ;;
-            stamp|provision|init) ACTION="$1"; shift ;;
+            install|uninstall|stamp|provision|init) ACTION="$1"; shift ;;
             *) _fail "Unknown installer argument: $1"; exit 2 ;;
         esac
     done
 }
 # Resolve caller-relative roots before self-staging changes the working directory.
 parse_arguments "$@"
-if [[ "$ACTION" != stamp && -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}" &&
+if [[ "$ACTION" != stamp && "$ACTION" != uninstall && -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}" &&
     -z "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET+x}" ]]; then
     _fail "Prepared-source transaction requires a frozen source target; upgrade the update engine before profile construction."
     exit 1
 fi
 case "$PROFILE" in ""|base|provider-exec) ;; *) _fail "Unknown runtime profile: $PROFILE"; exit 2 ;; esac
+case "/$INSTALL_DIR/" in */../*) _fail 'Legacy runtime paths must not contain raw .. components'; exit 1 ;; esac
 case "$INSTALL_DIR" in ""|/*) ;; *) INSTALL_DIR="$PWD/$INSTALL_DIR" ;; esac
 set -- "$ACTION"
 if [[ "$FORCE" == 1 ]]; then set -- "$@" --force; fi
@@ -53,6 +54,11 @@ export AGENT_CONTAINERS_ACTION="$ACTION"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+if [[ "$ACTION" == uninstall ]]; then
+    [[ "$FORCE" == 0 && -z "$PROFILE" ]] || { _fail 'Legacy uninstall does not accept force or profile'; exit 2; }
+    exec bash "$SCRIPT_DIR/legacy-uninstall.sh" "${INSTALL_DIR:-$HOME/.agent-containers}"
+fi
 
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
@@ -445,172 +451,9 @@ STUBEOF
     _ok "Binstub: $STUB (self-provisioning)"
 }
 # === install-transaction lock (fail-closed) ===
-# Serializes every mutating action of this runtime (stamp/install/update/
-# provision): an exclusive lock on $INSTALL_DIR/.install.lock (flock on fd 8, or
-# an exact-path PID receipt fallback where flock is unavailable) held for the whole build +
-# publish transaction. A concurrent run waits up to the timeout
-# (COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC, default 300s) and then FAILS -- it
-# never proceeds unlocked. The OS drops the flock if this process dies; a dead
-# owner's receipt is reclaimed; legacy dangling PID symlinks remain readable.
-__install_lock_link=""
-__install_lock_fd=""
-
-_install_lock_timeout() {
-    local __t="${COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC:-}"
-    case "$__t" in
-        ''|*[!0-9]*) __t=300 ;;
-    esac
-    [[ "$__t" -gt 0 ]] 2>/dev/null || __t=300
-    printf '%s' "$__t"
-}
-
-_create_install_lock_owner() {
-    local __path="$1" __private __result=1
-    __private="$(mktemp -d "$INSTALL_DIR/.install-lock-create.XXXXXX")" || return 1
-    # link(1), unlike ln(1), creates exactly the named entry, never a child
-    # beneath an existing directory or directory symlink (also on BSD/macOS).
-    if printf 'copilot-extensions.install-lock-pid:v1:%s\n' "$$" > "$__private/owner" &&
-       link "$__private/owner" "$__path" 2>/dev/null; then
-        __result=0
-    fi
-    # The published link is a second, independent directory entry on the same
-    # inode: once link(1) above succeeds, admission already happened and must
-    # be reported regardless of what happens to this private staging
-    # directory next. A concurrent purge is free to reclaim unreferenced
-    # staging scratch at any time (it never follows the published link), so a
-    # best-effort cleanup failure here must never flip a successful
-    # publication back into a reported failure -- that would abandon the
-    # mutex this call just admitted, with nothing left to ever release it.
-    rm -f "$__private/owner" 2>/dev/null
-    rmdir "$__private" 2>/dev/null
-    return "$__result"
-}
-
-_read_install_lock_owner() {
-    local __path="$1" __private __record="" __owner="" __result=1
-    if [[ -L "$__path" ]]; then
-        # Legacy PID symlinks represent IDs, not references to existing filesystem nodes.
-        [[ ! -e "$__path" ]] || return 1
-        __private="$(mktemp -d "$INSTALL_DIR/.install-lock-read.XXXXXX")" || return 1
-        # Preserve target bytes before command substitution can trim newlines.
-        if readlink "$__path" > "$__private/owner" &&
-           [[ -L "$__path" && ! -e "$__path" ]] &&
-           ! IFS= LC_ALL=C read -r -d '' -n 65 __record < "$__private/owner" &&
-           [[ "$__record" == *$'\n' ]]; then
-            __owner="${__record%$'\n'}"
-            case "$__owner" in
-                *[!0-9]*|"") ;;
-                *) __result=0 ;;
-            esac
-        fi
-        rm -f "$__private/owner" || __result=1
-        rmdir "$__private" || __result=1
-        [[ "$__result" != 0 ]] || printf '%s\n' "$__owner"
-        return "$__result"
-    fi
-    [[ -f "$__path" ]] || return 1
-    __private="$(mktemp -d "$INSTALL_DIR/.install-lock-read.XXXXXX")" || return 1
-    # Capture the inode before opening it. A raced FIFO/device/link remains
-    # non-regular in this private snapshot and cannot cause a blocking open.
-    if link "$__path" "$__private/owner" 2>/dev/null &&
-       [[ -f "$__private/owner" && ! -L "$__private/owner" && ! -L "$__path" &&
-          "$__private/owner" -ef "$__path" ]]; then
-        # A NUL delimiter reports NUL instead of silently dropping it.
-        # Only EOF within the byte bound can yield a complete receipt.
-        if ! IFS= LC_ALL=C read -r -d '' -n 65 __record < "$__private/owner" &&
-           [[ "$__record" == *$'\n' ]]; then
-            __record="${__record%$'\n'}"
-            case "$__record" in
-                copilot-extensions.install-lock-pid:v1:*)
-                    __owner="${__record#copilot-extensions.install-lock-pid:v1:}"
-                    case "$__owner" in
-                        *[!0-9]*|"") ;;
-                        *) __result=0 ;;
-                    esac
-                    ;;
-            esac
-        fi
-    fi
-    rm -f "$__private/owner" || __result=1
-    rmdir "$__private" || __result=1
-    [[ "$__result" != 0 ]] || printf '%s\n' "$__owner"
-    return "$__result"
-}
-
-_exit_install_lock() {
-    if [[ -n "$__install_lock_link" ]]; then
-        local __owner
-        __owner="$(_read_install_lock_owner "$__install_lock_link" 2>/dev/null || true)"
-        [[ "$__owner" == "$$" ]] && rm -f "$__install_lock_link"
-        __install_lock_link=""
-    elif [[ -n "$__install_lock_fd" ]]; then
-        flock -u "$__install_lock_fd" 2>/dev/null || true
-        eval "exec $__install_lock_fd>&-"
-        __install_lock_fd=""
-    fi
-}
-
-_enter_install_lock() {
-    local __timeout="${1:-$(_install_lock_timeout)}"
-    mkdir -p "$INSTALL_DIR" 2>/dev/null || return 1
-    if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != "1" ]]; then
-        { exec 8>"$INSTALL_DIR/.install.lock"; } 2>/dev/null || return 1
-        if ! flock -w "$__timeout" 8; then
-            exec 8>&-
-            return 1
-        fi
-        __install_lock_fd=8
-        return 0
-    fi
-    if ! command -v link >/dev/null 2>&1 || ! command -v mktemp >/dev/null 2>&1; then
-        _fail "PID-fallback install admission requires link(1) and mktemp; refusing to proceed unlocked"
-        return 1
-    fi
-    local __link="$INSTALL_DIR/.install.lock.pid" __deadline __owner __live __acquired
-    __deadline=$(( $(date +%s) + __timeout ))
-    # Always attempt admission once before enforcing the deadline: computing
-    # the deadline and this loop's own `date +%s` are two separate calls, so a
-    # short timeout (e.g. 1s) can straddle a second boundary between them and
-    # make a pre-check-only loop condition skip even an uncontended
-    # acquisition. Checking the deadline only after the first attempt (below)
-    # removes that race.
-    while :; do
-        __live=0
-        if _create_install_lock_owner "$__link.reap"; then
-            # Admission and stale cleanup share this mutex; no acquirer may
-            # replace the owner between a reaper's read and unlink.
-            __acquired=0
-            if _create_install_lock_owner "$__link"; then
-                __acquired=1
-            else
-                __owner="$(_read_install_lock_owner "$__link" 2>/dev/null || true)"
-                case "$__owner" in
-                    *[!0-9]*|"") ;; # Missing or malformed evidence never authorizes deletion.
-                    *)
-                        if kill -0 "$__owner" 2>/dev/null; then
-                            __live=1
-                        elif [[ "$(_read_install_lock_owner "$__link" 2>/dev/null || true)" == "$__owner" ]] &&
-                             rm -f "$__link" && _create_install_lock_owner "$__link"; then
-                            __acquired=1
-                        fi
-                        ;;
-                esac
-            fi
-            if [[ "$__acquired" == 1 ]]; then
-                __install_lock_link="$__link"
-            fi
-            if ! rm -f "$__link.reap"; then
-                _exit_install_lock
-                return 1
-            fi
-            [[ "$__acquired" != 1 ]] || return 0
-        fi
-        # A dead admission-mutex owner requires explicit repair, never another reaper.
-        [[ "$(date +%s)" -lt "$__deadline" ]] || break
-        if [[ "$__live" == 1 ]]; then sleep 1; else sleep 0.1; fi
-    done
-    return 1
-}
+# Publishers and legacy removal use the same persistent fd-8 gate, whether
+# acquisition uses native flock or the existing Python fcntl implementation.
+. "$SCRIPT_DIR/legacy-transaction.sh"
 # === end install-transaction lock ===
 
 if ! _enter_install_lock; then

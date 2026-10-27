@@ -1,5 +1,18 @@
 # agent-vault
 
+Native `uninstall` removes explicitly named runtime slots, snapshots, selectors,
+generated resolvers and service launchers. Configuration, authentication,
+`run/`, `logs/`, `core/`, `cache/` and unknown files are retained by default.
+Explicit purge still retains transaction coordination, and dry runs remain
+non-mutating. Linked roots, foreign manifests, unclassified consumers and live
+child processes refuse removal. Canonical batch-removal custody remains held
+through deletion; released lease registries retain their inodes without
+preventing idle removal. See the
+[install contract](../../docs/install-contract.md).
+The cross-adapter native fixtures are in
+`tests/test_native_uninstall_adapters.py`; cleanup requires the packaged shared
+finite-removal helper and selective native engine API.
+
 `agent-vault` is a standalone, machine-local secret store for Copilot CLI agents and local automation. It uses a user-selected KeePassXC `.kdbx` database, a small local daemon that caches the KeePass master password for a bounded time, and an `agent-vault` CLI that fetches API keys, SSH keys, credentials, and small sealed values on demand.
 
 It does **not** require a repo to be registered with `agent-worktrees`, and it

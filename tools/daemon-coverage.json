@@ -304,6 +304,7 @@
       "r:plugins/agent-ssh/scripts/command_lifecycle.py::run_lifecycle::Popen": 1,
       "r:plugins/agent-vault/scripts/command_lifecycle.py::run_lifecycle::Popen": 1,
       "r:plugins/agent-worktrees/scripts/command_lifecycle.py::run_lifecycle::Popen": 1,
+      "r:plugins/budget-guidance/scripts/command_lifecycle.py::run_lifecycle::Popen": 1,
       "r:plugins/agent-worktrees/scripts/runtime_install.py::install::Popen": 1,
       "r:plugins/agent-worktrees/scripts/runtime_install_modes.py::run::Popen": 1,
       "r:worktree-manager/scripts/runtime_install.py::_activate_after_bootstrap_update::Popen": 1,

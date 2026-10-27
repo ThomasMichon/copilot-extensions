@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
+from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any
 
 from .repo_filter import _sql_str
@@ -14,6 +16,7 @@ if TYPE_CHECKING:
     from .content_store import ContentStore
 
 PAGE_SIZE = 512
+log = logging.getLogger(__name__)
 
 
 def check_content_sources(content, chunks) -> None:
@@ -24,33 +27,50 @@ def check_content_sources(content, chunks) -> None:
 
 
 def delete_canonical(content, predicate: str, *, return_ids: bool = False):
+    from .bucket_projection import MAX_BUCKETS, mutation_buckets
+
     table = content._get_or_create_table()
-    content._source_domain.effect(f"canonical-delete:{content._table_name}")
+    domain = content._source_domain
     vectors = [
         content._db.open_table(name) for name in content._db.list_tables().tables
         if "vector" in content._db.open_table(name).schema.names
     ]
     reader = (
-        table.search().where(predicate, prefilter=True).select(["chunk_id"])
+        table.search().where(predicate, prefilter=True).select(["chunk_id", "source"])
         .limit(None).to_batches(batch_size=PAGE_SIZE)
     )
     total, selected = 0, []
+    sources: set[str] | None = set()
     try:
         for batch in reader:
             ids = batch.column("chunk_id").to_pylist()
+            batch_sources = batch.column("source").to_pylist()
+            if sources is not None:
+                buckets = mutation_buckets(batch_sources)
+                if buckets is None:
+                    sources = None
+                else:
+                    sources.update(buckets)
+                    if len(sources) > MAX_BUCKETS:
+                        log.warning("Deletion bucket budget exceeded; retaining whole-table invalidation")
+                        sources = None
             total += len(ids)
             if return_ids:
                 selected.extend(ids)
             sql = ", ".join(f"'{_sql_str(cid)}'" for cid in ids)
             for vector in vectors:
-                vector.delete(f"chunk_id IN ({sql})")
+                with domain.bucket_mutation(vector.name, "vector-delete:" + vector.name, batch_sources):
+                    vector.delete(f"chunk_id IN ({sql})")
     finally:
         reader.close()
-    table.delete(predicate)
+    with domain.bucket_mutation(
+        content._table_name, f"canonical-delete:{content._table_name}", sources,
+    ):
+        table.delete(predicate)
     return selected if return_ids else total
 
 
-def sync_content_projection(db, chunks) -> None:
+def sync_content_projection(db, chunks, *, source_domain=None) -> None:
     groups = defaultdict(list)
     for chunk in chunks:
         groups[(chunk.source, chunk.language)].append(chunk.chunk_id)
@@ -70,10 +90,15 @@ def sync_content_projection(db, chunks) -> None:
                 )
                 if not table.search().where(changed).select(["chunk_id"]).limit(1).to_list():
                     continue
-                table.update(
-                    where=changed,
-                    values={"source": source, "language": language},
+                mutation = (
+                    source_domain.bucket_mutation(name, "vector-provenance:" + name, [source])
+                    if source_domain is not None else nullcontext()
                 )
+                with mutation:
+                    table.update(
+                        where=changed,
+                        values={"source": source, "language": language},
+                    )
 
 
 def projection_records(

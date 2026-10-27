@@ -3,15 +3,17 @@ from __future__ import annotations
 
 from contextlib import ExitStack, contextmanager
 import errno
+import hashlib
 import importlib.util
 import os
 from pathlib import Path
 import secrets
 import stat
 import sys
+import time
 from typing import Any, Iterator
 
-from stamp_repair import repairable, tighten_directories
+from stamp_repair import destinations, repairable, tighten_directories
 
 _publication = None
 
@@ -466,3 +468,54 @@ def lock(fd: int) -> bool:
                 return False
             raise
     return True
+
+
+@contextmanager
+def install_transaction(root: Path, *, timeout: float = 20.0) -> Iterator[None]:
+    """Share the native installers' whole-transaction admission with session stamping."""
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.CreateMutexW.argtypes = (wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR)
+        kernel.CreateMutexW.restype = wintypes.HANDLE
+        kernel.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+        kernel.WaitForSingleObject.restype = wintypes.DWORD
+        kernel.ReleaseMutex.argtypes = (wintypes.HANDLE,)
+        kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+        identity = os.path.abspath(root).rstrip("/\\").lower()
+        digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24].upper()
+        name = f"Global\\CopilotExtensions.AgentIndex.Stamp.{digest}.Transaction"
+        handle = kernel.CreateMutexW(None, False, name)
+        if not handle and ctypes.get_last_error() == 5:
+            print("[agent-index] Global transaction mutex denied; using Local admission", file=sys.stderr)
+            handle = kernel.CreateMutexW(None, False, name.replace("Global\\", "Local\\", 1))
+        if not handle:
+            raise ctypes.WinError(ctypes.get_last_error())
+        held = False
+        try:
+            outcome = kernel.WaitForSingleObject(handle, int(timeout * 1000))
+            if outcome == 0x102:
+                raise TimeoutError("agent-index install transaction is busy")
+            if outcome not in (0, 0x80):
+                raise ctypes.WinError(ctypes.get_last_error())
+            held = True
+            yield
+        finally:
+            if held:
+                kernel.ReleaseMutex(handle)
+            kernel.CloseHandle(handle)
+        return
+    with Directory(root, repair_paths=destinations(root)) as directory:
+        fd = directory.open(".install.lock", create=True)
+        try:
+            deadline = time.monotonic() + timeout
+            while not lock(fd):
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("agent-index install transaction is busy")
+                time.sleep(0.05)
+            directory.verify()
+            yield
+        finally:
+            os.close(fd)

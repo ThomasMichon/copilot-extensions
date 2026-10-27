@@ -1,5 +1,19 @@
 # Native governance admission must work before any Python has been installed.
 $ErrorActionPreference = 'Stop'
+function Get-PayloadSourceHash {
+    param([Parameter(Mandatory)][string]$Path)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [IO.File]::OpenRead($Path)
+        try {
+            return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '')
+        } finally {
+            $stream.Dispose()
+        }
+    } finally {
+        $sha.Dispose()
+    }
+}
 $payload = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $legacy = Join-Path $env:USERPROFILE '.agent-pull-requests'
 $stageRoot = Join-Path $legacy '.install-stage'
@@ -52,8 +66,8 @@ if ((Split-Path -Parent $stage) -eq $stageRoot) {
             break
         }
         if (-not $entry.PSIsContainer -and
-            (Get-FileHash -LiteralPath $entry.FullName -Algorithm SHA256).Hash -cne
-            (Get-FileHash -LiteralPath $original.FullName -Algorithm SHA256).Hash) {
+            (Get-PayloadSourceHash -Path $entry.FullName) -cne
+            (Get-PayloadSourceHash -Path $original.FullName)) {
             $completeCopy = $false
             break
         }
@@ -79,8 +93,8 @@ if ((Split-Path -Parent $stage) -eq $stageRoot) {
             $relative = $original.FullName.Substring($origin.Length + 1)
             $copy = Get-Item -LiteralPath (Join-Path $payload $relative) -Force -ErrorAction SilentlyContinue
             if (-not $copy -or $copy.PSIsContainer -or
-                (Get-FileHash -LiteralPath $copy.FullName -Algorithm SHA256).Hash -cne
-                (Get-FileHash -LiteralPath $original.FullName -Algorithm SHA256).Hash) {
+                (Get-PayloadSourceHash -Path $copy.FullName) -cne
+                (Get-PayloadSourceHash -Path $original.FullName)) {
                 throw 'Staged installer payload differs from its origin'
             }
         }

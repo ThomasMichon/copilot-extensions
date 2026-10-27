@@ -1,5 +1,19 @@
 # Agent Bridge
 
+Native `uninstall` removes explicitly named runtime slots, snapshots, selectors,
+generated resolver files and deployment metadata, rather than treating the
+installation root as disposable. Configuration, databases, authentication,
+sessions, logs, route/PID receipts and unknown files are retained by default.
+`--purge` / `-Purge` remains explicit and retains transaction coordination.
+Dry runs do not stop processes or remove files. Unattributed processes,
+foreign manifests, linked roots and live child transports refuse removal.
+The adapters use the shared finite-removal owner described in the
+[install contract](../../docs/install-contract.md). Released runtime lease
+registries remain in place; held construction, retention or publication
+custody refuses removal.
+This is not acceptance evidence for uninstall/reinstall around a running session
+or reconnecting SSH transport.
+
 The optional local `account-relay.json` policy enables a separate **account-only**
 listener under this daemon's existing lifecycle. See the
 [source/worker contract](../agent-index/docs/account-relay.md). Do not

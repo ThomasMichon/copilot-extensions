@@ -1,5 +1,18 @@
 # agent-dispatch
 
+Native `uninstall` removes named runtime slots, snapshots, selectors, generated
+helpers and service launchers while retaining task databases, supervisor
+profiles, environment configuration, endpoint receipts, logs and unknown files.
+`--purge` / `-Purge` remains explicit and retains transaction coordination;
+dry runs are non-mutating. Foreign manifests, linked roots and unclassified
+runtime consumers refuse removal. Windows daemon attribution requires both
+the installation executable path and the expected module/subcommand.
+Canonical batch-removal custody covers runtime generations, snapshots and
+redirect publication through finite cleanup; released lease files remain
+without being mistaken for contention. See the
+[install contract](../../docs/install-contract.md). Native adapter fixtures do
+not establish whole-suite removal around a live session or retained transport.
+
 A **portable agent task-queue + per-host coordinator**. It lets multiple
 Copilot CLI agents (worktree sessions, bridged sub-agents, scheduled/reactive
 producers) coordinate work through a single, low-latency authority -- instead of
