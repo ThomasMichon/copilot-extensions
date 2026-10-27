@@ -838,7 +838,7 @@ fi
 # ── Detect REPO_DIR from project config, then CWD ───────────────────────
 
 REPO_DIR=""
-if $HAS_PROJECT; then
+if $HAS_PROJECT && [[ "$ACTION" != uninstall ]]; then
     _config_file="$HOME/.$PROJECT_NAME/config.yaml"
     if [[ -f "$_config_file" ]]; then
         # `|| true`: under `set -euo pipefail` a no-match grep exits 1 and
@@ -849,7 +849,7 @@ if $HAS_PROJECT; then
         fi
     fi
 fi
-if [[ -z "$REPO_DIR" ]]; then
+if [[ "$ACTION" != uninstall && -z "$REPO_DIR" ]]; then
     _git_root="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
     if [[ -n "$_git_root" ]]; then
         REPO_DIR="$_git_root"
@@ -933,7 +933,7 @@ VENV_BIN="$VENV_DIR/bin/agent-worktrees"
 # Layered project config deliberately omits machine paths. During marketplace
 # update the cwd is the installed payload, so resolve the adopted repo's anchor
 # from the canonical global repo registry through the previous-good runtime.
-if $HAS_PROJECT && [[ -z "$REPO_DIR" && -x "$LINK_PYTHON" ]]; then
+if $HAS_PROJECT && [[ "$ACTION" != uninstall && -z "$REPO_DIR" && -x "$LINK_PYTHON" ]]; then
     _registry_anchor="$(PYTHONPATH= "$LINK_PYTHON" -c '
 import sys
 from agent_worktrees.repos import find_repo

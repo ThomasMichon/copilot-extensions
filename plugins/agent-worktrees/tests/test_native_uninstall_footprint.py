@@ -560,6 +560,30 @@ def test_native_default_uninstall_removes_writer_footprint(native_install, shell
     _assert_default_uninstall(native_install, shell)
 
 
+def test_native_bash_uninstall_does_not_discover_an_unused_repository(native_install):
+    home, payload, root, owned, durable = native_install
+    executable = _host("bash")
+    binaries = home / "git-probe"
+    binaries.mkdir()
+    witness = home / "unexpected-git-call"
+    git = binaries / "git"
+    git.write_text(
+        '#!/bin/bash\nprintf invoked > "$HOME/unexpected-git-call"\nexit 97\n',
+        encoding="utf-8",
+    )
+    git.chmod(0o700)
+    before = _snapshot(root)
+    result = _run(
+        _native_arguments("bash", executable, payload, root), home,
+        env={"PATH": os.pathsep.join((str(binaries), os.environ["PATH"]))},
+    )
+    _skip_unrelated_module_consumer(result, before, durable)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not witness.exists()
+    assert all(not path.exists() for path in owned)
+    _preserved(durable)
+
+
 @pytest.mark.parametrize("native_install", ["home's quoted space"], indirect=True)
 @pytest.mark.parametrize("shell", ["bash", "powershell", "pwsh"])
 def test_native_default_uninstall_accepts_quoted_space_paths(native_install, shell):
