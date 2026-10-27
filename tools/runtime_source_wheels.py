@@ -13,6 +13,7 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import stat
 import time
 
 from packaging.requirements import Requirement
@@ -21,10 +22,14 @@ from packaging.version import Version
 
 from artifact_source_build import PromotionArtifactError, validate_runtime_metadata
 from build_python_artifacts import build_wheel
-from build_toolchain_lock import ToolchainLock, _query_marker_environment
+from build_toolchain_lock import (
+    ToolchainLock, _query_marker_environment,
+    sanitize_subprocess_env, strip_package_source_env_vars,
+)
 from runtime_profile import SCHEMA, ProfileError, RuntimeProfile, _wheel_filename, validate_profile
 from runtime_profile_wheels import profile_wheel_inputs
 from runtime_source_lock import SourceLockCandidate
+from runtime_source_wheel_cache import cached_source_wheel
 from installer_engine import _package_roots, _source_files, freeze_inputs, numbered_candidate, runtime
 from installer_dependency_policy import _private_retained_root, _select_uv_executable, _temporary_inputs, _toml
 from installer_wheel_inputs import WheelLimits, _check_deadline, _ordinary, inspect_archive
@@ -86,6 +91,51 @@ def _digest(path: Path, limit: int, deadline: float) -> str:
     return digest
 
 
+def _build_environment_identity(opaque_identity) -> str:
+    environment = sanitize_subprocess_env()
+    strip_package_source_env_vars(environment, strip_credentials=True)
+    return opaque_identity(json.dumps(
+        environment, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+    ))
+
+
+def _build_cache_binding(record, build_record, toolchain, uv, *, deadline, opaque_identity):
+    """Only the admitted offline lane has exact backend archive identities."""
+    tools = Path(__file__).parent
+    files = [
+        Path(uv).resolve(strict=True), toolchain.venv_python.resolve(strict=True),
+        *(tools / name for name in (
+            "runtime_source_wheels.py", "build_python_artifacts.py",
+            "build_toolchain_lock.py", "artifact_source_build.py",
+        )),
+    ]
+    return {
+        "schema": "copilot-extensions.source-wheel-construction", "version": 1,
+        # Retention remaps local paths into a fresh private workspace. Its raw
+        # hash is custody evidence, not a stable identity across transactions.
+        "source_sha256": record["source"]["assembly_hash"],
+        "source_tree": record["source"]["source_tree"],
+        "target": record["target"], "extras": record["extras"],
+        "build_wheels": sorted(
+            ({key: item[key] for key in ("name", "version", "filename", "sha256")}
+             for item in build_record["wheels"]),
+            key=lambda item: item["name"],
+        ),
+        "executors": [_digest(path, 256 << 20, deadline) for path in files],
+        "environment": _build_environment_identity(opaque_identity),
+    }
+
+
+def _validate_local_metadata(facts, declaration, toolchain, *, admitted_build):
+    generators = facts.wheel_metadata.get_all("Generator", [])
+    if len(generators) != 1 or (not admitted_build and generators != [toolchain.generator]):
+        raise ProfileError("built first-party wheel differs from its selected toolchain")
+    try:
+        validate_runtime_metadata(declaration, facts.metadata)
+    except PromotionArtifactError as error:
+        raise ProfileError("built first-party wheel differs from retained source: " + str(error)) from error
+
+
 def _extras(wheels: dict[str, dict], roots: list[str], environment: dict, deadline: float) -> dict:
     wanted: dict[str, set[str]] = {}
     pending = [(Requirement(text), {""}) for text in roots]
@@ -119,6 +169,7 @@ def retain_source_profile(
     build_profile: RuntimeProfile | None = None, offline: bool = False,
     procutil=None, construction_fd: int | None = None,
     retained_runtime: tuple[Path, str, Path] | None = None,
+    opaque_identity=None,
 ):
     """Build and freeze the exact complete source closure before construction.
 
@@ -196,6 +247,14 @@ def retain_source_profile(
         for item in build_record["wheels"]
     ):
         raise ProfileError("build-only closure differs from the retained source selection")
+    if build_record is not None and not callable(opaque_identity):
+        raise ProfileError("source wheel caching requires the installation owner's opaque identity provider")
+    cache_binding = (
+        _build_cache_binding(
+            record, build_record, toolchain, uv, deadline=deadline, opaque_identity=opaque_identity,
+        )
+        if build_record is not None else None
+    )
     with _temporary_inputs(None) as temporary:
         workspace = _private_retained_root(Path(temporary)).resolve(strict=True)
         output = workspace / "built"
@@ -206,21 +265,61 @@ def retain_source_profile(
             selected_projects = _selected_projects(
                 frozen.packages, root, record["extras"], record["target"]["environment"], deadline,
             )
+        frozen_modes = (
+            tuple((path, stat.S_IMODE(path.stat().st_mode)) for path in _source_files(frozen.packages))
+            if frozen is not None else ()
+        )
+
+        def verify_compact_source():
+            if frozen is not None:
+                files = _source_files(frozen.packages)
+                modes = tuple((path, stat.S_IMODE(path.stat().st_mode)) for path in files)
+                if before != runtime.fingerprint_source(files) or modes != frozen_modes:
+                    raise ProfileError("compact source changed before wheel cache publication")
+
         local_projects = {}
         for project_path in selected_projects:
             candidate.verify(deadline=deadline)
-            if frozen is not None and before != runtime.fingerprint_source(_source_files(frozen.packages)):
-                raise ProfileError("compact source changed before backend execution")
-            wheel = build_wheel(
-                project_path, output, toolchain=toolchain, reserved_names=set(archives),
-                uv=uv, deadline=deadline,
-                **({
-                    "offline": True, "procutil": procutil,
-                    "construction_fd": construction_fd, "retained_runtime": retained_runtime,
-                } if offline else {}),
-            )
-            name, version, _, _ = _wheel_filename(wheel.name, limits.max_tags, deadline)
+            verify_compact_source()
             declaration = _toml(project_path / "pyproject.toml")["project"]
+
+            def build(destination):
+                return build_wheel(
+                    project_path, destination, toolchain=toolchain, reserved_names=set(archives),
+                    uv=uv, deadline=deadline,
+                    **({
+                        "offline": True, "procutil": procutil,
+                        "construction_fd": construction_fd, "retained_runtime": retained_runtime,
+                    } if offline else {}),
+                )
+
+            def validate(wheel):
+                with _open(wheel) as stream:
+                    facts = inspect_archive(
+                        stream, limits=limits, deadline=deadline,
+                        record_algorithms=frozenset({"sha256"}),
+                    )
+                _validate_local_metadata(facts, declaration, toolchain, admitted_build=True)
+                name, version, _, _ = _wheel_filename(wheel.name, limits.max_tags, deadline)
+                if name != canonicalize_name(declaration["name"]) or version != Version(declaration["version"]):
+                    raise ProfileError("built first-party wheel filename differs from retained source")
+                if _build_environment_identity(opaque_identity) != cache_binding["environment"]:
+                    raise ProfileError("source build environment changed during construction")
+                verify_compact_source()
+                candidate.verify(deadline=deadline)
+
+            if cache_binding is None:
+                wheel = build(output)
+            else:
+                binding = json.dumps({
+                    **cache_binding, "project": canonicalize_name(declaration["name"]),
+                }, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("ascii")
+                wheel = cached_source_wheel(
+                    Path(record["policy"]["owner"]["runtimeRoot"]), binding, output,
+                    build=build, validate=validate,
+                    max_archive_bytes=limits.max_archive_bytes, deadline=deadline,
+                )
+            name, version, _, _ = _wheel_filename(wheel.name, limits.max_tags, deadline)
             if (
                 name != canonicalize_name(declaration["name"])
                 or version != Version(declaration["version"])
@@ -232,8 +331,7 @@ def retain_source_profile(
             expected[wheel.name] = _digest(wheel, limits.max_archive_bytes, deadline)
         if before != runtime.fingerprint_source(_source_files(projects)):
             raise ProfileError("source changed while building the exact wheel closure")
-        if frozen is not None and before != runtime.fingerprint_source(_source_files(frozen.packages)):
-            raise ProfileError("compact source changed while building the exact wheel closure")
+        verify_compact_source()
         observed_toolchain = toolchain.record if build_record is None else {
             "packages": toolchain.packages, "admitted_profile": build_profile.record(),
         }
@@ -262,15 +360,9 @@ def retain_source_profile(
                 if name in wheels:
                     raise ProfileError("source closure has duplicate distribution identities")
                 if name in local_projects:
-                    generators = facts.wheel_metadata.get_all("Generator", [])
-                    if len(generators) != 1 or (
-                        build_record is None and generators != [toolchain.generator]
-                    ):
-                        raise ProfileError("built first-party wheel differs from its selected toolchain")
-                    try:
-                        validate_runtime_metadata(local_projects[name], facts.metadata)
-                    except PromotionArtifactError as error:
-                        raise ProfileError("built first-party wheel differs from retained source: " + str(error)) from error
+                    _validate_local_metadata(
+                        facts, local_projects[name], toolchain, admitted_build=build_record is not None,
+                    )
                 wheels[name] = {
                     "name": name, "version": facts.version, "filename": filename,
                     "sha256": snapshot.digests[filename], "requires_python": facts.requires_python,

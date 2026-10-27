@@ -17,7 +17,7 @@ HOOKS = (
     "deregister-session.ps1", "deregister-session.sh", "anchor-hygiene-check.ps1",
     "anchor-hygiene-check.sh", "provision-check.ps1", "provision-check.sh", "statelessness_guard.py",
     "cross_repo_guard.py", "anchor_shell_parser.py", "anchor_write_guard.py", "pr_supersede_guard.py",
-    "registry_root.py", "nudge_status.py", "bind_nudge.py", "hook_runtime.py", "hook_pre_relevance.py",
+    "registry_root.py", "nudge_status.py", "bind_nudge.py", "hook_runtime.py", "hook_process_identity.py", "hook_pre_relevance.py",
     "hook_lifecycle_runtime.py", "native_source_context.py", "pretool_killswitch.py", "hook_client.py",
     "post-tool-hook.ps1", "terminal_probe.py", "bind-nudge.sh", "bind-nudge.ps1",
 )

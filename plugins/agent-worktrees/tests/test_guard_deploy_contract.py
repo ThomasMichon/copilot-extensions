@@ -75,6 +75,7 @@ def test_all_installers_deploy_every_py_hook():
         "nudge_status.py",
         "bind_nudge.py",
         "hook_runtime.py",
+        "hook_process_identity.py",
         "hook_pre_relevance.py",
         "hook_lifecycle_runtime.py",
         "native_source_context.py",

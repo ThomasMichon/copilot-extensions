@@ -168,6 +168,37 @@ evidence is no longer needed.
 
 ## Journal
 
+### 2026-10-27 - Corrected review-discovered cache invalidation gaps
+
+The first review identified permission-only source changes and publication
+before the compact backend source was rechecked. The binding now includes the
+authenticated Git tree, and fresh cache publication checks compact source
+content and modes before publishing. Actual backend-mutation/retry and POSIX
+mode-only wheel-permission controls were added. The updated targeted Windows
+packet passed19 controls, with its two POSIX-only cases skipped; updated
+cross-platform qualification and review remain required.
+
+### 2026-10-27 - Implemented the exact-input composition slice locally
+
+The ordinary retained UV preflight supplies configuration and source custody,
+not an exact resolved backend artifact lock. The existing repository-only
+source-runtime composer already supplies inspected, hashed build-tool wheels
+and offline owned backend execution. This slice adds content-bound local wheel
+reuse there without editing #8949's canonical helpers or enabling a new normal
+consumer.
+
+The first contained native Windows control built two local projects, reused both
+without another backend build across a fresh retention transaction, and rebuilt
+after a module-only source edit. Actual wheel contents contained the edit.
+Input identity uses authenticated source assembly content rather than
+temporary-path-dependent retained bytes. The whole source graph is currently
+one conservative invalidation unit; unchanged libraries in a changed graph do
+not yet get independent hits. The contained native Windows cache/source-build/
+source-wheel packet passed 61 controls; its POSIX-only FIFO control was skipped.
+Touched Python lint and the 13-plugin installation-contract check passed.
+Cross-platform qualification remains in progress. This is not completion,
+ordinary installer adoption, a production speed measurement or rollout.
+
 ### 2026-10-27 - Proposal accepted; implementation boundary remains explicit
 
 #9291 merged after current-head approval and required checks; the source

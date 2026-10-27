@@ -31,6 +31,7 @@ from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 from packaging.version import Version
 from runtime_wheel_inspection import inspect_wheel
+import runtime_feed_configuration
 from runtime_feed_configuration import retain_source_feed_inputs
 from runtime_profile import (
     SCHEMA,
@@ -251,6 +252,7 @@ def retain_source_runtime_inputs(
                     deadline=deadline, offline=True, procutil=procutil,
                     construction_fd=tools.descriptor,
                     retained_runtime=(build_root, build_version, Path(engine.runtime.__file__)),
+                    opaque_identity=runtime_feed_configuration._opaque_index_identity,
                 ) as completed:
                     def verify_runtime():
                         verify_build()
