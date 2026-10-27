@@ -59,6 +59,29 @@ class _Member(NamedTuple):
 class _CensusChanged(ValueError):
     """Discard every row from this pass and obtain a fresh complete census."""
 
+    def __init__(self, reason: str, *, pid: int = 0, flavor: int = 0,
+                 phase: str, native_errno: int = 0, observed_pgid: int = 0) -> None:
+        self.reason = reason
+        self.pid = pid
+        self.flavor = flavor
+        self.phase = phase
+        self.native_errno = native_errno
+        self.observed_pgid = observed_pgid
+        super().__init__(
+            f"{reason} pid={pid} flavor={flavor} phase={phase} "
+            f"errno={native_errno} observed_pgid={observed_pgid}"
+        )
+
+
+class GroupObservationChanged(ValueError):
+    """Known census churn exhausted one bounded observation, not an empty group."""
+
+    def __init__(self, last: _CensusChanged) -> None:
+        self.last = last
+        self.pid, self.flavor, self.phase = last.pid, last.flavor, last.phase
+        self.native_errno = last.native_errno
+        super().__init__(f"Darwin process-group observation: group churn exceeded; last={last}")
+
 
 def _invalid(cause: str) -> ValueError:
     return ValueError(f"Darwin process-group observation: {cause}")
@@ -120,7 +143,8 @@ class _Native:
         if size == 0:
             error = ctypes.get_errno()
             if error == errno.ESRCH:
-                raise _CensusChanged("Darwin group member disappeared")
+                raise _CensusChanged("member disappeared", pid=pid, flavor=flavor,
+                                     phase="pidinfo", native_errno=error)
             raise OSError(error or errno.EIO, "Darwin group member inspection failed")
         if size != ctypes.sizeof(data):
             raise _invalid("partial member inspection")
@@ -138,8 +162,12 @@ class _Native:
         after = self._unique(pid)
         if data.pid != pid or data.status not in (1, 2, 3, 4, 5, 6, 7):
             raise _invalid("invalid member identity")
-        if before != after or data.pgid != pgid:
-            raise _CensusChanged("Darwin group member changed")
+        if before != after:
+            raise _CensusChanged("member incarnation changed", pid=pid, flavor=17,
+                                 phase="member-incarnation")
+        if data.pgid != pgid:
+            raise _CensusChanged("member group changed", pid=pid, flavor=13,
+                                 phase="group-membership", observed_pgid=data.pgid)
         return _Member(pid, data.pgid, data.status, before)
 
     def rss(self, pid: int) -> int:
@@ -155,6 +183,7 @@ def group_usage(pgid: int, *, live_only: bool = False) -> tuple[int, int]:
     if type(pgid) is not int or not 1 <= pgid <= 0x7fffffff:
         raise _invalid("invalid process-group identifier")
     native = _Native()
+    last_change: _CensusChanged | None = None
     for _ in range(MAX_PASSES):
         try:
             pids = native.inventory(pgid)
@@ -164,7 +193,8 @@ def group_usage(pgid: int, *, live_only: bool = False) -> tuple[int, int]:
                 rss = native.rss(pid) if before.status != 5 else 0
                 after = native.member(pid, pgid)
                 if before.incarnation != after.incarnation:
-                    raise _CensusChanged("Darwin group member incarnation changed")
+                    raise _CensusChanged("member incarnation changed around RSS", pid=pid,
+                                         flavor=4, phase="rss-incarnation")
                 if before.status == 5 and after.status != 5:
                     raise _invalid("terminal member became live")
                 if after.status != 5:
@@ -172,9 +202,13 @@ def group_usage(pgid: int, *, live_only: bool = False) -> tuple[int, int]:
                     resident += rss
                 elif not live_only:
                     count += 1
-            if native.inventory(pgid) != pids:
-                raise _CensusChanged("Darwin group inventory changed")
+            final_pids = native.inventory(pgid)
+            if final_pids != pids:
+                raise _CensusChanged("group inventory changed",
+                                     pid=min(final_pids ^ pids), phase="inventory-after")
             return count, resident
-        except _CensusChanged:
+        except _CensusChanged as change:
+            last_change = change
             continue
-    raise _invalid("group churn exceeded")
+    assert last_change is not None
+    raise GroupObservationChanged(last_change) from last_change

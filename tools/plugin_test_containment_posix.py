@@ -4,6 +4,11 @@ from __future__ import annotations
 import shutil
 import subprocess
 
+if __package__:
+    from .plugin_test_containment_darwin import GroupObservationChanged as GroupObservationChanged
+else:
+    from plugin_test_containment_darwin import GroupObservationChanged as GroupObservationChanged
+
 
 def _ps_group_usage(pgid: int, *, live_only: bool = False) -> tuple[int, int] | None:
     ps = shutil.which("ps")

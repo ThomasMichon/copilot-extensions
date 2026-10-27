@@ -23,10 +23,14 @@ from typing import Any, Mapping, Sequence, TypeVar
 
 if __package__:
     from .native_test_paths import native_test_path
-    from .plugin_test_containment_posix import _darwin_group_usage, _ps_group_usage
+    from .plugin_test_containment_posix import (
+        GroupObservationChanged, _darwin_group_usage, _ps_group_usage,
+    )
 else:
     from native_test_paths import native_test_path
-    from plugin_test_containment_posix import _darwin_group_usage, _ps_group_usage
+    from plugin_test_containment_posix import (
+        GroupObservationChanged, _darwin_group_usage, _ps_group_usage,
+    )
 
 # Repository runners consume the canonical source without a plugin installation.
 _previous_path = sys.path.copy()
@@ -439,6 +443,17 @@ def _terminate_posix_group(pgid: int, identity: tuple[int, int]) -> None:
         while True:
             try:
                 usage = _posix_live_group_usage(pgid)
+            except GroupObservationChanged as exc:
+                if sys.platform != "darwin":
+                    raise UnreapedProcessError("Cannot verify POSIX process-group termination") from exc
+                if time.monotonic() >= deadline:
+                    if remaining:
+                        return False
+                    raise UnreapedProcessError(
+                        "Darwin process-group termination remained unknown after observation churn"
+                    ) from exc
+                time.sleep(0.05)
+                continue
             except (OSError, ValueError, IndexError, subprocess.TimeoutExpired) as exc:
                 raise UnreapedProcessError(
                     "Cannot verify POSIX process-group termination"

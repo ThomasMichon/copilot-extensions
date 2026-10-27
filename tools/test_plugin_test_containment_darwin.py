@@ -232,9 +232,14 @@ def test_unconfirmed_disappearance_exhausts_bounded_passes(kernel):
         ctypes.set_errno(errno.ESRCH)
         return 0
     kernel.hook = gone
-    with pytest.raises(ValueError, match="churn exceeded"):
+    with pytest.raises(darwin.GroupObservationChanged, match="churn exceeded") as caught:
         darwin.group_usage(PGID)
     assert len(kernel.inventory_calls) == darwin.MAX_PASSES
+    error = caught.value
+    assert (error.pid, error.flavor, error.phase) == (41, 17, "pidinfo")
+    assert error.native_errno == errno.ESRCH
+    assert error.last.reason == "member disappeared"
+    assert error.__cause__ is error.last
 
 
 @pytest.mark.parametrize("flavor", [13, 17, 4])
@@ -282,15 +287,35 @@ def test_group_change_during_rss_forces_fresh_census(kernel):
         if flavor == 4:
             kernel.groups[pid] = PGID + 1
     kernel.hook = moved
-    with pytest.raises(ValueError, match="churn exceeded"):
+    with pytest.raises(darwin.GroupObservationChanged, match="churn exceeded") as caught:
         darwin.group_usage(PGID)
+    assert caught.value.pid == 41
+    assert caught.value.flavor == 13
+    assert caught.value.phase == "group-membership"
+    assert caught.value.last.observed_pgid == PGID + 1
 
 
 def test_inventory_churn_is_bounded(kernel):
     kernel.snapshots = [[41], [42]] * darwin.MAX_PASSES
-    with pytest.raises(ValueError, match="churn exceeded"):
+    with pytest.raises(darwin.GroupObservationChanged, match="churn exceeded") as caught:
         darwin.group_usage(PGID)
     assert len(kernel.inventory_calls) == 2 * darwin.MAX_PASSES
+    assert (caught.value.pid, caught.value.phase) == (41, "inventory-after")
+
+
+def test_exhaustion_preserves_last_change_not_first_symptom(kernel):
+    def changes(pid, flavor, call, data):
+        if flavor == 17 and call == 1:
+            kernel.groups[pid] = PGID + 1
+            ctypes.set_errno(errno.ESRCH)
+            return 0
+    kernel.hook = changes
+    with pytest.raises(darwin.GroupObservationChanged) as caught:
+        darwin.group_usage(PGID)
+    assert caught.value.last.reason == "member group changed"
+    assert caught.value.flavor == 13
+    assert caught.value.phase == "group-membership"
+    assert "observed_pgid=7001" in str(caught.value)
 
 
 def test_transient_inventory_churn_discards_prior_rows(kernel):
@@ -363,6 +388,140 @@ def test_other_posix_dispatch_is_unchanged(monkeypatch, platform, live_only):
     observe = containment._posix_live_group_usage if live_only else containment._posix_group_usage
     assert observe(PGID) == (2, 12345)
     assert calls == [("linux", PGID, live_only), ("ps", PGID, live_only)]
+
+
+def _known_churn():
+    return darwin.GroupObservationChanged(darwin._CensusChanged(
+        "member disappeared", pid=41, flavor=17, phase="pidinfo", native_errno=errno.ESRCH,
+    ))
+
+
+@pytest.fixture
+def cleanup_clock(monkeypatch):
+    events = []
+    tick = [0]
+    monkeypatch.setattr(containment, "sys", SimpleNamespace(platform="darwin"))
+    monkeypatch.setattr(containment.signal, "SIGKILL", 9, raising=False)
+    monkeypatch.setattr(containment.os, "killpg",
+                        lambda pid, sig: events.append(("signal", sig)), raising=False)
+    def identity(pid):
+        events.append(("identity", pid))
+        return pid, pid
+    monkeypatch.setattr(containment, "_posix_group_identity", identity)
+    monkeypatch.setattr(containment.time, "monotonic", lambda: tick[0] * 0.05)
+    def sleep(seconds):
+        assert seconds == 0.05
+        tick[0] += 1
+        events.append(("sleep", seconds))
+    monkeypatch.setattr(containment.time, "sleep", sleep)
+    return SimpleNamespace(events=events, tick=tick)
+
+
+def test_cleanup_typed_churn_then_complete_empty_is_verified(cleanup_clock, monkeypatch):
+    rows = iter([(1, 0), _known_churn(), _known_churn(), (0, 0)])
+    def observe(pid):
+        row = next(rows)
+        if isinstance(row, Exception):
+            raise row
+        return row
+    monkeypatch.setattr(containment, "_posix_live_group_usage", observe)
+    containment._terminate_posix_group(PGID, (PGID, PGID))
+    assert cleanup_clock.events == [
+        ("identity", PGID), ("signal", containment.signal.SIGTERM),
+        ("identity", PGID), ("signal", 9), ("sleep", 0.05), ("sleep", 0.05),
+    ]
+
+
+def test_cleanup_persistent_churn_deadline_is_unknown_not_live_or_success(cleanup_clock, monkeypatch):
+    churn = _known_churn()
+    calls = [0]
+    def observe(pid):
+        calls[0] += 1
+        if calls[0] == 1:
+            return 1, 0
+        raise churn
+    monkeypatch.setattr(containment, "_posix_live_group_usage", observe)
+    with pytest.raises(containment.UnreapedProcessError, match="remained unknown") as caught:
+        containment._terminate_posix_group(PGID, (PGID, PGID))
+    assert caught.value.__cause__ is churn
+    assert churn.last.reason == "member disappeared"
+    assert cleanup_clock.tick[0] == 40
+    assert [event for event in cleanup_clock.events if event[0] == "signal"] == [
+        ("signal", containment.signal.SIGTERM), ("signal", 9),
+    ]
+
+
+def test_term_churn_deadline_still_verifies_identity_before_kill(cleanup_clock, monkeypatch):
+    def observe(pid):
+        if ("signal", 9) not in cleanup_clock.events:
+            raise _known_churn()
+        return 0, 0
+    monkeypatch.setattr(containment, "_posix_live_group_usage", observe)
+    containment._terminate_posix_group(PGID, (PGID, PGID))
+    assert cleanup_clock.tick[0] == 40
+    assert cleanup_clock.events[-2:] == [("identity", PGID), ("signal", 9)]
+
+
+def test_term_and_kill_churn_each_retain_original_two_second_bound(cleanup_clock, monkeypatch):
+    monkeypatch.setattr(containment, "_posix_live_group_usage",
+                        lambda pid: (_ for _ in ()).throw(_known_churn()))
+    with pytest.raises(containment.UnreapedProcessError, match="remained unknown"):
+        containment._terminate_posix_group(PGID, (PGID, PGID))
+    assert cleanup_clock.tick[0] == 80
+    assert cleanup_clock.events.count(("identity", PGID)) == 2
+
+
+def test_churn_never_waives_identity_refusal_before_kill(cleanup_clock, monkeypatch):
+    def identity(pid):
+        if cleanup_clock.tick[0] >= 40:
+            return pid, pid + 1
+        return pid, pid
+    monkeypatch.setattr(containment, "_posix_group_identity", identity)
+    monkeypatch.setattr(containment, "_posix_live_group_usage",
+                        lambda pid: (_ for _ in ()).throw(_known_churn()))
+    with pytest.raises(containment.UnreapedProcessError, match="stale or reused"):
+        containment._terminate_posix_group(PGID, (PGID, PGID))
+    assert ("signal", 9) not in cleanup_clock.events
+
+
+@pytest.mark.parametrize("failure", [
+    PermissionError(errno.EPERM, "fixture denial"),
+    OSError(errno.ENOTSUP, "fixture unavailable"),
+    ValueError("group churn exceeded but not typed"),
+    None,
+])
+@pytest.mark.parametrize("after_kill", [False, True])
+def test_cleanup_other_unknown_states_remain_immediately_fatal(
+    cleanup_clock, monkeypatch, failure, after_kill,
+):
+    def observe(pid):
+        if after_kill and ("signal", 9) not in cleanup_clock.events:
+            return 1, 0
+        if failure is not None:
+            raise failure
+        return None
+    monkeypatch.setattr(containment, "_posix_live_group_usage", observe)
+    with pytest.raises(containment.UnreapedProcessError, match="Cannot verify"):
+        containment._terminate_posix_group(PGID, (PGID, PGID))
+    assert cleanup_clock.tick[0] == 0
+    assert (("signal", 9) in cleanup_clock.events) is after_kill
+
+
+@pytest.mark.parametrize("platform", ["linux", "freebsd", "win32"])
+def test_typed_churn_retry_is_darwin_cleanup_only(cleanup_clock, monkeypatch, platform):
+    monkeypatch.setattr(containment, "sys", SimpleNamespace(platform=platform))
+    monkeypatch.setattr(containment, "_posix_live_group_usage",
+                        lambda pid: (_ for _ in ()).throw(_known_churn()))
+    with pytest.raises(containment.UnreapedProcessError, match="Cannot verify"):
+        containment._terminate_posix_group(PGID, (PGID, PGID))
+    assert cleanup_clock.tick[0] == 0
+
+
+def test_resource_polling_churn_is_still_fatal_not_zero_or_skipped(kernel, monkeypatch):
+    monkeypatch.setattr(containment, "sys", SimpleNamespace(platform="darwin"))
+    kernel.snapshots = [[41], [42]] * darwin.MAX_PASSES
+    with pytest.raises(darwin.GroupObservationChanged):
+        containment._posix_group_usage(PGID)
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="requires actual macOS libproc/RSS")
