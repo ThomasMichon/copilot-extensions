@@ -1243,3 +1243,27 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
 - #9288 is draft while that native proof is pending. Local failed attempts
   remain failures, the Medium thread remains unresolved, and there is no
   installed rollout or live-host effect.
+
+### 2026-10-27 - Consumer review corrections and independent qualification
+
+- Windows acceptance run `40584656272`, job `122472827124`, exercised exact
+  head `6c6737f38d540b11d365dcf5dba0a8f71baf1a5c`: all six focused controls
+  passed, with 16 deselected and no skips. Both full copied-setup terminal
+  modes passed through the completed runtime/provider and canonical pane Job.
+  The admission-only interrupt finding's thread is resolved. Earlier local
+  startup refusals remain failed measurements, not evidence of a latency fix.
+- Fresh Copilot review `5674644985` confirmed that correction but identified
+  another Medium issue: a normally returning PowerShell backend can leave
+  `$LASTEXITCODE` unset, incorrectly producing an interruption receipt.
+  Normalize that code to zero only on the normal-completion tail; preserve
+  the unset sentinel for early exits.
+- The new same-owner script regression has no explicit `exit` and requires
+  actual zero exit plus the correlated `returned` receipt. It and all four
+  existing copied-setup controls passed together (five passed, ten deselected).
+  PowerShell parsing and staged F/E9 lint passed.
+- Preserved the fix on a recovery branch, then rebased the same PR onto
+  `3666cd4098`. The only conflict was the installer declaration digest;
+  recomputed it from the merged installer, retaining both the concurrent
+  installer changes and this PR's native helper deployment entry. Rebased
+  validation and fresh review remain pending. No runtime was updated, no live
+  session was stopped, and the parent Plan and Validation Plan remain open.
