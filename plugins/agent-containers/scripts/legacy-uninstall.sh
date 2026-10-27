@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+[[ "$#" == 1 ]] || { printf '%s\n' 'Legacy uninstall requires exactly one runtime root; options are unsupported' >&2; exit 2; }
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 root="${1:?legacy runtime root required}"
 case "/$root/" in */../*) printf '%s\n' 'Legacy runtime paths must not contain raw .. components' >&2; exit 1 ;; esac

@@ -18,7 +18,7 @@ enter_codespaces_install_transaction() {
             [[ ! -L "$root" ]] || return 1
             root="${root%/*}"
         done
-        mkdir -p -- "$INSTALL_DIR" || return 1
+        mkdir -m 700 -p -- "$INSTALL_DIR" || return 1
         root="$(CDPATH= cd -P -- "$INSTALL_DIR" && pwd)" || return 1
         home="$(CDPATH= cd -P -- "$HOME" && pwd)" || return 1
         [[ "$root" != / && "$root" != "$home" && "$home" != "$root/"* && -O "$root" ]] || return 1

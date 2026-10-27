@@ -396,6 +396,16 @@ case "$ACTION" in
     *) _fail "Unknown installer action: $ACTION"; exit 2 ;;
 esac
 
+if [[ "$ACTION" == uninstall ]]; then
+    for ((argument_index=0; argument_index<${#ORIGINAL_ARGS[@]}; argument_index++)); do
+        case "${ORIGINAL_ARGS[$argument_index]}" in
+            uninstall) ;;
+            --install-dir) argument_index=$((argument_index + 1)) ;;
+            *) _fail "Unsupported legacy uninstall argument: ${ORIGINAL_ARGS[$argument_index]}"; exit 2 ;;
+        esac
+    done
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 

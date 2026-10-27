@@ -115,6 +115,36 @@ def _owner(root: Path) -> Iterator[None]:
         assert process.returncode == 0, stdout + stderr
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX root mode and caller umask")
+@pytest.mark.parametrize("fallback", [False, True])
+@pytest.mark.parametrize("existing", [False, True])
+def test_group_writable_umask_creates_private_root_but_refuses_existing_unsafe_root(
+    tmp_path: Path, fallback: bool, existing: bool,
+) -> None:
+    root = tmp_path / "install"
+    if existing:
+        root.mkdir(mode=0o775)
+        root.chmod(0o775)
+        (root / "retained").write_bytes(b"operator data")
+    frame = _frame(
+        tmp_path, root,
+        "umask 0002\nenter_codespaces_install_transaction\n"
+        "exit_codespaces_install_transaction\n",
+        fallback=fallback,
+    )
+    result = _run(frame, tmp_path / "home")
+    if existing:
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert root.stat().st_mode & 0o777 == 0o775
+        assert (root / "retained").read_bytes() == b"operator data"
+        assert not (root / ".install.lock").exists()
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert root.stat().st_mode & 0o777 == 0o700
+        assert (root / ".install.lock").is_file()
+        assert not list(root.glob(".install-lock-channel.*"))
+
+
 def _root(tmp_path: Path) -> tuple[Path, Path, int]:
     root = tmp_path / "install"
     root.mkdir()

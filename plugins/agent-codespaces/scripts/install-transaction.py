@@ -58,7 +58,7 @@ def own(root: Path, timeout: float) -> None:
             info = path.lstat()
             if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
                 raise RuntimeError("Install transaction refuses redirected ancestry")
-    root.mkdir(parents=True, exist_ok=True)
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
     if os.name != "nt" and (root.stat().st_uid != os.getuid() or root.stat().st_mode & 0o022):
         raise RuntimeError("Install transaction requires exclusive operator custody")
     identity = (root.stat().st_dev, root.stat().st_ino)

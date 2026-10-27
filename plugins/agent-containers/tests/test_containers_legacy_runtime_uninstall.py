@@ -24,6 +24,12 @@ spec.loader.exec_module(cases)
 cases.PLUGIN = PLUGIN
 
 test_native_absent_uninstall_creates_nothing = cases.test_native_absent_uninstall_creates_nothing
+test_native_uninstall_rejects_unsupported_options_without_mutation = (
+    cases.test_native_uninstall_rejects_unsupported_options_without_mutation
+)
+test_native_uninstall_helper_rejects_trailing_options = (
+    cases.test_native_uninstall_helper_rejects_trailing_options
+)
 test_native_refusal_precedes_staging_and_lock = cases.test_native_refusal_precedes_staging_and_lock
 test_native_idle_cleanup_preserves_durable_bytes_and_is_idempotent = (
     cases.test_native_idle_cleanup_preserves_durable_bytes_and_is_idempotent

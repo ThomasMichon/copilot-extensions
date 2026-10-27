@@ -1,3 +1,4 @@
+[CmdletBinding()]
 param([Parameter(Mandatory)][string]$InstallDir)
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'

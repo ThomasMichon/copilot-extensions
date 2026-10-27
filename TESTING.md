@@ -30,6 +30,11 @@ CodeSpaces' `test_cold_native_transaction.py` accepts `NATIVE_UNINSTALL_BASH`
 for actual Bash 3.2 qualification. It checks read-only status without lock
 capabilities, Python-free cold stamping, same-inode contention, attached-owner
 EOF and the exact declared first-party snapshot-library closure.
+Its native/Python gate controls also create private cold roots under a
+group-writable caller umask while refusing unsafe pre-existing roots unchanged.
+Machines/Containers native removal controls reject unsupported preview,
+check, force and context/profile options before mutation, including trailing
+options on their private adapters.
 `tools/test_uninstall_path_candidates.py` exercises activated runtime venvs
 ahead of eligible external interpreters, broken/aliased candidates and explicit
 no-external refusal across native metadata callers. The common finite-removal

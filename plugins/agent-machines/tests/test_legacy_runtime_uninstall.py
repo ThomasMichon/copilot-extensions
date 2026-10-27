@@ -38,7 +38,7 @@ def _environment(home: Path) -> dict[str, str]:
 
 def _run(
     host: str, root: str | Path | None, env: dict[str, str], *, action: str = "uninstall",
-    payload: Path | None = None,
+    payload: Path | None = None, extra: tuple[str, ...] = (),
 ) -> subprocess.CompletedProcess[str]:
     payload = payload or PLUGIN
     if Path(host).name in {"bash", "bash.exe"}:
@@ -51,7 +51,7 @@ def _run(
         if root is not None:
             command += ["-InstallDir", str(root)]
     return subprocess.run(  # noqa: S603 -- real native entrypoint, fixture-only root
-        command, env=env, cwd=ROOT, capture_output=True, text=True, timeout=35,
+        [*command, *extra], env=env, cwd=ROOT, capture_output=True, text=True, timeout=35,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
@@ -147,6 +147,52 @@ def test_native_absent_uninstall_creates_nothing(tmp_path: Path, host: str) -> N
     result = _run(host, root, env)
     assert result.returncode == 0, result.stdout + result.stderr
     assert not root.exists()
+
+
+@pytest.mark.parametrize("host", HOSTS)
+@pytest.mark.parametrize("option", ["dry-run", "check", "force", "context", "profile"])
+def test_native_uninstall_rejects_unsupported_options_without_mutation(
+    tmp_path: Path, host: str, option: str,
+) -> None:
+    env = _environment(tmp_path / "home")
+    payload = _isolated_payload(tmp_path)
+    root = tmp_path / "runtime"
+    _fixture(root, payload=payload)
+    before = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    flag = ("--" if Path(host).name in {"bash", "bash.exe"} else "-") + option
+    arguments = (flag, "fixture") if option in {"context", "profile"} else (flag,)
+    result = _run(host, root, env, payload=payload, extra=arguments)
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
+    assert not (root / ".install.lock").exists()
+    assert not (root / ".install-stage").exists()
+    assert not (tmp_path / "home/.local/bin").exists()
+
+
+@pytest.mark.parametrize("host", HOSTS)
+@pytest.mark.parametrize("option", ["dry-run", "check"])
+def test_native_uninstall_helper_rejects_trailing_options(
+    tmp_path: Path, host: str, option: str,
+) -> None:
+    env = _environment(tmp_path / "home")
+    payload = _isolated_payload(tmp_path)
+    root = tmp_path / "runtime"
+    _fixture(root, payload=payload)
+    before = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    if Path(host).name in {"bash", "bash.exe"}:
+        command = [host, str(payload / "scripts/legacy-uninstall.sh"), str(root), "--" + option]
+    else:
+        command = [
+            host, "-NoProfile", "-NonInteractive", "-File",
+            str(payload / "scripts/legacy-uninstall.ps1"), "-InstallDir", str(root), "-" + option,
+        ]
+    result = subprocess.run(
+        command, env=env, cwd=tmp_path, capture_output=True, text=True, timeout=35,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
+    assert not (root / ".install.lock").exists()
 
 
 @pytest.mark.parametrize("host", HOSTS)

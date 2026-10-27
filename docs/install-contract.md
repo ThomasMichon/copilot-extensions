@@ -2503,6 +2503,13 @@ transport; EOF settles an owner waiting for admission as well as a holder.
 When neither capability exists, mutation refuses without provisioning.
 MSYS retains the native Windows inode owner rather than assuming a POSIX
 `flock` port is interoperable. Read-only status needs neither lock capability.
+New POSIX CodeSpaces transaction roots are created with private permissions
+under both backends, independent of a group-writable caller umask. Existing
+unsafe roots still refuse without permission changes.
+Machines/Containers legacy removal accepts only its root override; unsupported
+preview/check/force/context/profile options refuse before staging or admission.
+The private adapters also reject trailing options rather than silently dropping
+them and performing removal.
 
 Installation-cell/managed roots, mutable development claims, linked ancestry,
 unrecognized legacy venv directories, foreign ownership, conflicting leases
