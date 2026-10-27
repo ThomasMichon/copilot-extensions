@@ -74,6 +74,16 @@ def _override_jump(config: SSHConfig, value: str) -> SSHConfig:
     )
 
 
+def _override_proxy(config: SSHConfig, value: str) -> SSHConfig:
+    config = _override_jump(config, "none")
+    return replace(
+        config, proxy_command=value, extra_options={"ProxyCommand": value, **{
+            key: item for key, item in config.extra_options.items()
+            if key.casefold() != "proxyjump"
+        }},
+    )
+
+
 def _expand_hostname(value: str, alias: str) -> str:
     def expand(match: re.Match[str]) -> str:
         token = match.group(1)
@@ -90,6 +100,8 @@ def prepare_jump_arguments(
     """Consume native jump options while preserving their route and remote argv."""
     prepared = [args[0]]
     jump: str | None = None
+    proxy: str | None = None
+    config_file = config.config_file
     overrides: dict[str, str] = {}
     destination_seen = False
     index = 1
@@ -119,6 +131,8 @@ def prepare_jump_arguments(
                 value = args[index]
             consumed = option == "J"
             key, setting = {"p": "port", "l": "user"}.get(option, ""), value
+            if option == "F":
+                config_file = value
             if option == "o":
                 key, separator, setting = value.partition("=")
                 if not separator:
@@ -128,15 +142,18 @@ def prepare_jump_arguments(
                     key, setting = fields[0], fields[1] if len(fields) == 2 else ""
                 if key.strip().casefold() == "proxyjump":
                     consumed, value = True, setting.strip()
+                elif key.strip().casefold() == "proxycommand":
+                    if jump is None and proxy is None:
+                        proxy = setting.strip()
             normalized = key.strip().casefold()
             if normalized in {"hostname", "port", "user"}:
                 overrides.setdefault(normalized, setting.strip())
             if consumed:
                 if not value:
                     raise ValueError("SSH jump option requires a value")
-                if option == "J" and jump is not None:
+                if option == "J" and (jump is not None or proxy is not None):
                     raise ValueError("Duplicate SSH jump option")
-                if jump is None:
+                if jump is None and proxy is None:
                     jump = value
                 if offset > 1:
                     prepared.append(argument[:offset])
@@ -148,7 +165,7 @@ def prepare_jump_arguments(
         else:
             prepared.append(argument)
         index += 1
-    if overrides:
+    if overrides or config_file != config.config_file:
         port = int(overrides["port"]) if "port" in overrides else config.port
         if port is not None and not 1 <= port <= 65535:
             raise ValueError("Invalid SSH destination port")
@@ -156,6 +173,7 @@ def prepare_jump_arguments(
             raise ValueError("SSH destination override requires a value")
         config = replace(
             config,
+            config_file=config_file,
             hostname=(
                 _expand_hostname(overrides["hostname"], config.host_alias)
                 if "hostname" in overrides else config.hostname
@@ -173,7 +191,29 @@ def prepare_jump_arguments(
                 *overrides.items(),
             ),
         )
-    return tuple(prepared), _override_jump(config, jump) if jump is not None else config
+    if proxy is not None:
+        if not proxy:
+            raise ValueError("SSH ProxyCommand requires a value")
+        config = _override_proxy(config, proxy)
+    elif jump is not None:
+        config = _override_jump(config, jump)
+    return tuple(prepared), config
+
+
+async def prepare_windows_launch(
+    args: Sequence[str], config: SSHConfig, executable: str,
+    *, cwd: str | None = None, environment: Mapping[str, str] | None = None,
+) -> tuple[tuple[str, ...], SSHConfig]:
+    prepared, selected = prepare_jump_arguments(args, config)
+    if selected.config_file != config.config_file:
+        source = SSHProfileSource(
+            config.host_alias, config_file=selected.config_file,
+            resolve_timeout=15, ssh_executable=executable, resolve_cwd=cwd,
+            process_env=environment, resolve_args=args[1:],
+        )
+        selected = await asyncio.to_thread(source.get_ssh_config)
+        prepared, selected = prepare_jump_arguments(args, selected)
+    return prepared, selected
 
 
 async def resolve_jump_route(

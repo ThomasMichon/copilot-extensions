@@ -15,7 +15,7 @@ import subprocess
 import sys
 import threading
 from dataclasses import dataclass, field
-from typing import Mapping, Protocol, runtime_checkable
+from typing import Mapping, Protocol, Sequence, runtime_checkable
 
 from .process import redirected_ssh_env
 
@@ -137,6 +137,8 @@ class SSHProfileSource:
     omitted callers retain the existing unbounded configuration-read policy.
     ``ssh_executable`` and ``resolve_cwd`` bind that read to the actual
     transport's selected client and local working directory.
+    ``resolve_args`` preserves complete native arguments for a configuration
+    reselection instead of reconstructing their profile semantics.
     """
 
     def __init__(
@@ -149,6 +151,7 @@ class SSHProfileSource:
         ssh_executable: str | None = None,
         resolve_cwd: str | None = None,
         process_env: Mapping[str, str] | None = None,
+        resolve_args: Sequence[str] | None = None,
     ) -> None:
         self._host_alias = host_alias
         self._user = user
@@ -158,6 +161,7 @@ class SSHProfileSource:
         self._resolve_timeout = resolve_timeout
         self._resolve_cwd = resolve_cwd
         self._process_env = process_env
+        self._resolve_args = tuple(resolve_args) if resolve_args is not None else None
         self._cached_config: SSHConfig | None = None
         self._cache_lock = threading.Lock()
 
@@ -184,13 +188,16 @@ class SSHProfileSource:
         if not ssh:
             raise SSHProfileResolutionError("OpenSSH client executable `ssh` is not available")
         args = [ssh, "-G"]
-        if self._config_file:
-            args.extend(["-F", self._config_file])
-        if self._port:
-            args.extend(["-p", str(self._port)])
-        if self._user:
-            args.extend(["-l", self._user])
-        args.append(self._host_alias)
+        if self._resolve_args is not None:
+            args.extend(self._resolve_args)
+        else:
+            if self._config_file:
+                args.extend(["-F", self._config_file])
+            if self._port:
+                args.extend(["-p", str(self._port)])
+            if self._user:
+                args.extend(["-l", self._user])
+            args.append(self._host_alias)
         proc = subprocess.run(
             args,
             stdin=subprocess.DEVNULL,

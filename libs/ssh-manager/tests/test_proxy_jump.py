@@ -9,6 +9,7 @@ import pytest
 
 from ssh_manager import proxy, proxy_jump
 from ssh_manager.config_sources import SSHConfig
+from ssh_manager.forward import build_forward_ssh_args
 from ssh_manager.process import run_process_cleanup
 
 
@@ -296,11 +297,82 @@ async def test_plain_config_cannot_reenable_an_explicitly_disabled_jump(monkeypa
         await run_process_cleanup(process)
 
 
+@pytest.mark.parametrize("command", ["owned-proxy --stdio", "none"])
+async def test_cli_proxy_command_overrides_profile_jump(monkeypatch, command):
+    prepared = AsyncMock(return_value=SimpleNamespace())
+    monkeypatch.setattr(proxy, "_is_windows", lambda: True)
+    monkeypatch.setattr(proxy, "_create_prepared_ssh", prepared)
+    config = _profile("target", "profile-jump")
+    args = build_forward_ssh_args(
+        config, 31001, 31002, extra_options={"ProxyCommand": command},
+    )
+    await proxy.create_ssh_subprocess(*args, config=config)
+    _args, selected, route, _kwargs = prepared.await_args.args
+    assert selected.proxy_command == command
+    assert proxy_jump.ssh_option(selected, "proxyjump") is None
+    assert route is None
+
+
+async def test_cli_proxy_command_is_not_lost_from_a_direct_profile(monkeypatch):
+    prepared = AsyncMock(return_value=SimpleNamespace())
+    monkeypatch.setattr(proxy, "_is_windows", lambda: True)
+    monkeypatch.setattr(proxy, "_create_prepared_ssh", prepared)
+    await proxy.create_ssh_subprocess(
+        "ssh", "-oProxyCommand=owned-proxy --stdio", "target", config=_profile("target"),
+    )
+    assert prepared.await_args.args[1].proxy_command == "owned-proxy --stdio"
+
+
+@pytest.mark.parametrize("options,command,jump", [
+    (("-oProxyCommand=first", "-oProxyCommand=second"), "first", None),
+    (("-oProxyCommand=first", "-oProxyJump=second"), "first", None),
+    (("-oProxyJump=first", "-oProxyCommand=second"), None, "first"),
+])
+def test_cli_proxy_selection_preserves_first_selected_route(options, command, jump):
+    _args, config = proxy_jump.prepare_jump_arguments(
+        ("ssh", *options, "target"), _profile("target"),
+    )
+    assert config.proxy_command == command
+    assert proxy_jump.ssh_option(config, "proxyjump") == jump
+
+
+@pytest.mark.parametrize("options", [("-F", "selected.conf"), ("-Fselected.conf",)])
+async def test_cli_config_selection_rebinds_root_and_every_jump(monkeypatch, options):
+    selected_root = _profile(
+        "target", config_file="selected.conf", hostname="selected-target.example", port=2200,
+    )
+    gateway = _profile("gateway", config_file="selected.conf", identity_file="selected-key")
+    calls = _profiles(monkeypatch, {"target": selected_root, "gateway": gateway})
+    prepared = AsyncMock(return_value=SimpleNamespace())
+    monkeypatch.setattr(proxy, "_is_windows", lambda: True)
+    monkeypatch.setattr(proxy, "_create_prepared_ssh", prepared)
+    arguments = ("selected-ssh", *options, "-Jgateway", "target")
+    environment = {"EXAMPLE_ACCOUNT": "selected"}
+    await proxy.create_ssh_subprocess(
+        *arguments, config=_profile("target", config_file="fallback.conf"),
+        cwd="caller-work", env=environment,
+    )
+    _args, selected, route, _kwargs = prepared.await_args.args
+    assert selected.config_file == "selected.conf"
+    assert selected.hostname == "selected-target.example"
+    assert route is not None and route.argv[1:3] == ("-F", "selected.conf")
+    assert route.argv[-2] == "selected-target.example:2200"
+    assert route.config.identity_file == "selected-key"
+    assert [host for host, _kwargs in calls] == ["target", "gateway"]
+    assert calls[0][1] == {
+        "config_file": "selected.conf", "resolve_timeout": 15,
+        "ssh_executable": "selected-ssh", "resolve_cwd": "caller-work",
+        "process_env": environment, "resolve_args": arguments[1:],
+    }
+    assert calls[1][1]["config_file"] == "selected.conf"
+
+
 @pytest.mark.parametrize("args", [
     ("ssh", "-J"), ("ssh", "-J", ""), ("ssh", "-o", ""),
     ("ssh", "-Jfirst", "-Jsecond", "target"),
     ("ssh", "-oHostName=%p.example", "target"),
     ("ssh", "-oHostName=target%", "target"),
+    ("ssh", "-oProxyCommand=first", "-Jsecond", "target"),
 ])
 def test_malformed_jump_options_refuse_before_native_launch(args):
     with pytest.raises(ValueError):

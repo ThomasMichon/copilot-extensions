@@ -2724,7 +2724,7 @@
         "libs/agent-procutil/src/agent_procutil/startup.py": "986b9973485ea50e00c52e8292316bd811062e59b652f514d9829d4a8d66bee0",
         "tools/promotion_unit_tests/test_resume_cli_contract.py": "e3b59ef42655e36b3098c19644262c10fd06ae2e6b861ddadcc08d1da5cf2e01",
         "tools/promotion_unit_tests/test_ssh_hosting_policy.py": "17ff731c310384634012290712ce5ad96ae1f6b7c4b1343179a663975793b919",
-        "libs/ssh-manager/src/ssh_manager/config_sources.py": "618f45c832ac3cd56e9f2dc8ccabf30af590c73a9b84d038456bc84317764bc0",
+        "libs/ssh-manager/src/ssh_manager/config_sources.py": "4481f8625649823315ec8b305826c18743ff915d7e47a415c44992b0669aa3e0",
         "libs/ssh-manager/src/ssh_manager/process.py": "8b57b2828cbde248ebfaf5a963e713bf3a96228b84f77564e7f437c7ae11c6f6",
         "libs/ssh-manager/src/ssh_manager/__init__.py": "52f1d821423d8f043665cd455c887e7066de6979ea2e0c9282c67f7e4e16d69a",
         "tools/promotion_unit_tests/fixtures/bridge_resume_parser_v0.py": "66723445ed476c265b03dac68af604b85f709dcda1e55ad42e045df29b1586bd",
