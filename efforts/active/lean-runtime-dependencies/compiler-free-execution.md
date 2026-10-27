@@ -44,9 +44,10 @@ not replaced or declared complete by this amendment.
    bounded source slices through their existing owners before implementation.
 2. Extend the existing shared Python lifecycle implementation and reuse its
    record protocol, locks, process-birth checks and Linux pidfd acquisition.
-   Thin shell entrypoints select an attributable supported interpreter and
-   invoke that shared implementation. Preserve same-process admission where
-   required; do not add a central supervisor service or another inventory.
+   Thin shell entrypoints invoke setup-provided Python through normal PATH
+   resolution and invoke that shared implementation. Preserve same-process
+   admission where required; do not add a central supervisor service or another
+   inventory.
 3. Replace Linux C supervision/reconciliation with standard-library Python and
    existing OS interfaces. Preserve owner loss, renewable and hard deadlines,
    unreaped child identity, descendant reparenting/settlement, exact artifact
@@ -58,8 +59,9 @@ not replaced or declared complete by this amendment.
    preserve a Python-free helper implementation. Preserve authenticated pipe
    endpoints, process handles, strict atomic Job containment, headlessness,
    operation-lock compatibility, filesystem/reparse/ACL checks and uncertain
-   launch outcomes. Do not invent a PATH-Python dependency or declare an
-   impossible bootstrap successful.
+   launch outcomes. Trust the setup-provided PATH interpreter; do not retain
+   signature, registry or physical-path interpreter admission as a replacement
+   for compilation.
    An unresolved bootstrap design blocks that slice before mutation.
 5. Remove canonical and generated native sources, compiler setup/build hooks,
    custom native artifact export/verification and embedded compilation/code
@@ -78,14 +80,27 @@ acquisition belongs to that existing provisioning owner; it is not approval
 for an additional embedded distribution, helper-owned download or competing
 installer.
 
-The Windows migration therefore orders the existing Python prerequisite before
-the shared safety helpers. A cold plugin runtime is not a Python-free machine.
-Thin shells hand off to shared standard-library Python through an attributable,
-qualified physical interpreter, without importing an addressed plugin's venv
-or selecting an arbitrary executable from PATH. Source-only distributions must
-carry the complete Python helper closure, not rely on an installed sibling.
+The operator's 2026-10-27 clarification supersedes interpreter attestation:
+normal PATH Python is trusted for composability. Upfront harness setup, through
+the existing Agent Machines provisioning owner, supplies the supported Python.
+Standalone setup retains its own declared prerequisite without requiring that
+sibling service.
+
+The Windows migration orders this prerequisite before the shared safety
+helpers. A cold plugin runtime is not a Python-free machine. Thin shells use
+the ordinary platform Python command from PATH; they do not inspect signatures,
+rediscover PEP 514 registrations, require a particular publisher or physical
+namespace, pin interpreter files, or reject an otherwise usable interpreter
+because it is in a venv, worktree or temporary directory. Setup owns keeping
+accidental disposable interpreters off durable PATH, not a runtime blacklist.
+Source-only distributions carry the complete helper source through the existing
+packaging owner, without a new physical-source admission ceremony.
+
 Existing process, lease, update-driver and installation-context owners still
-own their protocols and native OS bindings through ctypes.
+own their protocols and native OS bindings through ctypes. Trusting Python
+does not relax process identity, atomic Job containment, authenticated pipes,
+operation-lock compatibility or exact cleanup custody. Artifact/source receipts
+for managed application runtimes remain distinct from interpreter attestation.
 
 The prerequisite itself remains owned by machine provisioning. Missing or
 unsupported Python must report the prerequisite and use its existing consented
@@ -97,25 +112,33 @@ Machines service for every helper.
 
 Before removing a Windows compiled implementation:
 
-- [ ] Qualify the existing prerequisite-to-helper interpreter handoff,
-  including physical executable selection, supported version, retained
-  identity/custody and refusal of missing, replaced or addressed-runtime inputs.
+- [ ] Replace compiled interpreter admission with ordinary PATH invocation.
+  Remove signature/publisher, registry-only, PE/path-attestation and physical
+  namespace launch gates without adding venv/worktree/temporary-path filters.
+- [ ] Apply the same setup-owned prerequisite boundary to shared installer
+  Python rediscovery and signature-driven base selection. Preserve copied-venv
+  construction and module invocation where needed, without reimplementing
+  Windows code-integrity policy or changing package/feed integrity checks.
+- [ ] Exercise the setup-provided supported Python, legitimate PATH composition,
+  missing command, incompatible version and startup failure. Keep command
+  exposure tidy through existing setup, not per-helper attestation.
 - [ ] Prove the actual first-entry order: machine-owned Python provisioning,
-  admitted standard-library helper, then runtime construction or application
+  PATH-selected standard-library helper, then runtime construction or application
   work. No unqualified Python process establishes its own trust.
 - [ ] Preserve byte-range/operation-lock compatibility, authenticated pipe
   peers, strict atomic child Job assignment, headlessness and uncertain cleanup
   outcomes through the existing Python owners.
 - [ ] Requalify cold and repeat invocation with compilers absent and no helper
   acquisition fallback. Include missing-prerequisite, startup failure,
-  caller-loss and retained-identity controls in bounded disposable fixtures.
+  caller-loss and retained process-identity controls in bounded disposable
+  fixtures. OS policy blocking Python remains an explicit startup/setup error,
+  not permission to disable policy or download another interpreter.
 
-Stock Windows metadata confirms some file-identity, native-system and trust
-bindings already exist in platform assemblies. Metadata alone does not prove
-private-call permission, final-path semantics, file custody or Job behavior;
-neither an incomplete inventory nor a web answer establishes impossibility.
-Do not replace an unresolved guarantee with runtime code emission or a weaker
-post-start assignment.
+Earlier stock-framework signature and physical-path experiments are historical
+evidence, not prerequisites for this revised handoff. Do not continue that
+attestation design or use it to block the compiler-free migration. Native
+process/Job qualification remains required; no runtime code emission or weaker
+post-start assignment substitutes for that separate safety contract.
 
 ## Validation and stopping gates
 
