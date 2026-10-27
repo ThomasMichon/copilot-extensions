@@ -490,7 +490,8 @@ not installation, credential or live-adoption authority.
   incapable or rolled-back providers refuse the required policy before effects.
 - [ ] Qualify the [remote allocation acceptance matrix](origin-owned-allocation.md#validation-plan)
   through actual owner command boundaries, same-allocation recovery,
-  claim-confirmed embodiment and target completion, including an outbound-only
+  non-blocking claim linkage alongside ordinary child startup and target
+  completion, including an outbound-only
   origin. Source, installed and native results remain separate.
 
 ## Proposal
@@ -502,6 +503,24 @@ setup/apply, enrollment, live rollout, lifecycle takeover or implementation
 completion is asserted.
 
 ## Journal
+
+### 2026-10-26 - Non-blocking allocation claim linkage
+
+- The operator clarified: "I'd rather asynchronously try to link claims back
+  while getting the agent booted up". The
+  [allocation slice](origin-owned-allocation.md) captures the full narrow
+  clarification and replaces confirmation-before-embodiment with durable
+  receiving creation followed by asynchronous origin-claim linkage.
+- Pre-effect originating responsibility, exact allocation identity, recovery
+  after restart, parent-finalization gates and existing agent/session/task
+  admission remain required. Claim acknowledgement is not a second launch
+  dependency; this is not permission for unowned allocation or a reverse
+  connection requirement.
+- #9169 merged the initial execution plan as
+  `413f914f63d0ebde49585c482a09b2c042c7d270`, after current-head Copilot approval
+  and successful required checks. The non-blocking revision requires review
+  before its differing runtime semantics; implementation and qualification
+  remain open.
 
 ### 2026-10-26 - Origin-owned remote allocation architecture and execution slice
 

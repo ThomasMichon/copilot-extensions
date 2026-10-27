@@ -286,6 +286,9 @@ mutation follows from this amendment.
   The operator selected ordinary persistent volumes with monitored storage
   thresholds, not hard quotas; #9101 reviewed the linked amendment before
   implementation of that source policy.
+  The selected [retained experiment lifetime](retained-experiment-lifetime.md)
+  needs review through the existing instance owner before service/peer wiring;
+  ordinary disposable-test expiry and production lifetime remain unchanged.
 
 ### Mission amendment - Setup, refresh and first useful services
 
@@ -488,6 +491,17 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+- #9173 merged bounded runtime-origin observations as
+  `099473d9add28f9aafb306b6832c1243637c842f` after exact-head Copilot approval,
+  resolved stale-bytecode feedback and current required green checks.
+  The bounded packet passed 105 controls, including six explicit local
+  empty-venv controls with synthetic package/metadata. Actual timestamp-valid
+  caches first reproduced old-code execution, then the corrected probe refused
+  them before import, without cleanup. Re-read this complete Plan and Validation
+  Plan; main-package observations do not close image/dependency, guest/service,
+  persistence/fault, native START or running acceptance. Review the selected
+  retained-work lifetime extension through the existing instance owner before
+  implementing service/peer wiring; no resource or process action is authorized.
 - #9167 merged credential-free fixture preparation as
   `f8fb176c02e554633675ad137d395f99033eb45a` after exact-head Copilot approval,
   resolved explicit-CWD launch feedback and all required checks. The bounded

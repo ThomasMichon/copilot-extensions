@@ -15,8 +15,10 @@ agent-worktrees create --json --machine=<targetmachine> --repo=<targetrepo|defau
 The notation after `--repo` describes the default, not a literal argument value.
 The calling managed worktree is resolved from CWD before destination selection.
 Worktrees performs target allocation over SSH or a future adopted Gateway route.
-Success means both the actual receiving worktree and the originating worktree's
-matching claim are durable. Allocation alone starts no agent.
+Successful allocation means the actual receiving worktree and the originating
+worktree's allocation responsibility are durable. Exact child-claim linkage is
+asynchronous and reported separately; it must not hold up a composing host's
+agent startup after durable receiving creation. Allocation alone starts no agent.
 
 The operator selected the architecture, then directed:
 
@@ -26,8 +28,20 @@ and subsequently:
 
 > In any case, continue driving your effort, tackling blocking issues as you encounter them
 
-#9155 records the reviewed architectural intent. This amendment specifies the
-ordered source and validation work before runtime implementation. The decomposition
+The operator then rejected an acknowledgement-dependent launch gate:
+
+> Wait, why block agent-launch? This just creates a point of failure
+
+and selected launch after durable receiving creation, clarifying:
+
+> I'd rather asynchronously try to link claims back while getting the agent booted up
+
+This supersedes confirmation-before-embodiment, not the pre-effect pending
+obligation, exact-request recovery or ordinary hosting/session/task admission.
+
+#9155 records the initial reviewed architectural intent, and #9169 reviewed the
+execution plan. This amendment specifies the ordered source and validation work
+before runtime implementation. The decomposition
 below is **agent-recommended realization**, not a new identity, transport,
 credential or lifecycle authority.
 
@@ -74,8 +88,10 @@ never a fallback to an unowned checkout.
 
 ### A. Protected origin and receiving contracts
 
-- [ ] Land this execution/validation amendment before implementing new runtime
+- [x] Land the initial execution/validation amendment before implementing new runtime
   semantics.
+- [ ] Review the operator-selected non-blocking linkage revision before
+  implementing its differing startup and reconciliation semantics.
 - [ ] Define strict, bounded JSON requests/results for origin reservation,
   receiving creation/inspection, ownership confirmation and original-operation
   recovery. Keep creator, destination, logical request, actual child and session
@@ -89,9 +105,13 @@ never a fallback to an unowned checkout.
 - [ ] Add receiving record evidence sufficient for its normal lifecycle to
   recognize the qualified foreign creator without opening a foreign registry,
   copying its records or weakening ordinary cross-space owner checks.
-- [ ] Confirm the origin's exact child claim before the receiving allocation
-  becomes eligible for embodiment. Interrupted confirmation is recoverable and
-  cannot create another child or permit a second parent.
+- [ ] Permit ordinary embodiment once receiving creation and its original
+  ownership journal are durable. Link the origin's exact child claim
+  asynchronously while the agent boots, without adding an acknowledgement gate.
+  Interrupted linkage cannot create another child or permit a second parent.
+- [ ] Keep bounded linkage reconciliation with the existing responsible owner
+  and durable original operation across restart. Do not rely on an unowned
+  background coroutine, reverse callback or new scheduler/daemon.
 
 ### B. Ordinary CLI and shared consumers
 
@@ -103,7 +123,8 @@ never a fallback to an unowned checkout.
   target operation; no second topology store, shell payload or allocator.
 - [ ] Route Bridge's new owned remote allocation through the origin's Worktrees
   command, retaining actual target identity and the ordinary sessionless result.
-  Only confirmed ownership may precede its existing session embodiment.
+  Durable receiving creation may precede its existing session embodiment while
+  origin-claim linkage proceeds independently.
 - [ ] Inventory Dispatch's ordinary and explicit venue creation paths; migrate
   allocation consumers to the same authority without replacing task reservations,
   leases, prompt admission or conversation recovery.
@@ -153,11 +174,17 @@ explicitly selected integration lanes with finite resource/cleanup ownership.
   prove omitted-selector local creation and remote different-repo selection;
   the origin remains the CWD worktree and the result identifies the actual child.
 - [ ] Process-boundary assertions prove pending responsibility before effects,
-  exact receiving identity before binding, both owners' durable confirmation
-  before success, and no agent session/prompt as a creation side effect.
+  exact receiving identity before binding, durable receiving creation before
+  embodiment, honest pending/linked results, and no agent session/prompt as a
+  creation side effect.
+- [ ] Delayed, failed and lost claim-link acknowledgements do not delay ordinary
+  child startup. Reconciliation, including after origin restart, binds the same
+  child without duplicate creation, session launch or prompt delivery. Parent
+  finalization remains blocked while responsibility is unresolved.
 - [ ] Deterministic concurrent request and restart tests cover every interruption
   boundary: before receiving effects, after creation, after origin bind and
-  during lost acknowledgement. Recover one child and one claim; changed facts,
+  during lost acknowledgement, including a running child before linkage.
+  Recover one child and one claim; changed facts,
   retired identities and unknown history never allocate a replacement.
 - [ ] Parent finalization, abandon, transfer, generic release and stale writer
   controls cannot discard a pending/unknown allocation. Malformed or unknown

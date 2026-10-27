@@ -25,6 +25,11 @@ runtime qualified. Credential-free synthetic hosting/configuration preparation
 merged in #9167; actual guest origin, service/peer lifecycle and initial-case
 execution remain open. The [runtime guide](../../../tools/reproducer-lab/image-runtime.md)
 records bounded main-package origin-observation source and its qualification limits.
+Those observations merged in #9173; they are not actual guest qualification.
+The operator selected retaining accepted work after driver loss. Review the
+[existing-owner lifetime amendment](retained-experiment-lifetime.md) before
+implementing retained service/peer startup; ordinary disposable-test expiry
+and ongoing #8403 work remain unchanged.
 This is an agent-recommended decomposition of the remaining isolated
 failure-reproduction and logging qualification work. It does not authorize
 resource creation, production fault injection, deployment or credential access.
@@ -209,15 +214,18 @@ Each step stops on its named failed prerequisite; do not self-heal the subject.
    controls with explicit monitored thresholds, fresh usage/free-space refusal
    and honest unavailable-measurement outcomes. Add synthetic positive and
    negative controls without starting Docker.
-3. Implement the opt-in host tool and credential-free fixtures using existing
+3. Review the [retained experiment lifetime](retained-experiment-lifetime.md)
+   through the existing instance owner before service/peer startup wiring.
+   Never relabel test services production to avoid ordinary disposable expiry.
+4. Implement the opt-in host tool and credential-free fixtures using existing
    source-materialization, finite subprocess and service owners. Give every
    action a timeout, output cap and explicit outcome; leave unresolved native
    capture/strict-write dependencies unavailable rather than bypassed.
-4. After separate resource/provisioning approval, create exactly one isolated
+5. After separate resource/provisioning approval, create exactly one isolated
    experiment, inspect its effective boundary and prove persistence, monitoring
    and egress controls before the ordinary spawn and fault cases. Source review does not
    supply this approval or authorize existing-service changes.
-5. Review the implementation and record only actually exercised qualification.
+6. Review the implementation and record only actually exercised qualification.
    Select later native CLI, Windows, real authentication and service-manager
    scenarios separately; no privileged/systemd image or production adoption is
    included in the first experiment.
@@ -260,6 +268,14 @@ Each step stops on its named failed prerequisite; do not self-heal the subject.
   neither this plan nor a successful isolated experiment closes the parent.
 
 ## Immediate next action
+
+Review the selected [retained-work lifetime amendment](retained-experiment-lifetime.md)
+through the existing instance-lifecycle owner, then implement the minimal
+service/peer fixture. Image/runtime preparation, synthetic hosting inputs and
+bounded origin observations merged in #9161, #9167 and #9173 respectively.
+They do not qualify an image, dependencies, guest mounts or running services.
+The following paragraphs retain earlier prerequisite receipts, not an instruction
+to repeat already completed source work.
 
 The first [pure controls](../../../tools/reproducer-lab/README.md) parse the
 declaration and identify known unsafe or missing static Docker observations.
