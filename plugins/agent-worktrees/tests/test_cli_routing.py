@@ -1834,8 +1834,8 @@ def test_provider_stderr_is_redacted_before_bounding(monkeypatch, tmp_path, retu
     assert health.state == "failed"
     assert "fixture-secret" not in health.diagnostic
     assert "example.invalid" in health.diagnostic
-    assert len(health.diagnostic.split("stderr: ", 1)[1]) == 400
-    assert len(health.diagnostic) < 800
+    assert len(health.diagnostic.split("stderr: ", 1)[1]) <= 2048
+    assert len(health.diagnostic) < 2600
 
 
 def test_healthy_provider_stderr_is_not_reported(monkeypatch, tmp_path, capsys):

@@ -139,14 +139,11 @@ def _safe_probe_diagnostic(text: str | bytes, limit: int = 2048) -> str:
     return ("[diagnostic truncated]\n" if truncated else "") + detail[-limit:]
 
 
-def _report_manager_probe_failure(
-    summary: str, detail: str | bytes = "", *, warning: bool = False,
-) -> None:
+def _report_manager_probe_failure(summary: str, detail: str | bytes = "") -> None:
     with output.stdout_to_stderr():
-        report = output.warn if warning else output.err
-        report(_safe_probe_diagnostic(summary))
+        output.err(_safe_probe_diagnostic(summary))
         if diagnostic := _safe_probe_diagnostic(detail):
-            report(f"Startup detail:\n{diagnostic}")
+            output.err(f"Startup detail:\n{diagnostic}")
 
 
 def _probe_worktree_manager_version(
@@ -244,7 +241,7 @@ def _worktree_manager_health() -> _ManagerHealth:
         evidence = stderr or _safe_probe_diagnostic(proc.stdout or "")
         if evidence:
             stream = "stderr" if stderr else "stdout"
-            detail += f"\nStartup detail ({stream}):\n{evidence}"
+            detail += f" {stream}: {evidence}"
     return _ManagerHealth("failed", diagnostic=detail)
 
 
@@ -315,7 +312,8 @@ def _usable_worktree_manager_launcher_dir() -> Path | None:
     )(command)
     if proc is None:
         output.warn(
-            f"Ignoring an unusable Worktree Manager install at {slot}: its versioned runtime could not be started."
+            "Ignoring an unusable Worktree Manager install at "
+            f"{slot}: its versioned runtime could not be started."
         )
         return None
     if version is None and proc.returncode != 0:
@@ -536,8 +534,8 @@ def cmd_manager_install_trigger(project: str | None) -> int:
         output.header(f"{name} -- interactive mode needs Worktree Manager")
     print(
         "No usable Worktree Manager is available right now. On a first run "
-        "that's expected; if this machine already had one, inspect the startup "
-        "diagnostics above before choosing an update or repair.",
+        "that's expected; if this machine already had one, update or repair "
+        "it with the bootstrap below.",
         file=out,
     )
     print(

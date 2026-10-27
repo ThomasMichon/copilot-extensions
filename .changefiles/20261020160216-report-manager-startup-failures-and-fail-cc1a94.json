@@ -1,5 +1,5 @@
 {
-  "comment": "Report Manager startup failures and fail unavailable interactive launches",
+  "comment": "Retain sanitized Manager probe diagnostics without changing front-door health or onboarding behavior",
   "changes": [
     {
       "plugin": "agent-worktrees",

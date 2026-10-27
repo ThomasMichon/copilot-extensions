@@ -98,12 +98,16 @@ def test_probe_diagnostic_is_redacted_before_bounding(
     assert ("truncated" in captured.err) is bool(padding)
 
 
+@pytest.mark.parametrize("stderr", ["", " \n\t", "\x1b[0m"])
 def test_probe_uses_stdout_when_stderr_is_empty(
     provider: Provider, capsys: pytest.CaptureFixture[str],
+    stderr: str,
 ) -> None:
-    provider(_child_failure(
-        "\x1b[31minterpreter startup failed before Manager\x1b[0m", stdout=True,
-    ))
+    provider(
+        "import sys; "
+        "print('\\x1b[31minterpreter startup failed before Manager\\x1b[0m'); "
+        f"sys.stderr.write({stderr!r}); sys.exit(1)"
+    )
     assert launch._usable_worktree_manager() is None
     captured = capsys.readouterr()
     assert "interpreter startup failed before Manager" in captured.err
@@ -159,6 +163,57 @@ def test_exhausted_timeouts_preserve_partial_stderr_and_attempt_count(
     assert "timed out" in captured.err
     assert "fixture resolver waiting" in captured.err
     assert captured.out == ""
+
+
+def test_timeout_stdout_fallback_is_redacted_and_keeps_last_useful_evidence(
+    provider: Provider, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    provider("pass")
+    calls = []
+
+    def failed(argv: list[str], **kwargs: object) -> NoReturn:
+        calls.append(kwargs)
+        timeout = kwargs["timeout"]
+        assert timeout == 20.0
+        partial = (
+            b"\x1b[31mresolver at https://packages.example/simple?token=fixture-secret\x1b[0m"
+            if len(calls) == 1 else b""
+        )
+        raise subprocess.TimeoutExpired(argv, timeout, output=partial, stderr=b" \n")
+
+    monkeypatch.setattr(launch.subprocess, "run", failed)
+    assert launch._usable_worktree_manager() is None
+    captured = capsys.readouterr()
+    assert len(calls) == 2
+    assert "after 2 attempts (20s each)" in captured.err
+    assert "resolver at https://packages.example/simple" in captured.err
+    assert "fixture-secret" not in captured.err
+    assert "\x1b" not in captured.err
+    assert captured.out == ""
+
+
+@pytest.mark.parametrize("as_bytes", [False, True])
+def test_controls_and_credentials_are_removed_before_line_and_character_limits(
+    as_bytes: bool,
+) -> None:
+    message = (
+        "\x1b]0;ignored title\x07"
+        "https://user:" + "fixture-password" * 200 + "@packages.example/simple\n"
+        + "\n".join(f"progress {index}" for index in range(12))
+        + "\n" + "x" * 2200
+        + "\n\x1b[31mhttps://packages.example/simple?token=fixture-secret\x1b[0m\x00"
+    )
+    diagnostic = launch._safe_probe_diagnostic(
+        message.encode("utf-8") if as_bytes else message,
+    )
+    assert diagnostic.startswith("[diagnostic truncated]\n")
+    assert len(diagnostic.split("\n", 1)[1]) == 2048
+    assert "https://packages.example/simple?[redacted]" in diagnostic
+    assert "fixture-password" not in diagnostic
+    assert "fixture-secret" not in diagnostic
+    assert "ignored title" not in diagnostic
+    assert "\x1b" not in diagnostic
+    assert "\x00" not in diagnostic
 
 
 def test_transient_probe_timeout_does_not_report_a_failure(
