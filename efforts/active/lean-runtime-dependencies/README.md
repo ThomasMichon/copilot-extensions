@@ -263,6 +263,9 @@ merge closes the complete bootstrap, platform, release or adoption gates.
 The prerequisite clarification and Linux merge reconciliation then merged in
 #9162. Windows implementation now proceeds from the existing machine-owned
 Python prerequisite, not another interpreter acquisition mechanism.
+The private original-parent Windows Job primitive merged in #9170. It has
+native parent-loss and descendant-settlement evidence, but no compiled caller
+has switched and the interpreter admission boundary remains open.
 
 ### Current execution boundary
 
@@ -323,6 +326,29 @@ transfer without acceptance by a named tracked objective.
 
 ## Journal
 
+### 2026-10-26 - Stock-framework file custody qualification
+- Added an unused, repository-only Windows PowerShell file-guard primitive
+  through exact existing framework bindings, without embedded compilation or
+  runtime interop emission. The original selector and distributed bootstrap
+  callers remain unchanged.
+- The initial native packet passed 18 controls and failed directory custody.
+  An attribute-only directory handle retained identity but allowed rename;
+  treating its sharing flags as immutability was incorrect. Directory guards
+  now request directory-list access too, with an explicit differential control
+  retaining the weaker metadata-only behavior. No custody expectation was
+  weakened to make the earlier failure pass.
+- The corrected native Windows packet passed all 20 controls with no skips,
+  including directory/file exclusion, release and failure cleanup, final
+  junction refusal and the weaker metadata-only differential. Wrong-kind and
+  junction refusals inspect the exact captured handle's closure before the
+  PowerShell process exits, not after OS exit cleanup. The hardened,
+  network-disconnected Linux packet passed its portable control with 19
+  explicit native skips. Independent publication review remains pending.
+  This does not close interpreter/source-closure admission,
+  canonical path and drive checks, signer verification, shell framing,
+  PowerShell Core parity, compiled-caller replacement or native desktop gates.
+  Phase 7 and the parent campaign remain Active.
+
 ### 2026-10-26 - Windows original-parent lifetime building block
 - The existing path resolver and signed-executable selector do not provide
   complete prerequisite-to-helper admission. No interpreter installer or
@@ -344,6 +370,13 @@ transfer without acceptance by a named tracked objective.
 - Phase 7 and both owning efforts remain open. Next complete review of this
   native transfer building block, then the existing machine-owned interpreter
   handoff and bounded shell framing before removing compiled implementations.
+- #9170 merged as `cbbaffe972b7de4cf0119cf08591b5fd69515b29` after
+  independent approval of exact head `8f2d800c6fb7b65f1fa50e8189307f497d1f11ec`,
+  no review findings and required green CI. The final hardened owned-process
+  packet passed 182 tests with 20 explicit skips. Both effort READMEs were
+  re-read after merge; no aggregate Plan or Validation Plan item closes from
+  this unused primitive alone. Continue the machine-owned interpreter admission
+  and shell handoff, preserving all native desktop and consumer gates.
 
 ### 2026-10-26 - Linux compiler-free slice merged
 - #9129 merged to `dev` as `1ad9ecc02cb99a1ceed9e03462033f6e2eddeb1d`
