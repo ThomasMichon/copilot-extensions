@@ -122,7 +122,9 @@ def _launch_probe_env() -> dict[str, str]:
     return env
 
 
-def _safe_probe_diagnostic(text: str | bytes, limit: int = 2048) -> str:
+def _safe_probe_diagnostic(
+    text: str | bytes, limit: int = 2048, *, tail: bool = True,
+) -> str:
     from ._lifecycle_human.redact import redact
 
     if isinstance(text, bytes):
@@ -130,6 +132,7 @@ def _safe_probe_diagnostic(text: str | bytes, limit: int = 2048) -> str:
     text = re.sub(
         r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))", "", text,
     )
+    text = re.sub(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/@]*@", r"\1***@", text)
     text = "".join(
         char if char.isprintable() or char in "\n\t" else " " for char in text
     )
@@ -141,9 +144,10 @@ def _safe_probe_diagnostic(text: str | bytes, limit: int = 2048) -> str:
     )
     text = re.sub(r"(?i)(\bhttps?://[^\s?#]+)[?#][^\s]*", r"\1?[redacted]", text)
     lines = text.splitlines()
-    detail = "\n".join(lines[-10:])
+    detail = "\n".join(lines[-10:] if tail else lines[:10])
     truncated = len(lines) > 10 or len(detail) > limit
-    return ("[diagnostic truncated]\n" if truncated else "") + detail[-limit:]
+    excerpt = detail[-limit:] if tail else detail[:limit]
+    return ("[diagnostic truncated]\n" if truncated else "") + excerpt
 
 
 def _report_manager_probe_failure(summary: str, detail: str | bytes = "") -> None:
@@ -240,7 +244,7 @@ def _worktree_manager_health() -> _ManagerHealth:
         return _ManagerHealth("ready", command=manifest.command)
     display_name, display_source = _provider_command_display_name(manifest)
     source = _safe_probe_diagnostic(
-        f"{display_name} {display_source} ({manifest.command[0]})", 240,
+        f"{display_name} {display_source} ({manifest.command[0]})", 240, tail=False,
     )
     detail = f"Cannot use {source}: {reason}."
     if proc is not None:

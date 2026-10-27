@@ -255,6 +255,30 @@ def test_partial_timeout_url_userinfo_is_redacted_before_bounding(
     assert captured.out == ""
 
 
+@pytest.mark.parametrize("separator", ["\r", "\xa0", "\x00"])
+def test_nonprinting_url_userinfo_does_not_leave_password_fragments(separator: str) -> None:
+    message = "https://fixture-user:first-fragment" + separator + "second-fragment@host.example"
+    diagnostic = launch._safe_probe_diagnostic(message)
+    assert "fixture-user" not in diagnostic
+    assert "first-fragment" not in diagnostic
+    assert "second-fragment" not in diagnostic
+    assert "host.example" in diagnostic
+
+
+def test_long_registered_source_keeps_provider_and_registration_attribution(
+    provider: Provider, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dataclasses import replace
+
+    manifest = provider(_child_failure("startup refused"))
+    manifest = replace(manifest, source_path="/registered/" + "x" * 1000)
+    monkeypatch.setattr(launch, "_control_plane_provider_selection", lambda: (manifest, ""))
+    health = launch._worktree_manager_health()
+    assert health.state == "failed"
+    assert "'worktree-manager' via /registered/" in health.diagnostic
+    assert len(health.diagnostic) < 500
+
+
 def test_transient_probe_timeout_does_not_report_a_failure(
     provider: Provider, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:

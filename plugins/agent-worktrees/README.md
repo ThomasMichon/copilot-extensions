@@ -319,8 +319,9 @@ details on stderr, including resolver, spawn and exhausted-timeout errors.
 Terminal controls and URL credentials are removed before bounding; useful
 stdout is retained when stderr is empty. Nonprinting separators retain word
 boundaries, and incomplete credential-looking URL authorities are masked
-conservatively. First-run onboarding, the
-absent/failed/ready health model, explicit provider selection, real bundled
+conservatively. URL userinfo is masked before separator normalization; bounded
+source labels retain the provider and registration prefix. First-run onboarding,
+the absent/failed/ready health model, explicit provider selection, real bundled
 fallback and child exit status are unchanged. This reporting does not itself
 repair a dependency or interpreter-policy failure.
 
