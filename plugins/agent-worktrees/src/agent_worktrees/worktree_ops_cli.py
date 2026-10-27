@@ -571,6 +571,11 @@ def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | 
         from .execution_spaces import require_project_record_mutation
 
         require_project_record_mutation(record)
+        from .allocation_run import existing_claim
+
+        protected = existing_claim(record, stdout)
+        if protected is not None:
+            return protected
         # Idempotency contract matches `pr_ops._ensure_pr_claim`: capture
         # whether this ref is already an active `pr` claim BEFORE mutating
         # -- `add_resource_claim` reuses a matching ref rather than
@@ -685,17 +690,24 @@ def cmd_run(args: argparse.Namespace) -> int:
             output.err(f"run: cannot freeze owner ledger before creation: {exc}")
             return 1
 
+    reused_allocation = False
+
     def _finish_pending(claim: tracking.ResourceClaim | None) -> bool:
+        nonlocal reused_allocation
+
         if owner_path is None or not pending_ref:
             return claim is not None
-        if claim is None:
-            return False
         try:
             with tracking._RecordLock(owner_path, require_sidecar=True):
                 owner_record = tracking.load_record(owner_path)
                 from .execution_spaces import require_project_record_mutation
 
                 require_project_record_mutation(owner_record)
+                from .allocation_run import existing_claim
+
+                protected = existing_claim(owner_record, child_stdout)
+                if claim is None and protected is None:
+                    return False
                 owner_record.resources = [
                     item for item in owner_record.resources if item.ref != pending_ref
                 ]
@@ -704,14 +716,16 @@ def cmd_run(args: argparse.Namespace) -> int:
                 # BEFORE mutating -- a repeat `run` observing the same
                 # already-claimed PR must never feed a spurious second
                 # "claimed" event.
-                already_active = claim.kind == "pr" and any(
+                already_active = claim is not None and claim.kind == "pr" and any(
                     item.ref == claim.ref and item.kind == "pr"
                     and item.state == obligations.ACTIVE
                     for item in owner_record.resources
                 )
-                tracking.add_resource_claim(owner_record, claim, save=False)
+                if protected is None and claim is not None:
+                    tracking.add_resource_claim(owner_record, claim, save=False)
                 tracking.save_record(owner_record, owner_path)
-            if claim.kind == "pr" and not already_active:
+                reused_allocation = protected is not None
+            if claim is not None and claim.kind == "pr" and not already_active:
                 # worktree-claims-transitive-finalization Phase 3b: this is
                 # the actual live save site for `run`'s produced PR claim
                 # (the pending-ref placeholder above is replaced with the
@@ -748,15 +762,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     sys.stdout.flush()
 
     claim = _claim_from_run_output(child_stdout) if child_stdout.strip() else None
-    if claim is None:
-        output.err(
-            f"run: resource command exited {proc.returncode} but no claim could "
-            f"be parsed; pending ownership {pending_ref or '(cross-machine)'} is retained"
-        )
-        return proc.returncode or 1
     if not _finish_pending(claim):
-        return 1
-    output.err(f"run: journaled outbound claim {claim.ref} ({claim.kind}) on {owner_ref}")
+        if claim is None:
+            output.err(
+                f"run: resource command exited {proc.returncode} but no claim could "
+                f"be parsed; pending ownership {pending_ref or '(cross-machine)'} is retained"
+            )
+        return proc.returncode or 1
+    if reused_allocation:
+        output.err("run: retained original protected allocation responsibility; linkage reconciles asynchronously")
+    elif claim is not None:
+        output.err(f"run: journaled outbound claim {claim.ref} ({claim.kind}) on {owner_ref}")
     return proc.returncode
 
 

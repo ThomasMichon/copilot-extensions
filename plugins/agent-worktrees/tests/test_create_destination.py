@@ -39,7 +39,10 @@ def coordinator(owner, monkeypatch):
 
     def transport(operation: str, metadata: dict) -> dict:
         operations.append(operation)
-        claim = tracking.load_record(path).resources[0]
+        claim = next(
+            item for item in tracking.load_record(path).resources
+            if isinstance(item.producer, dict) and item.producer.get("lifetime") == allocation.LIFETIME
+        )
         assert claim.producer["token"] == metadata["token"]
         assert claim.is_unsettled
         proof = {
@@ -60,7 +63,7 @@ def coordinator(owner, monkeypatch):
             "result": {
                 "creation": {"version": 1, "status": "complete", "replayed": True},
                 "worktree": {
-                    "id": "child", "repo": "target", "execution_machine": "remote",
+                    "id": "child", "repo": "target", "execution_machine": "remote", "machine": "remote",
                     "path": IDENTITY["path"], "branch": IDENTITY["branch"],
                     "creation_nonce": IDENTITY["creation_nonce"], "owner_ref": "m/p/owner",
                 },
@@ -217,6 +220,53 @@ def test_missing_current_writer_refuses_before_reservation_or_receiving(coordina
     with pytest.raises(ValueError, match="origin writer"):
         create_remote(args())
     assert not tracking.load_record(path).resources and not operations
+
+
+@pytest.mark.parametrize("outcome", ["complete", "unknown", "changed"])
+def test_run_reuses_original_responsibility_instead_of_competing_plain_child_claim(
+    coordinator, monkeypatch, outcome,
+):
+    path, _, _, transport = coordinator
+    original_run = worktree_ops_cli.subprocess.run
+
+    def inner(command, **kwargs):
+        if not isinstance(command, str) or not kwargs.get("shell"):
+            return original_run(command, **kwargs)
+        if outcome == "unknown":
+            def lost(operation, metadata):
+                transport(operation, metadata)
+                raise RuntimeError("original receiving response lost")
+            monkeypatch.setattr(remote, "request", lost)
+        try:
+            response = create_remote(args())
+            code = 0
+        except destination.DestinationCreationFailure as exc:
+            response, code = exc.payload(), 3
+        if outcome == "changed":
+            response["allocation"]["request_id"] = "different-operation"
+        return SimpleNamespace(stdout=json.dumps(response), returncode=code)
+
+    monkeypatch.setattr(worktree_ops_cli.subprocess, "run", inner)
+    code = worktree_ops_cli.cmd_run(argparse.Namespace(
+        inner_command=["owned-command create --machine remote --repo target --json"],
+        owner_ref="m/p/owner#session",
+    ))
+    record = tracking.load_record(path)
+    protected = [item for item in record.resources if item.has_producer]
+    assert len(protected) == 1 and protected[0].producer["phase"] == "pending"
+    assert not any(item.ref == IDENTITY["ref"] for item in record.resources)
+    pending_wrappers = [item for item in record.resources if item.ref.startswith("pending-run:")]
+    assert len(pending_wrappers) == (1 if outcome == "changed" else 0)
+    assert code == {"complete": 0, "unknown": 3, "changed": 1}[outcome]
+    assert not finalize._assert_obligations_settled(record, "owner", abandon=False)
+
+
+def test_journal_helper_observes_original_protected_claim_without_adding_plain_ref(coordinator):
+    path, _, _, _ = coordinator
+    response = create_remote(args())
+    protected = worktree_ops_cli._journal_run_claim("m/p/owner", json.dumps(response))
+    assert protected.producer["request_id"] == response["allocation"]["request_id"]
+    assert len(tracking.load_record(path).resources) == 1
 
 
 def test_origin_uses_original_cwd_repository_before_explicit_destination(owner, monkeypatch):

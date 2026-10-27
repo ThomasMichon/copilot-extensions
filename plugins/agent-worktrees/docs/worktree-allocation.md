@@ -61,6 +61,12 @@ A lost response reuses the same protected token and receiving operation; it
 never authorizes a fresh key, replacement child or automatic cancellation.
 An unfinished or concluded receiving operation supplies no usable worktree.
 Pending and unknown origin responsibility continue to block parent conclusion.
+When composed through `run`, its temporary pending wrapper is settled only
+after verifying this same protected responsibility in the actual origin ledger.
+The wrapper does not add a competing plain child claim while linkage is pending.
+An uncertain creation response can retain that protected operation without
+leaking another unresolved wrapper; missing, changed or malformed responsibility
+keeps the wrapper visibly unresolved instead.
 
 ## Source ABI and negotiation
 

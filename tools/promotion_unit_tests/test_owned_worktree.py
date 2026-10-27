@@ -284,6 +284,60 @@ def test_destination_options_keep_no_launch_and_refuse_unsupported_seed(destinat
         destination._remote_options(args, attempt)
 
 
+@pytest.fixture
+def run_composition(api):
+    api.stub("worktree_machine_identity", execution_machine_from_fields=lambda row: row.get("machine"))
+    api.writer.tracking.format_claim_ref = lambda machine, project, worktree: f"{machine}/{project}/{worktree}"
+    return api.load("allocation_run")
+
+
+def _run_response():
+    return {
+        "allocation": {
+            "version": 1, "creator": metadata()["creator"], "request_id": "original",
+            "target": metadata()["recovery"], "receiving_status": "allocated",
+        },
+        "worktree": {
+            "id": "child", "repo": "repo", "machine": "target",
+            "owner_ref": metadata()["creator"], **{
+                key: value for key, value in identity().items() if key != "ref"
+            },
+        },
+    }
+
+
+def test_run_composition_reuses_one_protected_claim_for_complete_and_uncertain_results(api, run_composition):
+    import json
+
+    pending = metadata()
+    claim = SimpleNamespace(kind="worktree", producer=pending, ref=api.allocation.claim_ref(pending))
+    record = SimpleNamespace(execution_machine="origin", repo="project", worktree_id="parent", resources=[claim])
+    value = _run_response()
+    assert run_composition.existing_claim(record, json.dumps(value)) is claim
+    value.pop("worktree")
+    value["allocation"].pop("receiving_status")
+    value["creation"] = {"version": 1, "status": "pending", "repeat_new": False}
+    assert run_composition.existing_claim(record, json.dumps(value)) is claim
+    assert record.resources == [claim] and claim.producer == pending
+
+
+def test_run_composition_refuses_changed_or_unproven_responsibility_without_mutation(api, run_composition):
+    import json
+
+    claim = SimpleNamespace(kind="worktree", producer=metadata(), ref=api.allocation.claim_ref(metadata()))
+    record = SimpleNamespace(execution_machine="origin", repo="project", worktree_id="parent", resources=[claim])
+    for field, value in (
+        ("creator", "target/repo/other"), ("request_id", "other"),
+        ("target", {"machine": "other", "project": "repo"}), ("version", True),
+    ):
+        response = _run_response()
+        response["allocation"][field] = value
+        before = copy.deepcopy(vars(claim))
+        with pytest.raises(ValueError):
+            run_composition.existing_claim(record, json.dumps(response))
+        assert vars(claim) == before and record.resources == [claim]
+
+
 def test_reconcile_rejects_uncertain_or_changed_proof_without_mutation(api):
     for changed in (
         {"status": "unknown", "allocation_finished": False},
