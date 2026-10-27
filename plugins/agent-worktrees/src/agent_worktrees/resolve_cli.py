@@ -877,10 +877,14 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         except (permissions.FolderTrustError, ExecutionSpaceError) as exc:
             return output._json_error(str(exc), exit_code=3)
     if seed_pending:
-        launch_cmd = deferred_command(launch_cmd, yaml_path, seed_id=staged_seed.seed_id)
+        launch_cmd = deferred_command(
+            launch_cmd, yaml_path, seed_id=staged_seed.seed_id,
+            prepare_native=not getattr(state.args, "dry_run", False),
+        )
     else:
         launch_cmd = deferred_command(
             launch_cmd, yaml_path, admission_only=True,
+            prepare_native=not getattr(state.args, "dry_run", False),
             preserve_seed_id=staged_seed.seed_id if staged_seed else None,
             native_resume_session=native_resume,
         )

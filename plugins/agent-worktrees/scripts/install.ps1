@@ -3033,6 +3033,7 @@ function Deploy-Wrappers {
     Ensure-InstallDir $ScriptsDir
     foreach ($setup in @(
         'default-setup.ps1',
+        'native-seed-boundary.ps1',
         'default-setup.sh',
         'launch-command.ps1',
         'launch-command.sh',

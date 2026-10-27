@@ -26,7 +26,7 @@ import pytest
 
 import agent_worktrees.__main__ as m
 from agent_worktrees import config as cfg
-from agent_worktrees import launch_seed_state, resolve_cli, tracking
+from agent_worktrees import launch_seed_state, push_timeout, resolve_cli, tracking
 from agent_worktrees.sessions import LiveVerdict
 
 
@@ -217,19 +217,15 @@ def test_preplanned_bare_launch_is_fenced_and_preserves_retained_seed(
     assert code == 0 and "--admission-only" in plan["cmd"]
     assert "--preserve-seed-id" in plan["cmd"] and before_seed.seed_id in plan["cmd"]
     assert not plan["seed_pending"] and "--interactive" not in plan["cmd"]
-    options = {
-        "capture_output": True, "text": True, "timeout": 15,
-        "env": {
-            **os.environ,
-            "PYTHONPATH": str(Path(resolve_cli.__file__).resolve().parents[1]),
-        },
-        "creationflags": subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    environment = {
+        **os.environ,
+        "PYTHONPATH": str(Path(resolve_cli.__file__).resolve().parents[1]),
     }
     with launch_admission.guard(record.yaml_path):
-        blocked = subprocess.run(plan["cmd"], **options)
+        blocked = push_timeout.run_bounded(plan["cmd"], cwd=None, timeout=15, env=environment)
     assert blocked.returncode == 3 and "launch admission is busy" in blocked.stderr
     assert "bare-backend-started" not in blocked.stdout
-    admitted = subprocess.run(plan["cmd"], **options)
+    admitted = push_timeout.run_bounded(plan["cmd"], cwd=None, timeout=15, env=environment)
     assert admitted.returncode == 0, admitted.stderr
     assert admitted.stdout.strip() == "bare-backend-started"
     assert launch_seed_state.state_path(record.yaml_path).read_bytes() == before
@@ -277,13 +273,13 @@ def test_live_plan_cannot_start_backend_after_original_exits_during_repair(
         assert original.wait(timeout=10) == 0
         monkeypatch.setattr(m.sessions, "verify_worktree_active", lambda *a: LiveVerdict())
         with launch_admission.guard(record.yaml_path):
-            blocked = subprocess.run(
-                plan["cmd"], capture_output=True, text=True, timeout=15, **options,
+            blocked = push_timeout.run_bounded(
+                plan["cmd"], cwd=None, timeout=15, env=options["env"],
             )
         assert blocked.returncode == 3 and "launch admission is busy" in blocked.stderr
         assert "replacement-started" not in blocked.stdout
-        admitted = subprocess.run(
-            plan["cmd"], capture_output=True, text=True, timeout=15, **options,
+        admitted = push_timeout.run_bounded(
+            plan["cmd"], cwd=None, timeout=15, env=options["env"],
         )
         assert admitted.returncode == 0, admitted.stderr
         assert admitted.stdout.strip() == "replacement-started"

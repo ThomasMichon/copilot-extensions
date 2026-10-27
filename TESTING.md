@@ -16,24 +16,74 @@ result. These are contained component/installed-SDK controls, not actual Docker,
 official-image, automatically constructed controller or production evidence.
 Native/network/build tests remain outside the required no-actor unit packet.
 
-Agent-worktrees' `test_launch_seed_native.py` covers the dormant finite backend
+Agent-worktrees' `test_launch_seed_native.py` covers the finite backend and setup
 provider: retained one-time seed claims, literal argv, existing prompt-free
 execution observations, PID/birth and incarnation refusals, definite-spawn
 failure restoration, uncertain cleanup and terminal no-replay behavior.
-These controls do not activate a native shell, remove either production Python
-waiter, or qualify terminal/Job/install-removal behavior. The real PowerShell
+These controls do not qualify terminal/Job/install-removal behavior. Setup
+controls retain the existing host's PID/birth, keep the prompt unclaimed until
+backend dispatch and release admission-only preparation before the child lifetime.
+The real PowerShell
 seed-delivery consumer uses the existing finite process-tree owner so a timeout
 settles descendants rather than blocking on inherited capture pipes.
 The Windows-only `test_native_seed_shell.py` packet substitutes the finite
-provider but executes a real child through the dormant native adapter. It checks
+provider but executes a real child through the native adapter. It checks
 literal argv, retained PID/birth, exit, OS start refusal, uncertain receipts,
 absent end and exact redirected stdin/stdout/stderr. It is not interactive TTY,
-Ctrl+C, pane-Job or installation-survival evidence; production callers and the
-POSIX native adapter remain unchanged.
+Ctrl+C, pane-Job or installation-survival evidence. Whole copied-setup controls
+exercise the actual parameter binder, literal argv (including date-shaped
+strings), child ownership, correlated returns and absent end. POSIX native
+integration remains separate.
 Closed stdout/stderr reader controls exceed pipe capacity and require both
 actual child completion and the correlated return. Separate native controls
 split PowerShell's selected location from the OS process directory and assert
 the finite helper's and backend's actual cwd.
+The explicit Windows `tests/native/test_native_seed_console.py` packet uses a
+real windowless ConPTY and the canonical pane Job, both directly and under the
+outer pane wrapper. It tests a first interrupt without exit, a synthetic
+backend's own rapid-repeat termination policy, actual exit propagation and
+kernel child teardown. The synthetic count/window is not Copilot's policy.
+Control events are delivered by a bounded caller-owned helper attached only
+to the test's pinned ConPTY, not through the test runner's different console.
+This tests the native control-event path without depending on a synthetic
+stdin reader's scheduling; physical keyboard input in a real mux remains open.
+The fixture excludes pytest's captured std handles before creating the fresh
+terminal and checks native console handles, not `isatty()` alone (which accepts
+Windows `NUL`). The six adapter/outer-pane controls substitute finite policy replies.
+Full copied-setup admission controls instead use an actual completed runtime
+and check executable and same-host PowerShell-script backends through one
+interrupt, child survival, nonzero exit and the correlated return receipt.
+Neither lane is actual Copilot, real installer removal or live mux
+detach/reattach acceptance.
+The existing manual acceptance workflow's `native_launch` input selects only
+the focused Windows copied-setup packet at the immutable dispatch SHA. It is
+default-off, uses contained test roots without host-state opt-in, and does not
+expand required PR CI or select unrelated derived-diagnostic matrices.
+
+The explicit `tests/native/test_native_seed_runtime.py` lane constructs a real
+source-attributed runtime in a disposable installation and invokes its current-slot bootstrap from copied
+native consumers without replacing the finite provider. It checks backend
+and copied-setup lifetimes without a seed and with staged new/resume intent,
+literal arguments, real PID/birth and exit observations, one-time seed
+completion, nested operation correlation, prompt-free audit records and
+refusal of a different installation root. The fixture supplies no mux and
+uses a synthetic backend; it is not interactive Copilot, real mux, host rollout
+or uninstall/reinstall qualification.
+Its independently committed fixture omits test suites from the runtime source
+payload; it does not qualify full-repository source-retention latency.
+The finite provider's subprocess import-graph guard also keeps preparation and
+seed-daemon dependencies out of return-only callback startup. Monitor-path
+controls retain already-loaded CLI overrides without importing the full command
+surface merely to resolve the existing receipt owner's lock paths.
+Finite seed/receipt direct fallbacks import their declared canonical writer
+instead of the complete mutation roster. Registry controls verify owner identity,
+unchanged invalid-request fencing, unknown-verb discovery and ordinary daemon
+registration; no alternate mutation implementation or protocol version is added.
+The native phase watchdog control measures the approved ten-second cutoff
+against an actual stalled child, without retries or a resident waiter.
+Run the expensive current-runtime matrix explicitly on Windows with
+`python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_native_seed_runtime.py --allow-explicit-tiers --timeout 1000 --plugin-timeout 1600`.
+The existing `native` discovery exclusion keeps it out of ordinary unit CI.
 
 The optional native runtime-removal portfolio includes
 `tools/test_installer_engine_uninstall.py`,
@@ -1216,6 +1266,11 @@ with poisoned ambient CA/proxy/resolver/cache settings. Source selection,
 supported native configuration, stable policy identity and unsupported-provider/
 constraint refusals are distinct controls. Release-verifier backend responses
 remain synthetic; no live-feed or production approval is claimed.
+Native capture additionally compares equivalent ordered/duplicated certificate
+exports and proves that actual certificate additions/removals or changed
+transport verification flags still invalidate policy identity. Pure transport
+canonicalization controls live in `test_source_profile_derivation.py`; no
+machine certificate-store write or identity override is involved.
 The existing opt-in `wheel_inputs=true` Linux/Windows jobs include both suites;
 their six-minute budget and required unit-only CI roster are unchanged.
 Native deployment-reader cases also cover `downloadOrigins` parity. A real

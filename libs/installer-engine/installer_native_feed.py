@@ -386,6 +386,12 @@ class NativeFeedInputs:
     proxies: dict[str, str] = field(repr=False)
 
 
+def _transport_identity(context):
+    transport = _tls_record(context)
+    transport["certificates"] = sorted(set(transport["certificates"]))
+    return transport
+
+
 def capture_native_feed_inputs(
     transaction, projection: str, original: str, profile, policy: dict, uv: str,
     deadline: float, *, wheels: list[dict] | None, profile_policy: str,
@@ -471,8 +477,7 @@ def capture_native_feed_inputs(
                 cutoffs[name] = min(cutoffs[name], datetime.fromisoformat(value.replace("Z", "+00:00")))
     origins = tuple(policy["selection"].get("downloadOrigins", ()))
     context = _tls(network)
-    transport = _tls_record(context)
-    transport["certificates"] = sorted(transport["certificates"])
+    transport = _transport_identity(context)
     original_settings = _fields(_body(
         _projection(original, "PipCompileSettings").get("settings", ""), "PipSettings",
     ))

@@ -5,16 +5,53 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import sys
 from uuid import uuid4
 
 import pytest
+from agent_procutil.owned_process import run_caller_owned
 
 from agent_worktrees import config as cfg
-from agent_worktrees import launch_execution as audit, launch_seed_exec as legacy
+from agent_worktrees import launch_admission, launch_execution as audit, launch_seed_exec as legacy
 from agent_worktrees import launch_seed_native as native, launch_seed_state as seeds, locks, tracking
 from agent_worktrees.sessions import LiveVerdict
 
 pytestmark = pytest.mark.guard
+
+
+def test_finite_callback_import_does_not_load_preparation_or_seed_daemon():
+    result = run_caller_owned(
+        [sys.executable, "-I", "-B", "-c",
+         "import sys;import agent_worktrees.launch_seed_native;"
+         "assert 'agent_worktrees.launch_seed_exec' not in sys.modules;"
+         "assert 'agent_worktrees.launch_seed_state' not in sys.modules;"
+         "assert 'agent_worktrees.worktree_status_daemon' not in sys.modules"],
+        timeout=15, max_stdout_bytes=4096, max_stderr_bytes=4096,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_finite_monitor_paths_do_not_load_command_surface():
+    result = run_caller_owned(
+        [sys.executable, "-I", "-B", "-c",
+         "import sys;from agent_worktrees import status_monitor_runtime as monitor,config;"
+         "root=config.install_dir();"
+         "assert monitor._monitor_lock_path()==root/'status-monitor.lock';"
+         "assert monitor._monitor_registry_dir()==root/'status-monitor.d';"
+         "assert monitor._monitor_handoff_claim_root()==root/'status-monitor-handoffs.d';"
+         "assert 'agent_worktrees.__main__' not in sys.modules"],
+        timeout=15, max_stdout_bytes=4096, max_stderr_bytes=4096,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_finite_monitor_paths_preserve_loaded_cli_overrides(monkeypatch, tmp_path):
+    from agent_worktrees import __main__ as core, status_monitor_runtime as monitor
+
+    monkeypatch.setattr(core, "_aw_runtime_home", lambda: tmp_path)
+    assert monitor._monitor_lock_path() == tmp_path / "status-monitor.lock"
+    monkeypatch.setattr(core, "_monitor_lock_path", lambda: tmp_path / "selected.lock")
+    assert monitor._monitor_lock_path() == tmp_path / "selected.lock"
 
 
 @pytest.fixture
@@ -262,3 +299,84 @@ def test_native_cli_selects_only_current_completed_same_installation(tmp_path, m
         native.require_current_runtime(root)
         with pytest.raises(ValueError):
             native.require_current_runtime(Path("relative-engine"))
+
+
+def _setup(record, *, seed_id=None, **options):
+    script = record.parent / "default-setup.ps1"
+    script.write_text(
+        legacy.BOUNDARY_MARKER + "\n" + legacy.ATTEMPT_BOUNDARY_MARKER + "\n",
+        encoding="utf-8",
+    )
+    return native.prepare(
+        record, ["pwsh", "-NoProfile", "-File", str(script)], seed_id=seed_id,
+        setup=True, pid=os.getpid(), process_start_time=locks.process_start_time(os.getpid()),
+        **options,
+    )
+
+
+def test_setup_preparation_records_existing_owner_without_claiming_seed(record):
+    seed = seeds.stage(record, kind="new", text="retained until actual backend")
+    reply = _setup(record, seed_id=seed.seed_id)
+    assert reply["setup_seed_id"] == seed.seed_id
+    assert seeds.peek(record) == seed
+    saved = _saved(record, reply)
+    assert [event["phase"] for event in saved["events"]] == ["execution-requested", "process-spawned"]
+    assert saved["events"][-1]["details"] == {
+        "pid": os.getpid(), "process_start_time": locks.process_start_time(os.getpid()),
+        "boundary": "launcher-command",
+    }
+    backend = native.prepare(
+        record, ["copilot"], seed_id=seed.seed_id,
+        correlation=audit.Correlation(reply["attempt_id"], reply["resolution_id"], reply["operation_id"]),
+    )
+    assert backend["parent_id"] == reply["operation_id"]
+    _spawn(record, backend)
+    native.returned(record, _identity(backend), backend["operation_id"], exit_code=7)
+    native.returned(record, _identity(reply), reply["operation_id"], exit_code=7)
+    assert seeds.peek(record) is None
+    assert _saved(record, reply)["events"][-1]["details"]["process_exit_code"] == 7
+
+
+@pytest.mark.parametrize("preserve", [False, True])
+def test_setup_admission_releases_before_child_lifetime_and_never_takes_seed(record, preserve):
+    seed = seeds.stage(record, kind="resume", text="preserved bare-resume intent") if preserve else None
+    reply = _setup(
+        record, admission_only=True, preserve_seed_id=seed.seed_id if seed else None,
+    )
+    assert reply["setup_seed_id"] is None
+    with launch_admission.guard(record):
+        pass
+    assert seeds.peek(record) == seed
+    native.interrupted(record, _identity(reply), reply["operation_id"])
+    assert _saved(record, reply)["events"][-1]["phase"] == "unknown"
+    with pytest.raises(ValueError, match="do not replay"):
+        native.returned(record, _identity(reply), reply["operation_id"], exit_code=0)
+
+
+def test_setup_admission_cannot_hide_new_seed_or_bypass_busy_mutation(record):
+    with launch_admission.guard(record):
+        with pytest.raises(launch_admission.LaunchAdmissionBusy):
+            _setup(record, admission_only=True)
+    seed = seeds.stage(record, kind="new", text="later intent")
+    with pytest.raises(ValueError, match="refused"):
+        _setup(record, admission_only=True)
+    assert seeds.peek(record) == seed
+
+
+def test_setup_failure_leaves_prompt_unclaimed_and_never_records_backend(record):
+    seed = seeds.stage(record, kind="new", text="setup must not consume this")
+    reply = _setup(record, seed_id=seed.seed_id)
+    native.interrupted(record, _identity(reply), reply["operation_id"])
+    assert seeds.peek(record) == seed
+    saved = _saved(record, reply)
+    assert saved["events"][-1]["phase"] == "unknown"
+    assert all(event.get("details", {}).get("boundary") != "backend-command" for event in saved["events"])
+
+
+def test_setup_refuses_unconfirmed_owner_before_any_receipt(record):
+    with pytest.raises(ValueError, match="identity is unconfirmed"):
+        native.prepare(
+            record, ["copilot"], seed_id=None, setup=True,
+            pid=os.getpid(), process_start_time="0",
+        )
+    assert not list((record.parent / "launch-attempts").glob("*/*.execution.json"))

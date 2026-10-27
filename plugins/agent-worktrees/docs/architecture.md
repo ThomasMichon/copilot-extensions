@@ -574,7 +574,7 @@ Missing/incompatible handlers and
 unconfirmed responses close quietly without claiming notification delivery.
 
 These are shell-storage and callback boundaries, not complete installation
-survival: deferred setup/seed execution can still retain runtime-Python waiters.
+survival: unsupported seed/setup paths can still retain runtime-Python waiters.
 Untracked/anchor, older-owner and MSYS/Cygwin launcher paths retain legacy construction. Copied assets
 are retained in launch-owned state; no age-based sweep may delete a live or
 unconfirmed execution. Remaining launch/admission and reclamation integration is
@@ -589,18 +589,60 @@ owner must retain its actual child handle across the PID/birth observation.
 Only definite spawn failure restores a claim. Actual spawn finishes it, while
 terminal or unknown outcomes never authorize automatic replay. Return records
 the actual child code separately from uncertain bookkeeping.
-No production launch capability or native shell caller is activated by this
-provider alone; both legacy runtime waiters remain until consumer integration.
-The dormant Windows `scripts/native-seed-boundary.ps1` adapter is dot-sourced
-into an existing owner. It retains the actual child handle and wait, selecting
+On Windows, a current engine recognizes its canonical normalized setup's
+`native-setup-owner-v1` marker, a PowerShell 7 host and the selected canonical
+pane wrapper's `native-console-owner-v1` capability. It copies setup, the
+existing command wrapper, native adapter and machine-settings helper into the existing launch-attempt
+namespace outside both installation roots, then returns that setup command
+directly instead of a deferred Python waiter. Preview plans create no assets.
+The normal outer `launch-command.ps1` prefix is retained and relocated with its
+sibling setup, preserving that owner's existing same-host dot-source fast path
+and its fallback semantics rather than introducing another forwarding layer.
+Resolution inserts the same typed attempt/resolution correlation before the
+native argument envelope. Old scripts, Windows PowerShell, custom launchers and
+POSIX retain their previous path rather than silently accepting new syntax.
+An older pane provider also keeps the legacy command. A new prepared Windows
+pane receives a copy of the engine-owned native helper beside the canonical
+wrapper. Both waiting shell owners suppress only their own Ctrl+C/Break
+cancellation while the backend decides whether to continue or exit; this
+preserves outer post-child callbacks as well as child survival. Close/logoff
+handling and the pane's kill-on-close Job remain intact. Older engines do not
+copy this helper, so a newer wrapper without it retains its previous behavior.
+The copied setup performs finite admission/preparation before hooks or backend
+dispatch. It records its existing host PID/birth as the launcher owner, leaves
+the prompt unclaimed, and passes its operation ID as the backend's parent.
+Admission-only preparation takes the existing worktree lease only for its
+preflight; seeded preparation uses the seed authority's own guards. Neither
+holds a seed-admission lease through the child lifetime. This does not yet
+qualify the separate concurrent mux check/create/join contract.
+Admission-only setup protects its direct backend wait with the same native
+console-control helper, including same-host PowerShell-script execution.
+The outer pane's handler does not substitute for this setup-host protection.
+
+The Windows `scripts/native-seed-boundary.ps1` adapter is dot-sourced
+into that existing setup owner. It retains the actual child handle and wait, selecting
 the current completed runtime from the original root for each finite callback.
+Each native setup/seed/execution phase allows ten seconds for the current
+runtime call, then kills its child tree and retains unconfirmed state without
+retry. This does not change the separate pane lifecycle or mux-query deadlines.
+Finite receipt and seed direct fallbacks import their canonical registered
+writer, retaining the shared authority checks rather than loading unrelated
+mutation owners. Monitor-path compatibility uses an already-loaded CLI module,
+never a full command-surface import just to find the receipt lock.
 Consoleless redirected output uses asynchronous byte forwarding with inherited
 stdin; a real terminal retains direct unredirected streams. Kernel child/task
 waits recover a failed output destination by draining its remaining pipe,
 without polling or suppressing the actual exit callback. Finite helpers and
 the backend use PowerShell's explicit filesystem location rather than inheriting
-a potentially different process directory. Native terminal/
-Ctrl+C, copied-asset/caller and POSIX integration remain separate acceptance.
+a potentially different process directory. Direct executables and normalized
+PowerShell backend scripts use these finite phases, removing the final Python
+waiter too. Batch backend launchers retain the legacy invocation to preserve
+their shell semantics; they are not installation-survival qualified.
+Normal setup return records its real backend result; an interrupted setup
+records an unknown outcome rather than inventing a child exit. Missing end
+handlers remain quiet and do not change the result. Native terminal/Ctrl+C,
+actual installation-removal, mixed-generation and POSIX acceptance remain
+separate gates; copying assets or passing fixture tests does not close them.
 
 ### Current session, conclusion, and succession (the head pointer)
 

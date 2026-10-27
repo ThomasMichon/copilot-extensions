@@ -5,6 +5,20 @@ Back to the [canonical effort](README.md).
 The operator's literal proposal is retained below, including original typos.
 The effort README labels subsequent agent-recommended controls separately.
 
+## Operator - Reviewed native phase deadline
+
+The agent presented this decision after actual Windows current-runtime phases
+repeatedly exceeded the five-second cap:
+
+> Real Windows cold callbacks still exceed the contract’s five-second phase cap after removing avoidable imports. Should I keep engineering against five seconds, or revise the contract to a ten-second cap and take that change through normal review and validation? No retries or resident Python waiter would be added.
+
+The operator selected:
+
+> review-ten
+
+This authorizes the native Windows phase deadline revision, not a bypass of
+review, acceptance, custody or live-host safeguards.
+
 ## Operator - Minimal launcher and redirectable hooks
 
 > Can we look into making the session launcher as barebones as possible, using "hooks" before and after the copilot session that call through to redirectable binstubs? By the time a Copilot session exits, the universe around it can look very different, but the core construction stays the same:
@@ -115,3 +129,9 @@ surrounding requirement is changed.
 > Great. Continue driving. Your goal is to be able to have us live-test on [selected test host]: we'll record which sessions are currently active, exit all their current mux sessions, uninstall (and likely manually scrub) copilot-extensons services and tools, do a fresh install, restore the muxes using the new system, then uninstall, scrub, and reinstall again. When I say "scrub" I just mean straggler processes and detritus that our current uninstall flow might miss, not runtime state or config.
 
 > Make sure you have an effort tracking the remaining phases of this work, so you can burndown to completion
+
+## Operator - graceful exit and repeated interrupt behavior
+
+> I've started using `/exit` in the CLI prompt to exit instead of trusting `Ctrl+C`, as Ctrl+C too-readily kills the parent Mux attach (leaving the pane running) instead of properly exiting Copilot
+
+> Ctrl+C has to be hit multiple times in a row within a duration to terminate Copilot; one round will not suffice
