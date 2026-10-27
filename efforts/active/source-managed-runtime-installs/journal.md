@@ -2,6 +2,7 @@
 
 [Back to the effort](README.md). The Plan and Validation Plan remain the completion gate.
 
+- [2026-10-27 - Finite native footprints merged and macOS qualified](<journal/2026/10.27 native-runtime-removal.md>)
 - [2026-10-26 - State-preserving removal foundation](<journal/2026/10.26 runtime-removal.md>)
 - [2026-10-25 - Bridge fixed-recipe prerequisite](<journal/2026/10.25 bridge-first-use.md>)
 - [2026-10-25 - Bridge legacy bootstrap adoption](<journal/2026/10.25 bridge-bootstrap.md>)
