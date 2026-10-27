@@ -5333,3 +5333,30 @@ then proves bottom-up sibling settlement, BOTH-finalized removal retention,
 and preservation of untracked, modified and unpublished committed knowledge.
 These are on-demand filesystem/process controls, not additions to required
 unit-only CI or a claim of installed-runtime rollout.
+
+
+## Guarded Windows observation recovery
+
+Run `test_observation_review_regressions.py`,
+`test_windows_observation_custody.py` and
+`test_status_monitor_guarded_recovery.py` through the normal agent-worktrees
+plugin test runner. They protect main-thread cancellation propagation,
+background custody transfer, secondary cancellation during final updater
+settlement, real singleton-lease contention, deferred cache invalidation and
+strict serving/retirement receipts. The canonical procutil
+`test_windows_observation_spawn.py` injects all CRT/Win32-only dependencies;
+its pure creation/cleanup cases are not platform-skipped.
+
+For explicit native proof on Windows, set
+`AGENT_WORKTREES_NATIVE_RECOVERY=1` and select
+`tests\test_status_monitor_guarded_recovery_native.py`,
+`tests\test_status_monitor_guarded_cutover_native.py` and
+`tests\test_git_observation_native.py` with repeated `--test-file` arguments
+to `tools\run-plugin-tests.py agent-worktrees`. Keep the existing isolated
+runner and finite timeouts; do not use host-state opt-outs. The native helpers
+are disposable strict Job-owned processes, not production monitors or agents.
+They exercise real loopback framing, route/identity barriers, a successful
+published-successor handoff, failed/unready promotion, accepted-but-unsettled
+predecessor shutdown and exact native exit. These process-level witnesses stay
+outside the required no-actor promotion unit packet and do not qualify an
+installed rollout or a performance threshold.

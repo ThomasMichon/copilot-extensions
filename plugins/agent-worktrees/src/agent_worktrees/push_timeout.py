@@ -22,8 +22,11 @@ holding a lock/mutex) after the caller has already given up and returned.
 from __future__ import annotations
 
 import os
+import math
 import platform
 import subprocess
+import threading
+import time
 from typing import Literal, overload
 
 from agent_procutil import (
@@ -36,6 +39,286 @@ from agent_procutil import (
 #: 180s covers the documented worst-case provisioning ETA (120s) plus buffer
 #: for a contended provisioning mutex.
 DEFAULT_PUSH_TIMEOUT = 180.0
+OBSERVATION_CLEANUP_SECONDS = 5.0
+
+
+class ObservationUnavailable(subprocess.SubprocessError):
+    """The observation cannot acquire its own descendant containment."""
+
+
+class _ObservationReader:
+    def __init__(self, stream):
+        self.stream, self.chunks, self.error = stream, [], None
+        self.done = threading.Event()
+        self.attempted = False
+        self.launch_failure = None
+        self.never_started = False
+        self.thread = threading.Thread(target=self._read, name="git-observation-pipe", daemon=True)
+
+    def confirm_never_started(self):
+        if self.never_started:
+            return True
+        if self.launch_failure is None:
+            return False
+        lock = getattr(threading, "_active_limbo_lock", None)
+        pending = getattr(threading, "_limbo", None)
+        started = getattr(self.thread, "_started", None)
+        if lock is None or pending is None or started is None or not lock.acquire(False):
+            return False
+        try:
+            # Thread.start registers pending creation before the native launch;
+            # bootstrap records identity/start before removing that registration.
+            self.never_started = (
+                self.thread not in pending and self.thread.ident is None and not started.is_set()
+            )
+            return self.never_started
+        finally:
+            lock.release()
+
+    def _read(self):
+        try:
+            while chunk := self.stream.read(65536):
+                self.chunks.append(chunk)
+        except BaseException as error:
+            self.error = error
+        finally:
+            self.done.set()
+
+
+class _ObservationProcess:
+    """Local reader/root custody for the private atomic Windows adapter."""
+
+    def __init__(self, args, *, command_deadline, cleanup_deadline):
+        self.args, self.deadline = args, command_deadline
+        self.cleanup_deadline = cleanup_deadline
+        self.native = self.job = None
+        self.readers = []
+        self.cleaning = False
+
+    def attach(self, native, job):
+        self.native, self.job = native, job
+        self.stdin, self.stdout, self.stderr = native.stdin, native.stdout, native.stderr
+        for stream in (self.stdout, self.stderr):
+            self.readers.append(_ObservationReader(stream))
+
+    @property
+    def returncode(self):
+        return self.native.returncode
+
+    def begin_cleanup(self):
+        self.cleaning = True
+        self.deadline = self.cleanup_deadline
+
+    def communicate(self, *, timeout):
+        def remaining():
+            return 0 if timeout == 0 else min(timeout, max(0, self.deadline - time.monotonic()))
+
+        for reader in self.readers:
+            if self.cleaning and (not reader.attempted or reader.confirm_never_started()):
+                reader.stream.close()
+                reader.done.set()
+            elif not reader.attempted:
+                reader.attempted = True
+                try:
+                    reader.thread.start()
+                except RuntimeError as error:
+                    reader.launch_failure = error
+                    raise
+        for reader in self.readers:
+            if not reader.done.wait(remaining()):
+                raise subprocess.TimeoutExpired(self.args, timeout)
+            if reader.attempted and not reader.never_started:
+                reader.thread.join(remaining())
+                if reader.thread.is_alive():
+                    raise subprocess.TimeoutExpired(self.args, timeout)
+            if reader.error is not None and not self.cleaning:
+                raise reader.error
+        return tuple(
+            b"".join(reader.chunks).decode("utf-8", errors="replace")
+            .replace("\r\n", "\n").replace("\r", "\n") for reader in self.readers
+        )
+
+    def wait(self, *, timeout):
+        return self.native.wait(timeout)
+
+    def close(self):
+        if not self.cleaning or self.returncode is None or any(
+            not reader.done.is_set() or (
+                reader.attempted and not reader.never_started and reader.thread.is_alive()
+            )
+            for reader in self.readers
+        ):
+            raise RuntimeError("native observation root/readers remain unconfirmed")
+        for stream in (self.stdin, self.stdout, self.stderr):
+            if stream is not None:
+                stream.close()
+        self.native.close()
+
+
+def _spawn_observation(cmd, *, cwd, env, deadline, command_deadline):
+    from agent_procutil._windows_caller_owned import spawn
+    from agent_procutil.owned_process import OwnedCleanupError
+
+    process = _ObservationProcess(cmd, command_deadline=command_deadline, cleanup_deadline=deadline)
+    try:
+        native, job = spawn(
+            cmd, cwd=cwd, env=env, cleanup_deadline=deadline,
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+    except OwnedCleanupError as error:
+        attachment_error = None
+        try:
+            process.attach(error.process, error.job)
+        except BaseException as interrupted_attachment:
+            attachment_error = interrupted_attachment
+        failure = ObservationCleanupError("atomic creation cleanup was not confirmed")
+        failure.process, failure.job = process, error.job
+        failure.operation_error = getattr(error, "operation_error", error.__cause__)
+        cleanup_error = getattr(error, "cleanup_error", None)
+        if isinstance(cleanup_error, (KeyboardInterrupt, SystemExit)) and not isinstance(
+            failure.operation_error, (KeyboardInterrupt, SystemExit),
+        ):
+            failure.operation_error = cleanup_error
+        if isinstance(attachment_error, (KeyboardInterrupt, SystemExit)) and not isinstance(
+            failure.operation_error, (KeyboardInterrupt, SystemExit),
+        ):
+            failure.operation_error = attachment_error
+        failure.attachment_error = attachment_error
+        failure._job_empty_confirmed = getattr(error, "_job_empty_confirmed", False)
+        failure.observation_deadline, failure.observation_path = deadline, cwd
+        raise failure from error
+    try:
+        process.attach(native, job)
+    except BaseException as error:
+        failure = ObservationCleanupError("atomic reader preparation was not confirmed")
+        failure.process, failure.job = process, job
+        failure.operation_error = error
+        failure.observation_deadline, failure.observation_path = deadline, cwd
+        raise failure from error
+    return process, job
+
+
+class ObservationCleanupError(subprocess.SubprocessError):
+    """An owned observation did not confirm complete cleanup."""
+
+    def try_settle(self) -> bool:
+        if getattr(self, "_settled", False):
+            return True
+        if not getattr(self, "_job_empty_confirmed", False):
+            if self.job is None:
+                raise RuntimeError("no owned Job to confirm")
+            if not self.job.try_terminate_and_confirm_empty():
+                return False
+            self._job_empty_confirmed = True
+        try:
+            if hasattr(self.process, "begin_cleanup"):
+                self.process.begin_cleanup()
+            self.process.communicate(timeout=0)
+            self.process.wait(timeout=0)
+        except subprocess.TimeoutExpired:
+            return False
+        for stream in (self.process.stdin, self.process.stdout, self.process.stderr):
+            if stream is not None:
+                stream.close()
+        if hasattr(self.process, "close"):
+            self.process.close()
+        self._settled = True
+        return True
+
+
+class ObservationCleanupPending(subprocess.SubprocessError):
+    """The existing observation owner has not released this scope."""
+
+
+def _observation_options(deadline: float, *, cap: float | None = None) -> dict:
+    remaining = deadline - time.monotonic()
+    if remaining <= OBSERVATION_CLEANUP_SECONDS:
+        error = subprocess.TimeoutExpired("git observation", max(0, remaining))
+        error.observation_started = False
+        raise error
+    return {
+        "timeout": min(remaining, cap) if cap is not None else remaining,
+        "kill_tree": True, "observation_deadline": deadline,
+    }
+
+
+def _observation_wait(cmd: list[str], deadline: float, reserve: float = 0) -> float:
+    remaining = deadline - time.monotonic() - reserve
+    if remaining <= 0:
+        error = subprocess.TimeoutExpired(cmd, 0)
+        error.observation_started = False
+        raise error
+    return remaining
+
+
+def _run_observation(cmd: list[str], *, cwd, env: dict, timeout, deadline: float):
+    if platform.system() != "Windows":
+        raise ObservationUnavailable("bounded observation is Windows-only; POSIX work remains open")
+    from agent_procutil.owned_process import require_caller_owned_support
+
+    try:
+        require_caller_owned_support()
+    except (RuntimeError, OSError) as error:
+        raise ObservationUnavailable(str(error)) from error
+    wait = _observation_wait(cmd, deadline, OBSERVATION_CLEANUP_SECONDS)
+    if timeout is not None:
+        wait = min(wait, timeout)
+    if wait <= 0:
+        error = subprocess.TimeoutExpired(cmd, 0)
+        error.observation_started = False
+        raise error
+    command_deadline = min(deadline - OBSERVATION_CLEANUP_SECONDS, time.monotonic() + wait)
+    _observation_wait(cmd, command_deadline)
+    try:
+        proc, job = _spawn_observation(
+            cmd, cwd=cwd, env=env, deadline=deadline, command_deadline=command_deadline,
+        )
+    except (RuntimeError, OSError) as error:
+        raise ObservationUnavailable(str(error)) from error
+    if job is None:
+        failure = ObservationCleanupError("strict observation Job unavailable after launch")
+        failure.process, failure.job = proc, job
+        failure.observation_deadline, failure.observation_path = deadline, cwd
+        raise failure
+    stdout = stderr = ""
+    job_empty_confirmed = False
+    operation_error = None
+    try:
+        try:
+            stdout, stderr = proc.communicate(
+                timeout=_observation_wait(cmd, command_deadline),
+            )
+        except BaseException as error:
+            operation_error = error
+            if isinstance(error, subprocess.TimeoutExpired):
+                error.observation_started = True
+            raise
+    finally:
+        try:
+            job.terminate_and_wait(_observation_wait(cmd, deadline))
+            job_empty_confirmed = True
+            if hasattr(proc, "begin_cleanup"):
+                proc.begin_cleanup()
+            proc.communicate(timeout=_observation_wait(cmd, deadline))
+            proc.wait(timeout=_observation_wait(cmd, deadline))
+            for stream in (proc.stdin, proc.stdout, proc.stderr):
+                if stream is not None:
+                    stream.close()
+            if hasattr(proc, "close"):
+                proc.close()
+        except BaseException as error:
+            failure = ObservationCleanupError("observation cleanup was not confirmed")
+            failure.process, failure.job = proc, job
+            failure._job_empty_confirmed = job_empty_confirmed
+            failure.operation_error = operation_error
+            if isinstance(error, (KeyboardInterrupt, SystemExit)) and not isinstance(
+                operation_error, (KeyboardInterrupt, SystemExit),
+            ):
+                failure.operation_error = error
+            failure.cleanup_error = error
+            failure.observation_deadline, failure.observation_path = deadline, cwd
+            raise failure from error
+    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
 
 
 def _kill_tree(proc: subprocess.Popen) -> None:
@@ -89,6 +372,7 @@ def _kill_tree(proc: subprocess.Popen) -> None:
 def run_bounded(
     cmd: list[str], *, cwd: str | os.PathLike | None, env: dict, timeout: float | None,
     inherit_process_group: bool = False, binary: Literal[False] = False, input: None = None,
+    observation_deadline: float | None = None,
 ) -> subprocess.CompletedProcess[str]: ...
 
 
@@ -96,12 +380,14 @@ def run_bounded(
 def run_bounded(
     cmd: list[str], *, cwd: str | os.PathLike | None, env: dict, timeout: float | None,
     inherit_process_group: bool = False, binary: Literal[True], input: bytes | None = None,
+    observation_deadline: float | None = None,
 ) -> subprocess.CompletedProcess[bytes]: ...
 
 
 def run_bounded(
     cmd: list[str], *, cwd: str | os.PathLike | None, env: dict, timeout: float | None,
     inherit_process_group: bool = False, binary: bool = False, input: bytes | None = None,
+    observation_deadline: float | None = None,
 ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
     """Run *cmd*, capturing output; on a stall past *timeout*, kill its
     ENTIRE process tree (see module docstring) before re-raising
@@ -112,9 +398,19 @@ def run_bounded(
     ``inherit_process_group`` is for unbounded foreground work inside the
     Manager's owned group; the outer owner retains descendant cleanup.
     ``binary`` retains opaque bytes, with optional bytes supplied on stdin.
+    ``observation_deadline`` opts text-only, independent observations into a
+    single absolute monotonic ceiling, reserving cleanup inside that ceiling.
     """
     if input is not None and not binary:
         raise ValueError("bytes input requires binary capture")
+    if observation_deadline is not None:
+        if type(observation_deadline) not in (float, int) or not math.isfinite(observation_deadline):
+            raise ValueError("observation_deadline must be a finite monotonic instant")
+        if binary or input is not None or inherit_process_group:
+            raise ValueError("observation requires text capture and independent containment")
+        return _run_observation(
+            cmd, cwd=cwd, env=env, timeout=timeout, deadline=observation_deadline,
+        )
     windows = platform.system() == "Windows"
     proc, job = spawn_sync_in_kill_on_close_job(
         cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,

@@ -6,8 +6,10 @@ from contextlib import ExitStack
 import ctypes
 from ctypes import wintypes
 from functools import lru_cache
+import math
 import os
 import subprocess
+import time
 
 from agent_procutil import JobHandle, _build_job_extended_limit_info, _configure_job_api, _kernel32
 
@@ -128,11 +130,21 @@ def _environment_block(environment):
     return ctypes.create_unicode_buffer("\0".join(entries) + "\0\0")
 
 
-def spawn(argv: list[str], **kwargs):
+def spawn(argv: list[str], *, cleanup_deadline: float | None = None, **kwargs):
     """Create the target in its strict Job atomically, before it can run."""
     import msvcrt
     from agent_procutil.owned_process import OwnedCleanupError
 
+    def remaining():
+        budget = cleanup_deadline - time.monotonic()
+        if budget <= 0:
+            raise subprocess.TimeoutExpired(argv, 0)
+        return budget
+
+    if cleanup_deadline is not None:
+        if type(cleanup_deadline) not in (int, float) or not math.isfinite(cleanup_deadline):
+            raise ValueError("cleanup_deadline must be a finite monotonic instant")
+        remaining()
     environment = _environment_block(kwargs.get("env"))
     cwd = os.fspath(kwargs["cwd"]) if kwargs.get("cwd") is not None else None
     if cwd is not None and (not isinstance(cwd, str) or "\0" in cwd):
@@ -200,6 +212,8 @@ def spawn(argv: list[str], **kwargs):
             try:
                 for fd in child_fds:
                     os.set_handle_inheritable(msvcrt.get_osfhandle(fd), True)
+                if cleanup_deadline is not None:
+                    remaining()
                 if not kernel.CreateProcessW(
                     None, command, None, None, True,
                     0x80000 | 0x8000000 | 4 | (0x400 if environment is not None else 0),
@@ -207,18 +221,40 @@ def spawn(argv: list[str], **kwargs):
                 ):
                     raise ctypes.WinError(ctypes.get_last_error())
                 process = _Process(argv, info, streams)
+                if cleanup_deadline is not None:
+                    remaining()
                 if kernel.ResumeThread(info.hThread) == 0xFFFFFFFF:
                     raise ctypes.WinError(ctypes.get_last_error())
             finally:
+                if cleanup_deadline is not None and info.hProcess:
+                    # Transfer before ExitStack unwinds on post-create failure.
+                    parent_streams.pop_all()
                 if info.hThread:
                     kernel.CloseHandle(info.hThread)
             # Transfer only parent streams and native custody, never inheritable child handles.
             parent_streams.pop_all()
             return process, job
-    except BaseException:
+    except BaseException as operation_error:
         if process is None and info.hProcess:
             process = _Process(argv, info, streams)
         if process is not None:
+            if cleanup_deadline is not None:
+                job_empty_confirmed = False
+                try:
+                    job.terminate_and_wait(remaining())
+                    job_empty_confirmed = True
+                    process.wait(max(0.0, cleanup_deadline - time.monotonic()))
+                    for stream in (process.stdin, process.stdout, process.stderr):
+                        if stream is not None:
+                            stream.close()
+                    process.close()
+                except BaseException as cleanup_error:
+                    failure = OwnedCleanupError(process, job)
+                    failure.operation_error = operation_error
+                    failure.cleanup_error = cleanup_error
+                    failure._job_empty_confirmed = job_empty_confirmed
+                    raise failure from operation_error
+                raise
             try:
                 job.terminate_and_wait(2.0)
                 process.wait(2.0)

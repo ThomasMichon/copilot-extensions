@@ -2449,7 +2449,7 @@
         "fleet-manager/tests/test_host_profile.py": "37448c7b4dc138a8234556cee32872b4d4ddbb123ab5ef4dba6cc47b497eb298",
         "fleet-manager/tests/test_trusted_systemd_profile.py": "f5e02393ac409efd446073d68c36bc56930f9522fb14d0d7d40c975987609354",
         "libs/agent-procutil/setup.py": "fc307f6a4c180344b0f95a8f31d7db63747e56549d55bd32221f3185a89e39b1",
-        "libs/agent-procutil/src/agent_procutil/__init__.py": "8138b44223df2f5849c165033c9b503060cea5b80665879a240294cb3dd32aef",
+        "libs/agent-procutil/src/agent_procutil/__init__.py": "6b7b3db8dc5bee2cdfd3782f843a5819a60bb19a23bacbd0ed2b432215fdd04d",
         "libs/agent-procutil/src/agent_procutil/_async.py": "1f5ba1ec9b2cdf5608e446f5f334c1989a7e71dbc7dd515c158cf26c26c5fb71",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_child.py": "081933f7f8512827ff9fe0800a3bf226b0d4a757114e9b7060b63081b5aea644",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_identity.py": "c2e0010c35f710c0ce5668840d68ee1e088b288651f5d74f5fc0bd56c2744723",
