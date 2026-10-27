@@ -371,6 +371,12 @@ def _tree_size(path: Path) -> int:
     return total
 
 
+def _temp_storage_violation(used_bytes: int, max_mb: int) -> str | None:
+    if used_bytes > max_mb * 1024 * 1024:
+        return f"temporary-storage limit exceeded ({max_mb} MiB)"
+    return None
+
+
 def _linux_group_usage(pgid: int, *, live_only: bool = False) -> tuple[int, int] | None:
     proc_root = Path("/proc")
     if not proc_root.is_dir():
@@ -865,13 +871,8 @@ def _run_contained_process(
             if returncode is not None:
                 return returncode
             violation = None
-            if now >= next_temp_check:
-                temp_bytes = _tree_size(sandbox)
-                if temp_bytes > limits.max_temp_mb * 1024 * 1024:
-                    violation = (
-                        "temporary-storage limit exceeded "
-                        f"({limits.max_temp_mb} MiB)"
-                    )
+            if sys.platform != "darwin" and now >= next_temp_check:
+                violation = _temp_storage_violation(_tree_size(sandbox), limits.max_temp_mb)
                 next_temp_check = now + max(2.0, limits.poll_seconds)
             if violation is None and now >= next_usage_check:
                 usage = (
@@ -894,6 +895,10 @@ def _run_contained_process(
                     elif rss_bytes > limits.max_memory_mb * 1024 * 1024:
                         violation = f"memory limit exceeded ({limits.max_memory_mb} MiB)"
                 next_usage_check = now + limits.poll_seconds
+            # Due Darwin resource sampling precedes synchronous directory traversal.
+            if sys.platform == "darwin" and violation is None and now >= next_temp_check:
+                violation = _temp_storage_violation(_tree_size(sandbox), limits.max_temp_mb)
+                next_temp_check = now + max(2.0, limits.poll_seconds)
             if violation is not None:
                 print(f"[LIMIT] {violation}", file=sys.stderr)
                 return 124

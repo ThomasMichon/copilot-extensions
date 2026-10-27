@@ -49,6 +49,7 @@ def test_native_removal_is_an_isolated_manual_selection():
     assert "tools/run-plugin-tests.py agent-worktrees" in command
     assert "--test-file tests/test_native_uninstall_footprint.py" in command
     assert "--test-file tests/test_uninstall_project_commands.py" in command
+    assert '"PYTEST_ADDOPTS=--maxfail=1 --tb=short"' in command
     for name in ("Bounded libproc and exact-argv inspection",
                  "Complete native Worktrees uninstall entrypoints"):
         command = STEPS[name]["run"]

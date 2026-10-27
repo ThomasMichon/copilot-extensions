@@ -758,6 +758,139 @@ def test_poll_deadline_is_clamped_to_remaining_wall_budget(
     assert poll_process.events.count("cleanup") == 1
 
 
+def test_slow_temp_scan_cannot_consume_the_due_darwin_census_window(
+    poll_process, poll_clock, monkeypatch,
+):
+    codes = iter([None, None, 0])
+    monkeypatch.setattr(containment, "_posix_exit_code", lambda *a: next(codes))
+    events = []
+    def scan(sandbox):
+        events.append(("temp", poll_clock.now))
+        poll_clock.now += 0.4
+        return 0
+    def census(pid, *, deadline):
+        events.append(("census", poll_clock.now, deadline))
+        return 2, MIB
+    monkeypatch.setattr(containment, "_tree_size", scan)
+    monkeypatch.setattr(posix_observation, "_darwin_group_usage", census)
+    assert poll_process.run(poll_seconds=0.25) == 0
+    assert [event[0] for event in events] == ["census", "temp", "census"]
+    assert events[0] == ("census", 0.0, 0.25)
+    assert events[2][1:] == pytest.approx((0.4, 0.65))
+    assert poll_clock.sleeps == pytest.approx([0.0, 0.25])
+    assert poll_clock.now == pytest.approx(0.65)
+
+
+@pytest.mark.parametrize("later_row,limits,diagnostic", [
+    ((4, MIB), {"max_processes": 2}, "process-count limit exceeded"),
+    ((2, 2 * MIB), {"max_memory_mb": 1}, "memory limit exceeded"),
+])
+def test_slow_temp_overrun_requires_fresh_counters_on_next_cycle(
+    poll_process, poll_clock, monkeypatch, later_row, limits, diagnostic,
+):
+    codes = iter([None, None])
+    monkeypatch.setattr(containment, "_posix_exit_code", lambda *a: next(codes))
+    calls = []
+    def scan(sandbox):
+        poll_clock.now += 0.4
+        return 0
+    def census(pid, *, deadline):
+        calls.append((poll_clock.now, deadline))
+        if len(calls) == 1:
+            raise _known_churn()
+        return (2, MIB) if len(calls) == 2 else later_row
+    monkeypatch.setattr(containment, "_tree_size", scan)
+    monkeypatch.setattr(posix_observation, "_darwin_group_usage", census)
+    assert poll_process.run(poll_seconds=0.25, **limits) == 124
+    assert diagnostic in poll_process.stderr.getvalue()
+    assert [started for started, _ in calls] == pytest.approx([0.0, 0.05, 0.45])
+    assert [deadline for _, deadline in calls] == pytest.approx([0.25, 0.25, 0.70])
+    assert poll_clock.sleeps == [0.05, 0.0]
+
+
+@pytest.mark.parametrize("wall", [0.1, 0.3])
+def test_slow_temp_scan_does_not_renew_wall_budget_or_hide_elapsed_exit(
+    poll_process, poll_clock, monkeypatch, wall,
+):
+    deadlines = []
+    def scan(sandbox):
+        poll_clock.now += 0.4
+        return 0
+    def census(pid, *, deadline):
+        deadlines.append(deadline)
+        return 2, MIB
+    monkeypatch.setattr(containment, "_tree_size", scan)
+    monkeypatch.setattr(posix_observation, "_darwin_group_usage", census)
+    assert poll_process.run(wall_seconds=wall, poll_seconds=0.25) == 124
+    assert "wall-clock limit exceeded" in poll_process.stderr.getvalue()
+    assert deadlines == [min(0.25, wall)]
+    assert poll_clock.now == 0.4
+    assert poll_clock.sleeps == [0.0]
+
+
+def test_darwin_slow_temp_scan_still_enforces_storage_limit(
+    poll_process, poll_clock, monkeypatch,
+):
+    events = []
+    def scan(sandbox):
+        events.append("temp")
+        poll_clock.now += 0.4
+        return 2 * MIB
+    def census(pid, *, deadline):
+        events.append("census")
+        return 2, MIB
+    monkeypatch.setattr(containment, "_tree_size", scan)
+    monkeypatch.setattr(posix_observation, "_darwin_group_usage", census)
+    assert poll_process.run(poll_seconds=0.25, max_temp_mb=1) == 124
+    assert "temporary-storage limit exceeded (1 MiB)" in poll_process.stderr.getvalue()
+    assert events == ["census", "temp"]
+    assert poll_clock.sleeps == []
+
+
+def test_darwin_temp_and_resource_checks_keep_their_original_due_times(
+    poll_process, poll_clock, monkeypatch,
+):
+    codes = iter([None, None, None, 0])
+    monkeypatch.setattr(containment, "_posix_exit_code", lambda *a: next(codes))
+    temp_times, resource_times = [], []
+    def scan(sandbox):
+        temp_times.append(poll_clock.now)
+        poll_clock.now += 0.4
+        return 0
+    def census(pid, *, deadline):
+        resource_times.append(poll_clock.now)
+        return 2, MIB
+    monkeypatch.setattr(containment, "_tree_size", scan)
+    monkeypatch.setattr(posix_observation, "_darwin_group_usage", census)
+    assert poll_process.run() == 0
+    assert resource_times == [0.0, 1.0, 2.0]
+    assert temp_times == [0.0, 2.0]
+    assert poll_clock.sleeps == pytest.approx([0.6, 1.0, 0.6])
+    assert poll_clock.now == 3.0
+
+
+@pytest.mark.parametrize("platform", ["linux", "freebsd", "win32"])
+def test_non_darwin_temp_order_and_slow_scan_sleep_are_unchanged(
+    poll_process, poll_clock, monkeypatch, platform,
+):
+    monkeypatch.setattr(containment, "sys",
+                        SimpleNamespace(platform=platform, stderr=poll_process.stderr))
+    events = []
+    def scan(sandbox):
+        events.append("temp")
+        poll_clock.now += 0.4
+        return 0
+    def census(pid):
+        events.append("census")
+        return 2, MIB
+    monkeypatch.setattr(containment, "_tree_size", scan)
+    monkeypatch.setattr(containment, "_posix_group_usage", census)
+    assert poll_process.run(poll_seconds=0.25) == 0
+    assert events == ["temp", "census"]
+    assert poll_clock.sleeps == [0.25]
+    assert poll_clock.now == 0.65
+
+
 @pytest.mark.parametrize("platform", ["linux", "freebsd", "win32"])
 def test_non_darwin_poll_retains_its_existing_sleep_behavior(
     poll_process, poll_clock, monkeypatch, platform,
