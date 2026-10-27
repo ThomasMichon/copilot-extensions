@@ -27,6 +27,14 @@ legacy attempt without that intent refuses this recovery path and must be
 inspected through its original owner. No current attempt is retroactively
 adopted or cleared.
 
+Ordinary resume admits a failed or stopped pre-native allocation only when its
+original session-bound intent remains valid, no receiving child has yet been
+recorded and no native conversation or client exists. Recovery replays that
+allocation and permits one first native launch. If native startup then has an
+unknown result, it does not reroll or recreate the conversation. A retained child
+without a native identity requires explicit original-operation reconciliation;
+it is not evidence that native launch never started.
+
 ## Supported boundary
 
 This consumer requires a distinct canonical SSH destination execution-space key

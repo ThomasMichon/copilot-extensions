@@ -7,6 +7,7 @@ import importlib.util
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from types import ModuleType
 
 import pytest
@@ -83,6 +84,17 @@ def test_bridge_intent_preserves_original_owner_and_refuses_legacy_or_changed_ta
         module.arm(Target(execution_space_key="origin"), "original-session")
     for selected in (Target(type="local"), Target(worktree_id="existing"), Target(explicit_cwd=True)):
         assert module.arm(selected, "original-session") is selected
+    session = SimpleNamespace(
+        session_id="original-session", target=module.arm(Target(), "original-session"),
+        acp_session_id=None, client=None,
+    )
+    assert module.can_resume_allocation(session) is True
+    for selected in (Target(), Target(worktree_id="existing")):
+        session.target = selected
+        assert module.can_resume_allocation(session) is False
+    session.target = module.arm(Target(), "other-session")
+    with pytest.raises(ValueError):
+        module.can_resume_allocation(session)
 
 
 def test_bridge_capability_requires_actual_origin_and_nonblocking_creation_mode(api):

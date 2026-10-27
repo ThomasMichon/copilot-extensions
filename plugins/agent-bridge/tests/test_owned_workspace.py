@@ -10,6 +10,7 @@ import pytest
 
 from agent_bridge import owned_workspace as owned, transport
 from agent_bridge.acquisition_contract import AcquisitionRefused
+from agent_bridge.models import SessionStatus
 from agent_bridge.spawn_target import SpawnTarget
 from test_session_manager import _patch_acp as _patch_acp, _patch_spawn as _patch_spawn
 
@@ -225,3 +226,63 @@ async def test_real_session_manager_persists_intent_and_child_before_native_star
     assert session.acp_session_id == "acp-test-123"
     assert session.target.worktree_id == "actual-child"
     assert owned._intent(session.target)["creator"] == "origin/control/parent"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stopped", [False, True])
+async def test_manager_resumes_original_interrupted_allocation_before_first_native_launch(
+    session_manager, tmp_db, monkeypatch, _patch_spawn, _patch_acp, stopped,
+):
+    monkeypatch.setattr("agent_bridge.hosting_policy.require_target_hosting", AsyncMock())
+    keys = []
+
+    async def command(args, project, **kwargs):
+        if args[0] == "worktree-allocation":
+            return capabilities()
+        key = args[args.index("--creation-key") + 1]
+        keys.append(key)
+        if len(keys) == 1:
+            raise AcquisitionRefused("owner_operation_pending", "original receiving response lost")
+        return result(key)
+
+    monkeypatch.setattr(owned, "worktree_command", command)
+    session = await session_manager.start_session(target())
+    assert session.status == SessionStatus.FAILED and session.acp_session_id is None
+    _patch_spawn.assert_not_called()
+    retained = tmp_db.get_session(session.session_id)["target_json"]
+    session.target = SpawnTarget.from_json(retained)
+    if stopped:
+        await session_manager.stop_session(session.session_id)
+    resumed = await session_manager.resume_session(session.session_id)
+    assert resumed is session and resumed.status == SessionStatus.IDLE
+    assert resumed.target.worktree_id == "actual-child"
+    assert keys == [f"bridge-session:{session.session_id}"] * 2
+    assert _patch_spawn.await_count == 1
+    assert _patch_acp.return_value.new_session.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_interrupted_allocation_recovery_never_retries_an_unknown_native_launch(
+    session_manager, monkeypatch, _patch_spawn, _patch_acp,
+):
+    monkeypatch.setattr("agent_bridge.hosting_policy.require_target_hosting", AsyncMock())
+    calls = []
+
+    async def command(args, project, **kwargs):
+        if args[0] == "worktree-allocation":
+            return capabilities()
+        calls.append(args[args.index("--creation-key") + 1])
+        if len(calls) == 1:
+            raise AcquisitionRefused("owner_operation_pending", "response lost")
+        return result(calls[-1])
+
+    monkeypatch.setattr(owned, "worktree_command", command)
+    session = await session_manager.start_session(target())
+    _patch_acp.return_value.new_session.side_effect = TimeoutError("native result unknown")
+    with pytest.raises(TimeoutError, match="native result unknown"):
+        await session_manager.resume_session(session.session_id, allow_recreate=True)
+    assert _patch_spawn.await_count == 1
+    assert session.target.worktree_id == "actual-child"
+    with pytest.raises(RuntimeError, match="no ACP session ID"):
+        await session_manager.resume_session(session.session_id)
+    assert _patch_spawn.await_count == 1 and len(calls) == 2

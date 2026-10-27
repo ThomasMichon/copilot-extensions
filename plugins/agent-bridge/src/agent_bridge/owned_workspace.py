@@ -75,6 +75,19 @@ def _intent(target: SpawnTarget) -> dict[str, Any]:
     return value
 
 
+def can_resume_allocation(session: Session) -> bool:
+    """Only an unallocated retained target proves native launch has not begun."""
+    target = session.target
+    if session.acp_session_id or session.client is not None or not selects_new_owned_ssh(target):
+        return False
+    if _FIELD not in (target.venue or {}).get(REQUEST_OVERRIDES_KEY, {}):
+        return False
+    intent = _intent(target)
+    if intent["creation_key"] != f"bridge-session:{session.session_id}":
+        raise AcquisitionRefused("allocation_conflict", "allocation belongs to another bridge session")
+    return True
+
+
 def _result(value: dict[str, Any], intent: dict[str, Any]) -> dict[str, Any]:
     creation, saved, allocation = value.get("creation"), value.get("worktree"), value.get("allocation")
     if (

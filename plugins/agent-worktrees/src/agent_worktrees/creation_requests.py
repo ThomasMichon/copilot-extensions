@@ -52,6 +52,8 @@ def allocation_facts(config: cfg.Config, **options) -> dict:
         "remote": repo.remote,
         "default_branch": repo.default_branch,
         "kind": kind,
+        **({"caller_worktree": options["caller_worktree"]}
+           if options.get("caller_worktree") is not None else {}),
         "interface": options["interface"] or ("acp" if kind == "bridge" else "cli"),
         "origin": options["origin"] or (
             "system" if kind == "system"
@@ -200,6 +202,12 @@ def _replay(
     if not isinstance(worktree, dict):
         raise CreationRequestFailure("invalid", "Invalid creation result")
     record = _owner_record(worktree, records, project)
+    current_facts = json.loads(facts)
+    if (
+        current_facts.get("kind") == "bridge"
+        and record.caller_worktree != current_facts.get("caller_worktree")
+    ):
+        raise CreationRequestFailure("conflict", "The original allocation's caller worktree differs", worktree)
     if record.creation_nonce != receipt.get("creation_nonce"):
         raise CreationRequestFailure("conflict", "The original allocation was replaced", worktree)
     if "record_identity" in receipt:

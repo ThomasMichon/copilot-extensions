@@ -41,6 +41,10 @@ Bridge-shaped creation additionally requires `ordinary_create.kinds` to include
 preserves the bridge kind and navigation metadata through either local or remote
 creation without launching an agent. `--bridge` and `--system` are mutually
 exclusive; caller navigation metadata without bridge kind refuses.
+Keyed local creation compares caller navigation identity as an allocation fact,
+including on the omitted-selector path. Historical journals without that fact
+remain replayable only for a child with no caller; a caller-bearing historical
+child refuses rather than guessing or rebinding its caller.
 `creator_identity: true` declares the origin capability probe's optional
 `--owner-ref`: it resolves that actual local creator ledger and returns its
 canonical `creator` without reserving or allocating anything. This preserves
