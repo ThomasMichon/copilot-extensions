@@ -128,8 +128,9 @@ Also required, beyond that overlay:
 - [ ] Run the three task shapes in [proposal](proposal.md) with the draft
   kernel injected, and again without it.
 - [ ] Record pass/fail on behavior: used the stated test venue; did not add
-  unrequired checks; proposed a real extension instead of building it; did
-  not skip a real gate; did not go mute.
+  unjustified parallel machinery; allowed a proportionate in-architecture
+  check for a concrete failure; proposed a real extension instead of
+  building it; did not skip a real gate; did not go mute.
 - [ ] Revise and repeat if the result is mixed or negative. Do not project
   live guidance on a failed comparison.
 
@@ -155,7 +156,9 @@ Also required, beyond that overlay:
 - [ ] The projected kernel stays a concise fallback, not a restatement of
   repository test or install policy.
 - [ ] Required provenance and reviewed-fallback checks owned by instruction
-  source resolution remain intact.
+  source resolution remain intact. A proportionate in-architecture safeguard
+  for a concrete failure is not treated as a kernel failure, and an existing
+  required check is not removed.
 - [ ] Plugin tests for the projection declaration pass, and a changefile is
   present, before the implementation PR merges.
 
@@ -170,3 +173,10 @@ See [proposal.md](proposal.md).
 - Captured the public-safe request and the draft kernel. No instruction
   projection. No vision file yet.
 - Slug `proportional-engineering-conduct` is in use pending confirmation.
+
+### 2026-10-26 — Review narrowing
+- #9191 review: a pre-existing contract sentence must not block a small
+  check for a newly discovered ownership or corruption defect when that
+  check fits the existing architecture. Narrowed the prohibition to
+  unjustified parallel machinery, in the proposal and in this plan's
+  comparison and validation wording. Existing required checks stay.

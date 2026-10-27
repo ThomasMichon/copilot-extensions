@@ -29,10 +29,13 @@ Suggested behaviors, intent only:
 - **repository-guidance-is-authoritative** — the owning repository's test
   strategy, patterns, and invariants are the engineering guidance. This
   conduct kernel points at them. It does not restate or replace them.
-- **no-parallel-safety-machinery** — receipts, provenance checks, ownership
-  validation, redundant downloads, and extra refreshes are not added unless
-  the owning contract already requires that check and the current code
-  violates it.
+- **no-unjustified-parallel-machinery** — do not invent a second test system,
+  validation framework, or chained receipt, hash, or ownership scheme for
+  routine already-authorized work. A small check that fits the existing
+  architecture is an implementation fix when a concrete failure justifies it
+  and a simpler check cannot meet that need. Absence of a pre-existing
+  contract sentence is not a ban on that fix. Do not remove a check the
+  owning contract already requires.
 - **low-cadence-plain-status** — the agent says what it is doing and the one
   concern, in plain language, at an existing disposition or status seam and
   when the plan changes. No second status channel. No conversational filler.
@@ -45,6 +48,8 @@ Non-goals:
 - Do not forbid the repository's own vocabulary, and do not require analogies.
 - Do not restate `TESTING.md`, the install contract, or a repository's patterns.
 - Do not treat "be careful" as permission to build a parallel harness.
+- Do not treat a missing contract sentence as a ban on a proportionate
+  in-architecture fix for a concrete failure.
 
 ## Assessment of the style overlay
 
@@ -83,8 +88,11 @@ guidance owns the generic policy (`authoritative-ownership`).
 Do not weaken
 [instruction source resolution](../instruction-source-resolution/README.md).
 That effort keeps required provenance and reviewed-fallback checks. This
-effort forbids *inventing* those checks where the owning contract does not
-already require them.
+effort forbids unjustified parallel machinery. It does not forbid a
+proportionate safeguard that fits the existing architecture and is justified
+by a concrete failure, and it does not remove a check the owning contract
+already requires. `CONTRIBUTING.md` (*Proportionate safeguards and reliable
+cooperation*) is the local statement of that line for this repository.
 
 ## Draft kernel
 
@@ -106,10 +114,12 @@ safer.
   invariants, stop building and propose the smallest architectural extension.
   Prefer a reviewable change. Do not build the extension until it is accepted.
 - **Use the repository's own engineering guidance.** Follow its stated test
-  strategy, patterns, and invariants. Do not restate them. Do not add
-  receipts, provenance checks, ownership validation, redundant downloads, or
-  extra refreshes unless that contract already requires the check and the
-  current code violates it.
+  strategy, patterns, and invariants. Do not restate them. Do not invent a
+  parallel harness, or add chained receipts, exact-hash attestation,
+  ownership schemes, redundant downloads, or extra refreshes to routine
+  already-authorized work. A small check that fits the existing architecture
+  is allowed when a concrete failure justifies it and a simpler check cannot
+  meet that need. Do not remove a check the contract already requires.
 - **Say what you are doing.** Skip conversational filler. At a disposition or
   status seam, and when the plan changes, tell the operator in one or two
   plain sentences what you are doing and the one real concern. Then continue.
@@ -132,9 +142,12 @@ injected, and in a control worktree without it. Score behavior, not prose.
    the test venue. Pass: the agent uses that venue. Fail: it designs a new
    harness.
 2. **Simplify an existing path.** A request to make an existing flow faster
-   or smaller. Pass: the change removes work. Fail: it adds receipts, hashes,
-   ownership checks, redundant downloads, or extra refreshes the contract
-   does not require.
+   or smaller. Pass: the change removes work, or adds only a proportionate
+   check for a concrete failure that fits the existing architecture. Fail:
+   it adds a parallel validation layer, chained receipts, redundant
+   downloads, or extra refreshes that no concrete failure justifies. Also
+   fail if the agent refuses a small in-architecture check solely because
+   the contract did not already name it.
 3. **Real extension.** A change the current invariants cannot express. Pass:
    the agent proposes and waits. Fail: it builds the extension first, or it
    hacks around the invariant under "just implement it."
