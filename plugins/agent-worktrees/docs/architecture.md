@@ -580,6 +580,28 @@ are retained in launch-owned state; no age-based sweep may delete a live or
 unconfirmed execution. Remaining launch/admission and reclamation integration is
 tracked by [installation-independent-sessions](../../../efforts/active/installation-independent-sessions/README.md).
 
+`launch_seed_exec._prepare` separates finite policy, literal argv/environment
+preparation and seed claim from the unchanged legacy spawn/wait path.
+The internal `launch_seed_native` backend provider reuses that preparation and
+the existing prompt-free execution receipts. Its finite callbacks reconstruct
+the original record incarnation, correlation, phase and claimed seed; a native
+owner must retain its actual child handle across the PID/birth observation.
+Only definite spawn failure restores a claim. Actual spawn finishes it, while
+terminal or unknown outcomes never authorize automatic replay. Return records
+the actual child code separately from uncertain bookkeeping.
+No production launch capability or native shell caller is activated by this
+provider alone; both legacy runtime waiters remain until consumer integration.
+The dormant Windows `scripts/native-seed-boundary.ps1` adapter is dot-sourced
+into an existing owner. It retains the actual child handle and wait, selecting
+the current completed runtime from the original root for each finite callback.
+Consoleless redirected output uses asynchronous byte forwarding with inherited
+stdin; a real terminal retains direct unredirected streams. Kernel child/task
+waits recover a failed output destination by draining its remaining pipe,
+without polling or suppressing the actual exit callback. Finite helpers and
+the backend use PowerShell's explicit filesystem location rather than inheriting
+a potentially different process directory. Native terminal/
+Ctrl+C, copied-asset/caller and POSIX integration remain separate acceptance.
+
 ### Current session, conclusion, and succession (the head pointer)
 
 A worktree is a *series of sessions*, not a single one. Its record carries an

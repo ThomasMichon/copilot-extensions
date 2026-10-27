@@ -478,6 +478,7 @@ def test_actual_local_resume_alias_grid_preserves_record(tmp_path, monkeypatch, 
 def test_cold_resume_plan_executes_with_exact_prompt_at_powershell_boundary(
     tmp_path: Path, monkeypatch,
 ):
+    from agent_procutil.owned_process import run_caller_owned
     from agent_worktrees import output
 
     monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
@@ -507,14 +508,15 @@ def test_cold_resume_plan_executes_with_exact_prompt_at_powershell_boundary(
         assert resolve_cli.cmd_resolve(_args(seed=seed, no_mux=True)) == 0
     plan = json.loads(captured.getvalue())["launch"]
     try:
-        proc = subprocess.run(
-            plan["cmd"], capture_output=True, text=True, check=True, timeout=20,
+        proc = run_caller_owned(
+            plan["cmd"], timeout=20, max_stdout_bytes=1024 * 1024,
+            max_stderr_bytes=1024 * 1024,
             cwd=work_dir,
             env={**os.environ, "AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED": "1"},
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
     except subprocess.TimeoutExpired as error:
         pytest.fail(f"Native seed handoff timed out: stdout={error.stdout!r}; stderr={error.stderr!r}")
+    assert proc.returncode == 0, proc.stderr
     assert json.loads(proc.stdout.splitlines()[-1]) == ["--resume=history-s1", "--interactive", seed]
     assert tracking.load_record(tmp_path / "wt-a.yaml").pending_seed is None
     assert launch_seed_state.peek(tmp_path / "wt-a.yaml") is None

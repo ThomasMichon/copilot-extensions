@@ -99,6 +99,16 @@ real Copilot, TTY or installer-removal acceptance.
 
 ## Continuing smallest-boundary obligations
 
+Launch exclusion is per worktree, never a project-wide or global launch lock.
+Hold it only across the initial check/create race until the owning mux session
+is discoverable. A contender for that worktree rechecks and joins the existing
+mux instead of launching a duplicate. Different worktrees launch concurrently;
+the lock must not remain held for a Copilot session's lifetime. Preserve the
+separate seed-delivery and lifecycle authorities without extending this lock's
+scope or nesting a seed mutation under its own already-held admission lock.
+Acceptance must include overlapping same-worktree attempts, parallel
+different-worktree launches and release at mux discoverability.
+
 The copied shell owns only immutable launch data, native child execution,
 terminal/containment lifetime and two bounded handler invocations. It does not
 own environment preparation, update orchestration, registry policy or a

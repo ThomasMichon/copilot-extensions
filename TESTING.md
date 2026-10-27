@@ -3,6 +3,25 @@
 How to run the plugin test suites, explicit development checks, and the
 **opt-in end-to-end smoke tests** that require real infrastructure.
 
+Agent-worktrees' `test_launch_seed_native.py` covers the dormant finite backend
+provider: retained one-time seed claims, literal argv, existing prompt-free
+execution observations, PID/birth and incarnation refusals, definite-spawn
+failure restoration, uncertain cleanup and terminal no-replay behavior.
+These controls do not activate a native shell, remove either production Python
+waiter, or qualify terminal/Job/install-removal behavior. The real PowerShell
+seed-delivery consumer uses the existing finite process-tree owner so a timeout
+settles descendants rather than blocking on inherited capture pipes.
+The Windows-only `test_native_seed_shell.py` packet substitutes the finite
+provider but executes a real child through the dormant native adapter. It checks
+literal argv, retained PID/birth, exit, OS start refusal, uncertain receipts,
+absent end and exact redirected stdin/stdout/stderr. It is not interactive TTY,
+Ctrl+C, pane-Job or installation-survival evidence; production callers and the
+POSIX native adapter remain unchanged.
+Closed stdout/stderr reader controls exceed pipe capacity and require both
+actual child completion and the correlated return. Separate native controls
+split PowerShell's selected location from the OS process directory and assert
+the finite helper's and backend's actual cwd.
+
 The optional native runtime-removal portfolio includes
 `tools/test_installer_engine_uninstall.py`,
 `tools/test_installer_engine_commands.py`,

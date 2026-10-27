@@ -104,3 +104,14 @@ The option's full label was:
 > Once you have the new Mux wrapper, it should be pretty straightforward to each existing Mux pane on the target machine and then replace it with the new wrapper process. You'll just need to note which worktrees are currently active you can restore that exact set, properly resuming back into their associated sessions.
 >
 > I'd like it if `<repo> worktrees copilot --worktree-id ____` was the straightforward "launch this terminal into the mux session for the target worktree, resuming or re-attaching as appropriate". And we need a command which can simply create/restore the mux session for a worktree without attaching the current terminal, so other systems can leverage it to resume work.
+
+## Operator - per-worktree admission and two-cycle live test
+
+The private selected host name is replaced by `[selected test host]`; no
+surrounding requirement is changed.
+
+> We only want to block launches into the *same* worktree concurrently, before we have a chance to stand up the Mux session that other launch attempts would find themselves joining. We don't want to serializae launches into different worktrees; different worktrees should be able to launch in parallel
+
+> Great. Continue driving. Your goal is to be able to have us live-test on [selected test host]: we'll record which sessions are currently active, exit all their current mux sessions, uninstall (and likely manually scrub) copilot-extensons services and tools, do a fresh install, restore the muxes using the new system, then uninstall, scrub, and reinstall again. When I say "scrub" I just mean straggler processes and detritus that our current uninstall flow might miss, not runtime state or config.
+
+> Make sure you have an effort tracking the remaining phases of this work, so you can burndown to completion
