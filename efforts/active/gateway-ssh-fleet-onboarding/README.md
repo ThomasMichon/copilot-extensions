@@ -382,6 +382,9 @@ onboarded merely because its source is published.
 - [x] Land the ordinary origin-owned destination coordinator and original
   receiving-result contract. Consumer integration and installed/native
   qualification remain in the open allocation prerequisite.
+- [x] Land the first origin-local owned SSH Bridge consumer and its allocation,
+  native-identity and startup-serialization source controls. Foreign-origin
+  composition, Dispatch and installed/native qualification remain open.
 
 ### Phase 2 - Driver and directional policy
 
@@ -512,6 +515,28 @@ setup/apply, enrollment, live rollout, lifecycle takeover or implementation
 completion is asserted.
 
 ## Journal
+
+### 2026-10-27 - First owned SSH Bridge consumer source merged
+
+- #9241 merged to `dev` as `d8c29a492ad29c0bcd4ff2f6a4291170952107fb`.
+  Exact head `e3f63cc5d9ec8afc0814e82ae14e6c660d2e6a02` received Copilot
+  approval `5663879456`, no active findings and required green checks.
+- Bridge retains the original allocation key before effects, negotiates the
+  actual local creator and bridge-shaped ordinary creation, and records the
+  actual receiving child before native startup. Pending claim linkage does not
+  delay that startup. Missing or foreign origin capability refuses rather than
+  dropping ownership metadata.
+- Review corrections cover failed pre-native recovery, changed local caller
+  facts, persistent unknown-native fencing and stop/resume while the original
+  allocation response is delayed. Initial startup uses the existing lifecycle
+  lock; it does not add another allocation store, lock or acknowledgement gate.
+  The final source packet passed 233 isolated lifecycle cases and 2,443 required
+  units. Native cold/warm performance remains explicitly unmeasured.
+- Re-read the Plan and Validation Plan. Close only this owner-local consumer
+  source item. The broader #5839 caller-origin/Dispatch, outbound-only, real
+  native, release and installed acceptance remain open. Continue those actual
+  qualification boundaries without treating this merge as an installed worker
+  or completed Gateway setup.
 
 ### 2026-10-26 - Ordinary destination coordinator source merged
 

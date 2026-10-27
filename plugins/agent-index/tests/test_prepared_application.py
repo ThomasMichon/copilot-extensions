@@ -129,6 +129,69 @@ def test_restart_reuses_prepared_pairs_before_acquiring_a_new_delta(application)
         assert conn.execute("SELECT COUNT(*) FROM prepared_crawl_rows").fetchone()[0] == 0
 
 
+@pytest.mark.portfolio_tier("T3")
+def test_segment_ceiling_retains_prepared_work_until_explicit_consolidation(application):
+    from agent_index.store.ingestion_index import consolidate_ingestion_indices
+    from agent_index.store.scalar_index import MAX_SEGMENTS, ScalarIndexPreparationRequired, inspect_index
+
+    f = application
+    if not f.selected:
+        pytest.skip("legacy stores have no participating scalar-index owner")
+    for iteration in range(MAX_SEGMENTS + 1):
+        state, _ = inspect_index(
+            f.store.content_store._get_or_create_table(), column="chunk_id",
+        )
+        if state.segments == MAX_SEGMENTS:
+            break
+        f.delta = SourceDelta(upserts=[FileEntry(
+            f"{iteration}.md", f"Useful revision {iteration}.", "markdown", "sample:repo",
+        )], commit=f"revision-{iteration}")
+        f.run()
+    assert state.segments == MAX_SEGMENTS
+    before = f.store._source_domain.receipt()
+    projection = f.store.projection_snapshot()
+    checkpoints = f.paths.get_all_entries()
+    old_commit = IndexState.load(f.config.state_file).sources["sample:repo"].last_commit
+    f.delta = SourceDelta(upserts=[FileEntry(
+        "first.md", "Useful retained revision.", "markdown", "sample:repo",
+    )], commit="retained")
+    f.calls.clear()
+    with pytest.raises(ScalarIndexPreparationRequired, match="consolidation"):
+        f.run()
+    assert len(f.calls) == 2  # Prepared outside the writer, still subordinate to pending.
+    assert f.store._source_domain.receipt() == before
+    assert f.paths.get_all_entries() == checkpoints
+    assert IndexState.load(f.config.state_file).sources["sample:repo"].last_commit == old_commit
+    assert PendingCrawls(f.paths).load("sample:repo", f.scope)[0].commit == "retained"
+    with pytest.raises(ScalarIndexPreparationRequired, match="consolidation budget"):
+        consolidate_ingestion_indices(f.store, max_rows=0)
+    assert f.store._source_domain.receipt() == before
+    owners = [f.store.content_store, *(f.store.get_vector_table(m) for m in f.store.model_ids)]
+    budget = max(
+        sum(fragment.metadata.physical_rows for fragment in
+            owner._get_or_create_table().to_lance().get_fragments())
+        for owner in owners
+    )
+    consolidate_ingestion_indices(f.store, max_rows=budget)
+    assert f.store.projection_snapshot() == projection
+    # Reopen the existing journal/state, then prove retained work precedes fresh discovery.
+    f.paths = PathIndex(f.paths._db_path)
+    f.state = IndexState.load(f.config.state_file)
+    f.delta = SourceDelta(commit="newer")
+    f.calls.clear()
+    f.acquired.clear()
+    result = f.run()
+    assert f.calls == []
+    assert f.acquired == ["retained"]
+    assert result["work_counts"]["content_rows_upserted"] == 1
+    assert IndexState.load(f.config.state_file).sources["sample:repo"].last_commit == "newer"
+    assert PendingCrawls(f.paths).load("sample:repo", f.scope) is None
+    assert f.store.source_counts() == {"sample:repo": len(checkpoints) + 1}
+    assert f.store.content_store.get_document(
+        "sample:repo", "first.md",
+    ).content == "Useful retained revision."
+
+
 @pytest.mark.parametrize("failure", ["save", "clear"])
 def test_cursor_and_journal_failures_replay_committed_files_without_engine_calls(
     application, monkeypatch, failure,
@@ -163,6 +226,38 @@ def test_cursor_and_journal_failures_replay_committed_files_without_engine_calls
     assert result["work_counts"]["content_rows_upserted"] == 0
     assert result["work_counts"]["files_reused"] == 2
     assert IndexState.load(f.config.state_file).sources["sample:repo"].last_commit == "newer"
+
+
+@pytest.mark.portfolio_tier("T3")
+def test_nonempty_store_requires_explicit_preparation_before_pending_replay(application):
+    from agent_index.chunking.base import Chunk
+    from agent_index.store.ingestion_index import prepare_ingestion_indices
+    from agent_index.store.scalar_index import ScalarIndexPreparationRequired
+
+    f = application
+    if not f.selected:
+        pytest.skip("legacy stores have no participating scalar-index owner")
+    initial = Chunk("Existing text.", "old.md", "text", "markdown", 1, 1, "sample:repo")
+    for model in f.store.model_ids:
+        f.store.upsert(model, [initial], np.ones((1, 2), dtype=np.float32))
+    before = f.store._source_domain.receipt()
+    with pytest.raises(ScalarIndexPreparationRequired, match="preparation budget is 0"):
+        f.run()
+    assert f.calls == []
+    assert f.store._source_domain.receipt() == before
+    assert f.paths.get_all_entries() == {}
+    assert not f.config.state_file.exists()
+    assert PendingCrawls(f.paths).load("sample:repo", f.scope)[0].commit == "pinned"
+    prepare_ingestion_indices(f.store, max_rows=1)
+    f.delta = SourceDelta(commit="newer")
+    f.acquired.clear()
+    result = f.run()
+    assert len(f.calls) == 4
+    assert f.acquired == ["pinned"]
+    assert result["work_counts"]["content_rows_upserted"] == 2
+    assert f.store.source_counts() == {"sample:repo": 3}
+    assert IndexState.load(f.config.state_file).sources["sample:repo"].last_commit == "newer"
+    assert PendingCrawls(f.paths).load("sample:repo", f.scope) is None
 
 
 def test_checkpoint_change_during_preparation_refuses_before_store_entry(application):
