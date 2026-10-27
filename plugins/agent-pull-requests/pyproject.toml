@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-pull-requests"
-version = "0.3.104-dev1"
+version = "0.3.105-dev1"
 description = "Cross-repository pull-request CLI with agent-worktrees-mediated GitHub auth."
 readme = "README.md"
 license = "MIT"

@@ -144,7 +144,8 @@ and its diagnostics; successful consumption still checks the outer deadline.
 
 ## Optional stock Windows bootstrap building blocks
 
-Select `bootstrap_file_guard` or `bootstrap_file_trust` in `agent-codespaces`
+Select `bootstrap_file_guard`, `bootstrap_file_trust`, `bootstrap_path_guard`
+or `bootstrap_drive_map` in `agent-codespaces`
 through the bounded plugin runner. These repository-only helpers are not
 distributed or enabled by the existing bootstrap selector. Native tests use
 64-bit Windows PowerShell and PowerShell Core for the file guard and WinTrust.
@@ -182,6 +183,30 @@ managed `char[]` wrapper on the exact retained file/directory handle with a
 bounded buffer. Synthetic native-error/length/termination controls test error
 propagation and zero output; they are not additional native-call qualification.
 Closing the exact handle in the same child must succeed before that host exits.
+
+The ancestor guard retains the drive-root directory and every addressed
+component, with a 128-component limit checked before opening anything. Its
+controls cover file/directory leaves, ancestor rename exclusion, junction
+refusal, reverse-order release and complete cleanup after an open or release
+failure. Both guard forms reject non-root trailing separators before native
+binding, including existing file/directory inputs; the drive root remains a
+valid directory leaf. This is retained ancestor custody, not canonical-name,
+short-name, drive-mapping or source admission.
+
+The current-drive query calls existing stock declarations without defining or
+removing a DOS mapping. Windows PowerShell uses the existing StringBuilder
+declaration, whose marshaler exposes the current first string but not the
+native MULTI_SZ tail. Core passes owned UTF-16 buffers through the existing
+raw-pointer declaration using reflection's IntPtr conversion, without emitting
+an interop type or delegate. Its raw thunk does not capture native last error;
+zero results must report that diagnostic limit, not a stale error code.
+Controls check the fixed 32768-code-unit bound, actual pointer/argument
+forwarding, current-versus-prior mapping semantics and release before any
+consumer-visible result. Synthetic failures cover malformed output, partial
+allocation, invocation and post-free errors. Malformed drive inputs, including
+trailing newline, NUL and Unicode line-separator data, must fail before binding
+and emit no result. A current mapping is a snapshot,
+not proof that a drive is canonical or unchanged.
 
 ```text
 python tools/run-plugin-tests.py agent-codespaces -k bootstrap_file_trust --timeout 600 --plugin-timeout 600
