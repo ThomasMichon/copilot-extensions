@@ -116,8 +116,9 @@ def _browse_peer(args: argparse.Namespace, subcommand: str, *, repo: str | None 
     return result.returncode
 
 def _cmd_list(args: argparse.Namespace) -> int:
-    repo = _core()._scope_repo(args)
-    if not repo:
+    all_repos = bool(getattr(args, "all_repos", False))
+    repo = None if all_repos else _core()._scope_repo(args)
+    if not all_repos and not repo:
         print(_core()._REPO_UNRESOLVED, file=sys.stderr)
         return 2
     from . import remote_dispatch

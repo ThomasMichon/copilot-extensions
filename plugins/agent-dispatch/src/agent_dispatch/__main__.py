@@ -681,7 +681,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("list", help="list tasks (scoped to the calling repo by default)")
     p.add_argument("--category", choices=("work", "maintenance", "all"), default="work")
-    p.add_argument("--repo", help="lane to list (local name or remote URL); default: calling repo")
+    scope = p.add_mutually_exclusive_group()
+    scope.add_argument("--repo", help="lane to list (local name or remote URL); default: calling repo")
+    scope.add_argument(
+        "--all-repos", action="store_true",
+        help="explicitly list every repository lane without resolving the calling repo",
+    )
     p.add_argument(
         "--status",
         help="filter by status; comma-separate for several (e.g. queued,started)",
