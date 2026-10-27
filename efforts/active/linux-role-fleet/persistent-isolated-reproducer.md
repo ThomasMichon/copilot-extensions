@@ -26,10 +26,11 @@ merged in #9167; actual guest origin, service/peer lifecycle and initial-case
 execution remain open. The [runtime guide](../../../tools/reproducer-lab/image-runtime.md)
 records bounded main-package origin-observation source and its qualification limits.
 Those observations merged in #9173; they are not actual guest qualification.
-The operator selected retaining accepted work after driver loss. Review the
-[existing-owner lifetime amendment](retained-experiment-lifetime.md) before
-implementing retained service/peer startup; ordinary disposable-test expiry
-and ongoing #8403 work remain unchanged.
+The operator selected retaining accepted work after driver loss. The
+[existing-owner lifetime amendment](retained-experiment-lifetime.md) cleared
+behavior review in #9176; precise admission/API and compatibility review remains
+before implementation. Ordinary disposable-test expiry and ongoing #8403 work
+remain unchanged.
 This is an agent-recommended decomposition of the remaining isolated
 failure-reproduction and logging qualification work. It does not authorize
 resource creation, production fault injection, deployment or credential access.
@@ -269,8 +270,9 @@ Each step stops on its named failed prerequisite; do not self-heal the subject.
 
 ## Immediate next action
 
-Review the selected [retained-work lifetime amendment](retained-experiment-lifetime.md)
-through the existing instance-lifecycle owner, then implement the minimal
+Settle the precise admission/API and compatibility for the reviewed
+[retained-work lifetime amendment](retained-experiment-lifetime.md) through
+the existing instance-lifecycle owner, then implement the minimal
 service/peer fixture. Image/runtime preparation, synthetic hosting inputs and
 bounded origin observations merged in #9161, #9167 and #9173 respectively.
 They do not qualify an image, dependencies, guest mounts or running services.
