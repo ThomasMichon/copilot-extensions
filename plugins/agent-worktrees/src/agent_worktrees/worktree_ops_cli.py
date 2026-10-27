@@ -88,7 +88,10 @@ def add_parsers(sub) -> None:
         "--creation-request-id", default=None,
         help="Recover an existing remote allocation by its retained origin request ID; never reserve a new one",
     )
-    p.add_argument(
+    kinds = p.add_mutually_exclusive_group()
+    kinds.add_argument("--bridge", action="store_true", help="Create an agent-owned bridge worktree without launching it")
+    p.add_argument("--caller-worktree", default=None, help="With --bridge: retain the caller's navigation identity")
+    kinds.add_argument(
         "--system",
         action="store_true",
         help="Create a daemon-owned worktree (hidden from Picker, "
@@ -301,6 +304,8 @@ def cmd_remove_system(args: argparse.Namespace) -> int:
 
 def cmd_create(args: argparse.Namespace) -> int:
     """Create a new worktree non-interactively."""
+    from .create_destination import creation_kind
+
     is_system = getattr(args, "system", False)
     no_owner = getattr(args, "no_owner", False)
     owner_ref = (
@@ -360,6 +365,7 @@ def cmd_create(args: argparse.Namespace) -> int:
     dispatch_attempt = dispatch_fields if present_dispatch_fields else None
     with output.stdout_to_stderr():
         try:
+            kind = creation_kind(args)
             if project_state.namespaced():
                 project_state.ensure_project_state(cfg.project_name())
             config = cfg.load_config()
@@ -377,13 +383,14 @@ def cmd_create(args: argparse.Namespace) -> int:
                 result = _create_worktree_core(
                     config,
                     no_mux=True,
-                    kind="system" if is_system else "session",
+                    kind=kind,
                     owner=(getattr(args, "owner", None) or getattr(args, "name", None))
                     if is_system
                     else None,
                     name=getattr(args, "name", None) if is_system else None,
                     interface=getattr(args, "interface", None),
                     origin=getattr(args, "origin", None),
+                    caller_worktree=getattr(args, "caller_worktree", None),
                     owner_ref=owner_ref,
                     inherit_parent_session=not (is_system or no_owner),
                     dispatch_attempt=dispatch_attempt,

@@ -51,6 +51,7 @@ def capabilities(*, receiver: bool) -> dict:
             "version": 1, "destination_selectors": ["machine", "repo"],
             "creation_key": "opaque-v1", "result": "ordinary-worktree+allocation-v1",
             "recovery_request_id": True,
+            "kinds": ["session", "bridge"], "caller_worktree": True, "creator_identity": True,
             "claim_linkage": "non-blocking", "agent_launch": False,
         }}),
     }
@@ -79,7 +80,12 @@ def cmd_worktree_allocation(args) -> int:
     """Resolve the creator's own authority, never the receiving project's ledger."""
     try:
         if args.operation == "capabilities":
-            _emit(capabilities(receiver=False))
+            value = capabilities(receiver=False)
+            if args.owner_ref:
+                from .create_destination import _creator
+
+                value["creator"], _ = _creator(args.owner_ref)
+            _emit(value)
             return 0
         payload = read_input("worktree allocation")
         producer.canonical_json(payload)

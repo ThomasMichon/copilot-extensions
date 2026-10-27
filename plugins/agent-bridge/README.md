@@ -695,6 +695,11 @@ Ordinary keyed creation remains local-worktree-only. See
 [session creation contracts](docs/session-acquisition.md#exact-provider-instance-creation)
 for pending/terminal recovery and the separate first-prompt boundary.
 
+New owned SSH workspaces use the
+[origin-owned Worktrees allocation consumer](docs/owned-workspace-allocation.md)
+before resolving the existing child. This does not enable keyed remote
+embodiment or relocate a foreign caller's origin ledger.
+
 ### Namespace reader observations
 
 Only CLI `namespace-list` reads use optional procutil CPU metrics. Agent Bridge
