@@ -162,3 +162,36 @@ def test_changed_proof_cannot_mutate_original_bound_claim(api, field, value):
     with pytest.raises(ValueError):
         api.writer._transition(claim, "close", proof)
     assert vars(claim) == before
+
+
+def test_pending_admission_reserves_capacity_for_duplicated_lifecycle_proof(api):
+    value = metadata()
+    value["recovery"]["options"] = {"name": "x" * 8000}
+    assert api.allocation.valid_target(value["recovery"])
+    assert len(api.producer.canonical_json(value)) < api.producer.MAX_INPUT_BYTES
+    with pytest.raises(ValueError, match="lifecycle"):
+        api.allocation.require_lifecycle_capacity(
+            value["creator"], value["request_id"], value["token"], value["recovery"],
+        )
+    assert not api.allocation.valid_metadata(value)
+
+
+def test_identity_limit_counts_canonical_escaped_bytes_not_path_characters(api):
+    value = identity()
+    value["path"] = "/" + "\U0010ffff" * 340
+    assert len(value["path"]) < 4096
+    with pytest.raises(ValueError, match="identity exceeds lifecycle"):
+        api.allocation.AllocationIdentity.from_dict(value)
+    value["path"] = "/"
+    value["path"] += "x" * (4096 - len(api.producer.canonical_json(value)))
+    assert len(api.producer.canonical_json(value)) == 4096
+    assert api.allocation.AllocationIdentity.from_dict(value).to_dict() == value
+
+
+def test_exact_wire_capacity_includes_transport_newline(api):
+    value = {"value": ""}
+    value["value"] = "x" * (api.producer.MAX_INPUT_BYTES - len(api.allocation.wire_json(value)))
+    assert len(api.allocation.wire_json(value)) == api.producer.MAX_INPUT_BYTES
+    value["value"] += "x"
+    with pytest.raises(ValueError, match="wire response"):
+        api.allocation.wire_json(value)

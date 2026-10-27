@@ -32,6 +32,21 @@ def test_actual_lazy_capability_dispatch_needs_no_full_cluster(monkeypatch, comm
     assert result["schema"] == allocation.SCHEMA and result["role"] == role
     assert result["metadata_version"] == 3 and result["claim_linkage"] == "non-blocking"
     assert result["agent_launch"] is False
+    assert result["max_identity_bytes"] == 4096 and result["lifecycle_capacity_reserved"] is True
+
+
+def test_actual_wire_encoding_counts_newline_and_does_not_expand_pretty_printed_input():
+    value = {"nested": [[True] * 100] * 25}
+    assert len(json.dumps(value, indent=2)) > allocation.producer.MAX_INPUT_BYTES
+    with output.capture_json_output() as captured:
+        cli._emit(value)
+    assert json.loads(captured.getvalue()) == value
+    assert len(captured.getvalue()) <= allocation.producer.MAX_INPUT_BYTES
+    at_limit = {"value": "x" * (allocation.producer.MAX_INPUT_BYTES - len(allocation.wire_json({"value": ""})))}
+    assert len(allocation.wire_json(at_limit)) == allocation.producer.MAX_INPUT_BYTES
+    at_limit["value"] += "x"
+    with pytest.raises(ValueError, match="wire response"):
+        cli._emit(at_limit)
 
 
 def test_origin_cli_uses_exact_qualified_local_creator_and_registered_ledger(owner, monkeypatch):

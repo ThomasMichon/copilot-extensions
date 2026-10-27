@@ -39,12 +39,18 @@ def capabilities(*, receiver: bool) -> dict:
         "receiving_receipt": 1, "claim_linkage": "non-blocking",
         "handoff": False, "agent_launch": False,
         "max_input_bytes": producer.MAX_INPUT_BYTES,
+        "max_identity_bytes": allocation.MAX_IDENTITY_BYTES,
+        "lifecycle_capacity_reserved": True,
     }
+
+
+def _emit(value: dict) -> None:
+    output.write_real_stdout(allocation.wire_json(value))
 
 
 def _failure(exc: Exception) -> int:
     logging.getLogger(__name__).warning("Worktree allocation refused: %s", exc)
-    output._json_output({
+    _emit({
         "schema": allocation.SCHEMA, "version": allocation.VERSION,
         "error": "rejected", "message": str(exc),
     })
@@ -55,7 +61,7 @@ def cmd_worktree_allocation(args) -> int:
     """Resolve the creator's own authority, never the receiving project's ledger."""
     try:
         if args.operation == "capabilities":
-            output._json_output(capabilities(receiver=False))
+            _emit(capabilities(receiver=False))
             return 0
         payload = read_input("worktree allocation")
         producer.canonical_json(payload)
@@ -69,7 +75,7 @@ def cmd_worktree_allocation(args) -> int:
             "operation": args.operation, "input": payload,
             "owner_ref": args.owner_ref, "yaml_path": str(path),
         }, reason="allocation observes outside bounded registered RMW; no monitor bootstrap")
-        output._json_output(result)
+        _emit(result)
         return 1 if result.get("error") else 0
     except (ValueError, TypeError, OSError, RuntimeError, sqlite3.Error, yaml.YAMLError) as exc:
         return _failure(exc)
@@ -81,12 +87,12 @@ def cmd_worktree_allocation_receive(args) -> int:
 
     try:
         if args.operation == "capabilities":
-            output._json_output(capabilities(receiver=True))
+            _emit(capabilities(receiver=True))
             return 0
         payload = read_input("receiving worktree allocation")
         producer.canonical_json(payload)
         result = receive(args.operation, payload, cfg.load_config())
-        output._json_output(result)
+        _emit(result)
         return 0
     except (ValueError, TypeError, OSError, RuntimeError, sqlite3.Error, yaml.YAMLError) as exc:
         return _failure(exc)

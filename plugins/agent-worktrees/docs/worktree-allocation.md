@@ -24,7 +24,8 @@ refused. Capability discovery is independent of package versions; callers must
 query the actual selected runtime before depending on this ABI. The response
 declares schema `copilot-extensions.worktree-allocation`, version `1`,
 `metadata_version: 3`, `lifetime: owned-worktree`, receiving receipt version `1`,
-`claim_linkage: non-blocking`, and `agent_launch: false`.
+`claim_linkage: non-blocking`, `agent_launch: false`, `max_identity_bytes: 4096`,
+and `lifecycle_capacity_reserved: true`.
 
 The origin resolves an exact qualified local creator through its registered
 project configuration. A session alias, anchor, foreign creator or caller-supplied
@@ -64,6 +65,17 @@ Remote observations happen outside the origin record lock. Before committing,
 the original owner and complete protected metadata snapshot are checked again.
 Terminal or frozen owners do not reopen; handoff reservations and ref collisions
 refuse mutation. Transfer is not supported by this provider.
+
+Admission reserves capacity for the entire lifecycle, including the duplicated
+exact receiving proof and the actual origin response envelope, within the
+existing 16 KiB JSON limit. CLI responses use canonical compact ASCII-escaped
+JSON and count the trailing newline in that transport bound; pretty-printing
+cannot expand a validated response beyond it. A pending claim that fits by itself is not
+sufficient. Receiving identities have a combined 4 KiB canonical JSON limit
+(ASCII-escaped bytes, not character count), checked against the actual generated
+ref, nonce, path and branch before child identity reservation or Git creation.
+Oversized target/request facts are refused before origin reservation or receiving
+effects; accepted allocations retain room for cancellation or exact finality.
 
 ## Receiving operation
 

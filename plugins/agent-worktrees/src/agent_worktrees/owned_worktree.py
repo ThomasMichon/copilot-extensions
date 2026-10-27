@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 from dataclasses import dataclass
 from pathlib import PurePosixPath, PureWindowsPath
 
@@ -15,6 +16,7 @@ METADATA_VERSION = 3
 LIFETIME = "owned-worktree"
 NAMESPACE = "worktree-allocation"
 PHASES = frozenset({"pending", "bound", "confirmed", "closed"})
+MAX_IDENTITY_BYTES = 4096
 
 
 def _text(value: object, *, maximum: int = 1024) -> bool:
@@ -89,6 +91,8 @@ class AllocationIdentity:
             PurePosixPath(path).is_absolute() or PureWindowsPath(path).is_absolute()
         ):
             raise ValueError("allocation identity requires an absolute receiving path")
+        if len(producer.canonical_json(value)) > MAX_IDENTITY_BYTES:
+            raise ValueError("allocation identity exceeds lifecycle size limit")
         return cls(value["ref"], value["creation_nonce"], path, value["branch"])
 
     def to_dict(self) -> dict[str, str]:
@@ -113,6 +117,53 @@ def claim_ref(metadata: dict) -> str:
     if len(ref.encode("ascii")) > producer.MAX_REF_BYTES:
         raise ValueError("pending worktree allocation reference exceeds size limit")
     return ref
+
+
+def origin_response(metadata: dict, ref: str) -> dict:
+    """Keep admission's wire-size reservation tied to the actual origin response."""
+    return {
+        "schema": SCHEMA, "version": VERSION, "ok": True, "owner": metadata["creator"],
+        **{key: metadata[key] for key in ("creator", "request_id", "token", "phase")},
+        "ref": ref, "producer": copy.deepcopy(metadata),
+    }
+
+
+def wire_json(value: dict) -> str:
+    """Use one bounded encoding for admission and actual CLI transport, including LF."""
+    encoded = producer.canonical_json(value) + "\n"
+    if len(encoded) > producer.MAX_INPUT_BYTES:
+        raise ValueError("allocation JSON wire response exceeds size limit")
+    return encoded
+
+
+def require_lifecycle_capacity(creator: str, request_id: str, token: str, target: dict) -> None:
+    """Reserve room for both the largest admitted identity and exact closeout."""
+    metadata = {
+        "version": METADATA_VERSION, "lifetime": LIFETIME, "namespace": NAMESPACE,
+        "creator": creator, "request_id": request_id, "token": token,
+        "recovery": target, "phase": "closed",
+    }
+    proof = {
+        "schema": SCHEMA, "version": VERSION, "origin": creator,
+        "request_id": request_id, "token": token, "target": target,
+        "identity": None, "status": "cancelled", "allocation_finished": True,
+    }
+    cancelled = {**metadata, "closeout": proof}
+    # These are serialization stand-ins, not receiving identities. Their
+    # encoded lengths bound every identity/ref admitted by the real validators.
+    largest_identity = "x" * (MAX_IDENTITY_BYTES - 2)
+    ref_size = min(MAX_IDENTITY_BYTES, len(producer.canonical_json(
+        f"{target['machine']}/{target['project']}/" + "\U0010ffff" * 256,
+    )))
+    closed = {
+        **metadata, "identity": largest_identity,
+        "closeout": {**proof, "identity": largest_identity, "status": "finalized"},
+    }
+    try:
+        wire_json(origin_response(cancelled, claim_ref(cancelled)))
+        wire_json(origin_response(closed, "x" * (ref_size - 2)))
+    except ValueError as exc:
+        raise ValueError("allocation lacks lifecycle metadata capacity") from exc
 
 
 def verified_conclusion(result: object, metadata: dict) -> bool:
@@ -202,6 +253,9 @@ def valid_metadata(value: object) -> bool:
         return False
     try:
         qualified_ref(value["creator"])
+        require_lifecycle_capacity(
+            value["creator"], value["request_id"], value["token"], value["recovery"],
+        )
         if "identity" in value:
             identity = AllocationIdentity.from_dict(value["identity"])
             machine, project, _ = qualified_ref(identity.ref)

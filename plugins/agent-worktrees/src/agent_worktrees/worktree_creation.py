@@ -832,6 +832,16 @@ def _create_worktree_core(
 
         try:
             receiving_nonce = secrets.token_hex(8) if receiving_allocation is not None else None
+            if receiving_allocation is not None:
+                from .owned_worktree import AllocationIdentity
+
+                AllocationIdentity.from_dict({
+                    "ref": (
+                        f"{receiving_allocation.target['machine']}/{config.repo_name}/{worktree_id}"
+                    ),
+                    "creation_nonce": receiving_nonce,
+                    "path": str(worktree_path), "branch": branch,
+                })
             if creation_intent is not None:
                 receiving_recovery = {}
                 if receiving_allocation is not None:

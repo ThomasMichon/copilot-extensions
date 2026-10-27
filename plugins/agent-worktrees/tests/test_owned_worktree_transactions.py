@@ -154,6 +154,67 @@ def test_pending_closes_only_from_original_sealed_cancellation(owner, monkeypatc
     assert len(tracking.load_record(path).resources) == 1
 
 
+def test_oversized_future_closeout_is_rejected_before_reservation_or_receiving_io(owner, monkeypatch):
+    path, _ = owner
+    before = path.read_bytes()
+    target = {**TARGET, "authority": "x" * 1024, "options": {"name": "x" * 7000}}
+    assert allocation.valid_target(target)
+    monkeypatch.setattr(remote, "request", lambda *args: pytest.fail("oversized reservation made remote effects"))
+    result = call(path, "reserve", {"request_id": "large", "target": target})
+    assert result["error"] and "lifecycle" in result["message"]
+    assert path.read_bytes() == before and not tracking.load_record(path).resources
+
+
+@pytest.mark.parametrize("conclusion", ["cancelled", "finalized", "archived"])
+def test_maximum_admitted_target_and_identity_can_close_within_actual_wire_limit(owner, monkeypatch, conclusion):
+    path, _ = owner
+    monkeypatch.setattr("agent_worktrees.tracking_allocation_write.secrets.token_urlsafe", lambda n: "t" * 43)
+    low, high = 0, producer.MAX_INPUT_BYTES
+    while low + 1 < high:
+        middle = (low + high) // 2
+        candidate = {**TARGET, "options": {"name": "x" * middle}}
+        try:
+            allocation.require_lifecycle_capacity("m/p/owner", "edge", "t" * 43, candidate)
+        except ValueError:
+            high = middle
+        else:
+            low = middle
+    target = {**TARGET, "options": {"name": "x" * low}}
+    pending = call(path, "reserve", {"request_id": "edge", "target": target})
+    assert pending.get("ok"), pending
+    before = path.read_bytes()
+    refused = call(path, "reserve", {
+        "request_id": "edge", "target": {**TARGET, "options": {"name": "x" * high}},
+    })
+    assert refused["error"] and path.read_bytes() == before
+    identity = {
+        "ref": "remote/target/" + "\U0010ffff" * 256,
+        "creation_nonce": "n" * 128, "branch": "b" * 128, "path": "/x",
+    }
+    identity["path"] += "x" * (allocation.MAX_IDENTITY_BYTES - len(producer.canonical_json(identity)))
+    assert len(producer.canonical_json(identity)) == allocation.MAX_IDENTITY_BYTES
+    allocation.AllocationIdentity.from_dict(identity)
+
+    def receive(operation: str, metadata: dict) -> dict:
+        proof = observation(metadata, "allocated" if operation == "inspect" and metadata["phase"] == "pending" else conclusion)
+        proof["identity"] = None if conclusion == "cancelled" else identity
+        producer.canonical_json(proof)
+        return proof
+
+    monkeypatch.setattr(remote, "request", receive)
+    handle = {"token": pending["token"]}
+    if conclusion != "cancelled":
+        bound = call(path, "bind", handle)
+        assert bound.get("ok"), bound
+        producer.canonical_json(bound)
+    closed = call(path, "cancel" if conclusion == "cancelled" else "close", handle)
+    assert closed.get("ok") and closed["phase"] == "closed", closed
+    assert len(allocation.wire_json(closed)) <= producer.MAX_INPUT_BYTES
+    claim = tracking.load_record(path).resources[0]
+    assert producer.valid_metadata(claim.producer) and not claim.is_unsettled
+    assert call(path, "inspect", handle) == closed
+
+
 def test_receiving_io_is_outside_lock_and_concurrent_change_is_not_overwritten(owner, monkeypatch):
     path, _ = owner
     pending = reserve(path)

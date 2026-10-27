@@ -60,12 +60,7 @@ def _matches(record: tracking.WorktreeRecord, payload: dict) -> tracking.Resourc
 
 
 def _response(record: tracking.WorktreeRecord, claim: tracking.ResourceClaim) -> dict:
-    return {
-        "schema": allocation.SCHEMA, "version": allocation.VERSION, "ok": True,
-        "owner": tracking.format_claim_ref(record.execution_machine, record.repo, record.worktree_id),
-        **{key: claim.producer[key] for key in ("creator", "request_id", "token", "phase")},
-        "ref": claim.ref, "producer": copy.deepcopy(claim.producer),
-    }
+    return allocation.origin_response(claim.producer, claim.ref)
 
 
 def _reserve(
@@ -99,6 +94,9 @@ def _reserve(
         "creator": owner.canonical(), "request_id": payload["request_id"],
         "phase": "pending", "recovery": copy.deepcopy(payload["target"]),
     }
+    allocation.require_lifecycle_capacity(
+        metadata["creator"], metadata["request_id"], metadata["token"], metadata["recovery"],
+    )
     ref = allocation.claim_ref(metadata)
     if any(claim.ref == ref or (
         claim.has_producer and isinstance(claim.producer, dict)

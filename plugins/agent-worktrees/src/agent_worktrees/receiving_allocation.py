@@ -38,6 +38,9 @@ class ReceivingAllocation:
             raise ValueError("invalid receiving allocation request identity")
         if not allocation.valid_target(value["target"]):
             raise ValueError("invalid receiving allocation target")
+        allocation.require_lifecycle_capacity(
+            value["origin"], value["request_id"], value["token"], value["target"],
+        )
         return cls(value["origin"], value["request_id"], value["token"], copy.deepcopy(value["target"]))
 
     def to_fields(self) -> dict:

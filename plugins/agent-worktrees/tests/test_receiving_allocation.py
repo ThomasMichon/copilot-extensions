@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -167,6 +168,30 @@ def test_receiving_admission_cannot_skip_original_journal_or_launch_during_creat
                 config, owner_ref=admission.origin, receiving_allocation=admission,
                 no_pair=True, **fields,
             )
+    assert not list(records.glob("*.yaml"))
+
+
+def test_receiving_fields_reserve_closeout_capacity_before_accepting_request(receiver):
+    _, admission, records = receiver
+    fields = admission.to_fields()
+    fields["target"]["options"]["name"] = "x" * 8000
+    with pytest.raises(ValueError, match="lifecycle"):
+        receiving.ReceivingAllocation.from_fields(fields)
+    assert not list(records.glob("*.yaml"))
+
+
+def test_oversized_escaped_receiving_identity_is_refused_before_journal_reservation_or_git(receiver, monkeypatch):
+    config, admission, records = receiver
+    root = Path(config.default_repo.worktree_root).joinpath(*(["\U0010ffff" * 40] * 9))
+    monkeypatch.setitem(config.repos, config.repo_name, replace(config.default_repo, worktree_root=str(root)))
+    monkeypatch.setattr(
+        worktree_creation.git_ops, "create_worktree",
+        lambda *args, **kwargs: pytest.fail("oversized child identity reached Git creation"),
+    )
+    with pytest.raises(ValueError, match="identity exceeds lifecycle"):
+        create(receiver)
+    row = creation_requests.inspect(config, admission.key)
+    assert row is None or row["worktree"] is None
     assert not list(records.glob("*.yaml"))
 
 
