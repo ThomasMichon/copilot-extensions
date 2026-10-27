@@ -190,13 +190,26 @@ above is requested; these implementation choices remain reviewable.
 
 ## Progress
 
+The bounded source owner merged in #9274 as
+`d7edf4a7a04c1c4a62c82ccec73b741c8bae74ad`, after current-head Copilot
+assessment with no open findings and required green checks. A failed public
+package-metadata transport check passed on one normal failed-job retry;
+no dependency-age or review gate was bypassed. The next host-toolchain slice
+supports stable Compose 5 alongside Compose 2 without installing or replacing
+a host plugin. Its contained native/owner packet passes 164 cases, including
+every owner scenario with both Compose 2.39.4 and 5.1.4 version responses,
+plus early refusal of unsupported versions. These are native-protocol fixtures,
+not actual Compose or official-image deployment qualification.
+Actual installed adopter composition and official-image
+acceptance remain the following delivery gates, not consequences of this merge.
+
 The reviewed source appointment landed in #8872. The
 [explicit host SDK owner](../../../fleet-manager/docs/komodo-owner.md) implements
 the bounded declaration, native effect boundary, same-journal admission,
 status/withdrawal and installed-package entry seam. Component qualification
 uses synthetic native subprocess and authenticated HTTP fixtures; it does not
 qualify official images or activate the ordinary installed controller.
-The complete contained Fleet qualification passes 3184 tests with nine explicit
+The merged source's complete contained Fleet qualification passed 3184 tests with nine explicit
 platform/prerequisite skips and seven passing subtests, partitioned exhaustively
 into 139 Komodo cases and their 3045-case complement under the existing runner's
 admission, sandbox and process owner. The required no-actor unit packet passes

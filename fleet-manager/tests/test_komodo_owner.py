@@ -31,6 +31,7 @@ from test_runtime_identity import keys as keys
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux host substrate contract")
 
 
+@pytest.mark.parametrize("compose_version", ["2.39.4", "5.1.4"])
 @pytest.mark.parametrize("scenario", [
     "fresh-repeat", "lost-reply", "recovery", "update", "adoption", "foreign",
     "failed-recovery", "unsettled-restart", "lost-terminal-receipt",
@@ -51,9 +52,10 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux host subs
     "status-paused-periphery", "status-restarting-core",
 ])
 def test_composed_owner_preserves_original_operation_and_real_native_custody(
-    native_rig: Any, keys: Any, scenario: str, monkeypatch: Any,
+    native_rig: Any, keys: Any, scenario: str, monkeypatch: Any, compose_version: str,
 ) -> None:
     rig = native_rig
+    (rig["directory"] / "compose-version").write_text(compose_version)
     (rig["directory"] / "stateful").touch()
     runtime = rig["root"] / "host-runtime"
     runtime.mkdir(mode=0o700)
