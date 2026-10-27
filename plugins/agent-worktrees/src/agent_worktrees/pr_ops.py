@@ -352,6 +352,8 @@ def create_pr(
     attribution: SourceAttribution | None = None,
     dry_run: bool = False,
     confirm_fork: bool = False,
+    publication_origin: str | None = None,
+    publication_labels: tuple[str, ...] = (),
 ) -> dict:
     """Squash worktree commits, create + push a feature branch for a PR.
 
@@ -408,6 +410,8 @@ def create_pr(
     with the feature branch still local (a worktree created under the old
     reset-to-upstream scheme).
     """
+    from . import pr_publication_labels
+    config = pr_publication_labels.activate(config, publication_origin, publication_labels)
     repo = config.default_repo
     prcfg = repo.pr
     remote = repo.remote
@@ -443,6 +447,8 @@ def create_pr(
             record = tracking.load_record(yaml_path)
         except Exception:
             record = None
+    if not new:
+        pr_publication_labels.validate_scope(prcfg, record.active_pr() if record else None)
 
     # Round-22 finding: preflight the same allocation-time policy
     # `_open_via_provider`'s lazy backfill would otherwise only catch too
@@ -1125,7 +1131,7 @@ def _open_via_provider(
     attribution: SourceAttribution = False,
 ) -> None:
     """Open the PR through the provider plugin and auto-record it (best-effort)."""
-    from . import providers
+    from . import providers, pr_publication_labels
     from .providers import attribution as attr
 
     machine = record.execution_machine if record else ""
@@ -1261,6 +1267,9 @@ def _open_via_provider(
     # request intent for the dry-run/no-open paths; here we make it authoritative
     # for the opened PR so "opened as a DRAFT" can never be reported falsely.)
     result["draft"] = bool(draft)
+    labels = pr_publication_labels.refresh(config, record, target_pr)
+    if labels is not None:
+        result["publication_labels"] = labels
     # The PR opened, but a required label (auto-merge / source:<machine>) may
     # have failed to apply. Surface it rather than swallowing -- the merge gate
     # and source attribution depend on these labels.
@@ -1501,6 +1510,11 @@ def _finish_auto_open(
         if not want_open:  # untracked worktree: still say why nothing was opened
             result["pr_open_skipped"] = "--no-open" if open_pr is False else "pr.auto_open is off"
         return
+    from . import pr_publication_labels
+    if result.get("success"):
+        labels = pr_publication_labels.refresh(config, record, target_pr)
+        if labels is not None:
+            result["publication_labels"] = labels
     if record is not None and result.get("success"):
         error = pr_publish.record_rewrite_ownership(config, record, target_pr, result["branch"], head_sha, published_identity)
         if error:

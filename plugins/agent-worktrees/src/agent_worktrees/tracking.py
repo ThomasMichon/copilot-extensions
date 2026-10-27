@@ -385,20 +385,15 @@ class PRRecord:
     # implicit codename decision) that must not be confused with the unset sentinel.
     attribution_mode: str = ""
     attribution_explicit: bool = False
-    # A random UUID assigned ONCE when this entry is first created, and
-    # NEVER touched by any later branch/number/provider/state correction
-    # (round-36/37/38 findings: neither `branch` nor `number` is actually
-    # immutable -- a manual `set-pr` correction can reassign either -- so
-    # this is the SOLE stable per-entry merge identity `_save_record_unlocked`
-    # uses to protect the frozen attribution pair across concurrent saves).
-    # Backfilled INLINE by `_save_record_unlocked` itself for any entry that
-    # predates this field, not via a separate migration pass (round-37
-    # finding: this repo's config-migration framework explicitly excludes
-    # tracking YAML, so no such pass has an actual entry point).
+    # Stable random per-entry identity, unaffected by branch/number corrections.
+    # _save_record_unlocked backfills it inline and protects frozen metadata.
+    # Tracking YAML is outside the separate config-migration framework.
     pr_id: str = ""
     # Attribution and authority generation; durable corrections and frozen ties win.
     pr_revision: int = 0
     creation: dict[str, str] = field(default_factory=dict)
+    publication_origin: dict = field(default_factory=dict)
+    publication_labels: dict = field(default_factory=dict)
     _loaded_authority: tuple | None = field(default=None, repr=False, compare=False)
 
 # PR lifecycle states that are still live (the PR can still receive pushes).
@@ -1363,6 +1358,8 @@ def _parse_pr_mapping(raw: dict, default_repo: str) -> PRRecord:
         pr_id=pr_id_raw if isinstance(pr_id_raw, str) else "",
         pr_revision=pr_revision,
         creation=parse(raw),
+        publication_origin=raw.get("publication_origin") or {},
+        publication_labels=raw.get("publication_labels") or {},
         rewrite_owner=str(raw.get("rewrite_owner", "") or ""),
         rewrite_identity=str(raw.get("rewrite_identity", "") or ""),
     )
@@ -1434,6 +1431,10 @@ def _pr_to_yaml_dict(pr: PRRecord) -> dict[str, object]:
     }
     if pr.creation:
         d["creation"] = dict(pr.creation)
+    if pr.publication_origin:
+        d["publication_origin"] = dict(pr.publication_origin)
+    if pr.publication_labels:
+        d["publication_labels"] = dict(pr.publication_labels)
     if pr.head_observed_at:
         d["head_observed_at"] = pr.head_observed_at
     if pr.head_observed_api_base:

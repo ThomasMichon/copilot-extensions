@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import fields
 from datetime import datetime, timedelta
+import json
 
 from . import config as cfg, tracking
 
@@ -13,7 +14,7 @@ def authority(pr: tracking.PRRecord) -> tuple:
         "branch", "repo", "provider", "number", "url", "state",
         "base_sha", "head_sha", "patch_id", "remote", "head_repo",
         "head_identity", "head_owner", "rewrite_owner", "rewrite_identity",
-    )) + (tuple(sorted(pr.creation.items())),)
+    )) + (tuple(sorted(pr.creation.items())), json.dumps(pr.publication_origin, sort_keys=True))
 
 
 def loaded(record: tracking.WorktreeRecord) -> tracking.WorktreeRecord:

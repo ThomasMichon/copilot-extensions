@@ -112,7 +112,7 @@ class TestCreatePR:
         assert pr.attribution_mode == "codename"
         assert pr.attribution_explicit is False
         assert pr.pr_id
-        assert pr.pr_revision == 3  # attribution, publication lease, ownership
+        assert pr.pr_revision == 4  # attribution, creation publication, lease, ownership
         assert pr.rewrite_owner == f"{wid}:{pr.branch}"
 
     def test_freezes_explicit_per_call_override_verbatim(self, pr_repo):

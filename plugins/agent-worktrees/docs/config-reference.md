@@ -567,6 +567,11 @@ armed user configuration still fails before any worktree mutation.
 
 ## PR workflow — `repos.<name>.pr` (machine-local **or** in-repo)
 
+Optional `publication_origin: {id: control-plane, labels: [source:control-plane]}`
+defines an inert policy selected only by explicit publication options.
+See [publication-origin labels](pr-publication-labels.md) for attachment,
+worker export, additive reconciliation and metadata-only repair.
+
 Optional `publication_checks` configures fixed built-in self-review and scope
 checks that gate managed code publication. No external check commands or dynamic
 registry are accepted. See [publication checks](pr-publication-checks.md) for the

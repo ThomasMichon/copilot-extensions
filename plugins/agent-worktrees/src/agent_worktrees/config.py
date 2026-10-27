@@ -34,6 +34,7 @@ from . import machine_instructions
 from .codename_config import CodenameConfig, parse_codename
 from .pr_observation_config import ObservationConfig, parse_observation
 from .pr_publication_config import PublicationChecksConfig, parse_publication_checks, parse_string_tuple
+from .pr_publication_labels import PublicationOrigin, parse_origin
 from .pr_related_binding import parse_repository
 from .config_cache import (  # noqa: F401 (re-exported)
     ConfigCacheSession,
@@ -232,12 +233,9 @@ class PRConfig:
     head_scheme: str = "refspec"   # refspec (default) | snapshot
     head_pattern: str = ""         # empty -> provider-aware default (see above)
     push_timeout_seconds: float = publication_deadline.DEFAULT_PUSH_TIMEOUT
-    # Provider-plugin settings (PR creation via a provider CLI). ``api_base``
-    # is the hosting endpoint -- required for self-hosted Gitea
-    # (e.g. https://host/gitea) and Azure DevOps org URLs; GitHub defaults to
-    # the public API. ``token_command`` (a shell command that prints a token,
-    # e.g. a vault fetch) takes precedence over ``token_env`` (an env var
-    # name); GitHub falls back to ``gh`` auth when neither is set. ``labels``
+    # Provider endpoint: required for self-hosted Gitea and Azure DevOps;
+    # GitHub defaults to its public API. A token_command (printing a token)
+    # takes precedence over token_env; GitHub otherwise uses gh auth. ``labels``
     # are applied to every opened PR (``{machine}`` is templated). ``auto_open``
     # is **opt-in** (default False): only when a repo sets it true does
     # ``create-pr`` open the PR via the provider; otherwise the branch is just
@@ -246,6 +244,8 @@ class PRConfig:
     token_env: str = ""
     token_command: str = ""
     labels: tuple[str, ...] = ()
+    publication_origin: PublicationOrigin | None = None
+    publication_origin_active: bool = False
     auto_open: bool = False        # opt-in: open the PR via the provider after push
     # Embed source-worktree provenance in a hidden PR-body marker:
     # - "codename" (default, effort codename-attribution-by-default) -- a
@@ -1700,6 +1700,7 @@ def _parse_pr(raw: Any) -> PRConfig:
     enabled = bool(raw.get("enabled", False)) or required
 
     labels = parse_string_tuple(raw.get("labels", ()))
+    publication_origin = parse_origin(raw.get("publication_origin"))
 
     def _choice(value: Any, allowed: tuple[str, ...], default: str) -> str:
         """Normalize a config enum to one of ``allowed`` (case-insensitive),
@@ -1741,6 +1742,7 @@ def _parse_pr(raw: Any) -> PRConfig:
         token_env=str(raw.get("token_env", "")),
         token_command=str(raw.get("token_command", "")),
         labels=labels,
+        publication_origin=publication_origin,
         auto_open=bool(raw.get("auto_open", False)),
         source_attribution=_source_attribution(raw.get("source_attribution", "codename")),
         source_attribution_configured=("source_attribution" in raw),
