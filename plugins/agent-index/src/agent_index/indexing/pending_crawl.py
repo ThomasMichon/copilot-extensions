@@ -31,7 +31,8 @@ def recovery_scope(config_scope: str, connector: SourceConnector) -> str:
     identity = getattr(connector, "recovery_identity", None)
     if identity is None:
         if any(
-            callable(getattr(connector, name, None)) for name in ("discover_delta", "discover_hints")
+            callable(getattr(connector, name, None))
+            for name in ("discover_delta", "discover_hints", "discover_delta_page")
         ):
             raise ValueError("Delta connector must declare its effective recovery_identity")
         identity = (connector.source_name,)
@@ -118,7 +119,7 @@ class PendingCrawls:
                 "SELECT source FROM embedding_backfills WHERE complete = 0 ORDER BY source",
             )]
 
-    def load(self, source: str, scope: str) -> tuple[CrawlManifest, bool] | None:
+    def read_payload(self, source: str, scope: str) -> str | None:
         with closing(self._paths._connect()) as conn, conn:
             row = conn.execute(
                 "SELECT scope, payload FROM pending_crawls WHERE source = ?", (source,),
@@ -127,12 +128,68 @@ class PendingCrawls:
             return None
         if row["scope"] != scope:
             raise ValueError("Pending crawl belongs to a different source/account configuration")
-        data = json.loads(row["payload"])
+        return row["payload"]
+
+    def compare_and_save(
+        self, source: str, *, scope: str, payload: str, expected: str | None, family: str,
+    ) -> None:
+        """Publish acquisition progress under the same family exclusion and journal key."""
+        with closing(self._paths._connect()) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._assert_family_available(conn, source, family)
+            row = conn.execute(
+                "SELECT scope, payload FROM pending_crawls WHERE source = ?", (source,),
+            ).fetchone()
+            if (row is None and expected is not None) or (
+                row is not None and (row["scope"] != scope or row["payload"] != expected)
+            ):
+                raise PendingCrawlConflict("Pending acquisition changed before progress publication")
+            if row is None:
+                conn.execute(
+                    "INSERT INTO pending_crawls (source, scope, payload) VALUES (?, ?, ?)",
+                    (source, scope, payload),
+                )
+            else:
+                conn.execute(
+                    "UPDATE pending_crawls SET payload = ? WHERE source = ?", (payload, source),
+                )
+
+    def load(self, source: str, scope: str) -> tuple[CrawlManifest, bool] | None:
+        payload = self.read_payload(source, scope)
+        if payload is None:
+            return None
+        data = json.loads(payload)
+        if isinstance(data, dict) and data.get("version") == 2:
+            from agent_index.indexing.paged_crawl import decode_acquisition
+
+            decode_acquisition(payload, source)
+            return None
         if not isinstance(data, dict) or set(data) != {"version", "full", "manifest"}:
             raise ValueError("Invalid pending crawl envelope")
         if type(data["version"]) is not int or data["version"] != 1 or type(data["full"]) is not bool:
             raise ValueError("Unsupported pending crawl version or mode")
-        raw = data["manifest"]
+        return self.decode_manifest(data["manifest"], source), data["full"]
+
+    def discard_acquisition(
+        self, source: str, *, scope: str, expected_payload: str, family: str,
+    ) -> None:
+        """Explicitly abandon only the exact unapplied phase; complete work must replay."""
+        from agent_index.indexing.paged_crawl import decode_acquisition
+
+        with closing(self._paths._connect()) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT scope, payload FROM pending_crawls WHERE source = ?", (source,),
+            ).fetchone()
+            if row is None or row["scope"] != scope or row["payload"] != expected_payload:
+                raise PendingCrawlConflict("Pending acquisition changed before explicit discard")
+            progress = decode_acquisition(row["payload"], source)
+            if progress.manifest.accounting_family != family:
+                raise ValueError("Pending acquisition belongs to a different source family")
+            conn.execute("DELETE FROM pending_crawls WHERE source = ?", (source,))
+
+    @classmethod
+    def decode_manifest(cls, raw: object, source: str) -> CrawlManifest:
         if not isinstance(raw, dict) or set(raw) != set(CrawlManifest.__dataclass_fields__):
             raise ValueError("Invalid pending crawl manifest")
         if raw["source"] != source:
@@ -144,8 +201,8 @@ class PendingCrawls:
             commit=raw["commit"], stats=CrawlStats(**raw["stats"]),
             stored_family=raw["stored_family"], accounting_family=raw["accounting_family"],
         )
-        self._validate(manifest)
-        return manifest, data["full"]
+        cls._validate(manifest)
+        return manifest
 
     @staticmethod
     def _validate(manifest: CrawlManifest) -> None:
@@ -212,9 +269,12 @@ def recover_source(
 
     state.require_acquisition_scope(source, scope, full=full)
     manifest = acquire()
-    if not manifest.is_empty:
+    acquired = journal.load(source, scope)
+    if acquired is not None and acquired != (manifest, full):
+        raise PendingCrawlConflict("Acquired manifest does not match pending publication")
+    if acquired is None and not manifest.is_empty:
         journal.save(manifest, scope=scope, full=full)
     current = publish(manifest, full=full)
-    if not manifest.is_empty:
+    if acquired is not None or not manifest.is_empty:
         journal.clear(source)
     return totals[0] + current[0], totals[1] + current[1], totals[2] + current[2]
