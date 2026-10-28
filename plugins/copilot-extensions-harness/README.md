@@ -71,7 +71,23 @@ which starts pushing its own commits directly to the PR branch. See
 written policy this hook mechanically enforces. A control repo enabling this
 plugin purely for its instruction projections is never touched by the guard
 -- it only fires for a `gh`
-invocation whose current directory resolves to this plugin's own target repo.
+invocation whose current directory resolves to this plugin's own target repo,
+and only when the workspace explicitly enables `copilot-extensions-harness@<marketplace>`
+in `.github/copilot/settings.json` or `settings.local.json`. A matching local
+`false` overrides the repository setting. Global installation or user-level
+enablement alone is not adoption: unrelated workspaces (including VS Code)
+return a no-op, without repository or body discovery. Adoption lookup stops at
+the nearest repository boundary; a nested checkout cannot inherit its parent's
+opt-in. Missing or malformed project settings do not activate the guard.
+Relative body-file and API-input paths use that same resolved workspace, never
+the plugin payload/process directory.
+
+The shell entries also fail open when the helper/interpreter is unavailable or
+exits unsuccessfully, discarding partial output and emitting only a bounded,
+sanitized diagnostic. Unexpected Python exceptions signal the cooperating
+wrapper to report that diagnostic while the host-facing hook still exits
+successfully; direct legacy callers retain a zero exit code. Deliberate mention/uninspectable-body denials in an adopted,
+matching repository remain policy decisions, not execution failures.
 
 The guard first classifies publication syntax locally, using the same tokenizer
 and write predicates as the body scanner. Ordinary reads and unrelated shell
@@ -119,7 +135,10 @@ python tools/run-plugin-tests.py copilot-extensions-harness --test-file tests/te
 
 ## Enable
 
-No runtime, binstub, service, or setup script is involved. Enabling the plugin is
+Keep this plugin enabled at repository/workspace scope, not as a machine-wide
+hook policy. Existing global availability does not opt a project into its guard;
+the repository-local declaration below is required. No runtime, binstub,
+service, or setup script is involved. Enabling the plugin is
 the whole install; restart the session so the skills and agent are scanned.
 Synchronize the declared instruction projection in each adopting repository so
 the contribution boundary is available on launch paths that load checked-in
