@@ -17,6 +17,7 @@ from runtime_profile_release import (
     APPROVAL_SOURCE,
     _unique_object,
     validate_release_bindings,
+    with_release_profiles,
 )
 from runtime_profile_wheels import verify_profile_wheels
 from runtime_wheel_inspection import inspect_wheel
@@ -232,6 +233,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--native-profile", type=Path, required=True)
     parser.add_argument("--wheel-dir", type=Path, required=True)
+    parser.add_argument(
+        "--artifact-index",
+        type=Path,
+        help="emit a new artifact-index candidate with this profile, not an approval",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--timeout", type=float, default=300)
     parser.add_argument("--max-bytes", type=int, default=512 << 20)
@@ -280,14 +286,37 @@ def main(argv: list[str] | None = None) -> int:
             max_unpacked_bytes=8 * args.max_bytes,
             deadline=deadline,
         )
+        data = profile.canonical
+        result = {"profile_sha256": profile.lock_id}
+        if args.artifact_index is not None:
+            index = with_release_profiles(
+                json.loads(
+                    _read(args.artifact_index), object_pairs_hook=_unique_object
+                ),
+                [profile.record()],
+                {
+                    manifest["artifact_id"]: (
+                        manifest,
+                        profile.record()["artifact"]["manifest_sha256"],
+                    )
+                },
+            )
+            data = json.dumps(
+                index,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+                allow_nan=False,
+            ).encode("ascii")
+            result["index_sha256"] = "sha256:" + hashlib.sha256(data).hexdigest()
         with _temporary_inputs(destination.parent) as temporary:
             candidate = (
                 _private_retained_root(Path(temporary)).resolve() / "profile.json"
             )
-            candidate.write_bytes(profile.canonical)
+            candidate.write_bytes(data)
             _check_deadline(deadline)
             os.link(candidate, destination)
-        print(json.dumps({"profile_sha256": profile.lock_id}, sort_keys=True))
+        print(json.dumps(result, sort_keys=True))
         return 0
     except (OSError, ValueError, UnicodeError, PromotionArtifactError) as error:
         parser.exit(1, f"core profile refused: {error}\n")

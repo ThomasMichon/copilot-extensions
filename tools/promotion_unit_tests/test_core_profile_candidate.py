@@ -193,3 +193,139 @@ def test_raw_manifest_and_duplicate_properties_are_not_normalized_away(inputs):
     )
     with pytest.raises(ProfileError, match="duplicate JSON property"):
         build(inputs, manifest_data=raw.encode())
+
+
+def _index(inputs):
+    return {
+        "schema": "copilot-extensions.promotion-python-artifacts",
+        "schema_version": 2,
+        "dev_head": "a" * 40,
+        "content_tree": "b" * 40,
+        "admission": {
+            "signer_digest": "c" * 40,
+            "source_digest": "c" * 40,
+            "source_ref": "refs/heads/main",
+        },
+        "artifacts": [{"artifact_id": inputs[0]["artifact_id"]}],
+    }
+
+
+def _index_candidate(inputs, index, records):
+    import runtime_profile_release as release
+
+    manifest = inputs[0]
+    return release.with_release_profiles(
+        index,
+        records,
+        {
+            manifest["artifact_id"]: (
+                manifest,
+                "sha256:" + hashlib.sha256(json.dumps(manifest).encode()).hexdigest(),
+            )
+        },
+    )
+
+
+def test_index_candidate_preserves_all_existing_source_and_artifact_data(inputs):
+    index = _index(inputs)
+    original = json.dumps(index, sort_keys=True)
+    profile = build(inputs).record()
+    result = _index_candidate(inputs, index, [profile])
+    assert json.dumps(index, sort_keys=True) == original
+    assert {
+        key: value for key, value in result.items() if key != "runtime_profiles"
+    } == index
+    assert result["runtime_profiles"] == {
+        "schema": "copilot-extensions.release-runtime-profiles",
+        "version": 1,
+        "profiles": [profile],
+    }
+    result["artifacts"][0]["artifact_id"] = "changed"
+    assert json.dumps(index, sort_keys=True) == original
+
+
+def test_index_candidate_appends_without_replacing_existing_profiles(inputs):
+    profile = build(inputs).record()
+    index = _index_candidate(inputs, _index(inputs), [profile])
+    added = json.loads(json.dumps(profile))
+    added["target"]["environment"]["platform_release"] = "another-host"
+    result = _index_candidate(inputs, index, [added])
+    assert result["runtime_profiles"]["profiles"] == [profile, added]
+    assert index["runtime_profiles"]["profiles"] == [profile]
+    with pytest.raises(ProfileError, match="duplicate"):
+        _index_candidate(inputs, index, [profile])
+
+
+def test_index_candidate_retains_prior_other_artifact_profiles_for_full_revalidation(
+    inputs,
+):
+    profile = build(inputs).record()
+    previous = json.loads(json.dumps(profile))
+    previous["component"] = "other"
+    previous["release"]["identity"] = "other:2.0"
+    previous["artifact"]["artifact_id"] = "sha256:" + "9" * 64
+    index = _index(inputs)
+    index["artifacts"].append({"artifact_id": previous["artifact"]["artifact_id"]})
+    index["runtime_profiles"] = {
+        "schema": "copilot-extensions.release-runtime-profiles",
+        "version": 1,
+        "profiles": [previous],
+    }
+    result = _index_candidate(inputs, index, [profile])
+    assert result["runtime_profiles"]["profiles"] == [previous, profile]
+    assert index["runtime_profiles"]["profiles"] == [previous]
+    import runtime_profile_release as release
+
+    with pytest.raises(ProfileError, match="no validated first-party manifest"):
+        release.validate_release_bindings(result, {})
+
+
+@pytest.mark.parametrize(
+    "change", ["empty", "manifest", "artifact", "approval", "release"]
+)
+def test_index_candidate_refuses_unbound_or_empty_additions(inputs, change):
+    record = build(inputs).record()
+    records = [record]
+    if change == "empty":
+        records = []
+    elif change == "manifest":
+        record["artifact"]["manifest_sha256"] = "sha256:" + "0" * 64
+    elif change == "artifact":
+        record["artifact"]["artifact_id"] = "sha256:" + "0" * 64
+    elif change == "approval":
+        record["approval_source"] = "caller-approval"
+    else:
+        record["release"]["sha256"] = "sha256:" + "0" * 64
+    with pytest.raises(ProfileError):
+        _index_candidate(inputs, _index(inputs), records)
+
+
+@pytest.mark.parametrize("change", ["schema", "version", "source", "tree"])
+def test_index_candidate_requires_supported_source_index_data(inputs, change):
+    index = _index(inputs)
+    if change == "schema":
+        index["schema"] = "other"
+    elif change == "version":
+        index["schema_version"] = True
+    elif change == "source":
+        index["dev_head"] = "invalid"
+    else:
+        index["content_tree"] = "invalid"
+    with pytest.raises(ProfileError):
+        _index_candidate(inputs, index, [build(inputs).record()])
+
+
+def test_index_candidate_fits_the_existing_source_subject_byte_budget(inputs):
+    profile = build(inputs).record()
+    index = _index(inputs) | {"padding": ""}
+    baseline = _index_candidate(inputs, index, [profile])
+    size = len(
+        json.dumps(
+            baseline, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+        ).encode("ascii")
+    )
+    index["padding"] = "x" * ((1 << 20) - size)
+    assert _index_candidate(inputs, index, [profile])["padding"] == index["padding"]
+    index["padding"] += "x"
+    with pytest.raises(ProfileError, match="subject byte budget"):
+        _index_candidate(inputs, index, [profile])

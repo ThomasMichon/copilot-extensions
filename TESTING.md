@@ -2257,6 +2257,10 @@ custody is substituted at its existing owner boundary. The separate
 the producer CLI, including an independently launched child without ambient
 repository import paths and no-clobber output. That child belongs outside
 the no-actor packet; candidate assembly qualifies no feed or release approval.
+The same controls cover additive index composition, preserving previous
+profiles/source/artifacts, duplicate refusal and exact new manifest bindings.
+The native-facing suite additionally runs `--artifact-index` through the
+existing artifact-set validator; the emitted subject is still not approved.
 
 The reviewed [promotion burndown](efforts/active/dev-branch-release-pipeline/promotion-burndown.md)
 supersedes the historical full-suite promotion requirement below. Source CI

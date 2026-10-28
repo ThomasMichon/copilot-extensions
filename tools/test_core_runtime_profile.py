@@ -5,12 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
 from copy import deepcopy
 from pathlib import Path
 
+import promotion_python_artifacts as artifacts
 import pytest
 from promotion_python_artifacts import PromotionArtifactError
 from runtime_profile import ProfileError, validate_profile
@@ -294,3 +296,72 @@ def test_cli_emits_identical_candidate_and_refuses_overwrite(external_inputs, tm
     refused = subprocess.run(command, check=False, **options)
     assert refused.returncode != 0 and "already exists" in refused.stderr
     assert output.read_bytes() == expected.canonical
+
+
+def test_cli_index_handoff_passes_the_existing_artifact_validator(
+    external_inputs, tmp_path
+):
+    manifest, native, paths = external_inputs
+    source = tmp_path / "input-artifacts"
+    source.mkdir()
+    entry = artifacts.bundle_wheels(manifest, next(iter(paths.values())).parent, source)
+    import zipfile
+
+    with zipfile.ZipFile(source / entry["filename"]) as bundle:
+        raw = bundle.read("manifest.json")
+    manifest_path = tmp_path / "bound-manifest.json"
+    manifest_path.write_bytes(raw)
+    native_path = tmp_path / "native.json"
+    native_path.write_text(json.dumps(native))
+    index = {
+        "schema": artifacts.SCHEMA,
+        "schema_version": 2,
+        "dev_head": "a" * 40,
+        "content_tree": "b" * 40,
+        "artifacts": [entry],
+    }
+    source_index = source / artifacts.INDEX_NAME
+    original = json.dumps(index).encode()
+    source_index.write_bytes(original)
+    destination = tmp_path / "candidate-artifacts"
+    destination.mkdir()
+    shutil.copyfile(source / entry["filename"], destination / entry["filename"])
+    output = destination / artifacts.INDEX_NAME
+    command = [
+        sys.executable,
+        str(Path(__file__).with_name("core_runtime_profile.py")),
+        "--manifest",
+        str(manifest_path),
+        "--native-profile",
+        str(native_path),
+        "--wheel-dir",
+        str(next(iter(paths.values())).parent),
+        "--artifact-index",
+        str(source_index),
+        "--output",
+        str(output),
+    ]
+    result = subprocess.run(
+        command,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env={key: value for key, value in os.environ.items() if key != "PYTHONPATH"},
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stderr
+    checked = artifacts.validate_artifacts(
+        destination,
+        dev_head="a" * 40,
+        content_tree="b" * 40,
+        main_before="c" * 40,
+    )
+    assert {
+        key: value for key, value in checked.items() if key != "runtime_profiles"
+    } == index
+    assert source_index.read_bytes() == original
+    assert (
+        json.loads(result.stdout)["index_sha256"]
+        == "sha256:" + hashlib.sha256(output.read_bytes()).hexdigest()
+    )
