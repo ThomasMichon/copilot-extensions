@@ -52,7 +52,11 @@ Ownership boundaries:
   does not close it by solving a launch subset.
 - #8375 retains private 90-day prompt recovery, launch-attempt correlation and
   inspection. Reuse its attempt identity; do not make a parallel outcome store.
-- #7942 retains live readiness, SDK message consumption and receipt semantics.
+- #7942 retains asynchronous, non-provisioning first-prompt receipt observation
+  in context-handoff, including prompt-return latency and pending/unavailable
+  reconciliation. Observation does not relax handoff ownership or consumption.
+  Bridge's existing delivery implementation separately owns live readiness,
+  SDK message consumption and its delivery receipts.
 - #8669/#8864/#9321 retain installation-independent shells and the finite
   counted-NUL Bash seed reader; do not activate or replace that open work.
 - #5579 retains broader wrapper-depth reduction. A native prompt change must
