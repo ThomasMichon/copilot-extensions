@@ -553,8 +553,12 @@ class TestReapBoundCopilots:
 @pytest.mark.parametrize("outcome", ["clear", "timeout", "new-owner", "probe-error", "reused-pid"])
 def test_reclaim_one_requires_fresh_clear_binding_before_success(monkeypatch, tmp_path, outcome):
     from agent_worktrees import reclaim_cli
+    from types import SimpleNamespace
 
     monkeypatch.setattr(reclaim_cli.cfg, "tracking_dir", lambda: tmp_path)
+    (tmp_path / "wtA.yaml").write_text("fixture")
+    monkeypatch.setattr(reclaim_cli.tracking, "load_record", lambda *a: SimpleNamespace(sessions=[]))
+    monkeypatch.setattr(reclaim_cli, "_confirm_clear_publication", lambda *a, **k: {"confirmed": True})
     original = {"session_id": "original", "pid": 77777, "start_time": "100", "homing": "bare"}
     if outcome == "reused-pid":
         original["start_time"] = "200"
@@ -566,6 +570,7 @@ def test_reclaim_one_requires_fresh_clear_binding_before_success(monkeypatch, tm
     monkeypatch.setattr(reclaim, "filter_stop_unreachable", lambda found, **k: found)
 
     def resolve(**kwargs):
+        assert kwargs.get("session_ids") is None, "empty registry must not skip orphan discovery"
         if outcome == "probe-error" and not live:
             raise OSError("fixture observation failed")
         return list(live)
@@ -606,19 +611,20 @@ def test_reclaim_completion_waits_for_current_clear_publication(monkeypatch):
     monkeypatch.setattr(reclaim_cli.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(reclaim_cli.time, "sleep", lambda delay: clock.__setitem__(0, clock[0] + delay))
     responses = iter([
-        (99, False, None), (101, True, None), (101, False, {"status": "stale"}),
-        (102, False, None),
+        (99, False, False, None), (101, True, False, None),
+        (101, False, False, {"status": "stale"}), (102, False, True, None),
+        (103, False, False, None),
     ])
     calls = []
 
     def read(request, *, recover):
         assert not recover
         assert request["worktree_id"] == "wtA" and request["project"] == "fixture"
-        observed, live, availability = next(responses)
+        observed, live, mux, availability = next(responses)
         calls.append(observed)
         return {
             "worktrees": [{
-                "id": "wtA", "session_lock_live": live,
+                "id": "wtA", "session_lock_live": live, "mux_session": mux,
                 "fact_provenance": {
                     "session": {"quality": "current"}, "mux": {"quality": "current"},
                 },
@@ -630,8 +636,8 @@ def test_reclaim_completion_waits_for_current_clear_publication(monkeypatch):
     monkeypatch.setattr(worktrees_client, "read_current", read)
     result = reclaim_cli._confirm_clear_publication("wtA", after=100, timeout=1)
     assert result["confirmed"]
-    assert result["projection"]["revision"] == 4
-    assert len(calls) == 4
+    assert result["projection"]["revision"] == 5
+    assert len(calls) == 5
 
 
 def test_reclaim_publication_timeout_retains_pending_outcome(monkeypatch):

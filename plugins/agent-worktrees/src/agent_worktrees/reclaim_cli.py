@@ -53,7 +53,7 @@ def _confirm_clear_publication(worktree_id: str, *, after: float, timeout: float
                     facts.get("session", {}).get("quality") == "current"
                     and facts.get("mux", {}).get("quality") == "current"
                     and not any(row.get(name) for name in (
-                        "mux_live", "session_lock_live", "session_bound_live",
+                        "mux_session", "session_lock_live", "session_bound_live",
                         "session_bridge_live", "session_bare_orphan", "live_session_ids",
                     ))
                 ):
@@ -473,12 +473,22 @@ def reclaim_one(
     different owner that appeared after the guard pass.
     """
     record_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    discover_orphans = session_ids is None
     if session_ids is None and record_path.exists():
         record = tracking.load_record(record_path)
-        session_ids = [entry.session_id for entry in (record.sessions or ())]
+        session_ids = [entry.session_id for entry in (record.sessions or ())] or None
+
+    def bound(*, table=None):
+        found = reclaim.resolve_bound_copilots(
+            worktree_id=worktree_id, table=table,
+            **({"session_ids": session_ids} if session_ids is not None else {}),
+        )
+        if discover_orphans and session_ids is not None:
+            found += reclaim.resolve_bound_copilots(worktree_id=worktree_id, table=table)
+        return list({item["pid"]: item for item in found}.values())
+
     table = reclaim.build_process_table()
-    scope = {} if session_ids is None else {"session_ids": session_ids}
-    found = reclaim.resolve_bound_copilots(worktree_id=worktree_id, table=table, **scope)
+    found = bound(table=table)
     # #4272/#1416: a bare-resumed / bridge-owned session (cwd=home) is invisible
     # to the cwd-keyed resolve above, so an ACTIVE-via-bridge worktree would
     # offer Reclaim (see engine._reclaimable) but reap NOTHING -- stranding the
@@ -545,8 +555,10 @@ def reclaim_one(
     try:
         if session_ids is not None:
             record = tracking.load_record(record_path)
-            scope = {"session_ids": [entry.session_id for entry in (record.sessions or ())]}
-        remaining_bound = reclaim.resolve_bound_copilots(worktree_id=worktree_id, **scope)
+            session_ids = [entry.session_id for entry in (record.sessions or ())] or (
+                None if discover_orphans else []
+            )
+        remaining_bound = bound()
         remaining_bound += reclaim.resolve_bridge_bound(worktree_id)
         mux_live = sessions.has_mux_session(worktree_id)
         tracking.stamp_bound_live(worktree_id, bool(remaining_bound))
