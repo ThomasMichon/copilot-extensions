@@ -294,6 +294,12 @@ promotion flow; rollout requires its normal authorization.
   Copilot verdict was Comment with no Medium/High finding in its full body or
   inline comments; this is the repository's accepted verdict shape, not an
   assertion that the bot issued Approve. Required checks were green.
+- That verdict retained a generic caveat requesting human assessment of
+  discovery/publication risks. No separate human-assessment evidence is
+  recorded here, and this closeout does not claim the caveat was withdrawn.
+  The author assessed the concrete earlier findings against the corrections
+  and regressions, then applied the repository owner's clean-Comment completion
+  policy. That disposition is source review, not native or installed acceptance.
 - The immutable-commit packet at reviewed head `d308772717` passed 2,560 tests
   with 12 deselected and coverage recorded once. The complete customization,
   scanner and standalone publisher packet passed 615 tests with six
