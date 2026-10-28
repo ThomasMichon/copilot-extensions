@@ -204,6 +204,34 @@ repository history.
 
 ## Journal
 
+### 2026-10-28 - Integrate the merged finite cleanup owner before release
+
+- The operator authorized ordinary review, required CI, merge and promotion of
+  #7833, while retaining the separate installed-update and shared-host rollout
+  holds. The subsequent overlap decision selected merged #9253's cleanup owner
+  plus the broker-specific custody requirements, with fresh qualification.
+- Candidate `67614173467d7edcc676cc55da41119c384ca79a` reconciles current
+  `dev` without retaining the superseded staged-publisher exemption. Generic
+  teardown controllers, Darwin inspection, finite profiles, project-command
+  ownership and explicit purge semantics remain owned by upstream cleanup.
+  Native broker removal enters the same Worktrees policy adapter in process;
+  it proves the fixed driver stack and actual teardown lease before broker
+  removal and finite code deletion. Staged source retains the original project.
+- Local finite cleanup passed 149 tests with five platform skips; workflow and
+  synchronization controls passed 156 with 55 skips. The isolated native driver
+  and in-process policy packet passed 34 tests. An actual selected-slot project
+  cleanup probe passed after updating its extracted frontend fixture to include
+  the real headless invocation wrapper. Install-contract and source AST guards
+  passed; no module-size ceiling was widened.
+- Native whole-uninstall positive controls on the shared machine refused an
+  unrelated module consumer under tracked #8669 and were explicitly skipped;
+  they do not qualify the joined candidate. The earlier real-consumer result
+  below belongs only to its recorded source. All three hosted lanes must
+  requalify the reconciled source before this draft becomes reviewable.
+- No installed payload, runtime, Scheduled Task or shared-host service was
+  changed. The temporary resident and inherited feed/recovery obligations remain
+  held; the parent effort is Active.
+
 ### 2026-10-28 - Qualify real broker consumers and canonical removal
 
 - Exact candidate `3f92119913ff893fe8d3035d744ec601c7c1fb1a` passed all three
