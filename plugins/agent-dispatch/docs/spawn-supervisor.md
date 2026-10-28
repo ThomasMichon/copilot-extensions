@@ -908,9 +908,14 @@ ignored.
 `agent_dispatch.script_worker.ScriptTaskRuntime` is the small helper contract
 for those bodies. It reads the supervisor-injected task/coordinator context from
 environment variables, wraps claim/start/heartbeat/progress/complete/abandon,
-and treats a return without an explicit terminal call as a protocol violation:
-an orderly exit auto-abandons in the helper, and a confirmed-gone process is
-abandoned by supervisor recovery.
+and treats a claimed worker's return without an explicit terminal call as a
+protocol violation: an orderly exit auto-abandons in the helper, and a
+confirmed-gone claimed process is abandoned by supervisor recovery.
+An unclaimed worker instead waits through a structured
+[worker-admission inhibition](action-controls.md#worker-admission) and retries
+in the same process after clear. Cancellation does not abandon its queued task.
+Recovery retains a gone unclaimed body's reservation while inhibited; after
+clear, normal failed-spawn retry retains its task and logical creation identity.
 
 The local supervisor and every worker use the ordinary `agent-dispatch` client
 discovery path. The supervisor resolves a fresh client for every coordinator

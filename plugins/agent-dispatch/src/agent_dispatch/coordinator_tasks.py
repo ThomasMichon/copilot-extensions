@@ -45,6 +45,7 @@ from .coordinator_task_models import (
 )
 from .coordinator_verification import register_verification_routes
 from .events import EventBus
+from .queue_records import WorkerAdmissionInhibited
 from .lease import FencingGuard
 from .queue import (
     CompletionOutcome,
@@ -298,6 +299,8 @@ def register_task_routes(
             ) from exc
         except DedupConflictError as exc:
             raise HTTPException(status_code=409, detail=exc.detail()) from exc
+        except WorkerAdmissionInhibited as exc:
+            raise HTTPException(status_code=409, detail=exc.detail()) from exc
         except TaskError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if outcome.event_type is not None:
@@ -480,16 +483,21 @@ def register_task_routes(
         with gate.track_claim():
             if gate.draining:
                 return None
-            outcome = queue.claim_outcome(
-                owner,
-                body.capabilities,
-                repo=None if body.all_repos else body.repo,
-                machine=body.machine,
-                worktree=body.worktree,
-                task_id=body.task_id,
-                lease_seconds=body.lease_seconds,
-                evaluation=body.evaluation,
-            )
+            try:
+                outcome = queue.claim_outcome(
+                    owner,
+                    body.capabilities,
+                    repo=None if body.all_repos else body.repo,
+                    machine=body.machine,
+                    worktree=body.worktree,
+                    task_id=body.task_id,
+                    lease_seconds=body.lease_seconds,
+                    evaluation=body.evaluation,
+                )
+            except WorkerAdmissionInhibited as exc:
+                raise HTTPException(status_code=409, detail=exc.detail()) from exc
+            except TaskError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
         for rejection in outcome.producer_rejections:
             _emit_producer_event("producer.claim_rejected", rejection)
         task = outcome.task

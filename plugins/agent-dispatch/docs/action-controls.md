@@ -4,10 +4,9 @@
 that can observe a later clear. It is local to the selected installation:
 `AGENT_DISPATCH_INSTALL_DIR` or the default `~/.agent-dispatch`.
 
-This first consumer slice covers **automatic coordinator replacement** and
-**automatic supervisor self-update**. It does not yet inhibit explicit
-`deploy`/installer maintenance, supervisor unit reconciliation or new-worker
-admission. Those boundaries remain open in the
+Current consumers cover **automatic coordinator replacement**,
+**automatic supervisor self-update** and **new-worker admission**. Explicit
+`deploy`/installer maintenance and supervisor unit reconciliation remain open in the
 [implementation effort](../../../efforts/active/dispatch-reversible-action-controls/README.md).
 Do not treat these controls as a global deployment or worker-launch fence.
 
@@ -18,8 +17,10 @@ agent-dispatch actions contract --json
 agent-dispatch actions status --json
 agent-dispatch actions inhibit coordinator-replacement --reason "temporary maintenance"
 agent-dispatch actions inhibit supervisor-self-update --reason "temporary maintenance"
+agent-dispatch actions inhibit worker-admission --reason "temporary maintenance"
 agent-dispatch actions clear coordinator-replacement
 agent-dispatch actions clear supervisor-self-update
+agent-dispatch actions clear worker-admission
 ```
 
 These are local commands: they do not start a coordinator, remove a lane,
@@ -35,10 +36,60 @@ After a reviewed runtime upgrade, independently qualify the installed command
 and the actual coordinator/supervisor generation. This command deliberately
 reports running consumers as unqualified rather than asserting adoption.
 
-`status` reports each automatic action's installation scope, effective
+`status` reports each supported action's installation scope, effective
 inhibition, reason, state source and any read error. An active switch is a valid
 state, not an unsuccessful status query. Invalid state returns exit 2 with
 `ok: false`; ordinary status and successful mutation return 0.
+`action_attempts` contains all selected actions; the compatibility
+`automatic_attempts` field retains only the automatic replacement actions.
+
+## Worker admission
+
+The production coordinator checks `worker-admission` before execution claims
+and before minting a new spawn reservation or one-shot handoff-fallback attempt.
+An inhibited fallback retains its sole attempt for a later poll.
+Atomic create-and-claim also checks before a new task/claim mutation; ordinary
+enqueue and exact deduplication no-ops remain available.
+REST reports an explicit 409 denial with `detail.code: action_inhibited`,
+`detail.action: worker-admission`, `detail.retryable: true` and a message;
+the coordinator-hosted MCP tool returns an explicit error. Clearing state lets
+the same caller retry against the same coordinator. A denial leaves task
+generation, attempts, owner and existing reservations unchanged. An existing
+active reservation lookup remains an idempotent no-op, not new launch authority.
+
+Each local supervisor checks its selected installation before new reservation
+attempts, restricted startup retries and redriving an unclaimed worker.
+A restricted retry checks before preparation. A redrive checks before
+marking startup incomplete, so an inhibited attempt cannot strand that pending
+identity. Lanes keep polling and settling existing owned work; heartbeats,
+start, progress and completion of an already claimed task are not inhibited.
+Existing task holds, capacity, exclusivity and lane-stop controls remain
+independent. The shared bootstrap switch does not inhibit worker admission.
+
+One successfully reserved launch, or one redrive admitted before its startup
+fence, may finish if the switch changes during that attempt. Freezing only that
+attempt avoids abandoning a partially created worker or losing its send
+identity. Later polls, redrives and execution claims recheck current policy.
+An unclaimed retained worker must retry its claim after clear; inhibition does
+not authorize a second body, resetting its reservation or blind replay.
+The updated `ScriptTaskRuntime` waits and retries that structured denial in the
+same worker, without heartbeat/start or a terminal failure while unclaimed.
+Canceling that wait does not abandon the task. If the script genuinely exits
+before claiming, the supervisor retains its pending reservation during
+inhibition; after clear, confirmed absence permits ordinary failed-spawn retry
+with the same task and logical creation identity, not terminal abandonment.
+Live or unknown bodies remain untouched. Previously claimed scripts retain
+their existing explicit-terminal-call requirement.
+
+The coordinator enforces its own installation policy for REST and both MCP
+callers, including remote clients. A supervisor additionally enforces its local
+installation policy for local launch/redrive attempts. An old remote supervisor
+cannot enforce a new local redrive switch until upgraded. Direct `TaskQueue`
+embeddings are policy-neutral unless their trusted constructor supplies the
+`worker_admission` callback; they do not inherit ambient host files.
+Upgrade script runtimes along with their supervising consumers before relying
+on the structured-denial retry behavior; an older script helper does not gain
+that behavior from a newer coordinator.
 
 ## State and precedence
 

@@ -18,7 +18,7 @@ from .config import DEFAULT_HANDOFF_FALLBACK_GRACE, DEFAULT_ORPHAN_GRACE
 from .events import EventBus
 from .loop_governance import LoopGovernance
 from .procutil import run_agent_worktrees_capture
-from .queue import Status, Task, TaskQueue, machine_matches
+from .queue import Status, Task, TaskError, TaskQueue, machine_matches
 from .worktree_status_relay import WorktreeStatusRelayStore
 
 log = logging.getLogger("agent-dispatch.coordinator")
@@ -757,8 +757,12 @@ def _attempt_handoff_fallback(
     spawn_fn: Callable[..., Any] | None = None,
 ) -> str:
     """Attempt exactly one fallback launch for ``task``."""
-    if not queue.claim_handoff_fallback(task.id):
-        return "skipped"
+    try:
+        if not queue.claim_handoff_fallback(task.id):
+            return "skipped"
+    except TaskError as exc:
+        log.info("handoff fallback inhibited for task %s: %s", task.id, exc)
+        return "inhibited"
     from . import bridge
     from .handoff_fallback_seed import build_fallback_seed
 
