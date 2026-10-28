@@ -371,7 +371,10 @@ transfer without acceptance by a named tracked objective.
   one calibration/quiet epoch. Additional native controls cover Job-offer
   permission, explicit abort, receipt-write failure, unknown/adopted ACK custody,
   exact parent handle settlement and both hosts' receipt-EOF unwind.
-- The focused source controls pass 121 actor-free cases, 42 actual Linux
+- Source scrutiny also corrected the native offer fixture to name its original
+  pipe owner explicitly, not an ordinary venv launcher returned by parent-PID
+  discovery. An actor-free AST control preserves that distinction.
+- The focused source controls pass 122 actor-free cases, 42 actual Linux
   lifetime/startup/completion cases and three cold source-binding cases.
   Eight Windows-only controls remain unexecuted here. The new native attempt
   remains unspent pending frozen-source/producer review; the old negative

@@ -215,8 +215,8 @@ def callback():
     print("admitted", flush=True)
     return 7
 sys.exit(serve(
-    callback, owner_pid=os.getppid(),
-    owner_birth=birth_identity(os.getppid()), nonce="a" * 32,
+    callback, owner_pid=int(sys.argv[3]),
+    owner_birth=birth_identity(int(sys.argv[3])), nonce="a" * 32,
 ))
 '''
 
@@ -243,7 +243,7 @@ def test_native_offer_failure_preserves_parent_handle_custody(mode):
     baseline = handle_count()
     process = subprocess.Popen(
         [sys.executable, "-I", "-S", "-B", "-c", OFFER_BODY,
-         str(ROOT / "libs/agent-procutil/src"), mode],
+         str(ROOT / "libs/agent-procutil/src"), mode, str(os.getpid())],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         **no_window_kwargs(),
     )

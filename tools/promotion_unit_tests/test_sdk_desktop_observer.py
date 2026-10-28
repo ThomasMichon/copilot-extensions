@@ -793,6 +793,34 @@ def test_native_scope_never_includes_the_synthetic_fixture_controls(tmp_path):
         assert "--junitxml=" + str(output / f"native-{index + 1:02}.xml") in arguments
 
 
+def test_native_offer_fixture_names_original_pipe_owner_not_interpreter_launcher():
+    module = sys.modules["sdk_visibility_cases"]
+    syntax = ast.parse((ROOT / module.NATIVE_TEST).read_text())
+    assignments = {
+        node.targets[0].id: ast.literal_eval(node.value)
+        for node in syntax.body
+        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id in ("OFFER_MODES", "OFFER_BODY")
+    }
+    assert assignments["OFFER_MODES"] == module.OFFER_MODES
+    body = ast.parse(assignments["OFFER_BODY"])
+    serve = next(node for node in ast.walk(body) if isinstance(node, ast.Call)
+                 and isinstance(node.func, ast.Name) and node.func.id == "serve")
+    arguments = {item.arg: item.value for item in serve.keywords}
+    expected = ast.parse("int(sys.argv[3])", mode="eval").body
+    assert ast.dump(arguments["owner_pid"]) == ast.dump(expected)
+    assert ast.dump(arguments["owner_birth"]) == ast.dump(
+        ast.parse("birth_identity(int(sys.argv[3]))", mode="eval").body,
+    )
+    fixture = next(node for node in syntax.body if isinstance(node, ast.FunctionDef)
+                   and node.name == module.OFFER_FUNCTION)
+    spawn = next(node for node in ast.walk(fixture) if isinstance(node, ast.Call)
+                 and isinstance(node.func, ast.Attribute) and node.func.attr == "Popen")
+    assert ast.dump(spawn.args[0].elts[-1]) == ast.dump(
+        ast.parse("str(os.getpid())", mode="eval").body,
+    )
+
+
 @pytest.mark.parametrize("change", [
     "none", "failure", "error", "skipped", "missing", "duplicate", "other", "empty-classname",
 ])
