@@ -14,6 +14,7 @@ import pytest
 from agent_bridge.client import BridgeClient, BridgeClientError, BridgeConnectionError
 from agent_bridge.client_protocol_floor import protocol_floored_request
 from agent_bridge.protocol import (
+    HTTP_PROTOCOL_VERSION,
     LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION,
     REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION,
 )
@@ -25,6 +26,43 @@ class _Response(io.BytesIO):
 
     def __init__(self, payload: dict[str, Any]) -> None:
         super().__init__(json.dumps(payload).encode())
+
+
+@pytest.mark.parametrize("cutover,minimum", [
+    (False, HTTP_PROTOCOL_VERSION + 1),
+    (True, HTTP_PROTOCOL_VERSION + 1),
+    (True, 1),
+])
+def test_protocol_fence_rechecks_range_before_each_attempt(monkeypatch, cutover, minimum):
+    base, replacement = "http://127.0.0.1:57585", "http://127.0.0.1:47000"
+    client = BridgeClient(base, "test", connect_grace=2, reresolve=lambda: replacement)
+    replaced = False
+    posted = []
+
+    def transport(req, timeout=None):
+        nonlocal replaced
+        if req.full_url.endswith("/health"):
+            return _Response({
+                "protocol_version": HTTP_PROTOCOL_VERSION + 2,
+                "min_protocol_version": minimum if replaced or not cutover else 1,
+            })
+        posted.append(req.full_url)
+        if cutover and not replaced:
+            replaced = True
+            raise urllib.error.URLError(ConnectionRefusedError("retired"))
+        return _Response({"session_id": "created"})
+
+    monkeypatch.setattr("agent_bridge.client.urllib.request.urlopen", transport)
+    monkeypatch.setattr("agent_bridge.client_protocol_floor.time.sleep", lambda _: None)
+    request = protocol_floored_request(client, LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION)
+    if minimum > HTTP_PROTOCOL_VERSION:
+        with pytest.raises(BridgeClientError) as error:
+            request("POST", "/api/v1/sessions", {"agent": "worker"})
+        assert error.value.status == 426
+        assert posted == ([base + "/api/v1/sessions"] if cutover else [])
+    else:
+        assert request("POST", "/api/v1/sessions", {}) == {"session_id": "created"}
+        assert posted == [base + "/api/v1/sessions", replacement + "/api/v1/sessions"]
 
 
 @pytest.mark.parametrize("cli_floor", [0, 20, LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION + 1])
