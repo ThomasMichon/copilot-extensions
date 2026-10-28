@@ -503,14 +503,22 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   the collected reply. No reply environment is applied or backend dispatched.
 - The focused Windows/Git Bash framing/copy packet passed 55 controls with
   three native-POSIX skips. The selected native publication/uninstall packet
-  passed nine controls. Native Linux/macOS deadline/group qualification remains
-  pending; these local results are not native terminal or removal evidence.
+  passed nine controls. Native Linux/macOS deadline/group qualification was
+  still pending; these local results are not native terminal or removal evidence.
 - Native run `40676755235` passed Linux and Windows but failed on stock macOS
   Bash 3.2: process-substitution PIDs are not waitable there. Replaced that
   nonportable wait with a private per-call completion field emitted only after
   the finite supervisor has reaped its actual provider and settled its group.
-  The existing deadline is unchanged. The draft remains unqualified pending
-  the corrected native run; the failed attempt is not passing evidence.
+  The existing deadline is unchanged; the failed attempt is not passing evidence.
+- Corrected native run `40678165917` on
+  `6b7f28a1541d353c2a1bb22fd44428f63af9ff6f` passed all three selected jobs.
+  Linux Bash 5.2.21 and stock macOS Bash 3.2.57 each passed 53 reader/phase/copy
+  controls with 17 Windows-only skips, including actual timeout/group cleanup.
+  Windows passed nine setup/admission controls and the independent uncertain
+  Picker-handoff control. The corrected local packet passed 67 controls with
+  three native-POSIX skips; the exact-code no-actor packet passed 2,565 with
+  12 deselected in 99.781 seconds, coverage recorded once. This final journal
+  update changes no qualified runtime code.
 - Capability/rollback selection, canonical process-birth capture, backend
   custody and foreground terminal/signal behavior remain the next integration
   gates. Neither POSIX runtime waiter is removed, and no host installation,
