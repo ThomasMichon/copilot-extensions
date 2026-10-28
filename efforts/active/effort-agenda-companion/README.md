@@ -113,55 +113,62 @@ illustrative filenames or operations are not existing commands.
       slice on #9377 before starting implementation.
 
 ### Phase 1 - Companion contract and manual process aide
-- [ ] Define a small optional companion format for coarse nodes, stable
+- [x] Define a small optional companion format for coarse nodes, stable
       Plan/Validation references, exit criteria, named outcomes and permitted
       transitions, including loop bounds and explicit exhaustion behavior;
       do not copy the plan or maintain a second completion checklist.
-- [ ] Separate reusable effort/board templates from the worktree-local mutable
+- [x] Separate reusable effort/board templates from the worktree-local mutable
       agenda, execution position, attempts, evidence and saved continuations. Define
       cursor discovery/resumption without requiring a managed worktree.
-- [ ] Keep the agent-specific agenda, cursor and assignment queue beside the
+- [x] Keep the agent-specific agenda, cursor and assignment queue beside the
       worktree journal through an explicit owner/adopter locator; retain them
       across sessions and reference multiple canonical effort/task sources.
       Do not put the live agenda in each effort or invent a journal provider.
-- [ ] Specify nested call/return, blocked-child handling and return-time
+- [x] Specify nested call/return, blocked-child handling and return-time
       revalidation; distinguish a blocking child detour from parallel delegation.
-- [ ] Define guidance reconciliation so an adopted position or child detour is
+- [x] Define guidance reconciliation so an adopted position or child detour is
       not redirected by default checklist/binding reminders, including when a
       bound worktree has no agenda projection. Preserve existing reminder
       ownership and standalone operation.
-- [ ] Ship efforts-owned authoring and usage guidance with a synthetic worked
+- [x] Ship efforts-owned authoring and usage guidance with a synthetic worked
       example. Ordinary efforts and manual agenda use stay first-class.
 
 ### Phase 1S - Paired guidance spike
-- [ ] After a reviewed initial guidance candidate is usable, prepare the
+- [x] After a reviewed initial guidance candidate is usable, prepare the
       [paired spike](paired-spike.md): identical task/starting revision,
       independent worktrees and sessions, treatment-only agenda guidance.
       A CLI toolset or completed Phase 1 rollout is not a prerequisite.
-- [ ] Predeclare the task, prerequisite detour, task-level acceptance checks,
+- [x] Predeclare the task, prerequisite detour, task-level acceptance checks,
       matched agent configuration, finite budgets and scoring before either
       arm starts; preserve the ordinary baseline's effort tools.
-- [ ] Run the two attempts concurrently, verify actual guidance exposure and
+- [x] Run the two attempts concurrently, verify actual guidance exposure and
       collect independent outputs without cross-arm steering or publication.
-- [ ] Compare correctness, parent-task resumption, scope drift, false completion
+- [x] Compare correctness, parent-task resumption, scope drift, false completion
       and available cost observations. Record the first pair as exploratory
       and use its findings to revise guidance or choose bounded replications
       before committing to a helper implementation.
 
 ### Phase 2 - Optional helper decision and bounded implementation
-- [ ] Evaluate whether a lightweight efforts-owned CLI adds enough objective
+- [x] Evaluate whether a lightweight efforts-owned CLI adds enough objective
       cursor maintenance to justify it; record the decision and invocation/state
       ownership. Do not silently convert the plugin into a service.
-- [ ] If admitted, implement only the agreed scaffolding, inspection and cursor
+      [Initial spike findings and the read-only helper decision](spike-results.md)
+      admit next/check inspection only; no transition writer is needed for v1.
+- [x] If admitted, implement only the agreed scaffolding, inspection and cursor
       operations, including explicit transition and child-return validation.
       Otherwise document the manual procedure and its weaker guarantees.
-- [ ] Handle duplicate operations, stale cursors, changed definitions and
+- [x] Handle duplicate operations, stale cursors, changed definitions and
       interrupted returns with proportionate revision checks and reconciliation;
       do not claim exactly-once external effects.
+      The v1 helper is read-only: repeated inspections do not write, stale
+      snapshots/definitions are diagnosed, and interrupted manual edits still
+      require reconciliation rather than an invented transaction guarantee.
 
 ### Phase 3 - Qualification and adoption guidance
-- [ ] Qualify the standalone manual path and any admitted helpers using the
+- [x] Qualify the standalone manual path and any admitted helpers using the
       Validation Plan; document unsupported guarantees explicitly.
+      [Qualification and adoption boundary](qualification.md) records the
+      measured cases and deliberately unclaimed guarantees.
 - [ ] Update affected plugin guidance and truthful documentation, add required
       changefiles for payload changes, and land implementation through review.
 - [ ] Record source/release qualification and provide opt-in adoption and recovery
@@ -174,47 +181,56 @@ illustrative filenames or operations are not existing commands.
 These are **agent-recommended acceptance obligations**, not claims of tests
 already run or a requirement to publish execution artifacts.
 
-- [ ] A standalone adopter can author and follow a coarse agenda with only
+- [x] A standalone adopter can author and follow a coarse agenda with only
       efforts installed; no agent-dispatch, agent-worktrees, daemon or automatic
       turn driver is needed. Non-opted-in efforts keep their existing behavior.
-- [ ] A node identifies its canonical plan/validation references, objective,
+- [x] A node identifies its canonical plan/validation references, objective,
       exit criteria and allowed outcomes without duplicating completion status.
       Evidence distinguishes measured results from attributed agent judgment.
-- [ ] Manual instructions explicitly reject unsupported advancement; any helper
-      rejects missing exit evidence and undeclared branch/reset operations.
+- [x] Manual instructions explicitly reject advancement without exit evidence.
+      The read-only helper reports criteria/declared moves without certifying
+      them and implements no branch/reset writer; malformed references and
+      exceeded budgets are refused. Any future transition writer needs its own
+      exit-evidence gate, not permission inferred from a successful inspection.
       Failed, successful and no-progress cycles all honor declared bounds;
       exhaustion reaches an explicit stop/replan/steering outcome, not drift or
       silent completion.
-- [ ] A synthetic A -> B -> C -> B -> A scenario preserves the root objective
+- [x] A synthetic A -> B -> C -> B -> A scenario preserves the root objective
       and correct return points. A failed or blocked child remains visible; its
       PR/task/worktree ending does not satisfy its or its parent's effort gate.
-- [ ] Resumption reconstructs the agenda position and parent chain from durable
+- [x] Resumption reconstructs the agenda position and parent chain from durable
       records, not conversation history. Duplicate child returns cannot skip a
-      parent; a stale cursor cannot silently replace a newer one.
-- [ ] If helpers are admitted, test interrupted child activation/return, concurrent
-      stale updates, definition/plan-reference changes and archived effort paths.
+      parent through the helper, which does not write; manual interrupted/stale
+      edits require rereading the retained stack and canonical source gates.
+- [x] If helpers are admitted, qualify interrupted/steering snapshots, stale
+      readers, definition/plan-reference changes and explicit path reconciliation.
       Journal-only edits do not unnecessarily invalidate execution position.
-- [ ] Returning to a parent refreshes its agenda and relevant validation.
+      No concurrent-writer or archive-path migration guarantee is claimed by a
+      read-only inspector; locators remain explicit and manually reconciled.
+- [x] Returning to a parent refreshes its agenda and relevant validation.
       Uncertain external effects are observed before repetition; a reset never
       resets Git, restarts processes or discards existing work or obligations.
-- [ ] Multiple participants retain distinct execution positions against one
+- [x] Multiple participants retain distinct execution positions against one
       canonical effort; no repository-global current cursor or competing plan
       authority is introduced.
-- [ ] Any optional worktree projection reuses existing focus/claims owners and
+- [x] Any optional worktree projection reuses existing focus/claims owners and
       preserves the root completion gate; absence of that integration is safe.
       No dispatch integration is introduced as a prerequisite or deliverable.
-- [ ] Default checklist/binding guidance does not redirect an adopted position
+- [x] Default checklist/binding guidance does not redirect an adopted position
       or child detour, including in an already-bound worktree without an agenda
       projection. Qualify guidance reconciliation without replacing the reminder
       owner or requiring sibling plugins for standalone use.
-- [ ] Guidance and any helpers are qualified on Windows and Linux/WSL. Helper
+      The live implementation retained the same bound root with an older
+      declared slice while its journal cursor selected qualification work;
+      no automatic provider reminder/projection rewrite is asserted.
+- [x] Guidance and any helpers are qualified on Windows and Linux/WSL. Helper
       tests use the repository's bounded test path; required CI remains scoped
       to the actual change and native qualification is reported honestly.
-- [ ] A paired spike follows [the protocol](paired-spike.md): both arms attempt
+- [x] A paired spike follows [the protocol](paired-spike.md): both arms attempt
       the same task concurrently with matched configuration and ordinary
       planning tools; only the treatment receives the extra guidance layer.
       Task-level scoring does not require the control to produce agenda syntax.
-- [ ] The spike verifies intended guidance exposure and independently checks
+- [x] The spike verifies intended guidance exposure and independently checks
       the prerequisite repair and parent outcome. Record invalid setup,
       intervention and unavailable metrics honestly; one pair alone is not
       evidence of general superiority.
@@ -289,3 +305,60 @@ limits, with the following explicit corrections:
   worktree journal/state home, referencing canonical sources rather than making
   the live agenda a file owned by one effort. Provider discovery remains an
   optional owner boundary; no staged journal API is presumed available.
+
+### 2026-10-28 - Initial guidance merged; paired attempts started
+- Merged [#9421](https://github.com/ThomasMichon/copilot-extensions/pull/9421)
+  after current-head approval with no findings and green CI. The new skill,
+  manual examples, journal-local placement and opt-in pointer are reviewed
+  source; no local payload rollout is asserted.
+- Prepared two managed fixture worktrees from the same commit with independent
+  offline origins. Existing baseline checks pass, and the independent task
+  acceptance packet fails before implementation as intended.
+- Started concurrent general-purpose attempts with matching requested defaults
+  and soft budgets. Only the treatment receives the reviewed guidance beside
+  its worktree journal. Both must finish the parent task and assigned follow-up.
+- The active slice is now Phase 1S. Keep the whole effort open; collect actual
+  results before deciding whether lightweight helpers are justified.
+
+### 2026-10-28 - Paired outcomes and narrow helper decision
+- Both attempts passed the same eight independent task checks, returned from
+  the parser prerequisite and completed the assigned counts follow-up. The
+  treatment recorded an explicit journal-local stack/queue and completion
+  history; the control used the ordinary effort/journal process.
+- [Results and limitations](spike-results.md) distinguish the predeclared score
+  from a post-measurement compatibility observation and control remediation.
+  No general performance or efficacy advantage is claimed.
+- Admitted a small read-only next/check helper to make the answer and format
+  checks objective without implementing a cursor writer, dispatcher, journal
+  provider or automatic completion engine. Manual state remains single-writer.
+- Initial focused helper tests pass; qualification and source review remain
+  open. Continue with Phase 2, then the remaining Phase 3 acceptance gates.
+
+### 2026-10-28 - Read-only helper qualified
+- The final complete relevant efforts packet passed **74 tests, 9 skipped**
+  through the bounded source runner with cleanup verified. The skips are
+  reported platform-specific producer controls, not falsely counted as passes;
+  the helper's focused packet contains 19 passing cases.
+- Native Windows and real Linux Python CLI reads cover active, three-frame and
+  steering-with-queue snapshots plus stale expected revisions without writes.
+  Host startup diagnostics were kept separate; no system configuration changed.
+- Independently verified the three-frame witness's proof bytes, source gates,
+  3/2/1/0 frame snapshots and no-write receipts; reran the current helper against
+  the retained three-frame state.
+- [Qualification details](qualification.md) make the manual/single-writer,
+  read-only and source-completion boundaries explicit. The helper is deliberately
+  not a cursor writer; no transactional or concurrency guarantee is smuggled
+  into v1 acceptance.
+- Code and qualification are ready for source review. Continue to merge,
+  source/release reconciliation and final root/fixture obligation settlement.
+
+### 2026-10-28 - Review diagnostic fix
+- The helper review identified an uncaught filesystem error for NUL-bearing
+  agenda paths. Text/path checks now reject that input before filesystem access
+  and map invalid state-home resolution to the documented diagnostic.
+- Added no-write regressions for active and queued NUL paths plus an invalid
+  state-home case. The updated full packet passed **77 tests, 9 skipped** with
+  cleanup verified; all 22 focused helper cases pass.
+- The source-review gate remains open until the updated head is reviewed.
+  Both offline fixture outcomes and journals have been retained outside
+  cleanup-eligible worktrees, and their managed obligations are settled.
