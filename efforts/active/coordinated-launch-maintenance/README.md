@@ -10,51 +10,6 @@
 
 ## Guiding Intent
 
-Diagnostic run 40775390267 at `6690ace740` confirmed both actual Manager
-readers reach instance reservation and enter broker admission, but neither
-publishes a current roster within the existing 30-second budget. No admission
-exception reaches the owned monitor log before reader exit. The next
-credential-free hosted probe adds bounded installed-package thread locations
-(basename, line and function only, no source lines or frame locals) at failure
-to identify the blocked handoff without extending the startup deadline.
-Shared-host installation and restart remain unauthorized.
-Run 40777108354 at `b3381801aa` reproduced the failure; compiled package
-filenames did not contain `site-packages`, so that location filter produced
-no thread evidence. The revised disposable reader prints bounded basename-only
-thread locations and projects only monitor instance state plus native identity
-liveness. Admission may have succeeded before an early resident exit; absence
-of a failure log alone does not distinguish success from a blocked admission.
-Run 40778723621 at `33d999ec0a` established an admitted, native-live monitor
-and a second finished monitor while the Manager reader had no surviving loader
-thread. The feed client exhausted the unchanged half-second roster recovery
-window before the first durable projection existed; its generic
-`ProjectionUnavailable` became a nonretryable `malformed-peer` frame, so the
-Manager permanently abandoned a cold recovery. Preserve a distinct admitted
-recovery-pending exception through that existing feed boundary as retryable
-`unready`; refused launches and malformed/live-peer failures remain terminal.
-No deadline, broker lifetime proof or installation authority is changed.
-Run 40781121144 at `b4b22cfc5a62f3db9fc7fbea25a0888e6390a4d5`
-passed actual cold Manager construction and both installed `LiveLoader` recovery
-cycles: concurrent current reads, one serving owner, all caller Jobs closed
-before health observations, resident survival and canonical cleanup. The
-correction also passed all 111 contained roster/feed tests. First test-venv
-preparation exhausted the unchanged aggregate budget; the completed warmed
-packet passed in 23.57 seconds including cleanup, not under a widened budget.
-
-The candidate was then rebased onto `17c8272e76` with a durable backup.
-Conflicts were a generated installer fingerprint, independent daemon-coverage
-entries (both retained), and equivalent test formatting (upstream retained).
-Canonical regeneration refreshed the fingerprint and three source-build copies.
-The installed constructor and feed source changes did not conflict. The joined
-materialization/fixture packet passed 159 tests with 15 explicit platform/link
-skips. Its first attempt exposed an ignored stale Ruff-cache directory,
-unstaged generated snapshot inputs and a missing host Python import; removing
-only that owned cache, staging the actual regenerated inputs and using the
-existing test runtime resolved all three without a product-code workaround.
-Install contract (13 plugins), source AST guards and contribution-scoped module
-size all pass, with no baseline widening. Final exact-source native
-qualification and fresh review remain open; no installed rollout is implied.
-
 An already-healthy session must not wait for unrelated runtime installation.
 Keep adopted automatic maintenance available, coordinated and observable rather
 than disabling updates or starting an independent updater for every launch.
@@ -224,7 +179,8 @@ All detailed scenarios below are **agent-recommended** acceptance checks.
   and manual update/reconcile cannot overlap its mutation boundary.
 - [x] Exercise exact argv/environment, admission refusal, malformed plans,
   failed spawn, failed installer, opt-outs and explicit blocking mode.
-- [ ] Prove first-use/missing-prerequisite handling in an isolated fresh home.
+- [x] Prove first-use/missing-prerequisite handling in an isolated fresh home
+  (actual cold Worktrees/SSH/Manager construction in run 40783189911).
 - [x] Transfer Windows independent broker activation, all-caller-Job survival,
   native control/desktop observation and installer lifecycle qualification to
   #6859/#7833. The scheduling change retains existing strict admission; verify
@@ -248,6 +204,67 @@ worker is insufficient. Machine-local request/status/log data never enters
 repository history.
 
 ## Journal
+
+### 2026-10-28 - Qualify the actual cold Manager pivot on reconciled source
+
+Run 40783189911 at `c1800f38cc503bcc0bbd178feb0bfad745656cf5`
+passed all three hosted lanes. Windows proved actual adoption, both native
+child-transfer cycles, shared-outer negative topology, crash recovery and
+generation retention, zero visible windows or foreground changes, and canonical
+cleanup. The actual consumer lane passed cold Worktrees/SSH/Manager
+construction, automatic maintenance and manual exclusion, plus both concurrent
+installed Manager recovery cycles with every caller Job closed before resident
+health observations. Handoff preceded the held installer release by 2.25
+seconds. Its complete finite-removal packet passed 211 tests with five explicit
+skips. Linux passed 98 process/lifetime tests with one skip and 74 actual finite
+execution/participant tests with two skips. This is not a full interactive
+Picker run or shared-host rollout.
+
+The candidate was rebased onto `17c8272e76` with a durable backup.
+Conflicts were a generated installer fingerprint, independent daemon-coverage
+entries (both retained), and equivalent test formatting (upstream retained).
+Canonical regeneration refreshed the fingerprint and three source-build copies.
+The installed constructor and feed source changes did not conflict. The joined
+materialization/fixture packet passed 159 tests with 15 explicit platform/link
+skips. Its first attempt exposed an ignored stale Ruff-cache directory,
+unstaged generated snapshot inputs and a missing host Python import; removing
+only that owned cache, staging the actual regenerated inputs and using the
+existing test runtime resolved all three without a product-code workaround.
+The reconciled roster/feed packet passed all 111 tests in 100.84 seconds
+including preparation and cleanup. Install contract (13 plugins), source AST
+guards and contribution-scoped module size passed without baseline widening.
+`TESTING.md` now documents the actual Manager lane and retry distinction.
+Fresh review, required CI, merge and promotion remain open. Installed rollout,
+the separate source feed work and unresolved custody retain their named owners.
+
+Diagnostic run 40775390267 at `6690ace740` confirmed both actual Manager
+readers reach instance reservation and enter broker admission, but neither
+publishes a current roster within the existing 30-second budget. No admission
+exception reaches the owned monitor log before reader exit. The next
+credential-free hosted probe added bounded thread locations
+(basename, line and function only, no source lines or frame locals) at failure.
+Run 40777108354 at `b3381801aa` reproduced the failure; compiled package
+filenames did not contain `site-packages`, so that location filter produced
+no thread evidence. The revised disposable reader prints bounded basename-only
+thread locations and projects only monitor instance state plus native identity
+liveness. Absence of a failure log alone does not distinguish successful
+admission from a blocked admission.
+
+Run 40778723621 at `33d999ec0a` established an admitted, native-live monitor
+and a second finished monitor while the Manager reader had no surviving loader
+thread. The feed client exhausted the unchanged half-second roster recovery
+window before the first durable projection existed; its generic
+`ProjectionUnavailable` became a nonretryable `malformed-peer` frame, so the
+Manager permanently abandoned a cold recovery. A distinct admitted
+recovery-pending exception now crosses the existing feed boundary as retryable
+`unready`; refused launches and malformed/live-peer failures remain terminal.
+No deadline, broker lifetime proof or installation authority changed.
+Run 40781121144 at `b4b22cfc5a62f3db9fc7fbea25a0888e6390a4d5`
+first passed actual cold Manager construction and both installed `LiveLoader`
+recovery cycles. The correction passed all 111 contained roster/feed tests.
+Initial test-venv preparation exhausted the unchanged aggregate budget; the
+completed warmed packet passed in 23.57 seconds including cleanup, not under a
+widened budget. Shared-host installation and restart remain unauthorized.
 
 ### 2026-10-28 - Requalify joined source and exercise the stopped-resident reader
 
