@@ -127,9 +127,18 @@ Comparison request (verbatim):
   constructor/reuse path with original transport inputs unavailable. #9319
   merged as `89e9529c865dd21dbc57baefc42f4a9a21b9b1ef`; this completes custody,
   not ordinary selection or publication.
-- [ ] Replace experiment-specific wheel transport assembly with the repeatable
+- [x] Replace experiment-specific wheel transport assembly with the repeatable
   exact-profile producer in #9413. Its candidate bytes do not establish profile
   approval, complete source-material distribution or publication authority.
+  #9417 merged as `326a72d1332afe351e7f5e8ac0841ecba56a8230`.
+- [ ] Produce and read back a reproducible candidate delivery envelope binding
+  the exact profile, its existing wheel transport and explicitly selected
+  accompanying source/notice materials. Bind each material to affected wheel
+  digests and preserve its bytes; selection/qualification of required materials
+  remains with the caller. Reuse profile and transport identities rather than
+  creating release approval, signing, feed authority or a second constructor.
+  Keep the public first-party publisher unchanged; this slice neither chooses
+  an aggregate channel nor uploads third-party content.
 - [ ] Expand core plus optional heavy environments and the required platform/ABI
   matrix through the same admission contract.
 - [ ] Integrate install/update/no-op/rollback with the existing governor and
@@ -141,6 +150,11 @@ Comparison request (verbatim):
 
 ## Validation Plan
 
+- [ ] Candidate delivery controls reject changed/omitted/unexpected material
+  bytes, unrelated wheel bindings, unsafe paths, incomplete wheel transports,
+  exhausted budgets and output replacement. Real readback must retain the
+  selected materials and reach the existing wheel consumer without the original
+  inputs. Record unavailable release/native lanes without claiming qualification.
 - [ ] Negative controls refuse duplicate/conflicting first-party source bindings,
   changed wheel bytes, missing dependencies and unadmitted origins.
 - [ ] Preserve target markers, extras and Python ranges; the initial target's
@@ -166,6 +180,28 @@ profile/admission and constructor APIs. Source-tree conflicts are evidence to
 choose the wheel path, not a reason to relax source identity.
 
 ## Journal
+
+### 2026-10-28 - Complete candidate delivery producer
+- Coordinated a non-overlapping packaging slice with #4876. The existing
+  toolkit and one-service consumer owners retain their scope; the public
+  first-party publisher is unchanged.
+- Candidate delivery now binds the canonical selected profile, the existing
+  wheel transport and explicitly selected source/notice files. Material records
+  bind affected wheel digests, exact bytes and kind, without creating approval,
+  licensing clearance or feed/publication authority.
+- Two API builds and the actual command emit the same 38,934,900-byte envelope
+  for the 116-wheel native candidate and all eight accompanying files. Reversed
+  material selection is byte-identical. The original wheel consumer and material
+  readback succeed with copied inputs absent; original qualified files are
+  unchanged. This is packaging evidence, not release or live-update acceptance.
+- Review of #9424 reproduced a compressed-manifest budget gap: two controls
+  show 8,194 expanded bytes reaching JSON decoding under a 4,096-byte archive
+  or snapshot budget. Manifest and aggregate expanded-size checks now precede
+  decoding. The real complete candidate remains byte-identical.
+- Focused delivery/transport/release controls pass 105 cases with one
+  platform-specific skip. The PR documents its install-contract/effort impact;
+  final review and merge remain pending. The parent stays Active for the
+  remaining release, consumer and lifecycle gates.
 
 ### 2026-10-26 - Reviewed-intent boundary
 - Existing inventory and constructor research established the source-identity
@@ -294,3 +330,8 @@ choose the wheel path, not a reason to relax source identity.
   pre-bounded, and publication follows successful retained-input exit plus a
   final private-candidate check. The real selected profile and CLI still produce
   the identical transport bytes after these corrections.
+- #9417 merged on 2026-10-28 after approval of the corrected head, successful
+  required CI and resolution of both findings. Only this producer source slice
+  is complete. Enclosing release/material bindings, production publication and
+  ordinary consumer integration remain the next retained work; no rollout or
+  complete-distribution claim follows from the merge.

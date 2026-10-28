@@ -3738,6 +3738,40 @@ third-party-inclusive transport does not authorize uploading it through the
 public first-party publisher. This command supplies a reproducible candidate
 for an existing build/publication pipeline, not automatic pipeline activation.
 
+`tools/runtime_profile_delivery.py` adds the complete candidate envelope around
+that unchanged transport:
+
+```text
+python tools/runtime_profile_delivery.py --profile profile.json --transport core.zip --transport-sha256 sha256:<digest> --materials materials.json --material-dir materials --output delivery.zip
+```
+
+`materials.json` is an explicit filename-to-record map. Each record contains
+`kind` (`source` or `notice`), `wheels` (a nonempty list of affected selected wheel
+SHA-256 identities), `sha256` and `size`. The caller selects and qualifies the
+required materials; the command never infers legal sufficiency or obtains
+distribution rights. An empty map explicitly selects no accompanying files,
+not a claim that none are required. The envelope contains the canonical,
+unchanged `profile.json`, `wheels.zip`, `materials/<filename>` and a bounded
+`delivery.json` binding their exact bytes. Existing profile identity remains
+the selection identity; the envelope digest is a transport identity, not a new
+provenance or approval authority.
+
+The producer retains inputs, writes deterministic sorted members, then reads
+the entire candidate through `retain_profile_delivery` before atomic,
+non-replacing publication to the local output path. The reader requires an
+independently selected outer digest and the exact selected profile. It rejects
+changed, omitted, duplicate, unsafe or unexpected files, preserves material
+bytes without unpacking or executing them, and yields the original retained
+wheel snapshot plus read-only material handles/paths for the context lifetime.
+The existing wheel inspector verifies the full dependency closure and metadata.
+Byte/file/storage bounds and one deadline cover assembly and readback.
+
+This is packaging, not pipeline activation, release approval, acquisition,
+installation, service cutover or license clearance. The existing public
+first-party publisher is unchanged. An aggregate distribution must still use
+its authorized channel; neither a self-described manifest nor this command
+authorizes public redistribution or replaces consumer-side feed admission.
+
 On Windows, original and retained wheel handles allow shared reads but deny
 writers and deletion for their held lifetime, including extended-length paths.
 NTFS read-access updates can advance handle change time, so that timestamp is
