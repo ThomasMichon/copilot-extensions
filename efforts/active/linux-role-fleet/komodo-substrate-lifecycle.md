@@ -227,6 +227,29 @@ delivery remain open; no deployment or incumbent adoption is claimed here.
 
 ## Journal
 
+### 2026-10-27 - Official-image startup contract correction
+
+- #9332 tracks the exact-tag startup findings. MongoDB 8.0.32 drops to its
+  database UID before reading file credentials; the fixed profile must not
+  make host-owner-private credential files broadly readable. Its fixed Bash
+  handoff reads only the two selected mounts before re-entering the unchanged
+  vendor entrypoint, preserving normal initialization and privilege dropping.
+- Komodo 2.3.3 Periphery defaults its native key below `root_directory`.
+  The profile explicitly selects the retained shared key path instead.
+  The tag's singular environment aliases remain supported and unchanged.
+- The contained profile/native/owner packet passes 175 cases, including real
+  Bash handoff of literal credential bytes, missing-file refusal, Compose
+  interpolation and native observation. These are source/protocol controls,
+  not official-image startup, adoption or installed-adopter proof.
+- The remaining Komodo declaration/health/Gateway/installed-SDK packet passes
+  47 cases. The complementary Fleet packet passes 3,044 cases with nine
+  explicit prerequisite skips and seven passing subtests. The selected engine
+  fixture initially retained an older SDK; normal source preparation restored
+  that test dependency and its exact-source comparison then passed.
+- The Plan and Validation Plan remain open for actual adopter construction,
+  immutable official images, native health, lifecycle and recovery. No
+  production resource, credential, service or permission changed in this slice.
+
 ### 2026-10-27 - Bounded source owner and Compose compatibility
 
 - #9274 merged after current-head Copilot assessment with no open findings and

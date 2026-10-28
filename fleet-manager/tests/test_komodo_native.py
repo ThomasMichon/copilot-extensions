@@ -146,7 +146,8 @@ def _docker_protocol(args: list[str], directory: str) -> tuple[int, str]:
                     "Id": hashlib.sha256(f"{name}-{sequence}".encode()).hexdigest(),
                     "Image": "sha256:" + service["image"].split("sha256:")[1],
                     "Config": {"Labels": labels, "User": "", "Entrypoint": [],
-                               "Cmd": service.get("command", []),
+                               "Cmd": [argument.replace("$$", "$")
+                                       for argument in service.get("command", [])],
                                "Env": [key + "=" + value for key, value in service["environment"].items()]},
                     "HostConfig": {
                         "Privileged": False, "CapAdd": None, "PidMode": "",

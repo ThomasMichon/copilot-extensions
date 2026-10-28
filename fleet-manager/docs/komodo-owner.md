@@ -78,6 +78,26 @@ Only Core publishes a loopback port. Mongo and Periphery publish none.
 Periphery receives the selected native Docker socket; that is a powerful host
 capability requiring the host owner's independent admission.
 
+The Mongo image's normal entrypoint drops to its database UID before reading
+`*_FILE` settings. Its fixed command therefore uses the image's Bash to load
+only the two selected read-only credential mounts before re-entering the
+unchanged official entrypoint with `mongod`. Values enter only that process's
+environment, never the rendered profile, Docker command arguments or static
+container environment. The vendor still owns database initialization, data
+ownership and privilege dropping; no credential mode/owner changes or forked
+entrypoint are used. Compose dollar escapes are rendered explicitly and native
+inspection checks the resulting literal command after interpolation.
+Periphery's native private key is explicitly selected at
+`file:/config/keys/periphery.key` in the same retained identity directory that
+Core reads; the image's root-directory default must not create another key.
+Tagged source checks cover
+[Komodo 2.3.3 key configuration](https://github.com/moghtech/komodo/blob/780ac68b992094a9fccd5fffb760e0c84fd3c3d1/client/core/rs/src/entities/config/periphery.rs)
+and the
+[MongoDB 8.0.32 entrypoint](https://github.com/docker-library/mongo/blob/5808abcbf79f662b7f0ac597dcbdda606d9ac4e9/8.0/docker-entrypoint.sh).
+Actual selected
+official-image startup and authenticated readiness remain adopter qualification,
+not consequences of a shell or configuration test.
+
 The owner interrogates the actual daemon, Compose 2 or stable Compose 5 version, installed image
 digests/platform/configuration, container IDs/configuration/mounts and physical
 network. It scrubs ambient Docker context/auth controls. Native output is

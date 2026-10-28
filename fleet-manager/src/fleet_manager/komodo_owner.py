@@ -107,9 +107,11 @@ def verify_native(containers: dict[str, dict[str, Any]], selected: KomodoSelecti
                 raise PlanError("Komodo native owner or selected deployment changed")
             environment = _environment(image.environment)
             environment.update(expected["environment"])
+            command = (tuple(argument.replace("$$", "$") for argument in expected["command"])
+                       if "command" in expected else image.command)
             if (_environment(config.get("Env") or []) != environment
                     or tuple(config.get("Entrypoint") or ()) != image.entrypoint
-                    or tuple(config.get("Cmd") or ()) != tuple(expected.get("command", image.command))):
+                    or tuple(config.get("Cmd") or ()) != command):
                 raise PlanError("Komodo native fixed configuration differs from selection")
 
 
