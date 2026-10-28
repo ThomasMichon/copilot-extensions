@@ -127,10 +127,13 @@ original_signals = {
     name: signal.getsignal(getattr(signal, name))
     for name in ("SIGINT", "SIGPIPE", "SIGXFZ", "SIGXFSZ") if hasattr(signal, name)
 }
-if r["fault"] in ("interrupt", "encoding"):
+if r["fault"] in ("interrupt", "encoding", "interrupt-success"):
+    original_exec = launch_seed_posix.os.execvpe
     def failed_exec(*args):
-        if r["fault"] == "interrupt":
+        if r["fault"] in ("interrupt", "interrupt-success"):
             signal.raise_signal(signal.SIGINT)
+        if r["fault"] == "interrupt-success":
+            return original_exec(*args)
         raise UnicodeError("fixture encoding refusal")
     launch_seed_posix.os.execvpe = failed_exec
 elif r["fault"] == "observer-timeout":
@@ -260,7 +263,7 @@ def test_fast_success_is_spawned_or_unknown_never_restored(record, tmp_path, nat
     )
 
 
-@pytest.mark.parametrize("fault", ["interrupt", "encoding"])
+@pytest.mark.parametrize("fault", ["interrupt", "encoding", "interrupt-success"])
 def test_catchable_pre_exec_loss_cannot_finish_or_restore(
     record, tmp_path, native_bash, fault,
 ):
