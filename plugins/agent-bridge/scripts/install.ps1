@@ -1631,7 +1631,7 @@ function Stop-DaemonProcesses {
     }
 
     # Final verdict: both ports must be free.
-    return ((Get-PortListeners $Port).Count -eq 0 -and (Get-PortListeners $RelayPort).Count -eq 0)
+    return (@(Get-PortListeners $Port).Count -eq 0 -and @(Get-PortListeners $RelayPort).Count -eq 0)
 }
 
 function Invoke-Drain {

@@ -1,0 +1,9 @@
+{
+  "comment": "Fix the Windows installer stop verdict for empty and scalar listener results under StrictMode.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
