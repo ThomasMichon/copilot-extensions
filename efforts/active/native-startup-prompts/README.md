@@ -108,8 +108,8 @@ realize that source-only request. They are not additional deployment authority.
 ### Phase 3 - Qualification and source completion (agent-recommended)
 
 - [ ] Complete the focused validation below and fix regressions before publication.
-- [ ] Land the bounded implementation through normal CI, review and merge gates.
-- [ ] Record exact source acceptance and any unsupported native/platform lane;
+- [x] Land the bounded implementation through normal CI, review and merge gates.
+- [x] Record exact source acceptance and any unsupported native/platform lane;
   transfer release/rollout or broader integration work to a named objective.
   Do not report a source merge as live deployment or close neighboring issues.
 
@@ -150,6 +150,22 @@ preserve the existing custody or fallback contract returns here for an amendment
 instead of weakening those guarantees.
 
 ## Journal
+
+### 2026-10-28,08:26 UTC - Cold-launch source merged; remaining qualification retained
+
+- #9374 actually merged as `9dc3491fc527bbf5561a082341c2b12c44343087`.
+  The exact final head `f97c39c6cd223744405bfb24db5f913c279df748` has a
+  Copilot Comment with no open issues; its overview's concurrency/directory
+  concerns were assessed against the intentional pre-effect refusals, real
+  writer interleavings and actual directory binder controls. This is not a
+  claim that the verdict was Approve.
+- All four review threads are resolved, required CI passed, and the managed
+  Maintainer merge omitted only the separately authorized additional vote.
+  No blocking finding or CI requirement was bypassed.
+- Re-read this plan after merge. The bounded source item is closed; complete
+  native POSIX/full-mux and installed acceptance remain open under #9364 and
+  their existing owners. No promotion, rollout, service change, retained-session
+  restart or task acceptance follows from this merge.
 
 ### 2026-10-28 - Cold-launch source and Windows qualification
 

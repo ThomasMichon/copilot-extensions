@@ -203,6 +203,22 @@ evidence is no longer needed.
 
 ## Journal
 
+### 2026-10-28,07:16 UTC - Constructor cache and hardlinks reached Main
+
+- The current release snapshot is Main
+  `29b265566e30a6ebd732fc3e891fac20ad3e9013`, actually merged by promotion
+  #9373 at 07:16:10 UTC from qualified Dev
+  `d77783f0a10b067a249dd39cee09f48f9dc6024b`.
+- The #9340 constructor/cache/hardlink merge
+  `1603cbbc0ac1f5a8838154d724e90eb4fa9f2724` is contained in that promoted
+  Dev snapshot. The promotion identifies its source-artifact release and
+  producing qualification run. This checks the source snapshot, not Git
+  ancestry into the wholesale-regenerated Main tree.
+- These faster ordinary-install changes are released, pending authorized
+  rollout. No machine was updated by this observation. The distinct prepacked
+  first-party artifact consumer, real-service proof, later serialized machine
+  wave and installer portfolio acceptance remain open.
+
 ### 2026-10-28,05:55 UTC - Ordinary constructor slice merged; service proof remains open
 
 #9340 actually merged as `1603cbbc0ac1f5a8838154d724e90eb4fa9f2724`
