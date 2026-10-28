@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "source": {"kind": "effort", "ref": "efforts/active/example/README.md"},
+  "entry": "implement",
+  "nodes": {
+    "implement": {
+      "source_ref": "Phase 1 - Implementation",
+      "action": "Implement the assigned behavior within the declared scope.",
+      "exit": ["The intended change and focused regression tests are ready."],
+      "on": {"ready": "validate"},
+      "max_visits": 3
+    },
+    "validate": {
+      "source_ref": "Validation Plan",
+      "action": "Run the applicable bounded validation and inspect the results.",
+      "exit": ["Record the actual validation outcome and relevant code revision."],
+      "on": {"passed": "reconcile", "failed": "implement"},
+      "max_visits": 3
+    },
+    "reconcile": {
+      "source_ref": "Plan and Validation Plan",
+      "action": "Drive required review/merge gates, reconcile the effort and select the next authorized action.",
+      "exit": ["Every canonical Plan/Validation item is resolved or explicitly transferred, and the effort is Done."],
+      "on": {},
+      "max_visits": 3,
+      "terminal": true
+    }
+  }
+}

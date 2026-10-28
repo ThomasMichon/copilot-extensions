@@ -199,6 +199,17 @@ The operator subsequently confirmed the slug `effort-agenda-companion`.
 The [paired-spike protocol](paired-spike.md) is agent-recommended experimental
 design derived from this request, not additional verbatim operator requirements.
 
+## Operator direction admitting execution
+
+> Great. Start working on this. Goal is that through these additions, agents will be able to focus on iterating down their assigned efforts, detouring in limited capacity when appropriate, and always be able to self-answer the question of "what do it do next?" For example, you keep stopping after each thing I say, which means we failed to assign an agenda based on my goal: taking inspiration from graph code, add a companion set of guidance, perhaps aided by lightweight CLI tooling, which helps an agent impsoe structure on itself when driving one or more efforts within its worktree lane, ensuring that agent progressively completes tasks, understands the exit criteria, and understands its "work stack" when following detours or dealing with serendipity.
+
+This supersedes the earlier planning-only assignment; the canonical effort
+remains the whole implementation and qualification gate.
+
+## Operator direction on state placement
+
+> I would expect the stateful agenda to exist somewhere near the "worktree journal", as this is an agent's specific agenda, built from the efforts, tasks, random asides, etc. that it may wind up getting assigned during its existence.
+
 ## See Also
 
 - [Canonical effort and current proposal](README.md)

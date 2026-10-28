@@ -209,6 +209,9 @@ and [repair register](reconstruction-findings.md) retain the evidence and limits
 - [x] Land and natively qualify the dormant finite POSIX phase transport
   (#9395), including shared read/EOF deadlines and provider-group settlement.
   Production selection, exact process birth and backend lifetime remain open.
+- [x] Let the existing setup provider resolve an omitted canonical birth token
+  and record post-preparation identity uncertainty (#9401). Native consumer
+  selection and actual backend child/exec ownership remain open.
 - [ ] Remove both deferred-setup and final-backend runtime-Python waiters.
   Reuse finite seed preparation, existing seed custody and execution receipts;
   the native shell owns the actual child handle and wait. The normalized
@@ -530,8 +533,81 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   installed qualification. No source merge is installed-removal, shared
   standby or task-lifecycle acceptance, and no selected-host effect occurred.
 
+### 2026-10-28 - Dormant POSIX exec-boundary qualification
+
+- The next source trace confirmed that starting a Bash asynchronous job is
+  not a backend exec receipt and changes stdin/signal behavior. Keep the
+  native foreground child and exec-replace its transient interpreter instead.
+  A finite close-on-exec observer uses the existing seed/execution owners;
+  double-fork/reap prevents an observer zombie under the live backend, while
+  remaining in the caller's containment group preserves bounded test custody.
+- This provider-first candidate adds an optional described exec mode, not a
+  production consumer. Fast backend exit may make live PID/birth observation
+  unknown; it must never become definite exec failure or seed restoration.
+  Physical-terminal interrupt, current-runtime consumer selection and both
+  production POSIX waiter removals remain unchecked.
+- Windows provider compatibility passed 68 focused controls. Native Linux
+  and stock macOS Bash 3.2 execution, full required gates and review remain
+  pending; this entry is not acceptance or rollout evidence.
+- The initial exact-head native packet passed, but independent critique and
+  added negative controls found a catchable pre-exec loss gap. Native run
+  `40698510133` on `2c3ba7de326c5674a9a34025632d7b754ae8bf2d`
+  reproduced both actual SIGINT and encoding-loss cases on Linux and stock
+  macOS Bash 3.2: each incorrectly received completion status `0` while
+  the helper remained alive without exec. Each platform passed the other
+  140 controls, with 17 Windows-only skips; Windows remained green.
+  The fix emits an explicit unknown marker on every unwound pre-exec path,
+  reserving failure restoration for literal exec errors. Green rerun and
+  final review remain pending; ordinary consumers are still unchanged.
+- Copilot's exact-head review found that CPython's ignored signal dispositions
+  crossed the new exec boundary, unlike the prior `Popen` default. Native run
+  `40736639164` on `2e96028e6b746d61f65c6ea4de51efdcf7b122b5`
+  reproduced both non-Python `SIGPIPE` and `SIGXFSZ` cases on Linux and stock
+  macOS Bash 3.2: the shell reached exit 42 instead of signal termination.
+  Each platform passed the other 143 controls with 17 Windows-only skips;
+  Windows remained green. Restore these dispositions before exec, and the
+  helper's original handlers on unwind. Final green proof and review remain
+  pending, with production consumers and rollout untouched.
+- The next exact-head review identified a failed-exec cleanup interrupt
+  window. Rebased through the normal source-owned flow, preserving both
+  concurrent effort journals, then run `40739120817` on
+  `c183afa3d8cd3f6eb741a680f60165ddba3fd43a` reproduced actual SIGINT
+  stopping signal-handler restoration on Linux and stock macOS Bash 3.2.
+  Each platform passed the other 154 controls with 17 Windows-only skips;
+  Windows remained green. Defer caught SIGINT through exec-failure publication,
+  pipe closure and handler restoration, then propagate it. Successful exec
+  resets the caught handler in the kernel; an already ignored interrupt stays
+  ignored. This is a cleanup fix, not production consumer activation.
+- The following review correctly distinguished cleanup deferral from an
+  interrupt inside an otherwise successful exec attempt. Native run
+  `40741403409` on `6ce50e51ad657d9575a7e5391d0d00917e16788f`
+  reproduced the backend reaching exit 99 instead of refusing with 3 after
+  actual SIGINT on Linux and stock macOS Bash 3.2. Each platform passed the
+  other 155 controls with 17 Windows-only skips; Windows remained green.
+  The handler now enters interrupted cleanup immediately during the attempt,
+  deferring only further cleanup-time interrupts. Final green proof and
+  review remain pending; no ordinary consumer or host installation changed.
+
 ### 2026-10-28 - Provider-owned setup birth prerequisite
 
+- #9401 merged as `dead00dd6d7cb85743d77270cd83abf8b3689984` after genuine
+  exact-head Copilot approval `5682889134` on
+  `f2c7d37c3440b9050da59b3b84020b84dd296c57`, no findings and all required
+  provider checks green. Normal managed completion verified the actual merge
+  and reconciled the retained source worktree; the recovery ref remains.
+- Exact-head native run `40690933057` passed all three jobs. Linux Bash 5.2.21
+  and stock macOS Bash 3.2.57 each passed 127 provider/reader/phase/copy controls
+  with 17 Windows-only skips; Windows passed nine setup/admission controls
+  and the independent Picker-handoff control. The prepublication unit packet
+  passed 2,565 with 12 deselected in 87.000 seconds, coverage once; managed
+  publication changed only unrelated upstream documentation, not admitted
+  unit inputs or the tested provider implementation.
+- Re-read the parent Plan and Validation Plan after merge. Closed only this
+  setup-provider prerequisite. Continue conditional copied POSIX consumer
+  selection and actual native backend child/exec ownership, including fast
+  exit, real stdin/TTY, Ctrl+C, exact birth and post-exit receipts. Both
+  production POSIX runtime waiters and whole-effort live/standby/release
+  acceptance remain open. No selected-host action or rollout was performed.
 - The continuing POSIX trace found that setup needs the existing shell PID's
   canonical birth token before any preparation effect. Resolve an omitted
   setup token inside the existing finite provider with `locks.process_start_time`,

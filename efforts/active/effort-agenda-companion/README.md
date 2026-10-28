@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent, reviewed per-slice PRs against `dev`
 - **Created:** 2026-10-28
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [efforts](../../../visions/plugins/efforts/README.md)
   `optional-effort-agenda`, `nested-effort-continuations`,
   `cooperative-agenda-movement`; vision-extending
@@ -19,6 +19,10 @@ detours. A coarse graph describes the current work package, its exit condition,
 and permitted advancement, branch, loop, or reset. A saved continuation makes a
 child effort a detour with a return point, rather than a replacement objective.
 
+The stateful agenda belongs to the worktree's continuing agent and lives near
+its journal, accumulating assigned efforts, tasks and asides rather than
+belonging to a single effort or session.
+
 The companion belongs in the **efforts plugin**, not agent-dispatch. Optional
 local CLI helpers may scaffold an agenda and inspect or maintain its cursor;
 neither a scheduler nor another plugin is required. The effort README remains
@@ -30,7 +34,7 @@ a claim to constrain every action an agent can take.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Planning author | Capture inception and reviewed planning amendments | This effort and #9377 |
-| Implementation owner | Claim the next admitted implementation slice | #9377 and its future sub-issues |
+| Implementation owner | Drive guidance, spike, helper decision and the full completion gate | #9377 and this effort's Plan/Validation/Journal |
 
 ## Coordination
 
@@ -39,9 +43,10 @@ a claim to constrain every action an agent can take.
 - **Delegates:** none assigned; do not infer implementation ownership from this plan.
 - **Handoff:** update the Plan and Journal with results, remaining gates and the
   next claimed slice; keep the canonical effort here.
-- **Current assignment:** capture and land the paired-spike planning amendment.
-  It does not implement the companion, author its initial guidance, launch
-  experimental agents, authorize rollout, or claim the effort is complete.
+- **Current assignment:** drive the admitted implementation through guidance,
+  the paired spike, the helper decision and qualification. Continue across
+  phase and PR boundaries without requiring another operator prompt; preserve
+  genuine permission, review and safety gates. Live rollout remains separate.
 - **Adjacent owners:** [Worktree/Effort Railroad Binding](../worktree-effort-railroad-binding/README.md)
   and #3581/#3582/#3583 retain title, checklist-derived binding, and mid-session
   reminder work. No dispatch lifecycle, claims, or worktree-binding redesign is
@@ -79,9 +84,18 @@ the inception for this implementation effort. Once initial guidance is usable,
 compare concurrent attempts at the same task in separate worktrees, with the
 extra agenda layer present in only one arm.
 
-The latest spike direction is preserved verbatim:
+The operator has now admitted execution of the whole goal, not another
+planning-only slice. Agents should progressively complete assigned efforts,
+bound detours and serendipity, understand their work stack and exit criteria,
+and always derive their next concrete action.
 
-> Great. We should figure out how to do a spike test, once we have some initial guidance. We can create a worktree, add in this extra guidance layer, and drive an agent to do a task, in parallel with driving an agent in a worktree without the guidance framework to attempt the same task.
+Execution direction, verbatim:
+
+> Great. Start working on this. Goal is that through these additions, agents will be able to focus on iterating down their assigned efforts, detouring in limited capacity when appropriate, and always be able to self-answer the question of "what do it do next?" For example, you keep stopping after each thing I say, which means we failed to assign an agenda based on my goal: taking inspiration from graph code, add a companion set of guidance, perhaps aided by lightweight CLI tooling, which helps an agent impsoe structure on itself when driving one or more efforts within its worktree lane, ensuring that agent progressively completes tasks, understands the exit criteria, and understands its "work stack" when following detours or dealing with serendipity.
+
+Latest placement direction, verbatim:
+
+> I would expect the stateful agenda to exist somewhere near the "worktree journal", as this is an agent's specific agenda, built from the efforts, tasks, random asides, etc. that it may wind up getting assigned during its existence.
 
 The [full inception exchange](inception-transcript.md) distinguishes operator
 requirements from agent recommendations and records publication-only omissions.
@@ -95,7 +109,7 @@ illustrative filenames or operations are not existing commands.
 ### Phase 0 - Inception and reviewed scope
 - [x] Land the canonical effort, inception exchange, active index and matching
       efforts vision extension through normal review.
-- [ ] Record the reviewed proposal and explicitly admit the next implementation
+- [x] Record the reviewed proposal and explicitly admit the next implementation
       slice on #9377 before starting implementation.
 
 ### Phase 1 - Companion contract and manual process aide
@@ -103,9 +117,13 @@ illustrative filenames or operations are not existing commands.
       Plan/Validation references, exit criteria, named outcomes and permitted
       transitions, including loop bounds and explicit exhaustion behavior;
       do not copy the plan or maintain a second completion checklist.
-- [ ] Separate the reviewed agenda from participant-local mutable execution
-      position, attempts, evidence references and saved continuations. Define
+- [ ] Separate reusable effort/board templates from the worktree-local mutable
+      agenda, execution position, attempts, evidence and saved continuations. Define
       cursor discovery/resumption without requiring a managed worktree.
+- [ ] Keep the agent-specific agenda, cursor and assignment queue beside the
+      worktree journal through an explicit owner/adopter locator; retain them
+      across sessions and reference multiple canonical effort/task sources.
+      Do not put the live agenda in each effort or invent a journal provider.
 - [ ] Specify nested call/return, blocked-child handling and return-time
       revalidation; distinguish a blocking child detour from parallel delegation.
 - [ ] Define guidance reconciliation so an adopted position or child detour is
@@ -251,3 +269,23 @@ limits, with the following explicit corrections:
   honest interpretation of a first pair.
 - This amendment plans the experiment only. Initial guidance, fixture creation,
   run admission and both agent attempts remain unstarted.
+
+### 2026-10-28 - Execution admitted; retain the whole agenda
+- The operator authorized implementation and explicitly identified repeated
+  stopping after planning slices as a failure to retain the assigned goal.
+- The implementation owner now drives all remaining Plan/Validation items,
+  beginning with usable manual guidance and proceeding through the paired spike
+  and evidence-based helper decision. No additional admission prompt is needed
+  merely because a phase or PR finishes.
+- Initial implementation adds an opt-in skill, manual JSON companion examples
+  and a bounded continuous action/exit/detour/return procedure. Its limitations
+  are explicit; no automatic executor or dispatch integration is introduced.
+
+### 2026-10-28 - Worktree agenda placement clarified
+- The operator placed the stateful agenda near the worktree journal: it belongs
+  to the continuing agent and can accumulate several efforts, tasks and assigned
+  asides over the worktree's lifetime.
+- The initial guidance now keeps its agenda/cursor together in an explicit
+  worktree journal/state home, referencing canonical sources rather than making
+  the live agenda a file owned by one effort. Provider discovery remains an
+  optional owner boundary; no staged journal API is presumed available.

@@ -44,6 +44,7 @@ def test_finite_callback_import_does_not_load_preparation_or_seed_daemon():
          "import sys;import agent_worktrees.launch_seed_native;"
          "assert 'agent_worktrees.launch_seed_exec' not in sys.modules;"
          "assert 'agent_worktrees.launch_seed_state' not in sys.modules;"
+         "assert 'agent_worktrees.launch_seed_posix' not in sys.modules;"
          "assert 'agent_worktrees.worktree_status_daemon' not in sys.modules"],
         timeout=15, max_stdout_bytes=4096, max_stderr_bytes=4096,
     )
@@ -706,6 +707,7 @@ def test_selected_runtime_describes_literal_output_support_without_preparation()
         "preparation_output_formats": ["json", "nul"],
         "nul_reply_schema": "agent-worktrees.native-seed-reply.v1",
         "setup_process_start_time_sources": ["caller", "provider"],
+        "backend_execution_modes": ["posix-exec-v1"] if os.name == "posix" else [],
     }
     assert not result.stderr
 
@@ -726,3 +728,47 @@ def test_unknown_output_format_refuses_before_preparation(record, monkeypatch, c
     captured = capsys.readouterr()
     assert not captured.out and "invalid choice" in captured.err
     assert seeds.peek(record) == seed
+
+
+@pytest.mark.parametrize("extra", [
+    [], ["--operation-id", "c" * 32],
+    ["--completion-file", "missing"],
+    ["--operation-id", "c" * 32, "--completion-file", "missing", "--pid", "123"],
+    ["--operation-id", "c" * 32, "--completion-file", "missing", "--receipt-uncertain"],
+    ["--operation-id", "c" * 32, "--completion-file", "missing", "--seed-id", "seed"],
+])
+def test_exec_cli_refuses_incomplete_or_mixed_outcome_before_exec(
+    record, monkeypatch, capsys, extra,
+):
+    from agent_worktrees import launch_seed_posix
+
+    seed = seeds.stage(record, kind="new", text="must not change")
+    monkeypatch.setattr(native, "require_current_runtime", lambda root: None)
+    monkeypatch.setattr(
+        launch_seed_posix, "execute",
+        lambda *args: pytest.fail("Invalid exec syntax must refuse before exec"),
+    )
+    monkeypatch.setattr(sys, "argv", [
+        "launch_seed_native", "--contract-version", "1",
+        "--root", str(cfg.install_dir()), "--record", str(record), "--phase", "exec",
+        "--launch-attempt-id", "a" * 32, "--launch-resolution-id", "b" * 32,
+        *extra, "--", "copilot",
+    ])
+    assert native.main() == 3
+    captured = capsys.readouterr()
+    assert not captured.out and "unconfirmed" in captured.err
+    assert seeds.peek(record) == seed
+
+
+def test_completion_file_is_not_accepted_by_existing_preparation(record, monkeypatch, capsys):
+    monkeypatch.setattr(
+        native, "require_current_runtime",
+        lambda root: pytest.fail("Invalid completion use must refuse before runtime selection"),
+    )
+    monkeypatch.setattr(sys, "argv", [
+        "launch_seed_native", "--contract-version", "1",
+        "--root", str(cfg.install_dir()), "--record", str(record), "--phase", "prepare",
+        "--completion-file", "not-a-preparation-option", "--", "copilot",
+    ])
+    assert native.main() == 3
+    assert "unconfirmed" in capsys.readouterr().err
