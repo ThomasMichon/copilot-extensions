@@ -329,9 +329,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         self._native_turn_transport: NativeTurnTransport | AcquisitionHostTransport | None = None
         self._acquisition_launch: LocalLaunchOwner | None = None
 
-        # Auto-approve all permission requests (agent-bridge default).
-        # Ignored when on_permission is set.
-        self.auto_approve = True
+        self.auto_approve = False
 
         # Streaming output buffers for the current turn
         self._response_chunks: list[str] = []

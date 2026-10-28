@@ -1,0 +1,9 @@
+{
+  "comment": "Require explicit ACP permission answers by default and cancel unavailable upstream approval requests",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
