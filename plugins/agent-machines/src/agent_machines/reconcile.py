@@ -604,6 +604,7 @@ def restore(
     maintenance_safe: bool = False,
     accepted_machines: tuple[str, ...] | None = None,
     git_config_plan_sha256: str | None = None,
+    resource_types: frozenset[str] | None = None,
 ) -> RestoreResult:
     """Converge ``machine`` to the package union.
 
@@ -623,17 +624,20 @@ def restore(
     if _validator.has_errors(findings):
         raise RestoreValidationError(findings)
     p = plan(packages, machine, plat, accepted_machines)
-    surfaces = apply_surfaces(resolved, home=home, dry_run=dry_run, only=only)
+    surfaces = (
+        apply_surfaces(resolved, home=home, dry_run=dry_run, only=only)
+        if resource_types is None else []
+    )
 
     resource_names = _resources.resource_only_names(resolved, machine, plat)
     resource_results: list[_resources.ResourceResult] = []
-    if _want_resources(only, resource_names):
+    if resource_types is not None or _want_resources(only, resource_names):
         home_path = Path(home) if home is not None else Path.home()
         ctx = _resources.ResourceContext(
             home=home_path, repo_paths=_repo_paths(resolved), platform=plat,
             git_config_plan_sha256=git_config_plan_sha256,
         )
-        if maintenance_safe:
+        if maintenance_safe and resource_types is None:
             resource_results.extend(
                 runtime_spot_check_results(home=home_path, plat=plat, dry_run=dry_run)
             )
@@ -646,11 +650,12 @@ def restore(
             dry_run=dry_run,
             only=only,
             maintenance_safe=maintenance_safe,
+            resource_types=resource_types,
             )
         )
 
     all_modules: list[_modules.ModuleResult] = []
-    if _want_modules(only, resource_names):
+    if resource_types is None and _want_modules(only, resource_names):
         all_modules = _modules.run_modules(
             resolved, machine, plat, dry_run=dry_run,
             only=only, maintenance_safe=maintenance_safe,

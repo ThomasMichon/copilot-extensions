@@ -34,6 +34,14 @@ def start(proc: str = "engine") -> None:
         _run = _ut.Run.from_env_or_new(proc)
 
 
+def auth_cleanup_offer(offer: dict) -> None:
+    if _run is not None:
+        try:
+            _run.emit("auth_cleanup_offer", "run", "info", details={"cleanup_offer": offer})
+        except Exception:
+            pass
+
+
 def enter(phase: str) -> None:
     global _human_phase, _human_phase_failed
     from . import output

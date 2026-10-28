@@ -35,6 +35,18 @@ def add_update_options(p: argparse.ArgumentParser) -> None:
     p.add_argument("--auth-cwd", metavar="PATH", help=argparse.SUPPRESS)
     p.add_argument("--auth-non-repository", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--auth-environment", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument(
+        "--auth-cleanup", action="store_true",
+        help="Preview the declared agent-machines Git policy with --auth-report",
+    )
+    p.add_argument(
+        "--apply-auth-cleanup", metavar="PLAN_SHA",
+        help="Apply the exact declared Git preview with --auth-report; never part of an update",
+    )
+    p.add_argument(
+        "--revert-auth-cleanup", metavar="RECEIPT",
+        help="Preview a recorded Git rollback; --apply-auth-cleanup supplies its exact consent digest",
+    )
     p.add_argument("--json", action="store_true", help="JSON output for authentication, detached receipt or request status")
     p.add_argument(
         "--force-runtime",
@@ -108,6 +120,16 @@ def validate_auth_flags(args: argparse.Namespace) -> None:
     phase = getattr(args, "phase", None)
     selected = set(getattr(args, "plugin", None) or ())
     parser = argparse.ArgumentParser(prog="update")
+    cleanup = any(getattr(args, name, False) for name in (
+        "auth_cleanup", "apply_auth_cleanup", "revert_auth_cleanup",
+    ))
+    if cleanup and (
+        not getattr(args, "auth_report", False) or getattr(args, "auth_environment", False)
+    ):
+        parser.error("auth cleanup requires --auth-report and cannot export an auth environment")
+    if digest := getattr(args, "apply_auth_cleanup", None):
+        if not re.fullmatch(r"[a-f0-9]{64}", digest):
+            parser.error("--apply-auth-cleanup requires a lowercase SHA-256 preview digest")
     if selected and phase not in {"payloads", "preflight", "runtimes"}:
         parser.error("--plugin requires --phase payloads, preflight or runtimes")
     if phase and any(getattr(args, name, None) is not None for name in ("target", "runtime_sources")):

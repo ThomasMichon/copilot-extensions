@@ -195,6 +195,12 @@ def fold(
                  and isinstance(event.get("details"), dict)
                  and isinstance(event["details"].get("auth"), dict)
                  and isinstance(event["details"]["auth"].get("id"), str)]
+    cleanup_offers = [
+        event["details"]["cleanup_offer"] for event in events
+        if event.get("phase") == "auth_cleanup_offer" and event.get("event") == "info"
+        and isinstance(event.get("details"), dict)
+        and isinstance(event["details"].get("cleanup_offer"), dict)
+    ]
     return {
         "schema": STATUS_SCHEMA,
         "version": STATUS_VERSION,
@@ -210,7 +216,7 @@ def fold(
             "report": [item["auth"] for item in auth],
             "fallback_used": sorted({item["auth"]["id"] for item in auth
                                      if item.get("fallback_applied")} | set(auth_uses)),
-            "cleanup_offer": None,
-        }} if auth or auth_uses else {}),
+            "cleanup_offer": cleanup_offers[-1] if cleanup_offers else None,
+        }} if auth or auth_uses or cleanup_offers else {}),
         "plugins": {name: t for name, t in sorted(targets.items()) if "@" in name},
     }

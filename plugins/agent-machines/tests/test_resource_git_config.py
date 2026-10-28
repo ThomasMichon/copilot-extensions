@@ -68,6 +68,33 @@ def test_restore_requires_the_exact_preview_and_returns_a_rollback_receipt(tmp_p
     assert not restore([pkg], "box-1", home=home, only=["git-config"]).resource_results[0].changed
 
 
+def test_type_scoped_restore_cannot_select_an_unrelated_resource_or_module(
+    tmp_path, monkeypatch,
+):
+    from agent_machines import reconcile
+
+    data = base_package(
+        name="example/combined", schema_version=4, manage={},
+        resources=[
+            {"type": "git-config", "entries": [{"key": KEY, "values": ["helper"]}]},
+            {"type": "file", "id": "git-config", "path": "~/.unrelated", "content": "no"},
+        ],
+    )
+    pkg = load_package(write_package(tmp_path, "combined.yaml", data))
+    monkeypatch.setattr(
+        reconcile, "apply_surfaces", lambda *a, **k: pytest.fail("surface execution"),
+    )
+    monkeypatch.setattr(
+        reconcile._modules, "run_modules", lambda *a, **k: pytest.fail("module execution"),
+    )
+    result = reconcile.restore(
+        [pkg], "box-1", home=tmp_path, resource_types=frozenset({"git-config"}),
+    )
+    assert result.ok
+    assert [item.type for item in result.resource_results] == ["git-config"]
+    assert not (tmp_path / ".unrelated").exists()
+
+
 def test_authority_resolves_each_key_without_dropping_unrelated_declarations(tmp_path):
     lower = package(
         tmp_path,

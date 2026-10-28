@@ -85,6 +85,27 @@ Marketplace refresh, inventory browsing, plugin acquisition and their summary
 therefore do not extend the auth report's phase or human scope. These timing
 boundaries do not change authentication, acquisition or failure semantics.
 
+Authentication cleanup consumes the selected repository's existing
+agent-machines `git-config` policy; it supplies no helper, account or host
+defaults. Ordinary updates only offer a preview when authentication needs
+fallback or repair. No policy means `not_configured`, not an invented fix.
+
+```text
+agent-worktrees update --auth-report --auth-cleanup --json
+agent-worktrees update --auth-report --apply-auth-cleanup <preview-plan-sha> --json
+agent-worktrees update --auth-report --revert-auth-cleanup <backup-receipt> --json
+agent-worktrees update --auth-report --revert-auth-cleanup <backup-receipt> --apply-auth-cleanup <rollback-plan-sha> --json
+```
+
+Apply is a separate explicit operation, never forwarded into an update or a
+Manager environment export. The exact current preview digest is mandatory.
+Machines owns the strict resource-only transaction, backup and rollback;
+Worktrees rechecks source authentication and requests that same owner's rollback
+if a previously healthy source regresses. Failed/unconfirmed mutation or
+rollback remains a failure with recovery evidence, not an unchanged result.
+Neither path switches accounts, signs in, stores tokens, or provisions a missing
+policy runtime. `CE_UPDATE_AUTH=off` or `report-only` blocks cleanup application.
+
 ## How It Works
 
 The public `update` command submits to the shared durable execution driver

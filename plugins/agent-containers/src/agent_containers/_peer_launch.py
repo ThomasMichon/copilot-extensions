@@ -25,6 +25,7 @@ PEERS = {
     "agent-dispatch": "agent_dispatch",
     "agent-ssh": "agent_ssh",
     "agent-pull-requests": "agent_pull_requests",
+    "agent-machines": "agent_machines",
 }
 OWNERS = {
     "agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers",
@@ -81,8 +82,8 @@ def _active_context(
     return context
 
 
-def peer_environment(context: dict[str, Any], inherited: dict[str, str]) -> dict[str, str]:
-    """Rebind installation routing, retaining non-routing caller/session data."""
+def legacy_peer_environment(inherited: dict[str, str]) -> dict[str, str]:
+    """Remove caller routing and credentials before a peer selects its own roots."""
     environment = {}
     for key, value in inherited.items():
         upper = key.upper()
@@ -102,6 +103,12 @@ def peer_environment(context: dict[str, Any], inherited: dict[str, str]) -> dict
         ):
             continue
         environment[key] = value
+    return environment
+
+
+def peer_environment(context: dict[str, Any], inherited: dict[str, str]) -> dict[str, str]:
+    """Rebind installation routing, retaining non-routing caller/session data."""
+    environment = legacy_peer_environment(inherited)
     plugin = context["pluginId"]
     prefix = plugin.upper().replace("-", "_")
     environment.update({
