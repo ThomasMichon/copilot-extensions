@@ -16,6 +16,15 @@ command-hook handback, full installation or live fleet activation. The
 PowerShell 5/7 entry fixtures separately cover singleton-array rejection,
 inherited non-UTF-8 settings and strict/legacy response compatibility.
 
+`COPILOT_TEST_HOOK_PRE_PYTHON` is required for those entry fixtures and can
+also select an absolute, existing policy interpreter for the lifetime lane.
+Without that override, lifetime controls use the managed runner's interpreter.
+The PowerShell fixture resolver returns that exact path; an unrelated ambient
+Python trap verifies that PATH lookup cannot substitute another executable.
+This allows qualification against an already-selected installed SDK without
+changing or provisioning it. Results apply to that selected runtime, not to
+cached hook activation or a different machine's installation.
+
 `tools/promotion_unit_tests/test_artifact_license_notices.py` checks that the
 existing source-bound wheel verifier refuses omitted or changed source notices,
 accepts modern and legacy license locations, and preserves historical source
