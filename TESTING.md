@@ -2613,8 +2613,9 @@ Git-storage, thread and sleep effects, including attempted effects caught by a
 test. Test writes are confined to synthetic temporary storage.
 
 `tools/promotion_unit_tests/test_cell_installer.py` admits the original thirteen
-actor-free Machines release-payload and watchdog controls, with only the owned
-process runner substituted. It excludes the original module's real Linux
+actor-free Machines release-payload and watchdog controls. The owned process
+runner and fingerprint thread executor are substituted at their actor boundaries;
+canonical file selection, framing and hashing still execute. It excludes the original module's real Linux
 descendant-retirement test. The separate snapshot-provenance suite exercises
 actual POSIX payload replacement during a held provisioning lock, both adapters'
 copy-before-publication checks, and a native PowerShell cell-lock deadline on

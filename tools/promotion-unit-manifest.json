@@ -3348,7 +3348,7 @@
         "libs/agent-procutil/tests/sdk_visibility_cases.py": "88e26d52424879491a8d622fcb043c542e43fe5a8f3f05f3aa25afc5ce109444",
         "libs/installation-context/_installation_context_worker.py": "6c10396cb0555736155b25bf3f52d507c9e36b189eb06a175d0a27fc778f6c8d",
         "libs/agent-procutil/tests/test_shell_caller_owned_native.py": "89e0e3bc4da7c2779a13d04d151caa3e52735d938879062d8074de493d17489d",
-        "tools/promotion_unit_tests/test_cell_installer.py": "ee2ee29fa92a18839e2c0d4fed2a646f0275a957269b00a96d45c2523634a028",
+        "tools/promotion_unit_tests/test_cell_installer.py": "68359a3f8bfbb01e8faab7d7025d1dc6f9098440778257982944f0430b3176a8",
         "plugins/agent-machines/tests/test_cell_installer.py": "eb54567792f913e97fe20345c8ab0a115a6e6f0401a2edf2be3bb776cc75d79d",
         "plugins/agent-machines/scripts/cell_installer.py": "34155ebe5c1964b7e39afe7485e58a9e2b11649f4edff9c4254c632eb37c9c0c"
     },

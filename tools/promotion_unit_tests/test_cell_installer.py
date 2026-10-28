@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import concurrent.futures
 from pathlib import Path
 import sys
 
@@ -32,6 +33,28 @@ _original = _load(
 @pytest.fixture(autouse=True)
 def canonical_source_identity(monkeypatch):
     monkeypatch.setitem(sys.modules, "versioned_runtime_source", _identity)
+    monkeypatch.setattr(concurrent.futures, "ThreadPoolExecutor", InlinePool)
+
+
+class InlinePool:
+    """Keep canonical file framing and reads; substitute only thread execution."""
+
+    def __init__(self, **_options):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_error):
+        return False
+
+    def submit(self, function, *args, **kwargs):
+        result = concurrent.futures.Future()
+        try:
+            result.set_result(function(*args, **kwargs))
+        except BaseException as error:
+            result.set_exception(error)
+        return result
 
 
 for _name in (
