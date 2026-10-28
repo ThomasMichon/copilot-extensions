@@ -161,13 +161,24 @@ outcomes from agent-recommended research and prioritization mechanics.
   The [roadmap follow-through register](roadmap-follow-through.md) records
   #8733/#7650/#8802/#9072/#9413 finite completions, #8796's exact retained claim
   duty, #9233's focused documentation gap and the independently verified
-  933-open census; the whole target remains unmet. The next-decision matrix
+  935-open census; the whole target remains unmet. The next-decision matrix
   preserves #8682's specific finite consumer-qualification gap.
   The [bounded inflow decisions](roadmap-inflow.md) preserve #9414's P1
   standalone closure and #9412's P2 final-verdict gaps under their existing
   claimant, while crediting #9413's finite delivered producer.
+  Later #9435/#9436/#9442 arrivals now have independently admitted
+  [bounded P2 assessments](roadmap-inflow.md#later-inflow-at-fixed-94df-three-retained-p2-gaps);
+  actual runtime/native causes and finite residual qualification remain
+  explicit, with later delivered source credited rather than duplicated.
+  No whole completion or new implementation assignment is inferred.
 - [ ] Coalesce thematic duplicates into canonical issues and existing efforts;
   transfer explicit residual checklists before closing superseded reports.
+  The [current receiving-contract unit](consolidation-current-unit.md)
+  now has independently admitted current contracts for six conditional
+  families/nineteen own identities and authored direct receiving amendments.
+  Normal reviewed delivery and whole-current receiving readback remain;
+  no receiving acceptance or disposition follows from draft admission.
+  The separate #4124/#4564 specific acceptance gate remains deferred.
 - [ ] Refresh live and original-cohort metrics, append journal checkpoints, and
   continue graph-backed consolidation with creation-oldest-first coverage until
   at most 729 issues remain.
@@ -214,6 +225,8 @@ outcomes from agent-recommended research and prioritization mechanics.
   [Current slice qualification](roadmap-current-qualification.md) records
   independently admitted source residuals and planned prerequisites without
   transferring their owners or importing unrelated completion gates.
+  #9426 publishes those twelve bounded qualifications and the three-arrival
+  inflow delta; this broader identification/selection item remains open.
 - [ ] Produce an evidence-backed prerequisite graph and sequencing plan for a
   stable harness that progresses toward vision, distinguishing independent
   parallel work from actual blockers.

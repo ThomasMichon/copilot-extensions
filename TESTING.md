@@ -2239,6 +2239,15 @@ caller dependency. Runtime PEP 440 validation still uses the runtime tooling's
 declared `packaging`; no package is installed by the parser. Run this native
 child check under the bounded development supervisor, not the no-actor packet.
 
+`tools/promotion_unit_tests/test_core_profile_candidate.py` admits the core
+profile producer's exact-manifest, external-pin, metadata, root/extras,
+reachability and target decisions with actual wheel bytes. Only retained
+custody is substituted at its existing owner boundary. The separate
+`tools/test_core_runtime_profile.py` suite exercises real retained files and
+the producer CLI, including an independently launched child without ambient
+repository import paths and no-clobber output. That child belongs outside
+the no-actor packet; candidate assembly qualifies no feed or release approval.
+
 The reviewed [promotion burndown](efforts/active/dev-branch-release-pipeline/promotion-burndown.md)
 supersedes the historical full-suite promotion requirement below. Source CI
 and the independently governed Main control consume the unit-profile contract.

@@ -258,3 +258,31 @@ from the 741 original-cohort issues no longer open. The fixed 729 checkpoint
 is **204 issues away**. The three arrivals' bounded research is admitted; the
 excluded arrival remains untouched and counted. This does not close remaining
 priority/sequence, provisional or lossless-consolidation duties.
+
+## Receiving-manuscript publication census
+
+The complete metadata-only inventory at **2026-10-28 20:23:40 UTC
+(13:23:40 PDT)** contains **935 whole open issues**: 682 creator-eligible,
+253 excluded, 717 original-cohort issues and 218 inflow. All twelve raw
+responses, ten issue pages, unique identities and the unchanged full
+eleven-member roster were independently checked.
+
+Three eligible identities, #9435/#9436/#9442, arrived since the actual
+933-issue census; unrelated #9377 departed. No new campaign disposition
+occurred, so this refresh earns **zero closure credit**. The five finite
+completions in this register remain valid. The 741 original-cohort identities
+no longer open are not all campaign credit, and the current 682 eligible
+identities are not identical to the frozen four-wave assignment roster.
+
+The fixed whole-queue checkpoint remains 729, now **206 issues away**.
+The three arrivals have separately admitted
+[bounded P2 assessments](roadmap-inflow.md#later-inflow-at-fixed-94df-three-retained-p2-gaps),
+retaining precise residual branches and unknown runtime/native qualification
+while crediting actual later source delivery without duplicate implementation
+or new closure credit. The separate
+[nineteen-identity receiving manuscripts](consolidation-current-unit.md)
+have independently admitted current contracts but no accepted intake or
+source supersession yet. Normal reviewed receiving delivery, complete current
+readback, actual #4477 keeper publication and fresh source guards still
+precede supported dispositions. No implementation, native/installed proof,
+resource release or source-owner assignment is inferred.
