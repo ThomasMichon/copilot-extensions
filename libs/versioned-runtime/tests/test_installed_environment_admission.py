@@ -130,19 +130,21 @@ def test_linked_installed_package_is_refused(installed, tmp_path, published):
 
 
 @pytest.mark.parametrize("published", [False, True])
-def test_hardlinked_installed_package_is_refused(installed, tmp_path, published):
+def test_cached_wheel_hardlinks_survive_cache_retirement(installed, tmp_path, published):
     root, slot, site = installed
     if published:
         runtime.mark_complete(root, "2.0", payload_hash="same")
-    source = tmp_path / "checkout.py"
-    source.write_text("VALUE = 'mutable'\n")
+    cache = tmp_path / "wheel-cache"
+    cache.mkdir()
+    source = cache / "package.py"
+    source.write_text("VALUE = 'immutable wheel content'\n")
     os.link(source, site / "live.py")
-    with pytest.raises(RuntimeError):
-        runtime.mark_complete(root, "2.0", payload_hash="same")
-    if published:
-        assert runtime.check_admission(root, "2.0", payload_hash="same") == runtime.ADMIT_HEALTH_REPAIR_REQUIRED
-    assert source.read_text() == "VALUE = 'mutable'\n"
+    runtime.mark_complete(root, "2.0", payload_hash="same")
+    assert runtime.check_admission(root, "2.0", payload_hash="same") == runtime.ADMIT_REUSE
     assert (site / "live.py").stat().st_nlink == 2
+    source.unlink()
+    assert (site / "live.py").read_text() == "VALUE = 'immutable wheel content'\n"
+    assert runtime.check_admission(root, "2.0", payload_hash="same") == runtime.ADMIT_REUSE
 
 
 def test_metadata_io_failure_is_not_absence(installed, monkeypatch):

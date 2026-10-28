@@ -58,9 +58,8 @@ def require_immutable_environment(
         if (
             not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode))
             or getattr(info, "st_file_attributes", 0) & 0x400
-            or (stat.S_ISREG(info.st_mode) and info.st_nlink != 1)
         ):
-            raise error_type(f"Installed runtime content must be copied, not linked: {path}")
+            raise error_type(f"Installed runtime content must be ordinary files, not redirected: {path}")
 
     config = slot / "pyvenv.cfg"
     if os.path.lexists(config):

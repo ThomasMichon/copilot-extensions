@@ -1693,10 +1693,16 @@ write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
 Non-editable applies to the complete deployed dependency graph, including
 explicit development generations. Canonical source references may use
 `editable = true` to locate libraries in a source checkout; deployment must
-still install independent copies. The canonical installer dependency CLI
+still install noneditable wheel content rather than references to those source
+directories. The canonical installer dependency CLI
 refuses explicit editable operands and non-copy link modes, and supplies
-`--no-editable --link-mode copy` to UV. The Python constructor enforces the
-same flags and verifies installed origins. Never refresh an existing completed
+`--no-editable --link-mode copy` to UV. The Python constructor enforces
+`--no-editable`, verifies installed origins and permits ordinary immutable
+wheel-cache hardlinks as described in the source-wheel cache contract below.
+Completion rejects symlink/reparse redirection, editable origins and escaping
+path hooks, not an ordinary file merely having another hardlink. Cache content
+is never modified in place; cache retirement unlinks its own names without
+invalidating installed files. Never refresh an existing completed
 editable environment in place: construct and qualify a distinct immutable slot,
 then perform the authorized selection/cutover. These rules do not authorize a
 host migration or waive an adopter's construction and lifecycle acceptance.

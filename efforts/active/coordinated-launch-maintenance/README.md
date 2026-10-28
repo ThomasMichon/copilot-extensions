@@ -240,6 +240,18 @@ repository history.
   materialization passed for Worktrees and SSH; five shared-driver admission
   controls and the native missing-task refusal passed. Fresh Windows
   qualification remains required, without a guard waiver or timeout increase.
+- Follow-up run 40758894728 at `16abfd72bb34bc5eb9165507f06feae215357777`
+  passed both original Windows activation and native/portable POSIX. Actual cold
+  construction then refused upstream #9340's immutable extracted-wheel-cache
+  hardlinks. Reconcile completion inspection with that installed-file contract:
+  ordinary files may have multiple links; symlinks/reparse redirection, editable
+  origins and escaping/unverified path hooks still refuse. Real cache unlink
+  leaves admitted installed bytes usable; 59 environment controls passed with
+  four platform skips. No published slot is rewritten by inspection.
+- The final historical PID-collision fixture now chooses a target distinct
+  from its caller; all 76 broker/retirement controls passed. The stopped-resident
+  desktop-startup failure remains owned by this repair, with a peer-owned
+  temporary mitigation retained until separately authorized installed cutover.
 
 ### 2026-10-28 - Qualify real broker consumers and canonical removal
 

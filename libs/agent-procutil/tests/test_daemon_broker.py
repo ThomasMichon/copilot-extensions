@@ -179,7 +179,7 @@ def _caller_kernel(monkeypatch, members, *, in_job=True, mode="complete"):
 
 @pytest.mark.parametrize("same_job", [False, True])
 def test_caller_membership_distinguishes_ambient_jobs(monkeypatch, same_job):
-    target = Mock(pid=99001)
+    target = Mock(pid=broker.os.getpid() + 1)
     members = [broker.os.getpid()] + ([target.pid] if same_job else [])
     kernel = _caller_kernel(monkeypatch, members)
     assert broker._outside_caller_job(target) is not same_job
