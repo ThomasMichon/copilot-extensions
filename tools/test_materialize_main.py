@@ -134,6 +134,16 @@ def test_materialize_refuses_linked_source_content(tmp_path, native_file_symlink
     assert any("linked" in line for line in log), log
 
 
+def test_materialized_closure_allows_an_aliased_parent(tmp_path, native_file_symlink):
+    root = tmp_path / "real"
+    consumer = root / "plugins" / "example"
+    consumer.mkdir(parents=True)
+    (consumer / "pyproject.toml").write_text('[project]\nname = "example"\nversion = "1"\n')
+    alias = tmp_path / "alias"
+    native_file_symlink(alias, root, target_is_directory=True)
+    assert uer.materialized_local_source_problems(alias / "plugins" / "example") == []
+
+
 @pytest.mark.parametrize("nested", [False, True])
 @pytest.mark.parametrize("editable", [False, True])
 def test_materialize_declared_flat_python_modules(tmp_path, nested, editable):

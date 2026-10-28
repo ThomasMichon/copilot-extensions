@@ -172,25 +172,47 @@ def _direct_local_requirements(data: dict) -> list[str]:
     if not isinstance(project, dict) or not isinstance(build, dict):
         raise ManifestUnreadable("project and build-system must be tables")
     optional = project.get("optional-dependencies", {})
-    if not isinstance(optional, dict):
-        raise ManifestUnreadable("project.optional-dependencies must be a table")
+    dependency_groups = data.get("dependency-groups", {})
+    uv = data.get("tool", {}).get("uv", {})
+    extra_build = uv.get("extra-build-dependencies", {})
+    if any(not isinstance(table, dict) for table in (optional, dependency_groups, extra_build)):
+        raise ManifestUnreadable("dependency groups and extra build dependencies must be tables")
     groups = [
         project.get("dependencies", []), build.get("requires", []), *optional.values(),
+        *dependency_groups.values(),
+        *(uv.get(key, []) for key in (
+            "dev-dependencies", "constraint-dependencies", "override-dependencies",
+            "build-constraint-dependencies",
+        )),
     ]
+    metadata = uv.get("dependency-metadata", [])
+    if not isinstance(metadata, list) or any(not isinstance(entry, dict) for entry in metadata):
+        raise ManifestUnreadable("tool.uv.dependency-metadata must be a list of tables")
+    groups.extend(entry.get("requires-dist", []) for entry in metadata)
+    for entries in extra_build.values():
+        if not isinstance(entries, list):
+            raise ManifestUnreadable("extra build dependencies must be lists")
+        groups.append([
+            entry.get("requirement") if isinstance(entry, dict) else entry for entry in entries
+        ])
     local: list[str] = []
     for requirements in groups:
-        if not isinstance(requirements, list) or any(
-            not isinstance(requirement, str) for requirement in requirements
-        ):
-            raise ManifestUnreadable("dependency requirements must be lists of strings")
+        if not isinstance(requirements, list):
+            raise ManifestUnreadable("dependency requirements must be lists")
         for requirement in requirements:
-            match = re.match(r"^[A-Za-z0-9_.-]+(?:\[[^]]+\])?\s*@\s*(\S+)", requirement.strip())
+            if isinstance(requirement, dict) and set(requirement) == {"include-group"}:
+                continue
+            if not isinstance(requirement, str):
+                raise ManifestUnreadable("dependency requirements must be strings")
+            match = re.match(
+                r"^[A-Za-z0-9_.-]+\s*(?:\[[^]]*\]\s*)?@\s*(\S+)", requirement.strip(),
+            )
             if not match:
                 continue
             location = match.group(1)
             scheme = re.match(r"[A-Za-z][A-Za-z0-9+.-]*:", location)
             if (
-                scheme is None or scheme.group().lower().endswith(("file:", "+file:"))
+                scheme is None or scheme.group().lower().rsplit("+", 1)[-1] == "file:"
                 or PureWindowsPath(location).drive
             ):
                 local.append(requirement)
@@ -203,19 +225,19 @@ def materialized_local_source_problems(consumer_dir: Path) -> list[str]:
     if linked is not None:
         return [f"local source {consumer_dir / linked}: linked payload content"]
     root = consumer_dir.resolve()
-    pending = [consumer_dir]
+    pending = [root]
     seen: set[Path] = set()
     problems: list[str] = []
     while pending:
         current = pending.pop()
         resolved = current.resolve()
-        if resolved in seen:
-            continue
-        seen.add(resolved)
         manifest = current / "pyproject.toml"
         if _find_symlinked_ancestor(manifest, root) or not manifest.is_file():
             problems.append(f"local source {manifest}: missing or linked package manifest")
             continue
+        if resolved in seen:
+            continue
+        seen.add(resolved)
         try:
             data = _read_pyproject(current)
             sources = read_uv_sources(current, data=data)
@@ -250,11 +272,18 @@ def materialized_local_source_problems(consumer_dir: Path) -> list[str]:
                 if _find_symlinked_ancestor(target, root):
                     problems.append(f"{label}: {raw_path!r} traverses a linked directory")
                     continue
-                if target.is_file() and target.name.endswith(
-                    (".whl", ".zip", ".tar.gz", ".tar.bz2", ".tar.xz")
-                ):
-                    continue
-                pending.append(target)
+                route = current
+                for component in Path(raw_path).parts:
+                    route /= component
+                    if not route.exists():
+                        problems.append(f"{label}: {raw_path!r} has a missing path component")
+                        break
+                else:
+                    if target.is_file() and target.name.endswith(
+                        (".whl", ".zip", ".tar.gz", ".tar.bz2", ".tar.xz")
+                    ):
+                        continue
+                    pending.append(target)
     return problems
 
 
