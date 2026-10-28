@@ -48,6 +48,21 @@ thing, and it never spawns one just to be sure.
 
 ## Concepts & Components
 
+### Reversible automatic-update inhibition
+
+An automatic-update KillSwitch prevents pending normal installation work from
+starting, without retaining inert jobs in the execution queue. Such jobs leave
+with an explicit non-success outcome stating that nothing ran. Clearing the
+switch permits new normal work without per-job provenance approval; trusted
+source selection and ordinary execution admission still apply.
+
+Explicit operator-authorized repair remains available while automatic updates
+are inhibited. One designated install driver can carry repair-as-needed
+authority through its objective without asking again for each repair step.
+Repair uses the same serialized execution owner and never bypasses native
+exclusivity, unsettled-effect fences or protected resources. Inhibition does
+not terminate work that has already started.
+
 ### Explicit integrated coordination profile
 
 Alongside independently installed addons, an adopter can select the integrated

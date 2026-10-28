@@ -240,9 +240,10 @@ and [repair register](reconstruction-findings.md) retain the evidence and limits
     engine mux boundary through a launch-owned one-shot handoff, preserving
     final correlation, literal argv, setup reconciliation policy and
     same-host/seed/console custody without exempting unsafe consumers (#9410).
-  - [ ] Integrate startup handoffs with Manager's separate retrying Picker
+  - [x] Integrate startup handoffs with Manager's separate retrying Picker
     producer: fresh file per attempt, known-failure cleanup and retention
-    after publication/uncertainty without changing creation or seed custody.
+    after publication/uncertainty without changing creation or seed custody
+    (#9418).
 - [ ] Resolve attributable, installation-scoped start/end entry points afresh
   at each boundary; no cached runtime Python, daemon endpoint or imported
   installed helper survives merely to wait.
@@ -309,6 +310,11 @@ and [repair register](reconstruction-findings.md) retain the evidence and limits
   intent; a maintenance hold keeps installed tasks runnable but quiescent.
   The manual program wipe is not supported-uninstaller conformance evidence.
 - [ ] Verify containing normal Main release and exact released behavior.
+  - [x] Verify the containing #9418 release through normal promotion #9422:
+    Main `595c18f6eea91e8227fad1fc5b963fdb0df01bc6`, admitted Dev
+    `326a72d1332afe351e7f5e8ac0841ecba56a8230`, Worktrees 1.24.333-dev1
+    and Manager 0.6.190-dev1. Six launcher/setup/transport blobs match the
+    reviewed candidate exactly. Installed acceptance remains open.
 - [ ] Obtain any required selected-host rollout approval, use the canonical
   updater, and validate a fresh native launch/exit. Existing sessions may
   still carry their older wrapper and are not rollout evidence.
@@ -351,6 +357,11 @@ operator's installation-survival contract.
     and alternate-option behavior, normal/recovery reconciliation and real
     exit codes (#9410). This is component evidence, not Picker, live mux,
     handler replacement or supported-uninstall acceptance.
+  - [x] Picker component controls exercise the real copied startup reader,
+    per-attempt freshness and known-failure/join/receipt cleanup versus
+    uncertain-publication retention; existing pinned native PSMux controls
+    qualify both pane producers over two cycles (#9418). Installed survival
+    and representative Picker input-ready latency remain separate.
 - [ ] Real overlapping same-worktree attempts create one mux and join it;
   different-worktree launches overlap independently. Admission releases when
   the mux is discoverable, not when Copilot exits.
@@ -444,6 +455,30 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
 
 ## Journal
 
+### 2026-10-28 - Source-wheel deadline diagnosis
+
+- A subsequent normal Windows update rejected a candidate at
+  `verify_source -> _tool_tree -> _digest_file -> _check_deadline`.
+  The selected previous generation remained intact. The 333/334 installer
+  code is identical; this is not evidence of newly changed verification logic
+  or a corrupt wheel. Its 180-second child budget also covers the complete
+  source-wheel batch, not just one archive read.
+- Identified transient `UPDATE_DRIVER_WITNESS` data in the offline build
+  environment and cache identity. A native admitted-key reproduction failed
+  before the correction, with otherwise unchanged request inputs; a normal
+  build-environment change remained a valid cache invalidation.
+- The local correction removes the witness from the offline builder
+  environment/identity, not constructor admission. Both key/admission controls
+  pass. Actual constructors with different request witnesses built three wheels
+  once, reused all three on the next fresh generation, and rebuilt only the
+  changed leaf after a source edit. Assembly times were 54.782, 26.328 and
+  31.219 seconds, respectively, in a controlled three-project fixture.
+- Existing source/tool mutation controls are being re-run. Canonical and
+  vendored copies are synchronized, and the install contract documents the
+  separation. The shared batch deadline and all content checks are unchanged.
+  R9 records the remaining native installed-batch acceptance; these component
+  results do not close the parent effort or establish the sole timeout cause.
+
 ### 2026-10-28 - Picker per-attempt startup handoff
 
 - Implemented the separate Windows Picker producer's startup serialization
@@ -470,9 +505,24 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   production boundary. The reader/argv unit fixture uses a lightweight capture
   wrapper; the separate real-wrapper and native lanes retain actual process
   custody coverage. No timeout or containment limit was relaxed.
-- This is local candidate/component evidence pending review and merge, not
+- #9418 merged as `a9df11c5c4c6e1cdcd86d50b0be659fc20e637e1` after
+  exact-head Copilot approval, green required CI and no open review threads.
+  The managed flow used only the configured additional-CODEOWNER exception;
+  no review finding or failing required check was bypassed. Native sync
+  advanced the source worktree onto the merged range with a recovery ref.
+- Re-read all Plan and Validation Plan items after merge. Closed only the
+  Picker startup-transport/component subitems; this is not
   installed rollout, a Picker input-ready latency qualification, or same-process
   uninstall/reinstall acceptance. The parent effort remains Active.
+- The prior containing release run stopped at artifact release/tag creation
+  verification (#9411), not a green release. A newer normal promotion run is
+  active. Verify a containing Main release before the authorized host rollout;
+  preserve the existing live sessions and independent task-disable intent.
+- The subsequent normal run `40739096681` completed successfully and #9422
+  merged. Its admitted Dev snapshot contains #9418; all six relevant released
+  launch/setup/transport files match the reviewed source byte-for-byte. This
+  supersedes the earlier pending-release state for the component, not the
+  parent effort's installed or same-process acceptance gates.
 
 ### 2026-10-28 - Engine mux setup startup handoff
 

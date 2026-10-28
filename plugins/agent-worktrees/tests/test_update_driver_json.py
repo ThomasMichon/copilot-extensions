@@ -208,6 +208,31 @@ def test_driver_refusal_replaces_previous_success_status(tmp_path, monkeypatch, 
     assert json.loads(capsys.readouterr().out)["ok"] is False
 
 
+def test_killswitch_noop_reports_reason_without_requiring_executor_result(tmp_path, monkeypatch, capsys):
+    import update_driver
+
+    reason = "automatic-update KillSwitch active; nothing ran"
+    request = SimpleNamespace(
+        id="synthetic", log_path=tmp_path / "request.log", state="completed",
+        exit_code=3, started_at=None, error=reason,
+    )
+    monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
+    monkeypatch.setattr(boundary.cfg, "active_project", lambda: None)
+    monkeypatch.setattr(boundary.cfg, "install_dir", lambda: tmp_path)
+    monkeypatch.setattr(update_driver, "runtime_command", lambda *args: (("synthetic",), {}))
+    monkeypatch.setattr(update_driver, "enqueue", lambda *args, **kwargs: request)
+    monkeypatch.setattr(update_driver, "ensure_worker", lambda *args, **kwargs: None)
+    monkeypatch.setattr(update_driver, "wait", lambda *args, **kwargs: request)
+    status_path = tmp_path / "status.json"
+    assert boundary.cmd_reconcile_request(_args(
+        apply=True, repo=str(tmp_path), status=str(status_path),
+    )) == 1
+    failure = json.loads(capsys.readouterr().out)
+    assert failure["message"] == reason
+    assert json.loads(status_path.read_text())["message"] == reason
+    assert not boundary._result_path(request).exists()
+
+
 @pytest.mark.parametrize("verb", ["stage-update", "reconcile-plugins"])
 def test_status_publication_failure_retains_original_json_error(tmp_path, monkeypatch, capsys, verb):
     import update_driver
@@ -241,7 +266,7 @@ def test_queued_json_round_trip_returns_original_payload_and_exit(tmp_path, monk
 
     request = SimpleNamespace(
         id="fixture", state="completed", exit_code=5, error="canonical failure",
-        log_path=tmp_path / "fixture.log",
+        log_path=tmp_path / "fixture.log", started_at=1.0,
     )
     boundary._publish_result(request, '{"executed":[{"ok":false}]}')
     seen = {}

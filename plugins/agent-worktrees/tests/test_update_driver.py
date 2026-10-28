@@ -98,6 +98,40 @@ def test_ordinary_update_queues_before_manager_discovery(queued):
     assert seen["wait"] == request.id
 
 
+@pytest.mark.parametrize("values,repair", [
+    ({}, False), ({"force": True}, True),
+    ({"force_runtime": ["agent-bridge"]}, True), ({"recreate_venv": True}, True),
+])
+def test_force_options_record_explicit_repair_request(queued, values, repair):
+    seen, _request = queued
+    assert boundary.cmd_update_request(_args(**values)) == 4
+    assert seen["spec"].repair is repair
+
+
+def test_detached_adapter_binds_relative_killswitch_to_original_invocation(tmp_path, monkeypatch):
+    from pathlib import Path
+    import update_driver
+
+    home = tmp_path / "home"
+    home.mkdir()
+    scope = tmp_path / "scope"
+    invocation = scope / "invocation"
+    invocation.mkdir(parents=True)
+    (invocation / "pause.json").write_text('{"active":true}', encoding="utf-8")
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", "./pause.json")
+    assert _enqueue_fixture_update(monkeypatch, scope, no_manager=True) == 0
+    request, = update_driver.status()
+    assert Path(request.spec.killswitch_path).samefile(invocation / "pause.json")
+    monkeypatch.chdir(home)
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(home / "unrelated.json"))
+    assert update_driver.drain(executor=lambda tx: pytest.fail("inhibited runner started")) == 0
+    assert update_driver.wait(request.id).exit_code == 3
+
+
 def test_selected_phase_queues_exact_scope_and_labels_partial_receipt(queued, capsys):
     import json
 
@@ -290,6 +324,8 @@ def test_queued_update_keeps_original_context_after_project_chdir(queued, tmp_pa
 
 
 @pytest.mark.parametrize("with_manager", [False, True])
+# Two independently bounded 20-second workers plus fixture setup and cleanup.
+@pytest.mark.timeout(60)
 def test_actual_queued_engine_keeps_each_scope_and_original_invocation(tmp_path, monkeypatch, with_manager):
     import json
     import importlib.util

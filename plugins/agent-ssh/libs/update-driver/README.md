@@ -49,6 +49,18 @@ creation, not an implicit permission migration or a read-only status side effect
   cwd is normalized, while argument ordering and spelling remain significant.
   Adapters own semantic option normalization and safe-field projection. Never
   put credentials in argv, source, context, error strings, or runner metadata.
+  The optional `repair=False` boolean distinguishes an explicitly authorized
+  repair from normal work. Trusted product adapters set it for their existing
+  force/repair options; it is not an environment-variable override or a grant
+  of operator authority. Ordinary records omit the default field, preserving
+  existing identities. Legacy records without it remain normal requests.
+  An older driver rejects the new repair field before execution rather than
+  silently claiming to support its semantics.
+  An explicit `BOOTSTRAP_KILLSWITCH_STATE_FILE` override is captured at enqueue
+  as the absolute `killswitch_path`, relative to the request's original cwd
+  when needed. It participates in identity; a detached or already-running
+  worker never substitutes its own override. The empty default is omitted
+  from ordinary records, and legacy records continue to use canonical paths.
 - `TrustedRunner(argv, cwd, timeout=7200, env=(), context_keys=())` stores a complete internally
   constructed pinned invocation. Only Python import mapping (`PYTHONPATH`,
   `__PYVENV_LAUNCHER__`) can be persisted as environment metadata. Authentication
@@ -124,6 +136,32 @@ creation, not an implicit permission migration or a read-only status side effect
   An optional trusted `executor(Transaction)->int` must finish all its effects
   and cleanup before returning. Returning an exit code certifies that cleanup
   boundary; custom-executor exceptions remain conservatively interrupted.
+
+### Automatic-update KillSwitch and repair
+
+Before each pending request becomes running, the existing owner re-reads the
+shared bootstrap KillSwitch, including its legacy-path fallback and existing
+`BOOTSTRAP_KILLSWITCH_STATE_FILE` selection. An active switch completes normal
+jobs with exit 3 and error `automatic-update KillSwitch active; nothing ran`.
+Their start time stays absent, no product runner or installer starts, and the
+pending position is released. Status and wait retain this non-success outcome;
+the worker continues to later jobs. Clearing the switch permits new normal
+requests, but does not replay jobs already retired.
+
+Explicit `repair=True` requests bypass only this automatic-update inhibition,
+under the operator authority of the submitting driver. They retain the same
+execution lock, native process containment, foundation and interruption fences.
+Switch activation does not kill a running job. Ordinary jobs require no
+additional per-job provenance approval: their trusted adapter and normal
+installation admission remain responsible for source and execution integrity.
+
+As with the bootstrap guard, missing state means inactive; malformed or
+unreadable state warns and retains the existing fail-open policy. A selected
+namespaced installation context does not inherit the default installation's
+shared switch. This does not bypass that installation's own policy controls.
+No database migration, direct queue edit, new scheduler or flag removal is
+needed. Older pending jobs are handled by the next capable worker; updating
+source alone does not upgrade a selected or already-running worker.
 
 ## Execution and borrowed custody
 

@@ -353,9 +353,12 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
         environment = dict(transaction.environment)
         # Resolution is finished. Build hooks cannot consult another UV config,
         # index or interpreter selection through the source-build subprocess.
+        # Request custody stays with the constructor, not the offline builder.
         environment = {key: value for key, value in environment.items()
                        if not key.upper().startswith(("UV_", "PIP_", "PYTHON"))
-                       and key.upper() not in ("VIRTUAL_ENV", "CONDA_PREFIX")}
+                       and key.upper() not in (
+                           "VIRTUAL_ENV", "CONDA_PREFIX", "UPDATE_DRIVER_WITNESS",
+                       )}
         environment.update({
             "UV_NO_CONFIG": "1", "UV_OFFLINE": "1", "UV_CACHE_DIR": cache,
             "PYTHONDONTWRITEBYTECODE": "1",

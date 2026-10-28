@@ -47,6 +47,162 @@ def test_readonly_absent(area):
     assert not root.exists()
 
 
+def test_killswitch_retires_pending_normal_work_but_executes_repair(area, monkeypatch, capsys):
+    root = area / "state"
+    switch = area / "killswitch.json"
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(switch))
+    normal = sample(area)
+    repair = sample(area, repair=True)
+    assert repair.id != normal.id
+    switch.write_text('{"active":true}', encoding="utf-8")
+    seen = []
+    assert drain(root=root, executor=lambda tx: seen.append(tx.request.id) or 0) == 0
+    assert seen == [repair.id]
+    caller_output = io.StringIO()
+    skipped = wait(normal.id, root=root, output=caller_output)
+    assert skipped.state == "completed" and skipped.exit_code == 3
+    assert skipped.started_at is None and skipped.boot_id is None and not skipped.unresolved
+    assert skipped.error == "automatic-update KillSwitch active; nothing ran"
+    assert caller_output.getvalue() == skipped.error + "\n"
+    assert not skipped.log_path.exists()
+    assert status(repair.id, root=root).exit_code == 0
+    assert "nothing ran" in capsys.readouterr().err
+    switch.write_text('{"active":false}', encoding="utf-8")
+    later = sample(area)
+    assert drain(root=root, executor=lambda tx: seen.append(tx.request.id) or 0) == 0
+    assert seen == [repair.id, later.id]
+
+
+def test_killswitch_rechecked_between_jobs_without_interrupting_active_work(area, monkeypatch):
+    root = area / "state"
+    switch = area / "killswitch.json"
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(switch))
+    first = sample(area, source="first")
+    later = sample(area, source="later")
+    seen = []
+
+    def execute(tx):
+        seen.append(tx.request.id)
+        switch.write_text('{"active":true}', encoding="utf-8")
+        return 0
+
+    assert drain(root=root, executor=execute) == 0
+    assert seen == [first.id]
+    assert status(first.id, root=root).exit_code == 0
+    assert status(later.id, root=root).started_at is None
+    assert status(later.id, root=root).exit_code == 3
+
+
+def test_killswitch_real_runner_never_starts_normal_child(area, monkeypatch):
+    root = area / "state"
+    switch = area / "killswitch.json"
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", "killswitch.json")
+    switch.write_text('{"active":true}', encoding="utf-8")
+    normal_marker, repair_marker = area / "normal", area / "repair"
+
+    def submit(marker, repair):
+        return enqueue(
+            RequestSpec("fixture", repair=repair, cwd=str(area)), root=root,
+            runner=TrustedRunner((
+                sys.executable, "-c",
+                "from pathlib import Path; import sys; Path(sys.argv[1]).write_text('ran')",
+                str(marker),
+            ), str(area)),
+        )
+
+    normal, repair = submit(normal_marker, False), submit(repair_marker, True)
+    monkeypatch.chdir(root)
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(area / "unrelated-worker-switch.json"))
+    assert drain(root=root) == 0
+    assert wait(normal.id, root=root).exit_code == 3
+    assert wait(repair.id, root=root).exit_code == 0
+    assert not normal_marker.exists()
+    assert repair_marker.read_text() == "ran"
+
+
+def test_each_request_retains_its_own_override_not_the_workers(area, monkeypatch):
+    root = area / "state"
+    active, inactive = area / "active.json", area / "inactive.json"
+    active.write_text('{"active":true}', encoding="utf-8")
+    inactive.write_text('{"active":false}', encoding="utf-8")
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(active))
+    first = sample(area)
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(inactive))
+    second = sample(area)
+    assert first.id != second.id
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(active))
+    seen = []
+    assert drain(root=root, executor=lambda tx: seen.append(tx.request.id) or 0) == 0
+    assert seen == [second.id]
+    assert status(first.id, root=root).exit_code == 3
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_killswitch_default_path_and_namespaced_isolation(area, monkeypatch, legacy):
+    from pathlib import Path
+
+    monkeypatch.setattr(Path, "home", lambda: area)
+    monkeypatch.delenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", raising=False)
+    base = area / ".copilot-extensions"
+    switch = base / ("bootstrap-killswitch.json" if legacy else "killSwitches/bootstrap-killswitch.json")
+    switch.parent.mkdir(parents=True)
+    switch.write_text('{"active":true}', encoding="utf-8")
+    normal = sample(area)
+    namespaced = sample(area, context=(("COPILOT_EXTENSIONS_CONTEXT", "explicit-cell"),))
+    seen = []
+    assert drain(root=area / "state", executor=lambda tx: seen.append(tx.request.id) or 0) == 0
+    assert seen == [namespaced.id]
+    assert status(normal.id, root=area / "state").exit_code == 3
+
+
+@pytest.mark.parametrize("content", ['{"active":"true"}', "{", '{"active":false}'])
+def test_invalid_or_inactive_killswitch_preserves_existing_fail_open_policy(
+    area, monkeypatch, capsys, content,
+):
+    switch = area / "killswitch.json"
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(switch))
+    switch.write_text(content, encoding="utf-8")
+    request = sample(area)
+    assert drain(root=area / "state", executor=lambda tx: 0) == 0
+    assert status(request.id, root=area / "state").exit_code == 0
+    if content != '{"active":false}':
+        assert "invalid state" in capsys.readouterr().err
+
+
+def test_legacy_normal_identity_omits_default_repair_field(area, monkeypatch):
+    monkeypatch.delenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", raising=False)
+    request = sample(area)
+    with sqlite3.connect(area / "state" / "queue.sqlite3") as db:
+        stored = json.loads(db.execute("SELECT spec FROM requests WHERE id=?", (request.id,)).fetchone()[0])
+    assert "repair" not in stored
+    assert "killswitch_path" not in stored
+    assert sample(area, repair=False).id == request.id
+    assert status(request.id, root=area / "state").spec.repair is False
+    with pytest.raises(InvalidRequestError, match="explicit boolean"):
+        sample(area, repair="yes")
+
+
+def test_unsearchable_switch_directory_does_not_block_queued_repair(area, monkeypatch, capsys):
+    from pathlib import Path
+
+    monkeypatch.setattr(Path, "home", lambda: area)
+    monkeypatch.delenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", raising=False)
+    primary = area / ".copilot-extensions/killSwitches/bootstrap-killswitch.json"
+    exists = Path.exists
+
+    def denied(path):
+        if path == primary:
+            raise PermissionError("synthetic unsearchable directory")
+        return exists(path)
+
+    monkeypatch.setattr(Path, "exists", denied)
+    normal, repair = sample(area), sample(area, repair=True)
+    seen = []
+    assert drain(root=area / "state", executor=lambda tx: seen.append(tx.request.id) or 0) == 0
+    assert seen == [normal.id, repair.id]
+    assert "unreadable state; automatic update allowed: PermissionError" in capsys.readouterr().err
+
+
 def test_worker_acknowledgement_is_published_only_after_close(area, monkeypatch):
     from update_driver import core
 
@@ -231,7 +387,8 @@ def test_boot_identity_is_captured_once_before_ack_and_reused(area, monkeypatch)
     ]
 
 
-def test_exception_fences_without_replay(area):
+@pytest.mark.parametrize("repair", [False, True])
+def test_exception_fences_without_replay(area, repair):
     request = sample(area)
     later = sample(area, argv=("later",))
     root = area / "state"
@@ -243,7 +400,7 @@ def test_exception_fences_without_replay(area):
         drain(root=root, executor=execute)
     assert status(request.id, root=root).state == "interrupted"
     with pytest.raises(InterruptedError):
-        sample(area, argv=("refused",))
+        sample(area, argv=("refused",), repair=repair)
     with pytest.raises(InterruptedError):
         drain(root=root, executor=lambda tx: pytest.fail("unsafe replay"))
     assert status(later.id, root=root).state == "pending"

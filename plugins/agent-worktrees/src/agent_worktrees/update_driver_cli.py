@@ -182,6 +182,10 @@ def cmd_update_request(args: argparse.Namespace) -> int:
         spec = driver.RequestSpec(
             backend="engine", argv=tuple([*bypass, *flags]), project=project or "", cwd=str(cwd),
             source=str(cfg.install_dir().resolve()), context=_request_context(),
+            repair=bool(
+                getattr(args, "force", False) or getattr(args, "force_runtime", None)
+                or getattr(args, "recreate_venv", False)
+            ),
         )
         project_args = ["--project", project] if project else []
         argv, environment = driver.runtime_command(

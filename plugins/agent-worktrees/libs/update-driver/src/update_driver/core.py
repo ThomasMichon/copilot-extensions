@@ -15,7 +15,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Callable, Mapping, Sequence, TextIO
 
@@ -62,6 +62,8 @@ class RequestSpec:
     cwd: str = ""
     source: str = ""
     context: tuple[tuple[str, str], ...] = ()
+    repair: bool = False
+    killswitch_path: str = ""
 
 
 @dataclass(frozen=True)
@@ -143,6 +145,11 @@ def _spec(spec: RequestSpec) -> RequestSpec:
     ):
         raise InvalidRequestError("safe context must contain bounded key/value pairs")
     pairs = tuple(sorted((_text(k), _text(v)) for k, v in context))
+    if type(spec.repair) is not bool:
+        raise InvalidRequestError("repair selection must be an explicit boolean")
+    killswitch_path = _text(spec.killswitch_path)
+    if killswitch_path and not Path(killswitch_path).is_absolute():
+        raise InvalidRequestError("request KillSwitch path must be absolute")
     if len({k for k, _v in pairs}) != len(pairs):
         raise InvalidRequestError("safe context keys must be unique")
     cwd = _text(spec.cwd)
@@ -152,7 +159,48 @@ def _spec(spec: RequestSpec) -> RequestSpec:
         cwd = os.path.normcase(os.path.normpath(cwd))
     return RequestSpec(
         spec.backend, _vector(spec.argv), _text(spec.project), cwd, _text(spec.source), pairs,
+        spec.repair,
+        killswitch_path,
     )
+
+
+def _spec_document(spec: RequestSpec) -> dict:
+    document = asdict(spec)
+    if not spec.repair:
+        # Preserve identities and downlevel readability of ordinary queued jobs.
+        document.pop("repair")
+    if not spec.killswitch_path:
+        document.pop("killswitch_path")
+    return document
+
+
+def _automatic_update_inhibited(spec: RequestSpec) -> bool:
+    if spec.repair or dict(spec.context).get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
+        return False
+    override = spec.killswitch_path
+    try:
+        base = Path.home() / ".copilot-extensions"
+        path = Path(override).expanduser() if override else base / "killSwitches" / "bootstrap-killswitch.json"
+        if not override and not path.exists():
+            path = base / "bootstrap-killswitch.json"
+        with path.open("rb") as stream:
+            data = stream.read(65537)
+    except FileNotFoundError:
+        return False
+    except OSError as error:
+        print(f"[bootstrap-killswitch] unreadable state; automatic update allowed: "
+              f"{type(error).__name__}", file=sys.stderr)
+        return False
+    try:
+        if len(data) > 65536:
+            raise ValueError("state exceeds size limit")
+        state = json.loads(data.decode("utf-8-sig"))
+        if not isinstance(state, dict) or type(state.get("active")) is not bool:
+            raise ValueError("state requires a boolean active field")
+    except (UnicodeError, ValueError):
+        print("[bootstrap-killswitch] invalid state; automatic update allowed", file=sys.stderr)
+        return False
+    return state["active"]
 
 
 def _runner(runner: TrustedRunner) -> TrustedRunner:
@@ -386,7 +434,7 @@ def _request(row: sqlite3.Row, root: Path) -> Request:
         ):
             raise StateError("malformed recovery-authorization evidence")
         expected = hashlib.sha256(
-            (_json(asdict(spec)) + "\n" + _json(asdict(runner))).encode(),
+            (_json(_spec_document(spec)) + "\n" + _json(asdict(runner))).encode(),
         ).hexdigest()
         if row["identity"] != expected:
             raise StateError("request identity does not match safe invocation")
@@ -406,9 +454,15 @@ def enqueue(
     """Commit acceptance; only trusted adapters with pinned targets may share active work."""
     root = _root(root)
     spec, runner = _spec(spec), _runner(runner)
+    override = os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE")
+    if override and not spec.killswitch_path:
+        path = Path(override).expanduser()
+        if not path.is_absolute():
+            path = Path(spec.cwd or Path.cwd()) / path
+        spec = _spec(replace(spec, killswitch_path=os.path.abspath(path)))
     if type(coalesce_running) is not bool:
         raise InvalidRequestError("active coalescing must be an explicit boolean")
-    spec_json, runner_json = _json(asdict(spec)), _json(asdict(runner))
+    spec_json, runner_json = _json(_spec_document(spec)), _json(asdict(runner))
     identity = hashlib.sha256((spec_json + "\n" + runner_json).encode()).hexdigest()
     _reconcile_lost_owner(root)
     _assert_foundation_clear(root)
@@ -732,6 +786,16 @@ def drain(
                     db.commit()
                     return 0
                 request = _request(row, root)
+                if _automatic_update_inhibited(request.spec):
+                    reason = "automatic-update KillSwitch active; nothing ran"
+                    db.execute(
+                        """UPDATE requests SET state='completed',exit_code=3,error=?,
+                        finished_at=? WHERE id=?""",
+                        (reason, time.time(), request.id),
+                    )
+                    db.commit()
+                    print(f"Update request {request.id}: {reason}", file=sys.stderr)
+                    continue
                 db.execute(
                     "UPDATE requests SET state='running',started_at=?,boot_id=?,error=NULL WHERE id=?",
                     (time.time(), admission_boot, request.id),
@@ -812,6 +876,8 @@ def wait(
                 continue
             if output is not None:
                 output.write(decoder.decode(b"", final=True))
+                if request.started_at is None and request.error:
+                    output.write(request.error + "\n")
                 output.flush()
             return request
         _reconcile_lost_owner(_root(root))
