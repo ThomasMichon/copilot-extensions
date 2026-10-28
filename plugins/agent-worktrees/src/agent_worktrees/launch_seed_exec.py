@@ -152,14 +152,17 @@ def _native_setup_command(
     ).splitlines():
         return None
     from . import session_shell
-    from .manager_launch_cli import _usable_worktree_manager_launcher_dir, _worktree_manager_root
+    from .manager_launch_cli import _worktree_manager_root
 
-    launch_dir = _usable_worktree_manager_launcher_dir()
-    peer = launch_dir / "pane-wrapper.ps1" if launch_dir else None
-    if peer is None or not peer.is_file() or session_shell.NATIVE_CONSOLE_MARKER not in peer.read_text(
-        encoding="utf-8-sig",
-    ).splitlines():
-        return None
+    if not copy_only:
+        from .manager_launch_cli import _usable_worktree_manager_launcher_dir
+
+        launch_dir = _usable_worktree_manager_launcher_dir()
+        peer = launch_dir / "pane-wrapper.ps1" if launch_dir else None
+        if peer is None or not peer.is_file() or session_shell.NATIVE_CONSOLE_MARKER not in peer.read_text(
+            encoding="utf-8-sig",
+        ).splitlines():
+            return None
 
     prepared = session_shell.prepare(
         record_path.absolute(), script.absolute(),

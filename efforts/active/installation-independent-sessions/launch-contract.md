@@ -104,8 +104,10 @@ providers rather than provisioning, falling through to a foreign installation
 or starting an uncorrelated backend. This bounded normalized consumer
 integration is not full launch-path parity or concurrent mux admission proof.
 Cold `embody` separately copies the canonical Windows setup assets before its
-actual seed-free or terminal-fallback mux spawn, using the same marker/provider
-checks without activating the finite seed provider. Qualified startup prompts
+actual seed-free or terminal-fallback mux spawn, using the same canonical setup
+marker without activating the finite seed provider. It does not duplicate
+Manager health probes: the existing pane-construction owner still selects that
+provider. Qualified startup prompts
 retain their existing deferred preparation. Existing launch and prompt owners
 retain admission and seed custody. Previews and existing live-mux joins do
 not copy assets. Retained setup-time runtime arguments and consumed one-shot

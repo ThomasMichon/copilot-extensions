@@ -681,7 +681,10 @@ assets before mux creation for seed-free and terminal-fallback launches, without
 adding finite seed/admission flags or claiming a prompt. Qualified startup
 prompts retain their existing deferred preparation; already-prepared commands
 are left unchanged. Resume arguments and the native argument envelope remain unchanged;
-copy failure refuses before spawn. Existing live-mux joins and previews do not
+copy-only preparation does not probe Manager because it adds no provider flags.
+The existing pane-construction owner still selects and health-checks Manager;
+finite native activation retains its separate peer-capability check.
+Copy failure refuses before spawn. Existing live-mux joins and previews do not
 copy assets. This closes an actual consumer's installed-script dependency, not
 the generic uninstaller's conservative rooted-argument refusal or live removal
 qualification. Setup-time runtime arguments remain attributable startup data,

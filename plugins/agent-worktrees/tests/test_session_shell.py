@@ -314,6 +314,57 @@ def test_mux_setup_copy_leaves_custom_commands_unchanged(launch):
     assert not (record.parent / "launch-attempts").exists()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows setup plan")
+@pytest.mark.parametrize("healthy", [False, True])
+def test_copy_then_actual_pane_construction_probes_manager_only_once(launch, monkeypatch, healthy):
+    import subprocess
+    from types import SimpleNamespace
+
+    record, runtime, _assets = launch
+    scripts = runtime / "scripts"
+    scripts.mkdir()
+    canonical = Path(__file__).resolve().parents[1] / "scripts"
+    for name in ("default-setup.ps1", "launch-command.ps1", "native-seed-boundary.ps1",
+                 "reconcile-machine-settings.ps1"):
+        shutil.copy2(canonical / name, scripts / name)
+    (runtime / "current-version").write_text("A", encoding="utf-8")
+    slot = runtime / "versions" / "A"
+    bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
+    bootstrap.parent.mkdir()
+    bootstrap.touch()
+    python = slot / "Scripts" / "python.exe"
+    python.parent.mkdir()
+    python.touch()
+    monkeypatch.setattr(manager_launch_cli, "_core", lambda: SimpleNamespace())
+    monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: runtime)
+    monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: runtime)
+    monkeypatch.setattr(config, "install_dir", lambda: runtime)
+    monkeypatch.setattr(config, "tracking_dir", lambda: record.parent)
+    monkeypatch.setattr(config, "project_name", lambda: "example")
+    monkeypatch.setattr(sessions, "_LEGACY_BIN_DIR", str(runtime / "missing-legacy-bin"))
+    probes = []
+
+    def probe(command):
+        probes.append(command)
+        return (
+            ((0, 6, 44, 1), subprocess.CompletedProcess(command, 0, "worktree-manager 0.6.44-dev1"))
+            if healthy else (None, None)
+        )
+
+    monkeypatch.setattr(manager_launch_cli, "_probe_worktree_manager_version", probe)
+    command = [
+        "pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(scripts / "launch-command.ps1"), "--",
+        "pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(scripts / "default-setup.ps1"),
+        "-NativeArgumentsJson", '{"args":[]}',
+    ]
+    copied = launch_seed_exec.copied_setup_command(command, record)
+    assert probes == []
+    assert Path(copied[4]).is_relative_to(record.parent / "launch-attempts")
+    sessions._mux_pane_cmd("test-worktree", copied, is_tmux=False, mux_bin="psmux.exe")
+    assert len(probes) == 1
+    assert probes[0][0] == str(python)
+
+
 @pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Native PowerShell required")
 def test_copied_mux_setup_runs_and_returns_after_disposable_source_removal(launch, monkeypatch):
     from agent_procutil.owned_process import run_caller_owned

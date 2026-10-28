@@ -439,7 +439,14 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   supported-uninstall or real-Copilot acceptance test. The final contained
   shell/embody/resume packet passed all 128 tests on rebased Windows source, including that
   native control; high-signal Ruff and install-contract validation also passed.
-  Review and publication remain pending.
+  Published as #9390 with required CI green. The first review identified an
+  added duplicate Manager health probe under the lifecycle fence. Copy-only
+  preparation adds no native-provider flags, so it now avoids that irrelevant
+  probe while retaining the existing pane-construction health selection and
+  finite native activation's peer check. A deterministic underlying-probe count
+  control covers healthy and timeout results. The expanded final Windows
+  shell/embody/resume/Manager packet passed all 134 tests; fresh review of the
+  correction remains pending.
 - Supported removal remains conservatively blocked on rooted process
   arguments. A mux retains its consumed one-shot manifest path in startup
   argv; a seed-free setup's post-backend tail uses loaded code and Git, but

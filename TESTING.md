@@ -70,6 +70,9 @@ the synthetic backend before returning its real nonzero exit. `test_embody.py`
 checks copy-before-spawn and failure-before-spawn ordering with seed delivery
 still owned by the existing completion path. This is consumer/asset lifetime
 evidence, not supported product uninstall, real Copilot/TTY or host rollout.
+The setup-copy/actual-pane-construction control counts the underlying Manager
+probe on both healthy and timeout paths: copying adds none and construction
+performs its existing single probe.
 
 Agent-worktrees' `test_launch_seed_native.py` covers the finite backend and setup
 provider: retained one-time seed claims, literal argv, existing prompt-free
