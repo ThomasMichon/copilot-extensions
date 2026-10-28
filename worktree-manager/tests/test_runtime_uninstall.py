@@ -213,6 +213,21 @@ def test_bytecode_change_after_planning_refuses_before_withdrawal(tmp_path, monk
     assert cache.read_bytes().endswith(b"changed")
 
 
+@pytest.mark.parametrize("apply", [False, True])
+@pytest.mark.parametrize("state", [None, {}, {"kind": "file"}])
+def test_missing_sealed_entry_refuses_before_withdrawal(tmp_path, capsys, apply, state):
+    root = tmp_path / "manager"
+    slot = fixture_slot(root, python_source=True)
+    record = json.loads((slot / removal.INVENTORY).read_text(encoding="utf-8"))
+    record["entries"]["missing.py"] = state
+    (slot / removal.INVENTORY).write_text(json.dumps(record), encoding="utf-8")
+    before = tree_bytes(tmp_path)
+    assert removal.uninstall(root, apply=apply, as_json=True) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "refused" and result["removed"] == []
+    assert tree_bytes(tmp_path) == before
+
+
 @pytest.mark.parametrize("change", [
     "unknown-file", "empty-directory", "unsealed-source", "source-changed",
     "bad-header", "bad-binding", "sealed-cache-changed",

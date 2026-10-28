@@ -165,7 +165,7 @@ def _validate_inventory(slot: Path) -> dict:
         or type(record["version"]) is not int or record["version"] != 1
         or record["generation"] != slot.name or record["slot"] != _state(slot)
         or not isinstance(record["entries"], dict)
-        or any(current.get(name) != state for name, state in record["entries"].items())
+        or any(name not in current or current[name] != state for name, state in record["entries"].items())
     ):
         raise ValueError(f"Manager construction inventory changed or is unsupported: {slot}")
     extras = _generated_bytecode(slot, record["entries"], current)
