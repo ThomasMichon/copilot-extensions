@@ -19,6 +19,10 @@ READ_TIMEOUT = 1.0
 RECOVERY_WAIT = 0.5
 
 
+class ResidentRecoveryPending(ProjectionUnavailable):
+    """An admitted recovery has not published its first usable roster yet."""
+
+
 def __getattr__(name: str):
     if name == "monitor":
         from . import status_monitor_runtime
@@ -169,6 +173,7 @@ def _resident(request: dict) -> dict:
 def read_current(request: dict, *, recover: bool = True) -> dict:
     project, selection = request_selection(request)
     unavailable = None
+    recovery_pending = False
     try:
         return _resident(request)
     except ProjectionError:
@@ -197,6 +202,7 @@ def read_current(request: dict, *, recover: bool = True) -> dict:
                     break
             else:
                 unavailable = "resident launch/recovery did not produce a usable current roster"
+                recovery_pending = bool(started)
     except (OSError, ValueError, RecursionError, ProjectionUnavailable) as exc:
         unavailable = str(exc)
     from . import status_monitor_runtime as monitor
@@ -209,7 +215,8 @@ def read_current(request: dict, *, recover: bool = True) -> dict:
             contract_version=request["contract_version"],
         )
     except (ProjectionError, ProjectionUnavailable) as exc:
-        raise ProjectionUnavailable(f"{unavailable}; no usable advisory roster: {exc}") from exc
+        failure = ResidentRecoveryPending if recovery_pending else ProjectionUnavailable
+        raise failure(f"{unavailable}; no usable advisory roster: {exc}") from exc
     result["availability"] = {"status": "advisory", "reason": unavailable}
     result["contract_version"] = request["contract_version"]
     if request["contract_version"] == observations.VERSION:
@@ -257,6 +264,8 @@ def emit_current(args) -> int:
         except (OSError, ValueError, RecursionError, ProjectionError, ProjectionUnavailable) as exc:
             if isinstance(exc, FeedFailure):
                 code, retry = exc.code, exc.retry
+            elif isinstance(exc, ResidentRecoveryPending):
+                code, retry = "unready", True
             elif isinstance(exc, TimeoutError):
                 code, retry = "timeout", False
             elif isinstance(exc, ConnectionError):
