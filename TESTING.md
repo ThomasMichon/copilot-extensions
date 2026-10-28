@@ -1,5 +1,11 @@
 # Testing copilot-extensions
 
+`tools/test_runtime_profile_bundle.py` checks the repeatable exact-profile
+transport producer, actual command invocation, canonical consumer readback,
+determinism, source independence, aggregate storage and refusal/cleanup paths.
+Run it with `tools/test_installer_wheel_snapshot.py`; these producer integration
+controls are not enrolled automatically in required unit-only CI.
+
 `tools/promotion_unit_tests/test_artifact_license_notices.py` checks that the
 existing source-bound wheel verifier refuses omitted or changed source notices,
 accepts modern and legacy license locations, and preserves historical source
