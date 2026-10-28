@@ -7,6 +7,7 @@ from pathlib import Path
 import shlex
 import shutil
 import subprocess
+import sys
 import time
 
 import pytest
@@ -340,4 +341,66 @@ state="$(ps -o stat= -p "$descendant" || true)"
 ''', [root])
     assert result.returncode == 0, result.stderr
     assert not result.stdout
+    assert result.stderr == "Native preparation is unconfirmed; no backend started.\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Native POSIX escaped-session stdout deadline")
+@pytest.mark.parametrize("malformed", [False, True])
+def test_escaped_stdout_never_extends_the_preparation_deadline(
+    tmp_path: Path, malformed: bool,
+) -> None:
+    root = tmp_path / "runtime"
+    ready = root / "escaped-ready"
+    child = (
+        "import os,signal,time; from pathlib import Path; "
+        "signal.alarm(12); os.setsid(); "
+        f"Path({str(ready)!r}).write_text(str(os.getpid())); "
+        "time.sleep(13)"
+    )
+    _slot(
+        root, "A", malformed=malformed,
+        tail=(
+            f"{shlex.quote(sys.executable)} -I -S -B -c {shlex.quote(child)} &\n"
+            'for ((index=0; index<100; index++)); do\n'
+            '    [[ ! -f "${0%/versions/*}/escaped-ready" ]] || break\n'
+            '    sleep 0.01\n'
+            'done\n'
+            '[[ -f "${0%/versions/*}/escaped-ready" ]]'
+        ),
+    )
+    (root / "current-version").write_text("A", encoding="utf-8")
+    clock = f"{shlex.quote(sys.executable)} -I -S -B -c 'import time; print(time.monotonic())'"
+    started = time.monotonic()
+    try:
+        result = _run(r'''
+set -euo pipefail
+. "$1"
+started="$(''' + clock + r''')"
+code=0
+aw_native_seed_prepare "$2" --phase prepare --output-format nul || code=$?
+finished="$(''' + clock + r''')"
+printf '%s %s %s\n' "$code" "$started" "$finished"
+if [[ "$code" != 0 ]]; then
+    [[ -z "$AW_NATIVE_SEED_OPERATION" && -z "${AW_NATIVE_SEED_ARGV[0]+x}" ]]
+fi
+''', [root])
+    finally:
+        # This deliberately out-of-group writer has its own hard TTL. Observe
+        # retirement even when the preparation assertion or outer owner fails.
+        if ready.exists():
+            pid = int(ready.read_text())
+            while True:
+                state = run_caller_owned(
+                    ["ps", "-o", "stat=", "-p", str(pid)], timeout=1,
+                    max_stdout_bytes=128, max_stderr_bytes=128,
+                )
+                if not state.stdout.strip() or "Z" in state.stdout:
+                    break
+                assert time.monotonic() - started < 14, "Escaped fixture exceeded its hard TTL"
+                time.sleep(0.05)
+    assert ready.exists(), result.stderr
+    assert result.returncode == 0, result.stderr
+    code, began, finished = result.stdout.split()
+    assert code == "3", result.stdout
+    assert float(finished) - float(began) < 11, result.stdout
     assert result.stderr == "Native preparation is unconfirmed; no backend started.\n"
