@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import stat
 import sys
 from contextlib import contextmanager
@@ -105,6 +106,49 @@ def seal_inventory(slot: Path, *, frontdoors: dict[str, str], provider: dict) ->
         stream.write("\n")
 
 
+def _generated_bytecode(slot: Path, sealed: dict, current: dict) -> dict:
+    """Attribute only added CPython caches to unchanged construction-owned sources."""
+    import _imp
+
+    extras = {name: state for name, state in current.items() if name not in sealed}
+    directories = set()
+    for name, state in extras.items():
+        path = Path(name)
+        if state["kind"] == "directory":
+            continue
+        match = re.fullmatch(r"(.+)\.cpython-[0-9]+(?:\.opt-[12])?\.pyc", path.name)
+        if state["kind"] != "file" or path.parent.name != "__pycache__" or not match:
+            raise ValueError(f"Unattributed Manager artifact: {slot / path}")
+        source = path.parent.parent / (match[1] + ".py")
+        source_name = source.as_posix()
+        if sealed.get(source_name, {}).get("kind") != "file":
+            raise ValueError(f"Manager bytecode has no sealed source: {slot / path}")
+        content = (slot / path).read_bytes()
+        if len(content) <= 16 or hashlib.sha256(content).hexdigest() != state["digest"]:
+            raise ValueError(f"Manager bytecode changed or is malformed: {slot / path}")
+        magic, flags = content[:4], int.from_bytes(content[4:8], "little")
+        if magic[2:] != b"\r\n" or flags not in (0, 1, 3):
+            raise ValueError(f"Unsupported Manager bytecode header: {slot / path}")
+        source_path = slot / source
+        if flags:
+            valid = content[8:16] == _imp.source_hash(
+                int.from_bytes(magic, "little"), source_path.read_bytes(),
+            )
+        else:
+            info = source_path.stat()
+            valid = (
+                int.from_bytes(content[8:12], "little") == int(info.st_mtime) & 0xFFFFFFFF
+                and int.from_bytes(content[12:16], "little") == info.st_size & 0xFFFFFFFF
+            )
+        if not valid:
+            raise ValueError(f"Manager bytecode source binding changed: {slot / path}")
+        directories.add(path.parent.as_posix())
+    for name, state in extras.items():
+        if state["kind"] == "directory" and name not in directories:
+            raise ValueError(f"Unattributed Manager directory: {slot / name}")
+    return extras
+
+
 def _validate_inventory(slot: Path) -> dict:
     import tomllib
 
@@ -114,14 +158,17 @@ def _validate_inventory(slot: Path) -> dict:
     if publication.state_path(inventory, private=True) is None:
         raise ValueError(f"Unsupported Manager target: missing construction inventory in {slot}")
     record = _json(inventory)
+    current = _tree(slot)
     if (
         set(record) != {"schema", "version", "generation", "slot", "entries", "frontdoors", "provider"}
         or record["schema"] != "worktree-manager.artifact-inventory"
         or type(record["version"]) is not int or record["version"] != 1
         or record["generation"] != slot.name or record["slot"] != _state(slot)
-        or record["entries"] != _tree(slot)
+        or not isinstance(record["entries"], dict)
+        or any(name not in current or current[name] != state for name, state in record["entries"].items())
     ):
         raise ValueError(f"Manager construction inventory changed or is unsupported: {slot}")
+    extras = _generated_bytecode(slot, record["entries"], current)
     metadata = slot / "payload" / "pyproject.toml"
     project = tomllib.loads(metadata.read_text(encoding="utf-8"))["project"]
     if (
@@ -138,7 +185,7 @@ def _validate_inventory(slot: Path) -> dict:
     source.read_source_identity(slot / "payload", project["version"], plugin="worktree-manager")
     if not isinstance(record["frontdoors"], dict) or not isinstance(record["provider"], dict):
         raise ValueError("Malformed Manager integration ownership")
-    return record
+    return dict(record, entries={**record["entries"], **extras})
 
 
 def _integration(root: Path, record: dict) -> list[Path]:

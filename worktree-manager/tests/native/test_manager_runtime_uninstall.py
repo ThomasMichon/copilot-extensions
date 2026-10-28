@@ -270,6 +270,17 @@ def _exercise(directory):
     assert policy_probe.returncode == 1, policy_probe.stdout + policy_probe.stderr
     assert "Automatic maintenance disabled" in policy_probe.stderr
     assert _snapshot([slot]) == sealed, "Maintenance probe changed the sealed installed runtime"
+    print("Manager uninstall native: post-construction CPython cache", flush=True)
+    bytecode = json.loads(_success(_run([
+        installed_python, "-I", "-B", "-c",
+        "import importlib.util,json,pathlib,py_compile,sys; "
+        "source=pathlib.Path(sys.argv[1]); "
+        "cache=pathlib.Path(importlib.util.cache_from_source(str(source))); "
+        "assert not cache.exists(); py_compile.compile(str(source),doraise=True); "
+        "print(json.dumps({'created':cache.is_file(),'path':str(cache)}))",
+        slot / "payload" / "scripts" / "runtime_uninstall.py",
+    ], env, directory)).stdout)
+    assert bytecode["created"]
     roots = [root, bin_dir, provider.parent, directory / "state"]
     before = _snapshot(roots)
     preview = json.loads(_success(_run([*external, "--uninstall", "--json"], env, directory)).stdout)
@@ -315,6 +326,7 @@ def _exercise(directory):
         "daemon": daemon,
         "installation_list": listing,
         "maintenance_probe_preserved_runtime": True,
+        "post_construction_bytecode": bytecode,
         "removal": removed["status"], "repeat": absent["status"],
         "removed_runtime_and_frontdoors_confirmed": True,
         "durable_bytes_preserved": True,
@@ -333,6 +345,7 @@ def test_real_installed_manager_removal_and_reinstall():
     assert evidence["daemon"]["started"] and evidence["daemon"]["stopped"]
     assert evidence["installation_list"]["manager_listed"]
     assert evidence["maintenance_probe_preserved_runtime"]
+    assert evidence["post_construction_bytecode"]["created"]
     assert evidence["origin"]["files"] == evidence["reinstalled"]["files"] == evidence["source_files"]
     assert Path(evidence["reinstalled"]["module"]).is_file()
     assert not Path(evidence["base_python"]).is_relative_to(Path(evidence["root"]))

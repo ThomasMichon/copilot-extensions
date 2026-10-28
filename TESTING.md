@@ -4248,6 +4248,10 @@ refusal, actual external removal, repeated absence and actual reinstall.
 The daemon and Installation & Updates list command execute their production
 child argv without an inherited bytecode suppression setting; both must leave
 the sealed runtime unchanged.
+The removal exercise then creates a real post-construction CPython cache beside
+an inventory-owned source and removes it without rewriting the sealed inventory.
+Ordinary removal controls cover timestamp and checked/unchecked hash headers,
+optimization tags, another interpreter tag, unknown artifacts and plan-time races.
 Installed package/payload hashes and origin evidence must match; runtime slots,
 selectors and owned frontdoors/registration must disappear while durable-state
 bytes remain. No synthetic inventory, constructor mock or manual fixture

@@ -1550,7 +1550,11 @@ Linux `/proc`); other platforms refuse rather than assuming no process is live.
 Every present runtime slot must carry the construction-owned generation-1
 artifact inventory. Legacy, development, changed, unexpectedly linked, foreign, busy or
 otherwise unsupported targets refuse rather than being rebuilt or broadly
-deleted. Generic frontdoor bytes alone do not establish ownership: removing
+deleted. Added ordinary CPython bytecode caches are removable only beside an
+unchanged inventory-owned Python source, with canonical cache names and matching
+timestamp/size or source-hash headers. Their observed identities join the
+in-memory removal plan; the sealed inventory is never rewritten. Unknown cache
+contents, links and changes to sealed entries still refuse. Generic frontdoor bytes alone do not establish ownership: removing
 shared commands requires the matching current Manager registration.
 An interpreter or installer inside the target refuses apply before effects,
 including on Windows; use the external invocation above instead of delayed
