@@ -592,6 +592,7 @@ def adopting_harness(cwd: str | None, deadline: float) -> bool:
     root = Path(raw)
     if not root.is_absolute():
         return False
+    root = root.resolve()
     for directory in (root, *root.parents):
         if time.monotonic() >= deadline:
             return False

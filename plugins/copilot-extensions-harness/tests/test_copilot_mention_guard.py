@@ -1008,3 +1008,26 @@ def test_relative_body_reads_use_resolved_workspace(tmp_path, monkeypatch, capsy
     assert guard.run_guard() == 0
     output = capsys.readouterr().out
     assert bool(output) == mention_in_workspace
+
+
+@pytest.mark.parametrize("target_adopted", [False, True])
+def test_linked_workspace_uses_physical_repository_boundary(tmp_path, target_adopted):
+    guard = _load_guard()
+    outer = tmp_path / "outer"
+    _enable_harness(outer)
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    target = checkout / "subdirectory"
+    target.mkdir()
+    if target_adopted:
+        _enable_harness(checkout)
+    link = outer / "linked-subdirectory"
+    if os.name == "nt":
+        created = subprocess.run(
+            [os.environ["COMSPEC"], "/c", "mklink", "/J", str(link), str(target)],
+            capture_output=True, text=True, timeout=10, creationflags=NO_WINDOW,
+        )
+        assert created.returncode == 0, (created.stdout, created.stderr)
+    else:
+        link.symlink_to(target, target_is_directory=True)
+    assert guard.adopting_harness(str(link), time.monotonic() + 1) == target_adopted
