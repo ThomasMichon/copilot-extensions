@@ -544,3 +544,11 @@ Initial tests must prove the current gap before adding the guards.
   production lock, increasing its timeout or skipping the assertions.
   The affected shared/required/retained local selection passes all 78 cases.
   Exact-new-head native qualification is still required.
+- The third native installer packet completed the PID-link path and all update
+  and retained-runtime cases; only two SH boolean-success controls still failed
+  (73 passed, 16 explicit POSIX-only skips). Their Windows fixture selected a
+  CMD responder solely from the host OS, even when called by Bash, losing the
+  inline Python argument boundary. Select the responder by caller shell, use
+  literal LF for shell scripts and retain the original real JSON predicate and
+  all positive/negative assertions. The affected local selection passes 64 cases;
+  final native execution remains pending.

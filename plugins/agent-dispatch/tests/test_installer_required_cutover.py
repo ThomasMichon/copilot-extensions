@@ -185,7 +185,9 @@ def test_shell_harness_rechecks_real_policy_before_maintenance(tmp_path: Path) -
     assert "supervisor" in cleared.stdout.splitlines()
 
 
-def _fake_python(tmp_path: Path, output: str, rc: int, routed: bool) -> Path:
+def _fake_python(
+    tmp_path: Path, output: str, rc: int, routed: bool, *, shell: str,
+) -> Path:
     implementation = tmp_path / "fake_python.py"
     implementation.write_text(
         "import sys\n"
@@ -198,13 +200,15 @@ def _fake_python(tmp_path: Path, output: str, rc: int, routed: bool) -> Path:
         "    exec(sys.argv[2])\n",
         encoding="utf-8",
     )
-    path = tmp_path / ("python.cmd" if os.name == "nt" else "python")
+    native_cmd = os.name == "nt" and shell == "ps1"
+    path = tmp_path / ("python.cmd" if native_cmd else "python")
     wrapper = (
         f'@echo off\r\n"{sys.executable}" "{implementation}" %*\r\nexit /b %errorlevel%\r\n'
-        if os.name == "nt" else
-        f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(implementation))} "$@"\n'
+        if native_cmd else
+        f'#!/bin/sh\nexec {shlex.quote(Path(sys.executable).as_posix())} '
+        f'{shlex.quote(implementation.as_posix())} "$@"\n'
     )
-    path.write_text(wrapper, encoding="utf-8")
+    path.write_text(wrapper, encoding="utf-8", newline="\n")
     path.chmod(0o755)
     return path
 
@@ -227,7 +231,7 @@ def _fake_python(tmp_path: Path, output: str, rc: int, routed: bool) -> Path:
 def test_required_cutover_requires_explicit_boolean_success_and_zero_exit(
     tmp_path: Path, shell: str, output: str, rc: int, accepted: bool,
 ) -> None:
-    python = _fake_python(tmp_path, output, rc, routed=True)
+    python = _fake_python(tmp_path, output, rc, routed=True, shell=shell)
     if shell == "sh":
         script = "\n".join([
             "set -euo pipefail",
@@ -259,7 +263,7 @@ def test_required_cutover_requires_explicit_boolean_success_and_zero_exit(
 
 
 def test_posix_required_cutover_rejects_missing_route_without_start(tmp_path: Path) -> None:
-    python = _fake_python(tmp_path, json.dumps({"ok": True}), 0, routed=False)
+    python = _fake_python(tmp_path, json.dumps({"ok": True}), 0, routed=False, shell="sh")
     script = "\n".join([
         "set -euo pipefail",
         f"INSTALL_DIR={shlex.quote(tmp_path.as_posix())}",
