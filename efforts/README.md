@@ -10,7 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Effort Agenda Companion](active/effort-agenda-companion/README.md) | Draft; efforts-owned process aide and optional cursor helpers, inception proposal only | #9377; no dispatch integration or runtime implementation; preserves #3581/#3582/#3583 owners |
+| [Effort Agenda Companion](active/effort-agenda-companion/README.md) | Draft; inception reviewed in #9380, contract/manual-aide slice pending admission | #9377; efforts-owned companion and optional helpers, no dispatch integration or runtime implementation; preserves #3581/#3582/#3583 owners |
 | [Native Startup Prompts](active/native-startup-prompts/README.md) | Active; proposal reviewed in #9365, ordinary cold-launch consumer and isolated qualification next | #9364; preserves #7116/#8375/#7942/#8669/#5579 owners; no rollout or retained-session restart |
 | [Dispatch Reversible Action Controls](active/dispatch-reversible-action-controls/README.md) | Draft; action-level inhibition with live restoration, review before implementation | #9334; preserves #6820/#7694 maintenance ownership and existing lifecycle controls; no rollout |
 | [Cached Source Wheel Assembly](active/cached-source-wheel-assembly/README.md) | Active; proposal reviewed in #9291, content-bound reuse and native qualification remain | #9290; preserves #8873/#8949 verification, #5851 staging and #6937/#6941 release-lock owners |

@@ -1,7 +1,8 @@
 # Vision-Linked Stabilization Roadmap
 
-**Status:** Research plan and integration scaffold; priorities and execution
-waves are not yet adjudicated.
+**Status:** Research method with a [first-200-issue planning
+proposal](roadmap-wave-1.md); later eligible coverage and full execution
+sequencing remain open.
 
 Parent: [Backlog Reconciliation](README.md), Phase 2b.
 
@@ -45,6 +46,19 @@ operator requirements.
 Every snapshot must account for the entire open set as researched, provisional,
 pending research or excluded metadata-only. The first 200 assignments are a
 research wave, not a claim that the remaining corpus has been ranked.
+
+## Research findings
+
+The [first 200-issue proposal](roadmap-wave-1.md) links four per-issue appendices,
+a concrete source-fix versus qualification shortlist, existing work homes and a
+[33-edge scoped dependency register](roadmap-wave-1-dependencies.md). It
+accounts for 169 researched proposals and 31 provisional outcomes; it does not
+call them 169 bugs or replace the remaining eligible research.
+
+Sixteen selected current-source traces distinguish twelve source-supported
+defects, two qualification-only cases, one already-fixed predicate and one
+evidence/design gap. The proposal corrects #870 to P2, credits delivered
+foundations and retains source, release, installed and native evidence limits.
 
 ## Per-issue decision record
 
