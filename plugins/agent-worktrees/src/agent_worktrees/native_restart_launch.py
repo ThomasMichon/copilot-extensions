@@ -238,7 +238,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 result = sessions.mux_new_session(
                     expected["worktree_id"], expected["worktree_path"], command, env,
                 )
-                if result.get("ok") is True:
+                if result.get("ok") is True and result.get("created") is not False:
                     receipt = {**receipt, "state": "mux-created"}
                     native_restart_receipt.write(path, receipt, reserve=False)
             return _emit(receipt)

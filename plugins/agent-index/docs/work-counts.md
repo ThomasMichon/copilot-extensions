@@ -44,8 +44,36 @@ terminal JSON results. Timeouts count as attempts without responses. These are
 not wire-level redirect/transport retries, provider-semantic pages, identities,
 item/comment body counts, or compressed network bytes.
 
+`http_by_purpose` is an additive breakdown of those same counters. Its closed
+keys are `metadata`, `identity_page`, `item_body`, `comment_page` and
+`unclassified`; every observed request belongs to exactly one key, so each
+field's sum equals the aggregate `http` field. Retries, unsuccessful response
+bytes, 304s and JSON parse failures stay with the original request's purpose.
+Nested indexing runs keep their own breakdowns, just as they keep aggregate
+counts. The vocabulary never records endpoints, item IDs, account identities
+or arbitrary caller-provided labels.
+
+`GoodCitizenSession.get_json`, `post_json`, `request_json` and
+`paginate_continuation` accept the optional local keyword `purpose`, defaulting
+to `unclassified`. It is not sent as an HTTP parameter/header or added to a
+provider protocol. An unsupported label refuses before any request, even
+outside a measured run. Existing callers retain the same HTTP behavior and
+aggregate counts. Consumers may ignore the additive result field; the
+work-count format remains version 1.
+
+The built-in GitHub connector classifies principal/installation probes as
+metadata, issue listings as identity pages, targeted issue/PR retrieval as item
+bodies and comment pagination as comment pages. The category describes the
+**request's purpose**, not exclusive payload contents: an issue-list response
+also includes item bodies. Request/page counts are not parsed item/comment
+counts, and retries do not prove successful acquisition. Other connectors
+using this shared session remain explicitly unclassified until their own
+request owners opt in; this is not provider-wide semantic accounting.
+
 `http: null` means this transport was not observed in the round, **not zero
 provider traffic**. External providers and other transports remain unmeasured.
+An empty purpose mapping likewise means no classified shared-session boundary
+was observed, not that every source performed zero work.
 Unlisted work is likewise unavailable, not implicitly zero. Do not use this
 partial instrumentation to claim the entire scale acceptance matrix passed.
 
@@ -106,6 +134,8 @@ freshness check. Whole-store physical I/O qualification remains separate work.
 `tests/test_work_counts.py` qualifies native single/two-model rounds in both
 storage layouts, unchanged/replayed content, metadata reuse, changed text,
 tombstones, interrupted embedding/recovery, HTTP retries and scope isolation.
+It also checks purpose totals, closed-label refusal and unchanged POST/
+continuation request payloads.
 `tests/test_hinted_crawl.py` checks real hosted identity acquisition and worker
 serialization of the nested counts.
 

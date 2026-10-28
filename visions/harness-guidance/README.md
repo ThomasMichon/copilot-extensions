@@ -3,7 +3,7 @@
 - **Subject:** Ambient guidance across repositories, plugins, skills, and operator policy
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-26
+- **Last revised:** 2026-10-27
 - **Reality docs:** `docs/patterns/session-scoped-dynamic-guidance.md`, `docs/patterns/worktree-scoped-dynamic-guidance.md`, `docs/harness-runbook.md`
 
 ## Purpose & Intent
@@ -183,6 +183,18 @@ projection engine, authoring/review framework, sibling runtime, service or
 network operation. The implementation should stay simple rather than inherit
 unrelated machinery merely to reuse code from a similar subject.
 
+Every worktree creation and session start should copy the selected plugins'
+current declared files. Content hashes, fingerprints, provenance envelopes,
+version comparisons and prepared-generation receipts should not gate copying
+or the use of these managed instruction copies. Existing plugin selection and
+harness trust boundaries should own instruction trust rather than a second
+runtime authentication layer.
+
+Generated instructions may be overwritten while a session is running. An
+operator should be able to restart that session to load corrected upstream
+guidance; protecting a previously copied generation must not prevent refresh.
+Filesystem delivery should remain distinct from proving model admission.
+
 ### coordinator-first-task-routing
 
 Harnesses should provide model-neutral guidance that helps a coordinating agent
@@ -286,15 +298,18 @@ checked-in, scheduled-sync-worker-maintained copy is strictly the
 **fallback**: the floor a session falls back to only when no pre-session
 hook could render anything fresher (a fully hookless/headless/sandboxed
 launch) or hasn't yet had the chance to (a pre-sync gap on an otherwise
-hook-capable path). A fallback a stale leftover local artifact can
-silently outrank is not actually safe, so precedence between the two must
-be decided by stable content provenance (e.g. a declared version), never
-by the local artifact's mere existence or render recency.
+hook-capable path). For managed instruction copies, the currently selected
+plugin and its declaration determine the primary file; no separate version,
+content-provenance or fingerprint comparison should choose between it and the
+fallback. Creation and session start should replace stale generated copies
+directly. A failed copy should be reported explicitly, with the offline fallback
+remaining available when no usable managed copy exists.
 
 Applicable worktree and session-creation boundaries should establish that
 local guidance is available before the agent begins loading instructions. Session-start
-should repair missing or stale local guidance as a backup, not be the sole
-delivery opportunity on a path that can prepare it earlier.
+should copy the current plugin files again, including while another session is
+running, not be the sole delivery opportunity on a path that can prepare them
+earlier. A restart is sufficient to let that running session load the update.
 
 ### ambient-delivery-fails-open
 

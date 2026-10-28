@@ -161,6 +161,15 @@ Replay/catch-up/refusal has zero embedding, projection writes,
 FTS/cluster passes and native queries. This is not live-provider, arbitrary
 clock-skew, immutable full-snapshot, whole-memory/CPU or rollout qualification.
 
+The same native control separately compares saved HTTP request-purpose
+counters with the transport's exact attempts, completed responses and decoded
+payload bytes. Metadata probes, identity-page requests, item retrieval and
+comment pages must sum to the unchanged aggregate counters at every corpus
+size, including interrupted requests and journal resumption. No request in
+this built-in connector control may remain unclassified. These request-purpose
+measurements do not infer exclusive body contents from listing payloads or
+qualify transports outside the shared HTTP session.
+
 Qualify both a standalone single-model engine and a generic injected two-model
 consumer. A downstream adopts only a reviewed/published compatible engine
 revision, records its consumed provenance, and repeats the same count assertions

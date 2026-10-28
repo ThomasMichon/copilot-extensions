@@ -67,6 +67,7 @@ class WorkCounts:
     http: HttpCounts | None = None
     models: dict[str, ModelCounts] = field(default_factory=dict)
     source_mutations: dict[str, list[MutationResult]] = field(default_factory=dict)
+    http_by_purpose: dict[str, HttpCounts] = field(default_factory=dict)
 
     def model(self, model_id: str) -> ModelCounts:
         return self.models.setdefault(model_id, ModelCounts())
@@ -86,6 +87,17 @@ def observe_http() -> HttpCounts | None:
     if counts.http is None:
         counts.http = HttpCounts()
     return counts.http
+
+
+def observe_http_purpose(purpose: str) -> HttpCounts | None:
+    if not isinstance(purpose, str) or purpose not in {
+        "unclassified", "metadata", "identity_page", "item_body", "comment_page",
+    }:
+        raise ValueError("Unsupported HTTP measurement purpose")
+    counts = current_counts()
+    if counts is None:
+        return None
+    return counts.http_by_purpose.setdefault(purpose, HttpCounts())
 
 
 def measure_reindex(fn: Callable[P, dict[str, object]]) -> Callable[P, dict[str, object]]:

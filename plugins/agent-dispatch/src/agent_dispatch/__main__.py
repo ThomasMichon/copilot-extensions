@@ -667,6 +667,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--local", action="store_true", help="target only the local task authority; never fail over")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    from .action_controls_cli import register_commands as register_actions
+    register_actions(sub)
     from .diagnostic_logs import register_log_commands
     register_log_commands(sub)
     register_coordinator_commands(sub)

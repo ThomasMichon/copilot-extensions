@@ -154,7 +154,7 @@ class GitHubConnector:
     def _authenticated_recovery_account(self) -> str:
         try:
             data = self._http.get_json(
-                "/user", etag=False, retry_status=_retry_identity_probe,
+                "/user", etag=False, retry_status=_retry_identity_probe, purpose="metadata",
             ).data
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code not in (403, 404) or (
@@ -166,6 +166,7 @@ class GitHubConnector:
             # than guessing an account from repository ownership or token syntax.
             installation = self._http.get_json(
                 "/installation/repositories", params={"per_page": 1}, etag=False,
+                purpose="metadata",
             )
             data = installation.data
             if not isinstance(data, dict) or not isinstance(data.get("repositories"), list):
@@ -260,7 +261,9 @@ class GitHubConnector:
         }
         if since:
             params["since"] = since
-        for page in self._paginate(f"/repos/{self.owner}/{self.repo}/issues", **params):
+        for page in self._paginate(
+            f"/repos/{self.owner}/{self.repo}/issues", purpose="identity_page", **params,
+        ):
             if isinstance(page, list):
                 for item in page:
                     if isinstance(item, dict):
@@ -268,7 +271,9 @@ class GitHubConnector:
 
     def _comments_for(self, number: int) -> list[dict[str, Any]]:
         comments: list[dict[str, Any]] = []
-        for page in self._paginate(f"/repos/{self.owner}/{self.repo}/issues/{number}/comments"):
+        for page in self._paginate(
+            f"/repos/{self.owner}/{self.repo}/issues/{number}/comments", purpose="comment_page",
+        ):
             if isinstance(page, list):
                 comments.extend(item for item in page if isinstance(item, dict))
         return comments
@@ -350,11 +355,13 @@ class GitHubConnector:
             "api_url": item.get("url"),
         }
 
-    def _paginate(self, path: str, **params: Any) -> Iterable[Any]:
+    def _paginate(
+        self, path: str, *, purpose: str = "unclassified", **params: Any,
+    ) -> Iterable[Any]:
         page = int(params.pop("page", 1))
         per_page = int(params.pop("per_page", _DEFAULT_PER_PAGE))
         while True:
-            result = self._api_get(path, **params, per_page=per_page, page=page)
+            result = self._api_get(path, purpose=purpose, **params, per_page=per_page, page=page)
             if result.not_modified:
                 return
             yield result.data
@@ -362,9 +369,9 @@ class GitHubConnector:
                 return
             page += 1
 
-    def _api_get(self, path: str, **params: Any) -> _ApiResult:
+    def _api_get(self, path: str, *, purpose: str = "unclassified", **params: Any) -> _ApiResult:
         """GET JSON through the shared good-citizen HTTP path."""
-        return self._http.get_json(path, params=params)
+        return self._http.get_json(path, params=params, purpose=purpose)
 
     def _renewed_headers(self) -> dict[str, str]:
         assert self._token_provider is not None

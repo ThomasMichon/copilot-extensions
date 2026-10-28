@@ -699,6 +699,14 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
             f"failed to create session wt-{wt_id}: {result.get('error')}",
             exit_code=4,
         )
+    if result.get("created") is False:
+        output._json_output({
+            "ok": True, "worktree_id": wt_id, "anchor": True, **deferred,
+            "session": result["session"], "work_dir": work_dir,
+            "created": False, "resumed": True, "new_pane": None,
+            "note": "a live mux session already embodies this repo's anchor",
+        })
+        return 0
 
     new_pane = result.get("new_pane")
     if refusal := agent_policy.json_refusal(work_dir):

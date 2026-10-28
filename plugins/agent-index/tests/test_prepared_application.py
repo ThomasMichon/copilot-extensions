@@ -129,6 +129,124 @@ def test_restart_reuses_prepared_pairs_before_acquiring_a_new_delta(application)
         assert conn.execute("SELECT COUNT(*) FROM prepared_crawl_rows").fetchone()[0] == 0
 
 
+def test_later_chunk_failure_preserves_cursor_and_replays_proven_preparation(
+    application: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_index.chunking import get_chunker
+
+    f = application
+    retained = replace(f.files[0], path="retained.md", content="Retained document.")
+    f.delta = SourceDelta(upserts=[retained], commit="old")
+    f.run()
+    before_state = f.config.state_file.read_bytes()
+    before_paths = f.paths.get_all_entries()
+    table_names = [f.config.content_table, *(p.table_name for p in f.config.model_profiles.values())]
+    before_versions = {
+        name: f.store.content_store.db.open_table(name).version for name in table_names
+    }
+    before_receipt = f.store._source_domain.receipt() if f.selected else None
+    f.delta = SourceDelta(upserts=f.files, commit="pinned")
+    f.calls.clear()
+    attempted = []
+
+    def choose_chunker(path: str) -> tuple[object, str]:
+        attempted.append(path)
+        if path != f.files[1].path:
+            return get_chunker(path)
+
+        def fail(*args: object, **kwargs: object) -> None:
+            raise RuntimeError("fixture later-file chunker failure")
+
+        return SimpleNamespace(chunk=fail), "markdown"
+
+    with monkeypatch.context() as patch:
+        patch.setattr("agent_index.chunking.get_chunker", choose_chunker)
+        with pytest.raises(RuntimeError, match="later-file chunker failure"):
+            f.run()
+    assert attempted == [entry.path for entry in f.files]
+    assert [model for model, _texts in f.calls] == ["a", "b"]
+    assert all("first" in texts[0] for _model, texts in f.calls)
+    assert f.config.state_file.read_bytes() == before_state
+    assert f.state.sources["sample:repo"].last_commit == "old"
+    assert f.paths.get_all_entries() == before_paths
+    assert {
+        name: f.store.content_store.db.open_table(name).version for name in table_names
+    } == before_versions
+    if f.selected:
+        assert f.store._source_domain.receipt() == before_receipt
+    assert f.store.source_counts() == {"sample:repo": 1}
+    assert PendingCrawls(f.paths).load("sample:repo", f.scope)[0].commit == "pinned"
+
+    f.paths = PathIndex(f.paths._db_path)
+    f.state = IndexState.load(f.config.state_file)
+    f.delta = SourceDelta(commit="newer")
+    f.calls.clear()
+    f.acquired.clear()
+    result = f.run()
+    assert f.acquired == ["pinned"]
+    assert [model for model, _texts in f.calls] == ["a", "b"]
+    assert all("second" in texts[0] for _model, texts in f.calls)
+    assert result["work_counts"]["content_rows_upserted"] == 2
+    assert result["work_counts"]["checkpoint_rows_written"] == 2
+    assert IndexState.load(f.config.state_file).sources["sample:repo"].last_commit == "newer"
+    assert PendingCrawls(f.paths).load("sample:repo", f.scope) is None
+    assert f.store.source_counts() == {"sample:repo": 3}
+    for entry in [retained, *f.files]:
+        assert f.store.content_store.get_document(entry.source, entry.path).content == entry.content
+    for model in f.store.model_ids:
+        assert f.store.get_vector_table(model).count() == 3
+
+
+def test_failed_full_chunking_retains_old_state_but_rechunks_compatible_files(
+    application: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_index.chunking import get_chunker
+
+    f = application
+    f.delta = SourceDelta(upserts=f.files, commit="old")
+    f.run()
+    before_state = f.config.state_file.read_bytes()
+    before_paths = f.paths.get_all_entries()
+    f.calls.clear()
+    f.connector.current_commit = lambda: "full-target"
+    f.connector.discover = lambda **kwargs: list(f.files)
+
+    def choose_chunker(path: str) -> tuple[object, str]:
+        if path != f.files[1].path:
+            return get_chunker(path)
+
+        def fail(*args: object, **kwargs: object) -> None:
+            raise RuntimeError("fixture full chunker failure")
+
+        return SimpleNamespace(chunk=fail), "markdown"
+
+    with monkeypatch.context() as patch:
+        patch.setattr("agent_index.chunking.get_chunker", choose_chunker)
+        with pytest.raises(RuntimeError, match="full chunker failure"):
+            engine._index_source(
+                "sample:repo", config=f.config, state=f.state, path_index=f.paths,
+                multi_store=f.store, multi_clients=f.clients, full=True, connector=f.connector,
+            )
+    assert [model for model, _texts in f.calls] == ["a", "b"]
+    assert all("first" in texts[0] for _model, texts in f.calls)
+    assert f.config.state_file.read_bytes() == before_state
+    assert f.paths.get_all_entries() == before_paths
+    assert f.store.source_counts() == {"sample:repo": 2}
+    pending = PendingCrawls(f.paths).load("sample:repo", f.scope)
+    assert pending[0].commit == "full-target" and pending[1] is True
+    f.paths = PathIndex(f.paths._db_path)
+    f.state = IndexState.load(f.config.state_file)
+    f.delta = SourceDelta(commit="newer")
+    f.calls.clear()
+    f.acquired.clear()
+    f.run()
+    assert f.acquired == ["full-target"]
+    assert [model for model, _texts in f.calls] == ["a", "b"]
+    assert all("second" in texts[0] for _model, texts in f.calls)
+    assert IndexState.load(f.config.state_file).sources["sample:repo"].last_commit == "newer"
+    assert PendingCrawls(f.paths).load("sample:repo", f.scope) is None
+
+
 @pytest.mark.portfolio_tier("T3")
 def test_segment_ceiling_retains_prepared_work_until_explicit_consolidation(application):
     from agent_index.store.ingestion_index import consolidate_ingestion_indices

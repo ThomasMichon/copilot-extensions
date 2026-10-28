@@ -9,11 +9,15 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 from types import MappingProxyType
 from typing import BinaryIO, Mapping
+import zipfile
+import zlib
 
 from installer_wheel_inputs import (
-    WheelError, _check_deadline, _identity, _ordinary, _unsafe_windows_component,
+    WheelError, WheelLimits, _check_deadline, _identity, _member_chunks, _ordinary,
+    _unsafe_windows_component, preflight_archive,
 )
 
 
@@ -26,6 +30,127 @@ def retain_wheel_inputs(archives, expected, **limits):
         root = policy._private_retained_root(Path(temporary)).resolve()
         with open_wheel_snapshot(root, archives, expected, **limits) as snapshot:
             yield snapshot
+
+
+@contextmanager
+def retain_wheel_bundle(bundle, expected, **limits):
+    """Unpack an already selected transport into the existing snapshot owner."""
+    import installer_dependency_policy as policy
+
+    with policy._temporary_inputs(None) as temporary:
+        root = policy._private_retained_root(Path(temporary)).resolve()
+        with open_wheel_bundle_snapshot(root, bundle, expected, **limits) as snapshot:
+            yield snapshot
+
+
+def _selected_hashes(expected, max_wheels, deadline):
+    hashes = dict(expected)
+    if not hashes or len(hashes) > max_wheels:
+        raise WheelError("wheel snapshot count limit exceeded or empty set")
+    names = set()
+    for name, digest in hashes.items():
+        _check_deadline(deadline)
+        if (
+            not isinstance(name, str)
+            or re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.+-]*\.whl", name) is None
+            or _unsafe_windows_component(name) or name.casefold() in names
+        ):
+            raise WheelError("unsafe or ambiguous wheel snapshot filename")
+        names.add(name.casefold())
+        if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+            raise WheelError("invalid wheel snapshot digest")
+    return hashes
+
+
+@contextmanager
+def open_wheel_bundle_snapshot(
+    root: Path, bundle: Path, expected: Mapping[str, str], *,
+    bundle_sha256: str, max_bundle_bytes: int, max_wheels: int,
+    max_archive_bytes: int, max_total_bytes: int, max_snapshot_bytes: int,
+    deadline: float,
+):
+    """Retain exact ``wheels/<filename>`` members, not release/feed authority.
+
+    The caller owns a private root and cleanup, as with open_wheel_snapshot.
+    Storage includes both unpacked inputs and retained copies. All byte/count
+    bounds and the single deadline are inclusive and supplied by the caller.
+    """
+    from installer_dependency_config import native_retained_path
+
+    _check_deadline(deadline)
+    if any(type(value) is not int or value <= 0 for value in (
+        max_bundle_bytes, max_wheels, max_archive_bytes, max_total_bytes, max_snapshot_bytes,
+    )):
+        raise WheelError("wheel bundle limits must be explicit positive integers")
+    if not isinstance(bundle_sha256, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", bundle_sha256):
+        raise WheelError("invalid wheel bundle digest")
+    hashes = _selected_hashes(expected, max_wheels, deadline)
+    root = Path(native_retained_path(root))
+    bundle = Path(os.path.abspath(bundle))
+    before = _ordinary(bundle)
+    if before.st_size > max_bundle_bytes:
+        raise WheelError("wheel bundle archive byte budget exceeded")
+    paths = {}
+    total = 0
+    try:
+        with _open(bundle) as stream:
+            opened = _unchanged(bundle, before, stream)
+            if _digest(stream, max_bundle_bytes, deadline) != (bundle_sha256, before.st_size):
+                raise WheelError("wheel bundle digest or size mismatch")
+            _unchanged(bundle, before, stream, opened=opened)
+            preflight_archive(
+                stream, limits=WheelLimits(
+                    max_archive_bytes=max_bundle_bytes, max_expanded_bytes=max_total_bytes,
+                    max_member_bytes=max_archive_bytes, max_metadata_bytes=max_bundle_bytes,
+                    max_members=max_wheels, max_tags=1, max_metadata_member_bytes=max_bundle_bytes,
+                ), deadline=deadline,
+            )
+            with zipfile.ZipFile(stream) as archive:
+                members = archive.infolist()
+                if (
+                    len(members) != len(hashes)
+                    or {member.filename for member in members} != {"wheels/" + name for name in hashes}
+                ):
+                    raise WheelError("wheel bundle member set differs from selected wheels")
+                for member in members:
+                    _check_deadline(deadline)
+                    if (
+                        member.is_dir() or member.orig_filename != member.filename or member.flag_bits & 1
+                        or member.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
+                        or stat.S_IFMT(member.external_attr >> 16) not in (0, stat.S_IFREG)
+                        or member.external_attr & 0x10
+                        or member.file_size <= 0 or member.file_size > max_archive_bytes
+                    ):
+                        raise WheelError("wheel bundle member is unsafe or exceeds its byte budget")
+                    total += member.file_size
+                    if total > max_total_bytes or 2 * total > max_snapshot_bytes:
+                        raise WheelError("wheel bundle total or storage byte budget exceeded")
+                directory = root / "bundle"
+                directory.mkdir(mode=0o700)
+                for member in members:
+                    _check_deadline(deadline)
+                    name = member.filename.removeprefix("wheels/")
+                    destination = directory / name
+                    digest, size = hashlib.sha256(), 0
+                    with destination.open("xb") as output:
+                        for chunk in _member_chunks(
+                            stream, archive, member, limit=member.file_size, deadline=deadline,
+                        ):
+                            digest.update(chunk)
+                            size += len(chunk)
+                            output.write(chunk)
+                    if ("sha256:" + digest.hexdigest(), size) != (hashes[name], member.file_size):
+                        raise WheelError("wheel bundle member digest or size mismatch")
+                    paths[name] = destination
+            _unchanged(bundle, before, stream, opened=opened)
+    except (zipfile.BadZipFile, zlib.error, EOFError, NotImplementedError, UnicodeError) as error:
+        raise WheelError("wheel bundle archive is invalid") from error
+    with open_wheel_snapshot(
+        root, paths, hashes, max_wheels=max_wheels, max_archive_bytes=max_archive_bytes,
+        max_total_bytes=max_total_bytes, max_snapshot_bytes=max_snapshot_bytes - total,
+        deadline=deadline,
+    ) as snapshot:
+        yield snapshot
 
 
 def _unchanged(path, before, stream, *, opened=None):
@@ -357,21 +482,11 @@ def open_wheel_snapshot(
         raise WheelError("wheel snapshot count limit exceeded or empty set")
     if set(archives) != set(expected):
         raise WheelError("wheel snapshot filename set differs from expected")
-    paths, hashes = dict(archives), dict(expected)
-    names = set()
+    paths, hashes = dict(archives), _selected_hashes(expected, max_wheels, deadline)
     originals = {}
     total = 0
     for name, source in paths.items():
         _check_deadline(deadline)
-        if (
-            not isinstance(name, str)
-            or re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.+-]*\.whl", name) is None
-            or _unsafe_windows_component(name) or name.casefold() in names
-        ):
-            raise WheelError("unsafe or ambiguous wheel snapshot filename")
-        names.add(name.casefold())
-        if not isinstance(hashes[name], str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", hashes[name]):
-            raise WheelError("invalid wheel snapshot digest")
         source = Path(os.path.abspath(source))
         before = _ordinary(source)
         if before.st_size > max_archive_bytes:

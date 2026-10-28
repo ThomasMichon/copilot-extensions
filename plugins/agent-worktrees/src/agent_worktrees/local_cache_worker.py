@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import uuid
+from dataclasses import replace
 from pathlib import Path
 
 from agent_procutil import windowless_daemon_kwargs
@@ -130,10 +131,15 @@ def queue(root: Path, directory: Path):
     try:
         gate.acquire()
     except AlreadyRunningError:
-        return RefreshResult("queued", detail="guidance dispatch already reserved; not yet delivered")
+        return RefreshResult(
+            "failed", blocking=1,
+            detail="guidance dispatch reserved; request not queued; retry at the next lifecycle boundary",
+        )
     try:
         state = _read(directory / "request.json")
         if state and state["phase"] not in ("done", "failed") and locks.lock_is_live(state["owner"]):
+            state["pending_rerun"] = True
+            _save(directory, state)
             return RefreshResult("queued", detail=f"refresh already active; not yet delivered; result: {directory / 'refresh.log'}")
         request_id = uuid.uuid4().hex
         state = {
@@ -168,7 +174,7 @@ def queue(root: Path, directory: Path):
 
 
 def run(root: Path, directory: Path, request_id: str | None = None) -> int:
-    from .local_cache_refresh import RefreshResult, refresh_local_cache
+    from .local_cache_refresh import DEFAULT_TIMEOUT_S, RefreshResult, refresh_local_cache
 
     gate = _gate(directory)
     deadline = time.monotonic() + 5.0
@@ -198,43 +204,57 @@ def run(root: Path, directory: Path, request_id: str | None = None) -> int:
             or not locks.lock_is_live(state["owner"])
         ):
             raise ValueError("guidance worker admission was not confirmed")
-        state.update(phase="running", owner=_owner(os.getpid()))
+        state.update(phase="running", owner=_owner(os.getpid()), pending_rerun=False)
         _save(directory, state)
     finally:
         gate.release()
-    result = refresh_local_cache(root)
-    try:
-        if not directory.is_dir():
-            raise OSError("guidance workspace metadata was removed")
-        deadline = time.monotonic() + 5.0
-        while True:
-            try:
-                gate.acquire()
-                break
-            except AlreadyRunningError:
-                if time.monotonic() >= deadline:
-                    raise
-                time.sleep(0.01)
-        current = _read(directory / "request.json")
-        if current is None or current["request_id"] != request_id:
-            raise ValueError("guidance worker ownership changed before completion")
-        _log(directory, result.diagnostic)
-        current.update(
-            phase="done" if result.status in ("ready", "partial", "skipped") else "failed",
-            completed_at=time.time(),
-            result={
-                "status": result.status, "installed": result.changed if result.counts_known else None,
-                "unchanged": result.unchanged if result.counts_known else None,
-                "removed": result.removed if result.counts_known else None,
-                "counts_known": result.counts_known,
-                "generation": result.generation, "model_admission": "unknown",
-                "publication_revision": result.publication_revision,
-                "restart_required": bool(result.changed or result.removed) if result.counts_known else None,
-            },
-        )
-        _save(directory, current)
-    finally:
-        gate.release()
+    copy_deadline = time.monotonic() + DEFAULT_TIMEOUT_S
+    restart_required = False
+    while True:
+        result = refresh_local_cache(root, timeout=max(0.0, copy_deadline - time.monotonic()))
+        restart_required |= bool(result.changed or result.removed)
+        try:
+            if not directory.is_dir():
+                raise OSError("guidance workspace metadata was removed")
+            deadline = time.monotonic() + 5.0
+            while True:
+                try:
+                    gate.acquire()
+                    break
+                except AlreadyRunningError:
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(0.01)
+            current = _read(directory / "request.json")
+            if current is None or current["request_id"] != request_id:
+                raise ValueError("guidance worker ownership changed before completion")
+            if current.get("pending_rerun"):
+                if time.monotonic() < copy_deadline:
+                    current["pending_rerun"] = False
+                    _save(directory, current)
+                    continue
+                result = replace(
+                    result, status="timeout", blocking=result.blocking + 1,
+                    detail="backup refresh budget exhausted with another copy requested",
+                )
+            _log(directory, result.diagnostic)
+            current.update(
+                phase="done" if result.status in ("ready", "partial", "skipped") else "failed",
+                completed_at=time.time(),
+                result={
+                    "status": result.status, "installed": result.changed if result.counts_known else None,
+                    "unchanged": result.unchanged if result.counts_known else None,
+                    "removed": result.removed if result.counts_known else None,
+                    "counts_known": result.counts_known,
+                    "generation": result.generation, "model_admission": "unknown",
+                    "publication_revision": result.publication_revision,
+                    "restart_required": restart_required or (None if not result.counts_known else False),
+                },
+            )
+            _save(directory, current)
+            break
+        finally:
+            gate.release()
     print(result.diagnostic, flush=True)
     return 0 if result.status in ("ready", "skipped") else 1
 

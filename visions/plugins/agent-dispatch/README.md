@@ -7,7 +7,7 @@
 - **Scope:** branch (a per-plugin vision under the
   [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-24
+- **Last revised:** 2026-10-27
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -1210,6 +1210,20 @@ should run* converging on the declarations, while an override is a human's
 **higher-precedence veto** for when something must stop running *right now*,
 declaration notwithstanding — and, crucially, a later re-sync of the declaration
 does **not** quietly undo it.
+
+### reversible-action-inhibition
+An operator can inhibit selected recurring or on-demand actions without
+preventing the coordinator, supervisor or lane polling loops from starting.
+The existing consumer re-checks inhibition before each eligible action;
+clearing it restores normal eligibility on the next poll or caller retry,
+without a manual process restart. Action inhibition is distinct from a
+service/lane lifecycle override and never silently clears that independent veto.
+
+Only actions with a reliable retry or re-check path are suitable for this
+control. Inhibition preserves pending work, original execution identity and
+existing-work settlement. It does not consume a task, authorize duplicate
+execution, weaken ownership or compatibility checks, or turn unknown effects
+into absence. Effective inhibition and its reason remain observable.
 
 ### inherits-runtime-service-invariants
 The supervisor/coordinator singleton is itself a plugin-services runtime

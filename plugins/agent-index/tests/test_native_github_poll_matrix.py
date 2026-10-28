@@ -50,6 +50,7 @@ class Hosted:
     listed: tuple[int, ...] = (1, 2)
     revisions: dict[int, str] = field(default_factory=dict)
     requests: list[tuple[str, dict[str, str]]] = field(default_factory=list)
+    responses: list[tuple[str, int]] = field(default_factory=list)
     account: int = 123
     interrupted: bool = False
     truncated: bool = False
@@ -95,8 +96,13 @@ class Hosted:
         return httpx.Response(200, json=self.records[number])
 
     def connector(self):
+        def respond(request):
+            response = self.handle(request)
+            self.responses.append((request.url.path, len(response.content)))
+            return response
+
         return GitHubConnector(
-            SOURCE, token="fixture", min_interval_s=0, transport=httpx.MockTransport(self.handle),
+            SOURCE, token="fixture", min_interval_s=0, transport=httpx.MockTransport(respond),
         )
 
     def run(self, monkeypatch, *, failure=None):
@@ -296,6 +302,7 @@ def test_hosted_timestamp_overlap_at_three_corpus_sizes(
             before = projection(fixture)
             before_state = IndexState.load(fixture.config.state_file).sources[SOURCE]
             hosted.requests.clear()
+            hosted.responses.clear()
             measurement = measure_round(
                 lambda: hosted.run(monkeypatch, failure=failure), monkeypatch,
             )
@@ -307,6 +314,30 @@ def test_hosted_timestamp_overlap_at_three_corpus_sizes(
             assert counts["cluster_pass_attempts"] == counts["cluster_pass_completed"] == 0
             assert counts["http"]["attempts"] == len(expected_http)
             assert counts["http"]["retries"] == counts["http"]["not_modified"] == 0
+            def purpose(path):
+                return (
+                    "metadata" if path == "/user" else
+                    "identity_page" if path.endswith("/issues") else
+                    "comment_page" if path.endswith("/comments") else "item_body"
+                )
+
+            expected_purposes = {purpose(path) for path, _params in expected_http}
+            assert set(counts["http_by_purpose"]) == expected_purposes
+            for label, traffic in counts["http_by_purpose"].items():
+                assert traffic["attempts"] == sum(
+                    purpose(path) == label for path, _params in expected_http
+                )
+                assert traffic["responses"] == traffic["json_results"] == sum(
+                    purpose(path) == label for path, _size in hosted.responses
+                )
+                assert traffic["response_bytes"] == sum(
+                    size for path, size in hosted.responses if purpose(path) == label
+                )
+                assert traffic["retries"] == traffic["not_modified"] == 0
+            for metric in counts["http"]:
+                assert counts["http"][metric] == sum(
+                    traffic[metric] for traffic in counts["http_by_purpose"].values()
+                )
             if changed:
                 assert set(counts["models"]) == set(profiles)
             assert all(value["chunks_embedded"] == value["vector_rows_upserted"] == embedded

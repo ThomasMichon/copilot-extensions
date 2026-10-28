@@ -78,6 +78,32 @@ def _config(tmp_path: Path):
     )
 
 
+def test_remove_system_waits_for_same_worktree_launch_even_with_force(tmp_path, monkeypatch):
+    from agent_worktrees import managed_worktree_guard, worktree_lifecycle
+
+    record, tracking_dir = _record(tmp_path)
+    path = tracking_dir / f"{record.worktree_id}.yaml"
+    before = path.read_bytes()
+    remove = types.SimpleNamespace(called=False)
+
+    def forbidden(*args, **kwargs):
+        remove.called = True
+        pytest.fail("Removal crossed an active launch")
+
+    real_guard = worktree_lifecycle.guard
+    monkeypatch.setattr(worktree_lifecycle, "guard", lambda p: real_guard(p, timeout=0))
+    config = _config(tmp_path)
+    with real_guard(path):
+        result = managed_worktree_guard.perform(
+            record.worktree_id, path, config, force=True,
+            remove_fn=forbidden, tracking_path=tracking_dir,
+        )
+    assert not result.ok and not remove.called
+    assert path.read_bytes() == before
+    assert Path(record.worktree_path).exists()
+    assert not (Path(config.default_repo.worktree_root) / ".finalize.lock").exists()
+
+
 def test_remove_system_retains_record_when_worktree_removal_fails(
     tmp_path,
 ):

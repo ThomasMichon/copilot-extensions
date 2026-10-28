@@ -12,12 +12,13 @@ import shutil
 import subprocess
 import sys
 import time
+import zipfile
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
 import installer_dependency_policy as policy
-from installer_wheel_snapshot import retain_wheel_inputs
+from installer_wheel_snapshot import retain_wheel_bundle, retain_wheel_inputs
 from installer_wheel_inputs import WheelError
 from wheel_input_fixture import wheel_bytes
 
@@ -89,7 +90,7 @@ def candidate(engine, root, plugin, wheels, **options):
     )
 
 
-def snapshot(tmp_path, *, closure=False, version="1.0"):
+def snapshot(tmp_path, *, closure=False, version="1.0", transport="loose"):
     path = tmp_path / "demo_pkg-1.0-py3-none-any.whl"
     if not path.exists():
         path.write_bytes(wheel_bytes(
@@ -107,9 +108,24 @@ def snapshot(tmp_path, *, closure=False, version="1.0"):
                 metadata=b"Metadata-Version: 2.4\nName: helper\nVersion: 1.0\n\n",
             ))
         paths[helper.name] = helper
+    hashes = {
+        name: "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+        for name, path in paths.items()
+    }
+    if transport == "bundle":
+        bundle = tmp_path / "transport.zip"
+        with zipfile.ZipFile(bundle, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for name, path in paths.items():
+                archive.write(path, "wheels/" + name)
+        for path in paths.values():
+            path.unlink()
+        return retain_wheel_bundle(
+            bundle, hashes, bundle_sha256="sha256:" + hashlib.sha256(bundle.read_bytes()).hexdigest(),
+            max_bundle_bytes=100_000, max_wheels=2, max_archive_bytes=100_000,
+            max_total_bytes=100_000, max_snapshot_bytes=200_000, deadline=time.monotonic() + 60,
+        )
     return retain_wheel_inputs(
-        paths, {name: "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
-                for name, path in paths.items()},
+        paths, hashes,
         max_wheels=2, max_archive_bytes=100_000, max_total_bytes=100_000,
         max_snapshot_bytes=100_000, deadline=time.monotonic() + 60,
     )
@@ -245,8 +261,9 @@ def test_native_closed_transaction_ignores_poisoned_config_and_cache(tmp_path):
         assert not (poison / "cache").exists() and not (poison / "target").exists()
 
 
+@pytest.mark.parametrize("transport", ["loose", "bundle"])
 def test_native_existing_constructor_builds_and_reuses_exact_closed_wheels(
-    tmp_path, engine, plugin, monkeypatch,
+    tmp_path, engine, plugin, monkeypatch, transport,
 ):
     monkeypatch.setenv("UV_INDEX_URL", "http://127.0.0.1:1/unavailable")
     monkeypatch.setenv("UV_CONFIG_FILE", str(tmp_path / "missing-config"))
@@ -265,7 +282,10 @@ def test_native_existing_constructor_builds_and_reuses_exact_closed_wheels(
 
     monkeypatch.setattr(engine.runtime, "construction_lease", bounded(engine.runtime.construction_lease))
     monkeypatch.setattr(engine.runtime, "retention_custody", bounded(engine.runtime.retention_custody))
-    with snapshot(tmp_path, closure=True, version="1") as retained:
+    with snapshot(tmp_path, closure=True, version="1", transport=transport) as retained:
+        if transport == "bundle":
+            (tmp_path / "transport.zip").unlink()
+        original_wheels = {name: path.read_bytes() for name, path in retained.paths.items()}
         wheels = inspected(retained)
         assert wheels.receipt()["distributions"]["demo-pkg"]["version"] == "1"
         slots = []
@@ -283,7 +303,10 @@ def test_native_existing_constructor_builds_and_reuses_exact_closed_wheels(
         assert not (tmp_path / "poison-cache").exists()
     # Re-inspect cached bytes under a new temporary path; reuse binds content,
     # not the ephemeral location used by a previous installation.
-    with snapshot(tmp_path, closure=True, version="1") as retained:
+    if transport == "bundle":
+        for name, data in original_wheels.items():
+            (tmp_path / name).write_bytes(data)
+    with snapshot(tmp_path, closure=True, version="1", transport=transport) as retained:
         wheels = inspected(retained)
 
         def no_reconstruction(*args, **kwargs):

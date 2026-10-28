@@ -14,6 +14,17 @@ SECRET_NAMES = ("admin_username", "admin_password", "database_username",
                 "database_password", "jwt_secret", "webhook_secret")
 DATA_NAMES = ("mongo_data", "mongo_config", "keys", "backups", "periphery")
 
+# The official entrypoint drops to mongodb before its _FILE reads. Load only
+# these fixed private mounts as the image's root, then reuse its normal init/drop.
+MONGO_COMMAND = (
+    "bash", "-ec",
+    "MONGO_INITDB_ROOT_USERNAME=$(</run/secrets/database_username); "
+    "MONGO_INITDB_ROOT_PASSWORD=$(</run/secrets/database_password); "
+    "export MONGO_INITDB_ROOT_USERNAME MONGO_INITDB_ROOT_PASSWORD; "
+    "unset MONGO_INITDB_ROOT_USERNAME_FILE MONGO_INITDB_ROOT_PASSWORD_FILE; "
+    "exec docker-entrypoint.sh mongod --quiet --wiredTigerCacheSizeGB 0.25",
+)
+
 
 def ordinary_path(path: Path) -> None:
     if (not isinstance(path, Path) or not path.is_absolute() or ".." in path.parts
@@ -106,7 +117,7 @@ def render_profile(declaration: KomodoDeclaration, material: KomodoMaterializati
         return list(names)
 
     services["mongo"].update(
-        command=["--quiet", "--wiredTigerCacheSizeGB", "0.25"],
+        command=[argument.replace("$", "$$") for argument in MONGO_COMMAND],
         environment={
             "MONGO_INITDB_ROOT_USERNAME_FILE": "/run/secrets/database_username",
             "MONGO_INITDB_ROOT_PASSWORD_FILE": "/run/secrets/database_password",
@@ -142,6 +153,7 @@ def render_profile(declaration: KomodoDeclaration, material: KomodoMaterializati
     services["periphery"].update(
         init=True, depends_on={"core": {"condition": "service_started"}},
         environment={
+            "PERIPHERY_PRIVATE_KEY": "file:/config/keys/periphery.key",
             "PERIPHERY_CORE_ADDRESS": "ws://core:9120",
             "PERIPHERY_CONNECT_AS": desired["server_name"],
             "PERIPHERY_CORE_PUBLIC_KEYS": "file:/config/keys/core.pub",

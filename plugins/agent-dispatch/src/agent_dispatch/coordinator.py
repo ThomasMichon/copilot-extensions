@@ -661,6 +661,7 @@ def create_app(
 
                 from .config import routing_dir
                 from .runtime_version import install_dir
+                from .action_controls import action_inhibited
                 from .self_retire import is_superseded
                 from .self_update import stale_target
 
@@ -723,6 +724,12 @@ def create_app(
                     if not at_safe_point:
                         confirms = 0
                         continue
+                    if await asyncio.to_thread(
+                        action_inhibited, "coordinator-replacement", logger=log,
+                        automatic=True,
+                    ):
+                        confirms = 0
+                        continue
                     confirms += 1
                     if confirms < _su_confirmations:
                         continue
@@ -735,6 +742,11 @@ def create_app(
                             governance,
                             "pre-mutation:self-update",
                             loop_name="self-update",
+                        ):
+                            continue
+                        if await asyncio.to_thread(
+                            action_inhibited, "coordinator-replacement", logger=log,
+                            automatic=True,
                         ):
                             continue
                         _spawn_self_deploy(target)

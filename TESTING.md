@@ -1,5 +1,12 @@
 # Testing copilot-extensions
 
+`tools/promotion_unit_tests/test_artifact_license_notices.py` checks that the
+existing source-bound wheel verifier refuses omitted or changed source notices,
+accepts modern and legacy license locations, and preserves historical source
+layouts. The real artifact/native lane exercises ordinary backend inclusion
+from each independently packaged project's `LICENSE`; no package code or legal
+approval engine is added by the pure notice controls. copilot-extensions
+
 How to run the plugin test suites, explicit development checks, and the
 **opt-in end-to-end smoke tests** that require real infrastructure.
 
@@ -16,6 +23,34 @@ result. These are contained component/installed-SDK controls, not actual Docker,
 official-image, automatically constructed controller or production evidence.
 Native/network/build tests remain outside the required no-actor unit packet.
 
+Agent-worktrees' `test_mux_creation_admission.py` covers Windows gate and
+join-result semantics without claiming or typing a seed. Its explicit native
+`tests/native/test_mux_creation_overlap_native.py` packet overlaps the shipped
+PowerShell/Python creation boundaries in both directions against private
+synthetic mux protocol processes. It checks same-target joining, different-target
+overlap and actual kernel-lease release while the original creation client is
+still alive. It does not exercise complete Picker/embody preflight, actual
+PSMux, repo lifecycle fencing, POSIX parity or installation removal.
+Run it with `python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_mux_creation_overlap_native.py --allow-explicit-tiers --timeout 180 --plugin-timeout 600 --test-timeout 60`.
+The synthetic mux is a small executable built with the system C# compiler,
+not a Python interpreter proxy; fixture startup never justifies extending the
+production two-second query cap. An unavailable compiler is an explicit skip,
+not Windows acceptance evidence. Actors finish importing/loading their owners
+before a ready/go barrier admits native creation, matching the production
+creation timer rather than charging another actor's Python startup to it.
+This is not a cold whole-launch performance measurement.
+The same opt-in Windows job runs Manager's focused published-creation failure
+control, which executes the shipped failure/retry tail and retains argument,
+receipt and token handoffs after discovery without another attempt.
+
+Agent-worktrees' `test_worktree_lifecycle.py` holds the actual native launch
+fence in a child process, checks same-target retirement exclusion,
+independent different-target lifecycle leases and retention of the legacy
+repository barrier, and proves release on normal exit and process termination. Cleanup and
+managed-removal controls refuse an active target before fresh record reads or
+removal, including forced cleanup. These are lifecycle-fence controls, not
+whole-launch parallelism, full Picker, real mux or installation-removal acceptance.
+
 Agent-worktrees' `test_launch_seed_native.py` covers the finite backend and setup
 provider: retained one-time seed claims, literal argv, existing prompt-free
 execution observations, PID/birth and incarnation refusals, definite-spawn
@@ -23,6 +58,13 @@ failure restoration, uncertain cleanup and terminal no-replay behavior.
 These controls do not qualify terminal/Job/install-removal behavior. Setup
 controls retain the existing host's PID/birth, keep the prompt unclaimed until
 backend dispatch and release admission-only preparation before the child lifetime.
+The same packet checks default JSON compatibility, the finite provider's
+read-only contract declaration, counted NUL preparation replies, literal
+argument/environment fidelity, invalid-format/callback refusal before effects
+and held-seed/unknown handling for an unrepresentable reply. A real Bash reader
+control decodes the NUL fields without evaluating injected shell text. Git Bash
+execution is a framing control, not native Linux/macOS, terminal or production
+POSIX launch qualification; production POSIX consumer activation remains open.
 The real PowerShell
 seed-delivery consumer uses the existing finite process-tree owner so a timeout
 settles descendants rather than blocking on inherited capture pipes.
@@ -56,7 +98,7 @@ interrupt, child survival, nonzero exit and the correlated return receipt.
 Neither lane is actual Copilot, real installer removal or live mux
 detach/reattach acceptance.
 The existing manual acceptance workflow's `native_launch` input selects only
-the focused Windows copied-setup packet at the immutable dispatch SHA. It is
+the focused Windows copied-setup and mux-admission packets at the immutable dispatch SHA. It is
 default-off, uses contained test roots without host-state opt-in, and does not
 expand required PR CI or select unrelated derived-diagnostic matrices.
 

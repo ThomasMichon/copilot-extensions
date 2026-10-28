@@ -16,11 +16,12 @@ import os
 import platform
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
 import yaml
 
 from . import activity, mux_creation
+from .mux_creation import is_psmux as _is_psmux
 from .sessions_pane_args import cleanup_mux_pane_args, file_mux_pane_cmd, prompt_controls
 from .sessions_pane_retire import (
     _mux_bin,
@@ -1695,10 +1696,6 @@ def _mux_session_target(worktree_id: str, mux_bin: str) -> str:
     does not support it (rejected as an unknown session)."""
     return _mux_named_session_target(mux_session_name(worktree_id), mux_bin)
 
-def _is_psmux(mux_bin: str) -> bool:
-    return PureWindowsPath(mux_bin).stem.casefold() == "psmux"
-
-
 def _mux_named_session_target(session_name: str, mux_bin: str) -> str:
     """Return an exact mux target for an already-known session name."""
     sess = str(session_name)
@@ -1927,7 +1924,7 @@ def mux_new_session(
 ) -> dict:
     """Create a detached ``wt-<id>`` session running ``cmd``; return its pane.
 
-    Returns ``{ok, session, new_pane, error}``. Detached, so the caller does not
+    Returns ``{ok, session, new_pane, error, created}``. Detached, so the caller does not
     take over a terminal -- the embodied Copilot registers itself with the local
     bridge (Phase 1), which is how the spawn is later verified and viewed.
     """
@@ -1936,12 +1933,18 @@ def mux_new_session(
     sess = mux_session_name(worktree_id)
     argv: list[str] = []
     try:
-        argv = build_mux_new_session_argv(
-            worktree_id, mux_creation.pane_work_dir(work_dir), cmd, env, mux=mux,
+        r = mux_creation.run_or_join(
+            argv, binary=_mux_bin(mux), session=sess,
+            prepare=lambda: build_mux_new_session_argv(
+                worktree_id, mux_creation.pane_work_dir(work_dir), cmd, env, mux=mux,
+            ),
         )
-        r = mux_creation.run(argv)
+        if r is None:
+            return {
+                "ok": True, "session": sess, "new_pane": None, "error": None, "created": False,
+            }
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as e:
-        if not isinstance(e, subprocess.TimeoutExpired):
+        if not isinstance(e, (subprocess.TimeoutExpired, mux_creation.CreationUncertain)):
             cleanup_mux_pane_args(argv)
         return {"ok": False, "session": sess, "new_pane": None, "error": str(e)}
     if r.returncode != 0:
@@ -1959,7 +1962,7 @@ def mux_new_session(
     )
     return {
         "ok": True, "session": sess,
-        "new_pane": r.stdout.strip() or None, "error": None,
+        "new_pane": r.stdout.strip() or None, "error": None, "created": True,
     }
 
 

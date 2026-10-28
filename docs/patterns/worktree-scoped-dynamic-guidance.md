@@ -4,7 +4,7 @@
 behaviors `resilient-safety-boundary`, `ambient-delivery-fails-open`,
 `resume-stable-context`).
 
-> **Precedence note (`local-cache-delivery-primacy`):** the gitignored
+> **Legacy authoring-renderer precedence (`local-cache-delivery-primacy`):** the gitignored
 > local cache this pattern describes is the **primary** delivery path for
 > worktree-scoped projected instruction content -- it reflects the
 > currently installed payload, not a sync-lagged approximation of it. The
@@ -13,7 +13,10 @@ behaviors `resilient-safety-boundary`, `ambient-delivery-fails-open`,
 > fresher, or hasn't yet had the chance to. Precedence between the two is
 > decided by comparing their own embedded marker `pluginVersion` (§2),
 > never by the local file's mere existence -- a stale leftover must not be
-> able to outrank a genuinely newer checked-in copy.
+> able to outrank a genuinely newer checked-in copy. This version/marker rule
+> describes the legacy renderer/reader, not the verbatim startup-copy publisher
+> below. The remaining reader/compatibility migration is tracked by #9329;
+> startup copying has no content-hash, fingerprint or prepared-generation gate.
 
 ## Problem
 
@@ -24,21 +27,21 @@ belong there: "the session-folder file carries only the values that had to
 be computed this session... everything else... is a second, ordinary static
 projection... checked in and reviewed like any other static fail-safe."
 
-Projected static instruction content -- the rendered body of a plugin's own
+Projected static instruction content -- the body of a plugin's own
 `instructions/*.instructions.md` template, synced into a consumer repo via
 `projection-reflect`/`instruction-projections.json` -- is exactly that
 "everything else" case. It is:
 
-- **too large and too stable** to regenerate on every `sessionStart` (that
-  would rewrite identical text into a fresh file every session, burning
-  budget and producing content that can't be reviewed or diffed as checked-in
-  guidance, the precise cost §2a exists to avoid); and
+- **already authored and reviewed** in its plugin payload, so startup can copy
+  the file directly rather than regenerate policy or provenance envelopes; and
 - **not session-specific at all** -- the same rendered content applies to
   every session in a given worktree, changing only when the plugin's
   installed payload changes or the consumer repo's enablement changes.
 
-This content belongs in a reviewed worktree-scoped artifact, never a
-per-session rewrite. Current delivery separates a concise checked-in
+This content belongs in reviewed plugin source and a disposable worktree copy.
+Creation and session start replace that copy, including while another session
+is running; replacement does not claim the model has reloaded it.
+Legacy checked-in delivery separates a concise
 `.github/instructions/**/*.instructions.md` selector from its lock-owned,
 non-auto-loaded full body in `.github/copilot/context-fallbacks/`; explicitly
 declared inline kernels retain their ambient policy. Relying only on the
@@ -56,8 +59,9 @@ reviewed body as the source of truth would leave two gaps:
    fully headless, sandboxed, or cloud-hosted agent invocation). For those,
    the checked-in selector plus reviewed fallback (or explicit inline kernel)
    remains the usable offline path without cache writes. Other launch paths
-   can acquire authenticated current local bodies instead; file existence
-   alone does not establish their authority or delivery.
+   can acquire current managed copies instead. Plugin enablement and the
+   declaration own source selection; a separate content-authentication graph is
+   not a prerequisite to copying.
 
 ## Standard approach
 
@@ -173,45 +177,34 @@ installing replacements, allowing file/directory destination migrations in
 either direction without manual cleanup. Tracked blockers still fail the batch
 before any of those removals.
 
-Successful publication records a versioned `prepared.json` in the checkout's
-existing Git-administrative guidance directory. It binds the canonical root and
-home, exact current settings-derived plugin identities and payload roots,
-manifest generations, captured input-file identities/timestamps/content hashes, generated
-files/directories and Git index/HEAD evidence. A subsequent unchanged boundary
-revalidates that evidence (including current file bytes) without rebuilding the desired set, running Git or
-copying files. Changed settings, payloads, template links, pairing output,
-generated files, index/HEAD or malformed receipts require preparation again.
-Ignore-file evidence includes absent repository ignore files, so creating an
-override invalidates reuse. A receipt retains the Git evidence actually checked
-by preflight; changes to that evidence before mutation or receipt creation
-refuse publication rather than certifying an unchecked newer index. Regular
-symlinked source inputs retain both link identity and target content hashes;
-output-link redirection remains refused.
-Pending paired composition always refuses reuse. Partial/failed publications
-never create reusable readiness. The receipt is disposable local evidence, not
-a source of instruction authority or a model-admission receipt.
+Every creation/resume preparation copies the complete resolved instruction set,
+including when the same files were copied earlier. Session start queues another
+copy rather than probing a prepared generation. The publisher does not inspect
+old instruction bytes, compare content hashes or fingerprints, or reuse a
+`prepared.json` receipt. Old readiness receipts are ignored. Generated files may
+be replaced while a session is running; restart/new context loads the updated
+files through normal discovery.
 
-Version 2 distinguishes ready preparation from partial ownership history.
-Partial records are never reusable readiness. Their bounded source/byte
-ownership map lets healthy providers update proven slots without replacing
-guidance owned by an unresolved provider. Unknown legacy slots and structural
-overlaps remain untouched with an explicit ownership finding; a later complete
-source set can reconcile the generated namespace normally. Successful partial
-publication records ownership for newly delivered sources, so another partial
-pass can safely update them. This is a file-ownership safeguard, not a content
-selection policy; all tracked-file and path checks still apply.
+A small `owners.json` in the existing Git-administrative guidance directory
+records destination-to-plugin names only. During partial discovery it keeps an
+unresolved provider's destinations from being reassigned, without hashing or
+authenticating their content. Unknown legacy slots and structural overlaps
+remain untouched with an explicit ownership finding until a complete source
+set can reconcile the namespace. Git index and ignore metadata are checked
+around preflight to retain tracked-file protection; those checks do not inspect
+or authenticate instruction content.
 
-The complete desired set is built once inside the publication lock. Captured
-input identities and current source selection are checked again before copying,
-rather than reconstructing every desired byte a second time. All mutation-path
-Git protection remains in place. Cross-process callers use the same gate and
-resolve current inputs after acquiring it; an older waiting caller cannot
-publish its pre-lock selection over a newer generation.
+The desired bytes are read once inside the publication lock. A plugin update
+during a copy is not an authentication failure: the next serialized publication
+copies its current files. Cross-process callers resolve sources after acquiring
+the same gate, so an older waiting caller cannot publish a pre-lock selection
+over a newer one. Each destination is atomically replaced, without a cross-file
+rollback transaction or a content-match prerequisite.
 
 Bridge's local Session-Host path invokes the attributable optional Worktrees
 `knowledge compose-plugins --prepare-projections --json` owner after static
-plugin preparation and before spawn. Its successful generation is reused, not
-rendered into a competing namespace. This foreground call retains async
+plugin preparation and before spawn. It copies into the same managed namespace,
+not a competing renderer's output. This foreground call retains async
 cancellation/tree custody and operation-specific owner limits, without a broad
 five-second render cutoff. Without a Worktrees owner, the independent bounded
 compatibility renderer remains available; refused identity or a failed owner
@@ -235,11 +228,9 @@ missing custody is an explicit unavailable result, not an unsafe spawn.
 Fresh identity reads retain PID-reuse and unreadable-identity refusal.
 Native Darwin descendant controls remain distinct from adapter unit tests.
 
-SessionStart verifies current readiness before queueing its bounded backup.
-An exhausted reuse-probe budget means unverified readiness, not disabled
-backup: the remaining hook budget is checked again before queueing.
-That probe budget reaches receipt, file-hash and Git-evidence validation;
-expiry cannot be converted to reused readiness or swallowed as a cache miss.
+SessionStart queues its bounded backup on every invocation with sufficient hook
+dispatch budget, including after a successful foreground copy. It does not probe
+instruction fingerprints or prepared readiness before dispatch.
 For a late backup, the exact session retains a watch on the checkout-local
 completion status. The existing post-tool hook surfaces completion once:
 changed/removed files explicitly require restart/new context before discovery;
@@ -247,20 +238,19 @@ partial and failed outcomes retain reviewed-fallback guidance. An idle session
 is not awakened and no restart is automatic. Written files, a successful hook
 result and an acknowledgment never assert that the running model admitted the
 new instructions.
-The watch captures an initial generated-file publication revision before its
-readiness probe. A prospective output mutation advances that revision under the
+The watch captures an initial generated-file publication revision before
+dispatch. A prospective output mutation advances that revision under the
 publication lock before the first write or removal, including partial
 publications. It survives post-copy verification failure or abnormal exit;
-failed-publication counts remain explicitly unavailable. Complete readiness
-receipts also bind this revision, so failed mutation cannot reuse an older
-receipt. Completion compares revisions,
+failed-publication counts remain explicitly unavailable. This revision is only
+a change-notification token, not a content receipt or admission gate. Completion compares revisions,
 not only the backup's own copy counts: a foreground publisher that finishes
-before the backup is still a late change requiring a restart notice. An
-unchanged backup does not invent a new publication revision. Failure after
+before the backup is still a late change requiring a restart notice. A backup
+with no selected files or removals does not invent a new publication revision. Failure after
 possible changes reports repair and restart/new-context requirements while
 retaining reviewed fallback, never a successful refresh or model-admission claim.
-The watch timestamp precedes the probe as well, so a worker finishing during
-the probe is not discarded as an older completion. Abnormal worker exits
+The watch timestamp precedes dispatch as well, so a worker finishing while
+dispatch is being recorded is not discarded as an older completion. Abnormal worker exits
 persist a terminal timestamp and failure result for the same post-tool
 consumer; existing completed results are preserved.
 The consumer also compares the current publication revision, not just the
@@ -560,7 +550,14 @@ Admission holds a short kernel gate across reservation, process launch, and
 publication of the exact request nonce plus PID/start-time owner. The child
 claims only that request; another hook observes the live pending owner even
 before the child starts rendering. No lease or inherited log handle stays open
-in the Git administrative directory during rendering. The worker atomically
+in the Git administrative directory during rendering. A request arriving during
+an active copy records a pending rerun under that same admission gate. Completion
+checks and clears it under the gate, repeating discovery and copying without
+starting a second worker. Requests coalesce, but all copies share the original
+120-second budget; a pending copy at exhaustion reports failure, never success
+for an older snapshot. A caller that cannot acquire the short admission gate
+reports that its request was **not queued**, rather than acknowledging work it
+did not record. The worker atomically
 publishes a latest-result log capped at 8 KiB and its completed receipt.
 Snapshot replacement uses a short, bounded retry for transient Windows reader
 handles; persistent permission failures still propagate rather than reporting delivery.

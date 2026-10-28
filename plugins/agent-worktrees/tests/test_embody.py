@@ -1189,6 +1189,23 @@ class TestCmdEmbodyAnchor:
         assert out["seeded"] is True
         assert seeded == {"pane": "%4", "seed": "explore the repo"}
 
+    def test_anchor_late_join_never_seeds_or_claims_creation(self, monkeypatch, capfd):
+        _stub_anchor_config(monkeypatch)
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
+        monkeypatch.setattr(
+            sessions, "mux_new_session",
+            lambda *a, **k: {
+                "ok": True, "created": False, "session": "wt-anchor-example-web",
+                "new_pane": None, "error": None,
+            },
+        )
+        monkeypatch.setattr(
+            sessions, "mux_seed_pane", lambda *a, **k: pytest.fail("late-join seed"),
+        )
+        assert m.cmd_embody(_ns(anchor=True, seed="do not send")) == 0
+        result = json.loads(capfd.readouterr().out)
+        assert result["created"] is False and result["resumed"] is True
+
     def test_anchor_dry_run_reports_plan_without_spawning(self, monkeypatch, capfd):
         _stub_anchor_config(monkeypatch)
         monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)

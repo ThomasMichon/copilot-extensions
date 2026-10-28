@@ -272,6 +272,11 @@ def _marketplace_context() -> Path | None:
     )()
 
 
+def _cleanup_context(args: argparse.Namespace) -> Path:
+    explicit = getattr(args, "auth_cwd", None)
+    return Path(explicit) if explicit is not None else (_marketplace_context() or Path.cwd())
+
+
 def run_update(args: argparse.Namespace, steps) -> int:
     with session() as value:
         if value is not None and getattr(args, "target", None) is None:
@@ -285,13 +290,34 @@ def run_update(args: argparse.Namespace, steps) -> int:
                     ),
                 )
         rc = steps(args)
+        results = [
+            item for report in (
+                *getattr(value, "reports", {}).values(),
+                *getattr(value, "anchor_reports", {}).values(),
+            ) for item in report.results
+        ]
+        if any(item.status not in {"ok", "anonymous"} for item in results):
+            _cleanup_offer(_cleanup_context(args))
         if value is not None and rc == 0:
             return 1 if value.anchor_failed else 4 if value.unresolved else 0
         return rc
 
 
+def _cleanup_offer(cwd: Path) -> dict:
+    from . import update_auth_cleanup
+
+    offer = update_auth_cleanup.offer(cwd)
+    update_events.auth_cleanup_offer(offer)
+    if offer["status"] == "offered":
+        output.info(
+            "Auth cleanup available (preview only): update --auth-report --auth-cleanup; "
+            "apply requires the exact displayed plan digest."
+        )
+    return offer
+
+
 def cmd_report(args: argparse.Namespace) -> int:
-    cwd = Path(getattr(args, "auth_cwd", None) or Path.cwd())
+    cwd = _cleanup_context(args)
     selected = (
         [] if getattr(args, "auth_source", None) else sources.marketplaces(_marketplace_context())
     )
@@ -325,6 +351,40 @@ def cmd_report(args: argparse.Namespace) -> int:
         report = auth.report(selected)
     overlay = auth.fallback(report, apply_fixes=mode() != "report-only")
     payload = report.summary()
+    cleanup_result = None
+    digest = getattr(args, "apply_auth_cleanup", None)
+    receipt = getattr(args, "revert_auth_cleanup", None)
+
+    def recheck() -> auth.AuthReport:
+        nonlocal report
+        report = auth.report(selected, env=environment)
+        return report
+
+    if digest or receipt:
+        from . import update_auth_cleanup
+
+        if digest and mode() != "on":
+            cleanup_result = {"status": "blocked", "changed": False, "reason": "auth_mode_read_only"}
+        elif receipt:
+            cleanup_result = update_auth_cleanup.rollback(cwd, receipt, digest)
+            if cleanup_result["status"] == "reverted":
+                try:
+                    cleanup_result["report"] = recheck().summary()
+                except Exception:
+                    cleanup_result["status"] = "verification_failed"
+        else:
+            cleanup_result = update_auth_cleanup.apply(cwd, digest, report, recheck)
+        if "report" in cleanup_result:
+            payload = dict(cleanup_result["report"])
+        payload["cleanup"] = cleanup_result
+    elif getattr(args, "auth_cleanup", False) or any(
+        item.status not in {"ok", "anonymous"} for item in report.results
+    ):
+        from . import update_auth_cleanup
+
+        payload["cleanup_offer"] = update_auth_cleanup.offer(
+            cwd, include_values=bool(getattr(args, "auth_cleanup", False)),
+        )
     if getattr(args, "auth_environment", False):
         # Only added/replaced variables cross the Manager's process boundary.
         environment = overlay.environment(environment) if overlay else environment
@@ -336,4 +396,20 @@ def cmd_report(args: argparse.Namespace) -> int:
         print(json.dumps(payload))
     else:
         describe(report)
+        offer = payload.get("cleanup_offer", {})
+        if offer.get("status") == "offered":
+            output.info(offer["plan"]["diff"])
+            output.info("Apply with --auth-report --apply-auth-cleanup " + offer["plan"]["plan_sha256"])
+        if cleanup_result:
+            output.info("Auth cleanup: " + cleanup_result["status"])
+            if cleanup_result.get("backup_path"):
+                output.info("Rollback receipt: " + cleanup_result["backup_path"])
+            if cleanup_result.get("plan"):
+                output.info(json.dumps(cleanup_result["plan"]))
+    if cleanup_result and cleanup_result["status"] not in {
+        "applied", "reverted", "rollback_preview",
+    }:
+        return 1
+    if cleanup_result and "report" in cleanup_result:
+        return 0 if payload["all_ok"] else 4
     return 4 if overlay and overlay.denies else 0

@@ -1943,12 +1943,15 @@ def apply_resources(
     dry_run: bool = True,
     only: list[str] | None = None,
     maintenance_safe: bool = False,
+    resource_types: frozenset[str] | None = None,
 ) -> list[ResourceResult]:
     """Apply every resolved resource (optionally filtered by ``only``)."""
     resolved, _ = resolve_resources(packages, machine, plat)
     overlapping = conflicting_git_config_files(resolved, ctx)
     results: list[ResourceResult] = []
     for res in resolved:
+        if resource_types is not None and res.type not in resource_types:
+            continue
         if only and not _resource_wanted(res, only):
             continue
         if res.identity in overlapping:

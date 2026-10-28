@@ -122,6 +122,23 @@ scope or nesting a seed mutation under its own already-held admission lock.
 Acceptance must include overlapping same-worktree attempts, parallel
 different-worktree launches and release at mux discoverability.
 
+The bounded Windows implementation coordinates Picker and detached mux
+creation using a session-keyed kernel lease in the user mux registry, separate
+from seed admission and both product installations. It rechecks on contention,
+releases at discovery before the creation client returns, and reports a late
+join without claiming or typing a seed. Its native overlap packet executes
+the actual PowerShell/Python boundaries against private synthetic mux protocol
+processes. This is not full launcher or actual PSMux acceptance. The next
+engine slice adds a distinct per-worktree lifecycle lease to native launch
+and retirement owners before fresh checks through removal. It retains the
+repo-wide launch barrier for independently running older retirement owners.
+Publication is the provider-first expansion, not proof those peers were
+upgraded. Migration must qualify current peer support before removing the
+compatibility barrier and measuring different-worktree whole-path parallelism.
+Actual-mux qualification and POSIX parity also remain open. The separate
+`pane_create` new-session fallback also
+retains its existing implementation and remains in this continuing inventory.
+
 Use the native CLI's `/exit` for controlled live migration, then verify actual
 pane/backend exit. Ctrl+C is not an exit receipt: a first press can cancel a
 turn, repeated presses within the backend's own window can terminate it, and

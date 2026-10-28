@@ -132,6 +132,56 @@ def test_windows_cmdline_split():
     assert lu._basename(argv[0]) == "ssh"
 
 
+def test_windows_process_census_preserves_unicode_live_user(monkeypatch):
+    cfg = "C:\\Users\\Ren\u00e9\\target.config"
+    command = f'ssh.exe -F "{cfg}" -N host'
+
+    def run(argv, **kwargs):
+        assert "[Console]::OutputEncoding" in argv[-1]
+        assert not kwargs.get("text") and not kwargs.get("encoding")
+        return SimpleNamespace(returncode=0, stdout=json.dumps({
+            "ProcessId": 123, "ParentProcessId": 1, "CommandLine": command,
+        }, ensure_ascii=False).encode("utf-8"))
+
+    monkeypatch.setattr(lu.subprocess, "run", run)
+    monkeypatch.setattr(lu, "config_paths", lambda name: frozenset({lu._norm(cfg)}))
+    table = lu._read_proc_windows()
+    assert table == [ProcInfo(123, 1, ("ssh.exe", "-F", cfg, "-N", "host"))]
+    assert [(user.pid, user.role) for user in lu.live_users(NAME, table=table)] == [
+        (123, lu.ROLE_FORWARD),
+    ]
+
+
+@pytest.mark.parametrize("output", [None, b"\xff", b"{"])
+def test_windows_process_census_bad_capture_remains_unknown(monkeypatch, output):
+    monkeypatch.setattr(lu.subprocess, "run", lambda *args, **kwargs:
+                        SimpleNamespace(returncode=0, stdout=output))
+    monkeypatch.setattr(lu, "process_table", lu._read_proc_windows)
+    assert lu.process_table() is None
+    with pytest.raises(lu.CodespaceInUseError, match="could not be confirmed idle"):
+        lu.refuse_if_in_use(NAME, "finalize")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="requires Windows PowerShell")
+def test_windows_process_census_real_powershell_unicode(monkeypatch):
+    run = subprocess.run
+    fixture = (
+        "[Console]::OutputEncoding = [System.Text.Encoding]::GetEncoding(437); "
+        "function Get-CimInstance { param($ClassName) "
+        "[pscustomobject]@{ ProcessId=123; ParentProcessId=1; "
+        "CommandLine=('ssh.exe -F \"C:\\Users\\Ren' + [char]0xE9 + "
+        "'\\target.config\" -N host') } }; "
+    )
+
+    def run_fixture(argv, **kwargs):
+        return run([*argv[:-1], fixture + argv[-1]], **kwargs)
+
+    monkeypatch.setattr(lu.subprocess, "run", run_fixture)
+    assert lu._read_proc_windows() == [ProcInfo(
+        123, 1, ("ssh.exe", "-F", "C:\\Users\\Ren\u00e9\\target.config", "-N", "host"),
+    )]
+
+
 def test_codespaces_in_use_never_raises(monkeypatch):
     def boom():
         raise RuntimeError("ps exploded")

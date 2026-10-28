@@ -95,6 +95,21 @@ planning does this before local guidance rendering even with
 `--defer-projections`; bare resume trusts the recorded checkout, not HOME.
 Restore establishes required trust before reclaiming an existing owner;
 projection preparation remains separate from that destructive boundary.
+On Windows, Restore resolves the live owner from the worktree's registered
+sessions, not from its latest resumable conversation or the process cwd.
+It preserves the selected PID/birth identity through reclaim, waits for native
+process exit, then checks current bindings again before ordinary Resume.
+An owner that exited before Restore may resume normally only after the same
+clear-state check. Unknown retirement, a concurrent owner or failed observation
+refuses Resume; a termination request alone never clears live lock evidence.
+For a tracked worktree, Reclaim also waits up to 35 seconds for the existing
+resident producer to publish a current, non-stale row observed after that
+ownership check, with no bound process or mux. It does not recompute the roster
+in the reader. Its `publication` result retains that generation/revision.
+Timeout reports native retirement separately as `native_state_clear` with
+roster confirmation pending; it does not report `state_clear` or allow Restore
+to continue to Resume. This is a bounded clear-state observation, not the
+general mutation/publication receipt contract tracked separately.
 Legacy labels must also resolve to a local record on the actual native
 platform; a coincidentally existing path is not authority. Declared aliases
 and record-scoped legacy WSL mappings remain supported.

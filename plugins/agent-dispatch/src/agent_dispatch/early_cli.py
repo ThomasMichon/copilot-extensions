@@ -13,6 +13,15 @@ def dispatch(argv: list[str]) -> int | None:
         from .delegated_waiter_callback import main
 
         return main(argv[1:])
+    if argv[:1] == ["actions"] and not any(
+        name.startswith("AGENT_DISPATCH_TASK_") for name in os.environ
+    ):
+        from .action_controls_cli import register_commands as register_actions
+
+        parser = argparse.ArgumentParser(prog="agent-dispatch", allow_abbrev=False)
+        register_actions(parser.add_subparsers(dest="command", required=True))
+        args = parser.parse_args(argv)
+        return args.func(args)
     if (
         argv[:2] not in (["workers", "catalog"], ["workers", "save"])
         or any(name.startswith("AGENT_DISPATCH_TASK_") for name in os.environ)

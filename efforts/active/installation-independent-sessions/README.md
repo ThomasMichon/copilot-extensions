@@ -190,12 +190,20 @@ retains these constraints; private host identity stays outside this repository.
 - [x] Land finite seed/backend provider groundwork and the dormant Windows
   adapter with existing seed/execution authorities (#9242). This prerequisite
   does not activate callers or remove either production runtime waiter.
+- [x] Activate and qualify the normalized Windows/PowerShell 7 copied consumer
+  for executable and same-host-script backends (#9288), including interrupted
+  waits and normal script return without an explicit exit.
 - [ ] Remove both deferred-setup and final-backend runtime-Python waiters.
   Reuse finite seed preparation, existing seed custody and execution receipts;
-  the native shell owns the actual child handle and wait.
+  the native shell owns the actual child handle and wait. The normalized
+  Windows slice is merged; remaining legacy consumer parity is still open.
 - [ ] Fence only same-worktree check/create races until mux discoverability.
   Recheck and join on contention; distinct worktrees remain parallel and no
   launch lock survives for Copilot's lifetime.
+  - [x] Land and qualify the shared Windows Picker/detached creation primitive;
+    preserve the separate seed and lifecycle owners. POSIX parity and removal
+    of broader tracked-launch serialization, plus the separate `pane_create`
+    new-session fallback, remain separate unchecked work.
 - [ ] Prepare launch arguments/environment before the stable wrapper; copy
   its self-contained platform shell into launch-owned storage outside both
   removable runtime/config roots, with installer/pruning ownership explicit.
@@ -220,6 +228,10 @@ retains these constraints; private host identity stays outside this repository.
   disposable installations, including native Windows rather than Linux proxies.
 - [ ] Exercise existing consumer paths and regressions; retain source/runtime
   identities and evidence that proves which build each result exercised.
+- [ ] Qualify real mux creation-client output-handle lifetime, including a fast
+  successful client return before the first discovery poll and inherited
+  descendant output handles. A healthy pane must not be retired or lose its
+  handoff because only a creation client or its output transport failed.
 - [ ] Fix failures found in the touched contract; transfer only genuinely
   independent work to named tracked objectives without dropping acceptance.
 
@@ -284,6 +296,14 @@ operator's installation-survival contract.
 - [ ] Real overlapping same-worktree attempts create one mux and join it;
   different-worktree launches overlap independently. Admission releases when
   the mux is discoverable, not when Copilot exits.
+  - [x] Windows native component controls cover Picker and
+    `sessions.mux_new_session`, actual shared kernel-lease release, literal
+    arguments and failure handoff retention (#9320). This does not qualify
+    actual PSMux, complete tracked-launch parallelism or the pane fallback.
+  - [ ] Expand native launch and all tracked-retirement readers to the same
+    separate per-worktree lifecycle lease while retaining the legacy repository
+    barrier. Qualify independently running retirement peers before migration
+    removes that barrier; source/payload freshness is not peer support.
 - [ ] Linux clean room: install A, launch an interactive owned session,
   actually uninstall both systems, prove their runtime roots are gone, install
   B, and exit. The same mux, wrapper and Copilot processes remain interactive;
@@ -353,6 +373,20 @@ and does not delay final Copilot exit indefinitely merely to deliver a lifecycle
 notice; the existing bounded/quiet absent-handler contract remains intact.
 
 ## Journal
+
+### 2026-10-27 - Literal POSIX preparation transport prerequisite
+
+- Added a provider-first NUL-delimited preparation reply to the existing finite
+  seed owner, with runtime-local read-only capability discovery and unchanged
+  default JSON. The [architecture contract](../../../plugins/agent-worktrees/docs/architecture.md)
+  owns field order, completion, environment replacement and unknown-outcome
+  semantics; the provider never starts or waits for a backend.
+- Focused controls cover literal fields and a real Bash reader without `eval`,
+  invalid-format/callback refusal before effects, and retained seed custody
+  after an unrepresentable reply. This prerequisite does not activate a copied
+  POSIX setup or remove either production Python waiter. Native POSIX process,
+  terminal, installer-removal and same-process acceptance remain open, as do
+  #5579's separately owned forwarding and whole-chain process-count outcomes.
 
 ### 2026-10-27 - Finite native prerequisite merged; live survival stays open
 
@@ -1285,3 +1319,157 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   installer changes and this PR's native helper deployment entry. Rebased
   validation and fresh review remain pending. No runtime was updated, no live
   session was stopped, and the parent Plan and Validation Plan remain open.
+
+### 2026-10-27 - Normalized Windows consumer merged; launch admission next
+
+- #9288 merged as `0fceb0024d139eccd0da739a212e5197889a11af` after exact-head
+  Copilot approval `5675119539`, required green checks and the managed
+  Maintainer merge flow. Windows run `40592162495`, job `122498894011`, pinned
+  to `5dd6070e1aa709226f7858b767d3e280ca120c5e`, passed seven focused cases,
+  16 deselected and no skips. The rebased complete native-shell file passed
+  all 15 cases locally. These close the bounded normalized Windows consumer
+  slice, not the general parity, live-session or installation-survival gates.
+- Re-read the canonical Plan and Validation Plan. Next implement and prove
+  same-worktree check/create exclusion only until mux discoverability, with
+  recheck/join on contention and parallel different-worktree launches. Retain
+  the existing seed and lifecycle authorities and #5579's forwarding ownership.
+- The same worktree continues this effort; it is not finalized. Automatic
+  squash pull-forward aborted safely; after verifying the merged tree exactly
+  matched the published local tree and retaining a recovery branch, advanced
+  onto current `dev` without replaying the already merged commits.
+- #9253 remains open under its installer/removal owner; the YAML intent
+  trackers #9022/#9040 are closed, but installed guidance delivery and the
+  surviving-session standby controls remain unverified here. Normal release
+  and authorized selected-host rollout have not been verified. No target
+  runtime, service, session, state or configuration was changed.
+
+### 2026-10-27 - Shared Windows mux creation candidate
+
+- Implemented one session-keyed kernel lease shared by the Windows Picker
+  and detached new-session primitive. Both recheck before creation and on
+  contention. The lease releases at native mux discovery even when the
+  creation client is still alive, before receipt waits, attach or backend
+  lifetime. The seed-admission lease is not reused.
+- Late joins do not build a second detached pane or claim/type a seed.
+  Picker contenders dispose only their unused handoffs and follow the
+  existing join/cold-seed policy. Bridge acquisition retains its live-mux
+  refusal; exact-restart receipts do not credit another creator's mux.
+  Failed native discovery cannot invoke creator cleanup, and failure cleanup
+  does not run after releasing the creation lease to other launchers.
+- The isolated engine packet passed 134 cases without skips, including two
+  cross-language native overlap controls. The related Manager packet passed
+  49 cases with ten POSIX-only skips on Windows. The overlap fixture is a
+  small system-compiled executable; earlier Python-proxy startup failures
+  were failed measurements, not reasons to extend the production query cap.
+  The strengthened actor-specific query handshake passed both native cases,
+  without skips, in 12.16 seconds. Owner imports finish behind a ready/go
+  preparation barrier before native creation begins. Local validation uses
+  the same 60-second per-test fixture budget as the selected CI lane; no
+  production phase, query or creation deadline was expanded.
+- Fixed seven encountered cold-seed test fixtures to answer the current
+  hosting-admission contract before modeling an older seed interface. No
+  production hosting policy was weakened. Install-contract validation passed
+  for all 13 runtime plugins.
+- The default-off, exact-SHA Windows acceptance job includes the two focused
+  overlap cases without expanding required unit CI. Draft #9320 published
+  head `f1f097ccfaa5aef7fed72746d39eff3a382ae8a0`; Windows run `40605886719`,
+  job `122545157686`, passed nine focused cases, 16 deselected and no skips,
+  in 81.04 seconds. This is native component acceptance, not rollout.
+- Direct final review found that a failed query after dispatch could be
+  mistaken for definite non-creation. Retain the pending pane arguments as
+  uncertain instead; the focused regression packet passed nine cases.
+  Required CI also caught growth beyond `sessions.py`'s shrink-only ceiling.
+  Move check/create orchestration into its existing mux-creation owner,
+  without widening the baseline. Fresh combined validation passed 135 cases,
+  without skips, and the focused native packet passed both cases with literal
+  spaces, embedded quotes, trailing backslashes and empty arguments.
+  The module-size gate passes without a baseline edit. Updated-head native
+  acceptance, review and required CI remain pending for that follow-up.
+- The follow-up head `c1ee29675ec65c5b55f30a04568e7b14065ea9c4` passed the
+  selected Windows job again (run `40609005414`, job `122555632654`):
+  nine passed, 16 deselected and no skips in 79.26 seconds.
+  Copilot review `5676376600` then found one High issue: a nonzero client
+  return after publication could still delete a live pane's manifest.
+  Preserve every dispatched engine client's uncertain handoff; Picker also
+  preserves receipt/token files after publication and skips both retry paths.
+- The review fix passed eleven engine failure/admission controls and all
+  thirteen Manager creation controls. Native overlap passed both directions
+  with literal arguments and a stale-exit-code sentinel. The fixture now
+  leaves the parent harness home unchanged and overrides only actor
+  environments; readiness diagnostics distinguish preparation from creation.
+  One preparation-only failure preceded that isolation correction and is not
+  production latency evidence. The opt-in Windows job additionally selects
+  the single published-failure/retained-handoff control.
+- Required CI caught missing launch-census classifications for the new
+  bounded client calls. Updated exact caller-contained counts and passed the
+  coverage guard, without adding a resident service or weakening a guard.
+  These review/census corrections still await publication, fresh review and
+  exact-head acceptance; the High thread remains open until the fix is up.
+- This is a bounded Windows creation primitive, not complete per-worktree
+  launch admission: the tracked engine lifecycle fence still serializes its
+  protected section across a repository, `pane_create` retains its separate
+  new-session fallback, and POSIX is unchanged. Those
+  requirements remain open rather than deleting the existing deletion-race
+  protection. Neither live installation, session custody, release/rollout nor
+  two-cycle removal acceptance has changed.
+
+### 2026-10-27 - Windows creation primitive merged; full admission continues
+
+- #9320 merged as `f1748bc4afa510b9dbb9cfd2633289e8fcf1251b` through the
+  managed Maintainer flow. Fresh Copilot review `5676713459` on exact head
+  `9569ab560923e27724d95b1d2e65d9e70ec06bf4` reported no open findings;
+  its clean `COMMENTED` verdict on this owner-authored PR satisfies repository policy.
+  The earlier High thread was fixed and resolved, and required CI was green.
+  A body-only validation update refreshed the required check; the first merge
+  remained blocked until that new check passed. No CI bypass was used.
+- Exact-head Windows run `40615486375`, job `122576873953`, passed nine
+  copied-setup/script/mux controls (16 deselected) in 77.77 seconds and the
+  Picker failure control (one passed, 12 deselected) in 0.72 seconds, with no
+  skips. These are native component results, not actual PSMux, live rollout or
+  installer-removal acceptance.
+- Re-read the canonical Plan and Validation Plan. Closed only the bounded
+  Windows primitive/component subitems. Kept whole-path admission, separate
+  pane creation, POSIX, real mux/terminal behavior, standby, release/installed
+  proof and both selected-host cycles open. The already merged #9253 removal
+  prerequisite remains distinct from those live gates.
+- Pull-forward aborted safely on squash replay. All 20 owned PR paths exactly
+  matched the merged tree; the remaining tree delta belonged to the separate
+  merged wheel-transport change #9319. Retained recovery refs and advanced
+  onto the verified merged default without replaying this PR's commits.
+- Next stretch: preserve deletion/reclaim safety while replacing the broad
+  tracked-launch lifecycle serialization with per-worktree admission. Inventory
+  the real destructive callers before changing their fence. Include the
+  `pane_create` fallback without changing explicit new-pane intent into
+  accidental seed delivery to an existing pane. Retain the existing seed owner
+  and coordinate #5579's separately owned forwarding work.
+- The same worktree continues this active effort and is not finalized.
+  No live installation, service, banner, native conversation or terminal was
+  changed. Source merge is not a containing release or installed proof.
+
+### 2026-10-27 - Provider-first per-worktree retirement fencing
+
+- Traced physical retirement through finalization, routine cleanup/reap-one,
+  explicit managed removal and the managed sweep. Each now takes a distinct
+  kernel lifecycle lease before its fresh record/liveness checks and retains it
+  through physical removal. Repository mutation locking and seed/native
+  admission remain separate; forced removal cannot skip this lease.
+- Compatibility review rejected immediate removal of the repo-wide launch
+  barrier: independently running older retirement owners do not understand
+  the new lease. The current slice expands both sides while preserving the
+  old barrier. Full launch parallelism remains unimplemented until qualified
+  peer support permits migration; no deployment or daemon restart is implied.
+- The contained focused regression packet passed 217 tests in 433.46 seconds
+  (710.34 seconds including preparation and cleanup). It covered lifecycle
+  exclusion/release, forced managed removal, cleanup revalidation, managed
+  sweeping and PR finalization rollback. An earlier aggregate-limit run did
+  not finish and is not counted as a pass. After the compatibility-barrier
+  correction, the final launch/embodiment packet passed 119 tests in 53.78
+  seconds (392.59 seconds including preparation and cleanup). Its real child
+  controls retain the legacy repository barrier while proving per-target
+  exclusion, independent leases and release after exit or termination.
+- Documentation impact: updated the plugin's native-admission reference,
+  this effort's launch contract and `TESTING.md`; no vision intent changed.
+  This is the provider-first expansion toward the existing per-worktree
+  exclusion intent, not closure of whole-path or either live cycle.
+- The effort remains Active in this same worktree. No selected-host backup,
+  installation, service, banner or native conversation has been changed.
