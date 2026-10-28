@@ -152,6 +152,15 @@ existing preparation/retention owner's accepted interface when available;
 never call activation as a staging shortcut or infer controlled adoption from
 source tests.
 
+The existing **Installation context full** manual workflow offers the
+`dispatch-maintenance` portfolio for focused native Windows qualification at its
+immutable dispatch SHA. Its three bounded packets cover real policy/overlay
+behavior, installer cleanup and retained runtime, and background-worker
+lifecycle using disposable roots and owned processes. Inspect actual test
+results and skips; PowerShell on WSL does not qualify those Windows boundaries.
+This optional portfolio does not add a required-PR gate, reenroll the unavailable
+full Windows rotation or authorize a production installation.
+
 ## Worker admission
 
 The production coordinator checks `worker-admission` before execution claims

@@ -508,3 +508,15 @@ Initial tests must prove the current gap before adding the guards.
 - Explicit unmatched-token controls and 1,000 deterministic compound comparisons
   per backend now pass. The integrated contained selection passed all 121 tests;
   native installer/lifecycle code is unchanged.
+
+### 2026-10-28 - Native Windows qualification gate
+
+- The next independent review requested actual Windows installer cleanup,
+  refusal propagation and background-worker boundaries, rather than counting
+  WSL PowerShell as that platform's evidence.
+- Extend the existing manual installation portfolio with three focused
+  Dispatch maintenance packets on native Windows. Pin and verify the dispatch
+  SHA, retain finite runner/test/job limits and disposable roots, and leave the
+  required unit-only PR gate and unavailable full Windows rotation unchanged.
+- Native execution and actual test outcomes remain pending; declaring the
+  workflow or copying fixtures does not establish qualification or adoption.
