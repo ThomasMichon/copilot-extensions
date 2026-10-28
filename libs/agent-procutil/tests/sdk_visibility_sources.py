@@ -36,6 +36,7 @@ SDK_FILES = (
     *(f"libs/installation-context/_installation_context_{name}.py" for name in FRAGMENT_FILES),
     "libs/installation-context/installation_context.py",
     "libs/installation-context/installation-context.ps1",
+    "libs/installation-context/shell-caller-owned.ps1",
     "libs/installation-context/_installation_context_worker.py",
     "libs/installation-context/daemon_instance_runtime.pyz",
     "libs/agent-procutil/tests/test_shell_caller_owned_native.py",

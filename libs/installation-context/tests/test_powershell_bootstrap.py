@@ -369,11 +369,13 @@ if ($LASTEXITCODE -ne 0 -or $result.canonical -cne ('opaque:' + $value)) {
 def test_unsupported_python_retains_diagnostic_when_request_pipe_closes(tmp_path, host):
     if host is None:
         pytest.skip("PowerShell is unavailable")
-    source = SCRIPT.read_text(encoding="utf-8")
+    transport = SCRIPT.with_name("shell-caller-owned.ps1")
+    source = transport.read_text(encoding="utf-8")
     guard = "if sys.version_info < (3,10):"
     assert source.count(guard) == 1
     copied = tmp_path / SCRIPT.name
-    copied.write_text(source.replace(guard, "if True:"), encoding="utf-8")
+    shutil.copyfile(SCRIPT, copied)
+    (tmp_path / transport.name).write_text(source.replace(guard, "if True:"), encoding="utf-8")
     (tmp_path / "installation_context.py").write_text(
         "raise AssertionError('unsupported Python reached application work')\n", encoding="utf-8",
     )

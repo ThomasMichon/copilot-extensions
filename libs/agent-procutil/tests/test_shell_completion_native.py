@@ -36,7 +36,7 @@ serve(callback, owner_pid=os.getppid(), owner_birth=None, nonce="a" * 32)
 
 def test_request_bootstrap_does_not_buffer_the_following_offer_permission(tmp_path: Path) -> None:
     sdk = Path(__file__).resolve().parents[3] / "libs/installation-context"
-    shell = (sdk / "installation-context.ps1").read_text(encoding="utf-8")
+    shell = (sdk / "shell-caller-owned.ps1").read_text(encoding="utf-8")
     bootstrap = shell.split("    $bootstrap = @'\n", 1)[1].split("\n'@", 1)[0]
     (tmp_path / "_installation_context_worker.py").write_text(
         "import os\n"
@@ -46,7 +46,7 @@ def test_request_bootstrap_does_not_buffer_the_following_offer_permission(tmp_pa
         encoding="utf-8",
     )
     request = base64.b64encode(json.dumps({
-        "sdk": str(tmp_path / "installation_context.py"),
+        "worker": str(tmp_path / "_installation_context_worker.py"), "request": {},
     }).encode()) + b"\noffer:coalesced-permission\n"
     process = subprocess.Popen(
         [sys.executable, "-I", "-S", "-B", "-c", bootstrap],

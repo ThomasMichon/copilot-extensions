@@ -449,6 +449,7 @@ def test_required_source_closure_covers_current_package_and_every_sdk_fragment()
     expected = {
         "libs/installation-context/" + name for name in ast.literal_eval(assignment.value)
     }
+    expected.add("libs/installation-context/shell-caller-owned.ps1")
     assert expected <= set(binding.SDK_FILES)
     binding.require_sdk_sources(
         ROOT, [{"path": str(ROOT / name)} for name in binding.SDK_FILES],

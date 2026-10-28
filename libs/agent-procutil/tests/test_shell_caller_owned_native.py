@@ -157,6 +157,7 @@ def test_startup_receipt_failure_releases_input_before_waiting_for_worker(tmp_pa
     source = tmp_path / "sdk"
     source.mkdir()
     shutil.copyfile(SDK / "installation-context.ps1", source / "installation-context.ps1")
+    shutil.copyfile(SDK / "shell-caller-owned.ps1", source / "shell-caller-owned.ps1")
     (source / "installation_context.py").write_text("", encoding="utf-8")
     (source / "_installation_context_worker.py").write_text(
         "import json,os,sys\n"
@@ -345,7 +346,8 @@ def test_sdk_scope_retires_before_observer_cleanup(tmp_path, host, composition, 
     source = tmp_path / "sdk"
     source.mkdir()
     for name in (
-        "installation-context.ps1", "_installation_context_worker.py", "daemon_instance_runtime.pyz",
+        "installation-context.ps1", "shell-caller-owned.ps1",
+        "_installation_context_worker.py", "daemon_instance_runtime.pyz",
     ):
         shutil.copyfile(SDK / name, source / name)
     (source / "installation_context.py").write_text(BODY, encoding="utf-8")
@@ -420,3 +422,167 @@ def test_sdk_scope_retires_before_observer_cleanup(tmp_path, host, composition, 
                 parent.wait(3)
             parent.stdout.close()
             parent.stderr.close()
+
+
+CELL_HASH_WORKER = r'''
+import os, runpy, sys, time
+from pathlib import Path
+sys.path.insert(0, os.environ["SHELL_CALLER_TEST_HELPERS"])
+from caller_owned_fixture import identity
+import json
+
+def main(request):
+    cell = runpy.run_path(os.environ["CELL_CALLER_TEST_SOURCE"])
+    def blocked_identity(payload, version):
+        root = Path(os.environ["SHELL_CALLER_TEST_ROOT"])
+        identities = [identity()]
+        if os.getppid() != int(os.environ["SHELL_CALLER_TEST_PS_OWNER"]):
+            identities.append(identity(os.getppid()))
+        pending = root / "pending.json"
+        pending.write_text(json.dumps({"identities": identities}), encoding="utf-8")
+        pending.replace(root / "ready.json")
+        (root / "published").touch(exist_ok=False)
+        time.sleep(25)
+        (root / "forbidden-after-hash").touch()
+        raise RuntimeError("blocked hash was not retired")
+    real_identity = cell["payload_identity"]
+    def observed_identity(payload, version):
+        identities = [identity()]
+        if os.getppid() != int(os.environ["SHELL_CALLER_TEST_PS_OWNER"]):
+            identities.append(identity(os.getppid()))
+        os.environ["CELL_CALLER_TEST_OUTER"] = json.dumps(identities)
+        return real_identity(payload, version)
+    cell["watchdog"].__globals__["payload_identity"] = (
+        blocked_identity if os.environ["CELL_CALLER_TEST_PHASE"] == "hash" else observed_identity
+    )
+    return cell["main"](request)
+'''
+
+CELL_HARNESS = r'''
+param([string]$Source, [string]$Worker, [string]$Root, [int]$Deadline)
+$ErrorActionPreference = 'Stop'
+$env:SHELL_CALLER_TEST_PS_OWNER = [string]$PID
+$request = @{
+    argv = @($env:CELL_CALLER_TEST_PYTHON, '-I', '-B', '-X', 'utf8',
+        (Join-Path $Root 'installer.py'))
+    cwd = $Root
+    payload = (Join-Path $Root 'payload')
+    timeout = 30
+}
+& $Source -Worker $Worker -Request $request -TimeoutSeconds $Deadline
+exit $LASTEXITCODE
+'''
+
+
+@pytest.mark.parametrize("host", HOSTS or [None])
+@pytest.mark.parametrize("mode", ["deadline", "caller-exit"])
+@pytest.mark.parametrize("phase", ["hash", "installer"])
+def test_cell_work_is_bound_to_original_shell_and_whole_deadline(tmp_path, host, mode, phase):
+    if host is None:
+        pytest.skip("PowerShell is unavailable")
+    root = tmp_path / "payload"
+    root.mkdir()
+    (root / "plugin.json").write_text('{"name":"agent-machines","version":"1.0"}')
+    (root / "pyproject.toml").write_text('[project]\nversion = "1.0"\n')
+    (tmp_path / "installer.py").write_text(
+        "import json,os,subprocess,sys,time\n"
+        "from pathlib import Path\n"
+        "sys.path.insert(0, os.environ['SHELL_CALLER_TEST_HELPERS'])\n"
+        "from caller_owned_fixture import identity\n"
+        "child = subprocess.Popen([sys.executable, '-I', '-c', 'import time;time.sleep(25)'], "
+        "creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)\n"
+        "identities = [*json.loads(os.environ['CELL_CALLER_TEST_OUTER']), identity(), identity(child.pid)]\n"
+        "root = Path(os.environ['SHELL_CALLER_TEST_ROOT'])\n"
+        "pending = root / 'pending.json'\n"
+        "pending.write_text(json.dumps({'identities':identities}), encoding='utf-8')\n"
+        "pending.replace(root / 'ready.json')\n"
+        "(root / 'published').touch(exist_ok=False)\n"
+        "time.sleep(25)\n"
+        "(root / 'forbidden-after-hash').touch()\n",
+        encoding="utf-8",
+    )
+    worker = tmp_path / "worker.py"
+    worker.write_text(CELL_HASH_WORKER, encoding="utf-8")
+    harness = tmp_path / "caller.ps1"
+    harness.write_text(CELL_HARNESS, encoding="utf-8")
+    environment = {
+        **os.environ,
+        "SHELL_CALLER_TEST_ROOT": str(tmp_path),
+        "SHELL_CALLER_TEST_HELPERS": str(Path(__file__).parent),
+        "CELL_CALLER_TEST_SOURCE": str(ROOT / "plugins/agent-machines/scripts/cell_installer.py"),
+        "CELL_CALLER_TEST_PHASE": phase,
+        "CELL_CALLER_TEST_PYTHON": sys.executable,
+    }
+    observer = _linux_observer() if os.name != "nt" else nullcontext()
+    with observer, ExitStack() as cleanup:
+        started = time.monotonic()
+        parent = subprocess.Popen(
+            [host, "-NoProfile", "-NonInteractive", "-File", str(harness),
+             "-Source", str(SDK / "shell-caller-owned.ps1"), "-Worker", str(worker),
+             "-Root", str(tmp_path), "-Deadline", "4" if mode == "deadline" else "30"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
+            env=environment, **no_window_kwargs(),
+        )
+        try:
+            report = _wait(
+                lambda: _ready_report(parent, tmp_path), 3,
+                "cell hash did not publish its closed readiness witness",
+            )
+            pins = []
+            for identity in report["identities"]:
+                pin = PinnedProcess(identity)
+                cleanup.callback(pin.close)
+                cleanup.callback(pin.kill)
+                pins.append(pin)
+            assert all(not pin.gone() for pin in pins)
+            if mode == "caller-exit":
+                parent.kill()
+            stdout, stderr = parent.communicate(timeout=6)
+            _wait(
+                lambda: all(pin.gone() for pin in pins), 3,
+                "cell hash survived original PowerShell retirement",
+            )
+            assert time.monotonic() - started < 10
+            assert not (tmp_path / "forbidden-after-hash").exists()
+            if mode == "deadline":
+                assert parent.returncode == 124, stdout + stderr
+                assert "WATCHDOG" in stderr
+                assert "unconfirmed" not in stderr, stderr
+            else:
+                assert parent.returncode != 0
+        finally:
+            if parent.poll() is None:
+                parent.kill()
+                parent.wait(3)
+            parent.stdout.close()
+            parent.stderr.close()
+
+
+@pytest.mark.parametrize("host", HOSTS or [None])
+def test_cell_transport_round_trips_utf8_with_legacy_output_environment(tmp_path, host):
+    if host is None:
+        pytest.skip("PowerShell is unavailable")
+    root = tmp_path / "payload"
+    root.mkdir()
+    (root / "plugin.json").write_text('{"name":"agent-machines","version":"1.0"}')
+    (root / "pyproject.toml").write_text('[project]\nversion = "1.0"\n')
+    (tmp_path / "installer.py").write_text(
+        "import sys\nprint('result \\u03bb')\n"
+        "sys.stderr.write('diagnostic \\u03bb\\n')\nsys.exit(7)\n",
+        encoding="utf-8",
+    )
+    harness = tmp_path / "caller.ps1"
+    harness.write_text(CELL_HARNESS, encoding="utf-8")
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-File", str(harness),
+         "-Source", str(SDK / "shell-caller-owned.ps1"),
+         "-Worker", str(ROOT / "plugins/agent-machines/scripts/cell_installer.py"),
+         "-Root", str(tmp_path), "-Deadline", "10"],
+        capture_output=True, text=True, encoding="utf-8", timeout=15,
+        env={**os.environ, "PYTHONIOENCODING": "ascii", "PYTHONUTF8": "0",
+             "CELL_CALLER_TEST_PYTHON": sys.executable},
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 7, result.stdout + result.stderr
+    assert result.stdout == "result \u03bb\n"
+    assert result.stderr == "diagnostic \u03bb\n"

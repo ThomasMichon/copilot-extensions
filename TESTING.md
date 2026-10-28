@@ -225,6 +225,11 @@ The separate Linux-only `test_shell_completion_native.py` checks actual
 returned and abrupt exits with both zero and nonzero statuses. It requires the
 callback-return witness independently of the reaped status and does not
 repeat the desktop matrix or qualify Windows behavior.
+Separate cell-caller cases in the same native test file exercise original-shell
+loss and the shared deadline while payload hashing is blocked and while a real
+nested installer owns a descendant. A transport case returns non-ASCII stdout
+and stderr despite a legacy Python output environment. These are not added to
+the opt-in 44-case SDK desktop roster and do not replace its qualification.
 The fixture's identity report is admitted only after a separate marker confirms
 the producer completed its closed-file publication. A failed admitted read stays
 an error; the fixture does not suppress permissions failures or retry them as a pass.

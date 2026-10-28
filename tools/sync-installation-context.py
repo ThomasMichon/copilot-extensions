@@ -56,6 +56,7 @@ FILES = (
     ARCHIVE_NAME,
     "installation-context.sh",
     "installation-context.ps1",
+    "shell-caller-owned.ps1",
     "plugin-publication-probe.ps1",
     "plugin-publication-probe.sh",
     "guest-environment.ps1",

@@ -77,6 +77,48 @@ def test_release_hash_also_binds_source_identity_metadata(helper, payload):
     assert helper.payload_identity(payload, VERSION) != first
 
 
+@pytest.mark.parametrize("relative", (
+    "__pycache__/cached.pyc", ".venv/cached.py", ".git/config", "build/generated.py",
+    "dist/generated.whl", "project.egg-info/metadata", "nested/snapshot-provenance.json",
+))
+def test_release_hash_binds_generated_and_cached_bytes(helper, payload, relative):
+    expected = helper.payload_identity(payload, VERSION)
+    path = payload / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"first")
+    first = helper.payload_identity(payload, VERSION)
+    assert first != expected
+    path.write_bytes(b"second")
+    assert helper.payload_identity(payload, VERSION) != first
+    path.rename(path.with_name("renamed"))
+    assert helper.payload_identity(payload, VERSION) != first
+
+
+@pytest.mark.parametrize("directory", (False, True))
+def test_release_hash_rejects_linked_payload_inputs(helper, payload, directory, monkeypatch):
+    link = payload / "linked"
+    if directory:
+        link.mkdir()
+    else:
+        link.write_text("linked bytes")
+    original = Path.lstat
+    monkeypatch.setattr(Path, "lstat", lambda path: (
+        SimpleNamespace(st_mode=0o120777) if path == link else original(path)
+    ))
+    with pytest.raises(RuntimeError, match="ordinary files and directories"):
+        helper.payload_identity(payload, VERSION)
+
+
+def test_release_hash_propagates_incomplete_inventory(helper, payload, monkeypatch):
+    def incomplete(*_args, onerror, **_kwargs):
+        onerror(PermissionError("controlled incomplete walk"))
+        yield
+
+    monkeypatch.setattr(helper.os, "walk", incomplete)
+    with pytest.raises(PermissionError, match="controlled incomplete walk"):
+        helper.payload_identity(payload, VERSION)
+
+
 @pytest.fixture
 def owned_runner(monkeypatch):
     calls = []
@@ -138,6 +180,37 @@ def test_watchdog_refuses_unbounded_deadlines(helper, payload, timeout, owned_ru
     with pytest.raises(ValueError, match="finite and positive"):
         helper.watchdog(request)
     assert owned_runner[0] == []
+
+
+def test_worker_binds_original_caller_before_payload_identity(helper, payload, monkeypatch, owned_runner):
+    admitted = False
+    events = []
+    package = sys.modules["agent_procutil"]
+    transport = ModuleType("agent_procutil._shell_caller_owned")
+
+    def serve(callback, **lifetime):
+        nonlocal admitted
+        assert lifetime == {"owner_pid": 123, "owner_birth": "birth", "nonce": "nonce"}
+        events.append("admitted")
+        admitted = True
+        return callback()
+
+    real_identity = helper.payload_identity
+
+    def identity(root, version):
+        assert admitted, "payload I/O ran before original-caller custody"
+        events.append("hashed")
+        return real_identity(root, version)
+
+    transport.serve = serve
+    monkeypatch.setattr(package, "_shell_caller_owned", transport, raising=False)
+    monkeypatch.setitem(sys.modules, transport.__name__, transport)
+    monkeypatch.setattr(helper, "payload_identity", identity)
+    assert helper.main({
+        **_request(payload),
+        "lifetime": {"owner_pid": 123, "owner_birth": "birth", "nonce": "nonce"},
+    }) == 7
+    assert events == ["admitted", "hashed"]
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux exact-birth process-group qualification")

@@ -191,7 +191,6 @@ if ($cellSlotAction) {
     Set-Location -LiteralPath $env:USERPROFILE
     [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
     if (-not $CellWatchdogChild) {
-        $python = @(Get-Command python -CommandType Application -ErrorAction Stop)[0]
         $deadline = 480
         $deadlineText = $env:AGENT_MACHINES_INSTALL_DEADLINE_SEC
         if (-not $deadlineText) { $deadlineText = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC }
@@ -213,17 +212,11 @@ if ($cellSlotAction) {
             cwd = $env:USERPROFILE
             payload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
             timeout = $deadline
-        } | ConvertTo-Json -Depth 4 -Compress
-        $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($request))
-        $watchdogError = ''
-        $watchdogOutput = Invoke-Hidden -FilePath $python.Path -ArgList @(
-            '-I', '-B', (Join-Path $PSScriptRoot 'cell_installer.py'),
-            'watchdog', '--request-base64', $encoded
-        ) -ErrorOutput ([ref]$watchdogError)
-        $watchdogStatus = $LASTEXITCODE
-        [Console]::Out.Write($watchdogOutput)
-        [Console]::Error.Write($watchdogError)
-        exit $watchdogStatus
+        }
+        & (Join-Path $PSScriptRoot 'installation-context/shell-caller-owned.ps1') `
+            -Worker (Join-Path $PSScriptRoot 'cell_installer.py') `
+            -Request $request -TimeoutSeconds $deadline
+        exit $LASTEXITCODE
     }
 }
 

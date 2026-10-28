@@ -113,7 +113,7 @@ def test_all_sdk_adapters_are_counted_as_caller_contained_not_resident():
     root = Path(__file__).resolve().parents[1]
     census = json.loads((root / "tools/daemon-coverage.json").read_text(encoding="utf-8"))
     adapters = sorted((root / "plugins").glob(
-        "*/scripts/installation-context/installation-context.ps1",
+        "*/scripts/installation-context/shell-caller-owned.ps1",
     ))
     assert adapters
     for path in adapters:
@@ -122,6 +122,9 @@ def test_all_sdk_adapters_are_counted_as_caller_contained_not_resident():
         assert GUARD.native_sites(path.read_text(encoding="utf-8")) == {
             ("<script>", "Process.Start"): 1,
         }
+        sdk = path.with_name("installation-context.ps1").read_text(encoding="utf-8")
+        assert GUARD.native_sites(sdk) == {}
+        assert "'shell-caller-owned.ps1'" in sdk
         assert all(
             key not in sites for kind, sites in census["sites"].items()
             if kind != "caller-contained"

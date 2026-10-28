@@ -95,8 +95,14 @@ its whole working set rolled back.
   callback-return witness matching the reaped child's status; an abrupt
   `os._exit(0)` cannot attest a successful callback. Each shipped adapter's
   synchronous worker is counted as caller-contained in the lifecycle census,
-  not a separately leased resident daemon. The 30-second startup bound does not add
-  an application deadline; existing action/lock deadlines remain unchanged.
+  not a separately leased resident daemon. The co-located
+  `shell-caller-owned.ps1` owns this stock-.NET transport for the SDK and the
+  cell installer, with explicit UTF-8 producer and decoder settings. Its optional
+  application deadline starts before worker launch and covers request delivery,
+  custody admission, callback I/O and capture waits; retirement retains the
+  existing bounded cleanup and reports uncertainty rather than success.
+  The SDK does not select an application deadline: its 30-second startup bound
+  and existing action/lock deadlines remain unchanged.
   The original input stream is retained before closing its writer, because
   .NET Framework and Core differ on the disposed writer's `BaseStream`.
   Request-write failure retains the child's prerequisite diagnostic within
