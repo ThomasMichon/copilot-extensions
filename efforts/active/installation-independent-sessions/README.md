@@ -206,6 +206,9 @@ and [repair register](reconstruction-findings.md) retain the evidence and limits
   contract discovery (#9318), without activating a POSIX lifetime owner.
 - [x] Land the dormant Bash frame reader and copied POSIX setup assets (#9321);
   keep bounded callback execution and native lifetime activation separate.
+- [x] Land and natively qualify the dormant finite POSIX phase transport
+  (#9395), including shared read/EOF deadlines and provider-group settlement.
+  Production selection, exact process birth and backend lifetime remain open.
 - [ ] Remove both deferred-setup and final-backend runtime-Python waiters.
   Reuse finite seed preparation, existing seed custody and execution receipts;
   the native shell owns the actual child handle and wait. The normalized
@@ -420,6 +423,28 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
 
 ## Journal
 
+### 2026-10-28 - Provider-owned setup birth prerequisite
+
+- The continuing POSIX trace found that setup needs the existing shell PID's
+  canonical birth token before any preparation effect. Resolve an omitted
+  setup token inside the existing finite provider with `locks.process_start_time`,
+  not a second Bash ABI or prerequisite identity RPC. Advertise the optional
+  source through the existing read-only contract descriptor. Existing
+  caller-supplied tokens, default JSON, NUL frames and backend callbacks remain
+  unchanged; no production consumer omits the token yet.
+- New regressions reproduced omitted-token refusal in both seeded and
+  admission-only setup. A related existing gap left only `execution-requested`
+  when the owner's birth changed during preparation. The candidate now records
+  that post-effect uncertainty and never records a confirmed setup spawn or
+  releases staged intent for replay. Invalid/unreadable identity still refuses
+  before receipts or seed effects.
+- The focused Windows provider/pending-seed packet passes 68 controls, including
+  actual contract-description execution, current-kernel identity reads,
+  JSON/NUL compatibility and retained seed custody. Native Linux/macOS provider
+  acceptance, required gates and review remain pending. This does not activate
+  POSIX setup/backend lifetime or close fast-exit, stdin/TTY/signal, release,
+  live removal, standby or selected-host gates.
+
 ### 2026-10-28 - Cold embodiment setup-asset gap
 
 - Production tracing isolated a separate actual consumer: cold `embody` builds
@@ -496,6 +521,29 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
 
 ### 2026-10-28 - Finite POSIX transport qualification
 
+- #9395 merged as `25661575c6d9757b14e46562d946c164887b40ba` after exact-head
+  Copilot review `5682513310` on
+  `c72607e541fc944e8a95730adb6c99f083479e9b`. Its clean owner-authored
+  `COMMENTED` verdict had no open findings; the overview's pending-macOS
+  observation was superseded by completed run `40686894227` on that same head.
+  Linux Bash 5.2.21 and stock macOS Bash 3.2.57 each passed 66 controls with
+  17 Windows-only skips; Windows passed nine setup/admission controls and the
+  independent Picker-handoff control. The final unit packet passed 2,565 with
+  12 deselected in 91.687 seconds, coverage recorded once.
+- Both inline findings are resolved. A fresh metadata-triggered required gate
+  briefly blocked managed merge; the required-check watcher confirmed all
+  green before the successful retry. The normal Maintainer exception covered
+  only the additional CODEOWNER vote. Post-merge reconciliation retained a
+  recovery ref and proved the complete local PR delta matched the actual
+  squash delta before advancing only that merged range; no unmerged work was
+  discarded.
+- Re-read the parent Plan and Validation Plan after merge. Closed only the
+  dormant finite-transport prerequisite. Continue capability/rollback
+  selection and canonical process-birth integration before activating the
+  copied POSIX backend lifetime. Preserve #5579's forwarding ownership,
+  existing seed/execution receipts, terminal/stdin/signal semantics and all
+  real-removal, maintenance-standby and release/installed acceptance gates.
+  The effort remains Active; no live installation, session or rollout changed.
 - Added the dormant copied phase transport: reselect the owning root's current
   completed runtime at each boundary, retain literal reply bytes on a pipe,
   require actual successful producer exit and settle the finite provider group.
@@ -554,6 +602,11 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   The local corrected packet passed 78 with five native-POSIX skips,
   including actual control-write failure. This newer candidate still requires
   its own native packet and accepted review.
+- Run `40685597320` later completed with a provider-side macOS runner-acquisition
+  failure: no hosted runner acquired the job after repeated capacity attempts.
+  Its cancelled macOS job executed no test code and supplies no macOS pass.
+  The separately completed final run `40686894227` above is the native evidence;
+  no old run was retried or relabeled as successful.
 - Capability/rollback selection, canonical process-birth capture, backend
   custody and foreground terminal/signal behavior remain the next integration
   gates. Neither POSIX runtime waiter is removed, and no host installation,

@@ -149,6 +149,13 @@ The existing optional installation-context acceptance workflow's `native_launch`
 input also selects this focused reader/phase/copy packet on Linux and macOS, using
 `/bin/bash` and explicitly requiring stock macOS Bash 3.2. It stays outside
 required PR CI; the Windows terminal packet selected by that input is unchanged.
+That packet also explicitly selects `test_launch_seed_native.py` so the
+setup-only provider birth query exercises the canonical native OS helper,
+not a Bash ABI substitute. It covers caller-provided identity compatibility,
+provider-query JSON/NUL reply and seed-custody parity, pre-effect refusal of
+unreadable/invalid identity, and PID/birth replacement during preparation becoming
+unknown. Backend spawn callbacks still refuse omitted birth tokens; the actual
+read-only descriptor advertises the setup capability without preparing a launch.
 The real PowerShell
 seed-delivery consumer uses the existing finite process-tree owner so a timeout
 settles descendants rather than blocking on inherited capture pipes.

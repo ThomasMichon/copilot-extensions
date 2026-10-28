@@ -627,6 +627,23 @@ Both preparation forms reject an empty executable before any seed claim or
 process query; the NUL encoder and reader retain the same nonempty-executable
 rule. Empty subsequent arguments remain supported.
 
+For `setup` only, an omitted `--process-start-time` asks that same preparation
+owner to obtain the supplied PID's birth token through `locks.process_start_time`.
+The token is verified before effects and again after preparation, before
+recording the existing setup owner. Missing/unreadable birth, an invalid PID,
+or an explicitly empty/mismatched token refuses; a changed incarnation after
+preparation records `unknown`, not a confirmed spawn or automatic replay.
+The read-only descriptor advertises this additive behavior in
+`setup_process_start_time_sources: ["caller", "provider"]`. Existing callers
+continue supplying their token unchanged, and the JSON/NUL preparation replies
+are unchanged. No caller selects provider-query mode yet: a future consumer
+must establish this capability on its selected runtime before omitting the
+token and handle supported rollback without replaying effects. Backend
+`spawned` callbacks still require the native child's captured birth token;
+this setup-only query is neither a retained child handle nor backend
+exec/terminal/signal qualification. No Bash-specific process ABI, separate
+identity command, subprocess preflight or lifetime helper is introduced.
+
 The NUL reply is one fully encoded UTF-8 byte sequence, with a NUL after every
 field, in this order:
 
