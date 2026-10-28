@@ -54,6 +54,10 @@ activity when needed.
   packages, exit criteria and permitted transitions. The efforts plugin owns
   this process aide and any optional local helpers; ordinary planning does
   not depend on adopting it.
+- **Worktree-specific agenda** belongs to the continuing agent, alongside its
+  worktree journal. It draws from assigned efforts, tasks and asides and retains
+  execution position and work stack across sessions; canonical source contracts
+  stay with their existing owners.
 - **Nested continuation** preserves the parent objective and return position
   while an agent follows a child effort, then refreshes the parent's agenda
   when the child's own completion gate is met.

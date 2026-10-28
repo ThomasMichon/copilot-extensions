@@ -199,6 +199,28 @@ Ctrl+C, pane-Job or installation-survival evidence. Whole copied-setup controls
 exercise the actual parameter binder, literal argv (including date-shaped
 strings), child ownership, correlated returns and absent end. POSIX native
 integration remains separate.
+The optional native-launch Linux/macOS jobs also select
+`tests/native/test_native_seed_exec_posix.py`. It invokes the dormant
+exec-replacement phase beneath stock Bash, checking the same PID and canonical
+birth across exec, exact literal argv/stdin/streams, actual success/nonzero/
+signal exit, closed exec-pipe descriptors, no observer child under the backend,
+definite exec-error restoration, fast-exit uncertainty and a bounded observer
+timeout without replay. Actual SIGINT and encoding-loss controls keep the
+pre-exec helper alive long enough to disprove success-shaped EOF.
+An interrupt followed by an otherwise successful exec must refuse that exec,
+not depend on a following encoding error to preserve unknown custody.
+Non-Python `/bin/sh` controls send each available interpreter-ignored signal
+to the actual exec-replaced process and require signal termination rather
+than a following exit. Failure/interruption controls also require restoration
+of the helper's original signal handlers on unwind.
+A separate actual SIGINT during failed-exec handler restoration requires
+non-success publication, closed pipe ownership and retained definite-failure
+seed restoration, not a false spawned receipt.
+It uses the real seed
+and execution owners in disposable state, not a production launcher or host
+installation. These provider controls do not establish copied POSIX consumer
+activation, physical-terminal Ctrl+C, real Copilot or supported uninstall
+survival. Required unit-only PR CI remains unchanged.
 Closed stdout/stderr reader controls exceed pipe capacity and require both
 actual child completion and the correlated return. Separate native controls
 split PowerShell's selected location from the OS process directory and assert

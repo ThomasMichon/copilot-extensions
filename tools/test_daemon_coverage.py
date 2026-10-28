@@ -104,6 +104,11 @@ def test_session_host_direct_serve_is_the_admitted_startup_owner():
     assert census["admission_owners"]["b:session_host/host.py"] == [key]
 
 
+def test_posix_exec_intermediary_and_observer_keep_caller_containment():
+    census = json.loads(Path(__file__).with_name("daemon-coverage.json").read_text(encoding="utf-8"))
+    assert census["sites"]["caller-contained"]["w:launch_seed_posix.py::execute::fork"] == 2
+
+
 def test_counted_classification_cannot_cover_second_launch(tmp_path):
     fixture(tmp_path, "def serve(argv):\n    Popen(argv)\n    Popen(argv)\n", {
         "caller-contained": {"s:service.py::serve::Popen": 1},

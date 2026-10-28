@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "worktree": "replace-with-the-assigned-worktree-or-lane-identity",
+  "revision": 0,
+  "status": "working",
+  "max_depth": 3,
+  "max_detours_without_progress": 2,
+  "detours_without_progress": 0,
+  "frames": [
+    {
+      "agenda": "agenda.json",
+      "agenda_revision": "replace-with-reviewed-definition-identity",
+      "node": "implement",
+      "visits": {"implement": 1},
+      "evidence": [],
+      "next_action": "Read the assigned implementation requirement and identify the focused regression case.",
+      "return_to": null
+    }
+  ],
+  "queue": [],
+  "parked": []
+}

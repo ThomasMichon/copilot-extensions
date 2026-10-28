@@ -657,6 +657,50 @@ this setup-only query is neither a retained child handle nor backend
 exec/terminal/signal qualification. No Bash-specific process ABI, separate
 identity command, subprocess preflight or lifetime helper is introduced.
 
+The dormant POSIX `exec` phase is a separate, optional backend execution mode,
+advertised as `backend_execution_modes: ["posix-exec-v1"]` by that same selected
+POSIX runtime (the Windows list is empty). It takes the original prepared
+correlation/operation, literal backend command and an empty
+`.native-seed-exec.*` status file in the launch-owned
+`.shell` directory. It does not prepare or claim a second prompt. The helper
+exec-replaces the native shell's foreground child, preserving its PID, canonical
+birth, streams and process group; Python never waits for the backend's lifetime.
+A double-forked observer uses a close-on-exec error pipe, following the POSIX
+subprocess spawn convention, then calls the existing spawn or definite-failure
+owner. The intermediary is reaped before exec, so the backend inherits no
+observer child or zombie. The observer remains in caller containment, ignores
+only terminal interrupt/quit, and is bounded to ten seconds plus a one-second
+hard termination grace. It writes only `0` or `3`, never prompt/argv/environment
+bytes, to the private completion file.
+
+The exec pipe is not backend readiness or application acknowledgement. A fast
+exit before the live PID/birth check, observer loss, or incomplete observation
+retains an unknown handoff rather than restoring a successfully executed
+prompt. Catchable interruption or encoding failure emits an unknown marker before
+closing the pipe, not success-shaped EOF. As with the POSIX subprocess
+error-pipe convention, uncatchable death at the exec boundary cannot be
+distinguished from exec followed immediately by death; PID/birth is identity
+evidence, not a separate kernel exec attestation.
+Before exec, the helper restores `SIGPIPE` and the available `SIGXFZ` /
+`SIGXFSZ` dispositions to default, matching the prior subprocess boundary.
+If exec unwinds, it restores the helper's original handlers before reporting
+failure or uncertainty; CPython's ignored dispositions do not reach a
+non-Python backend.
+During the exec attempt, caught `SIGINT` immediately enters interrupted cleanup
+and refuses exec, including an interrupt inside Python's PATH search. Only
+cleanup-time interrupts are deferred until the non-success marker is published,
+the pipe is closed and the helper's handlers are restored. Successful exec
+resets the caught handler in the kernel. An already ignored `SIGINT` remains
+ignored. Cleanup-time interruption cannot turn a failed exec into success-shaped
+EOF.
+Only the explicit exec-error path permits restoration. A future native
+consumer must discover this capability before invoking the new phase, retain
+the actual foreground wait and exit code, settle the finite status boundary,
+and resolve the return handler afresh. No production caller selects this mode
+yet. Ordinary provider syntax/default replies and Windows child-handle
+ownership are unchanged; copied setup activation, actual TTY/Ctrl+C behavior
+and installation-removal acceptance remain separate work.
+
 The NUL reply is one fully encoded UTF-8 byte sequence, with a NUL after every
 field, in this order:
 
