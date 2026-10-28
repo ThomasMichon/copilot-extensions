@@ -5,9 +5,9 @@ from __future__ import annotations
 import hashlib
 import os
 import subprocess
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Callable, Mapping, Sequence
+from typing import Callable, Mapping
 
 import instruction_delivery as delivery
 
@@ -121,10 +121,8 @@ def ignored_local_paths(root: Path, relatives: list[str]) -> set[str]:
         return set()
 
 
-def resolve_source(
+def resolve_reviewed(
     root: Path, entry: Mapping[str, object], io: DeliveryIO,
-    canonical: tuple[bytes, bytes] | None = None,
-    canonical_error: str = "enabled canonical payload unavailable",
 ) -> dict[str, object]:
     fallback_raw = read_fallback(root, entry, io)
     reviewed_path = str(entry["destination"])
@@ -140,33 +138,6 @@ def resolve_source(
     reviewed = delivery.parse_marker(fallback_raw)
     delivery.validate_candidate(reviewed, entry)
     selected, marker, raw = reviewed_path, reviewed, fallback_raw
-    local_paths = [
-        delivery.local_destination(str(entry["destination"])),
-        delivery.legacy_local_destination(str(entry["destination"])),
-    ]
-    diagnostic: str | None = None
-    for local_path in local_paths:
-        try:
-            candidate = io.safe(root, PurePosixPath(local_path))
-            if not candidate.exists():
-                continue
-            candidate_raw = io.read(candidate, 2 * 1024 * 1024)
-            candidate_marker = delivery.parse_marker(candidate_raw)
-            delivery.validate_candidate(candidate_marker, entry)
-            if candidate_marker["renderedBytes"] != len(candidate_raw):
-                raise ValueError("local byte count mismatch")
-            if candidate_marker.get("deliveryKind") == "selector":
-                raise ValueError("local candidate is not a body")
-            delivery.validate_local_template(candidate_raw, candidate_marker)
-            if canonical is None:
-                raise ValueError(canonical_error)
-            if candidate_raw not in canonical:
-                raise ValueError("local candidate differs from enabled canonical render")
-            if delivery.local_wins(candidate_marker, reviewed):
-                selected, marker, raw = local_path, candidate_marker, candidate_raw
-                break
-        except (OSError, ValueError, KeyError, TypeError) as exc:
-            diagnostic = f"local candidate rejected: {exc}"
     return {
         "schema": "copilot-extensions.instruction-source-selection",
         "version": 1,
@@ -178,32 +149,8 @@ def resolve_source(
         ),
         "receiptCapable": delivery.complete_body(raw, marker),
         "modelAdmission": "unknown",
-        "diagnostic": diagnostic,
+        "diagnostic": None,
     }
-
-
-def resolve_authenticated(
-    root: Path, destination: str, entries: Mapping[str, Mapping[str, object]],
-    specs: Sequence[delivery.Projection], io: DeliveryIO,
-) -> dict[str, object]:
-    matches = [spec for spec in specs if spec.destination == destination]
-    if destination not in entries:
-        if io.safe(root, PurePosixPath(destination)).exists():
-            raise ValueError("unpaired source requires verified enabled declarations")
-        if len(matches) != 1:
-            raise ValueError("unpaired source requires verified enabled declarations (unambiguous)")
-        current, legacy = delivery.canonical_renders(matches[0])
-        return resolve_unpaired(root, destination, current, legacy, io)
-    canonical = None
-    error = "enabled canonical payload unavailable or ambiguous"
-    if len(matches) == 1:
-        try:
-            canonical = delivery.canonical_renders(matches[0])
-            delivery.validate_candidate(delivery.parse_marker(canonical[0]), entries[destination])
-        except ValueError as exc:
-            canonical = None
-            error = f"enabled canonical payload rejected: {exc}"
-    return resolve_source(root, entries[destination], io, canonical, error)
 
 
 def plan_fallback_change(
@@ -261,45 +208,6 @@ def require_untracked(
         raise ValueError("local body became tracked or tracking status is unknown")
 
 
-def retire_legacy_local(
-    root: Path, spec: delivery.Projection, io: DeliveryIO, result: object,
-    tracked_paths: set[str], inconclusive: bool,
-    recheck_tracking: Callable[[list[str]], tuple[set[str], bool]],
-) -> None:
-    legacy = delivery.legacy_local_destination(spec.destination)
-    try:
-        path = io.safe(root, PurePosixPath(legacy))
-        if not path.exists():
-            return
-        raw = io.read(path, 2 * 1024 * 1024)
-        marker = delivery.parse_marker(raw)
-        delivery.validate_local_template(raw, marker)
-        expected = delivery.canonical_renders(spec)
-        delivery.version_key(marker.get("pluginVersion"))
-        prior = delivery.canonical_renders(replace(spec, plugin_version=marker["pluginVersion"]))
-        if raw not in prior:
-            raise ValueError("legacy local is not the current enabled canonical body")
-        if legacy in tracked_paths or inconclusive:
-            raise ValueError("legacy local is tracked or tracking status is unknown")
-        new = io.safe(root, PurePosixPath(delivery.local_destination(spec.destination)))
-        if io.read(new, 2 * 1024 * 1024) != expected[0]:
-            raise ValueError("new canonical local body is not published")
-        path = io.safe(root, PurePosixPath(legacy))
-        if io.read(path, 2 * 1024 * 1024) != raw:
-            raise ValueError("legacy local changed after validation")
-        latest_tracked, latest_inconclusive = recheck_tracking([legacy])
-        if legacy in latest_tracked or latest_inconclusive:
-            raise ValueError("legacy local became tracked or tracking status is unknown")
-        path = io.safe(root, PurePosixPath(legacy))
-        if io.read(path, 2 * 1024 * 1024) != raw:
-            raise ValueError("legacy local changed during tracking validation")
-        path.unlink()
-        result.changed.append(legacy)
-        result.removed.append(legacy)
-    except (OSError, ValueError) as exc:
-        result.add("warning", "projection-local-cache-legacy", legacy, str(exc))
-
-
 def report_unmanaged_legacy_locals(
     root: Path, destinations: set[str], io: DeliveryIO, result: object
 ) -> None:
@@ -348,13 +256,20 @@ def inventory(
 
     def metrics(path: str, raw: bytes) -> dict[str, object]:
         return {
-            "path": path, "bytes": len(raw), "characters": len(raw.decode("utf-8")),
+            "path": path, "bytes": len(raw),
+            "characters": len(raw.decode("utf-8", errors="replace")),
         }
 
     for path in sorted(automatic):
         relative = path.relative_to(root).as_posix()
         try:
             raw = io.read(io.safe(root, PurePosixPath(relative)), 2 * 1024 * 1024)
+            if (
+                relative.startswith(delivery.MANAGED_NAMESPACE + "/")
+                and path.name.endswith(".local.instructions.md")
+            ):
+                groups["local_bodies"].append(metrics(relative, raw))
+                continue
             if delivery.MARKER_PREFIX.encode() not in raw:
                 continue
             marker = delivery.parse_marker(raw)

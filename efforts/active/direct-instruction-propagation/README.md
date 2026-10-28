@@ -96,7 +96,7 @@ The operator confirmed the slug `direct-instruction-propagation`.
 
 ## Validation Plan
 
-- [ ] Creation and session start each copy the selected plugin version rather
+- [x] Creation and session start each copy the selected plugin version rather
   than returning a prepared-generation reuse result.
 - [ ] Changed plugin content, same-version edits, missing or edited generated
   files and malformed/absent old receipts converge to current plugin bytes
@@ -184,3 +184,42 @@ promotion flow; rollout requires its normal authorization.
   retention of restart notices after an earlier pass changed files.
 - The source resolver, model-facing guidance and independent compatibility
   path remain the next source slices. No rollout occurred.
+
+### 2026-10-27 - Publisher implementation merged
+
+- #9336 merged as `3b7a166351` after current-head Copilot approval and required
+  green checks. The immutable-commit required unit packet passed 2,559 tests
+  with 12 deselected; the focused publisher packet passed 204 tests with
+  10 platform-specific skips.
+- Re-read the entire Plan and Validation Plan after merge. The lifecycle
+  copy-versus-reuse validation is resolved; Phase 2 remains open because
+  source selection, model-facing guidance and independent compatibility
+  copying still use the superseded verification contract.
+- Continued in the same source worktree. The next slice removes generated-copy
+  authentication and checked-in fallback prerequisites from runtime source
+  selection, preserving offline authoring checks separately. Source merge is
+  not release, installed rollout or completion of #9329.
+
+### 2026-10-27 - Raw-copy reader and compatibility implementation
+
+- Runtime lookup now selects enabled declarations' managed copies before
+  reading reviewed selectors, fallbacks or locks. Raw bodies require no
+  instruction digest, version comparison, envelope or receipt. Model-facing
+  selectors, catch-all guidance and the owning pattern use that same contract.
+- Independent compatibility publication now copies templates byte-for-byte into
+  the managed namespace on every call, including identical/edited outputs and
+  legacy `skipLocalCache` sources. It shares the startup publisher's native
+  workspace lease and resolves effective user/repository/local settings inside
+  that lease. Runtime discovery no longer collects Git/version provenance.
+- Explicit invalid marketplace configuration cannot silently select an installed
+  fallback. Path/index/ignore and ambiguity refusals remain visible. Incomplete
+  discovery retains old slots; historical bodies outside the reserved namespace
+  are reported for explicit migration rather than content-authenticated.
+- The focused reader/copy/standalone packet passed 256 tests with six
+  platform-specific skips. The broader customization/scanner/standalone packet
+  passed 570 tests with six skips. Independent review then identified stale
+  cleanup after a failed destination migration; read, write, ignore and tracked
+  refusal regressions now all retain the earlier copy and passed separately.
+- Python lint and the mechanical customization review passed their blocking
+  gates. Required immutable-commit validation and reviewed merge remain open.
+  No installed payload, running session or machine hold was changed.

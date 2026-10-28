@@ -50,6 +50,7 @@ class PluginSource:
     version: str = ""
     commit: str = ""
     is_local_checkout: bool = False
+    error: str = ""
 
     @property
     def payload_root(self) -> Path:
@@ -116,6 +117,41 @@ def _repo_is_trusted(repo_root: Path, home: Path) -> bool:
     return False
 
 
+def _strict_settings(path: Path) -> dict:
+    def unique(pairs):
+        data = {}
+        for key, value in pairs:
+            if key in data:
+                raise ValueError(f"duplicate settings key: {path}: {key}")
+            data[key] = value
+        return data
+
+    try:
+        with path.open("rb") as handle:
+            raw = handle.read(2 * 1024 * 1024 + 1)
+    except FileNotFoundError:
+        return {}
+    if len(raw) > 2 * 1024 * 1024:
+        raise ValueError(f"settings exceed the read limit: {path}")
+    try:
+        lines = raw.decode("utf-8-sig").splitlines(keepends=True)
+        while lines and (not lines[0].strip() or lines[0].lstrip().startswith("//")):
+            lines.pop(0)
+        text = "".join(lines)
+        data = json.loads(text, object_pairs_hook=unique)
+    except (UnicodeError, ValueError) as exc:
+        raise ValueError(f"invalid settings: {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"settings must be an object: {path}")
+    for key, expected in (("enabledPlugins", bool), ("extraKnownMarketplaces", dict)):
+        values = data.get(key, {})
+        if not isinstance(values, dict) or any(
+            not isinstance(value, expected) for value in values.values()
+        ):
+            raise ValueError(f"invalid {key}: {path}")
+    return data
+
+
 def _merged_settings(
     repo_root: Path,
     home: Path | None = None,
@@ -123,6 +159,7 @@ def _merged_settings(
     require_trust: bool = False,
     include_user: bool = True,
     include_local: bool = True,
+    strict: bool = False,
 ) -> tuple[dict[str, bool], dict[str, tuple[dict, Path]]]:
     """Merge the settings that decide a repo's *loaded* plugin set.
 
@@ -134,10 +171,16 @@ def _merged_settings(
     """
     selected_home = home or Path.home()
     layers = (
-        [(selected_home / ".copilot" / "settings.json", selected_home)]
+        [(selected_home / ".copilot" / "settings.json",
+          selected_home / ".copilot" if strict else selected_home)]
         if include_user
         else []
     )
+    if include_user and include_local:
+        layers.append((
+            selected_home / ".copilot" / "settings.local.json",
+            selected_home / ".copilot" if strict else selected_home,
+        ))
     if not require_trust or _repo_is_trusted(repo_root, selected_home):
         layers.append((repo_root / ".claude" / "settings.json", repo_root))
         if include_local:
@@ -157,7 +200,7 @@ def _merged_settings(
     enabled: dict[str, bool] = {}
     marketplaces: dict[str, tuple[dict, Path]] = {}
     for p, base in layers:
-        data = _load_json(p)
+        data = _strict_settings(p) if strict else _load_json(p)
         ep = data.get("enabledPlugins")
         if isinstance(ep, dict):
             for k, v in ep.items():
@@ -591,7 +634,7 @@ def _directory_marketplace_plugin(
     # never compares that key with the catalog's own `name`, so a repo may
     # register a published catalog under a distinct local id. Only the
     # repository-registry source keeps the stricter identity check.
-    if source_kind != "directory" and manifest.get("name") != marketplace:
+    if source_kind != "directory" and manifest.get("name") != source.get("manifestName", marketplace):
         return None
     plugin_root = manifest_root
     metadata = manifest.get("metadata")
@@ -642,6 +685,8 @@ def assemble_enabled_plugins(
     require_trust: bool = False,
     include_user: bool = True,
     include_local: bool = True,
+    strict: bool = False,
+    include_metadata: bool = True,
     agent_worktrees_command: str | None = None,
 ) -> list[PluginSource]:
     """Assemble the plugin set *actually loaded for this repo* into review scope."""
@@ -654,10 +699,13 @@ def assemble_enabled_plugins(
         require_trust=require_trust,
         include_user=include_user,
         include_local=include_local,
+        strict=strict,
     )
     out: list[PluginSource] = []
     for key in sorted(enabled):
         if not enabled[key]:
+            continue
+        if strict and "@" not in key:
             continue
         name, _, mkt = key.partition("@")
         name = name.strip()
@@ -673,10 +721,29 @@ def assemble_enabled_plugins(
             else ""
         )
 
-        footprint = _directory_marketplace_plugin(
-            mkt, name, declaration, base,
-            agent_worktrees_command=agent_worktrees_command,
-        )
+        try:
+            if strict and mkt in marketplaces:
+                configured_source = declaration.get("source")
+                if (
+                    not isinstance(configured_source, dict)
+                    or src_kind not in {"directory", "agent-worktrees-repo", "github"}
+                    or (src_kind == "github" and not isinstance(configured_source.get("repo"), str))
+                ):
+                    raise ValueError(f"invalid configured marketplace: {mkt}")
+            footprint = _directory_marketplace_plugin(
+                mkt, name, declaration, base,
+                agent_worktrees_command=agent_worktrees_command,
+            )
+            if strict and src_kind in {"directory", "agent-worktrees-repo"} and footprint is None:
+                raise ValueError(f"configured marketplace cannot resolve enabled plugin: {origin}")
+        except ValueError as exc:
+            if not strict:
+                raise
+            out.append(PluginSource(
+                skills_root=installed_root / mkt / name / "skills",
+                origin=origin, error=str(exc),
+            ))
+            continue
         # A directory-marketplace footprint is only trusted checkout
         # provenance when it is EITHER this reviewing repo's own tree
         # (`controlled`) OR resolved via the `agent-worktrees-repo` source
@@ -701,7 +768,7 @@ def assemble_enabled_plugins(
                 controlled = False
             is_local_checkout = controlled or src_kind == "agent-worktrees-repo"
             skills_root = footprint / "skills"
-            source_url = "" if controlled else _plugin_repo_url(footprint)
+            source_url = "" if controlled or not include_metadata else _plugin_repo_url(footprint)
         else:
             footprint = installed_root / mkt / name if mkt else installed_root / name
             skills_root = footprint / "skills"
@@ -710,7 +777,7 @@ def assemble_enabled_plugins(
             source_url = ""
             if isinstance(src, dict) and src_kind == "github" and src.get("repo"):
                 source_url = f"https://github.com/{str(src['repo']).strip()}"
-            if not source_url:
+            if not source_url and include_metadata:
                 source_url = _plugin_repo_url(footprint)
 
         out.append(
@@ -719,8 +786,8 @@ def assemble_enabled_plugins(
                 origin=origin,
                 controlled=controlled,
                 source=source_url,
-                version=_plugin_version(footprint),
-                commit=_plugin_commit(footprint) if is_local_checkout else "",
+                version=_plugin_version(footprint) if include_metadata else "",
+                commit=_plugin_commit(footprint) if is_local_checkout and include_metadata else "",
                 is_local_checkout=is_local_checkout,
             )
         )
