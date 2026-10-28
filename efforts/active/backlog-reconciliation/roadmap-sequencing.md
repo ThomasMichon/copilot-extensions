@@ -93,6 +93,14 @@ from current-predicate characterization. It preserves historical evidence pins
 and exact owners; nomination is neither current execution readiness nor a new
 hard prerequisite.
 
+All twelve selected first slices now have bounded
+[current qualification](roadmap-current-qualification.md). The separate
+[inflow delta](roadmap-inflow.md) credits #9413's completed finite producer
+and retains #9414 P1 before #9412 P2 by consequence, without a new semantic
+dependency or implementation assignment. Its reciprocal validation/edit
+interface and two satisfied within-producer precedences remain separate from
+the historical 145 relationships.
+
 Selected entry decisions already supported by the registers are:
 
 | Selected contribution | What actually precedes it | What does not have to finish first |

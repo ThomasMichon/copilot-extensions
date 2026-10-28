@@ -12,6 +12,13 @@ confirmed missing patches, implementation assignments or an exhaustive
 execution order. The original issue, all refinements, canonical effort and
 actual custodian retain authority over each selected slice.
 
+**Reviewed publication:** #9408 merged on 2026-10-28 at 17:36:32 UTC
+(10:36:32 PDT) as `86a0145e35df097d1749dfc141fcee3b608d3dec`, after
+current-head approval and required green checks. Its framing-boundary
+correction excludes LF from the measured JSON size. Continuing results and
+remaining selected work live in [current slice qualification](roadmap-current-qualification.md);
+publishing this matrix did not complete those outcomes or the parent.
+
 ## Evidence and selection boundary
 
 The same four thematic researchers reused their admitted four-wave primary
@@ -50,10 +57,10 @@ implementer or block unrelated ready work.
 |---|---|---|
 | #9323 | Original Codespaces/Bridge permission-chain claimant and owners; exact accepted whole-scope effort home remains a gap. | Characterize ordinary bare/cross-repository launches and correlated permission refusal, including unavailable upstream. Normal permissions and scoped grants survive; known bypass options refuse before effects and unavailable upstream cannot become allow. Do not certify arbitrary scripts by lexical inspection. |
 | #2861 | Existing agent-hoister source owner; no accepted whole-scope effort identified. | Recheck only differing authored content at an expected generated destination. Preserve or refuse before writing, and ensure later disable cannot erase it. Credit delivered stale-sibling cleanup rather than repeating it; legitimate generated refresh remains supported. |
-| #5842 | Original claim-handoff/resource and consumer-readiness owners; related Authoritative Worktrees Daemon is not whole-issue intake. | Recheck ordinary source-release versus consumer/resource commit and the missing-consumer case. A recoverable nonterminal protocol retains source responsibility/finalize blocking through actual consumer and resource commit; inherited #1602 readiness and later-binding cases remain distinct. Merely reversing two calls is insufficient. |
+| #5842 | Original claim-handoff/resource and consumer-readiness owners; related Authoritative Worktrees Daemon is not whole-issue intake. | Recheck ordinary source-release versus consumer/resource commit with the missing-consumer fault **after successful receiving-record preflight**, not already missing at entry. A recoverable nonterminal protocol retains source responsibility/finalize blocking through actual consumer and resource commit; inherited #1602 readiness and later-binding cases remain distinct. Merely reversing two calls is insufficient. |
 | #5904 | Canonical endpoint and Dispatch/Index/Vault cleanup owners; related Versioned Singleton Manager does not receive custody. | Recheck present-but-unvalidated state versus true absence at the existing serialized cleanup boundary and real callers/copies. Malformed, unreadable, unsupported or missing-PID state remains UNKNOWN; own/absent/successor controls and existing publisher serialization survive. Do not add a second lock or authorize live deletion. |
 | #4619 | Existing file/task handoff recovery, Dispatch state and Worktrees lineage owners; whole-outcome receiving acceptance remains unverified. | Characterize abort after the second validation but before final arm in both stores. Exactly one truthful abort/consume/final-arm result must preserve candidate identity, idempotence and manual-only/off signaling. Another read is not atomicity; an equivalent safe design is allowed. |
-| #5512 | Same sole Status-monitor Singleton Correctness owner, historically Draft Phase 1. | Recheck failed identity-bound termination and a newer publication before any conditional correction. Refusal preserves metadata; newer owners survive cleanup; successor-publication failure/acquired-unpublished readers remain recoverable. Preserve original native-platform proof **OR justified exemptions**, not a new every-platform gate. |
+| #5512 | Same sole Status-monitor Singleton Correctness owner, historically Draft Phase 1. | Recheck the production restart's termination-refusal/unconfirmed-exit result and a newer publication; it currently uses bare PID control despite an available identity-bound helper. Refusal preserves metadata; newer owners survive cleanup; successor-publication failure/acquired-unpublished readers remain recoverable. Preserve original native-platform proof **OR justified exemptions**, not a new every-platform gate. |
 
 The #9323 consequence justifies its selected permission-boundary
 characterization before routine cleanup. This is not a current outage claim.
@@ -77,7 +84,7 @@ or successful unrelated query is not their respective finite outcome.
 | Issue | Existing home and retained owner | First bounded decision and finite exit |
 |---|---|---|
 | #7758 | Source-Managed Runtime Installs, Phase 4b installation-execution owner. | Admit the exact Dispatch `stamp`/`provision` recipe through the existing foundation, queue and frozen-input owner before changing ordinary publishers. Preserve actual coordinator/supervisor effects, Windows/Linux construction, caller loss/concurrency, immutable failure and no-write refusals. Delivered Logger/Bridge adapters are not new work. |
-| #8370 | Persistent Installer Diagnostics, historically Draft; existing diagnostics and broker/logging owners. | Review the finite early/staged/retained attempt-record/discovery contract before implementation. Preserve private bounded sanitized output from both streams, completed-only 30-day retention, protected incomplete attempts and protocol stdout. A later healthy start is not diagnosis of the missing original exception. |
+| #8370 | Persistent Installer Diagnostics, Draft declaration retained; existing reviewed proposal and diagnostics/broker/logging owners. | Credit the already-reviewed proposal and admit the incumbent's exact executable early/staged/retained attempt-writer/discovery scope and qualification, not another proposal review. Preserve private bounded sanitized output from both streams, completed-only 30-day retention, protected incomplete attempts and protocol stdout. A later healthy start is not diagnosis of the missing original exception. |
 | #9290 | Cached Source Wheel Assembly and its existing source-assembly owner. | Characterize the reported non-project archive mapping/marker boundary; qualify supported mapping **OR** independently prove removal while retaining safe fallback. Credit released distinct build-requirement groups; never union isolated backends or skip the guard. Actual prepacked-service consumption and the complete strict **under-60-second** update ledger remain distinct overall duties. |
 
 The recipe-to-publisher dependency in #7758 is real and scoped. It does not
