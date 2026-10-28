@@ -179,12 +179,20 @@ outcomes from agent-recommended research and prioritization mechanics.
   in #9388.
   Its 168 researched proposals and 32 provisional outcomes are research
   assessments, not 168 demonstrated missing implementations.
-- [ ] _(Agent-recommended)_ Publish the [third disjoint 200-issue
+- [x] _(Agent-recommended)_ Publish the [third disjoint 200-issue
   proposal](roadmap-wave-3.md), its four appendices and
   [scoped dependency register](roadmap-wave-3-dependencies.md) together with
-  the cross-wave sequencing integration. Its 176 researched proposals,
+  the cross-wave sequencing integration through review in #9396.
+  Its 176 researched proposals,
   23 provisional outcomes and one history-gated, unranked issue do not
   establish 176 missing patches or close remaining roadmap work.
+- [ ] _(Agent-recommended)_ Publish the [fourth disjoint 82-issue
+  proposal](roadmap-wave-4.md), four appendices and
+  [36-relationship register](roadmap-wave-4-dependencies.md) with the
+  cross-wave integration. Its independently admitted 61 researched proposals
+  and 21 provisional outcomes complete assignment coverage of the frozen
+  12:11 UTC eligible census, not provisional decisions, later inflow or
+  the whole-queue numerical checkpoint.
 - [ ] Research each eligible remaining issue against the relevant current
   vision; retain excluded issues as counted, metadata-only coverage gaps.
 - [ ] Identify high-priority fixes and their actual existing efforts, retained
@@ -200,7 +208,8 @@ outcomes from agent-recommended research and prioritization mechanics.
   audits. The [second-wave proposal](roadmap-wave-2.md) adds 200 disjoint
   assessments without a new code-audit phase. The [third-wave
   proposal](roadmap-wave-3.md) adds 200 further assignments with no new
-  product-code audit; later eligible waves remain open.
+  product-code audit. The [fourth-wave proposal](roadmap-wave-4.md) adds the
+  frozen census's remaining 82 identities; later inflow remains open.
 - [ ] _(Agent-recommended)_ Integrate the
   [stabilization roadmap](stabilization-roadmap.md), including per-issue
   coverage, provisional decisions, priority rationale and wave exit criteria,
@@ -248,6 +257,9 @@ outcomes from agent-recommended research and prioritization mechanics.
   The [third-wave register](roadmap-wave-3-dependencies.md) adds 34 directed
   slice relationships and eight additional interface/coordination proposals;
   its four Lifecycle interface rows are already counted in the 34.
+  The [fourth-wave register](roadmap-wave-4-dependencies.md) adds 36 scoped
+  relationships, including three within-issue gates and several satisfied,
+  interface or nonblocking rows rather than 36 missing hard prerequisites.
 - [ ] The operational ledger can reconstruct the next batch and live
   researchers, PRs, watches and schedule after native context rollover.
 - [ ] The final whole-queue open count is at most 729; numerical progress never
