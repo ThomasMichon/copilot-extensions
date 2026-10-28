@@ -95,6 +95,21 @@ def test_finite_phase_streams_exact_reply_and_returns_provider_status(tmp_path: 
     assert not result.stderr
 
 
+def test_control_lookup_ignores_exported_functions_and_preserves_backend_path(tmp_path: Path) -> None:
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+env() { printf 'INTERCEPTED\n'; return 91; }
+export -f env
+export PATH="$2/no-utilities" FIXTURE_LITERAL="literal preserved"
+output="$(_aw_native_seed_control env "$BASH" -c 'printf "%s|%s" "$PATH" "$FIXTURE_LITERAL"')"
+[[ "$output" == "$PATH|$FIXTURE_LITERAL" ]]
+declare -F env >/dev/null
+''', [tmp_path])
+    assert result.returncode == 0, result.stderr
+    assert not result.stdout and not result.stderr
+
+
 def _contract_slot(
     root: Path, version: str, *, supported=True, discovery_tail="", discovery_exit=0,
     contract_version=1,
@@ -226,21 +241,23 @@ aw_native_seed_return "$2" 'Return unconfirmed.' --phase returned --exit-code 7
     )
 
 
-@pytest.mark.parametrize("from_exit", [False, True])
-def test_compatible_return_handler_is_actually_invoked(tmp_path: Path, from_exit: bool) -> None:
+@pytest.mark.parametrize("from_exit", ["direct", "trap", "setup"])
+def test_compatible_return_handler_is_actually_invoked(tmp_path: Path, from_exit: str) -> None:
     root = tmp_path / "runtime"
     _contract_slot(root, "A")
     (root / "current-version").write_text("A", encoding="utf-8")
-    ending = (
-        'trap \'aw_native_seed_return "$2" "Return unconfirmed." --phase returned --exit-code 7\' EXIT\nexit 7'
-        if from_exit else 'aw_native_seed_return "$2" "Return unconfirmed." --phase returned --exit-code 7'
-    )
+    ending = {
+        "direct": 'aw_native_seed_return "$2" "Return unconfirmed." --phase returned --exit-code 7',
+        "trap": 'trap \'aw_native_seed_return "$2" "Return unconfirmed." --phase returned --exit-code 7\' EXIT\nexit 7',
+        "setup": '. "${1%/*}/native-seed-setup.sh"\nLAUNCH_SEED_NATIVE_ROOT="$2"\n'
+                 'AW_NATIVE_SETUP_CALLBACK=(--record fixture)\ntrap _aw_native_setup_finish EXIT\nexit 7',
+    }[from_exit]
     result = _run(r'''
 set -euo pipefail
 . "$1"
 _aw_native_seed_supports_contract "$2" return
 ''' + ending, [root])
-    assert result.returncode == (7 if from_exit else 0), result.stderr
+    assert result.returncode == (0 if from_exit == "direct" else 7), result.stderr
     assert not result.stdout and not result.stderr
     assert (root / "effects").read_text().splitlines() == ["A"]
 

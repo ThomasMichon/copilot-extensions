@@ -158,26 +158,6 @@ print(json.dumps({
         "FIXTURE_LITERAL": "literal environment ' \u03a9\n\n",
         "AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED": "1",
     }
-    plan["probe"] = str(tmp_path / "probe-status")
-    if seed_kind and env_script is None:
-        boundary = Path(plan["copied"]).with_name("native-seed-boundary.sh")
-        source = boundary.read_text()
-        source = source.replace(
-            'statuses=("${PIPESTATUS[@]}")',
-            'statuses=("${PIPESTATUS[@]}")\n'
-            '        printf "descriptor %s %s\\n" "$mode" "${statuses[*]}" >> "$FIXTURE_CASE/probe-status"',
-        )
-        source = source.replace("aw_native_seed_phase() (", "_fixture_native_seed_phase() (")
-        source = source.replace('2>/dev/null', '2>> "$FIXTURE_CASE/probe-errors"')
-        source += r'''
-aw_native_seed_phase() {
-    local code=0
-    _fixture_native_seed_phase "$@" || code=$?
-    printf 'phase %s %s %s\n' "$2" "${3:-}" "$code" >> "$FIXTURE_CASE/probe-status"
-    return "$code"
-}
-'''
-        boundary.write_text(source, encoding="utf-8")
     return plan, env, checkout
 
 
@@ -192,11 +172,9 @@ def _assert_return(plan, code, seeded):
     observations = _observations(plan)
     assert len(observations) == (2 if seeded else 1)
     for saved in observations:
-        probe = Path(plan["probe"])
         assert saved["events"][-1]["phase"] == "execution-returned", {
             "setup": saved["parent_id"] is None,
             "phases": [event["phase"] for event in saved["events"]],
-            "probe": probe.read_text() if probe.exists() else "",
         }
         assert saved["events"][-1]["details"]["exit_code"] == code
     if seeded:
@@ -221,10 +199,7 @@ def test_copied_setup_preserves_native_wait_literal_streams_and_seed_custody(
     assert result.stdout == "BACKEND READY\nbackend stdout\n"
     assert result.stderr.splitlines().count("backend stderr") == 1
     if seed_kind:
-        probe = Path(plan["probe"])
-        assert result.stderr.endswith("backend stderr\n"), (
-            result.stderr, probe.read_text() if probe.exists() else "",
-        )
+        assert result.stderr.endswith("backend stderr\n"), result.stderr
     reply = json.loads((tmp_path / "backend.json").read_text())
     assert reply["argv"] == ARGUMENTS + (["--interactive", SEED] if seed_kind else [])
     assert reply["stdin"] == "retained stdin\n"
@@ -293,10 +268,26 @@ def test_native_control_utilities_do_not_change_a_restricted_backend_path(
         plan["command"], env=environment, cwd=checkout, input_text="retained stdin\n",
         timeout=60, max_stdout_bytes=65536, max_stderr_bytes=65536,
     )
+    diagnostics = None
+    if result.returncode != 7:
+        root, _plugin, _prefix, _env = installed_native_runtime
+        probe = run_caller_owned(
+            [native_bash, "-c", r'''
+set -u
+. "$1"
+_aw_native_seed_runtime "$2" || exit $?
+printf 'env lookup: '; builtin command -p -v env
+printf 'sleep lookup: '; builtin command -p -v sleep
+_aw_native_seed_control env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV -u __PYVENV_LAUNCHER__ \
+    "${AW_NATIVE_SEED_RUNTIME[@]}" -m agent_worktrees.launch_seed_native --describe-contract
+''', "probe", str(Path(plan["copied"]).with_name("native-seed-boundary.sh")), str(root)],
+            env=environment, cwd=checkout, timeout=20,
+            max_stdout_bytes=8192, max_stderr_bytes=8192,
+        )
+        diagnostics = {"code": probe.returncode, "stdout": probe.stdout, "stderr": probe.stderr}
     assert result.returncode == 7, {
         "stdout": result.stdout, "stderr": result.stderr, "observations": _observations(plan),
-        "probes": (tmp_path / "probe-status").read_text() if (tmp_path / "probe-status").exists() else "",
-        "errors": (tmp_path / "probe-errors").read_text() if (tmp_path / "probe-errors").exists() else "",
+        "read_only_probe": diagnostics,
     }
     assert (tmp_path / "backend-path").read_text() == environment["PATH"]
     _assert_return(plan, 7, True)
