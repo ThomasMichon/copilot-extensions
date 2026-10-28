@@ -58,10 +58,12 @@ def test_killswitch_retires_pending_normal_work_but_executes_repair(area, monkey
     seen = []
     assert drain(root=root, executor=lambda tx: seen.append(tx.request.id) or 0) == 0
     assert seen == [repair.id]
-    skipped = wait(normal.id, root=root)
+    caller_output = io.StringIO()
+    skipped = wait(normal.id, root=root, output=caller_output)
     assert skipped.state == "completed" and skipped.exit_code == 3
     assert skipped.started_at is None and skipped.boot_id is None and not skipped.unresolved
     assert skipped.error == "automatic-update KillSwitch active; nothing ran"
+    assert caller_output.getvalue() == skipped.error + "\n"
     assert not skipped.log_path.exists()
     assert status(repair.id, root=root).exit_code == 0
     assert "nothing ran" in capsys.readouterr().err
@@ -157,6 +159,27 @@ def test_legacy_normal_identity_omits_default_repair_field(area):
     assert status(request.id, root=area / "state").spec.repair is False
     with pytest.raises(InvalidRequestError, match="explicit boolean"):
         sample(area, repair="yes")
+
+
+def test_unsearchable_switch_directory_does_not_block_queued_repair(area, monkeypatch, capsys):
+    from pathlib import Path
+
+    monkeypatch.setattr(Path, "home", lambda: area)
+    monkeypatch.delenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", raising=False)
+    primary = area / ".copilot-extensions/killSwitches/bootstrap-killswitch.json"
+    exists = Path.exists
+
+    def denied(path):
+        if path == primary:
+            raise PermissionError("synthetic unsearchable directory")
+        return exists(path)
+
+    monkeypatch.setattr(Path, "exists", denied)
+    normal, repair = sample(area), sample(area, repair=True)
+    seen = []
+    assert drain(root=area / "state", executor=lambda tx: seen.append(tx.request.id) or 0) == 0
+    assert seen == [normal.id, repair.id]
+    assert "unreadable state; automatic update allowed: PermissionError" in capsys.readouterr().err
 
 
 def test_worker_acknowledgement_is_published_only_after_close(area, monkeypatch):

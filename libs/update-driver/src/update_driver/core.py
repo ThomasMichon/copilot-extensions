@@ -171,11 +171,11 @@ def _automatic_update_inhibited(spec: RequestSpec) -> bool:
     if spec.repair or dict(spec.context).get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
         return False
     override = os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE")
-    base = Path.home() / ".copilot-extensions"
-    path = Path(override).expanduser() if override else base / "killSwitches" / "bootstrap-killswitch.json"
-    if not override and not path.exists():
-        path = base / "bootstrap-killswitch.json"
     try:
+        base = Path.home() / ".copilot-extensions"
+        path = Path(override).expanduser() if override else base / "killSwitches" / "bootstrap-killswitch.json"
+        if not override and not path.exists():
+            path = base / "bootstrap-killswitch.json"
         with path.open("rb") as stream:
             data = stream.read(65537)
     except FileNotFoundError:
@@ -863,6 +863,8 @@ def wait(
                 continue
             if output is not None:
                 output.write(decoder.decode(b"", final=True))
+                if request.started_at is None and request.error:
+                    output.write(request.error + "\n")
                 output.flush()
             return request
         _reconcile_lost_owner(_root(root))

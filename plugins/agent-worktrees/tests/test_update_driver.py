@@ -300,6 +300,8 @@ def test_queued_update_keeps_original_context_after_project_chdir(queued, tmp_pa
 
 
 @pytest.mark.parametrize("with_manager", [False, True])
+# Two independently bounded 20-second workers plus fixture setup and cleanup.
+@pytest.mark.timeout(60)
 def test_actual_queued_engine_keeps_each_scope_and_original_invocation(tmp_path, monkeypatch, with_manager):
     import json
     import importlib.util
