@@ -20,6 +20,7 @@ printed.
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -56,6 +57,22 @@ def _resolve_bash() -> str | None:
 
 _BASH = _resolve_bash()
 pytestmark = pytest.mark.skipif(_BASH is None, reason="a real bash is not available")
+
+
+def _assert_cutover_lock_released(install_dir: Path) -> None:
+    probe = subprocess.run(
+        [_BASH, "-c", "\n".join([
+            "set -eu",
+            f"INSTALL_DIR={shlex.quote(str(install_dir))}",
+            'if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then',
+            '    exec 8>"$INSTALL_DIR/.activate.lock"; flock -n 8',
+            "else",
+            '    [[ ! -e "$INSTALL_DIR/.activate.lock.pid" && ! -L "$INSTALL_DIR/.activate.lock.pid" ]]',
+            "fi",
+        ])],
+        capture_output=True, text=True, timeout=5,
+    )
+    assert probe.returncode == 0, probe.stdout + probe.stderr
 
 
 def _extract_function_block(name: str) -> str:

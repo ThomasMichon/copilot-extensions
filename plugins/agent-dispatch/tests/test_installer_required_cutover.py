@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from tests.test_install_sh_activation_guard import _BASH
+from tests.test_install_sh_activation_guard import _assert_cutover_lock_released
 from tests.test_install_sh_activation_guard import _extract_function_block as sh_function
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -144,8 +145,7 @@ def test_update_never_falls_back_or_reconciles_after_required_cutover_failure(
         assert expected in output
     if shell == "sh":
         # A failure must release the actual cross-version activation lock too.
-        probe = _run(tmp_path, shell, f'exec 8>"{tmp_path}/.activate.lock"\nflock -n 8\n')
-        assert probe.returncode == 0, probe.stderr
+        _assert_cutover_lock_released(tmp_path)
 
 
 def _fake_python(tmp_path: Path, output: str, rc: int, routed: bool) -> Path:

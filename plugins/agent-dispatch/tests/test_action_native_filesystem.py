@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from tests.test_action_native_sh import BASH, SCRIPTS, _function
+from tests.test_install_sh_activation_guard import _assert_cutover_lock_released
 
 pytestmark = pytest.mark.skipif(not BASH or os.name == "nt", reason="native POSIX bash")
 
@@ -100,10 +101,12 @@ sed() {
     command sed "$@"
 }
 rm() {
-    [[ "$FAILURE" != removal || "${@: -1}" != "$UNIT_DIR/$SUPERVISOR_UNIT" ]] || return 73
-    [[ "$FAILURE" != profile-removal || "${@: -1}" != "$UNIT_DIR/test-supervisor-alpha.service" ]] || return 73
-    [[ "$FAILURE" != coordinator-removal || "${@: -1}" != "$UNIT_DIR/$SYSTEMD_UNIT" ]] || return 73
-    [[ "$FAILURE" != launcher-removal || "${@: -1}" != "$SUPERVISOR_LAUNCHER" ]] || return 73
+    local argument last=""
+    for argument in "$@"; do last="$argument"; done
+    [[ "$FAILURE" != removal || "$last" != "$UNIT_DIR/$SUPERVISOR_UNIT" ]] || return 73
+    [[ "$FAILURE" != profile-removal || "$last" != "$UNIT_DIR/test-supervisor-alpha.service" ]] || return 73
+    [[ "$FAILURE" != coordinator-removal || "$last" != "$UNIT_DIR/$SYSTEMD_UNIT" ]] || return 73
+    [[ "$FAILURE" != launcher-removal || "$last" != "$SUPERVISOR_LAUNCHER" ]] || return 73
     command rm "$@"
 }
 ''',
@@ -157,21 +160,42 @@ def test_native_fixture_allows_ordinary_effects_without_injection(
     assert effects.exists()
 
 
-@pytest.mark.parametrize("caller", ["do_install", "do_update"])
+@pytest.mark.parametrize("caller,no_flock", [
+    ("do_install", False), ("do_update", False), ("do_update", True),
+])
 def test_native_write_failure_reaches_caller_and_releases_cutover_lock(
-    tmp_path: Path, caller: str,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caller: str, no_flock: bool,
 ) -> None:
+    unexpected_flock = tmp_path / "unexpected-flock"
+    if no_flock:
+        monkeypatch.setenv("COPILOT_EXT_NO_FLOCK", "1")
+        bindir = tmp_path / "no-flock"
+        bindir.mkdir()
+        executable = bindir / "flock"
+        executable.write_text(
+            f"#!/bin/sh\nprintf invoked > {str(unexpected_flock)!r}\nexit 127\n",
+        )
+        executable.chmod(0o755)
+        monkeypatch.setenv("PATH", str(bindir) + os.pathsep + os.environ.get("PATH", ""))
+    else:
+        monkeypatch.delenv("COPILOT_EXT_NO_FLOCK", raising=False)
     result, root, effects = _native_harness(
         tmp_path, "_install_service", "coordinator-unit", caller=caller,
     )
     assert result.returncode == 73, result.stdout + result.stderr
     assert not effects.exists()
     if caller == "do_update":
-        probe = subprocess.run(
-            [BASH, "-c", f'exec 8>"{root}/.activate.lock"; flock -n 8'],
-            capture_output=True, text=True, timeout=5,
-        )
-        assert probe.returncode == 0, probe.stderr
+        _assert_cutover_lock_released(root)
+    assert not unexpected_flock.exists()
+
+
+def test_pid_lock_probe_rejects_an_unreleased_dangling_link(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("COPILOT_EXT_NO_FLOCK", "1")
+    (tmp_path / ".activate.lock.pid").symlink_to("unreleased-owner")
+    with pytest.raises(AssertionError):
+        _assert_cutover_lock_released(tmp_path)
 
 
 @pytest.mark.parametrize("function,failure", [

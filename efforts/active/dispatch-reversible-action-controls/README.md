@@ -350,3 +350,15 @@ Initial tests must prove the current gap before adding the guards.
   nested profiles/removal and the no-restart update branch.
 - Re-review and required checks remain separate. Preparation, release and
   installed adoption are still open; this is not operational recovery.
+
+### 2026-10-28 - Lock-backend test portability
+
+- The next review found the cleanup assertion unconditionally probing `flock`,
+  although native update selects a PID-symlink lock when `flock` is missing or
+  explicitly disabled.
+- Reused one backend-matched assertion in both affected test contracts. The
+  forced PID case supplies a failing `flock` executable and proves it is never
+  called; a dangling unremoved PID link is an explicit negative control.
+- The contained selection passed 60 cases with 24 PowerShell skips, covering
+  both selected lock paths. Runtime code and the previously executed native
+  PowerShell cases are unchanged.
