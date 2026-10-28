@@ -98,6 +98,16 @@ def test_ordinary_update_queues_before_manager_discovery(queued):
     assert seen["wait"] == request.id
 
 
+@pytest.mark.parametrize("values,repair", [
+    ({}, False), ({"force": True}, True),
+    ({"force_runtime": ["agent-bridge"]}, True), ({"recreate_venv": True}, True),
+])
+def test_force_options_record_explicit_repair_request(queued, values, repair):
+    seen, _request = queued
+    assert boundary.cmd_update_request(_args(**values)) == 4
+    assert seen["spec"].repair is repair
+
+
 def test_selected_phase_queues_exact_scope_and_labels_partial_receipt(queued, capsys):
     import json
 

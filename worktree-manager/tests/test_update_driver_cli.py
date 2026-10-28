@@ -47,6 +47,16 @@ def test_detach_json_is_an_observer_option_not_an_installer_argument():
     assert forwarded == ["--force"]
 
 
+@pytest.mark.parametrize("flags,repair", [
+    ([], False), (["--force"], True), (["--force-runtime", "agent-bridge"], True),
+    (["--recreate-venv"], True), (["--repair-engine", "/fresh/source"], True),
+])
+def test_operator_repair_classification_is_persisted(queued, flags, repair):
+    seen, _request = queued
+    assert driver.cmd_update_request(flags) == 6
+    assert seen["spec"].repair is repair
+
+
 @pytest.mark.parametrize("flags", [
     ["--recover-for-repair", "--force"],
     ["--recover-for-repair", "--auth-report"],

@@ -117,6 +117,8 @@ def _run_request(
         result = driver.wait(request.id, output=sys.stderr, worker=worker_process)
         if result.state != "completed" or result.exit_code is None:
             raise driver.StateError(result.error or "update request did not complete")
+        if result.started_at is None and result.exit_code != 0:
+            raise driver.StateError(result.error or "update request did not execute")
         path = _result_path(result)
         if path.stat().st_size > _PROTOCOL_LIMIT or path.is_symlink():
             raise driver.StateError("update executor result is invalid")
