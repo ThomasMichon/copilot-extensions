@@ -155,6 +155,21 @@ aw_native_seed_read_reply || code=$?
     assert "private-value" not in result.stderr
 
 
+def test_reader_eof_probe_preserves_an_existing_caller_descriptor(tmp_path: Path) -> None:
+    retained = tmp_path / "retained-input"
+    retained.write_bytes(b"retained-descriptor\n")
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+exec 3<"$2"
+aw_native_seed_read_reply
+IFS= read -r retained <&3
+[[ "$retained" == retained-descriptor ]]
+''', [retained.as_posix()], payload=nul_reply(_reply()).decode("utf-8"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not result.stdout and not result.stderr
+
+
 @pytest.mark.skipif(os.name == "nt", reason="Requires a native POSIX nonblocking pipe")
 def test_reader_refuses_real_nonblocking_pipe_without_eof() -> None:
     bash = shutil.which("bash")

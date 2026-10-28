@@ -495,6 +495,11 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   before the generic refusal at three frame positions. Suppress the internal
   parser's stderr while retaining its refusal status and the final probe's own
   diagnostic capture. Exact-source native qualification remains required.
+- Run 40666570855 still exposed the closed-stdin hang on both native POSIX
+  hosts: Bash can optimize a descriptor-0-to-itself redirection without
+  validating it. The precheck now duplicates stdin to a distinct temporary
+  descriptor for the single builtin, restoring any caller descriptor
+  afterward; a real retained-descriptor control covers that preservation.
 
 ### 2026-10-27 - Literal POSIX preparation transport prerequisite
 

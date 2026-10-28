@@ -34,7 +34,7 @@ _aw_native_seed_read_reply() {
     IFS= read -r -d '' field || return 3
     [[ "$field" == complete ]] || return 3
     # Refuse closed stdin before command substitution can reuse fd 0 for its pipe.
-    : 2>/dev/null <&0 || return 3
+    : 2>/dev/null 3<&0 || return 3
     # Bash also returns 1 for EAGAIN/EBADF. Capture only the probe's diagnostics.
     eof_diagnostics="$(
         extra=
