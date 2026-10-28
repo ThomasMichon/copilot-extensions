@@ -12,6 +12,9 @@ an `entry` node and a `nodes` object keyed by stable node IDs.
 Additional accepted assignments can be queued as other boards in the same
 worktree state home. These are parts of the worktree's personal agenda, not
 separate repository-global agendas or copies of canonical work.
+An optional `revision` tag (integer or text) can identify a definition; when
+present, it must equal the frame's `agenda_revision` for helper inspection.
+Without that tag, definition freshness remains an explicit manual check.
 Each node has:
 
 | Field | Meaning |
@@ -31,6 +34,8 @@ Do not put shell commands to execute or effectful expressions into this format.
 
 The example's fields are deliberately small:
 
+- `version: 1`: format identifier. The helper accepts an omitted version only
+  for compatibility with the first manual cursor convention and reports it.
 - `revision`: monotonically increasing manual update number.
 - `status`: `working`, `waiting`, `steering` or `complete`.
 - `max_depth` and `max_detours_without_progress`: positive finite lane budgets.
@@ -119,6 +124,21 @@ repository-wide pointer or write into another participant's cursor.
 No cursor exists by default. Opting out leaves ordinary efforts, bindings and
 claims intact; explicitly settle or transfer any active child/root
 responsibility first. Do not erase the stack to make cleanup appear safe.
+
+## Optional inspection
+
+The [read-only helper](../scripts/agenda.py) accepts `next` or `check` and the
+explicit `--state-home` directory. It reads `cursor.json`, active board files
+and the next queued board; it does not crawl a repository or validate every
+future queue item eagerly. Each JSON object is limited to 128 KiB. Duplicate
+keys, nonfinite values, invalid active references/return points and exceeded
+budgets produce diagnostics, never an empty agenda or a repaired file.
+
+No mutation is implemented: scaffolding stays a copy/edit of the examples,
+and transitions remain deliberate manual work. `--expected-revision` checks
+only the read snapshot, not CAS for a subsequent write. A complete cursor with
+no active frames is a supported representation; completed roots/results may
+remain as optional history. No history field proves the real source gate.
 
 See [the skill](../SKILL.md) for the action loop, serendipity policy and
 cooperative limitations.
