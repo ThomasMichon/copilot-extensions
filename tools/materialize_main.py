@@ -537,10 +537,14 @@ def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
         dest, canonical_root=canonical_root, human_sources=human_sources,
     ))
     consumers = sorted((dest / "plugins").glob("*"))
-    consumers.extend(dest / extra for extra in _EXTRA_CONSUMER_DIRS)
+    standalone = {dest / extra for extra in _EXTRA_CONSUMER_DIRS}
+    consumers.extend(sorted(standalone))
     for consumer in consumers:
         manifest = consumer / "pyproject.toml"
-        if manifest.is_file() or manifest.is_symlink():
+        if (
+            manifest.is_file() or manifest.is_symlink()
+            or consumer in standalone and consumer.is_dir()
+        ):
             log.extend(
                 f"SKIP {problem}"
                 for problem in uer.materialized_local_source_problems(consumer)

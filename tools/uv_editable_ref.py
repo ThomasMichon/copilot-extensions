@@ -139,15 +139,21 @@ def iter_consumer_dirs() -> list[tuple[str, Path]]:
     return out
 
 
-def read_uv_sources(consumer_dir: Path) -> dict:
-    """Read declared sources, refusing unreadable or malformed manifests."""
+def _read_pyproject(consumer_dir: Path) -> dict:
     pyproject = consumer_dir / "pyproject.toml"
     if pyproject.is_symlink() or not pyproject.is_file():
         return {}
     try:
-        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        return tomllib.loads(pyproject.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         raise ManifestUnreadable(f"{pyproject}: could not read/parse: {exc}") from exc
+
+
+def read_uv_sources(consumer_dir: Path, *, data: dict | None = None) -> dict:
+    """Read declared sources, refusing unreadable or malformed manifests."""
+    pyproject = consumer_dir / "pyproject.toml"
+    if data is None:
+        data = _read_pyproject(consumer_dir)
     tool = data.get("tool", {})
     if not isinstance(tool, dict):
         raise ManifestUnreadable(f"{pyproject}: [tool] is not a table")
@@ -160,8 +166,42 @@ def read_uv_sources(consumer_dir: Path) -> dict:
     return sources
 
 
+def _direct_local_requirements(data: dict) -> list[str]:
+    project = data.get("project", {})
+    build = data.get("build-system", {})
+    if not isinstance(project, dict) or not isinstance(build, dict):
+        raise ManifestUnreadable("project and build-system must be tables")
+    optional = project.get("optional-dependencies", {})
+    if not isinstance(optional, dict):
+        raise ManifestUnreadable("project.optional-dependencies must be a table")
+    groups = [
+        project.get("dependencies", []), build.get("requires", []), *optional.values(),
+    ]
+    local: list[str] = []
+    for requirements in groups:
+        if not isinstance(requirements, list) or any(
+            not isinstance(requirement, str) for requirement in requirements
+        ):
+            raise ManifestUnreadable("dependency requirements must be lists of strings")
+        for requirement in requirements:
+            match = re.match(r"^[A-Za-z0-9_.-]+(?:\[[^]]+\])?\s*@\s*(\S+)", requirement.strip())
+            if not match:
+                continue
+            location = match.group(1)
+            scheme = re.match(r"[A-Za-z][A-Za-z0-9+.-]*:", location)
+            if (
+                scheme is None or scheme.group().lower().endswith(("file:", "+file:"))
+                or PureWindowsPath(location).drive
+            ):
+                local.append(requirement)
+    return local
+
+
 def materialized_local_source_problems(consumer_dir: Path) -> list[str]:
     """Require the reachable local dependency closure to stay inside one payload."""
+    linked = _find_symlink(consumer_dir)
+    if linked is not None:
+        return [f"local source {consumer_dir / linked}: linked payload content"]
     root = consumer_dir.resolve()
     pending = [consumer_dir]
     seen: set[Path] = set()
@@ -177,7 +217,13 @@ def materialized_local_source_problems(consumer_dir: Path) -> list[str]:
             problems.append(f"local source {manifest}: missing or linked package manifest")
             continue
         try:
-            sources = read_uv_sources(current)
+            data = _read_pyproject(current)
+            sources = read_uv_sources(current, data=data)
+            for requirement in _direct_local_requirements(data):
+                problems.append(
+                    f"local source {manifest}: direct local requirement {requirement!r} "
+                    "must be declared through tool.uv.sources for vendoring"
+                )
         except ManifestUnreadable as exc:
             problems.append(f"local source {exc}")
             continue
@@ -275,7 +321,7 @@ def _find_symlinked_ancestor(path: Path, root: Path) -> Path | None:
     while True:
         if current.is_symlink():
             return current
-        if current.resolve() == root_r or current.parent == current:
+        if current == root_r or current.parent == current:
             return None
         current = current.parent
 

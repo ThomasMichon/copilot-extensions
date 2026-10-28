@@ -80,6 +80,60 @@ def test_materialize_accepts_complete_local_sibling_closure(tmp_path):
     assert not any(line.startswith("SKIP") for line in log), log
 
 
+def test_materialize_requires_existing_standalone_manifest_but_allows_skill_plugins(tmp_path):
+    (tmp_path / "worktree-manager").mkdir()
+    (tmp_path / "plugins" / "skill-only").mkdir(parents=True)
+    log = mm.materialize(tmp_path, canonical_root=tmp_path)
+    assert len(log) == 1 and "worktree-manager" in log[0] and "missing" in log[0], log
+
+
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize(
+    "requirements",
+    [
+        '[project]\ndependencies = ["missing @ file:///unavailable/package"]\n',
+        '[project.optional-dependencies]\nextra = ["missing @ ../unavailable"]\n',
+        '[build-system]\nrequires = ["missing @ file:///unavailable/package"]\n',
+    ],
+)
+def test_materialize_refuses_direct_local_requirements(tmp_path, nested, requirements):
+    consumer = tmp_path / "plugins" / "example"
+    package = consumer / "libs" / "nested" if nested else consumer
+    package.mkdir(parents=True)
+    (package / "pyproject.toml").write_text(requirements)
+    if nested:
+        (consumer / "pyproject.toml").write_text(
+            '[tool.uv.sources]\nnested = { path = "libs/nested" }\n',
+        )
+    log = mm.materialize(tmp_path, canonical_root=tmp_path)
+    assert any("direct local requirement" in line for line in log), log
+
+
+@pytest.mark.parametrize("kind", ["source", "inside-traversal", "outside-traversal"])
+def test_materialize_refuses_linked_source_content(tmp_path, native_file_symlink, kind):
+    consumer = tmp_path / "plugins" / "example"
+    package = consumer / "libs" / "dependency"
+    package.mkdir(parents=True)
+    (package / "pyproject.toml").write_text('[project]\nname = "dependency"\nversion = "1"\n')
+    original = tmp_path / "original-source"
+    original.mkdir()
+    (original / "module.py").write_text("value = 1\n")
+    if kind != "source":
+        (consumer / "anchor").mkdir()
+        link = original / "link" if kind == "outside-traversal" else consumer / "link"
+        native_file_symlink(link, consumer / "anchor", target_is_directory=True)
+        prefix = "../../original-source/" if kind == "outside-traversal" else ""
+        reference = prefix + "link/../libs/dependency"
+    else:
+        native_file_symlink(package / "src", original, target_is_directory=True)
+        reference = "libs/dependency"
+    (consumer / "pyproject.toml").write_text(
+        f'[tool.uv.sources]\ndependency = {{ path = "{reference}" }}\n',
+    )
+    log = mm.materialize(tmp_path, canonical_root=tmp_path)
+    assert any("linked" in line for line in log), log
+
+
 @pytest.mark.parametrize("nested", [False, True])
 @pytest.mark.parametrize("editable", [False, True])
 def test_materialize_declared_flat_python_modules(tmp_path, nested, editable):
