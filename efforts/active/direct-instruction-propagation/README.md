@@ -223,3 +223,23 @@ promotion flow; rollout requires its normal authorization.
 - Python lint and the mechanical customization review passed their blocking
   gates. Required immutable-commit validation and reviewed merge remain open.
   No installed payload, running session or machine hold was changed.
+
+### 2026-10-27 - Reader review compatibility corrections
+
+- #9350's first Copilot verdict identified five concrete compatibility defects.
+  Added focused regressions before changing production behavior: independently
+  healthy refresh after a sibling failure, case-only destination migration,
+  native built-in settings objects, supported remote/local source kinds and
+  all startup-supported marketplace-manifest layouts.
+- Separated declaration completeness from refresh failures: the former protects
+  unresolved slot ownership, while either prevents stale cleanup. A failed
+  replacement no longer blocks another independently resolved existing copy.
+- Stale cleanup now recognizes filesystem aliases of desired copies without
+  retaining genuinely different files on case-sensitive filesystems. A coupled
+  tracked-alias regression also reproduced an overwrite; index protection now
+  includes portable filename aliases in both initial and final probes.
+- Runtime discovery filters native built-ins before validating marketplace
+  values and matches startup's source kinds and manifest roots. It does not
+  route runtime settings through the separate committed-authoring validator.
+- These corrections remain on the same implementation PR, with review and
+  current-head validation still required before merge. No rollout occurred.

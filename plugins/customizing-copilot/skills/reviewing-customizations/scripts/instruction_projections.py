@@ -983,12 +983,28 @@ def _render_local_cache_locked(
         grouped.setdefault(key, []).append(copy)
     desired = {copy.local_destination for copy in declarations.copies}
     existing = list(_iter_local_cache_files(root))
-    tracked, inconclusive = _resolve_git_tracked_paths(
-        root, sorted(desired | {path.relative_to(root).as_posix() for path in existing}),
+    existing_relatives = {path.relative_to(root).as_posix() for path in existing}
+
+    def probe(paths: list[str]) -> tuple[set[str], bool]:
+        keys = {unicodedata.normalize("NFC", path).casefold() for path in paths}
+        aliases = {
+            path for path in existing_relatives
+            if unicodedata.normalize("NFC", path).casefold() in keys
+        }
+        tracked, unknown = _resolve_git_tracked_paths(root, sorted(set(paths) | aliases))
+        tracked_keys = {unicodedata.normalize("NFC", path).casefold() for path in tracked}
+        return tracked | {
+            path for path in paths
+            if unicodedata.normalize("NFC", path).casefold() in tracked_keys
+        }, unknown
+
+    tracked, inconclusive = probe(
+        sorted(desired | existing_relatives),
     )
     ignored = delivery_io.ignored_local_paths(root, sorted(desired))
     aggregate = 0
-    incomplete = bool(declarations.failures) or any(len(copies) != 1 for copies in grouped.values())
+    discovery_incomplete = bool(declarations.failures) or any(len(copies) != 1 for copies in grouped.values())
+    incomplete = discovery_incomplete
     for copies in grouped.values():
         copy = copies[0]
         relative = copy.local_destination
@@ -1013,9 +1029,7 @@ def _render_local_cache_locked(
                 result.add(WARNING, "projection-local-cache-ignore", relative,
                            "local instructions are not ignored by git; adopt *.local.instructions.md ignore coverage first")
                 continue
-            delivery_io.require_untracked(
-                relative, lambda paths: _resolve_git_tracked_paths(root, paths),
-            )
+            delivery_io.require_untracked(relative, probe)
             path = _prepare_destination_parent(root, PurePosixPath(relative))
             try:
                 info = path.lstat()
@@ -1024,7 +1038,7 @@ def _render_local_cache_locked(
             else:
                 if not stat.S_ISREG(info.st_mode):
                     raise ValueError("destination is not a regular file")
-                if incomplete:
+                if discovery_incomplete:
                     raise ValueError("partial discovery cannot reassign an existing generated slot")
             transaction.atomic_write(path, raw)
             result.changed.append(relative)
@@ -1053,9 +1067,21 @@ def _render_local_cache_locked(
                        "stale output is tracked by git or tracking status is unknown; retained")
             continue
         try:
-            delivery_io.require_untracked(
-                relative, lambda paths: _resolve_git_tracked_paths(root, paths),
-            )
+            path = _safe_destination(root, PurePosixPath(relative))
+            key = unicodedata.normalize("NFC", relative).casefold()
+            for copy in grouped.get(key, []):
+                target = _safe_destination(root, PurePosixPath(copy.local_destination))
+                try:
+                    same_file = path.samefile(target)
+                except FileNotFoundError:
+                    same_file = False
+                if same_file:
+                    break
+            else:
+                same_file = False
+            if same_file:
+                continue
+            delivery_io.require_untracked(relative, probe)
             _safe_destination(root, PurePosixPath(relative)).unlink()
             result.changed.append(relative)
             result.removed.append(relative)
@@ -2156,7 +2182,7 @@ def discover_enabled_sources(
     agent_worktrees_command: str | None = None,
 ) -> list[object]:
     """Reuse the settings/source resolver without importing the full scanner."""
-    if not require_trust:
+    if not require_trust and not runtime:
         validate_committed_settings(repo_root)
     from scan_plugin_sources import assemble_enabled_plugins
 

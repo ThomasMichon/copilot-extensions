@@ -145,10 +145,13 @@ def _strict_settings(path: Path) -> dict:
         raise ValueError(f"settings must be an object: {path}")
     for key, expected in (("enabledPlugins", bool), ("extraKnownMarketplaces", dict)):
         values = data.get(key, {})
-        if not isinstance(values, dict) or any(
-            not isinstance(value, expected) for value in values.values()
-        ):
+        if not isinstance(values, dict):
             raise ValueError(f"invalid {key}: {path}")
+        for name, value in values.items():
+            if key == "enabledPlugins" and "@" not in name:
+                continue
+            if not isinstance(value, expected):
+                raise ValueError(f"invalid {key}: {path}")
     return data
 
 
@@ -484,17 +487,14 @@ def _marketplace_manifest(root: Path) -> tuple[dict, Path] | None:
     """Load a supported marketplace manifest and its plugin-root base."""
     for relative in (
         Path(".github/plugin/marketplace.json"),
+        Path("marketplace.json"),
+        Path(".plugin/marketplace.json"),
         Path(".claude-plugin/marketplace.json"),
     ):
         path = root / relative
         data = _load_json_optional(path)
         if data is not None:
-            manifest_root = (
-                path.parent.parent.parent
-                if relative.parts[0] == ".github"
-                else path.parent.parent
-            )
-            return data, manifest_root
+            return data, root
     return None
 
 
@@ -596,7 +596,7 @@ def _directory_marketplace_plugin(
     if not isinstance(source, dict):
         return None
     source_kind = str(source.get("source", "")).strip().lower()
-    if source_kind == "directory":
+    if source_kind in {"directory", "local"}:
         raw_path = source.get("path")
         if not isinstance(raw_path, str) or not raw_path.strip():
             return None
@@ -634,7 +634,7 @@ def _directory_marketplace_plugin(
     # never compares that key with the catalog's own `name`, so a repo may
     # register a published catalog under a distinct local id. Only the
     # repository-registry source keeps the stricter identity check.
-    if source_kind != "directory" and manifest.get("name") != source.get("manifestName", marketplace):
+    if source_kind not in {"directory", "local"} and manifest.get("name") != source.get("manifestName", marketplace):
         return None
     plugin_root = manifest_root
     metadata = manifest.get("metadata")
@@ -726,15 +726,17 @@ def assemble_enabled_plugins(
                 configured_source = declaration.get("source")
                 if (
                     not isinstance(configured_source, dict)
-                    or src_kind not in {"directory", "agent-worktrees-repo", "github"}
-                    or (src_kind == "github" and not isinstance(configured_source.get("repo"), str))
+                    or src_kind not in {
+                        "directory", "local", "agent-worktrees-repo",
+                        "github", "git", "git-subdir", "npm", "url",
+                    }
                 ):
                     raise ValueError(f"invalid configured marketplace: {mkt}")
             footprint = _directory_marketplace_plugin(
                 mkt, name, declaration, base,
                 agent_worktrees_command=agent_worktrees_command,
             )
-            if strict and src_kind in {"directory", "agent-worktrees-repo"} and footprint is None:
+            if strict and src_kind in {"directory", "local", "agent-worktrees-repo"} and footprint is None:
                 raise ValueError(f"configured marketplace cannot resolve enabled plugin: {origin}")
         except ValueError as exc:
             if not strict:

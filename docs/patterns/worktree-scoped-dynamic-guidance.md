@@ -337,9 +337,13 @@ The compatibility publisher uses declaration-only discovery and raw atomic
 replacement in the managed namespace. It shares startup's per-workspace native
 file lease, with discovery inside the lease, and does not compare old bytes.
 An earlier copy remains available if a refresh fails, accompanied by the actual
-failure rather than a successful-refresh claim. Partial declaration discovery
-retains old files; complete discovery can remove stale untracked copies inside
-the reserved namespace. Historical siblings and compatibility bodies outside
+failure rather than a successful-refresh claim. A refresh failure suppresses
+stale cleanup without blocking independently resolved existing copies.
+Incomplete declaration discovery also prevents reassignment of existing slots.
+Complete successful publication removes stale untracked copies inside the
+reserved namespace. Case-only aliases of a current destination are reconciled
+by filesystem identity, so case-insensitive cleanup cannot unlink a new copy;
+Git protection also includes portable spelling aliases. Historical bodies outside
 that namespace are retained with visible migration findings, regardless of
 their content, version or self-supplied markers. Runtime selection does not use
 those old bodies as current copies.
@@ -364,6 +368,9 @@ repository-local settings in their existing precedence order. User-relative
 marketplace paths use the user Copilot directory, matching startup publication.
 Repository layers still honor the existing persisted-folder trust boundary.
 Malformed selected settings report errors rather than silently dropping a layer.
+Native built-in plugin settings are filtered before marketplace-entry validation.
+Runtime discovery accepts startup's local/remote source kinds and all four
+marketplace-manifest layouts, without a network fetch.
 Reviewed offline lock/artifact validation remains available without source
 freshness or folder trust. Explicit committed-source maintenance sync is a
 separate reviewable consent-owned write path, not authentication evidence.
