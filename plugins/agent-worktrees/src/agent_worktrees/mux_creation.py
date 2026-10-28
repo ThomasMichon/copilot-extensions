@@ -113,6 +113,10 @@ def run_session(argv: list[str], session: str, release) -> subprocess.CompletedP
                     raise subprocess.TimeoutExpired(argv, 15)
                 try:
                     child.wait(timeout=min(0.05, remaining))
+                    if child.returncode != 0:
+                        raise CreationUncertain(
+                            f"PSMux creation client exited {child.returncode}; pane state is uncertain",
+                        )
                     values = []
                     for stream in (stdout, stderr):
                         stream.seek(0)
@@ -132,6 +136,8 @@ def run_session(argv: list[str], session: str, release) -> subprocess.CompletedP
             if child.poll() is None:
                 child.kill()
             child.wait()
-            if isinstance(error, Exception) and not isinstance(error, subprocess.TimeoutExpired):
+            if isinstance(error, Exception) and not isinstance(
+                error, (subprocess.TimeoutExpired, CreationUncertain),
+            ):
                 raise CreationUncertain(f"PSMux creation outcome is uncertain: {error}") from error
             raise

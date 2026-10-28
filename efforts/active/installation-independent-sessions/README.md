@@ -1373,6 +1373,26 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   spaces, embedded quotes, trailing backslashes and empty arguments.
   The module-size gate passes without a baseline edit. Updated-head native
   acceptance, review and required CI remain pending for that follow-up.
+- The follow-up head `c1ee29675ec65c5b55f30a04568e7b14065ea9c4` passed the
+  selected Windows job again (run `40609005414`, job `122555632654`):
+  nine passed, 16 deselected and no skips in 79.26 seconds.
+  Copilot review `5676376600` then found one High issue: a nonzero client
+  return after publication could still delete a live pane's manifest.
+  Preserve every dispatched engine client's uncertain handoff; Picker also
+  preserves receipt/token files after publication and skips both retry paths.
+- The review fix passed eleven engine failure/admission controls and all
+  thirteen Manager creation controls. Native overlap passed both directions
+  with literal arguments and a stale-exit-code sentinel. The fixture now
+  leaves the parent harness home unchanged and overrides only actor
+  environments; readiness diagnostics distinguish preparation from creation.
+  One preparation-only failure preceded that isolation correction and is not
+  production latency evidence. The opt-in Windows job additionally selects
+  the single published-failure/retained-handoff control.
+- Required CI caught missing launch-census classifications for the new
+  bounded client calls. Updated exact caller-contained counts and passed the
+  coverage guard, without adding a resident service or weakening a guard.
+  These review/census corrections still await publication, fresh review and
+  exact-head acceptance; the High thread remains open until the fix is up.
 - This is a bounded Windows creation primitive, not complete per-worktree
   launch admission: the tracked engine lifecycle fence still serializes its
   protected section across a repository, `pane_create` retains its separate

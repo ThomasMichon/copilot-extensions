@@ -1900,7 +1900,7 @@ function Invoke-AwPsmuxCreation {
         }
         [Console]::Out.Write($stdout.Result)
         [Console]::Error.Write($stderr.Result)
-        $global:LASTEXITCODE = $process.ExitCode
+        Set-Variable -Name LASTEXITCODE -Value $process.ExitCode -Scope 1
     } finally {
         if ($started -and -not $process.HasExited) { $process.Kill() }
         $process.Dispose()
@@ -2200,6 +2200,8 @@ if (-not $noMux) {
     $totalCreateAttempts = 0
     $newSessionExit = 1
     $newSessionError = ''
+    $muxPublished = $false
+    $creationUncertain = $false
     $joinedDuringCreate = $false
     $retryCycle = $true
     while ($retryCycle) {
@@ -2289,9 +2291,12 @@ if (-not $noMux) {
                             }
                         }
                     } finally {
-                        if ($null -ne $creationLease) { $creationLease.Dispose() }
+                        if ($null -ne $creationLease) {
+                            $muxPublished = -not $creationLease.CanWrite
+                            $creationLease.Dispose()
+                        }
                     }
-                    $global:LASTEXITCODE = $createExit
+                    $LASTEXITCODE = $createExit
                     $newSessionExit = $createExit
                 } finally {
                     if ($null -ne $savedAuth) {
@@ -2307,7 +2312,9 @@ if (-not $noMux) {
             } catch {
                 $newSessionError = $_.Exception.Message.Split([Environment]::NewLine)[0].Trim()
             }
+            $creationUncertain = $newSessionExit -ne 0 -and $muxPublished
             if ($newSessionExit -eq 0) { break }
+            if ($creationUncertain) { break }
 
             if ($paneArgsFile) {
                 Remove-AwPaneArgsFile $paneArgsFile
@@ -2327,7 +2334,7 @@ if (-not $noMux) {
             }
         }
 
-        if ($newSessionExit -ne 0 -and (Read-AwMuxRetryChoice $sessName)) {
+        if (-not $creationUncertain -and $newSessionExit -ne 0 -and (Read-AwMuxRetryChoice $sessName)) {
             Write-SetupStatus 'Retrying PSMux startup...' 'WARN'
             $retryCycle = $true
         }
@@ -2344,7 +2351,7 @@ if (-not $noMux) {
         Join-AwExistingPsmuxSession
     }
     if ($newSessionExit -ne 0) {
-        if ($ahpTokenFile) {
+        if ($ahpTokenFile -and -not $creationUncertain) {
             Remove-Item -LiteralPath $ahpTokenFile `
                 -Force -ErrorAction SilentlyContinue
         }
@@ -2361,10 +2368,17 @@ if (-not $noMux) {
             "(exit code $newSessionExit)$detail. The worktree remains at '$preservedPath'. " +
             "Run '$recoveryCommand' to retry, or use --no-mux to request a direct session explicitly."
         )
+        if ($creationUncertain) {
+            $message = (
+                "PSMux client failed after session discovery (exit $newSessionExit)$detail. " +
+                "The pane's argument and token handoffs are preserved. " +
+                "Inspect the existing session '$sessName' before any retry."
+            )
+        }
         Write-SetupLog $message 'ERROR'
         Write-AwMuxFailure -Reason 'create_failed' -ExitCode $newSessionExit -Fields @(
             "attempts=$totalCreateAttempts",
-            'recoverable=true'
+            "recoverable=$((-not $creationUncertain).ToString().ToLowerInvariant())"
         )
         Write-Error $message -ErrorAction Continue
         exit $newSessionExit

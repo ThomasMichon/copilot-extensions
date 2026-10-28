@@ -528,9 +528,11 @@ the lease even when the native creation client has not returned yet; neither
 pane argument receipts, attach nor the backend lifetime retain it. Different
 session names use different leases. Query failure/timeout refuses creation.
 Lock files remain in place; process death releases kernel ownership without
-PID-based stale-lock deletion. A failed discovery query after dispatch leaves
-pane argument handoffs intact as an uncertain creation, like a client timeout;
-it is not proof that no pane exists.
+PID-based stale-lock deletion. A failed discovery query or nonzero client exit
+after dispatch leaves the engine's pane argument handoffs intact as uncertain;
+it is not proof that no pane exists. If Picker's client fails after publication,
+it preserves argument, receipt and token handoffs and offers no automatic
+retry. Its failure result requires inspecting the existing session first.
 
 A late detached join reports `created: false` without creating pane arguments
 or claiming/typing a seed. Typed Bridge acquisition still refuses a live mux,

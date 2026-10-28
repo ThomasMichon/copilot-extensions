@@ -128,6 +128,13 @@ jobs:
           --allow-explicit-tiers
           -k "copied_setup_admission or real_copied_setup or same_target_joins_at_discovery"
           --timeout 1000 --plugin-timeout 1600 --test-timeout 60
+      - name: Preserve uncertain Picker handoffs without retry
+        shell: pwsh
+        run: >-
+          python tools/run-plugin-tests.py worktree-manager
+          --test-file tests/test_psmux_launch_home.py
+          -k "published_creation_failure"
+          --timeout 120 --plugin-timeout 600 --test-timeout 60
 
   derived-diagnostics-posix:
     if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal }}

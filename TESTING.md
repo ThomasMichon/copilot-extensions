@@ -39,6 +39,9 @@ not Windows acceptance evidence. Actors finish importing/loading their owners
 before a ready/go barrier admits native creation, matching the production
 creation timer rather than charging another actor's Python startup to it.
 This is not a cold whole-launch performance measurement.
+The same opt-in Windows job runs Manager's focused published-creation failure
+control, which executes the shipped failure/retry tail and retains argument,
+receipt and token handoffs after discovery without another attempt.
 
 Agent-worktrees' `test_launch_seed_native.py` covers the finite backend and setup
 provider: retained one-time seed claims, literal argv, existing prompt-free

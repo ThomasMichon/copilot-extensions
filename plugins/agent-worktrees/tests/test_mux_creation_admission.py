@@ -73,13 +73,20 @@ def test_detached_join_does_not_build_a_second_pane_or_emit_creation(monkeypatch
         "ok": True, "session": "wt-a", "new_pane": None, "error": None, "created": False,
     }
 
-def test_post_dispatch_query_failure_preserves_pending_pane_arguments(monkeypatch):
+@pytest.mark.parametrize("failure", [
+    "query", "nonzero-before-discovery", "nonzero-after-discovery",
+])
+def test_post_dispatch_failure_preserves_pending_pane_arguments(monkeypatch, failure):
+    released = []
+
     @contextmanager
     def acquired(*args, **kwargs):
-        yield lambda: None
+        yield lambda: released.append(True)
 
     class Client:
         killed = False
+        returncode = None
+        waits = 0
 
         def __enter__(self):
             return self
@@ -88,19 +95,28 @@ def test_post_dispatch_query_failure_preserves_pending_pane_arguments(monkeypatc
             pass
 
         def wait(self, timeout=None):
-            if not self.killed:
-                raise subprocess.TimeoutExpired(["psmux"], timeout)
-            return 1
+            if self.killed:
+                return 1
+            self.waits += 1
+            if failure == "nonzero-before-discovery" or (
+                failure == "nonzero-after-discovery" and self.waits > 1
+            ):
+                self.returncode = 17
+                return 17
+            raise subprocess.TimeoutExpired(["psmux"], timeout)
 
         def poll(self):
-            return 1 if self.killed else None
+            return self.returncode
 
         def kill(self):
             self.killed = True
+            self.returncode = 1
 
     child = Client()
     def failed_query(*args, **kwargs):
-        raise RuntimeError("query unavailable")
+        if failure == "query":
+            raise RuntimeError("query unavailable")
+        return True
 
     monkeypatch.setattr(mux_creation, "session_gate", acquired)
     monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: child)
@@ -112,8 +128,10 @@ def test_post_dispatch_query_failure_preserves_pending_pane_arguments(monkeypatc
                         lambda argv: pytest.fail("post-dispatch is not definite non-creation"))
     result = sessions.mux_new_session("a", "checkout", ["copilot"])
     assert result["ok"] is False
-    assert "uncertain" in result["error"] and "query unavailable" in result["error"]
-    assert child.killed
+    assert "uncertain" in result["error"]
+    assert ("query unavailable" if failure == "query" else "exited 17") in result["error"]
+    assert child.killed is (failure == "query")
+    assert bool(released) is (failure == "nonzero-after-discovery")
 
 
 @pytest.mark.parametrize("acquisition", [False, True])

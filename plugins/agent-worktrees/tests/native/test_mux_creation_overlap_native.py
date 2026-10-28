@@ -16,7 +16,6 @@ import time
 
 import pytest
 
-from agent_worktrees import mux_creation
 from single_instance_lease import AlreadyRunningError, SingleInstance
 
 
@@ -68,17 +67,18 @@ class Mux {
 
 ENGINE = r"""
 import json, sys
-from agent_worktrees import sessions
 from pathlib import Path
 import os, time
+home = Path(sys.argv[2])
+actor = os.environ["MUX_ACTOR_ID"]
+(home / ("boot-" + actor)).write_text(json.dumps({"home": str(home), "actor": actor}))
+from agent_worktrees import sessions
 sessions.activity.log_event = lambda *a, **k: None
 sessions.build_mux_new_session_argv = lambda wt, cwd, *a, **k: [
     sys.argv[3], "new-session", "-s", sessions.mux_session_name(wt),
     "-P", "-F", "#{pane_id}",
     "child with spaces", 'quote "inside"', "tail\\", "", "--allow-all",
 ]
-home = Path(sys.argv[2])
-actor = os.environ["MUX_ACTOR_ID"]
 (home / ("ready-" + actor)).touch()
 deadline = time.monotonic() + 60
 while not (home / ("go-" + actor)).exists():
@@ -107,6 +107,7 @@ def _manager_driver(path):
     creation = source[start + len("                try {\n"):end]
     path.write_text(
         "$ErrorActionPreference='Stop'\n"
+        "$LASTEXITCODE=41\n"
         "$script:AwPsmuxBin=$args[0]\n$sessName='wt-'+$args[1]\n"
         "$plan=@{work_dir=$args[2]}\n$envFlags=@('-e','FIXTURE=two words')\n"
         "$paneCmd=@('child with spaces','quote \"inside\"','tail\\','','--allow-all')\n"
@@ -115,6 +116,8 @@ def _manager_driver(path):
         "$joinedDuringCreate=$false\n" + helpers + "\n"
         "$ready=Join-Path $HOME ('ready-'+$env:MUX_ACTOR_ID)\n"
         "$go=Join-Path $HOME ('go-'+$env:MUX_ACTOR_ID)\n"
+        "$boot=Join-Path $plan.work_dir ('boot-'+$env:MUX_ACTOR_ID)\n"
+        "[IO.File]::WriteAllText($boot,('home='+$HOME+'; ready='+$ready))\n"
         "[IO.File]::WriteAllText($ready,'')\n"
         "$deadline=[DateTime]::UtcNow.AddSeconds(60)\n"
         "while(-not [IO.File]::Exists($go)){\n"
@@ -126,7 +129,7 @@ def _manager_driver(path):
     )
 
 
-def _wait(check, message, actors=(), *, timeout=15):
+def _wait(check, message, actors=(), *, timeout=15, diagnostic=None):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         for actor in actors:
@@ -136,16 +139,15 @@ def _wait(check, message, actors=(), *, timeout=15):
         if check():
             return
         time.sleep(0.02)
-    pytest.fail(message)
+    pytest.fail(message + ("\n" + str(diagnostic()) if diagnostic else ""))
 
 
 @pytest.mark.parametrize("first,second", [("manager", "engine"), ("engine", "manager")])
 def test_same_target_joins_at_discovery_while_other_target_creates_in_parallel(
-    tmp_path, monkeypatch, first, second,
+    tmp_path, first, second,
 ):
     home = tmp_path / "home with spaces"
     home.mkdir()
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     mux_source = tmp_path / "mux.cs"
     mux_source.write_text(MUX, encoding="utf-8")
     binary = tmp_path / "psmux.exe"
@@ -185,6 +187,11 @@ def test_same_target_joins_at_discovery_while_other_target_creates_in_parallel(
         _wait(
             lambda: all((home / ("ready-" + identities[actor])).exists() for actor in actors),
             "Actors did not finish preparation before native creation", actors, timeout=45,
+            diagnostic=lambda: {
+                "expected": list(identities.values()),
+                "ready": sorted(path.name for path in home.glob("ready-*")),
+                "boot": {path.name: path.read_text("utf-8-sig") for path in home.glob("boot-*")},
+            },
         )
         (home / ("go-" + identities[creator])).touch()
         _wait(lambda: (home / "entered-wt-shared").exists(),
@@ -210,6 +217,8 @@ def test_same_target_joins_at_discovery_while_other_target_creates_in_parallel(
         assert contender.returncode == 0, stdout + stderr
         joined = json.loads(stdout)
         assert joined["created"] is False
+        if "code" in joined:
+            assert joined["code"] == 0
         key = hashlib.sha256(b"wt-shared").hexdigest()
         lease = SingleInstance(home / ".psmux" / "launch-locks", lock_name=key + ".lock")
 
@@ -237,11 +246,15 @@ def test_same_target_joins_at_discovery_while_other_target_creates_in_parallel(
                 stdout, stderr = child.communicate(timeout=10)
                 if child.returncode != 0:
                     errors.append(stdout + stderr)
+                elif not failing and child is not contender:
+                    report = json.loads(stdout)
+                    if "code" in report and report["code"] != 0:
+                        errors.append("Native creation retained a stale exit code: " + stdout)
             finally:
                 if child.poll() is None:
                     child.kill()
                     child.communicate(timeout=5)
         if not failing:
             assert not errors, "\n".join(errors)
-    with mux_creation.session_gate("wt-shared", exists=lambda: False, enabled=True) as create:
-        assert callable(create)
+    with lease:
+        pass
