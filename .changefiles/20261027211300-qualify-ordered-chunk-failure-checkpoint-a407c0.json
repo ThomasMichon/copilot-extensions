@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify ordered chunk-failure checkpoint recovery and forced full replay in both layouts",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

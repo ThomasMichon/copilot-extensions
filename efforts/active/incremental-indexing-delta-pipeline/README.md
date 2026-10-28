@@ -195,6 +195,7 @@ source-owner coordination rather than one large rewrite.
 
 Append-only entries are preserved in dated files, newest first.
 
+- [2026-10-27 checkpoint recovery](journal/2026/10.27%20checkpoint-recovery.md)
 - [2026-10-27 provider measurements](journal/2026/10.27%20provider-work-measurements.md)
 - [2026-10-26 storage](journal/2026/10.26%20incremental-indexing-storage.md)
 - [2026-10-26](journal/2026/10.26%20incremental-indexing.md)

@@ -78,7 +78,7 @@ def test_tombstone_failure_retains_cursor_for_replay(
     assert state.total_chunks == 3
 
 
-@pytest.mark.parametrize("interruption", ["cleanup", "later-batch"])
+@pytest.mark.parametrize("interruption", ["cleanup", "later-batch", "chunking"])
 def test_retry_only_reuses_files_whose_cleanup_completed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, interruption: str,
 ) -> None:
@@ -105,14 +105,23 @@ def test_retry_only_reuses_files_whose_cleanup_completed(
         patch.setattr(engine, "_embed_and_store_batch", embed)
         if interruption == "cleanup":
             patch.setattr(store, "reconcile_file_chunks", fail)
+        elif interruption == "chunking":
+            from agent_index.chunking import get_chunker
+
+            first_chunker = get_chunker(first.path)
+            patch.setattr(
+                "agent_index.chunking.get_chunker",
+                lambda path: (SimpleNamespace(chunk=fail), "text")
+                if path == second.path else first_chunker,
+            )
         with pytest.raises(RuntimeError, match="fixture"):
             run()
     assert state.sources["alias"].last_commit == "old"
     assert (paths.get_entry(first.source, first.path) is not None) == (
-        interruption == "later-batch"
+        interruption in {"later-batch", "chunking"}
     )
     assert paths.get_entry(second.source, second.path) is None
-    assert run()[0] == (2 if interruption == "later-batch" else 4)
+    assert run()[0] == (2 if interruption in {"later-batch", "chunking"} else 4)
     assert cleaned == ["first.md", "second.md"]
     assert state.sources["alias"].chunk_count == state.total_chunks == 4
 
