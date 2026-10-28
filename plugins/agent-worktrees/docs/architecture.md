@@ -676,7 +676,12 @@ bytes, to the private completion file.
 The exec pipe is not backend readiness or application acknowledgement. A fast
 exit before the live PID/birth check, observer loss, or incomplete observation
 retains an unknown handoff rather than restoring a successfully executed
-prompt. Only the explicit exec-error path permits restoration. A future native
+prompt. Catchable interruption or encoding failure emits an unknown marker before
+closing the pipe, not success-shaped EOF. As with the POSIX subprocess
+error-pipe convention, uncatchable death at the exec boundary cannot be
+distinguished from exec followed immediately by death; PID/birth is identity
+evidence, not a separate kernel exec attestation.
+Only the explicit exec-error path permits restoration. A future native
 consumer must discover this capability before invoking the new phase, retain
 the actual foreground wait and exit code, settle the finite status boundary,
 and resolve the return handler afresh. No production caller selects this mode

@@ -197,8 +197,11 @@ The optional native-launch Linux/macOS jobs also select
 `tests/native/test_native_seed_exec_posix.py`. It invokes the dormant
 exec-replacement phase beneath stock Bash, checking the same PID and canonical
 birth across exec, exact literal argv/stdin/streams, actual success/nonzero/
-signal exit, no observer child under the backend, definite exec-error
-restoration and fast-exit uncertainty without replay. It uses the real seed
+signal exit, closed exec-pipe descriptors, no observer child under the backend,
+definite exec-error restoration, fast-exit uncertainty and a bounded observer
+timeout without replay. Actual SIGINT and encoding-loss controls keep the
+pre-exec helper alive long enough to disprove success-shaped EOF.
+It uses the real seed
 and execution owners in disposable state, not a production launcher or host
 installation. These provider controls do not establish copied POSIX consumer
 activation, physical-terminal Ctrl+C, real Copilot or supported uninstall

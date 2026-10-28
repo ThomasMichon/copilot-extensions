@@ -145,6 +145,7 @@ def execute(
             os._exit(3)
     os.close(reader)
     os.close(completion)
+    outcome = b"U"
     try:
         # Reap only the immediate fork intermediary, not the backend. Its child
         # is reparented and cannot become an unowned zombie under Copilot.
@@ -161,7 +162,12 @@ def execute(
         try:
             os.execvpe(command[0], command, os.environ)
         except OSError:
-            os.write(writer, b"F")
+            outcome = b"F"
             return 3
     finally:
-        os.close(writer)
+        # A catchable interrupt/encoding failure is not successful exec EOF.
+        # Successful exec closes the descriptor without running this finally.
+        try:
+            os.write(writer, outcome)
+        finally:
+            os.close(writer)

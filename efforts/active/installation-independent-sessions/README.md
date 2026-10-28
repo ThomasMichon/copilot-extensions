@@ -549,6 +549,16 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
 - Windows provider compatibility passed 68 focused controls. Native Linux
   and stock macOS Bash 3.2 execution, full required gates and review remain
   pending; this entry is not acceptance or rollout evidence.
+- The initial exact-head native packet passed, but independent critique and
+  added negative controls found a catchable pre-exec loss gap. Native run
+  `40698510133` on `2c3ba7de326c5674a9a34025632d7b754ae8bf2d`
+  reproduced both actual SIGINT and encoding-loss cases on Linux and stock
+  macOS Bash 3.2: each incorrectly received completion status `0` while
+  the helper remained alive without exec. Each platform passed the other
+  140 controls, with 17 Windows-only skips; Windows remained green.
+  The fix emits an explicit unknown marker on every unwound pre-exec path,
+  reserving failure restoration for literal exec errors. Green rerun and
+  final review remain pending; ordinary consumers are still unchanged.
 
 ### 2026-10-28 - Provider-owned setup birth prerequisite
 

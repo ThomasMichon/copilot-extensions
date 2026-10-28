@@ -37,18 +37,36 @@ def record(tmp_path, monkeypatch):
 
 
 BACKEND = r'''
-import json, os, signal, sys, time
+import json, os, signal, subprocess, sys, time
 from pathlib import Path
 from agent_worktrees import locks
 root = Path(sys.argv[1])
 deadline = time.monotonic() + 5
 while not (root / ".native-seed-exec.complete").read_text() and time.monotonic() < deadline:
     time.sleep(0.01)
+if sys.platform == "linux":
+    children = Path("/proc/self/task/" + str(os.getpid()) + "/children").read_text()
+else:
+    probe = subprocess.Popen(
+        ["/bin/ps", "-axo", "pid=,ppid="], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    output, error = probe.communicate(timeout=2)
+    assert probe.returncode == 0, error
+    children = " ".join(
+        pid for pid, parent in (line.split() for line in output.decode().splitlines())
+        if int(parent) == os.getpid() and int(pid) != probe.pid
+    )
+closed = []
+for descriptor in json.loads((root / "pipe.json").read_text()):
+    try:
+        os.fstat(descriptor)
+        closed.append(False)
+    except OSError:
+        closed.append(True)
 (root / "backend.json").write_text(json.dumps({
     "pid": os.getpid(), "birth": locks.process_start_time(os.getpid()),
     "argv": sys.argv[3:], "stdin": sys.stdin.read(),
-    "children": Path("/proc/self/task/" + str(os.getpid()) + "/children").read_text()
-        if sys.platform == "linux" else None,
+    "children": children, "closed_pipe": closed,
 }), encoding="utf-8")
 print("backend stdout", flush=True)
 print("backend stderr", file=sys.stderr, flush=True)
@@ -88,12 +106,22 @@ r = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 Path(r["assets"], "before.json").write_text(json.dumps({
     "pid": os.getpid(), "birth": locks.process_start_time(os.getpid()),
 }))
-if r["fault"]:
+original_pipe = launch_seed_posix.os.pipe
+def observed_pipe():
+    descriptors = original_pipe()
+    Path(r["assets"], "pipe.json").write_text(json.dumps(descriptors))
+    return descriptors
+launch_seed_posix.os.pipe = observed_pipe
+if r["fault"] in ("interrupt", "encoding"):
     def failed_exec(*args):
         if r["fault"] == "interrupt":
             signal.raise_signal(signal.SIGINT)
         raise UnicodeError("fixture encoding refusal")
     launch_seed_posix.os.execvpe = failed_exec
+elif r["fault"] == "observer-timeout":
+    def stalled_receipt(*args, **kwargs):
+        time.sleep(30)
+    launch_seed_posix.native.spawned = stalled_receipt
 try:
     code = launch_seed_posix.execute(
         Path(r["record"]), Correlation(r["attempt"], r["resolution"], r["parent"]),
@@ -145,7 +173,8 @@ def test_foreground_exec_keeps_pid_birth_streams_and_actual_exit(
     assert {"pid": backend["pid"], "birth": backend["birth"]} == before
     assert backend["stdin"] == "retained stdin\n"
     assert backend["argv"] == ["", "two words", "literal;$()", "--interactive", seed.text]
-    assert backend["children"] in (None, "")
+    assert backend["children"] == ""
+    assert backend["closed_pipe"] == [True, True]
     assert result.stdout == "backend stdout\n"
     assert "backend stderr\n" in result.stderr
     assert seeds.peek(record) is None
@@ -213,5 +242,18 @@ def test_catchable_pre_exec_loss_cannot_finish_or_restore(
     assert [event["phase"] for event in events] == [
         "execution-requested", "seed-claimed", "unknown",
     ]
+    retained = seeds.peek(record)
+    assert retained.seed_id == seed.seed_id and retained.handoff_id
+
+
+def test_observer_timeout_is_finite_unknown_not_a_lifetime_waiter(record, tmp_path, native_bash):
+    seed, prepared, _correlation, assets, result = _run(
+        record, tmp_path, native_bash,
+        [sys.executable, "-c", "import time; time.sleep(0.1)"], fault="observer-timeout",
+    )
+    assert result.returncode == 0, result.stderr
+    assert (assets / ".native-seed-exec.complete").read_text() == "3\n"
+    events = audit.read(record.parent, prepared["attempt_id"], prepared["operation_id"])["events"]
+    assert events[-1]["phase"] == "unknown"
     retained = seeds.peek(record)
     assert retained.seed_id == seed.seed_id and retained.handoff_id
