@@ -66,6 +66,33 @@ def installer_policy(tmp_path: Path) -> str:
     )
 
 
+@pytest.mark.parametrize("linked", [False, True])
+@pytest.mark.parametrize("suffix", ["", "/", "//", "/./", "/../ordinary"])
+def test_policy_absence_walk_preserves_lexical_link_components(
+    tmp_path: Path, linked: bool, suffix: str,
+) -> None:
+    ordinary = tmp_path / "ordinary"
+    ordinary.mkdir()
+    root = ordinary
+    if linked:
+        root = tmp_path / "alias"
+        try:
+            root.symlink_to(ordinary, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"native symbolic-link support is unavailable: {exc}")
+    body = (
+        installer_policy(tmp_path)
+        + f"\n$InstallDir = {quote(str(root) + suffix)}\n"
+        + "function Get-BootstrapPython { return $null }\n"
+        + "Assert-DispatchActions @('runtime-activation')\n"
+    )
+    result = run_ps(tmp_path, body)
+    assert (result.returncode != 0) is linked, result.stdout + result.stderr
+    if linked:
+        assert "linked" in result.stderr
+    assert not (ordinary / "action-controls.json").exists()
+
+
 @pytest.mark.parametrize("selection", ["NoSupervisor", "NoService"])
 def test_supervisor_denial_preserves_native_roots_then_same_caller_clears(
     tmp_path: Path, selection: str,

@@ -357,3 +357,31 @@ def test_native_policy_prerequisite_failure_keeps_terminal_refusal_status(
     )
     assert result.returncode == 3, result.stderr
     assert "Action policy" in result.stderr
+
+
+@pytest.mark.parametrize("linked", [False, True])
+@pytest.mark.parametrize("suffix", ["", "/", "//", "/./", "/../ordinary"])
+def test_policy_absence_walk_does_not_skip_lexical_link_components(
+    tmp_path: Path, linked: bool, suffix: str,
+) -> None:
+    ordinary = tmp_path / "ordinary"
+    ordinary.mkdir()
+    root = ordinary
+    if linked:
+        root = tmp_path / "alias"
+        root.symlink_to(ordinary, target_is_directory=True)
+    script = "\n".join([
+        "set -eu",
+        f"INSTALL_DIR={str(root) + suffix!r}; SCRIPT_DIR={str(SCRIPTS)!r}",
+        '_fail() { echo "$*" >&2; }',
+        f"_bootstrap_python() {{ echo {sys.executable!r}; }}",
+        f". {str(SCRIPTS / 'source-runtime.sh')!r}",
+        "_require_actions runtime-activation",
+    ])
+    result = subprocess.run(
+        [BASH, "-c", script], capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == (3 if linked else 0), result.stderr
+    if linked:
+        assert "linked" in result.stderr
+    assert not (ordinary / "action-controls.json").exists()

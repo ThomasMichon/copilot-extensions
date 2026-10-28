@@ -362,3 +362,21 @@ Initial tests must prove the current gap before adding the guards.
 - The contained selection passed 60 cases with 24 PowerShell skips, covering
   both selected lock paths. Runtime code and the previously executed native
   PowerShell cases are unchanged.
+
+### 2026-10-28 - Lexical policy-root admission
+
+- The next review reported an unpublished linked-root bypass despite its
+  contradictory no-open-issues header. Actual POSIX cases reproduced trailing
+  separators hiding a symbolic root from the absence fast path.
+- Checked the same class in PowerShell: normalizing parent traversal erased
+  an intermediate symbolic component before absence was established. That
+  separate case also reproduced the incorrect allowance.
+- Strip only trailing separators from the POSIX inspection path, and walk
+  PowerShell parents lexically rather than resolving their full names. Linked
+  roots remain refused without changing the requested installation.
+- The three actual failing cases now pass alongside ordinary-root controls:
+  the contained selection passed 61 cases and actual host PowerShell passed all
+  54 cases. Ordinary roots with the same spellings remain Python-free; linked
+  roots still refuse without changing policy or active state.
+- Re-review, release, the accepted preparation interface and real running
+  qualification remain separate gates.

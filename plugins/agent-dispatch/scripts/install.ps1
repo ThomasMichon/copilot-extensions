@@ -795,8 +795,8 @@ function Assert-DispatchActions {
     $path = $policy
     do {
         $paths = @($path) + $paths
-        $parent = [IO.Directory]::GetParent($path)
-        $path = if ($parent) { $parent.FullName } else { '' }
+        $parent = [IO.Path]::GetDirectoryName($path)
+        $path = if ($parent) { $parent } else { '' }
     } while ($path)
     foreach ($path in $paths) {
         try { $attributes = [IO.File]::GetAttributes($path) }

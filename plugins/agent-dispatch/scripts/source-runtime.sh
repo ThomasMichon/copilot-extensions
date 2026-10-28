@@ -2,6 +2,7 @@ _require_actions() {
     # Stamping remains Python-free when ordinary explicit state is absent.
     # Prove searchable, unlinked ancestry rather than treating EACCES as absence.
     local probe="$INSTALL_DIR"
+    while [[ "$probe" != / && "$probe" == */ ]]; do probe="${probe%/}"; done
     if [[ ! -e "$INSTALL_DIR/action-controls.json" && ! -L "$INSTALL_DIR/action-controls.json" ]]; then
         while [[ ! -L "$probe" ]]; do
             if [[ -e "$probe" && ( ! -d "$probe" || ! -x "$probe" ) ]]; then break; fi

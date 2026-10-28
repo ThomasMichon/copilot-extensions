@@ -106,6 +106,9 @@ their effect. Explicit native stamping retains its Python-free path only when
 ordinary policy is proven absent through unlinked, accessible ancestry. Present
 or unprovable state requires the reader; an unavailable interpreter/helper is a
 named prerequisite failure, never permission to proceed.
+The absence walk preserves lexical link components: trailing separators cannot
+hide a linked root, and parent traversal is not normalized away before each
+ancestor is checked. Confirmed ordinary roots retain the Python-free path.
 
 The session-start hook checks `automatic-runtime-reconcile` before automatic
 stamp or background reconciliation. A denied optional hook action is visibly
