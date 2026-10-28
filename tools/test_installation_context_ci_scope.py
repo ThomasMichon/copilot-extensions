@@ -122,14 +122,14 @@ def test_native_jobs_do_not_reenter_required_unit_only_ci(retired_job: str) -> N
     assert not execution.get("continue-on-error", False)
 
 
-def test_native_launch_acceptance_is_explicit_windows_only_and_source_pinned() -> None:
+def test_native_launch_acceptance_is_explicit_and_source_pinned() -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
     )
     trigger = workflow.get("on", workflow.get(True))
     assert set(trigger) == {"workflow_dispatch"}
     assert trigger["workflow_dispatch"]["inputs"]["native_launch"] == {
-        "description": "Qualify copied Windows setup interrupt handling against a real current runtime",
+        "description": "Qualify copied Windows setup interrupts and the POSIX seed reply reader",
         "type": "boolean", "default": False,
     }
     job = workflow["jobs"]["native-launch-windows"]
@@ -149,6 +149,32 @@ def test_native_launch_acceptance_is_explicit_windows_only_and_source_pinned() -
     assert not any(step.get("continue-on-error", False) for step in job["steps"])
     for name in ("derived-diagnostics-posix", "derived-diagnostics-windows"):
         assert "!inputs.native_launch" in workflow["jobs"][name]["if"]
+
+
+def test_native_seed_reader_acceptance_uses_stock_posix_shells_only_when_selected() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    job = workflow["jobs"]["native-seed-reply-posix"]
+    assert job["if"] == "${{ inputs.native_launch }}"
+    assert job["strategy"] == {
+        "fail-fast": False, "matrix": {"os": ["ubuntu-latest", "macos-latest"]},
+    }
+    assert job["runs-on"] == "${{ matrix.os }}"
+    assert job["timeout-minutes"] == 8
+    assert job["steps"][0]["with"] == {
+        "ref": "${{ github.sha }}", "persist-credentials": False,
+    }
+    preflight = next(step for step in job["steps"] if step.get("name", "").startswith("Verify native"))
+    assert 'git rev-parse HEAD' in preflight["run"] and '"$EXPECTED_SHA"' in preflight["run"]
+    assert '/bin/bash -c \'[[ "$BASH_VERSINFO" == 3 ]]\'' in preflight["run"]
+    execution = job["steps"][-1]["run"]
+    assert 'export PATH="/bin:$PATH"' in execution
+    assert "--test-file tests/test_native_seed_reply_shell.py" in execution
+    assert "--test-file tests/test_session_shell.py" in execution
+    assert "--timeout 180 --plugin-timeout 240 --test-timeout 30" in execution
+    assert "--allow-host-state" not in execution
+    assert not any(step.get("continue-on-error", False) for step in job["steps"])
 
 
 def test_displaced_native_sources_and_unavailable_portfolio_remain_explicit() -> None:
