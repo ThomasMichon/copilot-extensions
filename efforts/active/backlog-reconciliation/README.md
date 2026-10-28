@@ -158,6 +158,10 @@ outcomes from agent-recommended research and prioritization mechanics.
   for discovering thematic alignment.
 - [ ] Verify and publish supported dispositions, preserving source versus
   release versus rollout distinctions and all active ownership.
+  The [roadmap follow-through register](roadmap-follow-through.md) records
+  #8733/#7650 finite completions, #8796's exact retained claim duty,
+  #9233's focused documentation gap and the independently verified
+  932-open census; the whole target remains unmet.
 - [ ] Coalesce thematic duplicates into canonical issues and existing efforts;
   transfer explicit residual checklists before closing superseded reports.
 - [ ] Refresh live and original-cohort metrics, append journal checkpoints, and
@@ -186,15 +190,18 @@ outcomes from agent-recommended research and prioritization mechanics.
   Its 176 researched proposals,
   23 provisional outcomes and one history-gated, unranked issue do not
   establish 176 missing patches or close remaining roadmap work.
-- [ ] _(Agent-recommended)_ Publish the [fourth disjoint 82-issue
+- [x] _(Agent-recommended)_ Publish the [fourth disjoint 82-issue
   proposal](roadmap-wave-4.md), four appendices and
   [36-relationship register](roadmap-wave-4-dependencies.md) with the
-  cross-wave integration. Its independently admitted 61 researched proposals
+  cross-wave integration through review in #9399. Its independently admitted 61 researched proposals
   and 21 provisional outcomes complete assignment coverage of the frozen
   12:11 UTC eligible census, not provisional decisions, later inflow or
   the whole-queue numerical checkpoint.
-- [ ] Research each eligible remaining issue against the relevant current
-  vision; retain excluded issues as counted, metadata-only coverage gaps.
+- [x] Research each eligible issue in the frozen 2026-10-28 12:11 UTC census
+  against the relevant pinned vision or retain an explicit unresolved gap.
+  The four reviewed waves cover all 682 eligible identities; 252 excluded
+  records remain counted, metadata-only gaps. Later inflow and changed
+  acceptance remain continuing Phase 2 work, not silently completed coverage.
 - [ ] Identify high-priority fixes and their actual existing efforts, retained
   owners, unresolved acceptance and first bounded work slices.
 - [ ] Produce an evidence-backed prerequisite graph and sequencing plan for a
