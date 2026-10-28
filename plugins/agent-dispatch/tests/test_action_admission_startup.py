@@ -208,6 +208,85 @@ def test_canceled_admission_wait_does_not_report_terminal_failure(
     assert not client.abandon_calls and client.closed
 
 
+def test_independent_hold_after_admission_wait_preserves_unclaimed_task(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "install"
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(root))
+    _policy(root, True)
+    app = build_app(Config(db_path=str(tmp_path / "tasks.db")))
+    queue = app.state.queue
+    task = queue.create("held script work", repo=TEST_REPO)
+    denied = threading.Event()
+    errors: list[BaseException] = []
+    url, stop = _boot(app)
+
+    class ObservedClient(DispatchClient):
+        def claim(self, **kwargs: object) -> dict | None:
+            try:
+                return super().claim(**kwargs)
+            except DispatchError:
+                denied.set()
+                raise
+
+    runtime = ScriptTaskRuntime(
+        ObservedClient(url), task.id, "script-one", repo=TEST_REPO,
+        heartbeat_seconds=0, admission_retry_seconds=0.01,
+    )
+
+    def run() -> None:
+        try:
+            with runtime as worker:
+                worker.announce_start()
+        except BaseException as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    try:
+        assert denied.wait(5)
+        held = queue.set_hold(task.id, reason="independent pause", actor="operator")
+        _policy(root, False)
+        thread.join(5)
+        assert not thread.is_alive()
+        assert len(errors) == 1 and isinstance(errors[0], RuntimeError)
+        assert "claim did not return task" in str(errors[0])
+        assert queue.get(task.id) == held
+        assert queue.get(task.id).status == "queued"
+        assert queue.get(task.id).attempts == 0
+    finally:
+        _policy(root, False)
+        thread.join(5)
+        stop()
+
+
+@pytest.mark.parametrize("claim", [None, {}, {"id": "other-task"}, []])
+def test_invalid_claim_after_admission_wait_does_not_abandon(
+    monkeypatch: pytest.MonkeyPatch, claim: object,
+) -> None:
+    from agent_dispatch import script_worker
+
+    client = FakeClient()
+    attempts = 0
+
+    def deny_then_return(**_kwargs: object) -> object:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise DispatchError(409, {
+                "code": "action_inhibited", "action": "worker-admission", "retryable": True,
+            })
+        return claim
+
+    monkeypatch.setattr(client, "claim", deny_then_return)
+    monkeypatch.setattr(script_worker.time, "sleep", lambda _seconds: None)
+    with pytest.raises(RuntimeError, match="claim did not return task"):
+        with ScriptTaskRuntime(client, "pending", "worker") as runtime:
+            runtime.announce_start()
+    assert attempts == 2
+    assert not client.start_calls and not client.abandon_calls and client.closed
+
+
 @pytest.mark.parametrize("detail", [
     "worker-admission is inhibited",
     {"code": "other", "action": "worker-admission", "retryable": True},

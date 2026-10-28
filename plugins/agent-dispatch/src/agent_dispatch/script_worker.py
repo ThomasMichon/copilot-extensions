@@ -166,7 +166,6 @@ class ScriptTaskRuntime:
                     all_repos=self.all_repos,
                     task_id=self.task_id,
                 )
-                self._admission_pending = False
                 break
             except DispatchError as exc:
                 if not exc.is_action_inhibited("worker-admission"):
@@ -176,6 +175,7 @@ class ScriptTaskRuntime:
                 time.sleep(max(0.01, self.admission_retry_seconds))
         if not isinstance(claim, dict) or claim.get("id") != self.task_id:
             raise RuntimeError(f"claim did not return task {self.task_id!r}")
+        self._admission_pending = False
         started = self.client.start(self.task_id, self.worker_id)
         self._started = True
         self._start_heartbeats()

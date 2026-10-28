@@ -262,3 +262,9 @@ Initial tests must prove the current gap before adding the guards.
   Cancellation preserves the unclaimed task. Gone unclaimed scripts retain
   their reservation while inhibited, then use the existing failed-spawn retry
   after clear; claimed scripts keep their prior failure semantics.
+- A second review found the pending flag cleared before validating a returned
+  claim. An independent hold applied during inhibition could therefore trigger
+  terminal abandonment after clear, although the script never owned the task.
+  Keep the pending flag until the claim is a mapping for this exact task.
+  Regressions cover a real coordinator hold/clear transition and all invalid
+  claim shapes without start or abandonment.
