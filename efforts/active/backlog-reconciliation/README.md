@@ -159,10 +159,13 @@ outcomes from agent-recommended research and prioritization mechanics.
 - [ ] Verify and publish supported dispositions, preserving source versus
   release versus rollout distinctions and all active ownership.
   The [roadmap follow-through register](roadmap-follow-through.md) records
-  #8733/#7650/#8802/#9072 finite completions, #8796's exact retained claim
+  #8733/#7650/#8802/#9072/#9413 finite completions, #8796's exact retained claim
   duty, #9233's focused documentation gap and the independently verified
-  930-open census; the whole target remains unmet. The next-decision matrix
+  933-open census; the whole target remains unmet. The next-decision matrix
   preserves #8682's specific finite consumer-qualification gap.
+  The [bounded inflow decisions](roadmap-inflow.md) preserve #9414's P1
+  standalone closure and #9412's P2 final-verdict gaps under their existing
+  claimant, while crediting #9413's finite delivered producer.
 - [ ] Coalesce thematic duplicates into canonical issues and existing efforts;
   transfer explicit residual checklists before closing superseded reports.
 - [ ] Refresh live and original-cohort metrics, append journal checkpoints, and
@@ -206,8 +209,11 @@ outcomes from agent-recommended research and prioritization mechanics.
 - [ ] Identify high-priority fixes and their actual existing efforts, retained
   owners, unresolved acceptance and first bounded work slices.
   The agent-recommended [next-decision matrix](roadmap-next-slices.md)
-  nominates twelve consequential first slices; current-predicate and finite
-  completion admission remain open, not implementation assignments.
+  nominates twelve consequential first slices; their bounded qualification
+  is recorded, not an exhaustive priority order or implementation assignment.
+  [Current slice qualification](roadmap-current-qualification.md) records
+  independently admitted source residuals and planned prerequisites without
+  transferring their owners or importing unrelated completion gates.
 - [ ] Produce an evidence-backed prerequisite graph and sequencing plan for a
   stable harness that progresses toward vision, distinguishing independent
   parallel work from actual blockers.
