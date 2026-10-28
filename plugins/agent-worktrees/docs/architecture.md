@@ -623,6 +623,9 @@ consumer. A future caller must discover support from the selected current
 runtime before sending new syntax, retain a supported legacy path for older
 providers or rollback, and never retry an uncertain preparation using another
 format. Existing JSON callers need no capability probe or migration.
+Both preparation forms reject an empty executable before any seed claim or
+process query; the NUL encoder and reader retain the same nonempty-executable
+rule. Empty subsequent arguments remain supported.
 
 The NUL reply is one fully encoded UTF-8 byte sequence, with a NUL after every
 field, in this order:

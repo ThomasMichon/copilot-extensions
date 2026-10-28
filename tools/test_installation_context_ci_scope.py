@@ -151,23 +151,25 @@ def test_native_launch_acceptance_is_explicit_and_source_pinned() -> None:
         assert "!inputs.native_launch" in workflow["jobs"][name]["if"]
 
 
-def test_native_seed_reader_acceptance_uses_stock_posix_shells_only_when_selected() -> None:
+@pytest.mark.parametrize(("name", "runner"), [
+    ("native-seed-reply-linux", "ubuntu-latest"),
+    ("native-seed-reply-macos", "macos-latest"),
+])
+def test_native_seed_reader_acceptance_uses_stock_posix_shells_only_when_selected(name, runner) -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
     )
-    job = workflow["jobs"]["native-seed-reply-posix"]
+    job = workflow["jobs"][name]
     assert job["if"] == "${{ inputs.native_launch }}"
-    assert job["strategy"] == {
-        "fail-fast": False, "matrix": {"os": ["ubuntu-latest", "macos-latest"]},
-    }
-    assert job["runs-on"] == "${{ matrix.os }}"
+    assert job["runs-on"] == runner
     assert job["timeout-minutes"] == 8
     assert job["steps"][0]["with"] == {
         "ref": "${{ github.sha }}", "persist-credentials": False,
     }
     preflight = next(step for step in job["steps"] if step.get("name", "").startswith("Verify native"))
     assert 'git rev-parse HEAD' in preflight["run"] and '"$EXPECTED_SHA"' in preflight["run"]
-    assert '/bin/bash -c \'[[ "$BASH_VERSINFO" == 3 ]]\'' in preflight["run"]
+    if runner == "macos-latest":
+        assert '/bin/bash -c \'[[ "$BASH_VERSINFO" == 3 ]]\'' in preflight["run"]
     execution = job["steps"][-1]["run"]
     assert 'export PATH="/bin:$PATH"' in execution
     assert "--test-file tests/test_native_seed_reply_shell.py" in execution
@@ -520,6 +522,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "interactive-completion-linux", "interactive-completion-macos",
         "interactive-completion-windows",
         "native-launch-windows",
+        "native-seed-reply-linux", "native-seed-reply-macos",
         "ssh-headless-linux", "ssh-headless-windows",
         "update-diagnostics-linux", "update-diagnostics-windows",
         "packaging-seed-linux", "packaging-seed-windows",
