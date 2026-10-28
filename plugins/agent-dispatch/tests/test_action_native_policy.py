@@ -15,6 +15,8 @@ import pytest
 from agent_dispatch.action_policy import ACTIONS
 from agent_dispatch.coordinator_cli import _cmd_cutover
 
+pytestmark = pytest.mark.usefixtures("isolated_service_environment")
+
 PLUGIN = Path(__file__).resolve().parents[1]
 
 

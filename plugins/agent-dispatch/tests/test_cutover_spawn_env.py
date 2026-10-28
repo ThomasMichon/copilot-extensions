@@ -20,15 +20,7 @@ from types import SimpleNamespace
 
 import pytest
 
-
-@pytest.fixture(autouse=True)
-def _isolate_production_environment_overlay(monkeypatch):
-    # Production overlays mutate os.environ directly, outside monkeypatch's undo log.
-    original = os.environ
-    before = dict(original)
-    monkeypatch.setattr(os, "environ", before.copy())
-    yield
-    assert dict(original) == before
+pytestmark = pytest.mark.usefixtures("isolated_service_environment")
 
 
 @pytest.fixture

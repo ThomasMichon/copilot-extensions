@@ -446,3 +446,16 @@ Initial tests must prove the current gap before adding the guards.
   actual host PowerShell cases. Nine native-Windows lifecycle cases remain
   explicitly skipped on WSL; neither their staging nor the host PowerShell
   execution establishes native Windows adoption.
+
+### 2026-10-28 - Cutover test-environment isolation
+
+- Assessed the next review's teardown concern: removing an absent environment
+  key through `monkeypatch` does not register a later direct production overlay
+  write for undo. Ordinary host/port/routing pins could outlive a test.
+- Extract the existing copied-environment fixture and apply it to all four
+  modules that directly execute cutover. Each case gets its own overlay target
+  and asserts the parent mapping is unchanged at teardown; other suites retain
+  their existing environment semantics.
+- The integrated routing/bootstrap selection again passed all 66 cases with
+  the teardown assertions active. Runtime/native code and the previously
+  executed actual PowerShell portfolio are unchanged.

@@ -12,6 +12,8 @@ from agent_dispatch import coordinator_cli
 from zdd import breadcrumb, routing
 from zdd.conditional import ConditionalCutover
 
+pytestmark = pytest.mark.usefixtures("isolated_service_environment")
+
 
 def test_conditional_legacy_refusal_preserves_native_route(tmp_path, monkeypatch, capsys):
     old = routing.publish_active(
