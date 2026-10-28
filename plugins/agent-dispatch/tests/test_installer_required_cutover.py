@@ -15,6 +15,7 @@ import pytest
 from tests.test_install_sh_activation_guard import _BASH
 from tests.test_install_sh_activation_guard import _assert_cutover_lock_released
 from tests.test_install_sh_activation_guard import _extract_function_block as sh_function
+from tests.test_install_sh_activation_guard import _native_bash_environment
 
 _ROOT = Path(__file__).resolve().parents[1]
 _PWSH = shutil.which("pwsh")
@@ -54,6 +55,7 @@ def _run(tmp_path: Path, shell: str, script: str, *args: str) -> subprocess.Comp
     return subprocess.run(
         [executable, *prefix, str(path), *args],
         capture_output=True, text=True, timeout=30,
+        env=_native_bash_environment() if shell == "sh" else None,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
 

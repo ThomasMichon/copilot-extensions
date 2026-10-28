@@ -59,6 +59,11 @@ _BASH = _resolve_bash()
 pytestmark = pytest.mark.skipif(_BASH is None, reason="a real bash is not available")
 
 
+def _native_bash_environment() -> dict[str, str]:
+    # Git Bash must create real symlinks for deliberately missing numeric PID targets.
+    return {**os.environ, "MSYS": "winsymlinks:nativestrict"}
+
+
 def _assert_cutover_lock_released(install_dir: Path) -> None:
     probe = subprocess.run(
         [_BASH, "-c", "\n".join([
@@ -144,13 +149,7 @@ def _run_activate_harness(
     try:
         with os.fdopen(fd, "w", newline="\n", encoding="utf-8") as f:
             f.write(script + "\n")
-        env = dict(os.environ)
-        # git-bash's `ln -s` otherwise fails outright ("No such file or
-        # directory") on Windows without this -- it needs an explicit
-        # request for a real, native symlink rather than its default
-        # emulation. Irrelevant on a genuine POSIX bash (Linux/macOS CI),
-        # where `ln -s` always creates a real symlink.
-        env["MSYS"] = "winsymlinks:nativestrict"
+        env = _native_bash_environment()
         result = subprocess.run(
             [_BASH, os.path.basename(script_path)],
             cwd=str(_INSTALL_SH.parent),
@@ -380,8 +379,7 @@ def _run_do_stamp_harness(
     try:
         with os.fdopen(fd, "w", newline="\n", encoding="utf-8") as f:
             f.write(script + "\n")
-        env = dict(os.environ)
-        env["MSYS"] = "winsymlinks:nativestrict"
+        env = _native_bash_environment()
         result = subprocess.run(
             [_BASH, os.path.basename(script_path)],
             cwd=str(_INSTALL_SH.parent),

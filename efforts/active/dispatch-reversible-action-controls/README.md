@@ -535,3 +535,12 @@ Initial tests must prove the current gap before adding the guards.
   than bypassing them. Forced-reader execution first reproduced nine local
   failures; independent full affected-file validation now passes all 64 cases.
   The fresh native Windows run remains pending.
+- The second native run again passed policy (147 tests; its two skips are
+  explicitly POSIX unprivileged access-denial controls) and worker lifecycle
+  (20 tests). Installer execution reached the previously masked SH lock path,
+  then timed out. The existing activation harness already documents Git Bash's
+  required native-symlink mode for numeric PID-link targets; extract and reuse
+  that environment in the required-cutover harness rather than changing the
+  production lock, increasing its timeout or skipping the assertions.
+  The affected shared/required/retained local selection passes all 78 cases.
+  Exact-new-head native qualification is still required.
