@@ -1446,6 +1446,24 @@ becomes live only when the workflow's existing Main control owner adopts it.
 
 ### Previewing without waiting for a real promotion
 
+Promotion's materializer checks the resulting local dependency closure for
+every plugin and declared standalone consumer, independently of its conversion
+log. Every reachable `[tool.uv.sources]` path must be non-editable, relative to
+that consumer's own payload, and lead to an existing package manifest or
+distribution archive. Nested sibling-library references are allowed inside the
+same payload. Missing packages,
+linked paths and references back to the monorepo or another payload refuse
+promotion before publication; installer-specific library lists are not the
+release dependency inventory.
+Existing standalone consumers must retain their root manifest. Retained
+workspace/file-URI mappings and path routes that leave and re-enter the owning payload
+are refused as well.
+Direct local requirements in project/build dependencies, dependency groups, or UV requirement
+settings (including overrides, constraints and extra build dependencies) are
+refused; declare them through `[tool.uv.sources]` so the vendoring flow owns their
+materialization. Linked payload content is refused even when the link
+points back into the original payload, since it may break after relocation.
+
 - **`python tools/preview_release.py <plugin>`** builds a scratch copy of
   that plugin's payload — with its vendored `libs/<lib>` materialized from
   canonical, and the version it would get if its pending changefiles were
