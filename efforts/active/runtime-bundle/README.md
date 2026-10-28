@@ -194,9 +194,14 @@ choose the wheel path, not a reason to relax source identity.
   material selection is byte-identical. The original wheel consumer and material
   readback succeed with copied inputs absent; original qualified files are
   unchanged. This is packaging evidence, not release or live-update acceptance.
-- Focused delivery/transport/release controls pass 103 cases with one
-  platform-specific skip. Source publication and review are pending; the parent
-  remains Active for the remaining release, consumer and lifecycle gates.
+- Review of #9424 reproduced a compressed-manifest budget gap: two controls
+  show 8,194 expanded bytes reaching JSON decoding under a 4,096-byte archive
+  or snapshot budget. Manifest and aggregate expanded-size checks now precede
+  decoding. The real complete candidate remains byte-identical.
+- Focused delivery/transport/release controls pass 105 cases with one
+  platform-specific skip. The PR documents its install-contract/effort impact;
+  final review and merge remain pending. The parent stays Active for the
+  remaining release, consumer and lifecycle gates.
 
 ### 2026-10-26 - Reviewed-intent boundary
 - Existing inventory and constructor research established the source-identity
