@@ -14,6 +14,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from . import __version__, telemetry
+from .action_controls import require_worker_admission
 from .config import (
     Config,
     has_live_local_coordinator,
@@ -92,7 +93,9 @@ def build_app(cfg: Config | None = None, *, replay_consumer_factory=None):
     if not telemetry.load_sink_from_config():
         telemetry.load_sink_from_env()
     Path(cfg.db_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
-    queue = TaskQueue(Path(cfg.db_path).expanduser())
+    queue = TaskQueue(
+        Path(cfg.db_path).expanduser(), worker_admission=require_worker_admission,
+    )
     return create_app(
         queue, token=cfg.token, control_token=cfg.control_token,
         sweep_interval=cfg.sweep_interval,

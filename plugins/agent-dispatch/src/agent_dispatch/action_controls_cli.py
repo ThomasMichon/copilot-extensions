@@ -57,7 +57,10 @@ def command(args: argparse.Namespace) -> int:
             result = {
                 "ok": not any(item["error"] for item in decisions),
                 "contract": CONTRACT, "scope": str(root), "state_file": str(path),
-                "automatic_attempts": decisions,
+                "action_attempts": decisions,
+                "automatic_attempts": [
+                    item for item in decisions if item["action"] in AUTOMATIC_ACTIONS
+                ],
             }
     except (OSError, ValueError, TimeoutError) as exc:
         result = {"ok": False, "contract": CONTRACT, "error": str(exc)}

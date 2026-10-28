@@ -16,6 +16,7 @@ MAX_STATE_BYTES = 64 * 1024
 ACTIONS = (
     "coordinator-replacement",
     "supervisor-self-update",
+    "worker-admission",
 )
 STATE_NAME = "action-controls.json"
 

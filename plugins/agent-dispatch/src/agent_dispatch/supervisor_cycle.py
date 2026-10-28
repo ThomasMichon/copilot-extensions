@@ -7,6 +7,7 @@ import time
 from typing import TYPE_CHECKING
 
 from .client import DispatchError
+from .action_controls import action_inhibited
 from .spawn_diagnostics import SpawnDiagnostics, diagnostic_text
 
 if TYPE_CHECKING:
@@ -63,6 +64,12 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
     call("redrive_unclaimed_spawns")
     if self.nudge:
         call("nudge_stalled", now=now)
+    if action_inhibited("worker-admission", logger=log):
+        trace.event("scheduling", "blocked", reason="worker_admission_inhibited")
+        if self.event_wake is not None:
+            self.event_wake.acknowledge()
+        call("_sync_event_subscriptions")
+        return []
     with trace.stage("failed_spawn_counts"):
         failed_counts = self._failed_spawn_counts()
     with trace.stage("selection") as selected:
@@ -118,6 +125,9 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
                     before_reserve.get("checkpoint"), before_reserve.get("reason"),
                     before_reserve.get("status"),
                 )
+                break
+            if action_inhibited("worker-admission", logger=log):
+                task_trace.event("scheduling", "blocked", reason="worker_admission_inhibited")
                 break
             with task_trace.stage("reserve") as reserved:
                 resp = reserve_for_backend(

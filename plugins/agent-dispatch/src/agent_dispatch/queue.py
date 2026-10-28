@@ -221,6 +221,7 @@ class TaskQueue(
         payload_dir: str | Path | None = None,
         blob_threshold: int = DEFAULT_BLOB_THRESHOLD,
         result_max_bytes: int = DEFAULT_RESULT_MAX_BYTES,
+        worker_admission: Callable[[], None] | None = None,
     ):
         self.db_path = str(db_path)
         self.lease_seconds = lease_seconds
@@ -228,6 +229,7 @@ class TaskQueue(
         self.eval_lease_seconds = eval_lease_seconds
         self.blob_threshold = blob_threshold
         self.result_max_bytes = result_max_bytes
+        self._worker_admission = worker_admission
         self._wake_notifier: Callable[[], None] | None = None
         self._owned_transition_notifier: Callable[[], None] | None = None
         self._run_waiter_prepare_notifier: Callable[[], None] | None = None
@@ -237,6 +239,11 @@ class TaskQueue(
             payload_dir = Path(self.db_path).parent / "payloads"
         self.payloads = PayloadStore(payload_dir)
         self._migrate()
+
+    def require_worker_admission(self) -> None:
+        """Check one admission attempt without imposing ambient host policy."""
+        if self._worker_admission is not None:
+            self._worker_admission()
 
     # -- connection / schema -------------------------------------------------
 

@@ -3236,6 +3236,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         prompt so it can claim/start/complete the task. Only a confirmed live
         worktree session is re-driven; unknown bridge state is left untouched.
         """
+        from .action_controls import action_inhibited
+
         redriven = 0
         for res in self._pool_reservations(state=SpawnState.SPAWNED):
             key = res.get("key")
@@ -3267,6 +3269,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 session = None
             if not session:
                 continue
+            if action_inhibited("worker-admission", logger=log):
+                break
             try:
                 pending = self.client.record_spawn(
                     key,

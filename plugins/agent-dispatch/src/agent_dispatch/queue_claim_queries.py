@@ -49,6 +49,7 @@ class QueueClaimQueriesMixin:
         _with_outcome: bool = False,
     ) -> Task | ClaimOutcome | None:
         """Atomically lease the best eligible ``queued`` task, or ``None``."""
+        self.require_worker_admission()
         repo = self._canonical_repo(repo)
         ts = self._now(now)
         caps = set(self._canonical_selector_tokens(capabilities))
@@ -154,6 +155,7 @@ class QueueClaimQueriesMixin:
                     producer_rejections=producer_rejections,
                 )
                 return outcome if _with_outcome else None
+            self.require_worker_admission()
             conn.execute(
                 "UPDATE tasks SET status = ?, owner = ?, claimed_at = ?, updated_at = ?,"
                 " lease_expires_at = ?, last_seen_at = ?, generation = generation + 1,"

@@ -1,0 +1,9 @@
+{
+  "comment": "Keep worker admission reversible while preserving pending execution identity",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
