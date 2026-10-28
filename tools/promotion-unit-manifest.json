@@ -2846,7 +2846,7 @@
         "tools/promotion_unit_tests/test_release_dynamic_decisions.py": "961ee6951789981ce9bb975dab62093d548942c5cc1df0762fc9fe74284c40db",
         "tools/promotion_unit_tests/test_release_evidence.py": "97f6f103b9bfbb216f0c8f406b516ea825de42dc35aa815874306787366662d0",
         "tools/promotion_unit_tests/test_release_helper_contract.py": "a0999f7a7394423adfdca6e86e39924ea5ec069469275170e2d587e430e0a591",
-        "tools/promotion_unit_tests/test_materialized_local_sources.py": "e3a813ec89b622906782f504ad7441d1d883804c834c59b33947de5c0c8ecfe0",
+        "tools/promotion_unit_tests/test_materialized_local_sources.py": "103c3ed93188e0b9aaf8673ca4194a091a768938c61fe140eed82f5bddf73451",
         "tools/promotion_unit_tests/test_release_helper_decisions.py": "585e6a98a5ff18456f5272d7405ad3c785a498e26332ffd7d71a0fb2a824a343",
         "tools/promotion_unit_tests/test_release_helper_loaders.py": "bad065bb3b7294522381e1ce24504c2ff669e789b32f0800533f432c0db9f196",
         "tools/promotion_unit_tests/test_remote_login_shell.py": "41030272e7d66953e8ce740aac239228d0c75ba7de9a18e48f9a57b9e9f10da0",
