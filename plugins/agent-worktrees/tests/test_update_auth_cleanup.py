@@ -249,15 +249,25 @@ def test_cleanup_offer_is_retained_in_status():
 def test_automatic_offer_never_persists_inline_helper_credentials(
     tmp_path, monkeypatch, capsys, padding,
 ):
+    import importlib.util
+    import sys
+
     import update_telemetry as ut
-    from agent_machines import git_config_transaction
 
     from agent_worktrees import update_auth_context as context
     from agent_worktrees import update_events
 
+    owner_source = (
+        Path(__file__).resolve().parents[3] / "plugins" / "agent-machines" / "src"
+        / "agent_machines" / "git_config_transaction.py"
+    )
+    spec = importlib.util.spec_from_file_location("cleanup_git_config_fixture", owner_source)
+    transaction = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, transaction)
+    spec.loader.exec_module(transaction)
     secret = "inline-helper-private-fixture-value"
     helper = "!f() { printf '%s' '" + secret + "'; }; f # " + "padding " * padding
-    plan = git_config_transaction.preview(
+    plan = transaction.preview(
         tmp_path / "global-config", {"credential.helper": [helper]},
     ).summary()
     packet = restore_packet(changed=True)
