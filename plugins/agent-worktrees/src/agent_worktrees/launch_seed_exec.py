@@ -255,6 +255,14 @@ def _setup_command(
     return None
 
 
+def supports_seed_command(command: list[str], record_path: Path) -> bool:
+    """Recognize the existing finite setup/direct-backend contract without effects."""
+    host = Path(command[0]).name.lower() if command else ""
+    if host in {"gh", "gh.exe"}:
+        return False
+    return _setup_command(record_path, "preview", command) is not None
+
+
 def launch(
     record_path: Path, command: list[str], *, invoke: bool = False, seed_id: str | None = None,
     admission_only: bool = False, preserve_seed_id: str | None = None,

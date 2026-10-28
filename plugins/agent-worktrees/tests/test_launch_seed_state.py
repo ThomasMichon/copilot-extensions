@@ -38,6 +38,103 @@ def _record(tmp_path):
     ).yaml_path
 
 
+@pytest.mark.parametrize("explicit", [False, True])
+def test_embody_native_startup_defers_claim_to_real_invocation(tmp_path, monkeypatch, explicit):
+    from agent_worktrees import embody_completion, embody_resume
+
+    path = _record(tmp_path)
+    text = "literal ' \"\n--resume=not-an-option \u03a9"
+    original = state.stage(path, kind="new", text="old" if explicit else text)
+    command, seed_id = embody_completion.prepare_startup_seed(
+        ["copilot"], path, text, explicit=explicit,
+    )
+    staged = state.peek(path)
+    assert staged.text == text and staged.handoff_id is None
+    assert seed_id == staged.seed_id
+    assert (seed_id != original.seed_id) is explicit
+    assert text not in command
+    assert command[-2:] == ["--", "copilot"]
+    assert command[command.index("--seed-id") + 1] == seed_id
+    native_command = embody_resume.with_resume(command, "history-id")
+    delimiter = native_command.index("--")
+    prepared = launch_seed_exec._prepare(
+        path, native_command[delimiter + 1:], invoke=True, seed_id=seed_id,
+    )
+    assert prepared.argv == ["copilot", "--resume=history-id", "--interactive", text]
+    assert prepared.receipt["seed"]["seed_id"] == seed_id
+    assert state.peek(path).handoff_id
+
+
+def test_embody_native_startup_refuses_uncertain_or_superseded_intent(tmp_path):
+    from agent_worktrees import embody_completion
+
+    path = _record(tmp_path)
+    seed = state.stage(path, kind="new", text="current")
+    with pytest.raises(ValueError, match="changed before launch"):
+        embody_completion.prepare_startup_seed(["copilot"], path, "stale", explicit=False)
+    receipt = state.take(path, seed_id=seed.seed_id)
+    before = state.peek(path)
+    with pytest.raises(ValueError, match="do not resend"):
+        embody_completion.prepare_startup_seed(["copilot"], path, "replacement", explicit=True)
+    assert state.peek(path) == before
+    assert state.restore(path, receipt)["restored"]
+
+
+def test_embody_native_startup_rejects_nul_before_staging_or_claim(tmp_path):
+    from agent_worktrees import embody_completion
+
+    path = _record(tmp_path)
+    original = state.stage(path, kind="new", text="retain")
+    with pytest.raises(ValueError, match="NUL"):
+        embody_completion.prepare_startup_seed(["copilot"], path, "bad\0input", explicit=True)
+    assert state.peek(path) == original
+
+
+def test_embody_native_startup_does_not_replace_typed_resume(tmp_path):
+    from agent_worktrees import embody_completion
+
+    path = _record(tmp_path)
+    original = state.stage(path, kind="resume", text="retained Resume")
+    with pytest.raises(ValueError, match="existing launch owner"):
+        embody_completion.prepare_startup_seed(["copilot"], path, "New task", explicit=True)
+    assert state.peek(path) == original
+
+
+@pytest.mark.parametrize("shell", ["bash", "pwsh"])
+def test_embody_marked_setup_keeps_prompt_unclaimed_until_backend(tmp_path, monkeypatch, shell):
+    from agent_worktrees import embody_completion
+
+    path = _record(tmp_path)
+    script = tmp_path / ("setup.sh" if shell == "bash" else "setup.ps1")
+    script.write_text(launch_seed_exec.BOUNDARY_MARKER + "\n", encoding="utf-8")
+    command = [shell, *([] if shell == "bash" else ["-File"]), str(script)]
+    seed = state.stage(path, kind="new", text="private staged prompt")
+    deferred, seed_id = embody_completion.prepare_startup_seed(
+        command, path, seed.text, explicit=False,
+    )
+    delimiter = deferred.index("--")
+    prepared = launch_seed_exec._prepare(
+        path, deferred[delimiter + 1:], invoke=False, seed_id=seed_id,
+    )
+    assert not isinstance(prepared, int)
+    assert prepared.receipt is None and state.peek(path) == seed
+    flag = "--launch-seed-id" if shell == "bash" else "-LaunchSeedId"
+    assert prepared.argv[prepared.argv.index(flag) + 1] == seed.seed_id
+    assert seed.text not in prepared.argv
+
+
+@pytest.mark.parametrize("command", [["custom-launcher"], ["gh", "copilot"]])
+def test_embody_unsupported_startup_preserves_legacy_fallback_without_staging(tmp_path, command):
+    from agent_worktrees import embody_completion
+
+    path = _record(tmp_path)
+    original = state.stage(path, kind="new", text="retain")
+    assert embody_completion.prepare_startup_seed(
+        command, path, "explicit", explicit=True,
+    ) == (command, None)
+    assert state.peek(path) == original
+
+
 def _settled_pair_receipt(path):
     from agent_worktrees import terminal_pair_progress
 
