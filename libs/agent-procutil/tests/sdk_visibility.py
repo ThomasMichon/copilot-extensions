@@ -96,8 +96,9 @@ def validate_request(mode: str, value: object) -> dict:
         validate_case_packets(Path(value["sdk_root"]), value["case_packets"])
     elif mode == "worker":
         validate_case_packet(Path(value["sdk_root"]), value["nodes"])
-        if type(value["packet"]) is not int or value["packet"] not in (0, 1):
-            raise ObservationBlocked("native packet ordinal must be zero or one")
+        native_arguments(
+            Path(value["sdk_root"]), Path(value["output"]), value["nodes"], value["packet"],
+        )
     return value
 
 
@@ -414,6 +415,9 @@ def worker(request: dict) -> int:
     require_sdk_sources(Path(request["sdk_root"]), request["sources"], runner=Path(__file__))
     verify_sources(request["sources"])
     validate_case_packet(Path(request["sdk_root"]), request["nodes"])
+    arguments = native_arguments(
+        Path(request["sdk_root"]), Path(request["output"]), request["nodes"], request["packet"],
+    )
     bind_sdk_import(Path(request["sdk_root"]))
     api = new_api()
     api.require_desktop()
@@ -422,9 +426,6 @@ def worker(request: dict) -> int:
         emit({"kind": "ready", "nonce": request["nonce"], "identity": api.identity()})
         if command(api, request["nonce"], request["deadline"]) != "run" or parent.gone():
             raise ObservationBlocked("SDK test worker was not admitted by its original caller")
-        arguments = native_arguments(
-            Path(request["sdk_root"]), Path(request["output"]), request["nodes"], request["packet"],
-        )
         os.environ["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
         import pytest
 

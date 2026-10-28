@@ -359,6 +359,25 @@ transfer without acceptance by a named tracked objective.
 
 ## Journal
 
+### 2026-10-28 - Prepare fresh source-bound native qualification
+
+- Startup-failure scrutiny found a wait cycle: receipt EOF waited for worker
+  exit before cleanup could deliver the abort/input EOF that worker needed.
+  The new real PowerShell regression reproduced the timeout; unwinding first
+  now preserves diagnostics and settles the failed startup on both Linux hosts.
+  All shipped adapter copies carry the same correction.
+- The explicitly consented fresh qualification is prepared as four literal
+  packets of 16, 16, 8 and 2 cases under one unchanged whole-run deadline and
+  one calibration/quiet epoch. Additional native controls cover Job-offer
+  permission, explicit abort, receipt-write failure, unknown/adopted ACK custody,
+  exact parent handle settlement and both hosts' receipt-EOF unwind.
+- The focused source controls pass 121 actor-free cases, 42 actual Linux
+  lifetime/startup/completion cases and three cold source-binding cases.
+  Eight Windows-only controls remain unexecuted here. The new native attempt
+  remains unspent pending frozen-source/producer review; the old negative
+  artifacts remain immutable. PR review, native qualification, helper migration
+  and every aggregate completion gate remain open.
+
 ### 2026-10-28 - Restore explicit management authorization
 
 - The next #9354 review had no inline findings but flagged context fallback

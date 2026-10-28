@@ -150,6 +150,153 @@ def test_published_report_read_errors_are_not_silently_retried(tmp_path, monkeyp
 
 
 @pytest.mark.parametrize("host", HOSTS or [None])
+def test_startup_receipt_eof_releases_input_before_waiting_for_worker(tmp_path, host):
+    if host is None:
+        pytest.skip("PowerShell is unavailable")
+    source = tmp_path / "sdk"
+    source.mkdir()
+    shutil.copyfile(SDK / "installation-context.ps1", source / "installation-context.ps1")
+    (source / "installation_context.py").write_text("", encoding="utf-8")
+    (source / "_installation_context_worker.py").write_text(
+        "import os,sys\n"
+        "from pathlib import Path\n"
+        "def main(request):\n"
+        "    os.close(1)\n"
+        "    sys.stdin.buffer.read()\n"
+        "    Path(request['parameters']['DurableHome']).mkdir()\n"
+        "    sys.stderr.write('controlled receipt publication failure\\n')\n"
+        "    return 1\n",
+        encoding="utf-8",
+    )
+    process = subprocess.Popen(
+        [host, "-NoProfile", "-NonInteractive", "-File",
+         str(source / "installation-context.ps1"), "source-id",
+         "-SourceJson", '{"source":"github","repo":"example/marketplace"}',
+         "-CopilotHome", str(tmp_path / "copilot"),
+         "-DurableHome", str(tmp_path / "released")],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
+        **no_window_kwargs(),
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=5)
+        assert process.returncode == 1, (stdout, stderr)
+        assert not stdout
+        assert "startup failed" in stderr
+        assert "controlled receipt publication failure" in stderr
+        assert (tmp_path / "released").is_dir()
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(3)
+        process.stdout.close()
+        process.stderr.close()
+
+
+OFFER_MODES = (
+    "no-permission", "wrong-permission", "abort", "write-abort",
+    "write-eof", "wrong-ack", "missing-ack", "adopted",
+)
+OFFER_BODY = r'''
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+from agent_procutil._daemon_instance_identity import birth_identity
+from agent_procutil._shell_caller_owned import serve
+mode = sys.argv[2]
+if mode.startswith("write-"):
+    class FailedReceipt:
+        def write(self, text):
+            sys.stderr.write("receipt:" + text)
+            sys.stderr.flush()
+            raise OSError("controlled receipt write failure")
+        def flush(self):
+            pass
+    sys.stdout = FailedReceipt()
+def callback():
+    print("admitted", flush=True)
+    return 7
+sys.exit(serve(
+    callback, owner_pid=os.getppid(),
+    owner_birth=birth_identity(os.getppid()), nonce="a" * 32,
+))
+'''
+
+
+@pytest.mark.skipif(os.name != "nt", reason="actual Windows parent Job handle table")
+@pytest.mark.parametrize("mode", OFFER_MODES)
+def test_native_offer_failure_preserves_parent_handle_custody(mode):
+    import ctypes
+    from ctypes import wintypes
+
+    from agent_procutil._windows_parent_job import _api
+
+    kernel = _api()
+    kernel.GetProcessHandleCount.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel.GetProcessHandleCount.restype = wintypes.BOOL
+    kernel.GetHandleInformation.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel.GetHandleInformation.restype = wintypes.BOOL
+
+    def handle_count():
+        count = wintypes.DWORD()
+        assert kernel.GetProcessHandleCount(kernel.GetCurrentProcess(), ctypes.byref(count))
+        return count.value
+
+    baseline = handle_count()
+    process = subprocess.Popen(
+        [sys.executable, "-I", "-S", "-B", "-c", OFFER_BODY,
+         str(ROOT / "libs/agent-procutil/src"), mode],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        **no_window_kwargs(),
+    )
+    remote = None
+    try:
+        nonce = "a" * 32
+        decision = {
+            "no-permission": b"",
+            "wrong-permission": b"wrong\n",
+            "abort": ("offer:" + nonce + "\nabort:" + nonce + "\n").encode(),
+            "write-abort": ("offer:" + nonce + "\nabort:" + nonce + "\n").encode(),
+            "write-eof": ("offer:" + nonce + "\n").encode(),
+            "wrong-ack": ("offer:" + nonce + "\nwrong\n").encode(),
+            "missing-ack": ("offer:" + nonce + "\n").encode(),
+            "adopted": ("offer:" + nonce + "\n" + nonce + "\n").encode(),
+        }[mode]
+        stdout, stderr = process.communicate(decision, timeout=5)
+        if mode not in ("no-permission", "wrong-permission"):
+            wire = stderr.split(b"receipt:", 1)[1] if mode.startswith("write-") else stdout
+            receipt = json.loads(wire.splitlines()[0])
+            assert receipt["nonce"] == nonce and receipt["owner_pid"] == os.getpid()
+            assert receipt["job"]["parent_pid"] == os.getpid()
+            if mode not in ("abort", "write-abort"):
+                remote = receipt["job"]["parent_handle"]
+                flags = wintypes.DWORD()
+                assert kernel.GetHandleInformation(remote, ctypes.byref(flags)), (
+                    "unconfirmed adoption reclaimed the caller's still-owned handle"
+                )
+                assert flags.value & 1 == 0
+        if mode == "adopted":
+            assert process.returncode == 7, stderr
+            assert stdout.splitlines()[1:] == [
+                b"admitted", b"", ("__COPILOT_CALLER_EXIT_" + nonce + "=7").encode(),
+            ]
+            assert not stderr
+        else:
+            assert process.returncode != 0
+            assert b"admitted" not in stdout and b"__COPILOT_CALLER_EXIT_" not in stdout
+            if mode in ("write-eof", "wrong-ack", "missing-ack"):
+                assert b"Job adoption is unconfirmed" in stderr
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(3)
+        for stream in (process.stdin, process.stdout, process.stderr):
+            stream.close()
+        process._handle.Close()
+        if remote is not None:
+            assert kernel.CloseHandle(remote)
+    assert handle_count() == baseline, "parent Job offer left an unsettled native handle"
+
+
+@pytest.mark.parametrize("host", HOSTS or [None])
 @pytest.mark.parametrize("composition", ["path", "test-venv"])
 @pytest.mark.parametrize("mode", ["completed", "abrupt", "caller-exit", "cancel"])
 @pytest.mark.parametrize("cycle", range(2))

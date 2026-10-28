@@ -87,6 +87,9 @@ adoption or an explicit nonce-bound **unadopted** abort. Only that abort permits
 remote-handle reclamation; EOF or a malformed acknowledgement preserves explicit
 uncertainty and never closes a numeric handle the shell might already have
 disposed or reused. A failed receipt write still consumes that decision.
+If the shell sees receipt EOF, it unwinds to send its abort or close input
+before waiting for the worker and diagnostics; waiting first would deadlock
+a worker that is still awaiting the handoff decision.
 Linux/macOS retain the original shell's private stdin lifetime pipe in an
 independent forked watcher member, established before releasing the callback.
 The watcher's own membership pins the original group even if its leader dies;

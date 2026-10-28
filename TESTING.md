@@ -241,14 +241,19 @@ The `passive` mode creates no window and changes no foreground state: it checks
 the native bindings, complete raw-event/poll capture and private-pipe identity
 handshake. After independent source review, the separately authorized visible
 mode consumes one control attempt, requires raw show/foreground/original-
-restoration/retirement witnesses, then observes the exact 32-case SDK lifetime
-matrix as two disjoint 16-case packets inside one uninterrupted quiet epoch.
-The probe request's `case_packets` supplies all 32 literal parametrized node
-IDs. `sdk_visibility_cases.py` rejects broad function selectors, overlapping
+restoration/retirement witnesses, then observes 42 cases inside one uninterrupted
+quiet epoch: the exact 32-case SDK lifetime matrix in two disjoint 16-case
+packets, eight real Windows Job-offer protocol controls, and startup receipt-EOF
+unwinding on both PowerShell hosts. The offer controls cover absent/invalid
+permission, explicit unadopted abort, receipt-write failure, absent/invalid ACK
+and normal adoption, including exact parent handle-table settlement. They test
+the native protocol, not every possible shell cancellation instruction.
+The probe request's `case_packets` supplies all 42 literal parametrized node
+IDs in that order. `sdk_visibility_cases.py` rejects broad function selectors, overlapping
 packets, source escapes and incomplete host/composition/mode/cycle coverage
 before any native binding or visible attempt. Each isolated worker runs at
 most 16 cases, retires inside that same observer and writes its own exact
-16-case JUnit; both reports must cover the declared matrix. Calibration is
+literal JUnit; all four reports must cover the declared matrix. Calibration is
 never repeated to partition tests, and the original whole deadline is not
 rearmed between workers.
 Each worker sets `--rootdir` to the verified SDK tree while keeping its empty

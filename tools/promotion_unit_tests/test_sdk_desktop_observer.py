@@ -328,7 +328,7 @@ def source_request(tmp_path):
 def case_packets(sdk):
     module = sys.modules["sdk_visibility_cases"]
     hosts = (r"C:\\Windows\\powershell.EXE", r"C:\\PowerShell\\pwsh.EXE")
-    return [
+    packets = [
         [
             str(sdk / module.NATIVE_TEST) + "::"
             + f"{module.FUNCTION}[{cycle}-{mode}-{composition}-{host}]"
@@ -338,6 +338,15 @@ def case_packets(sdk):
         ]
         for cycle in (0, 1)
     ]
+    packets.append([
+        str(sdk / module.NATIVE_TEST) + "::" + f"{module.OFFER_FUNCTION}[{mode}]"
+        for mode in module.OFFER_MODES
+    ])
+    packets.append([
+        str(sdk / module.NATIVE_TEST) + "::" + f"{module.EOF_FUNCTION}[{host}]"
+        for host in hosts
+    ])
+    return packets
 
 
 def test_probe_manifest_requires_explicit_complete_sdk_closure_at_selected_root(tmp_path):
@@ -670,7 +679,8 @@ def probe_failure_fixture(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("stage", [
-    f"worker-{packet:02}-{stage}" for packet in (1, 2) for stage in ("admit", "send", "settled", "exit")
+    f"worker-{packet:02}-{stage}" for packet in (1, 2, 3, 4)
+    for stage in ("admit", "send", "settled", "exit")
 ])
 def test_failed_sdk_worker_retires_inside_quiet_observer_before_seal(probe_failure_fixture, stage):
     request, events, failure, *_ = probe_failure_fixture
@@ -684,7 +694,7 @@ def test_failed_sdk_worker_retires_inside_quiet_observer_before_seal(probe_failu
     else:
         assert events.index("worker-01-close") < events.index("worker-02-close")
     report = json.loads((Path(request["output"]) / "visibility-result.json").read_text())
-    assert len(report["workers"]) == (1 if name == "worker-01" else 2)
+    assert len(report["workers"]) == int(name.rsplit("-", 1)[1])
     record = report["workers"][-1]
     assert record["stderr"] == name + " literal native stderr"
     assert record["stdout"] == name + " partial stdout"
@@ -759,11 +769,17 @@ def test_successful_children_close_inside_their_own_capture_epochs(probe_failure
     assert events.index("worker-01-close") < events.index("worker-02-close") < events.index("quiet-sdk-seal")
     assert events.count("calibration-enter") == events.count("quiet-sdk-enter") == 1
     report = json.loads((Path(request["output"]) / "visibility-result.json").read_text())
-    assert [worker["packet"] for worker in report["workers"]] == [0, 1]
-    assert [packet[-16:] for packet in report["pytest_packets"]] == request["case_packets"]
+    assert [worker["packet"] for worker in report["workers"]] == [0, 1, 2, 3]
+    assert [
+        arguments[-len(nodes):] for arguments, nodes in zip(
+            report["pytest_packets"], request["case_packets"], strict=True,
+        )
+    ] == request["case_packets"]
     waits = [event for event in events if isinstance(event, tuple) and event[1].startswith("worker")]
-    assert len(waits) == 2 and waits[0][2] == waits[1][2]
-    assert waits[0][3] == waits[1][3] == "quiet-sdk"
+    assert len(waits) == 4 and len({wait[2] for wait in waits}) == 1
+    assert {wait[3] for wait in waits} == {"quiet-sdk"}
+    assert all(events.index(f"worker-{index:02}-close") < events.index("quiet-sdk-seal")
+               for index in range(1, 5))
 
 
 def test_native_scope_never_includes_the_synthetic_fixture_controls(tmp_path):
@@ -771,7 +787,7 @@ def test_native_scope_never_includes_the_synthetic_fixture_controls(tmp_path):
     packets = case_packets(sdk)
     for index, nodes in enumerate(packets):
         arguments = runner.native_arguments(sdk, output, nodes, index)
-        assert arguments[-16:] == nodes
+        assert arguments[-len(nodes):] == nodes
         assert arguments.count("-x") == 1 and "--noconftest" in arguments
         assert arguments[arguments.index("--rootdir") + 1] == str(sdk)
         assert "--junitxml=" + str(output / f"native-{index + 1:02}.xml") in arguments
@@ -780,7 +796,7 @@ def test_native_scope_never_includes_the_synthetic_fixture_controls(tmp_path):
 @pytest.mark.parametrize("change", [
     "none", "failure", "error", "skipped", "missing", "duplicate", "other", "empty-classname",
 ])
-def test_native_junit_requires_all_32_actual_case_results(tmp_path, change):
+def test_native_junit_requires_all_42_actual_case_results(tmp_path, change):
     sdk = tmp_path / "sdk"
     packets = case_packets(sdk)
     for index, nodes in enumerate(packets):
@@ -805,15 +821,16 @@ def test_native_junit_requires_all_32_actual_case_results(tmp_path, change):
         suite[0].set("classname", "")
     ET.ElementTree(suite).write(path)
     if change == "none":
-        assert runner.verify_native_junit(tmp_path, sdk, packets)["case_count"] == 32
+        assert runner.verify_native_junit(tmp_path, sdk, packets)["case_count"] == 42
     else:
-        with pytest.raises(observer.ObservationBlocked, match="16-case"):
+        with pytest.raises(observer.ObservationBlocked, match="literal packet"):
             runner.verify_native_junit(tmp_path, sdk, packets)
 
 
 @pytest.mark.parametrize("change", [
     "one-packet", "oversize", "duplicate", "overlap", "wrong-function", "wrong-source",
-    "missing-mode", "wrong-host",
+    "missing-mode", "wrong-host", "missing-controls", "wrong-order", "control-duplicate",
+    "eof-host-mismatch",
 ])
 def test_unbounded_or_incomplete_native_packet_matrices_are_refused(tmp_path, change):
     sdk = tmp_path / "sdk"
@@ -826,6 +843,14 @@ def test_unbounded_or_incomplete_native_packet_matrices_are_refused(tmp_path, ch
         packets[0][-1] = packets[0][0]
     elif change == "overlap":
         packets[1] = packets[0][:]
+    elif change == "missing-controls":
+        packets = packets[:2]
+    elif change == "wrong-order":
+        packets[2], packets[3] = packets[3], packets[2]
+    elif change == "control-duplicate":
+        packets[2][-1] = packets[2][0]
+    elif change == "eof-host-mismatch":
+        packets[3] = [node.replace("PowerShell", "OtherPowerShell") for node in packets[3]]
     else:
         before, after = {
             "wrong-function": ("test_sdk_scope_retires_before_observer_cleanup", "test_other"),
@@ -834,7 +859,7 @@ def test_unbounded_or_incomplete_native_packet_matrices_are_refused(tmp_path, ch
             "wrong-host": ("powershell.EXE", "another.EXE"),
         }[change]
         packets = [[node.replace(before, after) for node in packet] for packet in packets]
-    with pytest.raises(observer.ObservationBlocked, match="native packet|native packets"):
+    with pytest.raises(observer.ObservationBlocked, match="packet|controls"):
         runner.validate_case_packets(sdk, packets)
 
 
@@ -843,7 +868,7 @@ def test_monolithic_case_function_is_not_a_bounded_literal_packet(tmp_path):
     sdk = tmp_path / "sdk"
     nodes = case_packets(sdk)[0]
     nodes[0] = str(sdk / module.NATIVE_TEST) + "::" + module.FUNCTION
-    with pytest.raises(observer.ObservationBlocked, match="function cases"):
+    with pytest.raises(observer.ObservationBlocked, match="literal bounded control roster"):
         runner.validate_case_packet(sdk, nodes)
 
 

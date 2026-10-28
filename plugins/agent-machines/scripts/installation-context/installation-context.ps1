@@ -252,8 +252,9 @@ sys.exit(runpy.run_path(worker)['main'](request))
             }
         }
         if (-not $ready.Result) {
-            while (-not $process.WaitForExit(100)) {}
-            Fail ("Caller-lifetime startup failed: " + $stderr.GetAwaiter().GetResult())
+            # Unwind first: the worker may need our abort or input EOF before
+            # it can exit and close diagnostics.
+            Fail 'Caller-lifetime startup failed before a custody receipt.'
         }
         $receipt = $ready.Result | ConvertFrom-Json
         if ($receipt.version -cne 1 -or $receipt.nonce -cne $nonce -or $receipt.owner_pid -cne $PID) {

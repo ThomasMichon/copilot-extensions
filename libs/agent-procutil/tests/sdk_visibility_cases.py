@@ -17,27 +17,52 @@ CASE = re.compile(
     re.escape(FUNCTION)
     + r"\[([01])-(completed|abrupt|caller-exit|cancel)-(path|test-venv)-(.+)\]"
 )
+OFFER_FUNCTION = "test_native_offer_failure_preserves_parent_handle_custody"
+OFFER_MODES = (
+    "no-permission", "wrong-permission", "abort", "write-abort",
+    "write-eof", "wrong-ack", "missing-ack", "adopted",
+)
+EOF_FUNCTION = "test_startup_receipt_eof_releases_input_before_waiting_for_worker"
+
+
+def packet_kind(nodes: list[str]) -> str:
+    names = [node.partition("::")[2] for node in nodes]
+    if len(nodes) == 16 and all(CASE.fullmatch(name) for name in names):
+        return "sdk"
+    if len(nodes) == 8 and set(names) == {f"{OFFER_FUNCTION}[{mode}]" for mode in OFFER_MODES}:
+        return "offer"
+    if len(nodes) == 2 and all(
+        name.startswith(EOF_FUNCTION + "[") and name.endswith("]") for name in names
+    ):
+        hosts = {name[len(EOF_FUNCTION) + 1:-1] for name in names}
+        kinds = {host.replace("\\", "/").rsplit("/", 1)[-1].casefold() for host in hosts}
+        if kinds == {"powershell.exe", "pwsh.exe"}:
+            return "eof"
+    raise ObservationBlocked("native packet differs from its literal bounded control roster")
 
 
 def validate_case_packet(sdk: Path, nodes: object) -> list[str]:
-    if not isinstance(nodes, list) or len(nodes) != 16:
-        raise ObservationBlocked("native packet must contain exactly 16 literal cases")
+    if not isinstance(nodes, list) or not 1 <= len(nodes) <= 16:
+        raise ObservationBlocked("native packet must contain at most 16 literal cases")
     for node in nodes:
         if not isinstance(node, str) or "\0" in node:
             raise ObservationBlocked("native packet has an invalid literal case")
         filename, separator, name = node.partition("::")
-        if not separator or Path(filename) != sdk / NATIVE_TEST or CASE.fullmatch(name) is None:
+        if not separator or Path(filename) != sdk / NATIVE_TEST or not name:
             raise ObservationBlocked("native packet escaped its source-bound function cases")
-    if len(set(nodes)) != 16:
+    if len(set(nodes)) != len(nodes):
         raise ObservationBlocked("native packet contains duplicate cases")
+    packet_kind(nodes)
     return nodes
 
 
 def validate_case_packets(sdk: Path, packets: object) -> list[list[str]]:
-    if not isinstance(packets, list) or len(packets) != 2:
-        raise ObservationBlocked("qualification requires two disjoint native packets")
+    if not isinstance(packets, list) or len(packets) != 4:
+        raise ObservationBlocked("qualification requires SDK, offer and startup EOF packets")
     result = [validate_case_packet(sdk, packet) for packet in packets]
-    nodes = [node for packet in result for node in packet]
+    if [packet_kind(packet) for packet in result] != ["sdk", "sdk", "offer", "eof"]:
+        raise ObservationBlocked("qualification packet kinds or order differ")
+    nodes = [node for packet in result[:2] for node in packet]
     keys = [CASE.fullmatch(node.partition("::")[2]).groups() for node in nodes]
     hosts = {key[3] for key in keys}
     kinds = {host.replace("\\", "/").rsplit("/", 1)[-1].casefold() for host in hosts}
@@ -48,13 +73,20 @@ def validate_case_packets(sdk: Path, packets: object) -> list[list[str]]:
     if (len(hosts) != 2 or kinds != {"powershell.exe", "pwsh.exe"}
             or len(set(nodes)) != 32 or set(keys) != expected):
         raise ObservationBlocked("native packets differ from the complete 32-case Windows matrix")
+    eof_hosts = {
+        node.partition("::")[2][len(EOF_FUNCTION) + 1:-1] for node in result[3]
+    }
+    if eof_hosts != hosts:
+        raise ObservationBlocked("startup EOF controls differ from the qualified SDK hosts")
     return result
 
 
 def native_arguments(sdk: Path, output: Path, nodes: list[str], packet: int) -> list[str]:
     validate_case_packet(sdk, nodes)
-    if type(packet) is not int or packet not in (0, 1):
-        raise ObservationBlocked("native packet ordinal must be zero or one")
+    if type(packet) is not int or packet not in (0, 1, 2, 3):
+        raise ObservationBlocked("native packet ordinal must be zero through three")
+    if packet_kind(nodes) != ("sdk", "sdk", "offer", "eof")[packet]:
+        raise ObservationBlocked("native packet ordinal differs from its literal roster")
     return [
         "-q", "-x", "--noconftest", "-p", "no:cacheprovider",
         "--rootdir", str(sdk),
@@ -69,13 +101,13 @@ def verify_packet_junit(path: Path, nodes: list[str]) -> dict:
     names = [(case.attrib["classname"], case.attrib["name"]) for case in cases]
     expected = {node.partition("::")[2] for node in nodes}
     if (
-        len(nodes) != 16 or len(expected) != 16 or len(cases) != 16
-        or len(set(names)) != 16 or {name for _, name in names} != expected
+        not 1 <= len(nodes) <= 16 or len(expected) != len(nodes) or len(cases) != len(nodes)
+        or len(set(names)) != len(nodes) or {name for _, name in names} != expected
         or any(not classname.endswith("test_shell_caller_owned_native") for classname, _ in names)
         or tree.findall(".//failure") or tree.findall(".//error") or tree.findall(".//skipped")
     ):
-        raise ObservationBlocked("actual native JUnit differs from its exact 16-case packet")
-    return {"case_count": 16, "cases": names, "bytes": path.stat().st_size,
+        raise ObservationBlocked("actual native JUnit differs from its exact literal packet")
+    return {"case_count": len(nodes), "cases": names, "bytes": path.stat().st_size,
             "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
 
 
@@ -85,4 +117,4 @@ def verify_native_junit(output: Path, sdk: Path, packets: list[list[str]]) -> di
         verify_packet_junit(output / f"native-{index + 1:02}.xml", nodes)
         for index, nodes in enumerate(packets)
     ]
-    return {"case_count": 32, "packets": results}
+    return {"case_count": sum(len(nodes) for nodes in packets), "packets": results}
