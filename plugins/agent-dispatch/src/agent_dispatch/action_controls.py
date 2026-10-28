@@ -10,7 +10,7 @@ from .action_policy import ActionDecision, evaluate_action
 from .install_paths import install_dir, uses_legacy_install_dir
 
 AUTOMATIC_ACTIONS = frozenset({
-    "coordinator-replacement", "supervisor-self-update",
+    "coordinator-replacement", "supervisor-self-update", "automatic-runtime-reconcile",
 })
 
 

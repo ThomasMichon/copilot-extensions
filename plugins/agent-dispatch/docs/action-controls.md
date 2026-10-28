@@ -4,11 +4,13 @@
 that can observe a later clear. It is local to the selected installation:
 `AGENT_DISPATCH_INSTALL_DIR` or the default `~/.agent-dispatch`.
 
-Current consumers cover **automatic coordinator replacement**,
-**automatic supervisor self-update** and **new-worker admission**. Explicit
-`deploy`/installer maintenance and supervisor unit reconciliation remain open in the
+Consumers cover **automatic coordinator replacement**, **automatic supervisor
+self-update**, **new-worker admission**, **automatic runtime reconciliation**,
+**native runtime activation** and **native supervisor reconciliation**. They
+guard the supported Dispatch callers described below, not arbitrary calls into
+the policy-neutral shared layout library or every external worker launcher.
+Release and actual consumer qualification remain separate in the
 [implementation effort](../../../efforts/active/dispatch-reversible-action-controls/README.md).
-Do not treat these controls as a global deployment or worker-launch fence.
 
 ## Commands and support
 
@@ -18,9 +20,15 @@ agent-dispatch actions status --json
 agent-dispatch actions inhibit coordinator-replacement --reason "temporary maintenance"
 agent-dispatch actions inhibit supervisor-self-update --reason "temporary maintenance"
 agent-dispatch actions inhibit worker-admission --reason "temporary maintenance"
+agent-dispatch actions inhibit automatic-runtime-reconcile --reason "temporary maintenance"
+agent-dispatch actions inhibit runtime-activation --reason "temporary maintenance"
+agent-dispatch actions inhibit supervisor-reconcile --reason "temporary maintenance"
 agent-dispatch actions clear coordinator-replacement
 agent-dispatch actions clear supervisor-self-update
 agent-dispatch actions clear worker-admission
+agent-dispatch actions clear automatic-runtime-reconcile
+agent-dispatch actions clear runtime-activation
+agent-dispatch actions clear supervisor-reconcile
 ```
 
 These are local commands: they do not start a coordinator, remove a lane,
@@ -41,7 +49,67 @@ inhibition, reason, state source and any read error. An active switch is a valid
 state, not an unsuccessful status query. Invalid state returns exit 2 with
 `ok: false`; ordinary status and successful mutation return 0.
 `action_attempts` contains all selected actions; the compatibility
-`automatic_attempts` field retains only the automatic replacement actions.
+`automatic_attempts` field retains only automatic actions, including runtime
+reconciliation; explicit maintenance and worker admission are excluded.
+
+## Native maintenance
+
+The POSIX and PowerShell installers check the required effects before source
+initialization, instance reconciliation or active-state publication.
+`install`, `update` and `provision` require `runtime-activation`,
+`coordinator-replacement` and `supervisor-reconcile`; `stamp` requires
+`runtime-activation`. Restoration checks the full maintenance set before
+delegating to the retained runtime's installer. A selected older retained
+consumer still needs separate capability qualification.
+
+Fresh checks also precede publication and the actual native coordinator and
+supervisor reconciliation calls. `deploy` and `_cutover` check
+`coordinator-replacement` for both conditional and legacy cutover paths; legacy
+cutover rechecks after waiting for its routing lock. An action denial exits
+nonzero, and a denied cutover never falls back to a normal restart. `--force`
+does not bypass policy. `--no-supervisor`/`-NoSupervisor` still removes native
+definitions; it is not a preservation option and remains a reconciliation
+effect.
+
+An inhibition of a required effect is not a successful full update. Early
+denial leaves active publication untouched. A later denial after an earlier
+effect committed remains a partial operation, not an atomic rollback guarantee.
+Existing activation locks, source receipts, conditional publication recovery,
+ownership fences and drain semantics remain authoritative.
+
+The native reader can be run directly from the selected payload without
+starting a coordinator or constructing a runtime:
+
+```bash
+python -I -B scripts/action_controls.py --root "<install-root>" \
+  --action runtime-activation --action coordinator-replacement \
+  --action supervisor-reconcile
+```
+
+It emits `ok` and a `decisions` array, returns 0 only when all requested actions
+are allowed, and returns 3 for inhibition, including malformed explicit policy.
+`--automatic` applies the shared bootstrap veto to supported automatic actions
+only. This read-only decision is not a durable grant: callers recheck before
+their effect. Explicit native stamping retains its Python-free path only when
+ordinary policy is proven absent through unlinked, accessible ancestry. Present
+or unprovable state requires the reader; an unavailable interpreter/helper is a
+named prerequisite failure, never permission to proceed.
+
+The session-start hook checks `automatic-runtime-reconcile` before automatic
+stamp or background reconciliation. A denied optional hook action is visibly
+skipped; the output-free hook still returns `{}` and a later session start
+rechecks. Cold first-use checks before provisioning locks, status writes,
+network fetch or installer execution. A denied upstream provision does not
+fall back to another installer in the same attempt. An already available,
+qualified runtime is executed before these cold checks, so ordinary service
+startup does not depend on admitting update work. These are action attempts,
+not cancellation of an already admitted background installer.
+
+No prepare-only or supervisor-preserving adoption option is introduced here.
+Construction and adoption remain coupled in the existing installer. Use the
+existing preparation/retention owner's accepted interface when available;
+never call activation as a staging shortcut or infer controlled adoption from
+source tests.
 
 ## Worker admission
 

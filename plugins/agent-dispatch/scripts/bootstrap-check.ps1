@@ -51,7 +51,63 @@ function Exit-SessionStart {
     exit 0
 }
 $PluginDir = Split-Path -Parent $PSScriptRoot
+function Get-BootstrapActionAdmission {
+    param([string]$Root, [string]$ScriptsRoot)
+    $ErrorActionPreference = 'Stop'
+    try {
+        $actionHelper = Join-Path $ScriptsRoot 'action_controls.py'
+        $nativeHelper = Join-Path $ScriptsRoot 'versioned_runtime_native.ps1'
+        foreach ($support in @($actionHelper, $nativeHelper)) {
+            if (-not [IO.File]::Exists($support)) {
+                throw "required policy support is unavailable: $support"
+            }
+        }
+        . $nativeHelper
+        $python = $null
+        foreach ($candidate in @('python3', 'python', 'py')) {
+            $command = Get-Command $candidate -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $command -or $command.Source -match 'WindowsApps') { continue }
+            if ($candidate -eq 'py') {
+                $probeError = ''
+                $probe = Invoke-Hidden -FilePath $command.Source -ArgList @('-3', '-I', '-B', '-c', 'import sys; print(sys.executable)') -ErrorOutput ([ref]$probeError)
+                if ($LASTEXITCODE -ne 0) { continue }
+                $python = $probe.Trim()
+            } else { $python = $command.Source }
+            if ([IO.Path]::IsPathRooted($python) -and [IO.File]::Exists($python)) { break }
+            $python = $null
+        }
+        if (-not $python) { throw 'absolute Python interpreter is unavailable' }
+        $diagnostic = ''
+        $response = Invoke-Hidden -FilePath $python -ArgList @(
+            '-I', '-B', $actionHelper, '--root', ([IO.Path]::GetFullPath($Root)),
+            '--action', 'automatic-runtime-reconcile', '--automatic'
+        ) -ErrorOutput ([ref]$diagnostic)
+        $code = $LASTEXITCODE
+        if ($diagnostic) { [Console]::Error.Write($diagnostic) }
+        if ($code -ne 0) {
+            [Console]::Error.WriteLine("[agent-dispatch] automatic-runtime-reconcile bootstrap refused (exit $code): $response")
+            if ($code -eq 3) { return 3 }
+            return 126
+        }
+        $decision = $response | ConvertFrom-Json -ErrorAction Stop
+        if ($decision.ok -isnot [bool] -or -not $decision.ok) {
+            throw "policy did not admit the action: $response"
+        }
+        return 0
+    } catch {
+        [Console]::Error.WriteLine("[agent-dispatch] automatic-runtime-reconcile bootstrap prerequisite failed: $($_.Exception.Message)")
+        return 126
+    }
+}
+function Assert-BootstrapAction {
+    $code = Get-BootstrapActionAdmission -Root $InstallDir -ScriptsRoot $PSScriptRoot
+    if ($code -ne 0) {
+        Write-SessionStartJson
+        exit $code
+    }
+}
 function Assert-BootstrapPublication {
+    Assert-BootstrapAction
     $helper = Join-Path $PSScriptRoot 'installation-context\plugin-publication-probe.ps1'
     if ([IO.File]::Exists($helper)) {
         try {
@@ -95,7 +151,14 @@ try {
             Assert-BootstrapPublication
             $pw = Get-Command pwsh -ErrorAction SilentlyContinue
             $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
+            Assert-BootstrapAction
             & $exe -NoProfile -ExecutionPolicy Bypass -File $stampInst stamp *> $null
+            if ($LASTEXITCODE -ne 0) {
+                $stampCode = $LASTEXITCODE
+                [Console]::Error.WriteLine("[agent-dispatch] automatic-runtime-reconcile stamp did not complete (exit $stampCode); no background retry attempted.")
+                Write-SessionStartJson
+                exit $stampCode
+            }
         }
         Exit-SessionStart
     }
@@ -187,6 +250,7 @@ try {
                             $reapProcess.StartTime.ToUniversalTime() -ne $startedAt.UtcDateTime) {
                             throw 'Reconcile process identity changed before retirement'
                         }
+                        Assert-BootstrapAction
                         & taskkill.exe /PID $reapProcess.Id /T /F *> $null
                         if ($LASTEXITCODE -ne 0 -and -not $reapProcess.HasExited) {
                             throw 'Could not retire the stale reconcile process tree'
@@ -214,6 +278,9 @@ try {
     # The worker claims its own identity after the parent publishes this attempt.
     $worker = @'
 $ErrorActionPreference = 'Continue'
+function Get-BootstrapActionAdmission {
+__ACTION_READER__
+}
 function Update-ReconcileAttempt([bool]$Completed, [int]$Code) {
     $mutex = New-Object Threading.Mutex($false, '__MUTEX__')
     $held = $false
@@ -245,10 +312,15 @@ try {
     # The new worker must own its staging and watchdog, not inherit another install's.
     $env:COPILOT_PLUGIN_INSTALL_STAGED = $null
     $env:COPILOT_PLUGIN_STAGED_FROM = $null
-    $LASTEXITCODE = 0
-    & { __INSTALLER__ } *> '__RECONCILELOG__'
-    $ok = $?
-    $code = if ($ok) { $LASTEXITCODE } else { 1 }
+    $admission = Get-BootstrapActionAdmission -Root '__INSTALL_ROOT__' -ScriptsRoot '__SCRIPTS_ROOT__'
+    if ($admission -ne 0) {
+        $code = $admission
+    } else {
+        $LASTEXITCODE = 0
+        & { __INSTALLER__ } *> '__RECONCILELOG__'
+        $ok = $?
+        $code = if ($ok) { $LASTEXITCODE } else { 1 }
+    }
 } catch {
     $failure = "attempt=__ATTEMPT__ background reconcile failed: $($_.Exception.Message)"
     Add-Content -LiteralPath '__RECONCILELOG__' -Value $failure
@@ -263,11 +335,15 @@ catch {
 }
 exit $code
 '@
-    $worker = $worker.Replace('__MUTEX__', $mutexName).Replace('__ATTEMPT__', $attemptId).`
+    $worker = $worker.Replace('__ACTION_READER__', (Get-Command Get-BootstrapActionAdmission).Definition).`
+        Replace('__INSTALL_ROOT__', $InstallDir.Replace("'", "''")).`
+        Replace('__SCRIPTS_ROOT__', $PSScriptRoot.Replace("'", "''")).`
+        Replace('__MUTEX__', $mutexName).Replace('__ATTEMPT__', $attemptId).`
         Replace('__STATUSFILE__', $statusFile.Replace("'", "''")).`
         Replace('__LOCKFILE__', $lockFile.Replace("'", "''")).`
         Replace('__RECONCILELOG__', $reconcileLog.Replace("'", "''")).Replace('__INSTALLER__', $reInner)
     $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($worker))
+    Assert-BootstrapAction
     $proc = Start-Process -FilePath 'conhost.exe' -PassThru -WindowStyle Hidden -ErrorAction Stop `
         -WorkingDirectory $env:USERPROFILE `
         -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc)

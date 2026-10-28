@@ -128,7 +128,58 @@ if ($env:AGENT_DISPATCH_NO_SELFPROVISION) {
     [Console]::Error.WriteLine('[agent-dispatch] runtime not provisioned (AGENT_DISPATCH_NO_SELFPROVISION set).')
     exit 1
 }
+function Assert-AutomaticRuntimeReconcile {
+    $actionHelper = Join-Path $payloadRoot 'scripts\action_controls.py'
+    $nativeHelper = Join-Path $payloadRoot 'scripts\versioned_runtime_native.ps1'
+    foreach ($support in @($actionHelper, $nativeHelper)) {
+        if (-not [IO.File]::Exists($support)) {
+            [Console]::Error.WriteLine("[agent-dispatch] automatic-runtime-reconcile prerequisite unavailable: $support")
+            exit 126
+        }
+    }
+    . $nativeHelper
+    $policyPython = $null
+    foreach ($candidate in @('python3', 'python', 'py')) {
+        $command = Get-Command $candidate -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $command -or $command.Source -match 'WindowsApps') { continue }
+        if ($candidate -eq 'py') {
+            $probeError = ''
+            $probe = Invoke-Hidden -FilePath $command.Source -ArgList @('-3', '-I', '-B', '-c', 'import sys; print(sys.executable)') -ErrorOutput ([ref]$probeError)
+            if ($LASTEXITCODE -ne 0) { continue }
+            $policyPython = $probe.Trim()
+        } else { $policyPython = $command.Source }
+        if ([IO.Path]::IsPathRooted($policyPython) -and [IO.File]::Exists($policyPython)) { break }
+        $policyPython = $null
+    }
+    if (-not $policyPython) {
+        [Console]::Error.WriteLine('[agent-dispatch] automatic-runtime-reconcile prerequisite unavailable: absolute Python interpreter is missing.')
+        exit 126
+    }
+    $diagnostic = ''
+    try {
+        $response = Invoke-Hidden -FilePath $policyPython -ArgList @(
+            '-I', '-B', $actionHelper, '--root', $runtimeRoot,
+            '--action', 'automatic-runtime-reconcile', '--automatic'
+        ) -ErrorOutput ([ref]$diagnostic)
+        $code = $LASTEXITCODE
+        if ($diagnostic) { [Console]::Error.Write($diagnostic) }
+        if ($code -ne 0) {
+            [Console]::Error.WriteLine("[agent-dispatch] automatic-runtime-reconcile refused (exit $code): $response")
+            if ($code -eq 3) { exit 3 }
+            exit 126
+        }
+        $decision = $response | ConvertFrom-Json -ErrorAction Stop
+        if ($decision.ok -isnot [bool] -or -not $decision.ok) {
+            throw "policy did not admit the action: $response"
+        }
+    } catch {
+        [Console]::Error.WriteLine("[agent-dispatch] automatic-runtime-reconcile policy check failed: $($_.Exception.Message)")
+        exit 126
+    }
+}
+$script:ColdRuntimeEffects = $false
 function Assert-Publication {
+    if ($script:ColdRuntimeEffects) { Assert-AutomaticRuntimeReconcile }
     $publicationArgs = @{
         Action = 'probe-plugin-publication'; PayloadRoot = $payloadRoot
         PluginId = 'agent-dispatch'; LegacyRoot = $runtimeRoot
@@ -214,6 +265,8 @@ function Select-ProvisionSource {
 $provisionSource = Select-ProvisionSource
 $python = Resolve-Runtime normal
 if ($python) { Invoke-Runtime $python }
+$script:ColdRuntimeEffects = $true
+Assert-AutomaticRuntimeReconcile
 [void][IO.Directory]::CreateDirectory($runtimeRoot)
 $statusPath = Join-Path $runtimeRoot '.provision-status'
 $lock = $null
@@ -228,6 +281,7 @@ while (-not $lock) {
 }
 $rc = 1
 function Invoke-Installer([string]$Path) {
+    Assert-AutomaticRuntimeReconcile
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     $global:LASTEXITCODE = 1
@@ -240,6 +294,7 @@ function Invoke-Installer([string]$Path) {
 try {
     $python = Resolve-Runtime
     if (-not $python) {
+        Assert-AutomaticRuntimeReconcile
         Assert-Publication
         $provisionSource = Select-ProvisionSource
         [Console]::Error.WriteLine('[agent-dispatch] runtime not provisioned -- provisioning on first use (may take ~30-120s). Do not kill; extend your timeout.')
@@ -250,6 +305,7 @@ try {
         if ($globalSurface -and -not $provisionSource.SourcePinned -and -not $env:AGENT_DISPATCH_PROVISION_OFFLINE) {
             $bootFile = Join-Path ([IO.Path]::GetTempPath()) "agent-dispatch-bootstrap-$PID.ps1"
             try {
+                Assert-AutomaticRuntimeReconcile
                 [Console]::Error.WriteLine('[agent-dispatch] fetching upstream installer (install/dispatch/bootstrap.ps1, main)...')
                 Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/install/dispatch/bootstrap.ps1' -UseBasicParsing -TimeoutSec 20 -OutFile $bootFile
                 Assert-Publication
@@ -261,7 +317,10 @@ try {
                 [Console]::Error.WriteLine("[agent-dispatch] upstream installer fetch/run failed ($($_.Exception.Message)); falling back to the locally stamped snapshot.")
             } finally { Remove-Item -LiteralPath $bootFile -Force -ErrorAction SilentlyContinue }
         }
-        if ($rc -ne 0) {
+        if ($rc -eq 3) {
+            [Console]::Error.WriteLine('[agent-dispatch] upstream provision refused an action or governance check (exit 3); no local snapshot fallback attempted. Retry after the inhibition or governance refusal is resolved.')
+        }
+        if ($rc -ne 0 -and $rc -ne 3) {
             Assert-Publication
             $provisionSource = Select-ProvisionSource
             if ($provisionSource.Installer -and [IO.File]::Exists($provisionSource.Installer)) {

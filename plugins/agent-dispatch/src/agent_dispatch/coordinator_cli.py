@@ -347,6 +347,27 @@ def _cmd_cutover(
     """Zero-downtime graceful cutover -- shared by ``deploy`` and ``_cutover``."""
     from zdd import breadcrumb
     from zdd.cutover import CutoverOrchestrator
+    from .action_controls import action_decision
+    from .install_paths import install_dir
+
+    policy_root = install_dir()
+
+    def admitted() -> bool:
+        decision = action_decision("coordinator-replacement", root=policy_root)
+        if not decision.inhibited:
+            return True
+        message = (
+            f"coordinator-replacement inhibited: scope={decision.scope} "
+            f"source={decision.source} reason={decision.reason or '(none)'}"
+            f"{'; ' + decision.error if decision.error else ''}"
+        )
+        print(f"[FAIL] {message}", file=sys.stderr)
+        if getattr(args, "json", False):
+            _emit({"ok": False, "error": message, "action": decision.action, "retryable": True})
+        return False
+
+    if not admitted():
+        return 3
 
     if conditional is not None:
         from zdd.conditional import run_conditional_cutover
@@ -510,6 +531,8 @@ def _cmd_cutover(
         )
         return 2
     try:
+        if not admitted():
+            return 3
         _pre_recovery_breadcrumb = breadcrumb.read_breadcrumb(_config.routing_dir())
         recovery = breadcrumb.recover_stale_cutover(
             _config.routing_dir(), make_client, health_check=liveness_check

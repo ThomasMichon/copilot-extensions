@@ -465,6 +465,7 @@ function Clear-UpdateMarker {
 
 $PluginDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $PkgSrcDir = Join-Path $PluginDir 'src\agent_dispatch'
+$script:ActionControlsHelper = Join-Path $PSScriptRoot 'action_controls.py'
 
 if (-not $InstallDir) {
     $InstallDir = Join-Path $env:USERPROFILE '.agent-dispatch'
@@ -660,6 +661,7 @@ function Invoke-VersionedActivate {
             $script:ActivationSuperseded = $true
             return $true
         }
+        Assert-DispatchActions @('runtime-activation', 'coordinator-replacement', 'supervisor-reconcile')
         $legacyVenv = Join-Path $InstallDir '.venv'
         if ((Test-Path $legacyVenv) -and -not (Test-VenvIsLink $legacyVenv)) {
             if ($RequireGracefulCutover) {
@@ -669,6 +671,7 @@ function Invoke-VersionedActivate {
             try { Stop-DispatchProcess -Subcommand serve | Out-Null } catch {}
             try { Retire-SupervisorProcesses | Out-Null } catch {}
         }
+        Assert-DispatchActions @('runtime-activation')
         $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
         $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
         & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
@@ -780,6 +783,64 @@ function Get-BootstrapPython {
         }
     }
     return $null
+}
+
+function Assert-DispatchActions {
+    param([Parameter(Mandatory)][string[]]$Actions)
+    $names = $Actions -join ', '
+    # Preserve Python-free stamping only after proving explicit policy absence.
+    $policy = Join-Path $InstallDir 'action-controls.json'
+    $paths = @()
+    $path = $policy
+    do {
+        $paths = @($path) + $paths
+        $parent = [IO.Directory]::GetParent($path)
+        $path = if ($parent) { $parent.FullName } else { '' }
+    } while ($path)
+    foreach ($path in $paths) {
+        try { $attributes = [IO.File]::GetAttributes($path) }
+        catch [IO.FileNotFoundException] { return }
+        catch [IO.DirectoryNotFoundException] { return }
+        catch {
+            throw "[agent-dispatch] Action policy prerequisite failed for ${names}: cannot establish policy absence at ${path}: $($_.Exception.Message)"
+        }
+        if ($attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw "[agent-dispatch] Action policy prerequisite failed for ${names}: linked policy path at $path"
+        }
+        if ($path -cne $policy -and -not ($attributes -band [IO.FileAttributes]::Directory)) {
+            throw "[agent-dispatch] Action policy prerequisite failed for ${names}: policy ancestor is not a directory: $path"
+        }
+    }
+    if (-not (Test-Path -LiteralPath $script:ActionControlsHelper -PathType Leaf)) {
+        throw "[agent-dispatch] Action policy prerequisite unavailable for ${names}: read-only helper is missing"
+    }
+    $python = Get-BootstrapPython
+    if (-not $python -or -not [IO.Path]::IsPathRooted($python) -or
+        -not (Test-Path -LiteralPath $python -PathType Leaf)) {
+        throw "[agent-dispatch] Action policy prerequisite unavailable for ${names}: absolute Python interpreter is missing"
+    }
+    $arguments = @('-I', '-B', $script:ActionControlsHelper, '--root', $InstallDir)
+    foreach ($name in $Actions) { $arguments += @('--action', $name) }
+    $diagnostic = ''
+    $output = Invoke-Hidden -FilePath $python -ArgList $arguments -ErrorOutput ([ref]$diagnostic)
+    $code = $LASTEXITCODE
+    if ($diagnostic) { [Console]::Error.Write($diagnostic) }
+    if ($code -ne 0) {
+        throw "[agent-dispatch] Required action policy refused ${names} (exit $code): $output$diagnostic"
+    }
+    try { $decision = $output | ConvertFrom-Json -ErrorAction Stop }
+    catch { throw "[agent-dispatch] Invalid action policy response for ${names}: $($_.Exception.Message)" }
+    if ($decision.ok -isnot [bool] -or -not $decision.ok) {
+        throw "[agent-dispatch] Action policy did not admit ${names}: $output"
+    }
+}
+
+function Assert-InstallActions {
+    if ($Action -in @('install', 'update', 'provision', 'restore')) {
+        Assert-DispatchActions @('runtime-activation', 'coordinator-replacement', 'supervisor-reconcile')
+    } elseif ($Action -eq 'stamp') {
+        Assert-DispatchActions @('runtime-activation')
+    }
 }
 
 function Get-PayloadHash {
@@ -1648,6 +1709,7 @@ function Install-RetainedRuntime {
     try {
         if (-not (Invoke-VersionedActivate)) { throw 'Retained runtime activation failed' }
         if (Test-ActivationSupersededNow) { throw 'Retained runtime activation was superseded' }
+        Assert-DispatchActions @('runtime-activation')
         Deploy-SelfProvisioningBinstub
         Write-Manifest
     } finally {
@@ -2088,6 +2150,7 @@ function Install-Runtime {
                 Write-Skip "Not publishing: source $SrcVersion is older than already-stamped $publishStampedVersion (a newer stamp published first; -Force to override)"
                 return
             }
+            Assert-DispatchActions @('runtime-activation')
             Deploy-SelfProvisioningBinstub
             Write-Manifest
             # The Picker materializes templates only from its verified active
@@ -2100,6 +2163,7 @@ function Install-Runtime {
         }
     } else {
         # Legacy (non-versioned) mode: no supersession concept, no lock.
+        Assert-DispatchActions @('runtime-activation')
         Deploy-SelfProvisioningBinstub
         Write-Manifest
         Register-PickerPivot
@@ -2597,6 +2661,7 @@ function Install-CoordinatorTask {
     # -- used after a graceful cutover already brought the new coordinator up, so a
     # Start-ScheduledTask here would race a SECOND coordinator (Thread B).
     param([switch]$NoStart)
+    Assert-DispatchActions @('coordinator-replacement')
     if ($NoService) {
         # Remove a coordinator task left from a prior full install so a host asked
         # to be client-only stops running one. Removal may be blocked without
@@ -3678,6 +3743,7 @@ function Install-SupervisorTaskInstance {
 }
 
 function Install-SupervisorTask {
+    Assert-DispatchActions @('supervisor-reconcile')
     $script:SupervisorReconcileFailed = $false
     $script:SupervisorReconciledNames = @{}
     Invoke-SupervisorAudit -Event service-reconcile -Reason configured-supervisor-pass
@@ -3972,6 +4038,7 @@ function Invoke-Stamp {
         # Publish-FileAtomically guards the binstub's self-provisioning read
         # (which never takes this mutex) against observing a torn,
         # partially-written marker file.
+        Assert-DispatchActions @('runtime-activation')
         if ($script:SourceRuntimeIdentity) {
             Publish-SourceRedirects -Snapshot $snapDir
         } else {
@@ -4044,6 +4111,7 @@ function Invoke-CoordinatorCutover {
        autonomous units alive.
        Returns $true when the cutover brought up the new coordinator (so the
        caller skips a normal task-start), $false to fall back to a normal start. #>
+    Assert-DispatchActions @('coordinator-replacement')
     $py = if (Test-Path $VenvPython) { $VenvPython } elseif (Test-Path $LinkPython) { $LinkPython } else { $null }
     if (-not $py) { return $false }
     Write-Step 'Graceful cutover: standing the new coordinator up beside the old, then flipping routing...'
@@ -4056,6 +4124,9 @@ function Invoke-CoordinatorCutover {
     }
     $rc = $LASTEXITCODE
     $ErrorActionPreference = $prevEAP
+    if ($rc -eq 3) {
+        throw "[agent-dispatch] coordinator-replacement inhibited during cutover; runtime selection may already have changed. No restart fallback attempted. $($out.Trim())"
+    }
     $ok = $false
     try {
         $jsonLine = if ($RequireGracefulCutover) { $out } else {
@@ -4163,6 +4234,7 @@ function Invoke-Update {
                     # Pre-Thread-B coordinator (unrouted, no /drain): one-time
                     # stop-and-swap (invariant #2 fallback). Every future update from a
                     # Thread-B build is graceful. The supervisor is left running.
+                    Assert-DispatchActions @('coordinator-replacement')
                     $stopped = Stop-DispatchProcess -Subcommand serve
                     if ($stopped -gt 0) {
                         Write-Step "Stopped $stopped pre-cutover coordinator process(es) -- one-time transition to graceful cutover"
@@ -4549,6 +4621,7 @@ $script:InstallerLifecycleAction = if ($Action -in @('install', 'provision')) { 
 $script:InstallerLifecycleOutcome = 'fail'
 if ($script:InstallerLifecycleAction) { Write-InstallerLifecycle begin }
 try {
+Assert-InstallActions
 if ($Action -in @('install', 'update', 'provision', 'stamp')) {
     Initialize-SourceRuntime
     Assert-SourceRuntime

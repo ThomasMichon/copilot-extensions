@@ -118,7 +118,28 @@ if [[ -n "${AGENT_DISPATCH_NO_SELFPROVISION:-}" ]]; then
     printf '[agent-dispatch] runtime not provisioned (AGENT_DISPATCH_NO_SELFPROVISION set).\n' >&2
     exit 1
 fi
+AUTO_ACTION_CHECK_REQUIRED=0
+require_automatic_reconcile() {
+    [[ -f "$PAYLOAD_ROOT/scripts/action_controls.py" ]] || {
+        printf '[agent-dispatch] cold runtime prerequisite unavailable: payload action reader is missing; use explicit installation management.\n' >&2
+        exit 126
+    }
+    local python="" candidate
+    for candidate in python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            python="$(command -v "$candidate")"
+            break
+        fi
+    done
+    [[ -n "$python" ]] || {
+        printf '[agent-dispatch] cold runtime prerequisite unavailable: no Python for action policy; use explicit installation management.\n' >&2
+        exit 126
+    }
+    "$python" -I -B "$PAYLOAD_ROOT/scripts/action_controls.py" \
+        --root "$RUNTIME_ROOT" --action automatic-runtime-reconcile --automatic >/dev/null || exit $?
+}
 assert_publication() {
+    [[ "$AUTO_ACTION_CHECK_REQUIRED" == 0 ]] || require_automatic_reconcile
     local probe="" rc=0 root_path=$'legacy\034root'
     local -a arguments=(probe-plugin-publication --payload-root "$PAYLOAD_ROOT" \
         --plugin-id agent-dispatch --legacy-root "$RUNTIME_ROOT")
@@ -201,6 +222,8 @@ select_provision_source
 
 resolve_runtime normal
 [[ -z "$AGENT_RT_PY" ]] || run_runtime "$@"
+AUTO_ACTION_CHECK_REQUIRED=1
+require_automatic_reconcile
 mkdir -p "$RUNTIME_ROOT"
 STATUS_PATH="$RUNTIME_ROOT/.provision-status"
 LOCK_LINK=""
@@ -294,7 +317,7 @@ if [[ "$GLOBAL" == 1 && "$SOURCE_PINNED" == 0 && -z "${AGENT_DISPATCH_PROVISION_
     rm -f -- "$BOOT_FILE"
     BOOT_FILE=""
 fi
-if [[ "$rc" != 0 ]]; then
+if [[ "$rc" != 0 && "$rc" != 3 ]]; then
     assert_publication
     select_provision_source
     if [[ -f "$INSTALLER" ]]; then

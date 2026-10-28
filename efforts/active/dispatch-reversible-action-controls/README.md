@@ -272,3 +272,40 @@ Initial tests must prove the current gap before adding the guards.
   script handles cancellation internally. No terminal report is required or
   sent while admission is still pending, whether cancellation escapes or is
   caught by the body; claimed script terminal reporting remains unchanged.
+
+### 2026-10-27 - Admission slice merged
+
+- #9351 merged as `20ec6d6544` after exact-head independent review, correction of
+  all High/Medium findings and all three required checks. The final targeted
+  startup/script lifecycle selection passed 21 cases, including independent
+  holds and both escaped and handled pending cancellation.
+- Only the admission mechanism items in Phase 2 are closed by this slice.
+  Native maintenance, release and actual consumer qualification remain open.
+- Next: implement the independent native action checks while preserving
+  #6820's preparation/retention ownership. The requested prepare-only interface
+  has not been supplied or accepted; do not activate a runtime as staging.
+
+### 2026-10-27 - Native maintenance implementation
+
+- Four actual POSIX installer regressions demonstrated forbidden runtime/removal
+  effects before guards. The native decision helper now uses the same bounded
+  reader without a runtime venv, and full maintenance preflights its required
+  effects before instance reconciliation or active publication.
+- Added native coordinator/supervisor guards, explicit legacy/conditional
+  cutover admission, cold first-use and session-start reconciliation checks.
+  Available qualified runtime execution remains ahead of cold update work.
+  Exit-3 cutover denial cannot become a restart fallback within that attempt.
+- Retained the existing Python-free explicit stamp only after proving ordinary
+  policy absent through unlinked, accessible ancestry. Present or unprovable
+  state is not permission. Kept the shared layout library policy-neutral.
+- Focused native/policy/activation/cutover selection passed 76 cases; the
+  source-publication selection passed 59 with 17 platform skips. Actual
+  contained WSL PowerShell execution additionally passed all 29 new admission
+  cases; parsing or skipped devcontainer cases were not substituted for that
+  behavioral evidence. This does not qualify Windows production adoption.
+- Existing extracted PowerShell fixtures now load the real admission
+  dependency. Native execution exposed a missing `Write-Step` fixture stub;
+  that small harness defect was corrected and all eight stamp cases passed.
+- Independent review, release and installed-consumer qualification remain
+  pending. The #6820 preparation/retention interface is still unanswered; this
+  slice does not introduce preparation or claim supervisor-preserving adoption.

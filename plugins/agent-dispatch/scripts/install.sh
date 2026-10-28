@@ -466,6 +466,7 @@ VENV_PYTHON="$VENV_DIR/bin/python"
 LINK_PYTHON="$VENV_PYTHON"
 
 _versioned_activate() {
+    _require_actions runtime-activation || return $?
     # Swap the stable `.venv` symlink to this version's freshly-built slot, moving
     # a legacy real `.venv` aside on first migration (--replace-nonlink). No-op in
     # legacy mode. On POSIX a rename tolerates the daemons' open files, and
@@ -1018,6 +1019,7 @@ STUBEOF
 }
 
 _ensure_runtime() {
+    _maintenance_preflight || return $?
     if [[ -z "${RETAINED_RUNTIME:-}" ]]; then
     _assert_source_runtime || return 1
     if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
@@ -1295,6 +1297,7 @@ _ensure_runtime() {
             done
         fi
         local __dispatch_publication_root="$INSTALL_DIR"
+        _maintenance_preflight || { _unlock_publish; return 3; }
         _runtime_publication_begin_install || { _unlock_publish; return 1; }
         if ! _runtime_publication_activate _versioned_activate; then
             _runtime_publication_restore || _fail 'Activation publication rollback failed'
@@ -1345,7 +1348,7 @@ _ensure_runtime() {
             _unlock_publish
             return 0
         fi
-        if ! deploy_binstub || ! _write_manifest; then
+        if ! _require_actions runtime-activation || ! deploy_binstub || ! _write_manifest; then
             _runtime_publication_restore || _fail 'Runtime publication rollback failed'
             _unlock_publish
             return 1
@@ -1357,6 +1360,7 @@ _ensure_runtime() {
         _unlock_publish
     else
         # Legacy (non-versioned) mode: no supersession concept, no lock.
+        _maintenance_preflight || return $?
         deploy_binstub || return 1
         _write_manifest || return 1
         _register_pivot
@@ -1461,6 +1465,7 @@ _wsl_windows_client() {
 }
 
 _install_service() {
+    _require_actions coordinator-replacement || return $?
     if [[ "$NO_SERVICE" -eq 1 ]]; then
         _skip "Coordinator service skipped (--no-service): this host is a client only"
         return 0
@@ -1564,6 +1569,7 @@ EOF
 # supervisor is a SEPARATE unit -- deliberately left running so it outlives the
 # coordinator swap and re-adopts via the durable queue DB + routing table.
 _coordinator_cutover() {
+    _require_actions coordinator-replacement || return $?
     [[ "$NO_SERVICE" -eq 1 ]] && return 1
     command -v systemctl >/dev/null 2>&1 || return 1
     local py="$VENV_PYTHON"
@@ -1573,17 +1579,22 @@ _coordinator_cutover() {
     # /drain-capable). read_active_endpoint verifies a live listener too.
     "$py" -c 'import sys; from zdd.routing import read_active_endpoint; from agent_dispatch.config import routing_dir; sys.exit(0 if read_active_endpoint(routing_dir()) else 1)' 2>/dev/null || return 1
     _step 'Graceful cutover: standing the new coordinator up beside the old, then flipping routing...'
-    local cutover_ok=0 output
+    local cutover_ok=0 output cutover_rc=0
     if [[ "${REQUIRE_GRACEFUL_CUTOVER:-0}" -eq 1 ]]; then
         if output="$("$py" -m agent_dispatch _cutover --json)"; then
             if printf '%s' "$output" | "$py" -c 'import json, sys; result = json.load(sys.stdin); sys.exit(0 if isinstance(result, dict) and result.get("ok") is True else 1)'; then
                 cutover_ok=1
             fi
+        else
+            cutover_rc=$?
         fi
         [[ "$cutover_ok" -eq 1 ]] || _warn "Graceful cutover was not confirmed: $output"
     elif "$py" -m agent_dispatch _cutover >/dev/null 2>&1; then
         cutover_ok=1
+    else
+        cutover_rc=$?
     fi
+    [[ "$cutover_rc" -ne 3 ]] || return 3
     if [[ "$cutover_ok" -eq 1 ]]; then
         _ok 'Coordinator cut over to the new build (no in-flight claim dropped; supervisor/workers re-adopt via the queue DB + routing table)'
         return 0
@@ -2100,6 +2111,7 @@ _status_supervisor_callback() {
 }
 
 _install_supervisor_service() {
+    _require_actions supervisor-reconcile || return $?
     SUPERVISOR_RECONCILE_FAILED=0
     if [[ "$NO_SUPERVISOR" -eq 1 ]]; then
         _supervisor_audit selection explicit-no-supervisor "$SUPERVISOR_UNIT" "$SUPERVISOR_ENV_FILE" skipped
@@ -2152,6 +2164,7 @@ _install_supervisor_service() {
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build to first
 # use (fits a sessionStart hook's grace window). No venv, no uv.
 do_stamp() {
+    _maintenance_preflight stamp || return $?
     _step 'agent-dispatch stamp; runtime deferred to first use'
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN" || return 1
     # Serialized under the SAME global activation lock _versioned_activate/
@@ -2258,6 +2271,7 @@ do_stamp() {
     if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
         payload="$(_source_snapshot)" || { _unlock_stamp_binstub; return 1; }
     fi
+    _require_actions runtime-activation || { _unlock_stamp_binstub; return 3; }
     _runtime_publication_begin_install || { _unlock_stamp_binstub; return 1; }
     if ! {
         if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
@@ -2280,6 +2294,7 @@ do_stamp() {
 }
 
 do_install() {
+    _maintenance_preflight install || return $?
     _step 'agent-dispatch install'
     _ensure_runtime || return 1
     if _activation_superseded_now; then
@@ -2303,6 +2318,7 @@ do_install() {
 }
 
 do_update() {
+    _maintenance_preflight update || return $?
     _step 'agent-dispatch update'
     # Mark the live-service update lifecycle as in-progress (ce#5066) so a
     # local liveness watchdog never force-restarts a daemon that is
@@ -2428,6 +2444,12 @@ do_update() {
         _supervisor_audit coordinator-cutover coordinator-cutover-returned "$SUPERVISOR_UNIT" "$SUPERVISOR_ENV_FILE" ok
         _install_service --no-restart
     else
+        local cutover_rc=$?
+        if [[ "$cutover_rc" -eq 3 ]]; then
+            _fail 'Coordinator replacement inhibited after runtime publication; no restart fallback or supervisor reconciliation attempted.'
+            _unlock_cutover
+            return 3
+        fi
         if [[ "${REQUIRE_GRACEFUL_CUTOVER:-0}" -eq 1 ]]; then
             _fail 'Required graceful cutover was not confirmed; runtime selection may already have changed. No restart or supervisor reconciliation attempted.'
             _unlock_cutover
@@ -2660,6 +2682,7 @@ source "$SCRIPT_DIR/source-runtime.sh"
 PACKAGE_VERSION="$SRC_VERSION"
 SOURCE_RUNTIME_IDENTITY=""
 if [[ "$ACTION" == restore ]]; then
+    _maintenance_preflight update || exit $?
     restore_python="$(_bootstrap_python)" || exit 1
     # Recursion control only; the parent helper owns the real retention lease.
     if [[ -z "${_AGENT_DISPATCH_RESTORE_OWNER:-}" ]]; then
@@ -2692,6 +2715,7 @@ if [[ -n "$_LIFECYCLE_ACTION" ]]; then
 fi
 case "$ACTION" in
     install|update|provision|stamp)
+        _maintenance_preflight || exit $?
         _initialize_source_runtime || exit 1
         _assert_source_runtime || exit 1
         ;;
