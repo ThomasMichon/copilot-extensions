@@ -514,6 +514,14 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   Native execution, required gates and review remain pending. No source or
   component result closes real Copilot/mux, supported-removal, installed
   rollout, standby or the parent effort's live acceptance.
+- First exact-head native run `40752002050` on
+  `3c219b1a3f347e1d4189ea01d4182603fca87c1e` passed 172 controls on Linux
+  and stock macOS Bash 3.2, with 17 Windows-only skips and one PTY failure
+  on each platform; Windows passed. The new PTY test's substring barrier
+  mistakenly accepted `BACKEND READ` inside `BACKEND READY`, permitting
+  Ctrl+C before input consumption. Use a distinct acknowledgement and exact
+  line matching. This is a fixture synchronization correction, not a passing
+  native packet or evidence that terminal acceptance can be skipped.
 
 ### 2026-10-28 - Dormant POSIX exec prerequisite merged
 

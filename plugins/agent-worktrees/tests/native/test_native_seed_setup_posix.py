@@ -82,7 +82,7 @@ print("BACKEND READY", flush=True)
 reply["stdin"] = sys.stdin.readline()
 (root / "backend.json").write_text(json.dumps(reply))
 if os.environ["FIXTURE_INTERACTIVE"]:
-    print("BACKEND READ", flush=True)
+    print("BACKEND INPUT CONSUMED", flush=True)
     while True:
         time.sleep(0.1)
 print("backend stdout", flush=True)
@@ -245,10 +245,10 @@ def test_copied_setup_keeps_real_terminal_and_sigint_beyond_the_finite_phase_dea
     def read_until(marker):
         nonlocal output
         deadline = time.monotonic() + 45
-        while marker not in output and time.monotonic() < deadline:
+        while marker not in output.splitlines() and time.monotonic() < deadline:
             if select.select([master], [], [], 0.1)[0]:
                 output += os.read(master, 65536)
-        assert marker in output, output.decode(errors="replace")
+        assert marker in output.splitlines(), output.decode(errors="replace")
 
     try:
         read_until(b"BACKEND READY")
@@ -256,7 +256,7 @@ def test_copied_setup_keeps_real_terminal_and_sigint_beyond_the_finite_phase_dea
         time.sleep(12)
         assert os.waitpid(pid, os.WNOHANG) == (0, 0)
         os.write(master, b"from terminal\n")
-        read_until(b"BACKEND READ")
+        read_until(b"BACKEND INPUT CONSUMED")
         os.write(master, b"\x03")
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
