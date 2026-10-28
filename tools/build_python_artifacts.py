@@ -982,7 +982,9 @@ def build_project_artifacts(
 def main() -> int:
     from artifact_builder_cli import main as run
     from standalone_python_artifacts import build_standalone_artifacts
-    from core_python_artifacts import build_core_artifacts
+    def build_core_artifacts(**kwargs):
+        from core_python_artifacts import build_core_artifacts as build
+        return build(**kwargs)
     return run(
         build_plugin_artifacts, __doc__ or "", standalone_builder=build_standalone_artifacts,
         core_builder=build_core_artifacts,

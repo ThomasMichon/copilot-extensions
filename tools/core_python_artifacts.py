@@ -132,7 +132,9 @@ def source_closure(root: Path, builder) -> CoreSources:
                 edges.append({"name": name, "extra": extra, "requirement": str(requirement)})
                 if dependency not in catalog:
                     continue
-                if requirement.url or Version(catalog[dependency][1]["project"]["version"]) not in requirement.specifier:
+                if requirement.url or not requirement.specifier.contains(
+                    Version(catalog[dependency][1]["project"]["version"]), prereleases=True,
+                ):
                     raise PromotionArtifactError(f"{name}: incompatible first-party dependency {text}")
                 sources = data.get("tool", {}).get("uv", {}).get("sources", {})
                 mappings = [value for key, value in sources.items() if canonicalize_name(key) == dependency]

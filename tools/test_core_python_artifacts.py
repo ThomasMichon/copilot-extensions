@@ -5,6 +5,7 @@ import copy
 import hashlib
 import json
 import zipfile
+from pathlib import Path
 
 import build_python_artifacts as builder
 import core_python_artifacts as core
@@ -225,16 +226,46 @@ def test_invalid_core_activation_is_not_silently_ignored(tmp_path, value):
 
 def test_core_cli_reuses_existing_policy_and_toolchain_arguments(tmp_path, monkeypatch):
     import sys
+    from types import SimpleNamespace
 
     import artifact_builder_cli
 
     calls = []
+    lock = SimpleNamespace(venv_python=Path(sys.prefix) / "bin" / "python")
+    monkeypatch.setattr(artifact_builder_cli, "resolve_toolchain_lock", lambda *args, **kwargs: lock)
     monkeypatch.setattr(sys, "argv", ["builder", "core", "--core", "--out-dir", str(tmp_path)])
     def build(**kwargs):
         calls.append(kwargs)
         return {"composition": "core"}
     assert artifact_builder_cli.main(None, "", core_builder=build) == 0
-    assert calls == [{"out_dir": tmp_path, "python": None, "toolchain": None}]
+    assert calls == [{"out_dir": tmp_path, "python": None, "toolchain": lock}]
+
+
+def test_legacy_builder_help_needs_no_ambient_packaging():
+    import os
+    import subprocess
+    import sys
+
+    script = Path(builder.__file__).resolve()
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", """
+import builtins, pathlib, runpy, sys
+script = pathlib.Path(sys.argv[1])
+original = builtins.__import__
+def guarded(name, *args, **kwargs):
+    if name == 'packaging' or name.startswith('packaging.'):
+        raise ModuleNotFoundError('ambient packaging is unavailable')
+    return original(name, *args, **kwargs)
+builtins.__import__ = guarded
+sys.path.insert(0, str(script.parent))
+sys.argv = [str(script), '--help']
+runpy.run_path(str(script), run_name='__main__')
+""", str(script)],
+        capture_output=True, text=True, check=False,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "--core" in result.stdout and "--standalone" in result.stdout
 
 
 @pytest.mark.parametrize("mutation", ["shape", "missing-source", "nonobject-project", "aliased-identity"])

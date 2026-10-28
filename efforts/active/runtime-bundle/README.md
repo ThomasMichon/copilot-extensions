@@ -390,3 +390,23 @@ choose the wheel path, not a reason to relax source identity.
   publication, full third-party release qualification and ordinary updater
   adoption remain open. No aggregate channel is selected or updated, no
   third-party bytes are uploaded, and no service/default runtime changes.
+- After rebasing onto current development source, the exact candidate's native
+  API build and independent source binding pass again: 42 wheels,
+  10,563,113 bytes, 372.937 seconds, archive SHA-256
+  `7f04619645f1a5ea7e197ca93ce3fbd53096b32fcad3c8102462e18f86c9ca8e`.
+- Review found two portability defects: an eager core import imposed ambient
+  `packaging` on legacy help/builds, and default specifier membership depended
+  on the parser's prerelease defaults. Five controls fail before correction
+  and pass afterward. Core CLI selection now runs in the resolved toolchain
+  and explicitly admits compatible development versions without weakening
+  version floors. A genuinely package-free caller passes legacy help and the
+  real 42-wheel core CLI; independent source-bound readback passes in 246.422
+  seconds with the retained toolchain. This rebuild has archive SHA-256
+  `efc450c3b78da2fea085aede68506476e444658ce72c333fdf3d7336e4f8b1b9`;
+  member payloads match the API build, while ZIP timestamps remain distinct.
+- Seventeen bounded core controls join the existing exact-input unit packet,
+  with only changed/new source bindings and the two new helper coverage targets.
+  The existing five-minute budget and effect/coverage rules are unchanged.
+  The native Windows full-packet attempt stops at an unchanged long-path
+  source-publication fixture after 1,743 passing cases and eight platform
+  skips; it is not passing packet evidence. Hosted Linux CI remains required.

@@ -4898,7 +4898,10 @@ python tools/build_python_artifacts.py core --core --out-dir <outside-source-dir
 ```
 
 Its existing toolchain-source, seasoning and shared-toolchain options are
-unchanged. This artifact contains no third-party wheels and performs no runtime
+unchanged. Core selection executes inside the resolved build-toolchain
+environment; the calling interpreter needs no ambient `packaging` installation.
+Legacy plugin/standalone help and invocation keep their existing requirements.
+This artifact contains no third-party wheels and performs no runtime
 dependency resolution. It does not publish the separate complete delivery
 envelope, approve a runtime profile, enable an installer/updater, remove an
 origin qualification or migrate a service.
