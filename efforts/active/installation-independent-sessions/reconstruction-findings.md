@@ -97,6 +97,21 @@ retain their implementation authority; filing or linking is not claiming work.
   delete caches manually or re-seal an installed generation to manufacture
   removal acceptance. The witness remains running; no removal is claimed.
 
+- [ ] **R9 - Per-request custody invalidates source-wheel reuse.** #8669.
+  An ordinary Windows candidate exhausted the shared source-wheel deadline
+  during build-tool-tree verification; the previously selected generation
+  remained intact. The 333/334 installer code is identical, and the same
+  180-second budget covers tooling, the complete source batch and validation.
+  Controlled native admission proves that `UPDATE_DRIVER_WITNESS` entered the
+  offline build environment and cache identity, changing keys for otherwise
+  identical requests. The local correction excludes that control metadata only
+  from offline builder inputs; constructor admission retains it. Key controls
+  and actual fresh-generation wheel reuse pass while ordinary environment and
+  source changes remain bound. This is a confirmed cache defect, not proof it
+  is the sole contributor to the observed deadline. Finish integrity regressions,
+  review/release and the actual installed batch before closing the live gate;
+  do not relax integrity checks or deadlines to manufacture acceptance.
+
 ## Evidence limits and remaining live gate
 
 Ordinary reconstruction, data-preservation checks and subsequent service health
