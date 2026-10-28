@@ -129,16 +129,36 @@ try {
     }
     $python = $null
     $resolver = Join-Path $PSScriptRoot 'resolve-runtime.ps1'
-    if (-not $env:COPILOT_EXTENSIONS_CONTEXT -and [IO.File]::Exists($resolver)) {
+    $runtimeRoot = Join-Path $env:USERPROFILE '.agent-worktrees'
+    if ($env:COPILOT_EXTENSIONS_CONTEXT) {
+        $validator = Join-Path $PSScriptRoot 'installation-context\installation-context.ps1'
+        if (-not [IO.File]::Exists($validator)) { throw 'Required installation-context validator is unavailable' }
+        $owner = if ($env:AGENT_WORKTREES_PAYLOAD_ROOT) { $env:AGENT_WORKTREES_PAYLOAD_ROOT }
+                 elseif ($env:COPILOT_PLUGIN_ROOT) { $env:COPILOT_PLUGIN_ROOT }
+                 else { Split-Path -Parent $PSScriptRoot }
+        $durableHome = $env:COPILOT_EXTENSIONS_CONTEXT
+        1..5 | ForEach-Object { $durableHome = Split-Path -Parent $durableHome }
+        $validation = @(& $validator -Action validate -Context $env:COPILOT_EXTENSIONS_CONTEXT `
+            -DurableHome $durableHome -ExpectedPluginId 'agent-worktrees' -ExpectedPayloadRoot $owner)
+        if ($LASTEXITCODE -ne 0) { throw 'Required installation context is invalid' }
+        $context = ConvertFrom-PreToolJson ($validation -join "`n")
+        if ($context -isnot [Collections.IDictionary] -or $context.pluginRoot -isnot [string] -or
+            -not [IO.Path]::IsPathRooted($context.pluginRoot)) { throw 'Invalid installation-context runtime root' }
+        $runtimeRoot = $context.pluginRoot
+    }
+    if ([IO.File]::Exists($resolver)) {
         $previousRoot = $env:AGENT_RT_ROOT
         try {
-            $env:AGENT_RT_ROOT = Join-Path $env:USERPROFILE '.agent-worktrees'
+            $env:AGENT_RT_ROOT = $runtimeRoot
             . $resolver -TraceMode read-only
             $python = $AwPy
         } finally {
             if ($null -eq $previousRoot) { Remove-Item Env:AGENT_RT_ROOT -ErrorAction SilentlyContinue }
             else { $env:AGENT_RT_ROOT = $previousRoot }
         }
+    }
+    if (-not $python -and $env:COPILOT_EXTENSIONS_CONTEXT) {
+        throw 'Required installation-context runtime is unavailable'
     }
     if (-not $python) {
         $python = Get-Command python -CommandType Application -All -ErrorAction SilentlyContinue |

@@ -109,10 +109,108 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
     assert result.returncode == 0, result.stderr
     if case == "policy-error":
         assert "private native diagnostic" not in result.stderr
-    python_required = case not in {"read", "active"}
+    python_required = case not in {"read", "active", "context"}
     assert observed.exists() is python_required, (result.stdout, result.stderr)
     if python_required:
         assert json.loads(observed.read_text(encoding="utf-8")) == payload
         assert json.loads(result.stdout)["permissionDecision"] == "deny"
+    elif case == "context":
+        assert json.loads(result.stdout)["permissionDecision"] == "deny"
     else:
         assert result.stdout == ""
+
+
+@pytest.mark.parametrize("native_shell", ["powershell.exe", "pwsh"])
+@pytest.mark.parametrize("invalid_context", [False, True])
+def test_native_entry_selects_validated_cell_runtime(native_shell, invalid_context, tmp_path):
+    import sysconfig
+    import agent_procutil
+
+    shell = shutil.which(native_shell)
+    if shell is None:
+        pytest.skip(f"{native_shell} is unavailable")
+    interpreter = Path(os.environ["COPILOT_TEST_HOOK_PRE_PYTHON"])
+    payload = tmp_path / "payload"
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    for name in ("pre-tool-hook.ps1", "hook_policy_process.py", "resolve-runtime.ps1"):
+        shutil.copyfile(SCRIPTS / name, scripts / name)
+    shutil.copytree(SCRIPTS / "installation-context", scripts / "installation-context")
+    shutil.copyfile(SCRIPTS.parent / "plugin.json", payload / "plugin.json")
+    observed = tmp_path / "policy-ran"
+    (scripts / "hook_client.py").write_text(
+        "import json,sys\nfrom pathlib import Path\n"
+        + "Path(" + repr(str(observed)) + ").write_text(sys.executable)\n"
+        + "print(json.dumps({'additionalContext':'validated cell policy'}))\n",
+        encoding="utf-8",
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    durable = tmp_path / "durable"
+    flags = {"creationflags": subprocess.CREATE_NO_WINDOW}
+    result = subprocess.run(
+        [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
+         str(scripts / "installation-context" / "installation-context.ps1"),
+         "-Action", "stamp", "-SourceJson",
+         json.dumps({"source": "github", "repo": "example/marketplace"}),
+         "-MarketplaceKey", "fixture", "-PluginId", "agent-worktrees",
+         "-PayloadRoot", str(payload), "-PayloadVersion", "1.0.0",
+         "-PayloadOrigin", "explicit", "-ExpectedNamespaceGeneration", "0",
+         "-ExpectedInstallGeneration", "0", "-DurableHome", str(durable)],
+        capture_output=True, text=True, encoding="utf-8", timeout=30, **flags,
+    )
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    context = json.loads(result.stdout)
+    root = Path(context["pluginRoot"])
+    runtime = root / "versions" / "1.0.0"
+    ambient = tmp_path / "ambient"
+    for target in (runtime, ambient):
+        created = subprocess.run(
+            [str(interpreter), "-m", "venv", "--without-pip", str(target)],
+            capture_output=True, text=True, timeout=30, **flags,
+        )
+        assert created.returncode == 0, (created.stdout, created.stderr)
+    site = runtime / "Lib" / "site-packages"
+    (site / "fixture-runtime.pth").write_text(
+        sysconfig.get_path("purelib") + "\n" + str(Path(agent_procutil.__file__).parents[1]) + "\n",
+        encoding="utf-8",
+    )
+    (runtime / ".install-complete.json").write_text(json.dumps({
+        "version": "1.0.0", "completed_at": "2026-01-01T00:00:00Z", "pid": 1,
+    }), encoding="utf-8")
+    (root / "current-version").write_text("1.0.0\n", encoding="utf-8")
+    pointer = Path(context["installReceipt"])
+    if invalid_context:
+        receipt = json.loads(pointer.read_text(encoding="utf-8"))
+        receipt["pluginId"] = "foreign-plugin"
+        pointer.write_text(json.dumps(receipt), encoding="utf-8")
+    env = os.environ.copy()
+    for name in ("AGENT_RT_ROOT", "AGENT_WORKTREES_PAYLOAD_ROOT", "PYTHONPATH"):
+        env.pop(name, None)
+    env.update(HOME=str(home), USERPROFILE=str(home), COPILOT_PLUGIN_ROOT=str(payload),
+               COPILOT_EXTENSIONS_CONTEXT=str(pointer),
+               PATH=str(ambient / "Scripts") + os.pathsep + env.get("PATH", ""))
+    available = subprocess.run(
+        [str(ambient / "Scripts" / "python.exe"), "-c", "import agent_procutil"],
+        capture_output=True, text=True, env=env, timeout=10, **flags,
+    )
+    assert available.returncode != 0, "ambient Python must lack the owned worker dependency"
+    available = subprocess.run(
+        [str(runtime / "Scripts" / "python.exe"), "-c",
+         "from agent_procutil.owned_process import require_caller_owned_support; require_caller_owned_support()"],
+        capture_output=True, text=True, env=env, timeout=10, **flags,
+    )
+    assert available.returncode == 0, (available.stdout, available.stderr)
+    result = subprocess.run(
+        [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(scripts / "pre-tool-hook.ps1")],
+        input=json.dumps({"toolName": "view", "toolArgs": {"path": "fixture.txt"}}),
+        capture_output=True, text=True, encoding="utf-8", env=env, cwd=home, timeout=25, **flags,
+    )
+    assert result.returncode == 0, result.stderr
+    reply = json.loads(result.stdout)
+    if invalid_context:
+        assert reply["permissionDecision"] == "deny"
+        assert not observed.exists()
+    else:
+        assert reply == {"additionalContext": "validated cell policy"}, result.stderr
+        assert Path(observed.read_text()).is_relative_to(runtime)

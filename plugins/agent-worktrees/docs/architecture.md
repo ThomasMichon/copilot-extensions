@@ -2896,6 +2896,11 @@ failure cancels the real worker behind a virtual-environment launcher; the SDK
 owns the policy's descendants under its 25-second budget. The shared installer
 native runner is unchanged; no generic installer lifetime behavior is widened.
 
+Explicit installation cells are validated through the existing native
+installation-context helper before the read-only runtime resolver selects the
+owning slot. A missing/invalid cell or unavailable owning interpreter denies
+without falling back to an ambient Python lacking the owned-process SDK.
+
 ### Opt-in resident pre-tool pilot
 
 The existing extension can register an SDK `onPreToolUse` callback when

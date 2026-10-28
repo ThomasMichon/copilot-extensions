@@ -25,9 +25,11 @@ PLUGIN = Path(__file__).resolve().parents[1]
     "real-array-result", "real-invalid-decision", "real-invalid-context-result", "real-unknown-result",
     "python-encoding", "python-warning", "python-invalid-shape",
     "python-runtime-unavailable", "python-missing-worker", "real-invalid-decision-type",
-    "python-unknown-response",
+    "python-unknown-response", "root-relative-stop", "slash-root-relative-stop",
 ])
 def test_resident_pre_tool_contract(case, tmp_path):
+    if case in {"root-relative-stop", "slash-root-relative-stop"} and os.name != "nt":
+        pytest.skip("Windows root-relative override semantics")
     node = shutil.which("node")
     assert node, "resident hook contract requires Node"
     scripts = tmp_path / "scripts"
@@ -112,6 +114,14 @@ if (name === "reads" || name === "bom") {
   writeFileSync(flag, JSON.stringify({ active: true }));
   assert.deepEqual(await hook({ ...input, toolName: "edit" }), {});
   assert.equal(calls, 0);
+} else if (["root-relative-stop", "slash-root-relative-stop"].includes(name)) {
+  writeFileSync(flag, JSON.stringify({ active: true }));
+  env.PRETOOL_KILLSWITCH_STATE_FILE = flag.slice(2);
+  if (name === "slash-root-relative-stop") {
+    env.PRETOOL_KILLSWITCH_STATE_FILE = env.PRETOOL_KILLSWITCH_STATE_FILE.replaceAll("\\\\", "/");
+  }
+  assert.equal((await hook({ ...input, toolName: "edit" })).permissionDecision, "deny");
+  assert.equal(calls, 1);
 } else if (name === "hot-toggle") {
   assert.deepEqual(await hook(input), {});
   writeFileSync(flag, JSON.stringify({ active: true }));

@@ -54,7 +54,9 @@ function matchesReadPolicy(scriptsRoot) {
 function hotStop(environment) {
   if (environment.COPILOT_EXTENSIONS_CONTEXT?.trim()) return null;
   const override = environment.PRETOOL_KILLSWITCH_STATE_FILE;
-  if (override && !isAbsolute(override)) return null;
+  if (override && (process.platform === "win32" ?
+      !/^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+(?:[\\/]|$))/.test(override) :
+      !isAbsolute(override))) return null;
   const path = override || join(homedir(), ".copilot-extensions", "killSwitches", "pretool-killswitch.json");
   try {
     const value = JSON.parse(boundedFile(path, 16384));
