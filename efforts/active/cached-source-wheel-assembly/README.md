@@ -12,11 +12,13 @@
 
 ## Guiding Intent
 
-Keep the self-contained raw-source payload model. An app and its vendored
-libraries can be delivered together without publishing prebuilt first-party
-wheels. Routine installation should reuse admitted dependency artifacts and
-locally built wheels when their complete construction inputs are unchanged.
-An empty target environment is not a reason to rebuild unchanged local code.
+Optimize released installation for prepacked first-party artifacts and fast
+assembly from cache. Reuse the promotion pipeline's existing first-party wheel
+bundles rather than inventing another artifact format or publisher. Source
+remains available for development and governed fallback; raw-source delivery
+does not require rebuilding that code on every device. When a local build is
+necessary, cache it by its complete construction inputs. An empty target
+environment is not a reason to rebuild unchanged code.
 
 The fast path must not install stale source or confuse a partial candidate
 with a complete generation. Confirm the selected installed contents and stamp
@@ -67,9 +69,11 @@ Public-safe scoped capture of the portable request:
 
 > We need to ensure that for most updates/installs, we can quickly assemble the venv from cache. We need to cut down on pre- or post-validation, except to simply confirm we allocated everything form the wheel, and then stamp the venv complete.
 
-The clarified delivery requirement is a self-contained raw-source payload per
-app with its shared libraries vendored. This effort does not require changing
-that distribution model to prebuilt first-party releases.
+The clarified immediate priority is prepackaging through the existing release
+artifacts and hardlinking from cache. Promotion may optimize the first-party
+code representation for download and device assembly. Moving all installation
+ownership to Worktree Manager and leaving plugins as discovery/usage guidance
+is the broader direction, not a prerequisite for this performance slice.
 
 The mechanisms and ordering below are agent-recommended implementation design,
 not additional operator requirements or authority to bypass admission.
@@ -90,6 +94,9 @@ not additional operator requirements or authority to bypass admission.
 
 ### Phase 2 - Content-bound construction reuse
 
+- [x] Implement and qualify the first exact-input reuse slice in the existing
+  offline source composer. #9296 merged; this does not enable ordinary
+  constructors or qualify the portfolio.
 - [ ] Identify the complete existing admitted construction identity: source
   contents and local dependency closure, selected extras/profile, interpreter
   compatibility, exact build backend/dependencies and packaging configuration.
@@ -107,6 +114,13 @@ not additional operator requirements or authority to bypass admission.
 
 ### Phase 3 - Proportionate completion and adoption
 
+- [ ] Prefer the existing promotion-built first-party wheel bundles on the
+  released installation path. Prove that the actual consumer skips local
+  build-tool provisioning and first-party build hooks; producing a bundle
+  without consuming it is not acceptance.
+- [ ] Use hardlinks from the extracted artifact cache for immutable candidate
+  assembly. Keep generated or mutable files private and prove that preparation,
+  update and cache retirement cannot change another generation's code.
 - [ ] Separate necessary input admission and installed-content confirmation
   from repeated full-tree scans and optional broad diagnostics. Reuse existing
   held-input evidence where its actual custody makes that valid; do not omit
@@ -123,7 +137,7 @@ not additional operator requirements or authority to bypass admission.
 
 ## Validation Plan
 
-- [ ] The actual UV reproduction distinguishes positional directories from
+- [x] The actual UV reproduction distinguishes positional directories from
   requirements references and detects stale source-body reuse.
 - [ ] Unchanged admitted inputs reach a fresh venv without first-party build
   subprocesses or unnecessary dependency resolution; measure acquisition,
@@ -167,6 +181,121 @@ claim for that substitution. Remove only the returned task folder after its
 evidence is no longer needed.
 
 ## Journal
+
+### 2026-10-28 - Speed-first direction and actual hardlink reuse
+
+The immediate scope is release-artifact prepackaging and hardlink assembly,
+not the broader Manager/plugin ownership migration. The existing promotion
+builder already emits an app's first-party wheel closure in an attested bundle.
+The ordinary Worktrees source lifecycle does not consume that artifact path;
+another packaging format alone would not eliminate device-side builds.
+That consumer adoption remains an explicit open gate, alongside the existing
+release-lock-input and source-staging owners.
+
+The ordinary immutable source constructor now selects a stable content-bound
+archive URL and requests UV hardlinks. Native controls prove unchanged fresh
+venvs share the same installed file identity, not merely equal contents, and
+that changing generated Worktrees provenance leaves a hardlinked cached peer
+unchanged. Thirty-three focused controls passed with one POSIX-only skip.
+The mutable development-refresh and private build-tool paths retain copies.
+The full disposable Windows lifecycle then passed with the original bounds:
+cold construction 185.556s, a fresh venv reusing sixteen local wheels 58.211s,
+and completed-generation reuse 10.063s. PowerShell 5, PowerShell 7 and Bash
+entrypoints returned in 27.026s, 22.601s and 25.658s respectively. These are
+individual samples, not tail qualification or the final speed target.
+The three-project control also proves that unlinking its exact private UV
+cache file leaves both hardlinked installed generations readable.
+
+### 2026-10-27 - Real normal-path reuse measured; redundant copying removed
+
+The disposable Worktrees lifecycle and native PowerShell/Bash entrypoints
+passed with the existing timeouts unchanged. A second fresh immutable venv
+reused all sixteen local project wheels without a build hook. Before the
+copy reduction, cold construction took 211.707s, fresh-venv reuse 127.602s,
+and completed-generation reuse 8.711s. Local wheel preparation accounted for
+145.749s cold and 64.054s warm; the latter included 8.636s admitting and
+fingerprinting the private build tools. These are one app's measured paths,
+not thirteen-app update totals or a claim that the fast-path objective is met.
+
+The warm path was still copying every project before checking for its wheel.
+It now derives the same project selection directly from retained source,
+copies only on a miss, and checks that copy against the binding before the
+build hook and again after it. Manifest normalization removes volatile local
+UV graph remapping, not packaging configuration or source modes.
+Fourteen focused native controls passed, including a warm-hit prohibition on
+source copying and refusal when source changes between keying and copying;
+one executable-mode control remains POSIX-only. Actual before/after timing
+and hosted real-backend qualification remain open.
+
+### 2026-10-27 - Ordinary constructor integration implemented; qualification open
+
+The canonical Python engine now retains a normal-source cache context after
+the existing retained-input admission, under its existing construction
+descriptor. The new helper admits a private build environment through the same
+native UV configuration and seasoning policy, binds its actual installed
+tool bytes, and builds supported static Setuptools projects offline without
+build isolation. Unsupported contracts explicitly keep the original path.
+The previously merged cache storage is now a canonical vendored helper rather
+than a repository-only tool. No new feed or installation authority is created.
+
+The normal native constructor control built three local projects, reused all
+three across a fresh retention workspace, then rebuilt only the edited library
+and installed its changed module. A contained cache/source/closed-wheel packet
+passed53 controls with one POSIX-only skip. Missing installed content and
+changed retained archives refuse before completion; backend mutation rejects
+cache publication and permits a clean retry. Broader lifecycle qualification
+is still running and its failures must be resolved before publication.
+
+The exact #8949 overlap was inspected and a disjoint boundary recorded in its
+thread: its bounded retained-content reader block is unchanged. No response
+from that owner is claimed. The current synchronized engine consumers are
+seven runtime plugins, standalone Manager and the update-driver foundation;
+this is not a claim that all thirteen runtime installers execute this path.
+An actual-backend hosted partition is added for Linux and Windows. Local
+upstream-wheel retrieval failed TLS negotiation through two clients, so that
+real-backend lane is not yet qualified. Ordinary adoption, latency accounting,
+remaining installer implementations and proportionate validation remain open.
+
+The actual Worktrees lifecycle initially exposed a real eligibility miss:
+the process library carries the ordinary two-statement Setuptools `setup()`
+entrypoint. That path completed its existing native lifecycle/reuse control,
+but did not exercise the cache and therefore was not credited as adoption.
+Eligibility now admits only that exact AST shape, with an optional docstring;
+additional setup code remains a miss. A proposed mixed source/archive variant
+was rejected after native UV reported conflicting local source URLs. No new
+source-table override or altered backend-resolution policy was introduced to
+paper over that conflict. The actual lifecycle control now requires source-wheel
+evidence explicitly. Its new run and hosted real-backend qualification remain
+open. The updated isolated normal packet passed12 controls with its POSIX-only
+case skipped on Windows.
+
+The cache-enabled actual lifecycle subsequently found a retained-byte
+verification clock scoped to the build stage rather than the individual
+verification operation. The reader now uses a fresh bounded I/O budget without
+changing the lifecycle's child or return timeouts; its focused clock control
+passes. The next actual run reached healthy candidate verification and runtime
+selection, but still missed the existing300-second construct return bound.
+That is an unresolved qualification failure, not a completed native install.
+Trace the post-selection operations and account for their elapsed work before
+publication; do not extend the bound or infer a pass from the healthy candidate.
+
+### 2026-10-27 - Exact-input composition slice merged; normal adoption is next
+
+#9296 merged at21:12:07 UTC as `5ed92969a9072907c724dbc630f1fe13c059d292`.
+Current-head Copilot review5674269356 found no open issues; both earlier
+high-priority findings were corrected and resolved. Qualification run40582712317
+completed successfully across24 Linux/Windows jobs. Its Linux profiles packet
+passed32 controls without skips, including actual permission-only invalidation
+and rejected backend content/mode mutation followed by retry. Required CI also
+passed after the final documentation edit; no CI gate was waived.
+
+The source worktree is synchronized onto the merged Dev commit. The remaining
+Phase2/3 and portfolio validation items stay open. Next, reconcile the normal
+constructor boundary with #8949, supply exact build-input admission for that
+path, and integrate self-contained caching with actual normal consumers.
+Independent unchanged-library hits and proportionate completion work remain
+separate measured requirements. The existing tooling-only composer is not an
+ordinary installer, a production latency result or an installed rollout.
 
 ### 2026-10-27 - Corrected review-discovered cache invalidation gaps
 

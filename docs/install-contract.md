@@ -4184,6 +4184,52 @@ health. It verifies the copied file coverage and content against the admitted
 source identity, and records the transaction's actual non-editable installation
 origins, not a second snapshot's paths. `freeze_inputs()` remains an explicit
 source-copy utility for packaging fixtures, not the construction path.
+
+Ordinary immutable Python-engine candidates can reuse locally built wheels
+without changing raw-source delivery. `installer_source_build.py` positively
+admits static, pure-Python `setuptools.build_meta` projects with ordinary
+`setuptools`/`wheel` build requirements. The same retained native UV settings
+and frozen seasoning cutoffs admit a private copied build-tool environment.
+Its actual installed bytes and modes, selected interpreter/target, UV, build
+helper and build environment identify subsequent offline, no-isolation builds.
+An open build requirement or a backend version alone is not a cache identity.
+
+Each compact project binds its own content and modes, excluding separately
+declared nested vendored projects. A library-only edit therefore need not rebuild
+unmodified app/library wheels. The installation owner's `.source-wheel-cache`
+uses the existing kernel construction leases and atomic entry publication;
+hits verify and select the stable, immutable archive without copying another
+source tree or changing its URL between generations. Keys read the retained
+project directly and bind normalized TOML content without remapped UV source paths;
+a miss copies and rechecks the project before running its build hook.
+Corrupt or incomplete entries fail explicitly instead of being
+silently rebuilt. Source or tool mutation during a build refuses publication.
+This storage is byte custody, not source, feed or installation authority.
+The assembly diagnostic reports built/reused project counts and tools/total
+elapsed time on stderr; those counts describe local wheels, not completed
+runtime generations or the whole update duration.
+
+Ordinary immutable source candidates request UV hardlinks from its extracted
+wheel cache, with UV's normal copy fallback when linking is unavailable.
+Mutable development refresh and the private build-tool environment retain
+copies. Installed preparation replaces generated build provenance atomically
+instead of overwriting a potentially shared cached file. Cache retirement may
+unlink its own files without invalidating the hardlinks in completed venvs.
+
+The final native install substitutes those inspected local archives for the
+already admitted local targets, retaining runtime dependency resolution,
+configuration and seasoning. Its additive `source_wheels` origin evidence binds
+archive digests and member hashes. Installed local contents are confirmed once,
+before any owner-defined preparation that intentionally generates runtime
+provenance. Existing installed health, completion and lifecycle publication
+remain in their original order. Completed-generation reuse does not construct
+another tools environment. Mutable dev builds, dynamic/custom backends,
+setup scripts beyond the ordinary `from setuptools import setup; setup()`
+boilerplate, and custom build/cache settings explicitly retain the original
+isolated-source path; a refusal or a failed supported build is not a silent
+fallback. This applies to actual Python-engine callers, not automatically to
+the other native installer implementations.
+
 Within that transaction, path-replacement forms and their ordered matcher are
 prepared once rather than rebuilt for each metadata scalar. Overlapping local
 package roots share verification only for the same original/retained file pair;

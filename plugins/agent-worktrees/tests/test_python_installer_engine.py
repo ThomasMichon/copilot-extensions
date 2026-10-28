@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -1299,7 +1300,9 @@ def test_completed_runtime_launch_failure_requests_distinct_repair(
         slot = candidate.slot
     engine.runtime.activate(root, "1.0.0", link_free=True)
     if failure == "unexecutable":
-        engine.runtime.slot_python(root, "1.0.0").write_bytes(b"not an executable")
+        python = engine.runtime.slot_python(root, "1.0.0")
+        python.chmod(python.stat().st_mode | stat.S_IWRITE)
+        python.write_bytes(b"not an executable")
     else:
         next(slot.glob("**/site-packages/example_module.py")).write_text(
             "import time\ntime.sleep(60)\n", encoding="utf-8",
