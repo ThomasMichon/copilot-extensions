@@ -18,6 +18,12 @@ credential-free hosted probe adds bounded installed-package thread locations
 (basename, line and function only, no source lines or frame locals) at failure
 to identify the blocked handoff without extending the startup deadline.
 Shared-host installation and restart remain unauthorized.
+Run 40777108354 at `b3381801aa` reproduced the failure; compiled package
+filenames did not contain `site-packages`, so that location filter produced
+no thread evidence. The revised disposable reader prints bounded basename-only
+thread locations and projects only monitor instance state plus native identity
+liveness. Admission may have succeeded before an early resident exit; absence
+of a failure log alone does not distinguish success from a blocked admission.
 
 An already-healthy session must not wait for unrelated runtime installation.
 Keep adopted automatic maintenance available, coordinated and observable rather

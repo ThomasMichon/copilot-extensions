@@ -32,15 +32,22 @@ try:
         time.sleep(0.05)
     rows=loader.records()
 except Exception:
-    for frame in sys._current_frames().values():
+    for frame in list(sys._current_frames().values())[:8]:
         locations=[]
         while frame is not None:
             path=Path(frame.f_code.co_filename)
-            if 'site-packages' in path.parts:
-                locations.append(path.name+':'+str(frame.f_lineno)+':'+frame.f_code.co_name)
+            locations.append(path.name+':'+str(frame.f_lineno)+':'+frame.f_code.co_name)
             frame=frame.f_back
         if locations:
             print('Owned reader thread locations: '+' <- '.join(locations[:16]),file=sys.stderr)
+    from agent_procutil.daemon_instances import inspect_instances
+    from agent_procutil._daemon_instance_identity import identity_state
+    for record in inspect_instances():
+        if record.get('service')=='agent-worktrees-status-monitor':
+            identity=(identity_state(int(record['pid']),record['birth'])
+                      if 'pid' in record and 'birth' in record else 'unbound')
+            print('Owned resident instance state='+record['state']+'; identity='+identity,
+                  file=sys.stderr)
     for path in (Path(sys.argv[2])/'logs/status-monitor.log',
                  Path(sys.argv[2])/'picker-status-monitor.log',
                  Path(sys.argv[2]).parent/'.agent-worktrees-status-monitor.log'):
