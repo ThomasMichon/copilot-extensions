@@ -59,14 +59,14 @@ def deferred_command(
     correlation: launch_execution.Correlation | None = None,
     prepare_native: bool = True,
     environment: dict[str, str] | None = None,
-    mux: bool = False,
+    environment_known: bool = True,
 ) -> list[str]:
     native = _native_setup_command(
         command, record_path, seed_id=seed_id, admission_only=admission_only,
         preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
         correlation=correlation,
         environment=environment,
-        mux=mux,
+        environment_known=environment_known,
     ) if prepare_native else None
     if native is not None:
         return native
@@ -130,7 +130,7 @@ def _native_setup_command(
     correlation: launch_execution.Correlation | None,
     copy_only: bool = False,
     environment: dict[str, str] | None = None,
-    mux: bool = False,
+    environment_known: bool = True,
 ) -> list[str] | None:
     if not command:
         return None
@@ -151,7 +151,7 @@ def _native_setup_command(
             preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
             correlation=correlation, copy_only=copy_only,
             environment=environment,
-            mux=mux,
+            environment_known=environment_known,
         )
         if inner is None:
             return None
@@ -174,7 +174,8 @@ def _native_setup_command(
     if posix and not copy_only:
         from .launch_seed_contract import supports_posix_setup
 
-        if mux and "BASH_ENV" not in (environment or {}):
+        # Opaque shell renderers may change even an explicit empty override.
+        if not environment_known:
             return None
         if (environment or {}).get("BASH_ENV", os.environ.get("BASH_ENV")):
             return None

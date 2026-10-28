@@ -39,7 +39,7 @@ def _run(prefix, environment, cwd, *arguments):
 
 def _plan(
     tmp_path, installed, bash, seed_kind, *, interactive=False, env_script=None,
-    arguments=None, expect_native=True, bash_env=None, mux=False,
+    arguments=None, expect_native=True, bash_env=None, environment_known=True,
 ):
     root, plugin, prefix, environment = installed
     scripts = root / "scripts"
@@ -142,7 +142,7 @@ prepared = launch_seed_exec.deferred_command(
     command, created.yaml_path, seed_id=seed.seed_id if seed else None,
     admission_only=seed is None, correlation=correlation,
     environment={"BASH_ENV": sys.argv[10]} if sys.argv[12] == "1" else None,
-    mux=sys.argv[11] == "1",
+    environment_known=sys.argv[11] == "1",
 )
 index = launch_seed_exec.native_setup_index(prepared)
 assert (index is not None) == (bool(seed_kind) and not sys.argv[8] and sys.argv[9] == "1"), prepared
@@ -159,7 +159,7 @@ print(json.dumps({
         str(env_script) if env_script is not None else "",
         "1" if expect_native else "",
         str(bash_env) if bash_env is not None else "",
-        "1" if mux else "",
+        "1" if environment_known else "",
         "1" if bash_env is not None else "",
     ))
     env = {
@@ -411,7 +411,7 @@ def test_mux_server_initializer_uses_only_explicit_pane_overrides(
 
     plan, environment, checkout = _plan(
         tmp_path, installed_native_runtime, native_bash, "new",
-        mux=True, expect_native=override == "", bash_env=override,
+        environment_known=override is not None, expect_native=override == "", bash_env=override,
     )
     primer = tmp_path / "server-bash-env.sh"
     primer.write_text("trap 'exit 1' EXIT\nexit 5\n", encoding="utf-8")
@@ -444,6 +444,25 @@ def test_mux_server_initializer_uses_only_explicit_pane_overrides(
         "assert seed.seed_id==sys.argv[2] and seed.handoff_id is None",
         plan["record"], plan["seed_id"],
     )
+
+
+def test_opaque_shell_rendered_empty_override_retains_legacy_backend_and_receipts(
+    tmp_path, installed_native_runtime, native_bash,
+):
+    plan, environment, checkout = _plan(
+        tmp_path, installed_native_runtime, native_bash, "new",
+        bash_env="", environment_known=False, expect_native=False,
+    )
+    environment["BASH_ENV"] = "''"
+    result = run_caller_owned(
+        plan["command"], env=environment, cwd=checkout, input_text="retained stdin\n", timeout=60,
+        max_stdout_bytes=65536, max_stderr_bytes=65536,
+    )
+    assert result.returncode == 7, result.stdout + result.stderr + repr(_observations(plan))
+    backend = json.loads((tmp_path / "backend.json").read_text())
+    assert "python" in backend["parent_command"].lower()
+    assert backend["stdin"] == "retained stdin\n"
+    _assert_return(plan, 7, True)
 
 
 def test_selected_runtime_disappearing_before_setup_never_claims_or_replays_the_seed(
