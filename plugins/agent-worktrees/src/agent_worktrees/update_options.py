@@ -120,16 +120,21 @@ def validate_auth_flags(args: argparse.Namespace) -> None:
     phase = getattr(args, "phase", None)
     selected = set(getattr(args, "plugin", None) or ())
     parser = argparse.ArgumentParser(prog="update")
-    cleanup = any(getattr(args, name, False) for name in (
-        "auth_cleanup", "apply_auth_cleanup", "revert_auth_cleanup",
-    ))
+    cleanup = getattr(args, "auth_cleanup", False) or any(
+        getattr(args, name, None) is not None
+        for name in ("apply_auth_cleanup", "revert_auth_cleanup")
+    )
     if cleanup and (
         not getattr(args, "auth_report", False) or getattr(args, "auth_environment", False)
     ):
         parser.error("auth cleanup requires --auth-report and cannot export an auth environment")
-    if digest := getattr(args, "apply_auth_cleanup", None):
+    digest = getattr(args, "apply_auth_cleanup", None)
+    if digest is not None:
         if not re.fullmatch(r"[a-f0-9]{64}", digest):
             parser.error("--apply-auth-cleanup requires a lowercase SHA-256 preview digest")
+    receipt = getattr(args, "revert_auth_cleanup", None)
+    if receipt is not None and not receipt.strip():
+        parser.error("--revert-auth-cleanup requires a nonempty backup receipt")
     if selected and phase not in {"payloads", "preflight", "runtimes"}:
         parser.error("--plugin requires --phase payloads, preflight or runtimes")
     if phase and any(getattr(args, name, None) is not None for name in ("target", "runtime_sources")):

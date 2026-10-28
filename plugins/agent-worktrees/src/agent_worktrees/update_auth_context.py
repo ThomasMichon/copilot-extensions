@@ -272,6 +272,11 @@ def _marketplace_context() -> Path | None:
     )()
 
 
+def _cleanup_context(args: argparse.Namespace) -> Path:
+    explicit = getattr(args, "auth_cwd", None)
+    return Path(explicit) if explicit is not None else (_marketplace_context() or Path.cwd())
+
+
 def run_update(args: argparse.Namespace, steps) -> int:
     with session() as value:
         if value is not None and getattr(args, "target", None) is None:
@@ -292,7 +297,7 @@ def run_update(args: argparse.Namespace, steps) -> int:
             ) for item in report.results
         ]
         if any(item.status not in {"ok", "anonymous"} for item in results):
-            _cleanup_offer(Path.cwd())
+            _cleanup_offer(_cleanup_context(args))
         if value is not None and rc == 0:
             return 1 if value.anchor_failed else 4 if value.unresolved else 0
         return rc
@@ -312,7 +317,7 @@ def _cleanup_offer(cwd: Path) -> dict:
 
 
 def cmd_report(args: argparse.Namespace) -> int:
-    cwd = Path(getattr(args, "auth_cwd", None) or Path.cwd())
+    cwd = _cleanup_context(args)
     selected = (
         [] if getattr(args, "auth_source", None) else sources.marketplaces(_marketplace_context())
     )

@@ -159,6 +159,9 @@ def test_cleanup_offer_is_retained_in_status():
     {"apply_auth_cleanup": SHA},
     {"revert_auth_cleanup": "receipt"},
     {"auth_report": True, "auth_environment": True, "auth_cleanup": True},
+    {"apply_auth_cleanup": ""},
+    {"auth_report": True, "apply_auth_cleanup": ""},
+    {"revert_auth_cleanup": ""},
 ])
 def test_cleanup_cli_cannot_hide_mutation_in_an_update_or_manager_export(names):
     import argparse
@@ -265,3 +268,96 @@ def test_read_only_modes_block_apply_before_the_owner_is_called(
     )
     assert context.cmd_report(args) == 1
     assert json.loads(capsys.readouterr().out)["cleanup"]["changed"] is False
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_report_cleanup_uses_selected_repository_unless_explicitly_overridden(
+    tmp_path, monkeypatch, capsys, explicit,
+):
+    import argparse
+    from agent_worktrees import update_auth_context as context, update_auth_sources as sources
+
+    selected, override = tmp_path / "selected", tmp_path / "override"
+    monkeypatch.setattr(context, "_marketplace_context", lambda: selected)
+    monkeypatch.setattr(sources, "marketplaces", lambda *a: [])
+    monkeypatch.setattr(sources, "anchors", lambda: [])
+    monkeypatch.setattr(auth, "report", lambda *a, **k: report())
+    monkeypatch.setattr(auth, "fallback", lambda *a, **k: None)
+    calls = []
+    monkeypatch.setattr(cleanup, "offer", lambda cwd: calls.append(cwd) or {"status": "current"})
+    assert context.cmd_report(argparse.Namespace(
+        auth_cleanup=True, auth_cwd=str(override) if explicit else None, json=True,
+    )) == 0
+    capsys.readouterr()
+    assert calls == [override if explicit else selected]
+
+
+def test_update_offer_uses_selected_repository_not_process_cwd(tmp_path, monkeypatch):
+    import argparse
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    from agent_worktrees import update_auth_context as context
+
+    selected = tmp_path / "selected"
+    session = SimpleNamespace(
+        reports={selected: report("auth_required")}, anchor_reports={},
+        unresolved=False, anchor_failed=False,
+    )
+    monkeypatch.setattr(context, "session", lambda: nullcontext(session))
+    monkeypatch.setattr(context, "_marketplace_context", lambda: selected)
+    calls = []
+    monkeypatch.setattr(context, "_cleanup_offer", lambda cwd: calls.append(cwd))
+    assert context.run_update(argparse.Namespace(phase="runtimes"), lambda *a: 0) == 0
+    assert calls == [selected]
+
+
+def test_large_preview_survives_the_real_emitter_and_status_fold(tmp_path, monkeypatch):
+    import update_telemetry as ut
+    from agent_worktrees import update_events
+
+    events_path = tmp_path / "events.jsonl"
+    run = ut.Run(
+        run_id="fixture", events_path=events_path, proc="engine",
+        owner="engine", is_owner=True,
+    )
+    monkeypatch.setattr(update_events, "_run", run)
+    offer = {
+        "status": "offered", "plan": {
+            "plan_sha256": SHA, "diff": "declared helper policy\n" * 1000,
+        },
+    }
+    update_events.auth_cleanup_offer(offer)
+    events, errors = ut.read_events(events_path)
+    assert errors == 0
+    status = ut.fold(events, run={"events_path": str(events_path)})
+    assert status["auth"]["cleanup_offer"] == offer
+
+
+@pytest.mark.parametrize("damage", ["missing", "changed", "escape"])
+def test_invalid_retained_preview_is_unavailable_without_losing_its_digest(
+    tmp_path, monkeypatch, damage,
+):
+    import update_telemetry as ut
+    from agent_worktrees import update_events
+
+    events_path = tmp_path / "events.jsonl"
+    monkeypatch.setattr(update_events, "_run", ut.Run(
+        run_id="fixture", events_path=events_path, proc="engine",
+        owner="engine", is_owner=True,
+    ))
+    update_events.auth_cleanup_offer({
+        "status": "offered", "plan": {"plan_sha256": SHA, "diff": "declared\n" * 1000},
+    })
+    events, errors = ut.read_events(events_path)
+    assert errors == 0
+    reference = events[0]["details"]["cleanup_offer"]
+    path = tmp_path / reference["preview_file"]
+    if damage == "missing":
+        path.unlink()
+    elif damage == "changed":
+        path.write_text("{}")
+    else:
+        reference["preview_file"] = "../outside.json"
+    result = ut.fold(events, run={"events_path": str(events_path)})["auth"]["cleanup_offer"]
+    assert result["status"] == "unavailable"
+    assert result["plan_sha256"] == SHA

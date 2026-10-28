@@ -105,6 +105,10 @@ if a previously healthy source regresses. Failed/unconfirmed mutation or
 rollback remains a failure with recovery evidence, not an unchanged result.
 Neither path switches accounts, signs in, stores tokens, or provisions a missing
 policy runtime. `CE_UPDATE_AUTH=off` or `report-only` blocks cleanup application.
+Cleanup selects an explicit `--auth-cwd` first, then the update's selected
+repository, then process CWD. Large preview bodies are retained beside the
+run's events with a bounded hash-checked reference, so status preserves both
+the complete preview and consent digest without enlarging event-line limits.
 
 ## How It Works
 
