@@ -370,8 +370,12 @@ Body/event name are `agent.source.observation`; `ce.schema` is
 ok/cancelled → INFO, error → ERROR, unavailable → WARN. Attributes contain only
 component, stage, outcome, measured duration/queue wait, optional fixture roster
 and the four admitted identity fields. Unavailable duration is absent, not zero.
-Correlation uses actual trace/span fields. Resources contain only service name
-and namespace; scope is `copilot-extensions.process-telemetry`, version `1`.
+Correlation uses actual trace/span fields. All three signals' Resources contain
+service name, namespace and `service.instance.id`: one opaque random UUID per
+configured signals sink, stable across its exports and distinct from other sinks
+in the same process. It is not derived from trace, session or source metadata
+and is never a datapoint or record attribute. Scope is
+`copilot-extensions.process-telemetry`, version `1`.
 No prompt, raw message, code, exception text, environment, path or arbitrary
 attribute map is accepted.
 
@@ -384,7 +388,8 @@ Metrics use public SDK data models, `MetricExporter` and public `encode_metrics`
 | `ce.source.queue_wait` | DELTA Histogram / `s` | independently measured queue waits |
 
 Only `ce.stage`/`ce.outcome` labels are admitted; there are at most 56 data
-points per batch, no dynamic resource dimensions, identity labels or exemplars.
+points per batch, no identity labels or exemplars. The resource instance UUID
+distinguishes independently owned DELTA streams without adding a datapoint label.
 Histogram bounds are 1, 5, 10, 25, 50, 100, 250, 500 ms and 1, 2, 5, 10 s,
 plus +Inf. Count/sum/min/max remain measurements, not a percentile estimate.
 Sampling is not inverse-weighted. Local drop/loss counters are not silently

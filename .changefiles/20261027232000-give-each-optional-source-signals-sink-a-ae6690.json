@@ -1,0 +1,21 @@
+{
+  "comment": "Give each optional source-signals sink a stable opaque OTLP resource instance UUID",
+  "changes": [
+    {
+      "plugin": "libs/process-telemetry",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
