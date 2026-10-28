@@ -34,6 +34,8 @@ fresh full-content eligibility. New arrivals remain unranked until researched.
 This publication is not a new whole-queue census and claims no issue closure.
 The fixed target remains at most 729 whole open issues, counting inflow and
 excluded authors.
+These are frozen wave snapshots; later census changes belong in the parent's
+dated journal rather than silently changing the research cohort.
 
 Research used exact original/refinement text after complete actor, collaborator,
 author/editor and nested-metadata gates, followed by one terminal metadata
@@ -176,9 +178,9 @@ Release and installation remain separately tracked where required.
 
 ## Publication slice versus remaining parent gates
 
-- [ ] Publish this exact 200-issue proposal, appendices and scoped dependency
-  register through normal review.
-- [ ] Reconcile the parent Plan/Validation and journal after the actual merge;
+- [x] Publish this exact 200-issue proposal, appendices and scoped dependency
+  register through normal review in #9388.
+- [x] Reconcile the parent Plan/Validation and journal after the actual merge;
   preserve all provisional decisions and next eligible supply.
 
 This finite publication does not complete the roadmap's 281 remaining eligible
