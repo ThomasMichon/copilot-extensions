@@ -483,3 +483,15 @@ Initial tests must prove the current gap before adding the guards.
 - Independent host execution passed all 75 affected lifecycle/required-cutover
   cases and all 15 retained-runtime cases, including actual WSL PowerShell.
   This does not qualify native Windows deployment or running adoption.
+
+### 2026-10-28 - Unicode suffix expansion parity
+
+- Independent review found unbraced POSIX variable matching consuming Unicode
+  suffix characters, unlike the standard library's ASCII variable-name rule.
+  Two actual oracle cases reproduced the wrong durable path; braced references
+  and Windows syntax remained correct.
+- Compile the POSIX pattern with `re.ASCII` and retain non-ASCII path suffixes
+  outside the reference. Extend the native-syntax controls for two Unicode
+  suffix classes and a braced control without changing Windows matching.
+- The integrated contained selection passed all 111 cases. The native
+  installer and previously executed PowerShell lifecycle portfolio are unchanged.

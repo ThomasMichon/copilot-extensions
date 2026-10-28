@@ -110,6 +110,8 @@ def test_service_env_expands_queue_path_from_its_captured_mapping(
     "'unclosed $FIXTURE_ROOT", '"$FIXTURE_ROOT"', "${FIXTURE_UNKNOWN}",
     "%FIXTURE_UNKNOWN%", "$FIXTURE_ROOT-tail", "${FIXTURE_ROOT}/$FIXTURE_UNKNOWN",
     "$FIXTURE_ROOT/${FIXTURE_ROOT}", "$FIXTURE_ROOT$", "${FIXTURE_ROOT", "%FIXTURE_ROOT",
+    "$FIXTURE_ROOT\u00e9/tasks.db", "$FIXTURE_ROOT\u4e00/tasks.db",
+    "${FIXTURE_ROOT}\u00e9/tasks.db",
 ])
 def test_captured_environment_expansion_preserves_native_syntax(
     monkeypatch, windows_keys, value,

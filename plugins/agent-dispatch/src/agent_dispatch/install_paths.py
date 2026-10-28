@@ -11,7 +11,7 @@ INSTALL_DIR_ENV = "AGENT_DISPATCH_INSTALL_DIR"
 LEGACY_INSTALL_DIRNAME = ".agent-dispatch"  # marketplace-isolation: allow legacy-compatibility
 SCOPED_SERVICE_HASH_LENGTH = 12
 
-_POSIX_ENV_REFERENCE = re.compile(r"\$(\w+|\{[^}]*\})")
+_POSIX_ENV_REFERENCE = re.compile(r"\$(\w+|\{[^}]*\})", re.ASCII)
 _WINDOWS_ENV_REFERENCE = re.compile(
     r"'[^']*(?:'|$)|\$\$|%%|\$\{([^}]*)\}|\$([A-Za-z0-9_-]+)|%([^%]*)%"
 )
