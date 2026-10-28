@@ -128,11 +128,15 @@ from seed admission and both product installations. It rechecks on contention,
 releases at discovery before the creation client returns, and reports a late
 join without claiming or typing a seed. Its native overlap packet executes
 the actual PowerShell/Python boundaries against private synthetic mux protocol
-processes. This is not full launcher or actual PSMux acceptance. The engine's
-existing repo-wide lifecycle fence remains unchanged, so whole-path
-different-worktree parallelism and POSIX parity remain open. No removal or
-replacement of that lifecycle protection is authorized without preserving its
-deletion-race contract. The separate `pane_create` new-session fallback also
+processes. This is not full launcher or actual PSMux acceptance. The next
+engine slice adds a distinct per-worktree lifecycle lease to native launch
+and retirement owners before fresh checks through removal. It retains the
+repo-wide launch barrier for independently running older retirement owners.
+Publication is the provider-first expansion, not proof those peers were
+upgraded. Migration must qualify current peer support before removing the
+compatibility barrier and measuring different-worktree whole-path parallelism.
+Actual-mux qualification and POSIX parity also remain open. The separate
+`pane_create` new-session fallback also
 retains its existing implementation and remains in this continuing inventory.
 
 Use the native CLI's `/exit` for controlled live migration, then verify actual

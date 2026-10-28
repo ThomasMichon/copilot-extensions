@@ -43,6 +43,14 @@ The same opt-in Windows job runs Manager's focused published-creation failure
 control, which executes the shipped failure/retry tail and retains argument,
 receipt and token handoffs after discovery without another attempt.
 
+Agent-worktrees' `test_worktree_lifecycle.py` holds the actual native launch
+fence in a child process, checks same-target retirement exclusion,
+independent different-target lifecycle leases and retention of the legacy
+repository barrier, and proves release on normal exit and process termination. Cleanup and
+managed-removal controls refuse an active target before fresh record reads or
+removal, including forced cleanup. These are lifecycle-fence controls, not
+whole-launch parallelism, full Picker, real mux or installation-removal acceptance.
+
 Agent-worktrees' `test_launch_seed_native.py` covers the finite backend and setup
 provider: retained one-time seed claims, literal argv, existing prompt-free
 execution observations, PID/birth and incarnation refusals, definite-spawn

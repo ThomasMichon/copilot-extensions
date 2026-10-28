@@ -125,6 +125,27 @@ class TestPRFinalize(PRWorkflowSetup):
         assert ok is True, err
         assert err is None
 
+    def test_finalize_preserves_checkout_and_rolls_back_while_launch_owns_target(
+        self, published_pr_repo, monkeypatch,
+    ):
+        from agent_worktrees import finalize as fin, worktree_lifecycle
+
+        config, wid, wt_path, _ = published_pr_repo
+        self._simulate_squash_merge(config, wid, "feature/add-feature-aaaa")
+        path = cfg.tracking_dir() / f"{wid}.yaml"
+        rec = tracking.load_record(path)
+        rec.pr.state = "merged"
+        tracking.save_record(rec, path)
+        prior_status = rec.status
+        real_guard = worktree_lifecycle.guard
+        monkeypatch.setattr(worktree_lifecycle, "guard", lambda p: real_guard(p, timeout=0))
+        with real_guard(path):
+            assert not fin.validate_and_finalize(wid, config)
+        assert wt_path.exists()
+        assert tracking.load_record(path).status == prior_status
+        with real_guard(path, timeout=0):
+            pass
+
     def test_finalize_refuses_dirty_worktree_at_merged_head(self, published_pr_repo):
         # #4400 review finding: _pr_finalize_precondition only inspects
         # commits, never the working tree -- a modified/untracked file at an

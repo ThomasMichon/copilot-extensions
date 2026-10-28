@@ -441,6 +441,16 @@ before creating a new execution leg. Older owners reject the new flag rather
 than silently returning an unfenced launch. The caller-facing mode contract is
 owned by the [Bridge resume reference](../agent-bridge/skills/agent-bridge/references/cli-commands.md#session-management).
 
+Native mux embodiment additionally holds a per-worktree kernel lifecycle lease
+through its final check and mux invocation. Cleanup, managed removal and
+finalization take the same lease before their fresh retirement checks and hold
+it through removal, including forced removal. This is a provider-first expansion:
+launch still retains the repository finalization lock for older retirement
+owners, including already-running daemons. Removing that compatibility barrier
+requires separately qualified peer support; source publication alone does not
+activate different-worktree launch parallelism. The new lease is distinct from
+seed/native admission and the Windows mux check/create lease.
+
 ### Explicit restart Resume
 
 `embody --worktree-id <exact-id> --restart-request <json> --json` is a separate,

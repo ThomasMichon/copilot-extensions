@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import time
+from contextlib import ExitStack
 from pathlib import Path
 
 from . import activity, disposition_history, finalize as fin, git_ops, handoff_trace, locks, prune, procs, sessions, tracking
@@ -231,7 +232,8 @@ def _remove_managed_worktree(
     """Tear down one managed (system/bridge) worktree: mux, git worktree,
     branch, tracking record. Mirrors ``cmd_remove_system``'s removal steps.
     Returns ``(removed, warnings)``. The tracking record is retained whenever
-    Git removal fails so a later managed sweep can retry."""
+    Git removal fails so a later managed sweep can retry. The caller holds
+    repository mutation locking and the target's lifecycle lease."""
     warns: list[str] = []
     yaml_path = tracking_path / f"{rec.worktree_id}.yaml"
     if reason := terminal_pair_progress.gc_preservation_reason(yaml_path):
@@ -512,11 +514,22 @@ def sweep_managed_worktrees(
             timeout=3,
             stale_after=3600,
         )
+        from . import worktree_lifecycle
+
+        removal_locks = ExitStack()
         try:
             lifecycle_lock.acquire()
+            removal_locks.callback(lifecycle_lock.release)
+            removal_locks.enter_context(worktree_lifecycle.guard(
+                tracking_path / f"{rec.worktree_id}.yaml",
+            ))
         except TimeoutError:
+            removal_locks.close()
             result["skipped"].append({"id": rec.worktree_id, "reason": "lifecycle-busy"})
             continue
+        except BaseException:
+            removal_locks.close()
+            raise
         try:
             yaml_path = tracking_path / f"{rec.worktree_id}.yaml"
             if not yaml_path.is_file():
@@ -642,7 +655,7 @@ def sweep_managed_worktrees(
                 tracking_path,
             )
         finally:
-            lifecycle_lock.release()
+            removal_locks.close()
         if not removed:
             result["skipped"].append(
                 {

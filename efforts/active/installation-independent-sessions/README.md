@@ -200,7 +200,7 @@ retains these constraints; private host identity stays outside this repository.
 - [ ] Fence only same-worktree check/create races until mux discoverability.
   Recheck and join on contention; distinct worktrees remain parallel and no
   launch lock survives for Copilot's lifetime.
-  - [ ] Land and qualify the shared Windows Picker/detached creation primitive;
+  - [x] Land and qualify the shared Windows Picker/detached creation primitive;
     preserve the separate seed and lifecycle owners. POSIX parity and removal
     of broader tracked-launch serialization, plus the separate `pane_create`
     new-session fallback, remain separate unchecked work.
@@ -228,6 +228,10 @@ retains these constraints; private host identity stays outside this repository.
   disposable installations, including native Windows rather than Linux proxies.
 - [ ] Exercise existing consumer paths and regressions; retain source/runtime
   identities and evidence that proves which build each result exercised.
+- [ ] Qualify real mux creation-client output-handle lifetime, including a fast
+  successful client return before the first discovery poll and inherited
+  descendant output handles. A healthy pane must not be retired or lose its
+  handoff because only a creation client or its output transport failed.
 - [ ] Fix failures found in the touched contract; transfer only genuinely
   independent work to named tracked objectives without dropping acceptance.
 
@@ -292,6 +296,14 @@ operator's installation-survival contract.
 - [ ] Real overlapping same-worktree attempts create one mux and join it;
   different-worktree launches overlap independently. Admission releases when
   the mux is discoverable, not when Copilot exits.
+  - [x] Windows native component controls cover Picker and
+    `sessions.mux_new_session`, actual shared kernel-lease release, literal
+    arguments and failure handoff retention (#9320). This does not qualify
+    actual PSMux, complete tracked-launch parallelism or the pane fallback.
+  - [ ] Expand native launch and all tracked-retirement readers to the same
+    separate per-worktree lifecycle lease while retaining the legacy repository
+    barrier. Qualify independently running retirement peers before migration
+    removes that barrier; source/payload freshness is not peer support.
 - [ ] Linux clean room: install A, launch an interactive owned session,
   actually uninstall both systems, prove their runtime roots are gone, install
   B, and exit. The same mux, wrapper and Copilot processes remain interactive;
@@ -1400,3 +1412,64 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   requirements remain open rather than deleting the existing deletion-race
   protection. Neither live installation, session custody, release/rollout nor
   two-cycle removal acceptance has changed.
+
+### 2026-10-27 - Windows creation primitive merged; full admission continues
+
+- #9320 merged as `f1748bc4afa510b9dbb9cfd2633289e8fcf1251b` through the
+  managed Maintainer flow. Fresh Copilot review `5676713459` on exact head
+  `9569ab560923e27724d95b1d2e65d9e70ec06bf4` reported no open findings;
+  its clean `COMMENTED` verdict on this owner-authored PR satisfies repository policy.
+  The earlier High thread was fixed and resolved, and required CI was green.
+  A body-only validation update refreshed the required check; the first merge
+  remained blocked until that new check passed. No CI bypass was used.
+- Exact-head Windows run `40615486375`, job `122576873953`, passed nine
+  copied-setup/script/mux controls (16 deselected) in 77.77 seconds and the
+  Picker failure control (one passed, 12 deselected) in 0.72 seconds, with no
+  skips. These are native component results, not actual PSMux, live rollout or
+  installer-removal acceptance.
+- Re-read the canonical Plan and Validation Plan. Closed only the bounded
+  Windows primitive/component subitems. Kept whole-path admission, separate
+  pane creation, POSIX, real mux/terminal behavior, standby, release/installed
+  proof and both selected-host cycles open. The already merged #9253 removal
+  prerequisite remains distinct from those live gates.
+- Pull-forward aborted safely on squash replay. All 20 owned PR paths exactly
+  matched the merged tree; the remaining tree delta belonged to the separate
+  merged wheel-transport change #9319. Retained recovery refs and advanced
+  onto the verified merged default without replaying this PR's commits.
+- Next stretch: preserve deletion/reclaim safety while replacing the broad
+  tracked-launch lifecycle serialization with per-worktree admission. Inventory
+  the real destructive callers before changing their fence. Include the
+  `pane_create` fallback without changing explicit new-pane intent into
+  accidental seed delivery to an existing pane. Retain the existing seed owner
+  and coordinate #5579's separately owned forwarding work.
+- The same worktree continues this active effort and is not finalized.
+  No live installation, service, banner, native conversation or terminal was
+  changed. Source merge is not a containing release or installed proof.
+
+### 2026-10-27 - Provider-first per-worktree retirement fencing
+
+- Traced physical retirement through finalization, routine cleanup/reap-one,
+  explicit managed removal and the managed sweep. Each now takes a distinct
+  kernel lifecycle lease before its fresh record/liveness checks and retains it
+  through physical removal. Repository mutation locking and seed/native
+  admission remain separate; forced removal cannot skip this lease.
+- Compatibility review rejected immediate removal of the repo-wide launch
+  barrier: independently running older retirement owners do not understand
+  the new lease. The current slice expands both sides while preserving the
+  old barrier. Full launch parallelism remains unimplemented until qualified
+  peer support permits migration; no deployment or daemon restart is implied.
+- The contained focused regression packet passed 217 tests in 433.46 seconds
+  (710.34 seconds including preparation and cleanup). It covered lifecycle
+  exclusion/release, forced managed removal, cleanup revalidation, managed
+  sweeping and PR finalization rollback. An earlier aggregate-limit run did
+  not finish and is not counted as a pass. After the compatibility-barrier
+  correction, the final launch/embodiment packet passed 119 tests in 53.78
+  seconds (392.59 seconds including preparation and cleanup). Its real child
+  controls retain the legacy repository barrier while proving per-target
+  exclusion, independent leases and release after exit or termination.
+- Documentation impact: updated the plugin's native-admission reference,
+  this effort's launch contract and `TESTING.md`; no vision intent changed.
+  This is the provider-first expansion toward the existing per-worktree
+  exclusion intent, not closure of whole-path or either live cycle.
+- The effort remains Active in this same worktree. No selected-host backup,
+  installation, service, banner or native conversation has been changed.

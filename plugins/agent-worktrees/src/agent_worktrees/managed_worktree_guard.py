@@ -259,7 +259,8 @@ def perform(wt_id, yaml_path, config, *, force, remove_fn, tracking_path):
 
     Checks blockers (unless ``force``), then serializes against other
     finalize/gc/remove-system callers with the same repo-wide lock the
-    managed gc sweep uses, reloads the tracking record fresh, and rechecks
+    managed gc sweep uses, takes the per-worktree lifecycle lease, reloads
+    the tracking record fresh, and rechecks
     blockers immediately before removing -- closing the gap between an
     initial check and the actual removal, where a claim/PR/dirty change
     could otherwise land unnoticed. ``remove_fn`` performs the actual git +
@@ -282,16 +283,26 @@ def perform(wt_id, yaml_path, config, *, force, remove_fn, tracking_path):
         if blockers:
             return GuardedRemoval(ok=False, message=refusal_message(wt_id, blockers))
 
+    from contextlib import ExitStack
+    from . import worktree_lifecycle
+
     lifecycle_lock = fin.FinalizeLock(
         Path(repo.worktree_root) / ".finalize.lock", timeout=3, stale_after=3600,
     )
+    removal_locks = ExitStack()
     try:
         lifecycle_lock.acquire()
+        removal_locks.callback(lifecycle_lock.release)
+        removal_locks.enter_context(worktree_lifecycle.guard(yaml_path))
     except TimeoutError:
+        removal_locks.close()
         return GuardedRemoval(
             ok=False,
-            message=f"could not acquire the repo lifecycle lock for {wt_id}; try again",
+            message=f"could not acquire lifecycle exclusion for {wt_id}; try again",
         )
+    except BaseException:
+        removal_locks.close()
+        raise
     try:
         rec = tracking.load_record(yaml_path)
         repo = _resolve_repo(config, rec)
@@ -314,5 +325,5 @@ def perform(wt_id, yaml_path, config, *, force, remove_fn, tracking_path):
                 )
         removed, warnings = remove_fn(rec, repo, tracking_path, force=True)
     finally:
-        lifecycle_lock.release()
+        removal_locks.close()
     return GuardedRemoval(ok=True, removed=removed, warnings=warnings, rec=rec)
