@@ -60,7 +60,13 @@ def test_offer_refuses_broader_or_malformed_owner_responses(tmp_path, monkeypatc
     assert cleanup.offer(tmp_path)["status"] == "unavailable"
 
 
-def test_apply_rechecks_auth_and_rolls_back_regression(tmp_path, monkeypatch):
+@pytest.mark.parametrize(("initial_status", "failed_status"), [
+    ("ok", "auth_required"), ("anonymous", "auth_required"),
+    ("fixable_by_fallback", "auth_required"), ("ok", "fixable_by_fallback"),
+])
+def test_apply_rechecks_auth_and_rolls_back_regression(
+    tmp_path, monkeypatch, initial_status, failed_status,
+):
     receipt = str(tmp_path / "receipt.json")
     calls = []
 
@@ -72,11 +78,12 @@ def test_apply_rechecks_auth_and_rolls_back_regression(tmp_path, monkeypatch):
             return {"plan": {"plan_sha256": SHA}, "changed": False, "dry_run": True}
         return {"changed": True, "dry_run": False, "backup_path": str(tmp_path / "undo.json")}
 
-    reports = iter([report("auth_required"), report()])
+    before = report(initial_status)
+    reports = iter([report(failed_status), before])
     monkeypatch.setattr(cleanup, "_invoke", invoke)
-    result = cleanup.apply(tmp_path, SHA, report(), lambda: next(reports))
+    result = cleanup.apply(tmp_path, SHA, before, lambda: next(reports))
     assert result["status"] == "auth_cleanup_reverted"
-    assert result["report"]["all_ok"]
+    assert result["report"] == before.summary()
     assert calls == [
         ["git-config", "restore", "--json", "--apply", "--git-config-plan-sha", SHA],
         ["git-config", "rollback", "--receipt", receipt, "--json"],
@@ -84,14 +91,22 @@ def test_apply_rechecks_auth_and_rolls_back_regression(tmp_path, monkeypatch):
     ]
 
 
-def test_successful_apply_preserves_receipt_and_reports_real_auth_health(tmp_path, monkeypatch):
+@pytest.mark.parametrize(("initial_status", "after_status"), [
+    ("auth_required", "auth_required"),
+    ("fixable_by_fallback", "fixable_by_fallback"),
+    ("fixable_by_fallback", "ok"),
+])
+def test_successful_apply_preserves_receipt_and_reports_real_auth_health(
+    tmp_path, monkeypatch, initial_status, after_status,
+):
     monkeypatch.setattr(
         cleanup, "_invoke",
         lambda *a: restore_packet(changed=True, dry_run=False, receipt=str(tmp_path / "receipt")),
     )
-    result = cleanup.apply(tmp_path, SHA, report("auth_required"), lambda: report("auth_required"))
+    after = report(after_status)
+    result = cleanup.apply(tmp_path, SHA, report(initial_status), lambda: after)
     assert result["status"] == "applied"
-    assert result["report"]["all_ok"] is False
+    assert result["report"] == after.summary()
     assert result["backup_path"]
 
 
@@ -103,6 +118,30 @@ def test_apply_failure_never_claims_an_unchanged_file(tmp_path, monkeypatch):
     result = cleanup.apply(tmp_path, SHA, report(), lambda: report())
     assert result["status"] == "unconfirmed"
     assert result["changed"] is None
+
+
+@pytest.mark.parametrize("failure", ["unconfirmed", "failed", "invalid-preview"])
+def test_automatic_rollback_failure_retains_the_original_recovery_receipt(
+    tmp_path, monkeypatch, failure,
+):
+    receipt = str(tmp_path / "receipt")
+
+    def invoke(argv, cwd):
+        if argv[:2] == ["git-config", "restore"]:
+            return restore_packet(changed=True, dry_run=False, receipt=receipt)
+        if failure == "invalid-preview":
+            return {"dry_run": True}
+        if "--apply" not in argv:
+            return {"dry_run": True, "plan": {"plan_sha256": SHA}}
+        if failure == "unconfirmed":
+            raise cleanup.PolicyUnavailable("policy_owner_unconfirmed")
+        return {"_failed": True, "changed": False}
+
+    monkeypatch.setattr(cleanup, "_invoke", invoke)
+    result = cleanup.apply(tmp_path, SHA, report(), lambda: report("auth_required"))
+    assert result["status"] == "rollback_failed"
+    assert result["changed"] is True
+    assert result["backup_path"] == receipt
 
 
 def test_legacy_owner_is_from_selected_payload_not_path(tmp_path, monkeypatch):

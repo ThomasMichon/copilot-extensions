@@ -166,8 +166,14 @@ def apply(
         after = recheck()
         healthy = {item.source.id for item in before.results if item.status in {"ok", "anonymous"}}
         now = {item.source.id for item in after.results if item.status in {"ok", "anonymous"}}
+        fallback = {
+            item.source.id for item in before.results if item.status == "fixable_by_fallback"
+        }
+        available = now | {
+            item.source.id for item in after.results if item.status == "fixable_by_fallback"
+        }
         result["report"] = after.summary()
-        regressed = not healthy <= now
+        regressed = not healthy <= now or not fallback <= available
     except Exception:
         regressed = True
     if not regressed:

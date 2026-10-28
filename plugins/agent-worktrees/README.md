@@ -101,7 +101,9 @@ Apply is a separate explicit operation, never forwarded into an update or a
 Manager environment export. The exact current preview digest is mandatory.
 Machines owns the strict resource-only transaction, backup and rollback;
 Worktrees rechecks source authentication and requests that same owner's rollback
-if a previously healthy source regresses. Failed/unconfirmed mutation or
+if directly working authentication or a previously available fallback is lost.
+Losing direct authentication is still a regression even if a fallback remains.
+Failed/unconfirmed mutation or
 rollback remains a failure with recovery evidence, not an unchanged result.
 Neither path switches accounts, signs in, stores tokens, or provisions a missing
 policy runtime. `CE_UPDATE_AUTH=off` or `report-only` blocks cleanup application.
