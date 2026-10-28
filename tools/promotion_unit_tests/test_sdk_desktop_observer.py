@@ -803,6 +803,11 @@ def test_native_offer_fixture_names_original_pipe_owner_not_interpreter_launcher
         and node.targets[0].id in ("OFFER_MODES", "OFFER_BODY")
     }
     assert assignments["OFFER_MODES"] == module.OFFER_MODES
+    nodes = [
+        str(ROOT / module.NATIVE_TEST) + "::" + f"{module.OFFER_FUNCTION}[{mode}]"
+        for mode in assignments["OFFER_MODES"]
+    ]
+    assert module.validate_case_packet(ROOT, nodes) == nodes
     body = ast.parse(assignments["OFFER_BODY"])
     serve = next(node for node in ast.walk(body) if isinstance(node, ast.Call)
                  and isinstance(node.func, ast.Name) and node.func.id == "serve")
