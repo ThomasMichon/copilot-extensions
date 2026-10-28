@@ -107,10 +107,19 @@ def _wrapper_delimiter(command: list[str], index: int) -> int | None:
     return delimiter if command[delimiter:delimiter + 1] == ["--"] else None
 
 
+def copied_setup_command(command: list[str], record_path: Path) -> list[str]:
+    """Relocate canonical setup assets without changing the caller's admission or seed owner."""
+    return _native_setup_command(
+        command, record_path, seed_id=None, admission_only=False, preserve_seed_id=None,
+        native_resume_session=None, correlation=None, copy_only=True,
+    ) or command
+
+
 def _native_setup_command(
     command: list[str], record_path: Path, *, seed_id: str | None,
     admission_only: bool, preserve_seed_id: str | None, native_resume_session: str | None,
     correlation: launch_execution.Correlation | None,
+    copy_only: bool = False,
 ) -> list[str] | None:
     if os.name != "nt" or not command or PureWindowsPath(command[0]).stem.casefold() != "pwsh":
         return None
@@ -125,7 +134,7 @@ def _native_setup_command(
         inner = _native_setup_command(
             command[delimiter + 1:], record_path, seed_id=seed_id, admission_only=admission_only,
             preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
-            correlation=correlation,
+            correlation=correlation, copy_only=copy_only,
         )
         if inner is None:
             return None
@@ -143,20 +152,25 @@ def _native_setup_command(
     ).splitlines():
         return None
     from . import session_shell
-    from .manager_launch_cli import _usable_worktree_manager_launcher_dir, _worktree_manager_root
+    from .manager_launch_cli import _worktree_manager_root
 
-    launch_dir = _usable_worktree_manager_launcher_dir()
-    peer = launch_dir / "pane-wrapper.ps1" if launch_dir else None
-    if peer is None or not peer.is_file() or session_shell.NATIVE_CONSOLE_MARKER not in peer.read_text(
-        encoding="utf-8-sig",
-    ).splitlines():
-        return None
+    if not copy_only:
+        from .manager_launch_cli import _usable_worktree_manager_launcher_dir
+
+        launch_dir = _usable_worktree_manager_launcher_dir()
+        peer = launch_dir / "pane-wrapper.ps1" if launch_dir else None
+        if peer is None or not peer.is_file() or session_shell.NATIVE_CONSOLE_MARKER not in peer.read_text(
+            encoding="utf-8-sig",
+        ).splitlines():
+            return None
 
     prepared = session_shell.prepare(
         record_path.absolute(), script.absolute(),
         installation_roots=(installer.install_dir().absolute(), _worktree_manager_root().absolute()),
         attempt_id=correlation.attempt_id if correlation else None,
     )
+    if copy_only:
+        return [*command[:index], str(prepared.wrapper), *command[index + 1:]]
     flags = [
         "-LaunchSeedPreparation", "admission" if admission_only else "seed",
         "-LaunchSeedNativeRoot", str(installer.install_dir()),

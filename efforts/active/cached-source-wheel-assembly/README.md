@@ -137,7 +137,7 @@ builder, publisher or composition plan.
 
 ### Phase 3 - Proportionate completion and adoption
 
-- [ ] Qualify exact-input reuse for static graphs with different declared
+- [x] Qualify exact-input reuse for static graphs with different declared
   build requirements, retaining independently admitted tooling per requirement
   set rather than merging their resolution environments.
 - [ ] Prioritize qualification of the released ordinary installer across the
@@ -222,6 +222,28 @@ claim for that substitution. Remove only the returned task folder after its
 evidence is no longer needed.
 
 ## Journal
+
+### 2026-10-28,09:59 UTC - Exact build-requirement groups merged
+
+- #9389 actually merged as `07267d72d70f9d41e191285626f2097843c78c95`.
+  Copilot review5680785895 approved exact head
+  `1961a01af3e4de5a68eadb3eac327ae715efc5df` with no open findings.
+  The complete thread inventory was empty and required CI was green, including
+  exact-input units after the one changed source digest was admitted.
+- The managed Maintainer merge omitted only the provider-authorized additional
+  CODEOWNER vote. No blocking review, required check or hold was bypassed.
+  Native source/test bytes match the independently successful real-backend
+  Linux/Windows run recorded below.
+- Re-read this plan after merge and close only the distinct-requirement-group
+  qualification item. Whole-update performance, prepacked-artifact consumption,
+  actual machine qualification and complete portfolio adoption remain open.
+  Promotion #9391 actually merged at10:13:52 UTC as Main
+  `fe8d61aebd1f1aaebaf65af8b82fb58834febf40`. Successful
+  run40668953130 explicitly admitted this exact Dev commit and published
+  `python-artifacts-07267d72d70f9d41e191285626f2097843c78c95` before merge.
+  The fix is released, pending separately admitted machine qualification;
+  it is not an installed speed or serving-health result. Publishing these
+  artifacts also does not prove that the ordinary consumer uses them.
 
 ### 2026-10-28 - Ordinary graphs exposed a conservative cache miss
 
