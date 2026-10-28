@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** `visions/session-hosting/README.md` - installation-independent-running-sessions; `visions/plugin-services/disposable-runtimes/README.md` - shared-maintenance-banner and service-independent-agent-standby; `visions/plugin-services/README.md` - process-count-scales-with-services-not-sessions and hooks-and-callbacks-are-transient
 - **Umbrella issue:** #8669
-- **Related issues:** #5579 (existing launch-depth owner), #8410 (Linux uninstall), #8312 (Windows updater handoff), #8864 (supported Manager uninstall), #9357 (disabled-task cold start), #9358 (native-GC diagnostics); existing reconstruction/maintenance owners in [the repair register](reconstruction-findings.md)
+- **Related issues:** #5579 (existing launch-depth owner), #8410 (Linux uninstall), #8312 (Windows updater handoff), #8864 (supported Manager uninstall), #9357 (disabled-task cold start), #9358 (native-GC diagnostics), #9375 (generated-bytecode removal); existing reconstruction/maintenance owners in [the repair register](reconstruction-findings.md)
 
 ## Guiding Intent
 
@@ -441,6 +441,12 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
 - The fresh baseline had no active mux panes. This cleanup/reconstruction
   does not close same-process interactive mux survival, native standby,
   full launch parity or the two-cycle acceptance gates. The effort stays Active.
+- #9363 merged after exact-head Copilot approval and required green CI.
+  Re-read the Plan and Validation Plan after merge: the repair register and
+  lifecycle clarification are durable, but their implementation and live
+  acceptance remain open. Next, establish an actual current-release muxed
+  witness before counting any further removal/reconstruction as session
+  survival evidence; retain the existing maintenance and implementation owners.
 
 ### 2026-10-27 - Literal POSIX preparation transport prerequisite
 
