@@ -180,7 +180,7 @@ def test_launch_owned_manifest_expiry_preserves_startup_grace(launch, monkeypatc
     monkeypatch.setattr(config, "tracking_dir", lambda: record.parent)
     monkeypatch.setattr(config, "install_dir", lambda: runtime)
     prepared = session_shell.prepare(record, assets / "pane-wrapper.ps1", installation_roots=(runtime,))
-    command = transport.file_mux_pane_cmd(str(prepared.wrapper), ["program", ""], launch_owned=True)
+    command = transport.file_mux_pane_cmd(str(prepared.wrapper), ["program", ""])
     manifest = Path(command[-1][1:-1].replace("''", "'"))
     now = 200000.0
     monkeypatch.setattr(transport.time, "time", lambda: now)
@@ -207,7 +207,7 @@ def test_launch_owned_cleanup_does_not_cross_another_shell(launch, monkeypatch):
     monkeypatch.setattr(
         transport, "_launch_args_roots", lambda: pytest.fail("producer enumerated other executions"),
     )
-    command = transport.file_mux_pane_cmd(str(first.wrapper), ["program"], launch_owned=True)
+    command = transport.file_mux_pane_cmd(str(first.wrapper), ["program"])
     manifest = Path(command[-1][1:-1].replace("''", "'"))
     foreign_command = [
         *command[:-3], "'" + str(second.directory / "pane-launch.ps1") + "'", *command[-2:],
@@ -218,14 +218,17 @@ def test_launch_owned_cleanup_does_not_cross_another_shell(launch, monkeypatch):
     assert not manifest.exists()
 
 
-def test_launch_owned_producer_refuses_unowned_directory(launch, monkeypatch):
+def test_legacy_producer_does_not_publish_in_unowned_wrapper_directory(launch, monkeypatch):
     from agent_worktrees import sessions_pane_args as transport
 
     record, runtime, assets = launch
     monkeypatch.setattr(config, "tracking_dir", lambda: record.parent)
-    with pytest.raises(RuntimeError, match="belong to the launch"):
-        transport.file_mux_pane_cmd(str(assets / "pane-wrapper.ps1"), ["program"], launch_owned=True)
+    monkeypatch.setattr(config, "install_dir", lambda: runtime)
+    command = transport.file_mux_pane_cmd(str(assets / "pane-wrapper.ps1"), ["program"])
+    manifest = Path(command[-1][1:-1].replace("''", "'"))
+    assert manifest.parent == runtime / "pane-args"
     assert not (assets / "pane-args").exists()
+    transport.cleanup_mux_pane_args(command)
 
 
 @pytest.mark.parametrize("ancestor", [0, 1, 2, 3])
@@ -236,14 +239,14 @@ def test_launch_owned_handoffs_refuse_indirect_ancestors(launch, monkeypatch, an
     monkeypatch.setattr(config, "tracking_dir", lambda: record.parent)
     monkeypatch.setattr(config, "install_dir", lambda: runtime)
     prepared = session_shell.prepare(record, assets / "pane-wrapper.ps1", installation_roots=(runtime,))
-    command = transport.file_mux_pane_cmd(str(prepared.wrapper), ["program"], launch_owned=True)
+    command = transport.file_mux_pane_cmd(str(prepared.wrapper), ["program"])
     manifest = Path(command[-1][1:-1].replace("''", "'"))
     os.utime(manifest, (0, 0))
     blocked = [manifest.parent, *manifest.parent.parents][ancestor]
     original = transport._is_link_or_junction
     monkeypatch.setattr(transport, "_is_link_or_junction", lambda path: path == blocked or original(path))
     with pytest.raises(RuntimeError, match="link or junction"):
-        transport.file_mux_pane_cmd(str(prepared.wrapper), ["program"], launch_owned=True)
+        transport.file_mux_pane_cmd(str(prepared.wrapper), ["program"])
     transport.sweep_mux_pane_args()
     transport.cleanup_mux_pane_args(command)
     assert manifest.exists()

@@ -93,15 +93,13 @@ def sweep_mux_pane_args() -> None:
         output.warn(f"Could not enumerate launch-owned pane argument handoffs: {exc}")
 
 
-def file_mux_pane_cmd(
-    wrapper: str, wrapper_args: list[str], *, launch_owned: bool = False,
-) -> list[str]:
+def file_mux_pane_cmd(wrapper: str, wrapper_args: list[str]) -> list[str]:
     launcher = Path(wrapper).with_name("pane-launch.ps1")
     if not launcher.is_file():
         raise RuntimeError("file-based pane launcher is missing; update Worktree Manager")
-    root = Path(wrapper).parent / "pane-args" if launch_owned else config.install_dir() / "pane-args"
-    if launch_owned and not _launch_args_root(root):
-        raise RuntimeError("pane argument directory must belong to the launch")
+    root = Path(wrapper).parent / "pane-args"
+    if not _launch_args_root(root):
+        root = config.install_dir() / "pane-args"
     if _indirect(root):
         raise RuntimeError("pane argument directory must not be a link or junction")
     root.mkdir(mode=0o700, parents=True, exist_ok=True)

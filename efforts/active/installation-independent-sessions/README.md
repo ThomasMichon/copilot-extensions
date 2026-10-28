@@ -483,6 +483,15 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   fresh disposable launch storage and literal transport, not supported product
   uninstall or real Copilot/TTY survival. Selected-host effects remain held
   until the separate rooted setup-argument dependency is qualified.
+- Publication as #9407 exposed the oversized dispatcher ratchet: adding the
+  optional storage-selection argument grew `sessions.py` by three lines.
+  Selection now stays entirely inside its existing pane-transport owner,
+  recognizing only this project's UUID-scoped copied shell directory and
+  retaining legacy storage otherwise. The dispatcher is unchanged from the
+  base; neither the size baseline nor the transport API is widened. The
+  full-tree module-size audit and Ruff pass; the post-correction engine packet
+  passed 61 controls on the rebased source. Required CI and a fresh review
+  remain publication gates.
 - Documentation impact: updated the authoritative launch architecture and
   test portfolio. This closes part of the existing installation-independent
   intent and follows the same launch/state owner; no new lifecycle authority,
