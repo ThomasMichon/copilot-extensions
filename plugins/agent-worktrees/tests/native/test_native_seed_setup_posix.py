@@ -8,9 +8,11 @@ from pathlib import Path
 import shlex
 import shutil
 import signal
+import subprocess
 import time
 
 import pytest
+from agent_procutil import no_window_kwargs
 from agent_procutil.owned_process import run_caller_owned
 
 import test_native_seed_runtime as runtime_fixture
@@ -73,6 +75,8 @@ reply = {
         ["/bin/ps", "-p", str(os.getppid()), "-o", "comm="], text=True,
     ).strip(),
     "literal_env": os.environ["FIXTURE_LITERAL"],
+    "inherited_sigint": str(signal.getsignal(signal.SIGINT)),
+    "signal_mask": sorted(map(int, signal.pthread_sigmask(signal.SIG_BLOCK, []))),
 }
 def interrupted(_signal, _frame):
     (root / "interrupted").write_text("yes")
@@ -231,6 +235,7 @@ def test_copied_setup_keeps_real_terminal_and_sigint_beyond_the_finite_phase_dea
 ):
     import pty
     import select
+    import termios
 
     plan, environment, checkout = _plan(
         tmp_path, installed_native_runtime, native_bash, "new", interactive=True,
@@ -260,13 +265,30 @@ def test_copied_setup_keeps_real_terminal_and_sigint_beyond_the_finite_phase_dea
         os.write(master, b"\x03")
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
+            if select.select([master], [], [], 0.05)[0]:
+                try:
+                    output += os.read(master, 65536)
+                except OSError:
+                    pass
             ended, status = os.waitpid(pid, os.WNOHANG)
             if ended:
                 waited = True
                 assert os.waitstatus_to_exitcode(status) == 130, output.decode(errors="replace")
                 break
             time.sleep(0.05)
-        assert waited, output.decode(errors="replace")
+        if not waited:
+            reply = json.loads((tmp_path / "backend.json").read_text())
+            modes = termios.tcgetattr(master)
+            processes = subprocess.run([
+                "/bin/ps", "-p", f"{pid},{reply['pid']}",
+                "-o", "pid=,ppid=,pgid=,stat=,comm=",
+            ], text=True, capture_output=True, timeout=2, **no_window_kwargs()).stdout
+            pytest.fail(json.dumps({
+                "output": output.decode(errors="replace"), "backend": reply,
+                "isig": bool(modes[3] & termios.ISIG), "vintr": repr(modes[6][termios.VINTR]),
+                "interrupted": (tmp_path / "interrupted").exists(),
+                "observations": _observations(plan), "processes": processes,
+            }, indent=2))
     finally:
         os.close(master)
         if not waited:
