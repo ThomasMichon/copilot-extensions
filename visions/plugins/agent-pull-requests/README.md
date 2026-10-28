@@ -3,7 +3,7 @@
 - **Subject:** The first-class pull-request plugin and independently operable PR service.
 - **Scope:** leaf (child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-18
+- **Last revised:** 2026-10-25
 - **Reality docs:** [PR plugin](../../../plugins/agent-pull-requests/README.md)
 
 ## Purpose & Intent
@@ -58,6 +58,31 @@ sharing observation for an authorized target/account scope. Increasing
 subscriber count does not require one polling or wait process per subscriber.
 The registrar owns PR subscriptions, not a replacement task queue or fleet store.
 
+### caller-driven-backend-connections
+
+Clients can ask the central service to connect to supported forge backends
+under the operator's admitted accounts and credential providers. Connections
+are shared and demand-driven; each new PR or repository does not require a
+service restart or a separately maintained watcher. Backend references select
+existing authority rather than granting new credentials or access.
+
+### explicit-sets-and-selected-pr-populations
+
+Subscriptions can describe explicit PR sets or bounded repository and
+criteria-selected PR populations. The service maintains discovery and shared
+observation as matching PRs enter, change or leave a selection. Independent
+subscribers retain their own lifetime, baseline and durable delivery state,
+even when their selected targets overlap.
+
+### author-and-reviewer-service-consumers
+
+When central observation is adopted, PR creation and tracking workflows enroll
+their confirmed PR identities through the service. Reviewer task emitters
+request subscriptions to the PR populations they need to consider rather than
+building their own discovery and polling systems. Publication policy, PR
+claims, reviewer eligibility and task lifecycle remain with their existing
+owners.
+
 ### standalone-and-fleet-service
 
 Native use and fleet-managed container deployment are supported realizations
@@ -102,6 +127,13 @@ fleet route does not silently use another account or local service. Credential
 providers retain issuance, renewal and revocation authority; the PR service
 does not turn its subscription store into a secret store.
 
+The client choice of native or fleet access is distinct from the forge
+backends to which a central service connects. A connection request or PR
+selection cannot change that service's credential, account or repository
+authority. Initial selection membership is distinguishable from subsequent
+PR changes; an unchanged observation or incomplete discovery cannot fabricate
+a change, a closure or a complete empty result.
+
 ## Non-Goals / Boundaries
 
 - No multi-operator tenancy within a fleet, and no hosting another operator's
@@ -118,7 +150,8 @@ does not turn its subscription store into a secret store.
 - Parent: [agent-fabric](../../agent-fabric/README.md)
 - PR capability contract:
   [worktree PR operations](../agent-worktrees/pull-requests/README.md)
-- Consumers: [agent-dispatch](../agent-dispatch/README.md)
+- Consumers: [agent-dispatch](../agent-dispatch/README.md) and
+  [reviewer loops](../agent-dispatch/reviewer/README.md)
 - Fleet: [machine-fleet](../../machine-fleet/README.md)
 - Lifecycle: [plugin-services](../../plugin-services/README.md)
 - Reality: [PR plugin](../../../plugins/agent-pull-requests/README.md)

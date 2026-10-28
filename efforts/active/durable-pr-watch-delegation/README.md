@@ -21,6 +21,11 @@ explicitly assigned fleet machines. A fleet belongs to exactly one operator;
 it never hosts another operator's state or credentials. Ordinary process
 waiters and supported native PR operation remain working alternatives.
 
+The central service is caller-driven: agents ask it to connect to forge
+backends and subscribe to PR sets as they create PRs; reviewer task emitters
+also request subscriptions to the PR ranges they need to watch. A client-side
+native/fleet switch alone does not deliver this service intake model.
+
 ## Participants
 
 | Participant | Role in this effort | Reached via |
@@ -72,6 +77,11 @@ source claims, not a closed tracker or new generic sign-off rendezvous.
   issues, resolving actual overlaps through normal review, not a new sign-off
   rendezvous. Native client work remains useful before fleet deployment.
 - **Handoff:** Continue from this README, its next unchecked item, and the current PR state. Do not replay the preserved branch wholesale.
+
+The caller-driven intake slice below extends the same watcher/client
+integration responsibility. Provider/inventory, credential, publication/claim
+and reviewer task owners remain unchanged; this is not a new generic producer
+framework, fleet controller or permission to activate a live backend.
 
 ## Context
 
@@ -198,6 +208,17 @@ Continuation selection after offline-input source delivery, verbatim:
 Continue watcher/client integration while actual image validation remains
 pending an approved builder, pinned base and runtime closure. This does not
 waive image acceptance or authorize unrelated runtime repair.
+
+Caller-driven service usage clarification, verbatim:
+
+> So, I expect that as agents start making PRs, the central service will be asked to connect to different backends and subscribe to a set of PRs. In addition, reviewer task emitters will wind up using this service to request subscriptions to ranges of PR that need watching.
+
+The [caller-driven subscription proposal](caller-driven-subscriptions.md)
+contains the **agent-recommended** interpretation, design and validation:
+author-side exact PR sets and reviewer-selected PR populations share the
+central service rather than requiring static startup entries or independent
+discovery pollers. The selection grammar and admission mechanics are design
+details, not additional operator quotations or live deployment authority.
 
 ## Plan
 
@@ -399,10 +420,33 @@ existing serving/consumer contract, not a second watcher or evaluator._
   isolated integration. Preserve renewal/refusal, original intent and one wake
   after recovery; synthetic issuers/forge responses do not close live provider,
   installed, image or fleet acceptance (GitHub source proof in #8975).
-- [ ] Qualify the corresponding native ADO configured-observation reader through
+- [x] Qualify the corresponding native ADO configured-observation reader through
   the same actual watcher, typed credential exchange and scoped Dispatch path.
   Preserve provider-native state and credential refusal without crediting
-  GitHub-only coverage as ADO parity or taking over broader conformance.
+  GitHub-only coverage as ADO parity or taking over broader conformance
+  (bearer-auth source proof in #8980; basic authentication and live forge
+  transport remain outside this finite evidence).
+
+### Caller-driven backend and PR-set intake
+
+_Operator-required usage; agent-recommended design, sequencing and validation._
+
+- [ ] Review the [caller-driven subscription amendment](caller-driven-subscriptions.md)
+  and corresponding PR/reviewer vision changes before implementation.
+- [ ] Add caller-driven connections to admitted forge backends and durable
+  exact-PR-set registrations through the existing central service owners;
+  preserve current credentials, identities and legacy watch contracts.
+- [ ] Add bounded provider-backed discovery and continuing membership for
+  reviewer PR selections, reusing native provider/inventory and watch cores
+  rather than a second forge adapter or polling service.
+- [ ] Integrate confirmed author-side PR creation/tracking without repeating
+  publication after subscription failure or losing its existing PR claim.
+- [ ] Integrate reviewer emitters with shared discovery and replay while
+  retaining eligibility, one-task-per-target deduplication and reviewer lineage.
+- [ ] Qualify real client/service and consumer paths, initial membership versus
+  changes, overlapping selections, partial discovery, disconnect/restart,
+  lost results and scoped cancellation at the proposal's named evidence tiers.
+  Keep provider, image and installed/fleet acceptance separately open.
 
 ### Phase 3 - Fenced dispatch delegation _(agent-recommended)_
 
@@ -689,6 +733,11 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [ ] Resolve the caller-driven backend, exact-set and reviewer-selection
+  [validation contract](caller-driven-subscriptions.md#validation-agent-recommended)
+  through actual author and reviewer consumers. A static configured-target
+  watch or per-coordinator backend switch is not equivalent delivery.
+
 - [ ] Resolve every directly retained #2874 Plan/Validation clause above at its original
   finite scope and evidence tier, preserving alternatives, same owners, holds, and
   current portfolio bounds. Administrative intake is not implementation, native
@@ -748,6 +797,47 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-25 - Clarify caller-driven central registration
+
+- Captured the operator's service-usage clarification verbatim and re-read it
+  against the source. The intended consumers are PR-creating agents and
+  reviewer task emitters requesting PR sets/ranges from the central service,
+  not merely coordinators choosing a native/fleet access mode.
+- Source tracing found fixed startup scope/observation mappings in the current
+  host and Gateway, confirmed-PR publication and claim boundaries in the
+  existing authoring path, and repository/filter-based reviewer discovery.
+  Native provider inventory and continuous-watch foundations are reusable;
+  their existence does not establish caller-driven connection or selection
+  support.
+- Propose reviewed vision and contract extensions before implementation.
+  Preserve all delivered exact-PR/credential proofs, existing owners and
+  remaining live provider, image, installed/fleet and evaluator acceptance.
+
+### 2026-10-25 - Merge native ADO watcher credential recovery
+
+- #8980 merged as `cf82e5f8e6e5f6d639655c0152857b4984908e10` from
+  approved head `1268534a72bbbee9c54b4624b5c41a61768f5ef3`.
+  Copilot review `5643208853` approved without findings; complete review and
+  review/issue comments were read. Required CI `40193320812` passed.
+- Exact-head native run `40193388396` passed all four selected jobs:
+  Dispatch passed 237 cases on Windows and 236 on Linux with one explicit
+  platform skip; PR service/client passed 296 plus 44 standalone cases on each
+  platform. Totals were 577 Windows passes and 576 Linux passes with one skip.
+  The new case constructs the actual native ADO configured snapshot and bearer
+  request headers after real typed credential acquisition, through the same
+  WatchService and scoped Dispatch queue. Only forge HTTP responses and the
+  issuer/provider are synthetic. No legacy `az` or ambient-PAT fallback is used.
+- The focused ADO case passed locally, followed by both provider cases
+  together. Fatal lint, install-contract, documentation consistency, changed-
+  module and whitespace gates passed. No production code, credential/native
+  deadline, required unit portfolio or manual job budget changed.
+- Re-read the parent Plan/Validation after merge. Managed completion retained
+  its backup and reconciled only the already-merged commit after refreshing
+  the recorded PR head. This closes only the ADO bearer source leaf; basic
+  authentication, broader conformance, live provider results, normal backend
+  activation, images and installed/fleet acceptance remain distinct and open.
+  No next activation, rollout or runtime owner change follows from this proof.
 
 ### 2026-10-25 - Merge native credential-backed watcher integration
 

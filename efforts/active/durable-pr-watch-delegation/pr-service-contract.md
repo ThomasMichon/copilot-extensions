@@ -289,6 +289,21 @@ credential-loss behavior and draining transaction custody remain authoritative.
    credentials and drain ownership. Assert original-ID reconciliation, no
    cross-binding adoption, no duplicate wake and unchanged native defaults.
 
+## Caller-driven intake amendment (agent-recommended, proposed)
+
+The central service must accept caller demand for backend connections,
+explicit PR sets and reviewer-selected PR populations. The current exact-PR
+replay/ACK and typed native credential paths are foundations, not proof of
+that intake model: fixed host scope and observation mappings do not register
+new service demand or discover a selection's future members.
+
+The [caller-driven subscription proposal](caller-driven-subscriptions.md)
+owns the proposed operations, consumer boundaries, compatibility sequence and
+validation. Native/fleet client access remains distinct from the forge
+backends the service connects to. Existing strict v1/v2 operations remain
+unchanged until separately negotiated support is implemented; this proposal
+advertises no new live route or credential authority.
+
 ## Forge credentials
 
 The service's observation worker obtains the minimum authorized forge access
