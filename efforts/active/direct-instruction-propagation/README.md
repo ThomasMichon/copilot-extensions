@@ -96,7 +96,7 @@ The operator confirmed the slug `direct-instruction-propagation`.
 
 ## Validation Plan
 
-- [ ] Creation and session start each copy the selected plugin version rather
+- [x] Creation and session start each copy the selected plugin version rather
   than returning a prepared-generation reuse result.
 - [ ] Changed plugin content, same-version edits, missing or edited generated
   files and malformed/absent old receipts converge to current plugin bytes
@@ -184,3 +184,104 @@ promotion flow; rollout requires its normal authorization.
   retention of restart notices after an earlier pass changed files.
 - The source resolver, model-facing guidance and independent compatibility
   path remain the next source slices. No rollout occurred.
+
+### 2026-10-27 - Publisher implementation merged
+
+- #9336 merged as `3b7a166351` after current-head Copilot approval and required
+  green checks. The immutable-commit required unit packet passed 2,559 tests
+  with 12 deselected; the focused publisher packet passed 204 tests with
+  10 platform-specific skips.
+- Re-read the entire Plan and Validation Plan after merge. The lifecycle
+  copy-versus-reuse validation is resolved; Phase 2 remains open because
+  source selection, model-facing guidance and independent compatibility
+  copying still use the superseded verification contract.
+- Continued in the same source worktree. The next slice removes generated-copy
+  authentication and checked-in fallback prerequisites from runtime source
+  selection, preserving offline authoring checks separately. Source merge is
+  not release, installed rollout or completion of #9329.
+
+### 2026-10-27 - Raw-copy reader and compatibility implementation
+
+- Runtime lookup now selects enabled declarations' managed copies before
+  reading reviewed selectors, fallbacks or locks. Raw bodies require no
+  instruction digest, version comparison, envelope or receipt. Model-facing
+  selectors, catch-all guidance and the owning pattern use that same contract.
+- Independent compatibility publication now copies templates byte-for-byte into
+  the managed namespace on every call, including identical/edited outputs and
+  legacy `skipLocalCache` sources. It shares the startup publisher's native
+  workspace lease and resolves effective user/repository/local settings inside
+  that lease. Runtime discovery no longer collects Git/version provenance.
+- Explicit invalid marketplace configuration cannot silently select an installed
+  fallback. Path/index/ignore and ambiguity refusals remain visible. Incomplete
+  discovery retains old slots; historical bodies outside the reserved namespace
+  are reported for explicit migration rather than content-authenticated.
+- The focused reader/copy/standalone packet passed 256 tests with six
+  platform-specific skips. The broader customization/scanner/standalone packet
+  passed 570 tests with six skips. Independent review then identified stale
+  cleanup after a failed destination migration; read, write, ignore and tracked
+  refusal regressions now all retain the earlier copy and passed separately.
+- Python lint and the mechanical customization review passed their blocking
+  gates. Required immutable-commit validation and reviewed merge remain open.
+  No installed payload, running session or machine hold was changed.
+
+### 2026-10-27 - Reader review compatibility corrections
+
+- #9350's first Copilot verdict identified five concrete compatibility defects.
+  Added focused regressions before changing production behavior: independently
+  healthy refresh after a sibling failure, case-only destination migration,
+  native built-in settings objects, supported remote/local source kinds and
+  all startup-supported marketplace-manifest layouts.
+- Separated declaration completeness from refresh failures: the former protects
+  unresolved slot ownership, while either prevents stale cleanup. A failed
+  replacement no longer blocks another independently resolved existing copy.
+- Stale cleanup now recognizes filesystem aliases of desired copies without
+  retaining genuinely different files on case-sensitive filesystems. A coupled
+  tracked-alias regression also reproduced an overwrite; index protection now
+  includes portable filename aliases in both initial and final probes.
+- Runtime discovery filters native built-ins before validating marketplace
+  values and matches startup's source kinds and manifest roots. It does not
+  route runtime settings through the separate committed-authoring validator.
+- These corrections remain on the same implementation PR, with review and
+  current-head validation still required before merge. No rollout occurred.
+
+### 2026-10-27 - Declaration and preparation parity corrections
+
+- The next #9350 review confirmed all five earlier findings resolved, then
+  identified catalog identity and four additional runtime parity gaps.
+- Focused controls reproduced acceptance of invalid/missing plugin manifests,
+  rejection of top-level destinations, publication during pending pairing and
+  loss of staged-deleted/renamed copies. The initial focused run failed 15
+  cases while accepting the explicitly mapped catalog control.
+- Runtime discovery now requires the existing explicit local catalog mapping
+  when registration and catalog identity differ. Payload manifests validate
+  plugin name only, without restoring instruction/version attestation.
+- Runtime destination mapping accepts startup's top-level and suffix forms.
+  Compatibility checks the existing pending-pair marker under its shared lease
+  before discovery, including linked-worktree metadata. Tracking probes include
+  staged deletions with rename detection disabled before copy and cleanup.
+- The focused compatibility packet passed all 31 cases, and the complete
+  customization/scanner/standalone packet passed 605 tests with six
+  platform-specific skips. Lint and whitespace checks passed. Immutable
+  current-head validation and another passing review remain open; no rollout
+  occurred.
+
+### 2026-10-27 - Activation and complete-declaration parity corrections
+
+- #9350's next review reported no new inline issue, but its full body contained
+  one High and four Medium previously missed findings. Those remain blocking
+  regardless of the overview's zero-open-issues wording.
+- Added ten failing controls for malformed qualified activation keys, startup's
+  portable case/underscore identities, BOM-prefixed JSON, complete-set
+  ancestor/descendant collisions and declared-count reporting.
+- Runtime discovery now rejects malformed activation identities before an empty
+  result can authorize cleanup. Runtime declarations use portable identities
+  rather than the stricter authoring identifier validator, and accept optional
+  JSON BOMs without changing copied instruction bytes.
+- Complete-set declaration validation excludes every conflicting output before
+  copy or selection, including across providers, while retaining independent
+  safe paths. The compatibility result again reports its declared-source count.
+  The focused compatibility packet passed all 41 cases; the complete
+  customization/scanner/standalone packet passed 615 tests with six
+  platform-specific skips. Lint and whitespace checks passed.
+- Full current-head validation and a passing review remain required. No rollout
+  or machine hold was performed.

@@ -21,6 +21,7 @@ import re
 import stat
 import subprocess
 import tempfile
+import unicodedata
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePosixPath
@@ -892,89 +893,12 @@ def local_sibling_destination(destination: str) -> str:
 def render_local_cache(
     repo_root: Path, discover_sources: Callable[[], Iterable[object]]
 ) -> Result:
-    """Render every enabled source's current auto-discovered instruction sibling,
-    at its gitignored ``*.local.instructions.md`` path; never mutate the checked-in
-    destination, the projection lock, or any git state.
+    """Compatibility publisher: copy current enabled templates on every call.
 
-    Purely local and offline: this never fetches a newer plugin version --
-    it only re-renders whatever payload is *already installed* at each
-    source's own ``payload_root``, exactly like ``sync_repository`` would,
-    minus every checked-in/git-*mutating* side effect. It does run
-    read-only ``git`` tracking-status queries (best-effort; a repository
-    with no ``.git`` at all, or no ``git`` binary, is fully supported and
-    behaves exactly as if no tracking concept applied -- see
-    :func:`_resolve_git_tracked_paths`), specifically so it can refuse to
-    manage a destination git already tracks (see the last bullet below) --
-    the ``*.local.instructions.md`` path is not necessarily gitignored
-    until the adopting repo has actually adopted that still-separate
-    convention. Safe to call from any session regardless of the caller's
-    repository push/PR permissions, and safe to call unconditionally on
-    every worktree create/resume/``sessionStart``, since a failure on one
-    source never blocks another. See
-    ``docs/patterns/worktree-scoped-dynamic-guidance.md``.
-
-    ``discover_sources`` is called **after** this call's own lock is
-    acquired, never before -- a precomputed/snapshotted source list handed
-    in ahead of time would reopen exactly the race the lock exists to close
-    (an older call, holding a stale/empty source list from before some
-    plugin was enabled, could acquire the lock *after* a newer call already
-    published that plugin's cache and delete it as "stale," both calls
-    reporting success). A real caller passes something like
-    ``lambda: discover_enabled_sources(repo_root, require_trust=False)``,
-    never a value computed outside this call.
-
-    Safety properties beyond a plain per-spec render:
-
-    * **Stale-sibling reconciliation.** A source that becomes disabled,
-      removed, or unloadable between two calls has its previous
-      current ``.local.instructions.md`` removed too. Non-discovered
-      compatibility bodies are retired only after new publication and exact
-      enabled canonical validation.
-      A file is only ever removed
-      when its own provenance marker both parses *and* declares the
-      checked-in destination whose local sibling is exactly this path --
-      a foreign file (no marker, a malformed one, or one copied from a
-      *different* projection) is never touched.
-    * **Destination and source-key collision safety.** Specs are grouped by
-      their portable local-cache path, and any repeated ``source_key`` is
-      rejected outright, before anything is written -- either ambiguity is
-      reported and the affected specs skipped entirely, never resolved by
-      last-writer-wins, while every unambiguous source still renders.
-    * **Idempotence.** A destination whose current on-disk bytes already
-      match the fresh render is recorded in ``unchanged`` and left alone
-      (no write, no fsync, no mtime churn).
-    * **Foreign-file protection on write, not just on cleanup.** Before
-      replacing an *existing* file whose bytes differ from the fresh
-      render, its own marker must identify this exact source and checked-in
-      destination -- otherwise the source is skipped as a conflict (a
-      finding is reported) rather than silently overwriting someone else's
-      file.
-    * **Budget auditing, not admission.** Template, per-file and aggregate
-      guidance budgets produce warnings without omitting safe local content.
-      Invalid budget config warns and uses the default for size accounting.
-      Separate local safety bounds keep source and provenance reads bounded;
-      checked-in scan/sync retain their strict budget policy.
-    * **`.github` indirection is rejected**, including ``.github/copilot``
-      -- a symlinked/junctioned ``.github`` could otherwise let the walk (and
-      the stale-cleanup unlink) reach files outside the repository.
-    * **Serialized against concurrent callers of this same function**, via a
-      dedicated lock (:func:`_local_cache_lock`) separate from
-      ``sync_repository``'s own -- two overlapping calls for the same
-      repository (a worktree create/resume racing its own ``sessionStart``)
-      can no longer interleave their render/write/cleanup passes and
-      clobber each other's fresher output or delete a sibling the other
-      just refreshed. Combined with resolving ``discover_sources`` only
-      after the lock is held, no call can ever act on a source set that a
-      more recent call has already superseded.
-    * **Never manages a destination git already tracks.** A
-      ``.local.instructions.md`` body is only ever written, refreshed,
-      or reconciled away when it is not currently tracked by git -- the
-      `.gitignore` convention this mechanism depends on
-      (``docs/patterns/worktree-scoped-dynamic-guidance.md``) is a
-      prerequisite this function verifies rather than assumes, so a repo
-      that has not adopted it yet (or a file accidentally committed before
-      it was) can never have a *tracked* file silently excluded from the
-      checked-in orphan scan.
+    Shares the managed startup publisher's workspace lease and reserved output
+    namespace. Discovery happens under that lease. No instruction rendering,
+    hashing, receipt validation or unchanged-content reuse occurs. Git-tracked
+    files, path indirection and ambiguous declarations remain protected.
     """
     result = Result(operation="render-local-cache")
     try:
@@ -982,14 +906,6 @@ def render_local_cache(
     except ValueError as exc:
         result.add(BLOCKING, "projection-root", repo_root, str(exc))
         return result
-    # A dedicated lock, deliberately separate from the checked-in sync's own
-    # `_repository_sync_lock` -- this path must never contend with (or be
-    # blocked behind) the privileged checked-in worker, but concurrent
-    # local-cache callers (a worktree create/resume racing its own
-    # `sessionStart`, or two overlapping sessions) absolutely can
-    # interleave otherwise: an older render finishing after a newer one
-    # would silently clobber fresher content with stale bytes, and the
-    # stale-cleanup pass could unlink a sibling another call just refreshed.
     lock_context = _local_cache_lock(root)
     try:
         lock_context.__enter__()
@@ -1012,6 +928,9 @@ def render_local_cache(
         # blocking finding, not crash this best-effort call out from under
         # a worktree-create/resume or sessionStart caller.
         try:
+            import instruction_copies
+
+            instruction_copies.require_pair_complete(root, _delivery_io())
             sources = list(discover_sources())
         except (OSError, ValueError) as exc:
             result.add(
@@ -1028,15 +947,20 @@ def render_local_cache(
 
 @contextmanager
 def _local_cache_lock(repo_root: Path) -> Iterator[None]:
-    lock_root = Path(tempfile.gettempdir()) / "copilot-instruction-projections"
+    lock_root = Path(tempfile.gettempdir()) / "agent-worktrees" / "static-instructions"
     lock_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if _is_indirection(lock_root) or not lock_root.is_dir():
-        raise OSError("local cache lock root is unsafe")
-    lock_name = (
-        _sha256(("local-cache:" + str(repo_root).casefold()).encode("utf-8"))
-        + ".lock"
-    )
+    for candidate in (lock_root.parent, lock_root):
+        if _is_indirection(candidate) or not candidate.is_dir():
+            raise OSError("local cache lock root is unsafe")
+    # This digest names a workspace, never instruction contents.
+    lock_name = hashlib.sha256(
+        os.fsencode(unicodedata.normalize("NFC", str(repo_root)).casefold())
+    ).hexdigest() + ".lock"
     lock_path = lock_root / lock_name
+    if _is_indirection(lock_path):
+        raise OSError("local cache lock path is unsafe")
+    if lock_path.exists() and not stat.S_ISREG(lock_path.lstat().st_mode):
+        raise OSError("local cache lock path is not a regular file")
     with lock_path.open("a+b") as handle:
         _lock_handle(handle)
         try:
@@ -1048,279 +972,121 @@ def _local_cache_lock(repo_root: Path) -> Iterator[None]:
 def _render_local_cache_locked(
     root: Path, sources: Iterable[object], result: Result
 ) -> Result:
-    """The actual render_local_cache work, run only while
-    ``_local_cache_lock(root)`` is held -- see :func:`render_local_cache`.
-    """
-    specs, _unknown_plugins = _load_specs(
-        root, sources, result, template_limit=MAX_LOCAL_TEMPLATE_BYTES
-    )
+    import instruction_copies
 
-    by_source_key: dict[str, list[ProjectionSpec]] = {}
-    for spec in specs:
-        by_source_key.setdefault(spec.source_key, []).append(spec)
-    duplicate_source_keys = {
-        key for key, entries in by_source_key.items() if len(entries) > 1
+    declarations = instruction_copies.load_declarations(
+        sources, _delivery_io(), workspace=root,
+        validate_path=_validate_relative, load_json=_load_json_bytes,
+    )
+    result.declared = declarations.declared
+    for message in declarations.failures.values():
+        result.add(BLOCKING, "projection-declaration", "<plugin-stack>", message)
+    grouped = {
+        unicodedata.normalize("NFC", copy.local_destination).casefold(): copy
+        for copy in declarations.copies
     }
-    for source_key in sorted(duplicate_source_keys):
-        result.add(
-            BLOCKING,
-            "projection-local-cache-ambiguous",
-            "<plugin-stack>",
-            f"source id {source_key!r} is declared more than once",
-        )
+    desired = {copy.local_destination for copy in declarations.copies}
+    existing = list(_iter_local_cache_files(root))
+    existing_relatives = {path.relative_to(root).as_posix() for path in existing}
 
-    grouped: dict[str, list[tuple[str, ProjectionSpec]]] = {}
-    for spec in specs:
-        if spec.source_key in duplicate_source_keys:
-            continue
-        if spec.skip_local_cache:
-            # Opted out (``skipLocalCache: true``) -- a source whose own
-            # rendered body already directs the agent to scan for every
-            # *.local.instructions.md sibling (the repo-wide catch-all) must
-            # never gain one of its own: it would match its own scan glob
-            # and get read back, pointlessly repeating the same directive.
-            continue
-        try:
-            local_destination = local_sibling_destination(spec.destination)
-        except ValueError as exc:
-            result.add(BLOCKING, "projection-local-cache", spec.destination, str(exc))
-            continue
-        grouped.setdefault(_portable_path_key(local_destination), []).append(
-            (local_destination, spec)
-        )
+    def probe(paths: list[str]) -> tuple[set[str], bool]:
+        keys = {unicodedata.normalize("NFC", path).casefold() for path in paths}
+        aliases = {
+            path for path in existing_relatives
+            if unicodedata.normalize("NFC", path).casefold() in keys
+        }
+        tracked, unknown = _resolve_git_tracked_paths(root, sorted(set(paths) | aliases))
+        tracked_keys = {unicodedata.normalize("NFC", path).casefold() for path in tracked}
+        return tracked | {
+            path for path in paths
+            if unicodedata.normalize("NFC", path).casefold() in tracked_keys
+        }, unknown
 
-    accepted: list[tuple[str, ProjectionSpec, RenderedProjection]] = []
-    for _key, entries in sorted(grouped.items()):
-        if len(entries) > 1:
-            owners = ", ".join(sorted(spec.source_key for _dest, spec in entries))
-            result.add(
-                BLOCKING,
-                "projection-local-cache-ambiguous",
-                entries[0][0],
-                f"multiple sources render to the same local cache path: {owners}",
-            )
-            continue
-        local_destination, spec = entries[0]
-        try:
-            # Never self-referential (see render_projection's docstring).
-            rendered = render_projection(spec, include_prefer_local=False)
-        except ValueError as exc:
-            result.add(BLOCKING, "projection-local-cache", spec.destination, str(exc))
-            continue
-        if rendered.byte_count > MAX_LOCAL_CACHE_BYTES:
-            result.add(
-                BLOCKING,
-                "projection-local-cache",
-                local_destination,
-                f"rendered local cache exceeds the {MAX_LOCAL_CACHE_BYTES}-byte "
-                "safety read limit",
-            )
-            continue
-        if spec.template_bytes > MAX_TEMPLATE_BYTES:
-            result.add(
-                WARNING,
-                "projection-local-cache-budget",
-                spec.template,
-                f"{spec.source_key} template is {spec.template_bytes} bytes; "
-                f"template budget is {MAX_TEMPLATE_BYTES} bytes",
-            )
-        if rendered.byte_count > MAX_PROJECTION_BYTES:
-            result.add(
-                WARNING,
-                "projection-local-cache-budget",
-                local_destination,
-                f"rendered local cache is {rendered.byte_count} bytes; the "
-                f"per-file budget is {MAX_PROJECTION_BYTES} bytes",
-            )
-        accepted.append((local_destination, spec, rendered))
-
-    aggregate_budget = _load_aggregate_budget(root, result, severity=WARNING)
-    aggregate = sum(rendered.byte_count for _dest, _spec, rendered in accepted)
-    if aggregate > aggregate_budget:
-        result.add(
-            WARNING,
-            "projection-local-cache-budget",
-            "<local-cache-aggregate>",
-            f"local cache aggregate is {aggregate} bytes; budget is "
-            f"{aggregate_budget} bytes",
-        )
-
-    existing_local_cache_files = list(_iter_local_cache_files(root))
-    existing_local_cache_relatives: list[str] = []
-    for path in existing_local_cache_files:
-        try:
-            existing_local_cache_relatives.append(path.relative_to(root).as_posix())
-        except ValueError:
-            continue
-    candidate_relatives = sorted(
-        {local_destination for local_destination, _spec, _rendered in accepted}
-        | {delivery.legacy_local_destination(spec.destination) for _, spec, _ in accepted}
-        | set(existing_local_cache_relatives)
+    tracked, inconclusive = probe(
+        sorted(desired | existing_relatives),
     )
-    # One batched query for every path this call might write or delete,
-    # rather than a process per file -- a large plugin stack, or a slow
-    # git probe, would otherwise pay repeated subprocess-startup cost (and
-    # repeated 5s timeouts) on every worktree create/resume/sessionStart
-    # refresh.
-    tracked_paths, tracking_inconclusive = _resolve_git_tracked_paths(
-        root, candidate_relatives
-    )
-    ignored_paths = delivery_io.ignored_local_paths(root, [local for local, _, _ in accepted])
-
-    valid_destinations: set[str] = set()
-    for local_destination, spec, rendered in accepted:
+    ignored = delivery_io.ignored_local_paths(root, sorted(desired))
+    aggregate = 0
+    discovery_incomplete = bool(declarations.failures)
+    incomplete = discovery_incomplete
+    for copy in declarations.copies:
+        relative = copy.local_destination
         try:
-            path = _prepare_destination_parent(
-                root, PurePosixPath(local_destination)
-            )
-            if local_destination in tracked_paths or tracking_inconclusive:
-                # Never manage tracked local guidance. An
-                # inconclusive check (a real git working tree whose tracked-
-                # files query itself failed) is treated exactly like
-                # "tracked" -- never like "confirmed untracked" -- because
-                # this is a git-backed root and the check simply couldn't
-                # complete, not evidence of anything.
-                result.add(
-                    BLOCKING,
-                    "projection-local-cache-tracked",
-                    local_destination,
-                    "this local-cache destination is tracked by git (or its "
-                    "tracked status could not be confirmed in a git working "
-                    "tree); refusing to manage it until it is confirmed "
-                    "untracked and the *.local.instructions.md ignore rule "
-                    "is in place",
-                )
+            raw = _read_bounded_regular(copy.template, MAX_LOCAL_TEMPLATE_BYTES)
+            aggregate += len(raw)
+            for budget in (MAX_TEMPLATE_BYTES, MAX_PROJECTION_BYTES):
+                if len(raw) > budget:
+                    result.add(WARNING, "projection-local-cache-budget", relative,
+                               f"instruction copy is {len(raw)} bytes; budget is {budget} bytes")
+            if relative in tracked or inconclusive:
+                incomplete = True
+                result.add(BLOCKING, "projection-local-cache-tracked", relative,
+                           "destination is tracked by git or tracking status is unknown")
                 continue
-            if local_destination not in ignored_paths:
-                result.add(WARNING, "projection-local-cache-ignore", local_destination,
+            if relative not in ignored:
+                incomplete = True
+                result.add(WARNING, "projection-local-cache-ignore", relative,
                            "local instructions are not ignored by git; adopt *.local.instructions.md ignore coverage first")
                 continue
-            current = _read_existing_local_cache(path)
-            if current == rendered.content:
-                result.unchanged.append(local_destination)
-                valid_destinations.add(local_destination)
+            delivery_io.require_untracked(relative, probe)
+            path = _prepare_destination_parent(root, PurePosixPath(relative))
+            try:
+                info = path.lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                if not stat.S_ISREG(info.st_mode):
+                    raise ValueError("destination is not a regular file")
+                if discovery_incomplete:
+                    raise ValueError("partial discovery cannot reassign an existing generated slot")
+            transaction.atomic_write(path, raw)
+            result.changed.append(relative)
+            result.written.append(relative)
+        except (OSError, ValueError) as exc:
+            incomplete = True
+            result.add(BLOCKING, "projection-local-cache", relative,
+                       f"could not write local cache: {exc}")
+    budget = _load_aggregate_budget(root, result, severity=WARNING)
+    if aggregate > budget:
+        result.add(WARNING, "projection-local-cache-budget", "<local-cache-aggregate>",
+                   f"local cache aggregate is {aggregate} bytes; budget is {budget} bytes")
+    for path in existing:
+        relative = path.relative_to(root).as_posix()
+        if not relative.startswith(delivery.MANAGED_NAMESPACE + "/"):
+            result.add(WARNING, "projection-local-cache-legacy", relative,
+                       "outside the managed copy namespace; retained for explicit migration")
+            continue
+        if relative in desired:
+            continue
+        # A failed provider's old files remain available, with a visible failure.
+        if incomplete:
+            continue
+        if relative in tracked or inconclusive:
+            result.add(WARNING, "projection-local-cache-tracked", relative,
+                       "stale output is tracked by git or tracking status is unknown; retained")
+            continue
+        try:
+            path = _safe_destination(root, PurePosixPath(relative))
+            key = unicodedata.normalize("NFC", relative).casefold()
+            copy = grouped.get(key)
+            if copy is not None:
+                target = _safe_destination(root, PurePosixPath(copy.local_destination))
+                try:
+                    same_file = path.samefile(target)
+                except FileNotFoundError:
+                    same_file = False
+            else:
+                same_file = False
+            if same_file:
                 continue
-            if current is not None:
-                marker = _parse_owned_local_cache_marker(current, local_destination)
-                if marker is None:
-                    result.add(
-                        WARNING,
-                        "projection-local-cache-foreign",
-                        local_destination,
-                        "an existing file at this local cache path does not "
-                        "carry this renderer's own provenance marker; "
-                        "refusing to overwrite it",
-                    )
-                    valid_destinations.add(local_destination)
-                    continue
-                if (
-                    marker.get("plugin") != spec.plugin
-                    or marker.get("sourceId") != spec.source_id
-                ):
-                    # A different logical source previously owned this
-                    # exact destination (e.g. a sourceId rename) -- this is
-                    # a legitimate handoff, not foreign content: the
-                    # destination-collision grouping above already
-                    # guarantees at most one *current* spec claims this
-                    # path, so refusing the overwrite here would just leave
-                    # the old source's stale guidance in place forever.
-                    # Supersede it, but report the handoff so it's never
-                    # silent.
-                    result.add(
-                        WARNING,
-                        "projection-local-cache-handoff",
-                        local_destination,
-                        "local cache previously rendered for "
-                        f"{marker.get('plugin')}:{marker.get('sourceId')}; "
-                        f"now superseded by {spec.source_key}",
-                    )
-            _transactional_write(
-                [(path, rendered.content, current)],
-                before_write=lambda: delivery_io.require_untracked(
-                    local_destination, lambda paths: _resolve_git_tracked_paths(root, paths)
-                ),
-            )
+            delivery_io.require_untracked(relative, probe)
+            _safe_destination(root, PurePosixPath(relative)).unlink()
+            result.changed.append(relative)
+            result.removed.append(relative)
         except (OSError, ValueError) as exc:
-            # A failed refresh must never leave a *stale* prior sibling
-            # masquerading as current guidance: deliberately NOT adding
-            # local_destination to valid_destinations here means the
-            # reconciliation pass below will still find and remove an
-            # owned prior render at this exact path (and report if even
-            # that removal fails), rather than the caller silently
-            # preferring outdated content because this destination simply
-            # never got marked as reconciled.
-            result.add(
-                BLOCKING,
-                "projection-local-cache",
-                local_destination,
-                f"could not write local cache: {exc}",
-            )
-            continue
-        result.changed.append(local_destination)
-        result.written.append(local_destination)
-        valid_destinations.add(local_destination)
-
-    legacy_tracking, legacy_inconclusive = _resolve_git_tracked_paths(
-        root, [delivery.legacy_local_destination(spec.destination) for _, spec, _ in accepted]
-    )
-    for local_destination, spec, _rendered in accepted:
-        if local_destination in valid_destinations:
-            delivery_io.retire_legacy_local(
-                root, spec, _delivery_io(), result,
-                legacy_tracking, legacy_inconclusive,
-                lambda paths: _resolve_git_tracked_paths(root, paths),
-            )
-    delivery_io.report_unmanaged_legacy_locals(
-        root, {spec.destination for local, spec, _ in accepted if local in valid_destinations},
-        _delivery_io(), result,
-    )
-
-    for path in existing_local_cache_files:
-        try:
-            relative = path.relative_to(root).as_posix()
-        except ValueError:
-            continue
-        if relative in valid_destinations:
-            continue
-        try:
-            path = _safe_destination(root, PurePosixPath(relative))
-            raw = _read_bounded_regular(path, MAX_LOCAL_CACHE_BYTES)
-        except (OSError, ValueError):
-            continue
-        if _parse_owned_local_cache_marker(raw, relative) is None:
-            continue
-        if relative in tracked_paths or tracking_inconclusive:
-            # Provenance does not authorize changing tracked working-tree
-            # content. Failed tracking probes likewise cannot authorize removal.
-            result.add(
-                WARNING,
-                "projection-local-cache-tracked",
-                relative,
-                "this stale local-cache file is tracked by git (or its "
-                "tracked status could not be confirmed in a git working "
-                "tree); leaving it in place rather than deleting a "
-                "possibly-tracked file -- untrack it and add the "
-                "*.local.instructions.md ignore rule",
-            )
-            continue
-        try:
-            delivery_io.require_untracked(
-                relative, lambda paths: _resolve_git_tracked_paths(root, paths)
-            )
-            path = _safe_destination(root, PurePosixPath(relative))
-            if _read_bounded_regular(path, MAX_LOCAL_CACHE_BYTES) != raw:
-                raise OSError("stale local cache changed after validation")
-            path.unlink()
-        except (OSError, ValueError) as exc:
-            result.add(
-                BLOCKING,
-                "projection-local-cache-stale",
-                relative,
-                f"could not remove stale local cache: {exc}",
-            )
-            continue
-        result.changed.append(relative)
-        result.removed.append(relative)
+            result.add(BLOCKING, "projection-local-cache-stale", relative,
+                       f"could not remove stale local cache: {exc}")
+    delivery_io.report_unmanaged_legacy_locals(root, set(), _delivery_io(), result)
     return result
 
 
@@ -1374,6 +1140,7 @@ def _resolve_git_tracked_paths(
             capture_output=True,
             timeout=5,
             env=env,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except FileNotFoundError:
         return set(), any((p / ".git").exists() for p in [root, *root.parents])
@@ -1400,14 +1167,21 @@ def _resolve_git_tracked_paths(
             capture_output=True,
             timeout=5,
             env=env,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        removed = subprocess.run(
+            ["git", "-C", str(root), "--literal-pathspecs", "diff", "--cached",
+             "--name-only", "--diff-filter=D", "--no-renames", "-z", "--", *relatives],
+            capture_output=True, timeout=5, env=env,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, subprocess.SubprocessError):
         return set(), True
-    if proc.returncode != 0:
+    if proc.returncode != 0 or removed.returncode != 0:
         return set(), True
     tracked = {
         entry
-        for entry in proc.stdout.decode("utf-8", "surrogateescape").split("\0")
+        for entry in (proc.stdout + removed.stdout).decode("utf-8", "surrogateescape").split("\0")
         if entry
     }
     return tracked, False
@@ -1732,8 +1506,17 @@ def _validate_fallback(root: Path, entry: dict, result: Result) -> bytes | None:
 def resolve_instruction_source(
     root: Path, destination: str, sources: Iterable[object] | None = None
 ) -> dict:
+    import instruction_copies
+
     root = validate_repository_root(root)
     relative = _validate_relative(destination, field_name="selector destination")
+    declarations = instruction_copies.load_declarations(
+        sources or [], _delivery_io(), workspace=root,
+        validate_path=_validate_relative, load_json=_load_json_bytes,
+    )
+    selected = instruction_copies.select_copy(root, destination, declarations, _delivery_io())
+    if selected is not None:
+        return selected
     _safe_destination(root, relative)
     result = Result(operation="resolve-source")
     entries, _, _ = _load_lock(root, result)
@@ -1743,11 +1526,13 @@ def resolve_instruction_source(
         _validate_projection_file(root, entries[destination], result)
     if result.blocking:
         raise ValueError("reviewed selector validation failed")
-    specs, _ = _load_specs(
-        root, sources or [], Result(operation="canonical-source"),
-        template_limit=MAX_LOCAL_TEMPLATE_BYTES,
-    )
-    return delivery_io.resolve_authenticated(root, destination, entries, specs, _delivery_io())
+    if destination not in entries:
+        detail = "; ".join(declarations.failures.values())
+        raise ValueError(f"no managed copy or reviewed fallback for this destination; {detail}")
+    selected = delivery_io.resolve_reviewed(root, entries[destination], _delivery_io())
+    if declarations.failures:
+        selected["diagnostic"] = "; ".join(declarations.failures.values())
+    return selected
 
 
 def instruction_delivery_inventory(root: Path, automatic: set[Path]) -> dict:
@@ -2399,17 +2184,19 @@ def discover_enabled_sources(
     installed_root: Path | None = None,
     home: Path | None = None,
     require_trust: bool = False,
+    runtime: bool = False,
     agent_worktrees_command: str | None = None,
 ) -> list[object]:
     """Reuse the settings/source resolver without importing the full scanner."""
-    if not require_trust:
+    if not require_trust and not runtime:
         validate_committed_settings(repo_root)
     from scan_plugin_sources import assemble_enabled_plugins
 
     return assemble_enabled_plugins(
         repo_root,
         installed_root=installed_root, home=home, require_trust=require_trust,
-        include_user=False, include_local=False,
+        include_user=runtime, include_local=runtime, strict=runtime,
+        include_metadata=not runtime,
         agent_worktrees_command=agent_worktrees_command,
     )
 

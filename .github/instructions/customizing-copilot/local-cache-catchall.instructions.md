@@ -1,57 +1,42 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","bodySha256":"be5d882b8ad5eb70096e199f297be8ccc6c47ca4979f0834ee27961b38d059f2","customizationKind":"instructions","deliveryKind":"body","destination":".github/instructions/customizing-copilot/local-cache-catchall.instructions.md","plugin":"customizing-copilot@copilot-extensions","pluginVersion":"0.2.39-dev1","renderedBytes":4038,"schema":"copilot-extensions.instruction-projection","sourceId":"local-cache-catchall","template":"instructions/local-cache-catchall.instructions.md","templateBytes":2970,"templateSha256":"8dd4f1ac7d716ff5a2ed3f02e11ccfbcedbfed9e8071c4fd7f1f61cfd457fd9e","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","bodySha256":"7cfc68945aeaf61dcea5a9aeebdad69595a7538716e4e90e672389d527e4fe41","customizationKind":"instructions","deliveryKind":"body","destination":".github/instructions/customizing-copilot/local-cache-catchall.instructions.md","plugin":"customizing-copilot@copilot-extensions","pluginVersion":"0.2.40-dev1","renderedBytes":3251,"schema":"copilot-extensions.instruction-projection","sourceId":"local-cache-catchall","template":"instructions/local-cache-catchall.instructions.md","templateBytes":2126,"templateSha256":"7a570bc3e67c29b5ad7d3225f578d0ee7814045fde8434f61422c4554c11cdb0","version":1} -->
 
 
-> If `.github/instructions/customizing-copilot/local-cache-catchall.local.instructions.md` is available, compare
-> `pluginVersion` and prefer whichever is newer. On a tie,
-> compare `templateSha256`: matching means prefer local;
-> differing means prefer this checked-in file.
+> Prefer the current plugin copy at `.github/instructions/agent-worktrees-generated/copilot-extensions/customizing-copilot/local-cache-catchall.local.instructions.md` when present.
+> Read it without hash, fingerprint, version, provenance or receipt checks.
+> Otherwise use this reviewed fallback. Restart to load later replacements.
 
-Before dependent/consequential action, acquire authoritative applicable
-guidance. Resolution failure is a visible blocker, never authorization.
-Inventory `.github/instructions/**/*.local.instructions.md`: creation preloads
-them; sessionStart may write later. Also recognize compatibility bodies under
-`.github/copilot/context-locals/**/*.local.md`.
-Missing local caches are normal; use each selector's reviewed fallback.
+Before dependent action, read the applicable current plugin instructions under
+`.github/instructions/agent-worktrees-generated/**/*.local.instructions.md`.
+Creation and session-start copy enabled plugins' declared files there. These
+are disposable upstream copies, not independent authorities to authenticate.
+Prefer them over older checked-in selectors, inline fallbacks or legacy caches.
+Do not compare content hashes, fingerprints, versions, provenance markers or
+receipts, and do not let an old selector or fallback lock block an available copy.
 
-Invoke `reviewing-customizations` and use its returned skill base, not an
-installed-path guess or a bare `resolve-source` command. Resolve an absolute
-Python interpreter and execute this argv (substitute the three placeholders
-and the source's exact declared destination):
+If a source's path is unclear, invoke `reviewing-customizations` and use its
+returned skill base, not an installed-path guess or a bare `resolve-source`
+command. Resolve an absolute Python interpreter and execute this argv
+(substitute the placeholders and the source's exact declared destination):
 `["<python>","<skill-base>/scripts/manage-instruction-projections.py","resolve-source","<repository>","<destination>","--from-settings","--json"]`.
 Use the attributable agent-worktrees catalog path with `--agent-worktrees-path`
-when the repository's marketplace resolver requires it. This validates reviewed
-lock/fallback ownership and authenticates paired or unpaired local bytes
-against the current enabled payload's canonical render. Self-supplied hashes
-and receipts prove consistency, not provenance. Unverifiable locals fall back
-to valid reviewed content; invalid reviewed content blocks. Without canonical
-payload proof, use the owned reviewed fallback. For authenticated candidates,
-compare identity/scope/version/hash exactly: newer version wins; equal version/hash favors local;
-equal version/different hash favors reviewed content. Do not compare hashes
-from memory. Full fallbacks use literal paths outside automatic instruction
-discovery; read only the selected body.
+when the repository's marketplace resolver requires it. Lookup uses enabled
+declarations and safe paths, not instruction-content authentication. Read the
+selected body. When no current copy is available, use the source's reviewed
+fallback; missing required guidance and real configuration or path failures
+remain visible blockers.
 
-For an unpaired local source, verify its enabled declaration and canonical
-template, marketplace/source identity and applicability before reading. Never
-trust an arbitrary local file or a global marker as proof of ownership or
-delivery. Absence of a checked-in source must not silently omit safe,
-verifiably owned new guidance.
+Read the entire applicable body unless that complete body is already directly
+visible in the current context. File existence, summaries, quoted fragments,
+truncated output and earlier-context loaded-state claims do not establish a full
+read. On uncertainty, read the omitted ranges. New declared sources do not need
+a checked-in selector or fallback before their current managed copy can be read.
 
-Skip a read only when the ENTIRE selected body is directly visible in the
-current applicable instruction/tool context, with full opening provenance and
-its matching closing body receipt (marketplace/plugin, source ID, version,
-template hash and scope). File existence, an opening marker alone, a closing
-receipt alone, quoted examples, omitted middle text, truncated output, compacted
-summaries and earlier-context claims do not establish coverage. Legacy bodies
-without receipts remain readable but cannot license skipping. On uncertainty
-read the full selected body, including any omitted ranges.
+Delivery is per source: a copied file does not prove that the running model has
+loaded it. Files may be replaced during a live session. Restart or begin a fresh
+context to load corrected copies, and read applicable guidance again after
+context reconstruction. Do not persist loaded-state claims.
 
-Coverage is per source, not global: partial admission of one body says nothing
-about another. Recompute authority and coverage after resume, compaction or
-context reconstruction, and after source changes. Persist no loaded-state
-claims. These instructions, selectors and inventories do not attest that any
-other body has reached the model.
-
-<!-- copilot-guidance-body-end:v1 {"bindingSha256":"3f8bdaac29b2ab64b3b5e5cbd59b6af1e745a344dabe0814c3f3ebc96dd1b4b1"} -->
+<!-- copilot-guidance-body-end:v1 {"bindingSha256":"634631231165b6f9c21abe32f0b2a072eb69df28ce499789d175ce0a14e60126"} -->
