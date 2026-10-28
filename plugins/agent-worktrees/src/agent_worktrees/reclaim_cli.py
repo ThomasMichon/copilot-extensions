@@ -406,12 +406,20 @@ def cmd_remux(args: argparse.Namespace) -> int:
             )
         wt_path = _wt_path(wt_id)
 
+    registry = None
+    if platform.system() == "Windows" and wt_id:
+        record_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+        if record_path.exists():
+            record = tracking.load_record(record_path)
+            registry = [entry.session_id for entry in (record.sessions or ())]
+        wt_path = None
     result = _core_helper("_perform_remux", _perform_remux)(
         worktree_id=wt_id,
         session_id=session_id,
         worktree_path=wt_path,
         force_sudo=getattr(args, "force_sudo", None),
         apply_windows=getattr(args, "yes", False),
+        **({"session_ids": registry} if registry is not None else {}),
     )
 
     if as_json:
@@ -499,11 +507,19 @@ def reclaim_one(
         if b["pid"] not in seen_pids:
             found.append(b)
             seen_pids.add(b["pid"])
+    protected = set()
     if bare_only:
         # Reachability-aware: keep a mux-homed target when its wt-<id> mux is
         # unreachable by Stop (a detached psmux server -- dotfiles #1447), so
         # Reclaim isn't a no-op on it; preserve only a live, Stop-able mux.
-        found = reclaim.filter_stop_unreachable(found, table=table)
+        unreachable = reclaim.filter_stop_unreachable(found, table=table)
+        unreachable_pids = {item["pid"] for item in unreachable}
+        protected = {
+            (item["pid"], str(item["start_time"]))
+            for item in found
+            if item["pid"] not in unreachable_pids and item.get("start_time")
+        }
+        found = unreachable
     if target_pids is not None:
         found = [item for item in found if item["pid"] in target_pids]
     if target_start_times is not None:
@@ -569,8 +585,15 @@ def reclaim_one(
         )
     except Exception as error:
         observation_error = f"post-reclaim observation failed: {error}"
-    ok = ok and observation_error is None and not remaining_bound
-    native_clear = ok and mux_live is False
+    unexpected = [
+        item for item in remaining_bound
+        if not (
+            mux_live is True and item.get("homing") == "mux"
+            and (item["pid"], str(item.get("start_time"))) in protected
+        )
+    ]
+    ok = ok and observation_error is None and not unexpected
+    native_clear = ok and not remaining_bound and mux_live is False
     publication = None
     if native_clear and record_path.exists():
         publication = _confirm_clear_publication(worktree_id, after=time.time())
@@ -586,8 +609,9 @@ def reclaim_one(
         "reason": observation_error or (
             publication["reason"] if publication and not publication["confirmed"]
             else
-            "a bound Copilot still owns the worktree" if remaining_bound
-            else "process retirement unconfirmed" if not ok else "reclaimed"
+            "a bound Copilot still owns the worktree" if unexpected
+            else "process retirement unconfirmed" if not ok
+            else "protected mux owner preserved" if remaining_bound else "reclaimed"
         ),
     }
 

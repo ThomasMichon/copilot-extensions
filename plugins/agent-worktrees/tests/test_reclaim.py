@@ -550,7 +550,9 @@ class TestReapBoundCopilots:
         assert out[0]["killed"] is True
 
 
-@pytest.mark.parametrize("outcome", ["clear", "timeout", "new-owner", "probe-error", "reused-pid"])
+@pytest.mark.parametrize("outcome", [
+    "clear", "timeout", "new-owner", "probe-error", "reused-pid", "protected-owner",
+])
 def test_reclaim_one_requires_fresh_clear_binding_before_success(monkeypatch, tmp_path, outcome):
     from agent_worktrees import reclaim_cli
     from types import SimpleNamespace
@@ -563,11 +565,15 @@ def test_reclaim_one_requires_fresh_clear_binding_before_success(monkeypatch, tm
     if outcome == "reused-pid":
         original["start_time"] = "200"
     replacement = {"session_id": "replacement", "pid": 77778, "start_time": "200", "homing": "bare"}
-    live = [original]
+    protected = {"session_id": "protected", "pid": 77779, "start_time": "300", "homing": "mux"}
+    live = [original, protected] if outcome == "protected-owner" else [original]
     monkeypatch.setattr(reclaim, "build_process_table", lambda: {})
     monkeypatch.setattr(reclaim, "descendants_of", lambda *a: set())
     monkeypatch.setattr(reclaim, "resolve_bridge_bound", lambda *a, **k: [])
-    monkeypatch.setattr(reclaim, "filter_stop_unreachable", lambda found, **k: found)
+    monkeypatch.setattr(
+        reclaim, "filter_stop_unreachable",
+        lambda found, **k: [item for item in found if item["homing"] != "mux"],
+    )
 
     def resolve(**kwargs):
         assert kwargs.get("session_ids") is None, "empty registry must not skip orphan discovery"
@@ -578,7 +584,10 @@ def test_reclaim_one_requires_fresh_clear_binding_before_success(monkeypatch, tm
     def reap(targets, **kwargs):
         assert targets == [original]
         assert kwargs["exit_timeout"] == 3.0
-        live[:] = [original] if outcome == "timeout" else [replacement] if outcome == "new-owner" else []
+        live[:] = (
+            [original] if outcome == "timeout" else [replacement] if outcome == "new-owner"
+            else [protected] if outcome == "protected-owner" else []
+        )
         return [{"pid": original["pid"], "killed": outcome != "timeout"}]
 
     monkeypatch.setattr(reclaim, "resolve_bound_copilots", resolve)
@@ -587,11 +596,11 @@ def test_reclaim_one_requires_fresh_clear_binding_before_success(monkeypatch, tm
     monkeypatch.setattr(reclaim, "clear_lock_residue", lambda **kw: cleanup_calls.append(kw) or [])
     monkeypatch.setattr(reclaim, "clear_bridge_locks", lambda *a, **kw: cleanup_calls.append(kw) or [])
     monkeypatch.setattr(reclaim, "teardown_detached_mux", lambda *a, **k: [])
-    monkeypatch.setattr(reclaim_cli.sessions, "has_mux_session", lambda *a: False)
+    monkeypatch.setattr(reclaim_cli.sessions, "has_mux_session", lambda *a: outcome == "protected-owner")
     monkeypatch.setattr(reclaim_cli.tracking, "stamp_bound_live", lambda *a, **k: None)
     monkeypatch.setattr(reclaim_cli.tracking, "stamp_mux_live", lambda *a, **k: None)
     result = reclaim_cli.reclaim_one("wtA", target_start_times={77777: "100"})
-    assert result["ok"] is (outcome == "clear")
+    assert result["ok"] is (outcome in {"clear", "protected-owner"})
     assert result["state_clear"] is (outcome == "clear")
     assert all(call["force_pids"] == set() for call in cleanup_calls)
     if outcome == "new-owner":
@@ -601,6 +610,9 @@ def test_reclaim_one_requires_fresh_clear_binding_before_success(monkeypatch, tm
     elif outcome == "reused-pid":
         assert result["targets"] == 0
         assert result["remaining_pids"] == [original["pid"]]
+    elif outcome == "protected-owner":
+        assert result["remaining_pids"] == [protected["pid"]]
+        assert result["reason"] == "protected mux owner preserved"
 
 
 def test_reclaim_completion_waits_for_current_clear_publication(monkeypatch):

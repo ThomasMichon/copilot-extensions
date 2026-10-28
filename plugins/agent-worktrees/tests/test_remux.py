@@ -172,6 +172,28 @@ class TestWindowsRestore:
             "target_start_times": {42: "start-42"},
         }]
 
+    def test_windows_remux_cli_selects_registered_owner_without_cwd_filter(self, monkeypatch, tmp_path):
+        from agent_worktrees import reclaim_cli
+
+        self._base(monkeypatch)
+        monkeypatch.setattr(reclaim_cli.cfg, "tracking_dir", lambda: tmp_path)
+        (tmp_path / "wtA.yaml").write_text("fixture")
+        monkeypatch.setattr(reclaim_cli.tracking, "load_record", lambda *a: types.SimpleNamespace(
+            worktree_path=r"C:\worktrees\wtA",
+            sessions=[types.SimpleNamespace(session_id="old-owner")],
+        ))
+        monkeypatch.setattr(reclaim_cli.worktree_identity, "_resolve_worktree_id", lambda value: "wtA")
+        calls = []
+        monkeypatch.setattr(cli, "_perform_remux", lambda **kw: calls.append(kw) or {
+            "ok": True, "requires_resume": True,
+        })
+        assert reclaim_cli.cmd_remux(types.SimpleNamespace(
+            session_id=None, worktree_id="wtA", json=True, yes=True, force_sudo=None,
+        )) == 0
+        assert calls[0]["worktree_path"] is None
+        assert calls[0]["session_ids"] == ["old-owner"]
+        assert calls[0]["session_id"] is None
+
     def test_restore_does_not_resume_before_process_state_is_clear(self, monkeypatch):
         self._base(monkeypatch)
         monkeypatch.setattr(cli, "reclaim_one", lambda *a, **k: {
