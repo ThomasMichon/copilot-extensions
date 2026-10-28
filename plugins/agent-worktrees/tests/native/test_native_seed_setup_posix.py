@@ -39,7 +39,7 @@ def _run(prefix, environment, cwd, *arguments):
 
 def _plan(
     tmp_path, installed, bash, seed_kind, *, interactive=False, env_script=None,
-    arguments=None, expect_native=True, bash_env=None,
+    arguments=None, expect_native=True, bash_env=None, mux=False,
 ):
     root, plugin, prefix, environment = installed
     scripts = root / "scripts"
@@ -141,7 +141,8 @@ if seed_kind == "new":
 prepared = launch_seed_exec.deferred_command(
     command, created.yaml_path, seed_id=seed.seed_id if seed else None,
     admission_only=seed is None, correlation=correlation,
-    environment={"BASH_ENV": sys.argv[10]} if sys.argv[10] else None,
+    environment={"BASH_ENV": sys.argv[10]} if sys.argv[12] == "1" else None,
+    mux=sys.argv[11] == "1",
 )
 index = launch_seed_exec.native_setup_index(prepared)
 assert (index is not None) == (bool(seed_kind) and not sys.argv[8] and sys.argv[9] == "1"), prepared
@@ -158,6 +159,8 @@ print(json.dumps({
         str(env_script) if env_script is not None else "",
         "1" if expect_native else "",
         str(bash_env) if bash_env is not None else "",
+        "1" if mux else "",
+        "1" if bash_env is not None else "",
     ))
     env = {
         **environment, "FIXTURE_CASE": str(tmp_path), "FIXTURE_RECORD": plan["record"],
@@ -387,6 +390,49 @@ def test_selected_bash_env_early_exit_keeps_the_legacy_owner_and_final_status(
         plan["command"], env=environment, cwd=checkout, timeout=60,
         max_stdout_bytes=65536, max_stderr_bytes=65536,
     )
+    assert result.returncode == 1, result.stdout + result.stderr + repr(_observations(plan))
+    assert not (tmp_path / "backend-python-env").exists()
+    _assert_return(plan, 1, False)
+    _root, _plugin, prefix, env = installed_native_runtime
+    _run(
+        prefix, env, checkout, "-c",
+        "from pathlib import Path;from agent_worktrees import launch_seed_state;import sys;"
+        "seed=launch_seed_state.peek(Path(sys.argv[1]),read_only=True);"
+        "assert seed.seed_id==sys.argv[2] and seed.handoff_id is None",
+        plan["record"], plan["seed_id"],
+    )
+
+
+@pytest.mark.parametrize("override", [None, ""])
+def test_mux_server_initializer_uses_only_explicit_pane_overrides(
+    tmp_path, installed_native_runtime, native_bash, monkeypatch, override,
+):
+    from agent_worktrees import sessions
+
+    plan, environment, checkout = _plan(
+        tmp_path, installed_native_runtime, native_bash, "new",
+        mux=True, expect_native=override == "", bash_env=override,
+    )
+    primer = tmp_path / "server-bash-env.sh"
+    primer.write_text("trap 'exit 1' EXIT\nexit 5\n", encoding="utf-8")
+    environment["BASH_ENV"] = str(primer)
+    monkeypatch.setattr(sessions, "_mux_pane_cmd", lambda *_a, **_kw: list(plan["command"]))
+    pane = sessions.build_mux_new_session_argv(
+        "native-env", str(checkout), plan["command"],
+        {"BASH_ENV": override} if override is not None else {}, mux="tmux",
+    )
+    for index, value in enumerate(pane[:-1]):
+        if value == "-e":
+            key, _, content = pane[index + 1].partition("=")
+            environment[key] = content
+    result = run_caller_owned(
+        plan["command"], env=environment, cwd=checkout, input_text="retained stdin\n", timeout=60,
+        max_stdout_bytes=65536, max_stderr_bytes=65536,
+    )
+    if override is not None:
+        assert result.returncode == 7, result.stdout + result.stderr + repr(_observations(plan))
+        _assert_return(plan, 7, True)
+        return
     assert result.returncode == 1, result.stdout + result.stderr + repr(_observations(plan))
     assert not (tmp_path / "backend-python-env").exists()
     _assert_return(plan, 1, False)

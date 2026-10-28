@@ -881,6 +881,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
             launch_cmd, yaml_path, seed_id=staged_seed.seed_id,
             prepare_native=not getattr(state.args, "dry_run", False),
             environment=env,
+            mux=True,
         )
     else:
         launch_cmd = deferred_command(
@@ -889,6 +890,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
             preserve_seed_id=staged_seed.seed_id if staged_seed else None,
             native_resume_session=native_resume,
             environment=env,
+            mux=True,
         )
 
     launch = {
