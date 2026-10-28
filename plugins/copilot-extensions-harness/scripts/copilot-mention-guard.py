@@ -334,7 +334,7 @@ def _is_api_comment_or_review_write(tokens: list[str]) -> bool:
 
 def _read_bounded(
     path: str, limit: int = 200_000, *, deadline: float | None = None,
-    errors: str = "replace",
+    errors: str = "replace", cwd: str | None = None,
 ) -> str | None:
     """Contents of *path*, or ``None`` if it can't be read/is too large to
     fully inspect -- NEVER an empty or truncated string on failure, either
@@ -346,7 +346,10 @@ def _read_bounded(
     cut-off prefix as the complete body."""
     def read() -> str | None:
         try:
-            with open(path, encoding="utf-8", errors=errors) as fh:
+            source = Path(path)
+            if cwd and not source.is_absolute():
+                source = Path(cwd) / source
+            with open(source, encoding="utf-8", errors=errors) as fh:
                 content = fh.read(limit + 1)
         except (OSError, UnicodeError):
             return None
@@ -378,7 +381,9 @@ _UNSCANNABLE = object()  # sentinel: the body is sourced from stdin, which a
 # unverifiable publish through.
 
 
-def _extract_input_json_body(path: str, deadline: float | None = None) -> str | object:
+def _extract_input_json_body(
+    path: str, deadline: float | None = None, *, cwd: str | None = None,
+) -> str | object:
     """``gh api --input <file>`` (or ``--input -`` for stdin) sends a raw
     JSON request body -- read *path*, parse it, and return its ``"body"``
     field if present as a string. Any failure (stdin, unreadable file,
@@ -387,7 +392,7 @@ def _extract_input_json_body(path: str, deadline: float | None = None) -> str | 
     if path == "-":
         return _UNSCANNABLE
     try:
-        content = _read_bounded(path, deadline=deadline, errors="strict")
+        content = _read_bounded(path, deadline=deadline, errors="strict", cwd=cwd)
         if content is None:
             return _UNSCANNABLE
         payload = json.loads(content)
@@ -425,7 +430,9 @@ def _contains_unexpanded_reference(value: str) -> bool:
     return bool(_UNEXPANDED_REFERENCE_RE.search(value))
 
 
-def _extract_body_text(tokens: list[str], deadline: float | None = None) -> str | object:
+def _extract_body_text(
+    tokens: list[str], deadline: float | None = None, *, cwd: str | None = None,
+) -> str | object:
     """Best-effort: the literal body text this invocation would publish, or
     the ``_UNSCANNABLE`` sentinel if the body is sourced from stdin
     (``--body-file -`` / ``-F body=@-``, gh's stdin convention) or is an
@@ -460,7 +467,7 @@ def _extract_body_text(tokens: list[str], deadline: float | None = None) -> str 
             if token == flag and index + 1 < len(tokens):
                 if tokens[index + 1] == "-":
                     return _UNSCANNABLE
-                content = _read_bounded(tokens[index + 1], deadline=deadline)
+                content = _read_bounded(tokens[index + 1], deadline=deadline, cwd=cwd)
                 if content is None:
                     return _UNSCANNABLE
                 parts.append(content)
@@ -470,7 +477,7 @@ def _extract_body_text(tokens: list[str], deadline: float | None = None) -> str 
                 value = token[len(flag) + 1 :]
                 if value == "-":
                     return _UNSCANNABLE
-                content = _read_bounded(value, deadline=deadline)
+                content = _read_bounded(value, deadline=deadline, cwd=cwd)
                 if content is None:
                     return _UNSCANNABLE
                 parts.append(content)
@@ -480,14 +487,14 @@ def _extract_body_text(tokens: list[str], deadline: float | None = None) -> str 
             index += 2 if token in FILE_BODY_FLAGS else 1
             continue
         if token == "--input" and index + 1 < len(tokens):
-            result = _extract_input_json_body(tokens[index + 1], deadline)
+            result = _extract_input_json_body(tokens[index + 1], deadline, cwd=cwd)
             if result is _UNSCANNABLE:
                 return _UNSCANNABLE
             parts.append(result)
             index += 2
             continue
         if token.startswith("--input="):
-            result = _extract_input_json_body(token[len("--input=") :], deadline)
+            result = _extract_input_json_body(token[len("--input=") :], deadline, cwd=cwd)
             if result is _UNSCANNABLE:
                 return _UNSCANNABLE
             parts.append(result)
@@ -515,7 +522,7 @@ def _extract_body_text(tokens: list[str], deadline: float | None = None) -> str 
                 if value == "@-":
                     return _UNSCANNABLE
                 if value.startswith("@"):
-                    content = _read_bounded(value[1:], deadline=deadline)
+                    content = _read_bounded(value[1:], deadline=deadline, cwd=cwd)
                     if content is None:
                         return _UNSCANNABLE
                     parts.append(content)
@@ -556,7 +563,7 @@ def _publication_statements(command: str) -> list[list[str]]:
 
 def command_publishes_copilot_mention(
     command: str, *, statements: list[list[str]] | None = None,
-    deadline: float | None = None,
+    deadline: float | None = None, cwd: str | None = None,
 ) -> str | None:
     """Returns a deny-reason string if *command* should be blocked, else
     ``None``. Two distinct reasons: an actual ``@copilot`` mention, or a
@@ -564,7 +571,7 @@ def command_publishes_copilot_mention(
     for tokens in _publication_statements(command) if statements is None else statements:
         if deadline is not None and time.monotonic() >= deadline:
             return "unscannable"
-        body_text = _extract_body_text(tokens, deadline)
+        body_text = _extract_body_text(tokens, deadline, cwd=cwd)
         if deadline is not None and time.monotonic() >= deadline:
             return "unscannable"
         if body_text is _UNSCANNABLE:
@@ -575,6 +582,47 @@ def command_publishes_copilot_mention(
         if MENTION.search(body_text):
             return "mention"
     return None
+
+
+def adopting_harness(cwd: str | None, deadline: float) -> bool:
+    """Require project adoption; a globally installed payload is not consent."""
+    raw = cwd or os.environ.get("COPILOT_PROJECT_DIR")
+    if not isinstance(raw, str) or not raw:
+        return False
+    root = Path(raw)
+    if not root.is_absolute():
+        return False
+    root = root.resolve()
+    for directory in (root, *root.parents):
+        if time.monotonic() >= deadline:
+            return False
+        settings = directory / ".github" / "copilot"
+        enabled = {}
+        found = False
+        for name in ("settings.json", "settings.local.json"):
+            path = settings / name
+            if not path.is_file():
+                continue
+            found = True
+            text = _read_bounded(str(path), deadline=deadline, errors="strict")
+            if text is None:
+                return False
+            try:
+                value = json.loads(text)
+            except ValueError:
+                return False
+            if not isinstance(value, dict) or not isinstance(value.get("enabledPlugins", {}), dict):
+                return False
+            enabled.update(value.get("enabledPlugins", {}))
+        if found:
+            return any(
+                isinstance(key, str) and key.startswith("copilot-extensions-harness@")
+                and key.split("@", 1)[1] and value is True
+                for key, value in enabled.items()
+            )
+        if (directory / ".git").exists():
+            return False
+    return False
 
 
 def main() -> int:
@@ -603,16 +651,20 @@ def main() -> int:
         if isinstance(args, str):
             args = json.loads(args)
         command = args.get("command", "") if isinstance(args, dict) else ""
-        # Prefer an explicit cwd on the tool-call payload if the host
-        # provides one; fall back to this hook process's own cwd (which the
-        # CLI sets to match the session's current directory).
-        hook_cwd = data.get("cwd") or (args.get("cwd") if isinstance(args, dict) else None)
+        # Plugin process CWD may be its payload, not the calling workspace.
+        hook_cwd = (
+            data.get("cwd") or data.get("workingDirectory")
+            or (args.get("cwd") if isinstance(args, dict) else None)
+            or os.environ.get("COPILOT_PROJECT_DIR")
+        )
     except Exception:
         return 0
     if not isinstance(command, str):
         return 0
     statements = _publication_statements(command)
     if not statements:
+        return 0
+    if not adopting_harness(hook_cwd, deadline):
         return 0
     plugin_root = Path(
         os.environ.get("COPILOT_PLUGIN_ROOT")
@@ -626,7 +678,7 @@ def main() -> int:
         # at all, is never touched by this guard (fail open, not closed).
         return 0
     reason = command_publishes_copilot_mention(
-        command, statements=statements, deadline=deadline,
+        command, statements=statements, deadline=deadline, cwd=hook_cwd,
     )
     if reason == "mention":
         print(
@@ -671,5 +723,13 @@ def main() -> int:
     return 0
 
 
+def run_guard(*, wrapped: bool = False) -> int:
+    try:
+        return main()
+    except Exception:
+        print("[copilot-extensions-harness] mention guard unavailable; skipped", file=sys.stderr)
+        return 1 if wrapped else 0
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run_guard(wrapped=sys.argv[1:] == ["--wrapped"]))

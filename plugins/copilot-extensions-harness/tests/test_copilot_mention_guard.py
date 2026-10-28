@@ -35,6 +35,22 @@ def _load_guard():
     return module
 
 
+def _enable_harness(root):
+    settings = root / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(json.dumps({"enabledPlugins": {
+        "copilot-extensions-harness@copilot-extensions": True,
+    }}), encoding="utf-8")
+
+
+@pytest.fixture
+def adopted_harness(tmp_path, monkeypatch):
+    _enable_harness(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("COPILOT_PROJECT_DIR", str(tmp_path))
+    return tmp_path
+
+
 # ---------------------------------------------------------------------------
 # command_publishes_copilot_mention -- same logic as the facility-wide guard
 # this plugin's version was derived from; kept in lockstep intentionally.
@@ -432,23 +448,31 @@ def test_hook_is_a_noop_outside_the_target_repo(tmp_path: Path) -> None:
     assert result.stdout.strip() == ""
 
 
-def test_hook_denies_inside_the_target_repo() -> None:
+@pytest.mark.parametrize("adopted", [False, True])
+def test_hook_denies_inside_the_target_repo(tmp_path, adopted) -> None:
     """End-to-end: run from a real checkout of this plugin's own target
     repo (this repo itself), the guard must fire."""
     payload = json.dumps({
         "toolName": "bash",
         "toolArgs": {"command": 'gh pr comment 1 -R owner/repo --body "@copilot review"'},
     })
-    repo_root = PLUGIN.resolve().parents[1]
+    repo_root = tmp_path
+    if adopted:
+        _enable_harness(repo_root)
+    subprocess.run(["git", "init", "-q"], cwd=repo_root, check=True, creationflags=NO_WINDOW)
+    subprocess.run(["git", "remote", "add", "origin", "https://github.com/ThomasMichon/copilot-extensions.git"],
+                   cwd=repo_root, check=True, creationflags=NO_WINDOW)
     result = subprocess.run(
         [sys.executable, str(PLUGIN / "scripts" / "copilot-mention-guard.py")],
         input=payload, capture_output=True, text=True,
-        env={**os.environ, "COPILOT_PLUGIN_ROOT": str(PLUGIN)}, creationflags=NO_WINDOW,
+        env={**os.environ, "COPILOT_PLUGIN_ROOT": str(PLUGIN), "COPILOT_PROJECT_DIR": str(repo_root)}, creationflags=NO_WINDOW,
         cwd=str(repo_root),
     )
     assert result.returncode == 0
-    decision = json.loads(result.stdout)
-    assert decision["permissionDecision"] == "deny"
+    if adopted:
+        assert json.loads(result.stdout)["permissionDecision"] == "deny"
+    else:
+        assert result.stdout == ""
 
 
 @pytest.mark.parametrize("command", [
@@ -524,7 +548,7 @@ def test_deferred_import_is_charged_to_remaining_decision_budget(monkeypatch):
 ])
 @pytest.mark.parametrize("scoped", [True, False])
 def test_relevance_preserves_unknown_body_and_repository_scope(
-    monkeypatch, capsys, command, scoped,
+    monkeypatch, capsys, command, scoped, adopted_harness,
 ):
     guard = _load_guard()
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({
@@ -562,7 +586,7 @@ def test_remote_discovery_is_one_process_with_remaining_budget(monkeypatch):
     assert len(calls) == 1
 
 
-def test_expired_scope_budget_does_not_read_body(monkeypatch, capsys):
+def test_expired_scope_budget_does_not_read_body(monkeypatch, capsys, adopted_harness):
     guard = _load_guard()
     clock = [0.0]
     monkeypatch.setattr(guard.time, "monotonic", lambda: clock[0])
@@ -649,7 +673,7 @@ def test_repo_probe_preserves_fetch_url_rewrites_and_ignores_push_urls(tmp_path)
     assert guard.current_repo_candidates(str(tmp_path)) == ["example/target"]
 
 
-def test_local_relevance_preserves_file_input_without_literal_mention(tmp_path, monkeypatch, capsys):
+def test_local_relevance_preserves_file_input_without_literal_mention(tmp_path, monkeypatch, capsys, adopted_harness):
     guard = _load_guard()
     body = tmp_path / "body.txt"
     body.write_text("@copilot review", encoding="utf-8")
@@ -672,6 +696,7 @@ def test_local_relevance_preserves_file_input_without_literal_mention(tmp_path, 
 def test_native_hook_process_counts_and_latency(tmp_path, capsys, case):
     """Observe real CLI boundaries without executing the proposed gh command."""
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, creationflags=NO_WINDOW)
+    _enable_harness(tmp_path)
     config = tmp_path / ".git" / "config"
     with config.open("a", encoding="utf-8") as stream:
         for index in range(24):
@@ -687,7 +712,7 @@ def test_native_hook_process_counts_and_latency(tmp_path, capsys, case):
         "atexit.register(lambda: print(json.dumps(calls),file=sys.stderr));"
         "runpy.run_path(sys.argv[1],run_name='__main__')"
     )
-    env = {**os.environ, "COPILOT_PLUGIN_ROOT": str(PLUGIN)}
+    env = {**os.environ, "COPILOT_PLUGIN_ROOT": str(PLUGIN), "COPILOT_PROJECT_DIR": str(tmp_path)}
     cases = {
         "irrelevant": "git status --short",
         "relevant": "gh pr comment 1 --body-file -",
@@ -739,6 +764,7 @@ def test_native_hook_process_counts_and_latency(tmp_path, capsys, case):
 
 
 def test_hook_exits_with_blocked_file_reader(tmp_path):
+    _enable_harness(tmp_path)
     script = PLUGIN / "scripts" / "copilot-mention-guard.py"
     wrapper = """
 import runpy, sys, time
@@ -746,6 +772,7 @@ guard = runpy.run_path(sys.argv[1])
 scope = guard["main"].__globals__
 scope["target_repo_from_manifest"] = lambda *a: "o/r"
 scope["current_repo_matches"] = lambda *a, **kw: True
+scope["adopting_harness"] = lambda *a, **kw: True
 def blocked_open(*a, **kw):
     time.sleep(30)
 scope["open"] = blocked_open
@@ -780,7 +807,7 @@ def test_powershell_lookup_preserves_selection_without_cmdlet_pipelines(tmp_path
     for name in names:
         (tmp_path / name).write_text("@echo off\n", encoding="utf-8")
     hook = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["preToolUse"][0]["powershell"]
-    lookup = hook[:hook.index("& $py.Source")] + "if ($py) { Write-Output $py.Source }"
+    lookup = hook[:hook.index("try { $result =")] + "if ($py) { Write-Output $py.Source }"
     legacy = LEGACY_POWERSHELL_LOOKUP + "if (-not $py) { exit 0 }; Write-Output $py.Source"
     env = {
         **os.environ,
@@ -796,7 +823,7 @@ def test_powershell_lookup_preserves_selection_without_cmdlet_pipelines(tmp_path
         assert result.stdout.strip() == (str(tmp_path / expected) if expected else "")
 
 
-def test_hot_killswitch_restores_mention_guard(tmp_path, monkeypatch, capsys):
+def test_hot_killswitch_restores_mention_guard(tmp_path, monkeypatch, capsys, adopted_harness):
     guard = _load_guard()
     state = tmp_path / "pretool.json"
     monkeypatch.setenv("PRETOOL_KILLSWITCH_STATE_FILE", str(state))
@@ -824,3 +851,183 @@ def test_active_killswitch_returns_before_reading_input(tmp_path, monkeypatch):
             pytest.fail("active switch reached guard input")
     monkeypatch.setattr(guard.sys, "stdin", Unreadable())
     assert guard.main() == 0
+
+
+@pytest.mark.parametrize("adoption", ["missing", "disabled", "malformed", "enabled", "local-disabled"])
+def test_only_project_adopters_reach_repository_policy(tmp_path, monkeypatch, capsys, adoption):
+    guard = _load_guard()
+    settings = tmp_path / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    if adoption in {"enabled", "local-disabled"}:
+        _enable_harness(tmp_path)
+    elif adoption == "disabled":
+        settings.write_text('{"enabledPlugins":{"copilot-extensions-harness@copilot-extensions":false}}')
+    elif adoption == "malformed":
+        settings.write_text("{")
+    if adoption == "local-disabled":
+        settings.with_name("settings.local.json").write_text(
+            '{"enabledPlugins":{"copilot-extensions-harness@copilot-extensions":false}}')
+    global_home = tmp_path / "global-home"
+    global_settings = global_home / ".copilot" / "settings.json"
+    global_settings.parent.mkdir(parents=True)
+    global_settings.write_text('{"enabledPlugins":{"copilot-extensions-harness@copilot-extensions":true}}')
+    monkeypatch.setenv("HOME", str(global_home))
+    monkeypatch.setenv("USERPROFILE", str(global_home))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(guard, "current_repo_matches", lambda *a, **kw: True)
+    monkeypatch.setattr(guard, "target_repo_from_manifest", lambda *a: "o/r")
+    monkeypatch.setattr(guard.sys, "stdin", io.StringIO(json.dumps({
+        "toolName": "powershell", "cwd": str(tmp_path),
+        "toolArgs": {"command": 'gh pr comment 1 --body "@copilot review"'},
+    })))
+    assert guard.run_guard() == 0
+    output = capsys.readouterr().out
+    assert bool(output) == (adoption == "enabled")
+    if output:
+        assert json.loads(output)["permissionDecision"] == "deny"
+
+
+def test_adoption_stops_at_nested_repository_boundary(tmp_path):
+    guard = _load_guard()
+    _enable_harness(tmp_path)
+    nested = tmp_path / "nested"
+    (nested / ".git").mkdir(parents=True)
+    assert not guard.adopting_harness(str(nested), time.monotonic() + 1)
+    assert guard.adopting_harness(str(tmp_path / "child"), time.monotonic() + 1)
+
+
+def test_unexpected_guard_failure_is_a_successful_noop(monkeypatch, capsys):
+    guard = _load_guard()
+    def failure():
+        raise RuntimeError("private exception details")
+    monkeypatch.setattr(guard, "main", failure)
+    assert guard.run_guard() == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "skipped" in captured.err
+    assert "private exception details" not in captured.err
+
+
+@pytest.mark.parametrize("failure", ["missing", "crash", "caught"])
+@pytest.mark.parametrize("native_shell", ["powershell.exe", "pwsh", "bash"])
+def test_shipped_wrapper_fails_open_on_unavailable_guard(tmp_path, failure, native_shell):
+    shell = shutil.which(native_shell)
+    if shell is None:
+        pytest.skip(f"{native_shell} is unavailable")
+    if os.name == "nt" and native_shell == "bash":
+        pytest.skip("Windows bash may select an unrelated WSL environment")
+    payload = tmp_path / "payload"
+    (payload / "scripts").mkdir(parents=True)
+    if failure == "crash":
+        (payload / "scripts" / "copilot-mention-guard.py").write_text(
+            "import sys\nprint('invalid partial output')\nraise SystemExit(7)\n", encoding="utf-8")
+    if failure == "caught":
+        source = str(PLUGIN / "scripts" / "copilot-mention-guard.py")
+        (payload / "scripts" / "copilot-mention-guard.py").write_text(
+            "import runpy,sys\nns=runpy.run_path(" + repr(source) + ")\n"
+            + "def fail(): raise RuntimeError('private exception details')\n"
+            + "ns['run_guard'].__globals__['main']=fail\n"
+            + "raise SystemExit(ns['run_guard'](**({'wrapped':True} if '--wrapped' in sys.argv else {})))\n", encoding="utf-8")
+    hook = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["preToolUse"][0]
+    command = hook["bash" if native_shell == "bash" else "powershell"]
+    argv = [shell, "-c", command] if native_shell == "bash" else [
+        shell, "-NoProfile", "-NonInteractive", "-Command", command,
+    ]
+    env = {**os.environ, "COPILOT_PLUGIN_ROOT": str(payload),
+           "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", "")}
+    result = subprocess.run(argv, input="{}", capture_output=True, text=True, env=env,
+                            cwd=tmp_path, timeout=10, creationflags=NO_WINDOW)
+    assert result.returncode == 0, result.stderr
+    assert not result.stdout.strip()
+    assert "Traceback" not in result.stderr
+    assert "skipped" in result.stderr
+    assert "private exception details" not in result.stderr
+
+
+def test_plugin_process_directory_is_not_session_adoption(tmp_path, monkeypatch):
+    guard = _load_guard()
+    _enable_harness(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("COPILOT_PROJECT_DIR", raising=False)
+    assert not guard.adopting_harness(None, time.monotonic() + 1)
+    monkeypatch.setenv("COPILOT_PROJECT_DIR", str(tmp_path))
+    assert guard.adopting_harness(None, time.monotonic() + 1)
+
+
+@pytest.mark.parametrize("nested_adopted", [False, True])
+def test_explicit_tool_directory_precedes_project_fallback(tmp_path, monkeypatch, capsys, nested_adopted):
+    guard = _load_guard()
+    _enable_harness(tmp_path)
+    nested = tmp_path / "nested"
+    (nested / ".git").mkdir(parents=True)
+    if nested_adopted:
+        _enable_harness(nested)
+    monkeypatch.setenv("COPILOT_PROJECT_DIR", str(tmp_path))
+    inspected = []
+    def matches(target, cwd, **kwargs):
+        inspected.append(cwd)
+        return True
+    monkeypatch.setattr(guard, "current_repo_matches", matches)
+    monkeypatch.setattr(guard, "target_repo_from_manifest", lambda *a: "o/r")
+    monkeypatch.setattr(guard.sys, "stdin", io.StringIO(json.dumps({
+        "toolName": "powershell", "toolArgs": {
+            "cwd": str(nested), "command": 'gh pr comment 1 --body "@copilot review"',
+        },
+    })))
+    assert guard.run_guard() == 0
+    output = capsys.readouterr().out
+    assert bool(output) == nested_adopted
+    assert inspected == ([str(nested)] if nested_adopted else [])
+
+
+@pytest.mark.parametrize("body_args", [
+    "--body-file body.txt", "--body-file=body.txt", "-F body=@body.txt",
+    "--input body.json", "--input=body.json",
+])
+@pytest.mark.parametrize("mention_in_workspace", [False, True])
+def test_relative_body_reads_use_resolved_workspace(tmp_path, monkeypatch, capsys, body_args, mention_in_workspace):
+    guard = _load_guard()
+    workspace = tmp_path / "workspace"
+    process = tmp_path / "process"
+    workspace.mkdir()
+    process.mkdir()
+    _enable_harness(workspace)
+    for directory, mention in ((workspace, mention_in_workspace), (process, not mention_in_workspace)):
+        text = "@copilot review" if mention else "safe body"
+        (directory / "body.txt").write_text(text, encoding="utf-8")
+        (directory / "body.json").write_text(json.dumps({"body": text}), encoding="utf-8")
+    monkeypatch.chdir(process)
+    monkeypatch.setattr(guard, "current_repo_matches", lambda *a, **kw: True)
+    monkeypatch.setattr(guard, "target_repo_from_manifest", lambda *a: "o/r")
+    monkeypatch.setattr(guard.sys, "stdin", io.StringIO(json.dumps({
+        "cwd": str(workspace), "toolName": "bash", "toolArgs": {
+            "command": ("gh pr comment 1 " if body_args.startswith("--body-file")
+                        else "gh api repos/o/r/issues/1/comments --method POST ") + body_args,
+        },
+    })))
+    assert guard.run_guard() == 0
+    output = capsys.readouterr().out
+    assert bool(output) == mention_in_workspace
+
+
+@pytest.mark.parametrize("target_adopted", [False, True])
+def test_linked_workspace_uses_physical_repository_boundary(tmp_path, target_adopted):
+    guard = _load_guard()
+    outer = tmp_path / "outer"
+    _enable_harness(outer)
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    target = checkout / "subdirectory"
+    target.mkdir()
+    if target_adopted:
+        _enable_harness(checkout)
+    link = outer / "linked-subdirectory"
+    if os.name == "nt":
+        created = subprocess.run(
+            [os.environ["COMSPEC"], "/c", "mklink", "/J", str(link), str(target)],
+            capture_output=True, text=True, timeout=10, creationflags=NO_WINDOW,
+        )
+        assert created.returncode == 0, (created.stdout, created.stderr)
+    else:
+        link.symlink_to(target, target_is_directory=True)
+    assert guard.adopting_harness(str(link), time.monotonic() + 1) == target_adopted
