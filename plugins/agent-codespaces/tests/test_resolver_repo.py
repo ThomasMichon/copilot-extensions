@@ -108,6 +108,19 @@ class TestResolveCrossRepo:
     """#174: resolve(<name>, repo=..., repo_remote=...) builds the launch cmd."""
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("shell", ["bash", "sh", "dash", "zsh"])
+    async def test_shell_named_checkout_is_not_a_shell_wrapper(self, shell, _patched):
+        workspace = f"/workspaces/{shell}"
+        _patched(CodespacesConfig(workspace_folder=workspace))
+
+        target = await CodespaceResolver().resolve_spec("cs-1")
+
+        assert target["codespace"]["workspace_folder"] == workspace
+        assert target["codespace"]["acp_command"] == guarded_launch(
+            f"cd {workspace} && {_COPILOT}", workspace,
+        )
+
+    @pytest.mark.asyncio
     async def test_changed_config_is_rechecked_before_writing_launch(self, _patched, monkeypatch, tmp_path):
         from agent_codespaces import resolver
 

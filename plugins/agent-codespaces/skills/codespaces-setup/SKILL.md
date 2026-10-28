@@ -277,9 +277,11 @@ such grants from an owned override through its normal configuration workflow;
 do not replace shared configuration merely to get a launch through.
 The check decodes POSIX quoting/escaping and literal `sh`/`bash`/`dash`/`zsh`
 `-c`, `-lc` and `-cl` payloads, up to eight nested wrappers. Malformed quoting,
-opaque shell invocations and dynamic nested payloads are refused. Arbitrary custom
-executables or computed behavior cannot be established by this check. ACP
-permission requests still require the client's explicit correlated answer;
+opaque shell invocations, dynamic nested payloads and backslash-newline
+continuations are refused. Literal command-position `cd` operands remain
+directory paths even when named after a shell; `env -C cd` is not that exception.
+Arbitrary custom executables or computed behavior cannot be established by this
+check. ACP permission requests still require the client's explicit correlated answer;
 headless operation is not approval.
 
 ### `credentials`

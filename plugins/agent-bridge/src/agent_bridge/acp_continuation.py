@@ -254,8 +254,7 @@ def capture_idle_continuation(
         or client._idle_operations or client._prompt_in_flight or client._prompt_lock.locked()
         or client._loading_session or client._out_of_turn_open
         or client._out_of_turn_settle_handle is not None
-        or client._pending_permission_future is not None or client._pending_permission_id is not None
-        or client._pending_permission_options or client._pending_elicitations
+        or client._pending_permissions or client._pending_elicitations
         or client._pending_ask_user_meta or client._stderr_task is not None
         or client._idle_event_log is not event_log
         or event_log._session_id != host.session_id
@@ -326,8 +325,7 @@ def require_prepared_continuation(
         or client._prompt_in_flight or client._prompt_lock.locked()
         or client._loading_session or client._out_of_turn_open
         or client._out_of_turn_settle_handle is not None
-        or client._pending_permission_future is not None or client._pending_permission_id is not None
-        or client._pending_permission_options or client._pending_elicitations
+        or client._pending_permissions or client._pending_elicitations
         or client._pending_ask_user_meta or client._stderr_task is not None
         or client._connection._conn._next_request_id != state.host.acp_wire.next_client_request_id
         or _encode(_client_snapshot(client, state.host, cursor)) != _encode(payload)

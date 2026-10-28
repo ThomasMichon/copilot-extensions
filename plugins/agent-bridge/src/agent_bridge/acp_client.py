@@ -352,9 +352,9 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         )
         self._prompt_error: str | None = None
         self._stop_reason: str | None = None
-        self._pending_permission_future: asyncio.Future[RequestPermissionResponse] | None = None
-        self._pending_permission_id: str | None = None
-        self._pending_permission_options: set[str] = set()
+        self._pending_permissions: dict[
+            str, tuple[asyncio.Future[RequestPermissionResponse], set[str]]
+        ] = {}
 
         # Parked ``ask_user`` elicitations, keyed by tool_call_id. Each future
         # resolves to a CreateElicitationResponse once a human answers (via
@@ -699,12 +699,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         """
         if self._remote_transport is not None:
             self._remote_cancel_answers()
-        # Cancel any pending permission
-        if self._pending_permission_future and not self._pending_permission_future.done():
-            self._pending_permission_future.set_result(
-                RequestPermissionResponse(outcome={"outcome": "cancelled"})
-            )
-            self._pending_permission_future = None
+        self._cancel_pending_permissions()
 
         # Drop any pending out-of-turn settle timer so it can't fire after
         # teardown (it would touch a closed session's event log).
@@ -1043,26 +1038,19 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         request_id = uuid.uuid4().hex
         loop = asyncio.get_running_loop()
         future: asyncio.Future[RequestPermissionResponse] = loop.create_future()
-        self._pending_permission_future = future
-        self._pending_permission_id = request_id
-        self._pending_permission_options = {
+        option_ids = {
             str(option["optionId"])
             for option in option_dicts
             if option.get("optionId")
         }
+        self._pending_permissions[request_id] = (future, option_ids)
         try:
             self._emit("permission_request", {
                 "request_id": request_id,
                 "title": title,
                 "options": option_dicts,
             })
-        except Exception:
-            self._pending_permission_future = None
-            self._pending_permission_id = None
-            self._pending_permission_options = set()
-            raise
-        self._completion_event.set()
-        try:
+            self._completion_event.set()
             result = await future
             outcome = getattr(result, "outcome", None)
             if hasattr(outcome, "model_dump"):
@@ -1074,33 +1062,35 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
             })
             return result
         finally:
-            if self._pending_permission_future is future:
-                self._pending_permission_future = None
-                self._pending_permission_id = None
-                self._pending_permission_options = set()
+            self._pending_permissions.pop(request_id, None)
+
+    def _cancel_pending_permissions(self) -> None:
+        for future, _options in self._pending_permissions.values():
+            if not future.done():
+                future.set_result(
+                    RequestPermissionResponse(outcome={"outcome": "cancelled"})
+                )
+        self._pending_permissions.clear()
 
     def has_pending_permission(self, request_id: str) -> bool:
-        """Whether ``request_id`` is the currently answerable permission."""
+        """Whether ``request_id`` is an answerable permission."""
         if self._remote_transport is not None:
             entry = self._remote_answers.get(request_id)
             return bool(self.is_running and entry and not entry["future"].done())
-        return bool(
-            request_id
-            and request_id == self._pending_permission_id
-            and self._pending_permission_future
-            and not self._pending_permission_future.done()
-        )
+        entry = self._pending_permissions.get(request_id)
+        return bool(entry and not entry[0].done())
 
     def resolve_permission(self, request_id: str, option_id: str) -> bool:
-        """Resolve the current manual permission request with one offered option."""
+        """Resolve one manual permission request with one of its offered options."""
         if self._remote_transport is not None:
             return self._remote_answer_permission(request_id, option_id)
-        if not self.has_pending_permission(request_id):
+        entry = self._pending_permissions.get(request_id)
+        if entry is None or entry[0].done():
             return False
-        if option_id not in self._pending_permission_options:
+        future, option_ids = entry
+        if option_id not in option_ids:
             raise ValueError(f"Unknown permission option {option_id}")
-        assert self._pending_permission_future is not None
-        self._pending_permission_future.set_result(
+        future.set_result(
             RequestPermissionResponse(
                 outcome={"outcome": "selected", "optionId": option_id}
             )
@@ -1260,9 +1250,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         self._prompt_complete = False
         self._prompt_error = None
         self._stop_reason = None
-        self._pending_permission_future = None
-        self._pending_permission_id = None
-        self._pending_permission_options = set()
+        self._cancel_pending_permissions()
         self._completion_event = asyncio.Event()
 
     def _build_turn_result(self) -> dict[str, Any]:

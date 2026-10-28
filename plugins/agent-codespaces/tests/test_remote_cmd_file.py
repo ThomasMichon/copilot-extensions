@@ -75,6 +75,9 @@ class TestBuildSpawnCommand:
         r"--allow-tool=\*", '--al""low-all',
         r'&& bash -lc "copilot --acp --permission-mode=\"bypassPermissions\""',
         r"""&& bash -lc 'sh -c "copilot --acp --allow-tool=\\*"'""",
+        r"""&& cd -- /workspaces/bash && env bash -lc 'copilot --acp --allow-tool=\*'""",
+        r"""&& env -C cd bash -lc 'copilot --acp --allow-tool=\*'""",
+        r"""&& env -C cd -- /bin/bash -lc 'copilot --acp --allow-tool=\*'""",
     ])
     def test_refuses_permission_bypass_before_dispatch_side_effects(self, option, tmp_path, monkeypatch):
         dispatch = tmp_path / "dispatch"
@@ -91,6 +94,8 @@ class TestBuildSpawnCommand:
 
     @pytest.mark.parametrize("payload", [
         "copilot --acp '", 'bash -lc "$ACP_COMMAND"', "bash launch.sh",
+        "copilot --acp --stdio --allow-" + "\\\n" + "all",
+        "bash -lc 'copilot --acp --stdio --allow-" + "\\\n" + "all'",
     ])
     def test_refuses_uninspectable_shell_before_dispatch(self, payload, tmp_path, monkeypatch):
         dispatch = tmp_path / "dispatch"
