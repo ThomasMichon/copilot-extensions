@@ -227,6 +227,12 @@ and [repair register](reconstruction-findings.md) retain the evidence and limits
 - [ ] Prepare launch arguments/environment before the stable wrapper; copy
   its self-contained platform shell into launch-owned storage outside both
   removable runtime/config roots, with installer/pruning ownership explicit.
+  - [x] Copy canonical Windows setup assets for actual seed-free and
+    terminal-fallback cold embodiment without taking over prompt/admission
+    custody or adding a Manager health probe (#9390).
+  - [ ] Move prepared Windows pane argument manifests and their receipts
+    outside removable runtimes while retaining legacy transport, scoped
+    cleanup and startup grace.
 - [ ] Resolve attributable, installation-scoped start/end entry points afresh
   at each boundary; no cached runtime Python, daemon endpoint or imported
   installed helper survives merely to wait.
@@ -445,6 +451,67 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   POSIX setup/backend lifetime or close fast-exit, stdin/TTY/signal, release,
   live removal, standby or selected-host gates.
 
+### 2026-10-28 - Launch-owned Windows argument handoffs
+
+- Continued the same runtime-removal preflight gap without changing the
+  uninstaller's active-consumer refusal. Both Windows pane producers still
+  placed their one-shot argv manifest under the engine's removable runtime,
+  even after copying the launcher and wrapper into execution-owned state.
+- Prepared production panes now use the copied shell's own `pane-args`
+  directory for the manifest and optional receipt. Legacy construction keeps
+  its prior transport. Consumption and receipt schemas remain unchanged;
+  startup arguments retained by the setup process are a separate open boundary.
+- Cleanup matches the owning launcher and refuses indirect ancestors.
+  Producers sweep only their own directory; the existing monitor also expires
+  this project's UUID-scoped handoffs after the existing 24-hour startup grace,
+  without reclaiming copied scripts or execution state.
+- The first contained engine selection passed 56 controls. The full Manager
+  consumer packet reached 42 completed tests without an assertion failure
+  before the runner's 180-second aggregate budget expired. The bounded rerun
+  uses a larger test-runner budget, not changed production deadlines.
+- The complete Manager rerun exposed two stale fixture assumptions at the
+  existing mux-admission boundary: an extracted retry fixture omitted its
+  creation-lease helpers, and a pre-lease manifest-write failure still expected
+  owned-session teardown. The focused repairs supply a disposable lease and
+  preserve the correct no-teardown behavior before admission; production
+  admission and cleanup semantics are unchanged.
+- Final contained validation: 60 engine controls passed; all 54 selected
+  Manager consumer controls passed across the complete packet and the two
+  repaired-control rerun. Three explicitly opt-in real-PSMux controls stayed
+  skipped; they are not claimed as live acceptance. Ruff, diff checking and
+  the 13-plugin install contract passed. The native PowerShell consumer covers
+  fresh disposable launch storage and literal transport, not supported product
+  uninstall or real Copilot/TTY survival. Selected-host effects remain held
+  until the separate rooted setup-argument dependency is qualified.
+- Publication as #9407 exposed the oversized dispatcher ratchet: adding the
+  optional storage-selection argument grew `sessions.py` by three lines.
+  Selection now stays entirely inside its existing pane-transport owner,
+  recognizing only this project's UUID-scoped copied shell directory and
+  retaining legacy storage otherwise. The dispatcher is unchanged from the
+  base; neither the size baseline nor the transport API is widened. The
+  full-tree module-size audit and Ruff pass; the post-correction engine packet
+  passed 61 controls on the rebased source. Required CI and a fresh review
+  remain publication gates.
+- Review identified a machine-wide cleanup gap: the sweep used only ambient
+  project context, leaving abandoned manifests in other registered projects
+  unreclaimed. The monitor entry point now reuses the existing registered-project
+  inventory and passes explicit tracking roots through enumeration and
+  ownership checks without switching active project context. Independent
+  project failures remain isolated, and inventory failure preserves legacy
+  expiry. New controls cover unset/unrelated context, two projects and an
+  unregistered negative control. This is a cleanup correction, not new launch
+  admission or installation-removal authority.
+- Post-review contained engine validation passes 65 controls, including the
+  actual monitor sweep entry point and the new cross-project/failure controls.
+  The already-passing 54 Manager consumer controls are unaffected.
+- Documentation impact: updated the authoritative launch architecture and
+  test portfolio. This closes part of the existing installation-independent
+  intent and follows the same launch/state owner; no new lifecycle authority,
+  service, CLI protocol or version requirement is introduced.
+- No installed rollout, task-trigger change, host removal or live-session
+  mutation was performed for this source slice. The parent effort remains
+  Active until its production and actual installation-survival gates pass.
+
 ### 2026-10-28 - Cold embodiment setup-asset gap
 
 - Production tracing isolated a separate actual consumer: cold `embody` builds
@@ -474,8 +541,11 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   probe while retaining the existing pane-construction health selection and
   finite native activation's peer check. A deterministic underlying-probe count
   control covers healthy and timeout results. The expanded final Windows
-  shell/embody/resume/Manager packet passed all 134 tests; fresh review of the
-  correction remains pending.
+  shell/embody/resume/Manager packet passed all 134 tests. Fresh Copilot
+  approval on `ec700cb72f`, resolved feedback and required green CI preceded
+  the managed merge of #9390 as
+  `6ebf69e11d8d31d0dd97f5e5330bdb575dfa35d7`. This is merged source, not a
+  released or installed capability claim.
 - Supported removal remains conservatively blocked on rooted process
   arguments. A mux retains its consumed one-shot manifest path in startup
   argv; a seed-free setup's post-backend tail uses loaded code and Git, but
@@ -483,6 +553,13 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   exemption. No removal guard, live session or task trigger was changed.
   Proper consumer admission and the same-process clean-middle proof remain
   open parent gates, alongside the previously recorded partial update.
+- Re-read the effort's Plan and Validation Plan after merge. The next bounded
+  stretch traces and migrates remaining installation-root startup data through
+  existing launch-owned handoffs: both pane manifest constructors still name
+  installed `pane-args`, and setup startup argv still carries runtime-root
+  arguments. Preserve receipt/cleanup ownership and test actual consumer
+  lifetimes before admitting removal; do not weaken the generic guard or
+  treat file copying as the parent clean-middle proof. The effort stays Active.
 
 ### 2026-10-28 - Native witness and generated-cache removal prerequisite
 
