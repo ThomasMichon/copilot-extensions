@@ -31,6 +31,7 @@ from packaging.version import InvalidVersion, Version
 from seasoned_public_feed import DEFAULT_MIN_AGE_DAYS, _default_fetch
 from seasoned_uv import _bundled_dbus_next
 from standalone_consumers import local_dependency_source
+from python_project_inventory import contained_path as _contained_path, manifests as manifests
 
 MIN_AGE_SECONDS = DEFAULT_MIN_AGE_DAYS * 86400
 _SourceTrees = dict[Path, tuple[str, ast.Module]]
@@ -48,18 +49,6 @@ class Declaration:
     ecosystem: str = "python"
 
 
-def manifests(root: Path) -> list[Path]:
-    """Canonical projects, including standalone/server projects, not vendor copies."""
-    paths = set(root.glob("*/pyproject.toml"))
-    paths.update(root.glob("libs/*/pyproject.toml"))
-    for directory in ("plugins", "services"):
-        paths.update(
-            p for p in (root / directory).rglob("pyproject.toml")
-            if not {"libs", ".venv", "node_modules", "__pycache__"} & set(p.relative_to(root).parts)
-        )
-    return sorted(paths)
-
-
 def _toml(path: Path) -> dict:
     with path.open("rb") as stream:
         return tomllib.load(stream)
@@ -67,18 +56,10 @@ def _toml(path: Path) -> dict:
 
 def contained_path(path: Path, root: Path) -> Path:
     """Require real repository entries, not escaping/repointed links or junctions."""
-    lexical = Path(os.path.abspath(path))
-    if not lexical.is_relative_to(root):
-        raise DeclarationError("source path escapes the repository")
-    current = lexical
-    while current != root:
-        if current.is_symlink() or getattr(current, "is_junction", lambda: False)():
-            raise DeclarationError("repository source path traverses a symlink or junction")
-        current = current.parent
-    resolved = lexical.resolve()
-    if not resolved.is_relative_to(root):
-        raise DeclarationError("resolved source path escapes the repository")
-    return resolved
+    try:
+        return _contained_path(path, root)
+    except ValueError as exc:
+        raise DeclarationError(str(exc)) from exc
 
 
 def _python_declarations(path: Path, data: dict) -> list[Declaration]:

@@ -4864,6 +4864,45 @@ Wire it as a `pre-push` hook (see `tools/hooks/pre-push`, which also runs
 if any privately-configured internal identifier leaks into the tree; it no-ops
 unless a denylist is configured, see the agent-codespaces README "Local
 identifier guard").
+## Consolidated first-party core artifact
+
+`bundle/core.json` selects the `core` composition in candidate promotions.
+Candidates without that marker retain the existing plugin/standalone artifact
+set. The core is an additional schema-5 manifest and ZIP in the existing
+`python-artifacts.json` index, identified by `composition:core` and the
+marketplace's existing `metadata.version`; it is not a dummy Python package.
+The existing immutable publisher and pinned promotion attestation apply.
+
+The canonical project inventory and runtime-root selector live in
+`tools/python_project_inventory.py`. Core includes plugin and standalone
+runtime roots, their selected extras and all reachable canonical first-party
+distributions. Index's service and engine environments remain separate.
+Conditional dependencies are retained as declarations, not evaluated on the
+build host. One locked toolchain builds each canonical distribution once
+through the same wheel-construction path used by individual artifacts.
+Standalone setup admission, injected resources and wheel/source checks still
+apply to their members.
+
+The manifest binds roots, extras, conditions, dependency edges, canonical
+project paths, source/resource hashes and the existing marketplace version.
+Promotion independently re-derives that closure before publication and refuses
+missing, duplicate, substituted or changed projects. An artifact-mode runtime
+profile bound to this manifest must include **every** first-party wheel,
+including shared libraries; legacy individual manifests retain their existing
+optional-library binding.
+
+The existing CLI can build this artifact explicitly:
+
+```bash
+python tools/build_python_artifacts.py core --core --out-dir <outside-source-directory>
+```
+
+Its existing toolchain-source, seasoning and shared-toolchain options are
+unchanged. This artifact contains no third-party wheels and performs no runtime
+dependency resolution. It does not publish the separate complete delivery
+envelope, approve a runtime profile, enable an installer/updater, remove an
+origin qualification or migrate a service.
+
 ## Compiler-free daemon-instance artifact construction
 
 The shared `agent-procutil` Linux lifetime owner is standard-library Python,
