@@ -20,6 +20,8 @@ when present.  These tests pin that contract: the flat consumer must receive an
 from __future__ import annotations
 
 import json
+import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -115,6 +117,60 @@ def test_bash_launcher_avoids_bash4_mapfile():
     assert "UPDATE_ARGV" not in text and "_RARGV" not in text
     assert '${_project_args[@]+"${_project_args[@]}"}' in text
     assert '${_reconcile_project[@]+"${_reconcile_project[@]}"}' in text
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Native Bash pane environment contract")
+@pytest.mark.parametrize("ahp", [False, True])
+@pytest.mark.parametrize("populated", [False, True])
+def test_shell_pane_environment_preserves_literal_values_and_ahp_exclusions(
+    tmp_path, ahp, populated,
+):
+    source = _LAUNCH_SCRIPT.read_text(encoding="utf-8")
+    start = source.index("    # Export profile env vars")
+    exports = source[start:source.index("    # Build command array from JSON", start)]
+    start = source.index("        TMUX_ENV_FLAGS=()")
+    flags = source[start:source.index("        # Pane wrapper", start)]
+    selected = {
+        "BASH_ENV": "", "FIXTURE_EMPTY": "", "FIXTURE_EQUALS": "one=two",
+        "FIXTURE_LITERAL": "two words ' \" \\ $() `literal` \u03a9\ncontinued\n\n",
+        "GH_TOKEN": "fixture-only", "GITHUB_TOKEN": "fixture-only",
+        "AGENT_WORKTREES_AHP_AUTH_TOKEN": "fixture-only",
+    } if populated else {}
+    code = "\n".join([
+        "set -euo pipefail",
+        f"PYTHON={shlex.quote(sys.executable)}",
+        f"JSON={shlex.quote(json.dumps({'env': selected}))}",
+        exports,
+        f"_AHP_RESUME_AVAILABLE={int(ahp)}",
+        "COPILOT_CLI_ENABLED_FEATURE_FLAGS=selected-features",
+        "SETUP_LOG='log with spaces'; LAUNCH_ID=fixture-launch",
+        flags,
+        "tmux() {",
+        '  "$PYTHON" -c \'import json,os,sys; print(json.dumps({'
+        '"argv":sys.argv[1:],"exported":{k:os.environ[k] for k in '
+        'json.loads(sys.argv[1])}}))\' "$JSON_KEYS" "$@"',
+        "}",
+        f"JSON_KEYS={shlex.quote(json.dumps(list(selected)))}",
+        'tmux "${TMUX_ENV_FLAGS[@]}"',
+    ])
+    environment = dict(os.environ)
+    environment.pop("BASH_ENV", None)
+    result = subprocess.run(
+        ["/bin/bash", "-c", code], cwd=tmp_path, env=environment,
+        capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    observed = json.loads(result.stdout)
+    assert observed["exported"] == selected
+    expected = {"WORKTREE_SETUP_LOG": "log with spaces", "WORKTREE_LAUNCH_ID": "fixture-launch"}
+    expected.update({
+        key: value for key, value in selected.items()
+        if not ahp or key not in {"GH_TOKEN", "GITHUB_TOKEN", "AGENT_WORKTREES_AHP_AUTH_TOKEN"}
+    })
+    if ahp:
+        expected["COPILOT_CLI_ENABLED_FEATURE_FLAGS"] = "selected-features"
+    arguments = observed["argv"][1:]
+    assert arguments == [part for key, value in expected.items() for part in ("-e", f"{key}={value}")]
 
 
 def test_powershell_launcher_contains_unwrap():

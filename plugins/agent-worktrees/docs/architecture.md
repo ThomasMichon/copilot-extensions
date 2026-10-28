@@ -777,10 +777,11 @@ the server/session environment can differ from the planning client. The
 literal Python pane builder can forward an explicit empty `BASH_ENV` override;
 a nonempty one retains legacy ownership. Opaque shell-rendered creation,
 JSON and Launcher mux plans always retain the legacy owner, even with an
-explicit empty override: Manager's shell renderer currently passes the shell
-quotation characters literally. Correct literal forwarding and qualification
-of that Manager path remain pending under #8669; this fence does not fix its
-general environment quoting or establish installation survival for that path.
+explicit empty override: older Manager shell renderers pass the shell
+quotation characters literally, and a newer source file does not establish
+which renderer actually executes. Qualification and compatible migration of
+that Manager path remain pending under #8669; corrected literal forwarding
+alone does not remove this fence or establish installation survival.
 Plans containing non-UTF-8 POSIX command or record-path bytes also retain that
 owner before discovery or copying; the literal reply remains strict UTF-8.
 Direct NUL preparation with such arguments refuses before runtime selection or
