@@ -81,6 +81,67 @@ def test_service_env_overlay_matches_native_key_semantics(tmp_path, monkeypatch,
         assert env["Agent_Dispatch_Host"] == "127.0.0.2"
 
 
+@pytest.mark.parametrize("windows_keys", [False, True])
+@pytest.mark.parametrize("reference", ["$FIXTURE_ROOT", "${FIXTURE_ROOT}", "%FIXTURE_ROOT%"])
+def test_service_env_expands_queue_path_from_its_captured_mapping(
+    tmp_path, monkeypatch, windows_keys, reference,
+):
+    from agent_dispatch import install_paths
+
+    monkeypatch.setattr(install_paths, "os", SimpleNamespace(
+        **{**vars(os), "name": "nt" if windows_keys else "posix"},
+    ))
+    monkeypatch.setenv("FIXTURE_ROOT", str(tmp_path / "unrelated-caller"))
+    selected = str(tmp_path / "durable-root")
+    (tmp_path / "service.env").write_text(
+        f"FIXTURE_ROOT={selected}\nAGENT_DISPATCH_DB={reference}/tasks.db\n",
+    )
+    env = {"FIXTURE_ROOT": str(tmp_path / "captured-before-overlay")}
+    install_paths.apply_service_env_overlay(env, tmp_path)
+    expected = selected if windows_keys or reference != "%FIXTURE_ROOT%" else reference
+    assert env["AGENT_DISPATCH_DB"] == f"{expected}/tasks.db"
+    assert os.environ["FIXTURE_ROOT"] == str(tmp_path / "unrelated-caller")
+
+
+@pytest.mark.parametrize("windows_keys", [False, True])
+@pytest.mark.parametrize("value", [
+    "$FIXTURE_ROOT", "${FIXTURE_ROOT}", "%FIXTURE_ROOT%",
+    "$$FIXTURE_ROOT", "%%FIXTURE_ROOT%%", "'$FIXTURE_ROOT'",
+    "'unclosed $FIXTURE_ROOT", '"$FIXTURE_ROOT"', "${FIXTURE_UNKNOWN}",
+    "%FIXTURE_UNKNOWN%", "$FIXTURE_ROOT-tail", "${FIXTURE_ROOT}/$FIXTURE_UNKNOWN",
+    "$FIXTURE_ROOT/${FIXTURE_ROOT}", "$FIXTURE_ROOT$", "${FIXTURE_ROOT", "%FIXTURE_ROOT",
+])
+def test_captured_environment_expansion_preserves_native_syntax(
+    monkeypatch, windows_keys, value,
+):
+    import ntpath
+    import posixpath
+
+    from agent_dispatch import install_paths
+
+    monkeypatch.setenv("FIXTURE_ROOT", "expanded with $FIXTURE_UNKNOWN")
+    monkeypatch.delenv("FIXTURE_UNKNOWN", raising=False)
+    env = dict(os.environ)
+    expected = (ntpath if windows_keys else posixpath).expandvars(value)
+    monkeypatch.setattr(install_paths, "os", SimpleNamespace(
+        **{**vars(os), "name": "nt" if windows_keys else "posix"},
+    ))
+    assert install_paths._expand_service_env_value(value, env) == expected
+
+
+def test_windows_expansion_uses_case_insensitive_snapshot_names(tmp_path, monkeypatch):
+    from agent_dispatch import install_paths
+
+    monkeypatch.setattr(install_paths, "os", SimpleNamespace(**{**vars(os), "name": "nt"}))
+    (tmp_path / "service.env").write_text(
+        "Fixture_Root=captured\n"
+        "AGENT_DISPATCH_DB=%fixture_root%/${fixture_root}/$fixture_root/tasks.db\n",
+    )
+    env = {}
+    install_paths.apply_service_env_overlay(env, tmp_path)
+    assert env["AGENT_DISPATCH_DB"] == "captured/captured/captured/tasks.db"
+
+
 def test_cutover_spawn_passive_applies_service_env_overlay(tmp_path, monkeypatch, daemon_calls):
     """The actual ``spawn_passive`` closure inside ``_cmd_cutover`` must call
     through to the shared overlay -- not just the extracted helper in
@@ -234,7 +295,10 @@ def test_cutover_honors_durable_host_from_service_env(tmp_path, monkeypatch, dae
     (install_dir / "service.env").write_text(
         'AGENT_DISPATCH_CONTROL_TOKEN_COMMAND=vault get "Agent-Dispatch Control Token" password\n'
         "AGENT_DISPATCH_HOST=10.0.0.5\n"
+        f"FIXTURE_QUEUE_ROOT={install_dir}\n"
+        "AGENT_DISPATCH_DB=${FIXTURE_QUEUE_ROOT}/tasks.db\n"
     )
+    monkeypatch.setenv("FIXTURE_QUEUE_ROOT", str(tmp_path / "unrelated-caller"))
     monkeypatch.setattr("agent_dispatch.install_paths.install_dir", lambda: install_dir)
     monkeypatch.delenv("AGENT_DISPATCH_HOST", raising=False)
     monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(tmp_path / "routing"))
@@ -245,6 +309,16 @@ def test_cutover_honors_durable_host_from_service_env(tmp_path, monkeypatch, dae
     monkeypatch.setattr(main_mod, "_reap_superseded_coordinators", lambda *_a, **_k: None)
 
     captured: dict = {}
+    from agent_dispatch import config
+
+    load_config = config.load_config
+
+    def captured_config():
+        cfg = load_config()
+        captured["db_path"] = cfg.db_path
+        return cfg
+
+    monkeypatch.setattr(config, "load_config", captured_config)
 
     class _FakeResult:
         ok = True
@@ -273,8 +347,10 @@ def test_cutover_honors_durable_host_from_service_env(tmp_path, monkeypatch, dae
     assert exit_code == 0
 
     assert captured["bind"] == "10.0.0.5"
+    assert captured["db_path"] == f"{install_dir}/tasks.db"
     captured["spawn_passive"](4321)
     assert len(daemon_calls) == 1
-    cmd, _kwargs = daemon_calls[0]
+    cmd, options = daemon_calls[0]
+    assert options["env"]["AGENT_DISPATCH_DB"] == captured["db_path"]
     assert "--host" in cmd
     assert cmd[cmd.index("--host") + 1] == "10.0.0.5"

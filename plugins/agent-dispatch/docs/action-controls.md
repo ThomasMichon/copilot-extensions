@@ -85,6 +85,11 @@ An explicitly selected custom routing directory remains supported; an overlay
 cannot replace or clear it to retarget an already admitted attempt. Lock,
 recovery, routing publication and replacement environment use the same captured
 target rather than resolving ambient routing again mid-cutover.
+Variable references in durable pins resolve against that overlay snapshot,
+including earlier pins in the file, not the triggering process's unrelated
+environment. POSIX dollar references and Windows dollar/percent references keep
+their native quoting, escape and unknown-variable behavior without temporarily
+rewriting process state.
 Internal conditional callers must supply the target's captured `install_root`
 alongside its captured `routing_dir` and conditional request. A missing policy
 root is an explicit refusal, not permission to use the caller's installation.

@@ -459,3 +459,27 @@ Initial tests must prove the current gap before adding the guards.
 - The integrated routing/bootstrap selection again passed all 66 cases with
   the teardown assertions active. Runtime/native code and the previously
   executed actual PowerShell portfolio are unchanged.
+
+### 2026-10-28 - Detached environment expansion
+
+- The next assessment identified queue selection resolving references against
+  the triggering process instead of the detached overlay. Five actual
+  dollar/braced/Windows-percent cases reproduced a wrong or unexpanded database
+  path while a POSIX percent-literal control remained correct.
+- Expand references from the supplied snapshot, including earlier durable
+  pins, without a temporary process-global environment mutation. Preserve
+  native case/quote/escape/unknown-variable behavior with direct POSIX/Windows
+  standard-library syntax controls; the shared helper serves first-use and
+  cutover consumers consistently.
+- The integrated selection passed 105 cases, including actual cutover
+  configuration and replacement environment selecting the same durable queue
+  despite unrelated caller state.
+- The installer-fixture assessment reproduced an unmatched PowerShell closing
+  brace after the shipped outer-try refactor and omitted real guard dependencies
+  in lifecycle/retained-runtime function extraction. Reconstruct the actual
+  try/catch/finally boundary, stage real guards, isolate unrelated reconciliation
+  effects and keep recorder-I/O failures separate from valid policy roots.
+  Original lifecycle and retained-runtime assertions remain unchanged.
+- Independent host execution passed all 75 affected lifecycle/required-cutover
+  cases and all 15 retained-runtime cases, including actual WSL PowerShell.
+  This does not qualify native Windows deployment or running adoption.

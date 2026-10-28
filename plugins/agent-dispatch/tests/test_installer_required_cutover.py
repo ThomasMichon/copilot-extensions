@@ -25,7 +25,10 @@ def ps_function(name: str) -> str:
     start = text.index(f"function {name} {{")
     admission = (
         ps_function("Assert-DispatchActions")
-        if name in {"Invoke-CoordinatorCutover", "Invoke-VersionedActivate", "Invoke-Update"}
+        if name in {
+            "Invoke-CoordinatorCutover", "Invoke-VersionedActivate", "Invoke-Update",
+            "Install-RetainedRuntime", "Install-Runtime",
+        }
         else ""
     )
     return admission + "\n" + text[start:text.index("\n}\n", start) + 2]
