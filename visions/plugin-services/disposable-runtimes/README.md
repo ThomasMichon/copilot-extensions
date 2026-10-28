@@ -4,7 +4,7 @@
   with durable state and an independently readable maintenance hold.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-26
+- **Last revised:** 2026-10-27
 - **Reality docs:** [`docs/install-contract.md`](../../../docs/install-contract.md),
   [`docs/architecture.md`](../../../docs/architecture.md)
 
@@ -49,6 +49,9 @@ Neither purpose depends on the services being maintained.
 - **Disposable credential relays:** agent credential/token brokerage may be
   removed with the supporting suite. It is not a protected machine-management
   transport merely because it forwards credentials.
+- **Storage lifetime boundaries:** program scripts and environments,
+  configuration, durable runtime state, and disposable temporary state have
+  distinct, legible ownership and retention boundaries.
 
 ## Features
 
@@ -80,6 +83,23 @@ its independently owned working transport or durable access configuration.
 Where a connection invokes provisioner-owned code on every request or
 reconnect, that dependency is explicit rather than assumed absent.
 
+### uninstall-by-clear-storage-boundaries
+
+Supporting code can be removed as a small, clearly owned set of directories
+without sorting individual files around configuration, persisted runtime state
+or live transactional state. Temporary state is distinguishable from durable
+authority; a temporary location does not make an irreplaceable in-flight
+transaction disposable.
+
+Each service and Manager still has a proper uninstall flow for registrations,
+shutdown and dependency handling. Simple directory removal is the conceptual
+storage boundary that makes safe uninstall understandable and auditable, not
+a replacement for those lifecycle obligations.
+
+Uninstall de-registers the removed component's owned tasks and other service
+registrations. A normal in-place update preserves them and their enablement
+intent; it does not simulate uninstall/reinstall through scheduler churn.
+
 ### shared-maintenance-banner
 
 One banner is both the automatic-update veto and the agent-facing explanation,
@@ -96,6 +116,21 @@ banner, including Manager's own updates, recurring controllers, launch hooks,
 first-use repair and delegated execution. A previously queued request or
 earlier eligibility check cannot bypass the hold at the actual effect boundary.
 Intentional runtime absence is not permission to recreate it.
+
+### cooperative-maintenance-standby
+
+While installed, background tasks and registrars remain registered and runnable
+during maintenance. They check the applicable shared KillSwitch before doing
+work; while it is active, they do no work and wait with occasional checks for
+clearance. Maintenance is a running-but-quiescent mode, not disablement in the
+operating system's scheduler. Explicit uninstall remains a separate lifecycle
+operation that removes owned registrations.
+
+When the hold clears, the existing owners resume their loops and subscriptions
+without requiring task re-registration or losing progress. The standby boundary
+remains usable when supporting tooling is absent and does not keep an old
+replaceable runtime alive merely to wait. Ordinary reconstruction and current
+capability resolution precede resumed dependent work.
 
 ### service-independent-agent-standby
 
@@ -148,6 +183,11 @@ temporarily unreadable. Clearance is attributable and applicable to that hold;
 agents verify the required capability is available before resuming. Clearing a
 banner never enables another disabled policy or grants permission for a queued
 operation that has lost its original authority.
+
+Cooperative standby does not override an independently disabled task or
+service. Neither cold-start recovery nor maintenance clearance silently changes
+scheduler enablement, bypasses a KillSwitch or duplicates a suspended loop or
+subscription.
 
 ### data-and-host-lifetime-outlive-tooling
 
