@@ -227,6 +227,13 @@ repository history.
   startup/reconnect policy and deadlines; capture an eventually published
   fixture-owned route for canonical shutdown on failure. No production recovery
   budget is increased and no advisory data is relabeled current.
+- Run 40766979493 then exposed the fixture's missing Manager dependency
+  closure (`rich`): copying Manager source into a Worktrees interpreter is not
+  an installed Manager consumer. Construct Manager itself with its canonical
+  installer and declared dependencies, verify the reader imports from that
+  installed slot, and retain the same caller-Job and live-loader contract.
+  Canonical Manager removal and absence of its additional owned Task join final
+  cleanup. Do not patch the Worktrees environment with individual packages.
 
 ### 2026-10-28 - Integrate the merged finite cleanup owner before release
 

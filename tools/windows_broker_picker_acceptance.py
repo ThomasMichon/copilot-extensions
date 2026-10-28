@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 import time
@@ -14,7 +13,10 @@ from windows_broker_fixture import admit
 READER = """
 import json,sys,time
 from pathlib import Path
-sys.path.insert(0,sys.argv[1])
+slot=Path(sys.argv[1]).resolve()
+import worktree_manager
+if not Path(worktree_manager.__file__).resolve().is_relative_to(slot):
+    raise RuntimeError('Picker reader is not using the constructed Manager runtime')
 from worktree_manager.production_picker import context
 from worktree_manager.production_picker.picker_tui.data_ssh import LiveLoader,Source
 context.set_project(sys.argv[3])
@@ -54,16 +56,15 @@ print(json.dumps(client.shutdown() if sys.argv[2]=='shutdown' else client.health
 
 
 def qualify(root: Path, runtime: Path, command: list[str], projects: list[Path], *,
+            manager_slot: Path,
             environment: dict[str, str], run, procutil) -> dict:
     admit(root, True)
     from agent_procutil.daemon_broker import WindowsDaemonProcess
     from zdd import routing
 
-    reader = root / "manager-reader"
-    source = Path(__file__).resolve().parents[1] / "worktree-manager" / "src" / "worktree_manager"
-    shutil.copytree(source, reader / "worktree_manager",
-                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    env = {**environment, "WORKTREE_MANAGER_ENGINE_ARGV": json.dumps(command)}
+    python = manager_slot / "Scripts" / "python.exe"
+    env = {**environment, "WORKTREE_MANAGER_ENGINE_ARGV": json.dumps(command),
+           "WORKTREE_MANAGER_ROOT": str(manager_slot.parent.parent)}
     cycles = []
     for cycle in range(2):
         endpoint = routing.read_active_endpoint(runtime / "status-monitor-routing")
@@ -74,7 +75,7 @@ def qualify(root: Path, runtime: Path, command: list[str], projects: list[Path],
         try:
             for index in range(2):
                 process, job = procutil.spawn_sync_in_kill_on_close_job(
-                    [command[0], "-I", "-B", "-c", READER, str(reader), str(runtime),
+                    [str(python), "-I", "-B", "-c", READER, str(manager_slot), str(runtime),
                      f"broker-fixture-{index}"],
                     cwd=projects[index], env=env, require_job=True, allow_breakaway=False,
                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -130,5 +131,5 @@ def qualify(root: Path, runtime: Path, command: list[str], projects: list[Path],
                         resident.wait(timeout=30)
                     finally:
                         resident.close()
-    return {"actual_copied_manager_reader": True, "cycles": cycles,
+    return {"actual_installed_manager_reader": True, "cycles": cycles,
             "resident_cleanup_confirmed": True, "full_interactive_picker": False}

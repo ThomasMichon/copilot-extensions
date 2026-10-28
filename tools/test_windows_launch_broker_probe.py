@@ -122,7 +122,8 @@ def test_real_consumer_fixture_refuses_shared_host_before_loading_or_mutating(mo
 def test_actual_picker_fixture_refuses_shared_host_before_copy_or_spawn(monkeypatch, tmp_path):
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     with pytest.raises(RuntimeError, match="ephemeral Windows CI consent"):
-        picker_probe.qualify(tmp_path, tmp_path, [], [], environment={}, run=Mock(), procutil=Mock())
+        picker_probe.qualify(tmp_path, tmp_path, [], [], manager_slot=tmp_path,
+                             environment={}, run=Mock(), procutil=Mock())
     assert not (tmp_path / "manager-reader").exists()
 
 

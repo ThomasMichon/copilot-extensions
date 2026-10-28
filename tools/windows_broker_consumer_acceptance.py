@@ -120,16 +120,23 @@ def qualify(root: Path) -> dict:
         ])
         projects.append(project)
     owners = {}
-    for name in ("agent-worktrees", "agent-ssh"):
+    for name in ("agent-worktrees", "agent-ssh", "worktree-manager"):
         payload = profile / ".copilot" / "installed-plugins" / "copilot-extensions" / name
         payload.parent.mkdir(parents=True, exist_ok=True)
         preparation._materialize(REPOSITORY, name, payload)
         owners[name] = payload
     runtime = profile / ".agent-worktrees"
     peer_runtime = profile / ".agent-ssh"
+    manager_runtime = profile / ".worktree-manager"
     environment["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] = str(projects[0])
 
     def lifecycle(name, action):
+        if name == "worktree-manager":
+            return [
+                sys.executable, "-I", "-B", str(owners[name] / "scripts" / "runtime_install.py"),
+                "--root", str(manager_runtime), "--payload", str(owners[name]),
+                *(["--uninstall", "--apply", "--json"] if action == "uninstall" else ["--", "--version"]),
+            ]
         command = [
             shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
             "-File", str(owners[name] / "scripts" / "install.ps1"), action,
@@ -145,6 +152,7 @@ def qualify(root: Path) -> dict:
     cleanup = {}
     outcome = {}
     config = None
+    manager_config = None
     command = None
     registered = []
     try:
@@ -248,8 +256,15 @@ def qualify(root: Path) -> dict:
             raise RuntimeError("a later request began before the prior mutation settled")
         from windows_broker_picker_acceptance import qualify as qualify_picker
 
+        run(lifecycle("worktree-manager", "install"), cwd=projects[0])
+        manager_version = (manager_runtime / "current-version").read_text().strip()
+        manager_slot = manager_runtime / "versions" / manager_version
+        manager_config = installation.registration(manager_runtime, manager_slot)
+        if not broker.task_operation("inspect", manager_config, Deadline(10))["installed"]:
+            raise RuntimeError("cold Manager construction did not adopt its broker")
         picker = qualify_picker(
-            root, runtime, command, projects, environment=environment, run=run, procutil=pu,
+            root, runtime, command, projects, manager_slot=manager_slot,
+            environment=environment, run=run, procutil=pu,
         )
         outcome = {
             "cold_actual_worktrees_construction": True,
@@ -262,6 +277,7 @@ def qualify(root: Path) -> dict:
             "manual_update_serialized": True, "all_submitter_jobs_closed_before_release": True,
             "credential_free_private_profile": True,
             "picker_recovery": picker,
+            "cold_actual_manager_construction": True,
         }
     finally:
         # Canonical removal must prove finite scopes have settled; never force-clear their journal.
@@ -289,18 +305,23 @@ def qualify(root: Path) -> dict:
             except Exception as error:
                 cleanup["projects"] = str(error)
         for name, target in (
-            (("agent-ssh", peer_runtime), ("agent-worktrees", runtime)) if settled else ()
+            (("worktree-manager", manager_runtime), ("agent-ssh", peer_runtime),
+             ("agent-worktrees", runtime)) if settled else ()
         ):
             if not target.exists():
                 continue
             try:
                 run(lifecycle(name, "uninstall"), cwd=projects[0], timeout=180)
-                cleanup[name] = not (target / "deploy-manifest.json").exists()
+                cleanup[name] = not (
+                    target / ("current-version" if name == "worktree-manager" else "deploy-manifest.json")
+                ).exists()
                 if not cleanup[name]:
                     raise RuntimeError(f"{name} canonical uninstall retained its deployed manifest")
             except Exception as error:
                 cleanup[name] = str(error)
-        if config is not None:
+        for component, captured in (("broker-task", config), ("manager-broker-task", manager_config)):
+            if captured is None:
+                continue
             try:
                 # Removal deleted the entrypoint. Inspect the captured owned definition
                 # through the canonical read-only native adapter, never activation admission.
@@ -310,14 +331,14 @@ def qualify(root: Path) -> dict:
                     str(Path(broker.__file__).with_name("windows_broker_task.ps1")),
                     "-Action", "inspect",
                 ], env=environment, timeout=10, max_stdout_bytes=65536, max_stderr_bytes=65536,
-                    input_text=json.dumps({"config": config.task()}))
+                    input_text=json.dumps({"config": captured.task()}))
                 if inspection.returncode:
                     raise RuntimeError("owned Task absence inspection failed: " + inspection.stderr[-4096:])
-                cleanup["broker-task"] = json.loads(inspection.stdout) == {
+                cleanup[component] = json.loads(inspection.stdout) == {
                     "installed": False, "accepting": False,
                 }
             except Exception as error:
-                cleanup["broker-task"] = str(error)
+                cleanup[component] = str(error)
         (root / "cleanup.json").write_text(json.dumps(cleanup), encoding="utf-8")
         desktop = witness.finish()
         (root / "desktop.json").write_text(json.dumps({
@@ -326,6 +347,7 @@ def qualify(root: Path) -> dict:
         expected = {
             "requests": True, "projects": True, "agent-ssh": True,
             "agent-worktrees": True, "broker-task": True,
+            "worktree-manager": True, "manager-broker-task": True,
         }
         if any(value is not True for value in cleanup.values()) or (not body_failed and cleanup != expected):
             raise RuntimeError("real consumer cleanup was not confirmed: " + json.dumps(cleanup))
