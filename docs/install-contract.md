@@ -4251,6 +4251,10 @@ and frozen seasoning cutoffs admit a private copied build-tool environment.
 Its actual installed bytes and modes, selected interpreter/target, UV, build
 helper and build environment identify subsequent offline, no-isolation builds.
 An open build requirement or a backend version alone is not a cache identity.
+Per-request update-driver custody stays with the constructor and its admission
+handoff. Its witness is excluded from the offline builder environment and cache
+identity, so a new update request does not invalidate unchanged project wheels.
+Other build-environment changes remain part of the identity.
 The base interpreter is resolved in the caller's context before changing child
 directories. Native `uv cache dir` selects the retained transaction's cache;
 offline builds keep that exact location even after feed configuration is removed.

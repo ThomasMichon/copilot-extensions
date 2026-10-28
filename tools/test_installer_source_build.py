@@ -140,6 +140,7 @@ def test_normal_fresh_candidates_hit_per_project_and_body_edit_rebuilds_only_lea
     installed_modules = []
     origins = []
     for index in range(2):
+        monkeypatch.setenv("UPDATE_DRIVER_WITNESS", f"synthetic-request-{index}")
         if index:
             monkeypatch.setattr(
                 builds, "_compact",
@@ -169,6 +170,63 @@ def test_normal_fresh_candidates_hit_per_project_and_body_edit_rebuilds_only_lea
     expected = installed_modules[0].read_bytes()
     cached_module.unlink()
     assert all(path.read_bytes() == expected for path in installed_modules)
+    assert engine.runtime.current_version(root) is None
+
+
+@pytest.mark.parametrize("variable,same_key", [
+    ("UPDATE_DRIVER_WITNESS", True),
+    ("SOURCE_BUILD_DIAGNOSTIC_MODE", False),
+])
+def test_request_custody_is_not_a_build_input_but_build_environment_still_is(
+    engine, ordinary, tmp_path, monkeypatch, variable, same_key,
+):
+    root = tmp_path / "installation"
+    keys = []
+    bindings = []
+    environments = []
+    admitted_values = []
+    canonical = builds._canonical
+    child = engine._child
+
+    class ObservedKey(Exception):
+        pass
+
+    def observe(_root, binding, _output, **_options):
+        keys.append(hashlib.sha256(binding).hexdigest())
+        bindings.append(json.loads(binding))
+        raise ObservedKey
+
+    def observe_environment(value):
+        if isinstance(value, dict) and value.get("UV_OFFLINE") == "1":
+            environments.append(value.copy())
+        return canonical(value)
+
+    def observe_admission(argv, **options):
+        if argv[1:4] == ["-I", "-m", "venv"]:
+            admitted_values.append(options["environment"].get(variable))
+        return child(argv, **options)
+
+    monkeypatch.setattr(builds, "cached_source_wheel", observe)
+    monkeypatch.setattr(builds, "_canonical", observe_environment)
+    monkeypatch.setattr(engine, "_child", observe_admission)
+    for index in range(2):
+        monkeypatch.setenv(variable, f"synthetic-value-{index}")
+        with pytest.raises(ObservedKey):
+            with _candidate(engine, root, ordinary, f"1.0.0+request{index}"):
+                pytest.fail("cache-key observation must stop before building or publishing")
+        assert os.environ[variable] == f"synthetic-value-{index}"
+    assert len(keys) == 2
+    assert admitted_values == ["synthetic-value-0", "synthetic-value-1"]
+    assert len(environments) == 2
+    assert {
+        key for key in environments[0].keys() | environments[1].keys()
+        if environments[0].get(key) != environments[1].get(key)
+    } == (set() if same_key else {variable})
+    assert {
+        key for key in bindings[0].keys() | bindings[1].keys()
+        if key != "environment" and bindings[0].get(key) != bindings[1].get(key)
+    } == set()
+    assert (keys[0] == keys[1]) is same_key
     assert engine.runtime.current_version(root) is None
 
 

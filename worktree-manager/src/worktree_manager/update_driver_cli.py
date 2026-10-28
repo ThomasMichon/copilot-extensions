@@ -87,6 +87,9 @@ def parse_options(rest: list[str]) -> tuple[argparse.Namespace, list[str]]:
     canonical.add_argument("--auth-environment", action="store_true")
     parsed = canonical.parse_args(forwarded)
     options.target = parsed.target
+    options.repair = bool(
+        parsed.force or parsed.force_runtime or parsed.recreate_venv or parsed.repair_engine
+    )
     if parsed.target is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", parsed.target):
         parser.error("--target requires a nonempty component identifier")
     if parsed.target is not None and options.engine_acquisition_timeout is not None:
@@ -287,6 +290,7 @@ def cmd_update_request(rest: list[str]) -> int:
         spec = driver.RequestSpec(
             backend="manager", argv=tuple(arguments), project=project or "",
             cwd=str(cwd), source=_source_key(), context=tuple(request_context().items()),
+            repair=options.repair,
         )
         argv, env = driver.runtime_command("worktree_manager", ["update", *arguments])
         request = driver.enqueue(
