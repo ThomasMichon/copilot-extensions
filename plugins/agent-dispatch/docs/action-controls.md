@@ -77,6 +77,9 @@ redirect the installation root or change `COPILOT_EXTENSIONS_CONTEXT`. A refused
 overlay leaves the caller's environment unchanged; select the intended
 installation explicitly before retrying. Root comparison preserves lexical
 parent traversal rather than normalizing away intermediate links.
+On Windows, the shared overlay canonicalizes environment keys before validation
+and publication, including mixed-case root/context entries; later pins retain
+native case-insensitive overwrite semantics. POSIX keys remain case-sensitive.
 Internal conditional callers must supply the target's captured `install_root`
 alongside its captured `routing_dir` and conditional request. A missing policy
 root is an explicit refusal, not permission to use the caller's installation.

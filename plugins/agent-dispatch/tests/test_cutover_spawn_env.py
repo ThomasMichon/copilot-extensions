@@ -16,6 +16,7 @@ fail with ``control_authority_not_configured`` even though the installed
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,6 +29,18 @@ def _isolate_production_environment_overlay(monkeypatch):
     monkeypatch.setattr(os, "environ", before.copy())
     yield
     assert dict(original) == before
+
+
+@pytest.fixture
+def daemon_calls(monkeypatch):
+    calls = []
+
+    def launch(argv, **options):
+        calls.append((argv, options))
+        return SimpleNamespace(pid=99999999)
+
+    monkeypatch.setattr("agent_procutil.spawn_daemon", launch)
+    return calls
 
 
 def test_apply_service_env_overlay_adds_control_token_command(tmp_path):
@@ -57,7 +70,26 @@ def test_apply_service_env_overlay_is_a_noop_without_a_service_env_file(tmp_path
     assert result == {"PATH": "/usr/bin"}
 
 
-def test_cutover_spawn_passive_applies_service_env_overlay(tmp_path, monkeypatch):
+@pytest.mark.parametrize("windows_keys", [False, True])
+def test_service_env_overlay_matches_native_key_semantics(tmp_path, monkeypatch, windows_keys):
+    from agent_dispatch import install_paths
+
+    monkeypatch.setattr(install_paths, "os", SimpleNamespace(
+        **{**vars(os), "name": "nt" if windows_keys else "posix"},
+    ))
+    (tmp_path / "service.env").write_text(
+        "AGENT_DISPATCH_HOST=127.0.0.1\n"
+        "Agent_Dispatch_Host=127.0.0.2\n",
+    )
+    env = {"AGENT_DISPATCH_HOST": "127.0.0.3"}
+    assert install_paths.apply_service_env_overlay(env, tmp_path) is env
+    assert env["AGENT_DISPATCH_HOST"] == ("127.0.0.2" if windows_keys else "127.0.0.1")
+    assert ("Agent_Dispatch_Host" in env) is not windows_keys
+    if not windows_keys:
+        assert env["Agent_Dispatch_Host"] == "127.0.0.2"
+
+
+def test_cutover_spawn_passive_applies_service_env_overlay(tmp_path, monkeypatch, daemon_calls):
     """The actual ``spawn_passive`` closure inside ``_cmd_cutover`` must call
     through to the shared overlay -- not just the extracted helper in
     isolation -- so a future refactor can't silently drop the call site."""
@@ -105,25 +137,7 @@ def test_cutover_spawn_passive_applies_service_env_overlay(tmp_path, monkeypatch
             return _FakeResult()
 
     monkeypatch.setattr(zdd_cutover, "CutoverOrchestrator", _FakeOrchestrator)
-    popen_calls: list = []
     monkeypatch.setattr("agent_dispatch.cutover_process.process_start_time", lambda _pid: None)
-    launch_policy = []
-    monkeypatch.setattr(
-        "agent_procutil.windowless_daemon_kwargs",
-        lambda **options: launch_policy.append(options) or {},
-    )
-
-    import subprocess as _subprocess
-
-    def _fake_popen(cmd, **kwargs):
-        popen_calls.append((cmd, kwargs))
-
-        class _P:
-            pid = 99999999
-
-        return _P()
-
-    monkeypatch.setattr(_subprocess, "Popen", _fake_popen)
 
     parser = main_mod.build_parser()
     ns = parser.parse_args(["deploy", "--json"])
@@ -135,19 +149,23 @@ def test_cutover_spawn_passive_applies_service_env_overlay(tmp_path, monkeypatch
     # control-token command even though this test process's own env was
     # scrubbed of it above.
     captured["spawn_passive"](9999)
-    assert launch_policy == [{"breakaway": True}]
-    assert len(popen_calls) == 1
-    _cmd, kwargs = popen_calls[0]
+    assert len(daemon_calls) == 1
+    _cmd, kwargs = daemon_calls[0]
+    assert kwargs["console_children"] is True
+    assert kwargs.get("breakaway", True) is True
+    assert kwargs["instance"].lifecycle == "resident"
     assert (
         kwargs["env"]["AGENT_DISPATCH_CONTROL_TOKEN_COMMAND"]
         == 'vault get "Agent-Dispatch Control Token" password'
     )
     # The passive replacement runs from the runtime root, never this
     # process's own cwd.
-    assert kwargs["cwd"] == str(install_dir)
+    assert kwargs["cwd"] == install_dir
 
 
-def test_cutover_spawn_passive_fresh_port_wins_over_service_env_port_pin(tmp_path, monkeypatch):
+def test_cutover_spawn_passive_fresh_port_wins_over_service_env_port_pin(
+    tmp_path, monkeypatch, daemon_calls,
+):
     """A stale ``AGENT_DISPATCH_PORT`` pin in ``service.env`` must never
     override the orchestrator-selected port the cutover is actually binding
     the replacement coordinator to -- the overlay has to apply *before* the
@@ -192,21 +210,7 @@ def test_cutover_spawn_passive_fresh_port_wins_over_service_env_port_pin(tmp_pat
             return _FakeResult()
 
     monkeypatch.setattr(zdd_cutover, "CutoverOrchestrator", _FakeOrchestrator)
-    popen_calls: list = []
     monkeypatch.setattr("agent_dispatch.cutover_process.process_start_time", lambda _pid: None)
-    monkeypatch.setattr("agent_procutil.windowless_daemon_kwargs", lambda **_k: {})
-
-    import subprocess as _subprocess
-
-    def _fake_popen(cmd, **kwargs):
-        popen_calls.append((cmd, kwargs))
-
-        class _P:
-            pid = 99999999
-
-        return _P()
-
-    monkeypatch.setattr(_subprocess, "Popen", _fake_popen)
 
     parser = main_mod.build_parser()
     ns = parser.parse_args(["deploy", "--json"])
@@ -216,12 +220,12 @@ def test_cutover_spawn_passive_fresh_port_wins_over_service_env_port_pin(tmp_pat
     # The orchestrator picked a fresh free port (9999 here) for the passive
     # process to bind -- the service.env pin of 4444 must not win.
     captured["spawn_passive"](9999)
-    assert len(popen_calls) == 1
-    _cmd, kwargs = popen_calls[0]
+    assert len(daemon_calls) == 1
+    _cmd, kwargs = daemon_calls[0]
     assert kwargs["env"]["AGENT_DISPATCH_PORT"] == "9999"
 
 
-def test_cutover_honors_durable_host_from_service_env(tmp_path, monkeypatch):
+def test_cutover_honors_durable_host_from_service_env(tmp_path, monkeypatch, daemon_calls):
     """A durable ``AGENT_DISPATCH_HOST`` pin in ``service.env`` must be
     honored by the cutover's own configuration (and thus its health-check /
     routing bind and the ``--host`` flag passed to the replacement process),
@@ -267,21 +271,7 @@ def test_cutover_honors_durable_host_from_service_env(tmp_path, monkeypatch):
             return _FakeResult()
 
     monkeypatch.setattr(zdd_cutover, "CutoverOrchestrator", _FakeOrchestrator)
-    popen_calls: list = []
     monkeypatch.setattr("agent_dispatch.cutover_process.process_start_time", lambda _pid: None)
-    monkeypatch.setattr("agent_procutil.windowless_daemon_kwargs", lambda **_k: {})
-
-    import subprocess as _subprocess
-
-    def _fake_popen(cmd, **kwargs):
-        popen_calls.append((cmd, kwargs))
-
-        class _P:
-            pid = 99999999
-
-        return _P()
-
-    monkeypatch.setattr(_subprocess, "Popen", _fake_popen)
 
     parser = main_mod.build_parser()
     ns = parser.parse_args(["deploy", "--json"])
@@ -290,7 +280,7 @@ def test_cutover_honors_durable_host_from_service_env(tmp_path, monkeypatch):
 
     assert captured["bind"] == "10.0.0.5"
     captured["spawn_passive"](4321)
-    assert len(popen_calls) == 1
-    cmd, _kwargs = popen_calls[0]
+    assert len(daemon_calls) == 1
+    cmd, _kwargs = daemon_calls[0]
     assert "--host" in cmd
     assert cmd[cmd.index("--host") + 1] == "10.0.0.5"

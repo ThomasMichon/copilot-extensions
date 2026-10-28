@@ -99,10 +99,16 @@ def test_same_conditional_caller_observes_clear_and_repeated_inhibition(
 
 
 @pytest.mark.parametrize("selection", ["other-root", "other-context", "normalized-alias"])
+@pytest.mark.parametrize("windows_keys", [False, True])
 def test_service_env_cannot_redirect_a_checked_cutover_installation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selection: str,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selection: str, windows_keys: bool,
 ) -> None:
-    from agent_dispatch import config, single_instance
+    from agent_dispatch import config, install_paths, single_instance
+
+    if windows_keys:
+        monkeypatch.setattr(install_paths, "os", SimpleNamespace(**{**vars(os), "name": "nt"}))
+        for key in ("Agent_Dispatch_Install_Dir", "Copilot_Extensions_Context"):
+            monkeypatch.delenv(key, raising=False)
 
     root = tmp_path / "selected"
     root.mkdir()
@@ -127,6 +133,9 @@ def test_service_env_cannot_redirect_a_checked_cutover_installation(
     else:
         _policy(other, "coordinator-replacement", True)
         line = f"AGENT_DISPATCH_INSTALL_DIR={other}"
+    if windows_keys:
+        key, value = line.split("=", 1)
+        line = f"{key.title()}={value}"
     (root / "service.env").write_text(line + "\n")
 
     def forbidden(*_args: object, **_kwargs: object) -> None:
@@ -139,10 +148,16 @@ def test_service_env_cannot_redirect_a_checked_cutover_installation(
     assert "COPILOT_EXTENSIONS_CONTEXT" not in os.environ
 
 
+@pytest.mark.parametrize("windows_keys", [False, True])
 def test_service_env_keeps_benign_pins_inside_the_selected_installation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, windows_keys: bool,
 ) -> None:
-    from agent_dispatch import config, single_instance
+    from agent_dispatch import config, install_paths, single_instance
+
+    if windows_keys:
+        monkeypatch.setattr(install_paths, "os", SimpleNamespace(**{**vars(os), "name": "nt"}))
+        for key in ("Agent_Dispatch_Install_Dir", "Agent_Dispatch_Host", "Agent_Dispatch_Port"):
+            monkeypatch.delenv(key, raising=False)
 
     root = tmp_path / "selected"
     root.mkdir()
@@ -151,10 +166,14 @@ def test_service_env_keeps_benign_pins_inside_the_selected_installation(
     monkeypatch.delenv("AGENT_DISPATCH_HOST", raising=False)
     monkeypatch.delenv("AGENT_DISPATCH_PORT", raising=False)
     monkeypatch.setattr(config, "client_token", lambda: None)
-    (root / "service.env").write_text(
-        f"AGENT_DISPATCH_INSTALL_DIR={root}/\n"
-        "AGENT_DISPATCH_HOST=127.0.0.2\nAGENT_DISPATCH_PORT=61002\n",
-    )
+    pins = {
+        "AGENT_DISPATCH_INSTALL_DIR": f"{root}/",
+        "AGENT_DISPATCH_HOST": "127.0.0.2",
+        "AGENT_DISPATCH_PORT": "61002",
+    }
+    (root / "service.env").write_text("".join(
+        f"{key.title() if windows_keys else key}={value}\n" for key, value in pins.items()
+    ))
     targets = []
 
     class ReachedNativeLock(Exception):

@@ -399,3 +399,23 @@ Initial tests must prove the current gap before adding the guards.
   32 cases, including unrelated caller configuration and custom target routing.
   Re-review and required checks remain pending; preparation, release and actual
   adoption are still separate.
+
+### 2026-10-28 - Windows environment-key review
+
+- The next independent review found mixed-case service-environment keys
+  bypassing the regular dictionary's root/context validation before Windows'
+  case-insensitive environment applied the redirect. Four contained cases
+  reproduced the bypass or lost ordinary pins.
+- Canonicalize keys in the shared overlay under Windows semantics, before
+  cutover validation or publication. This also keeps first-use replacement
+  consumers consistent. Preserve POSIX case sensitivity and native last-pin
+  precedence; do not normalize installation paths to hide linked components.
+- Extend the actual cutover cases for mixed-case root/context/alias refusal
+  and ordinary pins, plus direct shared-overlay overwrite controls.
+  Source regressions emulate environment-key semantics; they are not native
+  Windows installation or running-adoption evidence.
+- The expanded selection passed all 49 cases. Existing launch fixtures now
+  capture the shared daemon boundary instead of asking the real instance
+  registry to commit a fictitious PID. Actual Dispatch environment, fresh-port,
+  host, working-directory and resident-launch option assertions remain; shared
+  native launch policy stays with its owning tests.

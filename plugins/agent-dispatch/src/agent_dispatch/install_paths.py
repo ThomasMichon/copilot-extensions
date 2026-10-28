@@ -74,7 +74,10 @@ def apply_service_env_overlay(env: dict[str, str], install_dir_path: Path) -> di
                 if not s or s.startswith("#") or "=" not in s:
                     continue
                 k, v = s.split("=", 1)
-                env[k.strip()] = os.path.expandvars(v.strip())
+                key = k.strip()
+                if os.name == "nt":
+                    key = key.upper()
+                env[key] = os.path.expandvars(v.strip())
         except OSError:
             pass
     return env
