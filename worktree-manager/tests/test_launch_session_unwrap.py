@@ -367,14 +367,14 @@ def test_windows_failed_psmux_creation_reaps_only_the_named_session():
     assert "Sort-Object Value -Descending" in ps
     assert "[Diagnostics.Process]::GetProcessById($pidValue)" in ps
     assert "$startDeltaMs -gt 1" in ps
-    # Three create-failure call sites (initial retry, argument handoff, and
-    # AHP token handoff) plus one defensive call after `attach`
+    # Four create-failure call sites (creation exception, nonzero result,
+    # argument handoff and AHP token handoff) plus one defensive call after `attach`
     # returns and `has-session` reports the session gone -- `has-session`
     # going away only means psmux's own registry forgot the session, not that
     # its server/pane process tree actually exited (see #2830's 935-process
-    # leak from a zombie mux session). All three share the same launch-id
+    # leak from a zombie mux session). All five share the same launch-id
     # ownership check, so this is a no-op on a genuinely clean exit.
-    assert ps.count("Stop-AwOwnedPsmuxSession $sessName") == 4
+    assert ps.count("Stop-AwOwnedPsmuxSession $sessName") == 5
 
 
 def test_windows_post_attach_session_gone_still_reaps_owned_tree():

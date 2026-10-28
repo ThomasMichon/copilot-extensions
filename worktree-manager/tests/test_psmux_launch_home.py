@@ -123,8 +123,10 @@ def test_published_creation_failure_preserves_handoffs_and_does_not_retry(tmp_pa
     start = source.index("    if ($newSessionExit -ne 0) {", end)
     end = source.index("\n    } else {\n        if ($paneArgsFile)", start)
     failure_tail = source[start:end] + "\n}\n"
-    manifest, receipt, token = [tmp_path / name for name in ("args.json", "receipt.json", "token")]
-    for path in (manifest, receipt, token):
+    manifest, receipt, token, startup = [
+        tmp_path / name for name in ("args.json", "receipt.json", "token", "startup.json")
+    ]
+    for path in (manifest, receipt, token, startup):
         path.write_text("retained", encoding="utf-8")
     script = tmp_path / "failure.ps1"
     script.write_text(
@@ -132,6 +134,7 @@ def test_published_creation_failure_preserves_handoffs_and_does_not_retry(tmp_pa
         "$newSessionExit=17\n$newSessionError=''\n$muxPublished=$true\n"
         "$maxCreateAttempts=3\n$totalCreateAttempts=0\n"
         "$paneArgsFile=$args[0]\n$paneReceiptFile=$args[1]\n$ahpTokenFile=$args[2]\n"
+        "$startupArgsFile=$args[4]\n"
         "$sessName='wt-fixture'\n"
         "$plan=[pscustomobject]@{worktree_id='fixture';work_dir=$args[3]}\n"
         "function Remove-AwPaneArgsFile { throw 'Deleted an uncertain handoff' }\n"
@@ -148,12 +151,12 @@ def test_published_creation_failure_preserves_handoffs_and_does_not_retry(tmp_pa
     )
     result = subprocess.run(
         [PWSH, "-NoProfile", "-File", str(script),
-         str(manifest), str(receipt), str(token), str(tmp_path)],
+         str(manifest), str(receipt), str(token), str(tmp_path), str(startup)],
         capture_output=True, text=True, timeout=15,
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
     assert result.returncode == 17, result.stdout + result.stderr
-    assert all(path.read_text("utf-8") == "retained" for path in (manifest, receipt, token))
+    assert all(path.read_text("utf-8") == "retained" for path in (manifest, receipt, token, startup))
     report = json.loads(result.stdout)
     assert report["attempts"] == 1
     assert "recoverable=false" in report["fields"]

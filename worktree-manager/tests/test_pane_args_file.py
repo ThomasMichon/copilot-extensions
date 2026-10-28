@@ -21,6 +21,7 @@ import pytest
 
 WRAPPER = Path(__file__).resolve().parents[1] / "bin" / "pane-wrapper.ps1"
 LAUNCHER = WRAPPER.with_name("pane-launch.ps1")
+HELPERS = WRAPPER.with_name("pane-args.ps1")
 PWSH = shutil.which("pwsh")
 pytestmark = pytest.mark.skipif(not PWSH, reason="PowerShell 7 is required")
 
@@ -75,6 +76,9 @@ def _powershell_producer(
         "$inputJson=[System.Text.Json.JsonDocument]::Parse([IO.File]::ReadAllText($args[1]))\n"
         "$wrapperArgs=@($inputJson.RootElement.EnumerateArray() | ForEach-Object { $_.GetString() })\n"
         "$inputJson.Dispose()\n"
+        "$cmd=@()\n$startupArgsFile=$null\n"
+        + HELPERS.read_text("utf-8")
+        + "\n"
         + source[start:end]
         + "\nConvertTo-Json -InputObject @($paneCmd) -Compress -EscapeHandling EscapeNonAscii\n",
         encoding="utf-8",
@@ -86,6 +90,7 @@ def _powershell_producer(
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
     assert result.returncode == 0, result.stderr
+    assert not result.stderr
     return json.loads(result.stdout)
 
 
@@ -103,27 +108,29 @@ def _run(
 
 @pytest.mark.parametrize("launch_owned", [False, True])
 def test_manifest_round_trip_and_fresh_retry(tmp_path, launch_owned):
-    child = tmp_path / "child with spaces.ps1"
-    child.write_text(
-        "[IO.File]::WriteAllText($args[0], "
-        "(ConvertTo-Json -InputObject @($args[1..($args.Count-1)]) -Compress))\n",
+    # This contract ends at wrapper argv; real wrapper/child custody has its own lane.
+    wrapper = tmp_path / WRAPPER.name
+    wrapper.write_text(
+        "[IO.File]::WriteAllText($env:TEST_CAPTURE, "
+        "(ConvertTo-Json -InputObject @($args) -Compress))\n",
         encoding="utf-8",
     )
+    shutil.copy2(LAUNCHER, tmp_path / LAUNCHER.name)
+    child = tmp_path / "child with spaces.ps1"
     expected = ["", "two words", 'a"quote', "a'quote", "trailing\\",
                 "$literal; & text", "--allow-all", "\u03bb", "2026-10-08T12:00:00Z"]
     env = _test_env(tmp_path)
-    wrapper = WRAPPER
     if launch_owned:
         shell = tmp_path / "launch-attempts" / ("a" * 32) / ("b" * 32 + ".shell")
         shell.mkdir(parents=True)
         wrapper = shell / WRAPPER.name
-        shutil.copy2(WRAPPER, wrapper)
+        shutil.copy2(tmp_path / WRAPPER.name, wrapper)
         shutil.copy2(LAUNCHER, shell / LAUNCHER.name)
     for attempt in range(2):
         output = tmp_path / f"captured-{attempt}.json"
+        child_argv = [PWSH, "-NoProfile", "-File", str(child), str(output), *expected]
         command = _powershell_producer(
-            tmp_path, wrapper,
-            [PWSH, "-NoProfile", "-File", str(child), str(output), *expected],
+            tmp_path, wrapper, child_argv,
             launch_owned=launch_owned,
         )
         manifest = Path(command[-1][1:-1].replace("''", "'"))
@@ -133,10 +140,11 @@ def test_manifest_round_trip_and_fresh_retry(tmp_path, launch_owned):
                 assert manifest.parent == wrapper.parent / "pane-args"
                 assert not manifest.is_relative_to(tmp_path / "runtime")
             result = _run(
-                manifest, env, receipt=receipt, launcher=wrapper.with_name(LAUNCHER.name),
+                manifest, dict(env, TEST_CAPTURE=str(output)), receipt=receipt,
+                launcher=wrapper.with_name(LAUNCHER.name),
             )
             assert result.returncode == 0, result.stderr
-            assert json.loads(output.read_text("utf-8")) == expected
+            assert json.loads(output.read_text("utf-8")) == child_argv
             assert not manifest.exists()
             acknowledged = json.loads(receipt.read_text("utf-8"))
             assert acknowledged["manifest"] == manifest.name
@@ -279,10 +287,7 @@ def test_foreign_receipt_path_is_rejected_before_consumption(tmp_path):
 
 def _parent_receipt_waiter(tmp_path, *, short_timeout=False):
     source = (WRAPPER.parent / "launch-session.ps1").read_text("utf-8")
-    helpers = source[
-        source.index("    function Remove-AwPaneArgsFile"):
-        source.index("    $maxCreateAttempts")
-    ]
+    helpers = HELPERS.read_text("utf-8")
     marker = source.index("            # Cold nested PowerShell startup")
     start = source.rfind("        if ($paneArgsFile) {", 0, marker)
     end = source.index("\n        if ($ahpTokenFile) {", marker)
@@ -292,6 +297,7 @@ def _parent_receipt_waiter(tmp_path, *, short_timeout=False):
     script = tmp_path / "parent-wait.ps1"
     script.write_text(
         "$paneArgsFile=$args[0]\n$paneReceiptFile=\"$paneArgsFile.receipt.json\"\n"
+        "$startupArgsFile=$env:TEST_STARTUP\n"
         "$plan=[pscustomobject]@{worktree_id='synthetic-worktree'}\n"
         "$script:LaunchProject='example'\n$ahpTokenFile=$env:TEST_TOKEN\n"
         "if($ahpTokenFile){$tokenLock=[IO.File]::Open($ahpTokenFile,"
@@ -315,7 +321,10 @@ def test_parent_requires_valid_receipt_and_logs_before_owned_cleanup(tmp_path, r
     if receipt_content:
         Path(str(manifest) + ".receipt.json").write_text(receipt_content)
     log = tmp_path / "diagnostic.log"
-    env = dict(_test_env(tmp_path), TEST_LOG=str(log), TEST_READY=str(tmp_path / "ready"))
+    startup = tmp_path / "startup.json"
+    startup.write_text("unconsumed", encoding="utf-8")
+    env = dict(_test_env(tmp_path), TEST_LOG=str(log), TEST_READY=str(tmp_path / "ready"),
+               TEST_STARTUP=str(startup))
     result = subprocess.run(
         [PWSH, "-NoProfile", "-File", str(_parent_receipt_waiter(tmp_path, short_timeout=True)),
          str(manifest)],
@@ -327,6 +336,7 @@ def test_parent_requires_valid_receipt_and_logs_before_owned_cleanup(tmp_path, r
     assert "saved conversation and worktree are preserved" in result.stderr
     assert "--no-mux" in result.stderr
     assert ("invalid" if receipt_content else "not-acknowledged") in result.stderr
+    assert not startup.exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows exclusive token handoff cleanup")
@@ -486,7 +496,18 @@ def test_invalid_manifest_argv_is_rejected(tmp_path, argv):
     assert "Could not consume pane argument handoff" in result.stderr
 
 
-def test_launcher_retry_regenerates_consumed_manifest(tmp_path):
+@pytest.mark.parametrize("startup", ["none", "consumed", "unconsumed"])
+def test_launcher_retry_regenerates_consumed_manifest(tmp_path, startup):
+    shutil.copy2(HELPERS, tmp_path / HELPERS.name)
+    command = []
+    if startup != "none":
+        from test_pane_startup import _copied_setup
+
+        shell = _copied_setup(tmp_path)
+        command = [PWSH, "-NoProfile", "-NoLogo", "-File", str(shell / "default-setup.ps1"),
+                   "", "two words", "--allow-all"]
+    command_file = tmp_path / "command.json"
+    command_file.write_text(json.dumps(command), encoding="utf-8")
     source = (WRAPPER.parent / "launch-session.ps1").read_text("utf-8")
     helper_start = source.index("function Invoke-AwPsmuxFromHome {")
     helper_end = source.index("\n}\n", helper_start) + 3
@@ -499,6 +520,15 @@ def test_launcher_retry_regenerates_consumed_manifest(tmp_path):
         ".Replace(\"''\",\"'\")\n"
         "if (-not (Test-Path -LiteralPath $path)) { exit 2 }\n"
         "[IO.File]::AppendAllText($env:TEST_LOG,$path+\"`n\")\n"
+        "$outer=[IO.File]::ReadAllText($path) | ConvertFrom-Json\n"
+        "$startupIndex=[array]::IndexOf(@($outer.argv),'--startup-manifest')\n"
+        "if ($startupIndex -ge 0) {\n"
+        " $inner=[string]$outer.argv[$startupIndex+1]\n"
+        " if (-not (Test-Path -LiteralPath $inner)) { exit 5 }\n"
+        " [IO.File]::AppendAllText($env:TEST_STARTUP_LOG,$inner+\"`n\")\n"
+        " if ($env:TEST_STARTUP -ne 'unconsumed' -or "
+        "@(Get-Content -LiteralPath $env:TEST_LOG).Count -gt 1) { [IO.File]::Delete($inner) }\n"
+        "}\n"
         "[IO.File]::Delete($path)\n"
         "if (@(Get-Content -LiteralPath $env:TEST_LOG).Count -eq 1) { exit 1 }\n"
         "exit 0\n",
@@ -506,12 +536,13 @@ def test_launcher_retry_regenerates_consumed_manifest(tmp_path):
     )
     script = tmp_path / "retry.ps1"
     script.write_text(
-        "$script:AwPsmuxBin=$args[0]\n$paneWrapper=$args[1]\n"
+        "$ErrorActionPreference='Stop'\n$script:AwPsmuxBin=$args[0]\n$paneWrapper=$args[1]\n"
         "$RuntimeDir=$args[2]\n"
         "$paneLaunch=Join-Path (Split-Path -Parent $paneWrapper) 'pane-launch.ps1'\n"
-        "$plan=[pscustomobject]@{work_dir=$args[2]}\n"
+        "$plan=[pscustomobject]@{work_dir=$args[2];record_path=(Join-Path $args[2] 'fixture.yaml')}\n"
         "$sessName='fixture-session'\n"
         "$wrapperArgs=@('payload','two words')\n$ahpArgs=@()\n$envFlags=@()\n"
+        "$cmd=@([IO.File]::ReadAllText($args[3]) | ConvertFrom-Json)\n"
         "function Assert-AwColdResume {}\n"
         "function Write-SetupLog {}\nfunction Write-SetupStatus {}\n"
         "function Enter-AwMuxCreation { [IO.File]::Open("
@@ -530,21 +561,38 @@ def test_launcher_retry_regenerates_consumed_manifest(tmp_path):
     )
     log = tmp_path / "attempts.txt"
     result = subprocess.run(
-        [PWSH, "-NoProfile", "-File", str(script), str(fake), str(WRAPPER), str(tmp_path)],
+        [PWSH, "-NoProfile", "-File", str(script), str(fake), str(WRAPPER), str(tmp_path),
+         str(command_file)],
         capture_output=True, text=True, timeout=15,
-        env=dict(_test_env(tmp_path), TEST_LOG=str(log)),
+        env=dict(_test_env(tmp_path), TEST_LOG=str(log), TEST_STARTUP=startup,
+                 TEST_STARTUP_LOG=str(tmp_path / "startup-attempts.txt")),
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {
         "attempts": 2, "stops": 1, "code": 0, "error": "",
     }
+    assert not result.stderr
     paths = log.read_text("utf-8").splitlines()
     assert len(set(paths)) == 2
     assert all(not Path(path).exists() for path in paths)
+    if command:
+        paths = (tmp_path / "startup-attempts.txt").read_text("utf-8").splitlines()
+        assert len(set(paths)) == 2
+        assert all(not Path(path).exists() for path in paths)
 
 
-def test_manifest_write_failure_keeps_original_error_through_retry_cleanup(tmp_path):
+@pytest.mark.parametrize("startup", [False, True])
+def test_manifest_write_failure_keeps_original_error_through_retry_cleanup(tmp_path, startup):
+    shutil.copy2(HELPERS, tmp_path / HELPERS.name)
+    command = []
+    if startup:
+        from test_pane_startup import _copied_setup
+
+        shell = _copied_setup(tmp_path)
+        command = [PWSH, "-NoProfile", "-NoLogo", "-File", str(shell / "default-setup.ps1")]
+    command_file = tmp_path / "command.json"
+    command_file.write_text(json.dumps(command), encoding="utf-8")
     source = (WRAPPER.parent / "launch-session.ps1").read_text("utf-8")
     start = source.index("    $savedPsmuxSession = ")
     end = source.index("    if ($newSessionExit -ne 0) {", start)
@@ -556,7 +604,9 @@ def test_manifest_write_failure_keeps_original_error_through_retry_cleanup(tmp_p
     script.write_text(
         "$ErrorActionPreference='Stop'\n$paneWrapper=$args[0]\n$RuntimeDir=$args[1]\n"
         "$paneLaunch=Join-Path (Split-Path -Parent $paneWrapper) 'pane-launch.ps1'\n"
-        "$plan=[pscustomobject]@{work_dir=$args[1]}\n$wrapperArgs=@('payload')\n"
+        "$plan=[pscustomobject]@{work_dir=$args[1];record_path=(Join-Path $args[1] 'fixture.yaml')}\n"
+        "$wrapperArgs=@('payload')\n"
+        "$cmd=@([IO.File]::ReadAllText($args[2]) | ConvertFrom-Json)\n"
         "$ahpArgs=@()\n$envFlags=@()\n"
         "function Assert-AwColdResume {}\nfunction Write-SetupLog {}\n"
         "function Write-SetupStatus {}\nfunction Read-AwMuxRetryChoice { $false }\n"
@@ -567,7 +617,8 @@ def test_manifest_write_failure_keeps_original_error_through_retry_cleanup(tmp_p
         encoding="utf-8",
     )
     result = subprocess.run(
-        [PWSH, "-NoProfile", "-File", str(script), str(WRAPPER), str(tmp_path)],
+        [PWSH, "-NoProfile", "-File", str(script), str(WRAPPER), str(tmp_path),
+         str(command_file)],
         capture_output=True, text=True, timeout=15, env=_test_env(tmp_path),
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
@@ -576,19 +627,19 @@ def test_manifest_write_failure_keeps_original_error_through_retry_cleanup(tmp_p
         "attempts": 3, "stops": 0, "code": 1, "error": "synthetic manifest write failure",
     }
     assert not list((tmp_path / "pane-args").glob("aw-pane-*"))
+    if startup:
+        assert not list((shell / "pane-args").glob("aw-pane-*"))
     assert not result.stderr
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows file sharing contract")
 def test_launcher_locked_cleanup_logs_and_preserves_failure_path(tmp_path):
-    source = (WRAPPER.parent / "launch-session.ps1").read_text("utf-8")
-    start = source.index("    function Remove-AwPaneArgsFile")
-    end = source.index("    $maxCreateAttempts", start)
+    helpers = HELPERS.read_text("utf-8")
     script = tmp_path / "locked-cleanup.ps1"
     script.write_text(
         "$script:warnings=@()\n"
         "function Write-SetupLog($message,$level) { $script:warnings+=@($message) }\n"
-        + source[start:end]
+        + helpers
         + "\n$stream=[IO.File]::Open($args[0],[IO.FileMode]::Open,"
         "[IO.FileAccess]::Read,[IO.FileShare]::None)\n"
         "try { Remove-AwPaneArgsFile $args[0]; $retained=Test-Path -LiteralPath $args[0] }"
@@ -621,26 +672,27 @@ def test_real_psmux_direct_child_control(tmp_path):
     if not psmux:
         pytest.skip("PSMux is required")
     name = "aw-direct-test-" + uuid.uuid4().hex
+    env = _test_env(tmp_path)
     try:
         result = subprocess.run(
             [psmux, "new-session", "-d", "-s", name, "-c", str(tmp_path),
              "pwsh.exe", "-NoProfile", "-NoLogo", "-Command", "Start-Sleep -Seconds 20"],
             capture_output=True, text=True, encoding="utf-8", timeout=15,
-            env=_test_env(tmp_path), creationflags=subprocess.CREATE_NO_WINDOW,
+            env=env, cwd=env["USERPROFILE"], creationflags=subprocess.CREATE_NO_WINDOW,
         )
         assert result.returncode == 0, result.stderr
         time.sleep(2)
         live = subprocess.run(
             [psmux, "has-session", "-t", name],
             capture_output=True, text=True, timeout=5,
-            env=_test_env(tmp_path), creationflags=subprocess.CREATE_NO_WINDOW,
+            env=env, cwd=env["USERPROFILE"], creationflags=subprocess.CREATE_NO_WINDOW,
         )
         assert live.returncode == 0, live.stderr
     finally:
         subprocess.run(
             [psmux, "kill-session", "-t", name],
             capture_output=True, text=True, timeout=10,
-            env=_test_env(tmp_path), creationflags=subprocess.CREATE_NO_WINDOW,
+            env=env, cwd=env["USERPROFILE"], creationflags=subprocess.CREATE_NO_WINDOW,
         )
 
 
@@ -733,6 +785,7 @@ def test_real_psmux_file_launch_two_cycles(tmp_path, producer, monkeypatch):
 def _exercise_psmux_cycles(tmp_path, producer, psmux, folder, wrapper, child, expected, roots, observer):
     from agent_worktrees import locks
 
+    env = _test_env(tmp_path)
     for cycle in range(2):
         name = "aw-file-test-" + uuid.uuid4().hex
         output = tmp_path / f"capture-{cycle}.json"
@@ -767,7 +820,7 @@ def _exercise_psmux_cycles(tmp_path, producer, psmux, folder, wrapper, child, ex
                 [psmux, "new-session", "-d", "-s", name, "-c", str(tmp_path),
                  *command],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
-                env=_test_env(tmp_path),
+                env=env, cwd=env["USERPROFILE"],
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
             roots.add(process.pid)
@@ -783,7 +836,7 @@ def _exercise_psmux_cycles(tmp_path, producer, psmux, folder, wrapper, child, ex
             pane = subprocess.run(
                 [psmux, "display-message", "-p", "-t", name, "#{pane_pid}"],
                 capture_output=True, text=True, timeout=5,
-                env=_test_env(tmp_path), creationflags=subprocess.CREATE_NO_WINDOW,
+                env=env, cwd=env["USERPROFILE"], creationflags=subprocess.CREATE_NO_WINDOW,
             )
             assert pane.returncode == 0 and pane.stdout.strip().isdigit(), pane.stderr
             pane_pid = int(pane.stdout.strip())
@@ -807,7 +860,7 @@ def _exercise_psmux_cycles(tmp_path, producer, psmux, folder, wrapper, child, ex
                 diagnostic = subprocess.run(
                     [psmux, "capture-pane", "-p", "-t", name],
                     capture_output=True, text=True, encoding="utf-8", timeout=5,
-                    env=_test_env(tmp_path), creationflags=subprocess.CREATE_NO_WINDOW,
+                    env=env, cwd=env["USERPROFILE"], creationflags=subprocess.CREATE_NO_WINDOW,
                 )
                 pytest.fail(
                     f"manifest_pending={manifest.exists()}; "
@@ -825,7 +878,7 @@ def _exercise_psmux_cycles(tmp_path, producer, psmux, folder, wrapper, child, ex
         finally:
             stopped = subprocess.run(
                 [psmux, "kill-session", "-t", name],
-                capture_output=True, text=True, timeout=10, env=_test_env(tmp_path),
+                capture_output=True, text=True, timeout=10, env=env, cwd=env["USERPROFILE"],
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
             assert stopped.returncode == 0, stopped.stderr

@@ -233,9 +233,13 @@ and [repair register](reconstruction-findings.md) retain the evidence and limits
   - [x] Move prepared Windows pane argument manifests and their receipts
     outside removable runtimes while retaining legacy transport, scoped
     cleanup and startup grace (#9407).
-  - [ ] Consume canonical copied Windows setup's startup arguments through a
-    launch-owned one-shot handoff, preserving final correlation, literal argv
-    and same-host/seed/console custody without exempting unsafe consumers.
+  - [x] Consume canonical copied Windows setup's startup arguments at the
+    engine mux boundary through a launch-owned one-shot handoff, preserving
+    final correlation, literal argv, setup reconciliation policy and
+    same-host/seed/console custody without exempting unsafe consumers (#9410).
+  - [ ] Integrate startup handoffs with Manager's separate retrying Picker
+    producer: fresh file per attempt, known-failure cleanup and retention
+    after publication/uncertainty without changing creation or seed custody.
 - [ ] Resolve attributable, installation-scoped start/end entry points afresh
   at each boundary; no cached runtime Python, daemon endpoint or imported
   installed helper survives merely to wait.
@@ -339,6 +343,11 @@ operator's installation-survival contract.
   unchanged literal argument/environment/exit propagation.
 - [ ] A simple subprocess integration test invokes the real copied shell and
   real redirectable handler; mocks cannot bypass the resolution being tested.
+  - [x] Native Windows engine-startup controls run real copied command/setup,
+    consume arguments before the backend and preserve literal argv, same-host
+    and alternate-option behavior, normal/recovery reconciliation and real
+    exit codes (#9410). This is component evidence, not Picker, live mux,
+    handler replacement or supported-uninstall acceptance.
 - [ ] Real overlapping same-worktree attempts create one mux and join it;
   different-worktree launches overlap independently. Admission releases when
   the mux is discoverable, not when Copilot exits.
@@ -432,6 +441,36 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
 
 ## Journal
 
+### 2026-10-28 - Picker per-attempt startup handoff
+
+- Implemented the separate Windows Picker producer's startup serialization
+  inside its existing retry loop, after final launch/seed planning. It selects
+  only marker-qualified copied setup under the launch plan's tracking root;
+  legacy/custom commands and unsupported host options keep their old argv.
+- Each attempt gets a fresh inner startup file. Known failure, unused
+  concurrent join and rejected outer receipt clean up only that attempt's
+  inner file; publication uncertainty retains it. Creation leases,
+  reconciliation policy, prompt ownership and native containment are unchanged.
+- Moved the existing receipt/removal helpers into the shipped sibling
+  `pane-args.ps1`, reducing the launcher, and added that dependency to the
+  engine's canonical fallback-asset manifest.
+- The final per-contract Windows packet passed 113 controls, including actual
+  copied-reader execution and real wrapper/Job cleanup. The engine's
+  fallback/deploy/unregister packet passed 31. Ruff, the full module-size
+  audit and all 13 install-contract checks passed.
+- The opt-in PSMux packet passed all three controls with the existing
+  digest-pinned disposable 3.3.6 tool: both producers completed two cycles,
+  with exact owned teardown and no observed owned focus/window leakage.
+  Earlier accidental PATH selection of host 3.3.5 reproduced the already
+  recorded immediate-exit failure, not a startup-transport pass.
+- The native fixture now uses isolated HOME as client CWD, matching the
+  production boundary. The reader/argv unit fixture uses a lightweight capture
+  wrapper; the separate real-wrapper and native lanes retain actual process
+  custody coverage. No timeout or containment limit was relaxed.
+- This is local candidate/component evidence pending review and merge, not
+  installed rollout, a Picker input-ready latency qualification, or same-process
+  uninstall/reinstall acceptance. The parent effort remains Active.
+
 ### 2026-10-28 - Engine mux setup startup handoff
 
 - The copied setup host still retained installation-root arguments in its
@@ -479,6 +518,17 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   assuming that helper's exit behavior. The corrected startup packet passes
   26 controls, including all 13 explicit native cases. Fresh accepted review
   and required CI remain publication gates.
+- Current-head Copilot approval `5685875425`, the resolved recovery thread
+  and required green checks preceded managed merge of #9410 as
+  `e4b86de7d74c46d750bb102b80fc8f8fab8ba02c`. The parent issue remains open.
+  Normal pull-forward auto-aborted while replaying the aggregate squash;
+  retained recovery refs and identical whole-series/squash patch IDs proved
+  the entire range was merged before advancing only that range.
+- Re-read Plan and Validation Plan after merge. Closed only the engine
+  startup-transport/component subitems; the parent remains Active. Continue
+  with retry-safe Picker integration, then containing release and authorized
+  installed qualification. No source merge is installed-removal, shared
+  standby or task-lifecycle acceptance, and no selected-host effect occurred.
 
 ### 2026-10-28 - Provider-owned setup birth prerequisite
 
