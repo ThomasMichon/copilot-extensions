@@ -16,7 +16,7 @@ from agent_procutil import no_window_kwargs
 from . import embody_resume, installer, launch_admission, launch_seed_state, sessions
 from . import tracking, tracking_write
 from . import launch_execution
-from .native_arguments import SETUP_VALUE_OPTIONS
+from .native_arguments import SETUP_VALUE_OPTIONS, VALUE_OPTIONS
 
 BOUNDARY_MARKER = "# agent-worktrees:launch-seed-boundary-v1"
 ATTEMPT_BOUNDARY_MARKER = "# agent-worktrees:launch-attempt-boundary-v1"
@@ -234,12 +234,23 @@ def _setup_command(
             if native_only and script.name in {"default-setup.ps1", "default-setup.sh"}:
                 options = {}
                 position = index + 1
-                while position + 1 < len(command):
-                    flag = command[position].casefold()
-                    if flag not in SETUP_VALUE_OPTIONS | {"-nativeargumentsjson"}:
+                setup_values = SETUP_VALUE_OPTIONS | {
+                    "-nativeargumentsjson", "-executiondirectory", "--execution-directory",
+                }
+                while position < len(command):
+                    argument = command[position]
+                    flag = argument.casefold()
+                    if argument == "--":
                         break
-                    options[flag] = command[position + 1]
-                    position += 2
+                    if flag in setup_values:
+                        if position + 1 >= len(command):
+                            return None
+                        options[flag] = command[position + 1]
+                        position += 2
+                    elif argument in VALUE_OPTIONS or argument == "-C":
+                        position += 2
+                    else:
+                        position += 1
                 path = {**os.environ, **(environment or {})}.get("PATH", "")
                 for flag in ("-sessionpath", "--session-path"):
                     if flag in options:

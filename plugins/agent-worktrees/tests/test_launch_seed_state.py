@@ -207,11 +207,17 @@ def test_wrapped_intermediary_keeps_terminal_fallback(tmp_path, monkeypatch, she
 
 @pytest.mark.parametrize("shell", ["bash", "pwsh"])
 @pytest.mark.parametrize("selection", ["gh-only", "session-path", "explicit-gh", "explicit-cli"])
-def test_default_setup_requires_available_nonintermediary_backend(tmp_path, shell, selection):
-    from agent_worktrees import embody_completion
+@pytest.mark.parametrize("recovery", [False, True])
+def test_default_setup_requires_available_nonintermediary_backend(
+    tmp_path, monkeypatch, shell, selection, recovery,
+):
+    from agent_worktrees import embody_completion, process_launcher
 
     path = _record(tmp_path)
-    script = tmp_path / ("default-setup.sh" if shell == "bash" else "default-setup.ps1")
+    scripts = tmp_path / "installation" / "scripts"
+    scripts.mkdir(parents=True)
+    monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: scripts.parent)
+    script = scripts / ("default-setup.sh" if shell == "bash" else "default-setup.ps1")
     script.write_text(launch_seed_exec.BOUNDARY_MARKER + "\n", encoding="utf-8")
     bin_dir, cli_dir = tmp_path / "bin", tmp_path / "selected"
     bin_dir.mkdir()
@@ -223,11 +229,20 @@ def test_default_setup_requires_available_nonintermediary_backend(tmp_path, shel
         executable.write_text("", encoding="utf-8")
         executable.chmod(0o700)
     command = [shell, *([] if shell == "bash" else ["-File"]), str(script)]
+    if recovery:
+        command += ["--recovery" if shell == "bash" else "-Recovery"]
+    command += ["--model", "-CopilotPath", "--allow-all"]
     if selection == "session-path":
         command += ["--session-path" if shell == "bash" else "-SessionPath", str(cli_dir)]
     elif selection.startswith("explicit"):
         command += ["--copilot-path" if shell == "bash" else "-CopilotPath",
                     str(gh if selection == "explicit-gh" else cli)]
+    command = process_launcher.bind_execution_directory(
+        command, str(tmp_path / "checkout"), ValueError, passthrough_start=len(command),
+    )
+    assert command[command.index(str(script)) + 1] == (
+        "--execution-directory" if shell == "bash" else "-ExecutionDirectory"
+    )
     seed = state.stage(path, kind="new", text="retain")
     prepared, seed_id = embody_completion.prepare_startup_seed(
         command, path, seed.text, explicit=False, environment={"PATH": str(bin_dir)},

@@ -200,6 +200,13 @@ instead of weakening those guarantees.
   an intermediary is available. Unsupported marker encoding is classified and
   logged before staging rather than aborting a valid custom launcher. The
   corresponding PowerShell/Bash and encoding packet passed 276 tests.
+- Qualification now consumes the actual execution-directory fields injected
+  by `bind_execution_directory`, plus setup switches and complete native option
+  values. Prepared-command controls use that real binder before qualification;
+  they preserve explicit-gh refusal and session-PATH selection under normal
+  and recovery launches without misreading an option-shaped native value.
+  The updated state/launch-argument packet passed 326 tests. The shared
+  execution-directory validation contract is unchanged.
 
 ### 2026-10-28 - Proposal reviewed
 
