@@ -382,7 +382,9 @@ def cmd_report(args: argparse.Namespace) -> int:
     ):
         from . import update_auth_cleanup
 
-        payload["cleanup_offer"] = update_auth_cleanup.offer(cwd)
+        payload["cleanup_offer"] = update_auth_cleanup.offer(
+            cwd, include_values=bool(getattr(args, "auth_cleanup", False)),
+        )
     if getattr(args, "auth_environment", False):
         # Only added/replaced variables cross the Manager's process boundary.
         environment = overlay.environment(environment) if overlay else environment

@@ -83,7 +83,7 @@ def _resource(payload: dict, *, dry_run: bool) -> dict:
     return items[0]
 
 
-def offer(cwd: Path) -> dict:
+def offer(cwd: Path, *, include_values: bool = False) -> dict:
     try:
         payload = _invoke(["git-config", "restore", "--json"], cwd)
         if payload.get("resources") == [] and payload.get("ok") is True:
@@ -97,6 +97,14 @@ def offer(cwd: Path) -> dict:
             or not _SHA.fullmatch(str(plan.get("plan_sha256", "")))
         ):
             raise PolicyUnavailable("policy_preview_unavailable")
+        if not include_values:
+            plan = {
+                **plan,
+                "diff": (
+                    f"- sha256:{plan.get('before_sha256', 'unavailable')}\n"
+                    f"+ sha256:{plan.get('after_sha256', 'unavailable')}\n"
+                ),
+            }
         return {
             "status": "offered" if item.get("changed") else "current",
             "owner": "agent-machines", "plan": plan,

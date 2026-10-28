@@ -205,6 +205,44 @@ def test_cleanup_offer_is_retained_in_status():
     assert payload["auth"]["cleanup_offer"] == offer
 
 
+@pytest.mark.real_installer_processes
+@pytest.mark.parametrize("padding", [1, 1000])
+def test_automatic_offer_never_persists_inline_helper_credentials(
+    tmp_path, monkeypatch, capsys, padding,
+):
+    import update_telemetry as ut
+    from agent_machines import git_config_transaction
+
+    from agent_worktrees import update_auth_context as context
+    from agent_worktrees import update_events
+
+    secret = "inline-helper-private-fixture-value"
+    helper = "!f() { printf '%s' '" + secret + "'; }; f # " + "padding " * padding
+    plan = git_config_transaction.preview(
+        tmp_path / "global-config", {"credential.helper": [helper]},
+    ).summary()
+    packet = restore_packet(changed=True)
+    packet["resources"][0]["change_plan"] = plan
+    monkeypatch.setattr(cleanup, "_invoke", lambda *a: packet)
+    events_path = tmp_path / "run" / "events.jsonl"
+    monkeypatch.setattr(update_events, "_run", ut.Run(
+        run_id="fixture", events_path=events_path, proc="engine",
+        owner="engine", is_owner=True,
+    ))
+    offered = context._cleanup_offer(tmp_path)
+    events, errors = ut.read_events(events_path)
+    assert errors == 0
+    status = ut.fold(events, run={"events_path": str(events_path)})
+    assert offered["plan"]["plan_sha256"] == plan["plan_sha256"]
+    assert status["auth"]["cleanup_offer"]["plan"]["plan_sha256"] == plan["plan_sha256"]
+    assert secret not in json.dumps(offered)
+    assert secret not in json.dumps(status)
+    output = capsys.readouterr()
+    assert secret not in output.out + output.err
+    assert all(secret not in path.read_text() for path in events_path.parent.iterdir())
+    assert cleanup.offer(tmp_path, include_values=True)["plan"] == plan
+
+
 @pytest.mark.parametrize("names", [
     {"auth_cleanup": True},
     {"apply_auth_cleanup": SHA},
@@ -344,7 +382,12 @@ def test_report_cleanup_uses_selected_repository_unless_explicitly_overridden(
     monkeypatch.setattr(auth, "report", lambda *a, **k: report())
     monkeypatch.setattr(auth, "fallback", lambda *a, **k: None)
     calls = []
-    monkeypatch.setattr(cleanup, "offer", lambda cwd: calls.append(cwd) or {"status": "current"})
+    def offer(cwd, *, include_values=False):
+        assert include_values is True
+        calls.append(cwd)
+        return {"status": "current"}
+
+    monkeypatch.setattr(cleanup, "offer", offer)
     assert context.cmd_report(argparse.Namespace(
         auth_cleanup=True, auth_cwd=str(override) if explicit else None, json=True,
     )) == 0
