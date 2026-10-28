@@ -78,6 +78,15 @@ is the broader direction, not a prerequisite for this performance slice.
 The mechanisms and ordering below are agent-recommended implementation design,
 not additional operator requirements or authority to bypass admission.
 
+**Released-installer qualification priority, verbatim:**
+> Great. Priority is going to be getting the updated installer tested on various machines. Any issue we encounter, we should track, and any performance issue should be analyzed, too. We want <1min for update, and even that feels slow.
+
+The complete ordinary update through health is the sub-minute acceptance
+target, not just wheel or venv assembly. The existing deployment owner retains
+the serialized test lane. The per-target measurement breakdown, issue
+deduplication and analysis below are agent-recommended execution detail.
+This does not waive admission, integrity, dependency or service lifecycle gates.
+
 **Proof and rollout sequencing, verbatim:**
 > Once we get a proof-of-concept shipped in at least once service, we'll want to go to each machine and run an update. Then, we'll probably want to continue our install-focused detour here and just take on the work to align all service installers to reuse vendored code.
 
@@ -128,6 +137,14 @@ builder, publisher or composition plan.
 
 ### Phase 3 - Proportionate completion and adoption
 
+- [ ] Prioritize qualification of the released ordinary installer across the
+  existing admitted machine scope. Preserve exact selected source, request,
+  installed/serving identity, complete wall time and health in the deployment
+  owner's ledger; distinguish changed-runtime, warm/no-op and cold paths.
+- [ ] Require under sixty seconds for a complete update. Track each encountered
+  issue, deduplicate against its existing owner, and analyze every performance
+  miss by actual phase/child costs and repeated work. Do not exclude admission,
+  transport or health costs silently or relax a correctness gate to meet time.
 - [ ] Prefer the existing promotion-built first-party wheel bundles on the
   released installation path. Prove that the actual consumer skips local
   build-tool provisioning and first-party build hooks; producing a bundle
@@ -202,6 +219,31 @@ claim for that substitution. Remove only the returned task folder after its
 evidence is no longer needed.
 
 ## Journal
+
+### 2026-10-28 - Released-installer timing qualification first
+
+- Captured the operator's multi-machine test priority, issue tracking and
+  sub-minute whole-update target. The existing admitted deployment owner and
+  serialization remain; no second updater or unrelated rollout is introduced.
+- Actual results and performance explanations are still required. The earlier
+  narrow cached-wheel timing is not whole-update evidence, and source release
+  is not proof of installation, serving health or prepacked real-service use.
+
+### 2026-10-28,07:16 UTC - Constructor cache and hardlinks reached Main
+
+- The current release snapshot is Main
+  `29b265566e30a6ebd732fc3e891fac20ad3e9013`, actually merged by promotion
+  #9373 at 07:16:10 UTC from qualified Dev
+  `d77783f0a10b067a249dd39cee09f48f9dc6024b`.
+- The #9340 constructor/cache/hardlink merge
+  `1603cbbc0ac1f5a8838154d724e90eb4fa9f2724` is contained in that promoted
+  Dev snapshot. The promotion identifies its source-artifact release and
+  producing qualification run. This checks the source snapshot, not Git
+  ancestry into the wholesale-regenerated Main tree.
+- These faster ordinary-install changes are released, pending authorized
+  rollout. No machine was updated by this observation. The distinct prepacked
+  first-party artifact consumer, real-service proof, later serialized machine
+  wave and installer portfolio acceptance remain open.
 
 ### 2026-10-28,05:55 UTC - Ordinary constructor slice merged; service proof remains open
 
