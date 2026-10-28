@@ -280,7 +280,18 @@ The opt-in `installation-context-acceptance.yml` admitted-source jobs also run
 Profiles, refusal controls and Manager reuse run in disjoint partitions on
 each host, retaining the existing six-minute job ceiling rather than combining
 every native source scenario into one growing serial job.
-The latter exercises the real standalone Manager adapter and immutable
+Its separate `normal` partition exercises
+`tools/test_installer_source_build.py` against the real, hash-pinned
+Setuptools 84.0.0 wheel. The workflow acquires that fixture before the
+loopback-feed tests; the tests themselves make no external requests.
+For local qualification, `TEST_SOURCE_WHEEL_REAL_BACKEND` names an already
+acquired copy of that exact wheel. Without it, the same native constructor
+controls use a small synthetic backend. Neither variant installs a host runtime
+or changes a service. Controls cover per-project hits across fresh retained
+workspaces, library-only source changes, explicit unsupported-contract misses,
+pre-completion archive/content refusal, backend source/tool mutation and clean
+retry. POSIX source-mode cases remain explicit skips on Windows.
+`test_manager_source_native.py` exercises the real standalone Manager adapter and immutable
 constructor with a complete synthetic Manager/process-owner wheel closure:
 offline construction, retained reuse, changed binding, missing first-party
 input and failed-candidate selector preservation. A configured synthetic Git

@@ -29,7 +29,7 @@ from build_toolchain_lock import (
 from runtime_profile import SCHEMA, ProfileError, RuntimeProfile, _wheel_filename, validate_profile
 from runtime_profile_wheels import profile_wheel_inputs
 from runtime_source_lock import SourceLockCandidate
-from runtime_source_wheel_cache import cached_source_wheel
+from installer_source_wheel_cache import cached_source_wheel
 from installer_engine import _package_roots, _source_files, freeze_inputs, numbered_candidate, runtime
 from installer_dependency_policy import _private_retained_root, _select_uv_executable, _temporary_inputs, _toml
 from installer_wheel_inputs import WheelLimits, _check_deadline, _ordinary, inspect_archive
