@@ -661,6 +661,8 @@ digits, never provider text evaluated as arithmetic.
 Parsing uses ASCII collation and case-sensitive matching independently of
 caller settings, restoring the caller's locale and `nocasematch` option on
 success and refusal.
+The reader suppresses caller xtrace while private fields are in use and restores
+the original tracing setting afterward; it never traces reply data itself.
 The existing installers, publication inventory and uninstall profile own this
 asset; `session_shell.prepare` can copy it with the POSIX normalized setup,
 launch-command and reconciliation scripts outside the removable roots.

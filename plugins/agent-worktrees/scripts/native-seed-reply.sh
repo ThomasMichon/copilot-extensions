@@ -45,7 +45,8 @@ _aw_native_seed_read_reply() {
 }
 
 aw_native_seed_read_reply() {
-    local nocasematch=0 status=0
+    local nocasematch=0 tracing=0 status=0
+    case $- in *x*) tracing=1; set +x ;; esac
     AW_NATIVE_SEED_ATTEMPT=""
     AW_NATIVE_SEED_RESOLUTION=""
     AW_NATIVE_SEED_OPERATION=""
@@ -60,6 +61,7 @@ aw_native_seed_read_reply() {
     fi
     _aw_native_seed_read_reply || status=3
     if [[ "$nocasematch" == 1 ]]; then shopt -s nocasematch; fi
+    if [[ "$tracing" == 1 ]]; then set -x; fi
     if [[ "$status" != 0 ]]; then
         printf 'Native preparation reply is invalid; no backend started.\n' >&2
         return 3

@@ -75,6 +75,31 @@ printf '%s' "$AW_NATIVE_SEED_ENV_COUNT"
     assert result.stdout == count and not result.stderr
 
 
+def test_reader_suppresses_private_fields_and_restores_caller_xtrace():
+    private_argument = "private-argument-must-not-be-logged"
+    private_environment = "private-environment-must-not-be-logged"
+    prepared = _reply({"PRIVATE": private_environment})
+    prepared["argv"].append(private_argument)
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+set -x
+aw_native_seed_read_reply
+valid_flags="$-"
+if aw_native_seed_read_reply; then exit 90; else code=$?; fi
+[[ "$code" == 3 ]]
+invalid_flags="$-"
+set +x
+printf '%s\n' "$valid_flags" "$invalid_flags"
+''', payload=nul_reply(prepared).decode("utf-8"))
+    assert result.returncode == 0, result.stderr
+    assert len(result.stdout.splitlines()) == 2
+    assert all("x" in flags for flags in result.stdout.splitlines())
+    assert private_argument not in result.stderr
+    assert private_environment not in result.stderr
+    assert "Native preparation reply is invalid; no backend started." in result.stderr
+
+
 def test_invalid_frames_clear_previous_reply_without_evaluating_counts_or_leaking_data(tmp_path):
     forbidden = tmp_path / "must-not-run"
     valid = nul_reply(_reply({"SECRET": "must-not-appear"})).decode("utf-8")
