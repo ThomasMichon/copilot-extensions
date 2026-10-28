@@ -492,6 +492,18 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   full-tree module-size audit and Ruff pass; the post-correction engine packet
   passed 61 controls on the rebased source. Required CI and a fresh review
   remain publication gates.
+- Review identified a machine-wide cleanup gap: the sweep used only ambient
+  project context, leaving abandoned manifests in other registered projects
+  unreclaimed. The monitor entry point now reuses the existing registered-project
+  inventory and passes explicit tracking roots through enumeration and
+  ownership checks without switching active project context. Independent
+  project failures remain isolated, and inventory failure preserves legacy
+  expiry. New controls cover unset/unrelated context, two projects and an
+  unregistered negative control. This is a cleanup correction, not new launch
+  admission or installation-removal authority.
+- Post-review contained engine validation passes 65 controls, including the
+  actual monitor sweep entry point and the new cross-project/failure controls.
+  The already-passing 54 Manager consumer controls are unaffected.
 - Documentation impact: updated the authoritative launch architecture and
   test portfolio. This closes part of the existing installation-independent
   intent and follows the same launch/state owner; no new lifecycle authority,

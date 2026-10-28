@@ -32,10 +32,11 @@ def _indirect(path: Path) -> bool:
     return any(_is_link_or_junction(item) for item in (path, *path.parents))
 
 
-def _launch_args_root(root: Path) -> bool:
+def _launch_args_root(root: Path, tracking_root: Path | None = None) -> bool:
     try:
         parts = root.absolute().relative_to(
-            config.tracking_dir().absolute() / "launch-attempts",
+            (tracking_root if tracking_root is not None else config.tracking_dir()).absolute()
+            / "launch-attempts",
         ).parts
     except (RuntimeError, ValueError):
         return False
@@ -46,11 +47,8 @@ def _launch_args_root(root: Path) -> bool:
     )
 
 
-def _launch_args_roots():
-    try:
-        attempts = config.tracking_dir() / "launch-attempts"
-    except RuntimeError:
-        return
+def _launch_args_roots(tracking_root: Path):
+    attempts = tracking_root / "launch-attempts"
     if _indirect(attempts) or not attempts.is_dir():
         return
     for attempt in attempts.iterdir():
@@ -61,7 +59,7 @@ def _launch_args_roots():
             continue
         for shell in attempt.iterdir():
             root = shell / "pane-args"
-            if _launch_args_root(root) and not _indirect(root) and root.is_dir():
+            if _launch_args_root(root, tracking_root) and not _indirect(root) and root.is_dir():
                 yield root
 
 
@@ -83,14 +81,38 @@ def _sweep_root(root: Path) -> None:
         output.warn(f"Could not expire pane argument handoffs: {exc}")
 
 
-def sweep_mux_pane_args() -> None:
+def sweep_mux_pane_args(tracking_roots: list[Path] | None = None) -> None:
     """Expire unconsumed handoffs after a full day of startup grace."""
     _sweep_root(config.install_dir() / "pane-args")
+    if tracking_roots is None:
+        try:
+            tracking_roots = [config.tracking_dir()]
+        except RuntimeError:
+            tracking_roots = []
+    for tracking_root in tracking_roots:
+        try:
+            for root in _launch_args_roots(tracking_root):
+                _sweep_root(root)
+        except OSError as exc:
+            output.warn(f"Could not enumerate launch-owned pane argument handoffs: {exc}")
+
+
+def sweep_registered_mux_pane_args() -> None:
+    """Use the resident's registered-project inventory, never ambient context."""
+    from .allocation_link_discovery import registered_projects
+
+    roots = []
     try:
-        for root in _launch_args_roots():
-            _sweep_root(root)
-    except OSError as exc:
-        output.warn(f"Could not enumerate launch-owned pane argument handoffs: {exc}")
+        projects = registered_projects()
+    except (OSError, RuntimeError, ValueError) as exc:
+        output.warn(f"Could not enumerate pane argument projects: {exc}")
+        projects = set()
+    for project in sorted(projects):
+        try:
+            roots.append(config.tracking_dir(project))
+        except (OSError, RuntimeError, ValueError) as exc:
+            output.warn(f"Could not resolve pane argument project {project}: {exc}")
+    sweep_mux_pane_args(roots)
 
 
 def file_mux_pane_cmd(wrapper: str, wrapper_args: list[str]) -> list[str]:

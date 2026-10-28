@@ -92,6 +92,10 @@ startup grace, matching-launcher cleanup and foreign-path refusal. Manager's
 the shipped PowerShell consumer, including consumed receipts and fresh retries.
 These controls do not establish supported uninstall or same-process interactive
 survival; setup startup arguments remain a separate dependency boundary.
+`test_pane_args_projects.py` exercises the monitor's actual sweep entry point
+with explicit registered-project roots, unset and unrelated ambient context,
+two projects, an unregistered negative control and independent project or
+inventory failures. It does not start a resident monitor.
 
 Agent-worktrees' `test_launch_seed_native.py` covers the finite backend and setup
 provider: retained one-time seed claims, literal argv, existing prompt-free

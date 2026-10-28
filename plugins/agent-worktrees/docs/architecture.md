@@ -560,8 +560,12 @@ For prepared Windows panes, both builders place the one-shot argv manifest and
 its optional consumption receipt in the copied shell's `pane-args` directory,
 not either removable runtime. The launcher consumes and deletes the manifest
 before invoking the wrapper. Rejected-launch cleanup is scoped to the matching
-launcher. Producers expire only their own directory; the existing monitor also
-finds this project's UUID-scoped shell directories. Expiry removes only
+launcher. Producers expire only their own directory; the machine-wide monitor
+uses the existing registered-project inventory and explicit tracking roots to
+find every registered project's UUID-scoped shell directories, without changing
+or relying on an ambient active project. An unavailable project does not prevent
+expiry in other projects; inventory failure still permits legacy expiry.
+Expiry removes only
 unconsumed manifests older than 24 hours, never the copied scripts or their
 execution state. Legacy peers retain their runtime-local transport and expiry.
 
