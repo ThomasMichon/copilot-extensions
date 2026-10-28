@@ -204,7 +204,7 @@ and [repair register](reconstruction-findings.md) retain the evidence and limits
   waits and normal script return without an explicit exit.
 - [x] Land provider-first literal preparation transport and selected-runtime
   contract discovery (#9318), without activating a POSIX lifetime owner.
-- [ ] Land the dormant Bash frame reader and copied POSIX setup assets;
+- [x] Land the dormant Bash frame reader and copied POSIX setup assets (#9321);
   keep bounded callback execution and native lifetime activation separate.
 - [ ] Remove both deferred-setup and final-backend runtime-Python waiters.
   Reuse finite seed preparation, existing seed custody and execution receipts;
@@ -493,6 +493,104 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   as rooted. No product was removed and no guard or process was bypassed.
   Next classify the actual mux manifest/data references and descendant setup
   lifetime through existing launch/removal owners before retrying removal.
+
+### 2026-10-28 - Finite POSIX transport qualification
+
+- Added the dormant copied phase transport: reselect the owning root's current
+  completed runtime at each boundary, retain literal reply bytes on a pipe,
+  require actual successful producer exit and settle the finite provider group.
+  Complete output followed by nonzero exit is still unconfirmed and clears
+  the collected reply. No reply environment is applied or backend dispatched.
+- The focused Windows/Git Bash framing/copy packet passed 55 controls with
+  three native-POSIX skips. The selected native publication/uninstall packet
+  passed nine controls. Native Linux/macOS deadline/group qualification was
+  still pending; these local results are not native terminal or removal evidence.
+- Native run `40676755235` passed Linux and Windows but failed on stock macOS
+  Bash 3.2: process-substitution PIDs are not waitable there. Replaced that
+  nonportable wait with a private per-call completion field emitted only after
+  the finite supervisor has reaped its actual provider and settled its group.
+  The existing deadline is unchanged; the failed attempt is not passing evidence.
+- Corrected native run `40678165917` on
+  `6b7f28a1541d353c2a1bb22fd44428f63af9ff6f` passed all three selected jobs.
+  Linux Bash 5.2.21 and stock macOS Bash 3.2.57 each passed 53 reader/phase/copy
+  controls with 17 Windows-only skips, including actual timeout/group cleanup.
+  Windows passed nine setup/admission controls and the independent uncertain
+  Picker-handoff control. The corrected local packet passed 67 controls with
+  three native-POSIX skips; the exact-code no-actor packet passed 2,565 with
+  12 deselected in 99.781 seconds, coverage recorded once. This final journal
+  update changes no qualified runtime code.
+- Review then found early malformed input could return refusal before the
+  finite producer settled. Actual malformed-header and malformed-completion
+  regressions both reproduced a still-live provider at return. The collector
+  now retains and drains its private pipe through supervisor EOF before
+  returning failure. Both regressions and the focused Windows/Git Bash packet
+  pass: 69 controls with three native-POSIX skips. The corrected drain still
+  requires fresh native qualification; neither watchdog nor test deadline
+  was increased.
+- Native run `40680633959` on `de066ca18e14c77e7e7b9ad4b5f79f1135e690f9`
+  then passed all three jobs: Linux and stock macOS Bash each passed 55
+  reader/phase/copy controls with 17 Windows-only skips, including both
+  malformed/hung-provider regressions. The exact-code unit packet passed
+  2,565 with 12 deselected. These results qualified the inherited-group fix,
+  not deliberate group escape.
+- Subsequent review found an escaped descendant could retain stdout past the
+  watchdog. Native Linux run `40684489735` on
+  `c5fbd22472d8a9d1e63f57350afd8ecb34b5faa6` reproduced both cases:
+  a valid frame authorized after 12.026 seconds and malformed input refused
+  only after 12.026 seconds. The escaped fixture had a hard lifetime armed
+  before `setsid`, an after-escape readiness barrier and observed retirement.
+  The new candidate shares one deadline across all reads and EOF, and replaces
+  rejection's EOF drain with a private, prompt-free supervisor-status receipt
+  in the existing copied launch directory. It preserves inherited-group
+  custody and refuses escaped stdout without claiming cross-group retirement.
+  Fresh native qualification and accepted review are still required.
+- Candidate `936b49a87faadf20a02b58d29bf552466107e6e5` passed the native
+  Linux escaped-stdout packet (64 passed, 17 Windows-only skips) and the
+  Windows setup/Picker packet; macOS remained queued. Its unit packet passed
+  2,565 with 12 deselected in 100.093 seconds. Review then found caller
+  `noclobber` prevented writing the existing control file. A real regression
+  reproduced refusal after 11.18 seconds; the writer now uses `>|` only for
+  its own receipt, preserving caller options and suppressing raw path errors.
+  The local corrected packet passed 78 with five native-POSIX skips,
+  including actual control-write failure. This newer candidate still requires
+  its own native packet and accepted review.
+- Capability/rollback selection, canonical process-birth capture, backend
+  custody and foreground terminal/signal behavior remain the next integration
+  gates. Neither POSIX runtime waiter is removed, and no host installation,
+  running service, session, release or rollout permission changed.
+
+### 2026-10-28 - Dormant reader merged; finite POSIX consumer next
+
+- #9321 merged as `a1e629c7d884cb1af9f0138fd330e3c20a6f718e`.
+  Exact-head Copilot review `5680991863` on
+  `0eadfa38a6589fe792301d3888bea98c8aad9c57` reported no open issues;
+  its clean owner-authored `COMMENTED` shape satisfies repository policy.
+  The overview's pending-native observation was superseded by the completed
+  exact-head run below. All four review threads are resolved, and the fresh
+  metadata-triggered required CI passed before managed completion. The
+  authorized Maintainer exception covered only the additional review vote.
+- Native run `40670087559` passed all three selected jobs: Linux Bash 5.2.21
+  and stock macOS Bash 3.2.57 each passed 36 reader/copy controls with 10
+  Windows-only skips; Windows passed nine copied-setup/creation controls
+  and the independent uncertain-Picker-handoff control. The real nonblocking
+  pipe, actual closed descriptors, caller-descriptor preservation and
+  prompt-free refusal all passed without increasing their deadlines.
+- The final no-actor unit packet passed 2,565 cases, 12 deselected, with
+  coverage collected once. Real-process reader tests are selected explicitly,
+  not admitted as fast structural guards. Earlier native failures above
+  remain failures rather than being relabeled as passing qualification.
+- Normal pull-forward attempted to replay the landed series and aborted.
+  The complete local PR delta and actual squash delta had the same stable
+  patch ID; retained recovery refs preserved the published tip. Advanced only
+  that proven merged range, then completed normal reconciliation. The broader
+  aggregate-squash repair remains tracked in #4130.
+- Re-read the complete Plan and Validation Plan. Closed only the dormant
+  reader/copy item. Continue finite current-runtime POSIX callback execution
+  and native lifetime integration, preserving the existing seed/receipt
+  owners, exact process birth, stdin, terminal signals and #5579's forwarding
+  ownership. Production POSIX activation, release, installed acceptance,
+  shared YAML standby and both live cycles remain open. No host installation,
+  service or running session changed; this effort remains Active.
 
 ### 2026-10-28 - Reconstruction findings and cooperative standby direction
 

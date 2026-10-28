@@ -171,6 +171,7 @@ jobs:
           export PATH="/bin:$PATH"
           python tools/run-plugin-tests.py agent-worktrees \
             --test-file tests/test_native_seed_reply_shell.py \
+            --test-file tests/test_native_seed_phase_shell.py \
             --test-file tests/test_session_shell.py \
             --timeout 180 --plugin-timeout 240 --test-timeout 30
 
@@ -206,6 +207,7 @@ jobs:
           export PATH="/bin:$PATH"
           python tools/run-plugin-tests.py agent-worktrees \
             --test-file tests/test_native_seed_reply_shell.py \
+            --test-file tests/test_native_seed_phase_shell.py \
             --test-file tests/test_session_shell.py \
             --timeout 180 --plugin-timeout 240 --test-timeout 30
 

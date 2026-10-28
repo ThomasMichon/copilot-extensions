@@ -179,6 +179,7 @@ def test_native_seed_reader_acceptance_uses_stock_posix_shells_only_when_selecte
     execution = job["steps"][-1]["run"]
     assert 'export PATH="/bin:$PATH"' in execution
     assert "--test-file tests/test_native_seed_reply_shell.py" in execution
+    assert "--test-file tests/test_native_seed_phase_shell.py" in execution
     assert "--test-file tests/test_session_shell.py" in execution
     assert "--timeout 180 --plugin-timeout 240 --test-timeout 30" in execution
     assert "--allow-host-state" not in execution

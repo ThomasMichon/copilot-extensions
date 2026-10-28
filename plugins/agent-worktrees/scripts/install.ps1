@@ -3091,6 +3091,7 @@ function Deploy-Wrappers {
         'default-setup.ps1',
         'native-seed-boundary.ps1',
         'native-seed-reply.sh',
+        'native-seed-boundary.sh',
         'default-setup.sh',
         'launch-command.ps1',
         'launch-command.sh',

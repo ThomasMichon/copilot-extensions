@@ -75,6 +75,30 @@ printf '%s' "$AW_NATIVE_SEED_ENV_COUNT"
     assert result.stdout == count and not result.stderr
 
 
+def test_reader_requires_the_optional_transport_completion_before_eof(tmp_path: Path) -> None:
+    frame = nul_reply(_reply())
+    paths = []
+    for index, trailer in enumerate((b"expected\0", b"wrong\0", b"", b"expected\0extra")):
+        path = tmp_path / str(index)
+        path.write_bytes(frame + trailer)
+        paths.append(path.as_posix())
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+for frame in "${@:2}"; do
+    code=0
+    aw_native_seed_read_reply expected < "$frame" 2>/dev/null || code=$?
+    if [[ "$code" != 0 ]]; then
+        [[ -z "$AW_NATIVE_SEED_OPERATION" && -z "${AW_NATIVE_SEED_ARGV[0]+x}" ]]
+    fi
+    printf '%s\n' "$code"
+done
+''', paths)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["0", "3", "3", "3"]
+    assert not result.stderr
+
+
 def test_reader_suppresses_private_fields_and_restores_caller_xtrace():
     private_argument = "private-argument-must-not-be-logged"
     private_environment = "private-environment-must-not-be-logged"
@@ -123,6 +147,40 @@ done
     assert result.stderr.splitlines() == [
         "Native preparation reply is invalid; no backend started.",
     ] * 4
+
+
+@pytest.mark.parametrize("deadline", ["0", "-1", "1+1", "9999999999", "$(exit 90)"])
+def test_reader_refuses_noncanonical_deadlines_without_evaluation(deadline: str) -> None:
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+if aw_native_seed_read_reply "" "$2"; then exit 90; fi
+[[ -z "$AW_NATIVE_SEED_OPERATION" && -z "${AW_NATIVE_SEED_ARGV[0]+x}" ]]
+''', [deadline], payload=nul_reply(_reply()).decode("utf-8"))
+    assert result.returncode == 0, result.stderr
+    assert not result.stdout
+    assert result.stderr == "Native preparation reply is invalid; no backend started.\n"
+
+
+def test_reader_uses_one_deadline_for_all_fields_and_eof() -> None:
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+deadline=$((SECONDS + 10))
+read() {
+    local code=0
+    builtin read "$@" || code=$?
+    if [[ "$code" == 0 && "${!#}" == field && "$field" == complete ]]; then
+        SECONDS="$deadline"
+    fi
+    return "$code"
+}
+if aw_native_seed_read_reply "" "$deadline"; then exit 90; fi
+[[ -z "$AW_NATIVE_SEED_OPERATION" && -z "${AW_NATIVE_SEED_ARGV[0]+x}" ]]
+''', payload=nul_reply(_reply()).decode("utf-8"))
+    assert result.returncode == 0, result.stderr
+    assert not result.stdout
+    assert result.stderr == "Native preparation reply is invalid; no backend started.\n"
 
 
 @pytest.mark.parametrize("nounset", ["on", "off"])
