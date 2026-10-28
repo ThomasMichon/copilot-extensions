@@ -56,6 +56,11 @@ creation, not an implicit permission migration or a read-only status side effect
   existing identities. Legacy records without it remain normal requests.
   An older driver rejects the new repair field before execution rather than
   silently claiming to support its semantics.
+  An explicit `BOOTSTRAP_KILLSWITCH_STATE_FILE` override is captured at enqueue
+  as the absolute `killswitch_path`, relative to the request's original cwd
+  when needed. It participates in identity; a detached or already-running
+  worker never substitutes its own override. The empty default is omitted
+  from ordinary records, and legacy records continue to use canonical paths.
 - `TrustedRunner(argv, cwd, timeout=7200, env=(), context_keys=())` stores a complete internally
   constructed pinned invocation. Only Python import mapping (`PYTHONPATH`,
   `__PYVENV_LAUNCHER__`) can be persisted as environment metadata. Authentication

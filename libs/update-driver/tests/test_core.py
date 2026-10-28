@@ -96,13 +96,13 @@ def test_killswitch_rechecked_between_jobs_without_interrupting_active_work(area
 def test_killswitch_real_runner_never_starts_normal_child(area, monkeypatch):
     root = area / "state"
     switch = area / "killswitch.json"
-    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(switch))
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", "killswitch.json")
     switch.write_text('{"active":true}', encoding="utf-8")
     normal_marker, repair_marker = area / "normal", area / "repair"
 
     def submit(marker, repair):
         return enqueue(
-            RequestSpec("fixture", repair=repair), root=root,
+            RequestSpec("fixture", repair=repair, cwd=str(area)), root=root,
             runner=TrustedRunner((
                 sys.executable, "-c",
                 "from pathlib import Path; import sys; Path(sys.argv[1]).write_text('ran')",
@@ -111,11 +111,30 @@ def test_killswitch_real_runner_never_starts_normal_child(area, monkeypatch):
         )
 
     normal, repair = submit(normal_marker, False), submit(repair_marker, True)
+    monkeypatch.chdir(root)
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(area / "unrelated-worker-switch.json"))
     assert drain(root=root) == 0
     assert wait(normal.id, root=root).exit_code == 3
     assert wait(repair.id, root=root).exit_code == 0
     assert not normal_marker.exists()
     assert repair_marker.read_text() == "ran"
+
+
+def test_each_request_retains_its_own_override_not_the_workers(area, monkeypatch):
+    root = area / "state"
+    active, inactive = area / "active.json", area / "inactive.json"
+    active.write_text('{"active":true}', encoding="utf-8")
+    inactive.write_text('{"active":false}', encoding="utf-8")
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(active))
+    first = sample(area)
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(inactive))
+    second = sample(area)
+    assert first.id != second.id
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(active))
+    seen = []
+    assert drain(root=root, executor=lambda tx: seen.append(tx.request.id) or 0) == 0
+    assert seen == [second.id]
+    assert status(first.id, root=root).exit_code == 3
 
 
 @pytest.mark.parametrize("legacy", [False, True])
@@ -150,11 +169,13 @@ def test_invalid_or_inactive_killswitch_preserves_existing_fail_open_policy(
         assert "invalid state" in capsys.readouterr().err
 
 
-def test_legacy_normal_identity_omits_default_repair_field(area):
+def test_legacy_normal_identity_omits_default_repair_field(area, monkeypatch):
+    monkeypatch.delenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", raising=False)
     request = sample(area)
     with sqlite3.connect(area / "state" / "queue.sqlite3") as db:
         stored = json.loads(db.execute("SELECT spec FROM requests WHERE id=?", (request.id,)).fetchone()[0])
     assert "repair" not in stored
+    assert "killswitch_path" not in stored
     assert sample(area, repair=False).id == request.id
     assert status(request.id, root=area / "state").spec.repair is False
     with pytest.raises(InvalidRequestError, match="explicit boolean"):

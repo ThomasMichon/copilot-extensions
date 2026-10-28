@@ -108,6 +108,30 @@ def test_force_options_record_explicit_repair_request(queued, values, repair):
     assert seen["spec"].repair is repair
 
 
+def test_detached_adapter_binds_relative_killswitch_to_original_invocation(tmp_path, monkeypatch):
+    from pathlib import Path
+    import update_driver
+
+    home = tmp_path / "home"
+    home.mkdir()
+    scope = tmp_path / "scope"
+    invocation = scope / "invocation"
+    invocation.mkdir(parents=True)
+    (invocation / "pause.json").write_text('{"active":true}', encoding="utf-8")
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", "./pause.json")
+    assert _enqueue_fixture_update(monkeypatch, scope, no_manager=True) == 0
+    request, = update_driver.status()
+    assert Path(request.spec.killswitch_path).samefile(invocation / "pause.json")
+    monkeypatch.chdir(home)
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(home / "unrelated.json"))
+    assert update_driver.drain(executor=lambda tx: pytest.fail("inhibited runner started")) == 0
+    assert update_driver.wait(request.id).exit_code == 3
+
+
 def test_selected_phase_queues_exact_scope_and_labels_partial_receipt(queued, capsys):
     import json
 
