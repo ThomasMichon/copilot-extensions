@@ -194,8 +194,9 @@ identities are not the same frozen 682-assignment roster.
 All three arrivals have separate independently admitted
 [bounded P2 assessments](roadmap-inflow.md#later-inflow-at-fixed-94df-three-retained-p2-gaps)
 at actual fetched source `94df27510cd6a6d6db1c659846e0ff5921d7aa7a`.
-Unknown runtime/native causes, local-helper/home gaps and unverified
-correction delivery stay explicit, not completion claims.
+Unknown runtime/native causes, precise helper/diagnostic/control-witness
+residuals and the unresolved whole effort home stay explicit. Actual later
+source delivery is credited below, not turned into whole completion.
 The only relevant guidance/vision delta from `272e` is two Efforts
 provenance archive links, not changed intent. This separate inflow work
 authorizes no implementation, test/build, native/cache/process/service
@@ -214,6 +215,34 @@ expanded to twenty-two represented records. The **20:57:37 UTC
 excluding rosters and 85 comment metadata nodes, with stable complete
 actor/roster and no drift against any admitted terminal record. The original
 nineteen-record guard remains valid evidence for its earlier scope.
+
+## Later publication-base reconciliation
+
+The managed publication base advanced to
+`611e819e298041a4f2b660d4c25900a4bc0149d5` after the fixed-pin studies.
+Its new Plugin Service Model concept concerns **automatic-update
+inhibition**, not an extension of this research session's authority.
+Pending normal install jobs leave with explicit non-success/nothing-ran
+results; clearing inhibition permits new normal work under trusted selection
+and ordinary admission. A separately designated, explicitly authorized
+repair driver may retain repair-as-needed authority through its objective,
+using the same serialized owner, native exclusivity, unsettled-effect fences
+and protected-resource rules. Inhibition does not terminate started work.
+
+That intent is compatible with retained source selection/execution custody.
+It is distinct from a machine-maintenance standby hold and an advisory
+pre-tool workflow-stop state. No installation, repair, cache/process/service
+action, per-job approval ceremony or new execution assignment follows here.
+
+The same base changed directly relevant #9435 guard/wrapper/test source and
+#9442's queued-engine test after `94df`. The separately admitted
+[delivery delta](roadmap-inflow.md#later-inflow-at-fixed-94df-three-retained-p2-gaps)
+credits actual merged #9438 adoption/wrapper/control-source delivery and
+#9442's aggregate-only 60-second item annotation. Do not duplicate those
+source changes. #9435's precise helper/diagnostic branches and finite witness,
+and #9442's individual 20-second/native qualification, remain distinct.
+Neither is a whole completion or new execution/timeout approval. Original
+snapshots remain immutable and attributed to their actual pins.
 
 ## Fresh research and subsequent gates
 

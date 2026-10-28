@@ -277,8 +277,9 @@ identities are not identical to the frozen four-wave assignment roster.
 The fixed whole-queue checkpoint remains 729, now **206 issues away**.
 The three arrivals have separately admitted
 [bounded P2 assessments](roadmap-inflow.md#later-inflow-at-fixed-94df-three-retained-p2-gaps),
-retaining exact source gaps, unknown runtime/native causes and unverified
-correction delivery without implementation or new closure credit. The separate
+retaining precise residual branches and unknown runtime/native qualification
+while crediting actual later source delivery without duplicate implementation
+or new closure credit. The separate
 [nineteen-identity receiving manuscripts](consolidation-current-unit.md)
 have independently admitted current contracts but no accepted intake or
 source supersession yet. Normal reviewed receiving delivery, complete current

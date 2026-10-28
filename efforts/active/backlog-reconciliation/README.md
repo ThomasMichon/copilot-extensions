@@ -168,8 +168,9 @@ outcomes from agent-recommended research and prioritization mechanics.
   claimant, while crediting #9413's finite delivered producer.
   Later #9435/#9436/#9442 arrivals now have independently admitted
   [bounded P2 assessments](roadmap-inflow.md#later-inflow-at-fixed-94df-three-retained-p2-gaps);
-  actual runtime/native causes and unverified correction delivery remain
-  explicit gaps, not completed fixes or new implementation assignments.
+  actual runtime/native causes and finite residual qualification remain
+  explicit, with later delivered source credited rather than duplicated.
+  No whole completion or new implementation assignment is inferred.
 - [ ] Coalesce thematic duplicates into canonical issues and existing efforts;
   transfer explicit residual checklists before closing superseded reports.
   The [current receiving-contract unit](consolidation-current-unit.md)

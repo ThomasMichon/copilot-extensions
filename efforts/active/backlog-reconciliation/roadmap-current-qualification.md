@@ -277,8 +277,9 @@ counted. No implementation or broader native/rollout gate follows.
 The later complete 20:23 UTC inventory contains three further eligible
 arrivals, #9435/#9436/#9442, outside this qualified subset. Their separate
 [bounded P2 assessments](roadmap-inflow.md#later-inflow-at-fixed-94df-three-retained-p2-gaps)
-are independently admitted at `94df`; source gaps, unknown runtime/native
-causes and unverified correction delivery remain explicit. They are not
+are independently admitted at `94df`, with actual later `611e` source delivery
+separately credited. Precise residual branches, unknown runtime/native causes
+and finite qualification remain explicit. They are not
 silently covered by the historical four-wave count or implementation grants.
 
 Qualifying these twelve first slices does not establish a complete execution
