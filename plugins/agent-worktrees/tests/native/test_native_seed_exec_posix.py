@@ -59,7 +59,7 @@ raise SystemExit(code)
 '''
 
 
-def _run(record, tmp_path, native_bash, command):
+def _run(record, tmp_path, native_bash, command, *, fault=None):
     seed = seeds.stage(record, kind="new", text="literal prompt ' \" \u03a9\n")
     prepared = native.prepare(record, command, seed_id=seed.seed_id)
     correlation = audit.Correlation(
@@ -75,22 +75,36 @@ def _run(record, tmp_path, native_bash, command):
         "resolution": prepared["resolution_id"], "parent": prepared["parent_id"],
         "operation": prepared["operation_id"], "command": prepared["argv"],
         "completion": str(completion), "assets": str(assets),
+        "fault": fault,
     }), encoding="utf-8")
     driver = tmp_path / "exec-driver.py"
     driver.write_text('''
-import json, os, sys
+import json, os, signal, sys, time
 from pathlib import Path
 from agent_worktrees import locks
 from agent_worktrees.launch_execution import Correlation
-from agent_worktrees.launch_seed_posix import execute
+from agent_worktrees import launch_seed_posix
 r = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 Path(r["assets"], "before.json").write_text(json.dumps({
     "pid": os.getpid(), "birth": locks.process_start_time(os.getpid()),
 }))
-raise SystemExit(execute(
-    Path(r["record"]), Correlation(r["attempt"], r["resolution"], r["parent"]),
-    r["operation"], r["command"], Path(r["completion"]),
-))
+if r["fault"]:
+    def failed_exec(*args):
+        if r["fault"] == "interrupt":
+            signal.raise_signal(signal.SIGINT)
+        raise UnicodeError("fixture encoding refusal")
+    launch_seed_posix.os.execvpe = failed_exec
+try:
+    code = launch_seed_posix.execute(
+        Path(r["record"]), Correlation(r["attempt"], r["resolution"], r["parent"]),
+        r["operation"], r["command"], Path(r["completion"]),
+    )
+except (KeyboardInterrupt, UnicodeError):
+    deadline = time.monotonic() + 12
+    while not Path(r["completion"]).read_text() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    code = 3
+raise SystemExit(code)
 ''', encoding="utf-8")
     environment = dict(os.environ)
     if prepared["environment"] is not None:
@@ -184,3 +198,20 @@ def test_fast_success_is_spawned_or_unknown_never_restored(record, tmp_path, nat
         event["phase"] == "execution-returned" and event["details"].get("exit_code") == 3
         for event in events
     )
+
+
+@pytest.mark.parametrize("fault", ["interrupt", "encoding"])
+def test_catchable_pre_exec_loss_cannot_finish_or_restore(
+    record, tmp_path, native_bash, fault,
+):
+    seed, prepared, _correlation, assets, result = _run(
+        record, tmp_path, native_bash, [sys.executable, "-c", "raise SystemExit(99)"], fault=fault,
+    )
+    assert result.returncode == 3, result.stderr
+    assert (assets / ".native-seed-exec.complete").read_text() == "3\n"
+    events = audit.read(record.parent, prepared["attempt_id"], prepared["operation_id"])["events"]
+    assert [event["phase"] for event in events] == [
+        "execution-requested", "seed-claimed", "unknown",
+    ]
+    retained = seeds.peek(record)
+    assert retained.seed_id == seed.seed_id and retained.handoff_id
