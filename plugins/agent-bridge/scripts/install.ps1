@@ -2280,6 +2280,8 @@ function Materialize-SnapshotVendoredLibs {
         'machine-transport'    = (Resolve-VendoredLib -LibName 'machine-transport')
         'worktree-identity'    = (Resolve-VendoredLib -LibName 'worktree-identity')
         'process-telemetry'    = (Resolve-VendoredLib -LibName 'process-telemetry')
+        'repository-policy'    = (Resolve-VendoredLib -LibName 'repository-policy')
+        'update-driver'        = (Resolve-VendoredLib -LibName 'update-driver')
     }
     foreach ($entry in $sources.GetEnumerator()) {
         $source = $entry.Value
@@ -2311,6 +2313,8 @@ function Materialize-SnapshotVendoredLibs {
             'agent-machine-transport'    = 'machine-transport'
             'agent-worktree-identity'    = 'worktree-identity'
             'agent-process-telemetry'    = 'process-telemetry'
+            'agent-repository-policy'    = 'repository-policy'
+            'agent-update-driver'        = 'update-driver'
         }
         foreach ($entry in $rewrites.GetEnumerator()) {
             $oldLine = '{0} = {{ path = "../../libs/{1}", editable = true }}' -f $entry.Key, $entry.Value

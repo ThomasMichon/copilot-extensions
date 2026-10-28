@@ -27,11 +27,11 @@ def _function_source(source: str, name: str, next_marker: str) -> str:
     return source[start:end]
 
 
-@pytest.mark.skipif(
-    not (shutil.which("pwsh") or shutil.which("powershell.exe")),
-    reason="PowerShell is unavailable",
-)
-def test_codec_snapshot_embeds_every_declared_library_under_real_powershell(tmp_path):
+@pytest.mark.parametrize("host_name", ["powershell.exe", "pwsh"])
+def test_codec_snapshot_embeds_every_declared_library_under_real_powershell(tmp_path, host_name):
+    host = shutil.which(host_name)
+    if not host:
+        pytest.skip(f"{host_name} is unavailable")
     references = tomllib.loads((PLUGIN / "pyproject.toml").read_text(encoding="utf-8"))[
         "tool"
     ]["uv"]["sources"]
@@ -75,7 +75,7 @@ Materialize-SnapshotVendoredLibs -SnapshotDir '{target}'
 """
     result = subprocess.run(
         [
-            shutil.which("pwsh") or shutil.which("powershell.exe"),
+            host,
             "-NoProfile", "-NonInteractive", "-Command", script,
         ],
         capture_output=True, text=True, timeout=30,
