@@ -147,8 +147,10 @@ installation or later development tip has the same behavior.
 - **Current result:** The selected acquisition-to-cursor/GC ownership path
   retains a gap, with a **conditional, unexecuted** sequential-alias A/B/C
   counterexample: shared canonical rows may reflect B while another alias's
-  completed A cursor selects a net A..C delta that undoes a B-only change.
-  This does not claim corruption in every integration.
+  completed A cursor selects a net A..C delta. If C reverts a B-only file
+  change, that delta can omit the file and leave B-only content indexed.
+  The regression targets this stale-row failure, not a delta that performs
+  the omitted revert. This does not claim corruption in every integration.
 - **Next finite contribution:** Qualify the actual supported shared-family/
   independent-cursor case, then use a shared completed-family watermark
   **OR** explicit stale-alias repair/refusal through the existing authority.
