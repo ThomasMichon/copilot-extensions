@@ -1175,7 +1175,7 @@ jobs:
           from datetime import datetime, timezone
           import hashlib, os, pathlib, tempfile, urllib.request
           filename = "setuptools-84.0.0-py3-none-any.whl"
-          url = ("https://files.pythonhosted.org/packages/95/9c/"
+          url = ("https://files.pythonhosted.org/packages/95/9c/"  # feed-guard: allow hash-pinned hosted test fixture, not runtime acquisition
                  "c510029fc6ef33a6275cd2c5d3cecd6613dfd6aa401d57c54f1c18852ccf/" + filename)
           with urllib.request.urlopen(url, timeout=30) as response:
               content = response.read(8 << 20)
