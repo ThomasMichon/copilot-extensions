@@ -490,6 +490,38 @@ def test_changed_index_refuses_before_output_mutation(copy_workspace, monkeypatc
     assert output.read_bytes() == previous
 
 
+@pytest.mark.parametrize("kind", ["exclude", "gitignore"])
+def test_changed_git_protection_link_target_refuses_before_copy(copy_workspace, monkeypatch, kind):
+    root, home = copy_workspace
+    template, output = provider(root, home)
+    target = home / "ignore-rules"
+    link = root / ".git/info/exclude" if kind == "exclude" else root / ".gitignore"
+    target.write_bytes(link.read_bytes() if link.exists() else b"")
+    link.unlink(missing_ok=True)
+    try:
+        link.symlink_to(target)
+    except OSError as exc:
+        if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("native file-link privilege unavailable")
+        raise
+    assert lcr.prepare_for_launch(root).status == "ready"
+    previous = output.read_bytes()
+    template.write_bytes(b"must not replace after stale Git preflight")
+    original = static._git
+
+    def replace_rules_after_check(path, *args, **kwargs):
+        value = original(path, *args, **kwargs)
+        if args[0] == "check-ignore":
+            target.write_bytes(b"!**/\n!*.local.instructions.md\n")
+        return value
+
+    monkeypatch.setattr(static, "_git", replace_rules_after_check)
+    result = lcr.prepare_for_launch(root)
+    assert result.status == "failed"
+    assert "Git protection evidence changed" in result.detail
+    assert output.read_bytes() == previous
+
+
 @pytest.mark.guard
 @pytest.mark.parametrize("legacy_progress", [False, True], ids=["timed", "legacy"])
 def test_copy_opaque_bytes_without_packaged_engine(

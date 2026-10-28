@@ -37,6 +37,12 @@ def stamp(path: Path, *, deadline: float | None = None) -> list | None:
         str(path.resolve()), info.st_mode, info.st_dev, info.st_ino,
         info.st_size, info.st_mtime_ns, info.st_ctime_ns,
     ]
+    if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+        target = path.stat()
+        followed = [target.st_mode, target.st_dev, target.st_ino]
+        if not stat.S_ISDIR(target.st_mode):
+            followed.extend((target.st_size, target.st_mtime_ns, target.st_ctime_ns))
+        value.append(followed)
     _check(deadline)
     return value
 
