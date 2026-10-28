@@ -75,10 +75,14 @@ def test_explicit_activation_is_required_and_not_sticky():
         labels.activate(conf, "control-plane")
 
 
-def test_additive_readback_idempotency_and_repair():
+@pytest.mark.parametrize("requested", [
+    ["source:control-plane"],
+    ["source:control-plane", "secondary", "source:control-plane"],
+])
+def test_additive_readback_idempotency_and_repair(requested):
     backend = Backend()
     backend.fail = True
-    origin = labels.parse_origin(ORIGIN)
+    origin = labels.parse_origin({"id": "control-plane", "labels": requested})
     failed = labels.reconcile(backend, "base/project", 7, origin)
     assert not failed["ok"] and failed["publication_retained"]
     assert failed["number"] == 7 and failed["repair"] == "pr-publication-labels"
@@ -86,7 +90,7 @@ def test_additive_readback_idempotency_and_repair():
     assert labels.reconcile(backend, "base/project", 7, origin)["ok"]
     backend.additions.clear()
     assert labels.reconcile(backend, "base/project", 7, origin)["ok"]
-    assert backend.labels == ["unrelated", "source:control-plane"]
+    assert backend.labels == ["unrelated", *dict.fromkeys(requested)]
     assert backend.additions == []
 
 
@@ -118,7 +122,8 @@ def test_origin_scope_and_outcome_round_trip():
         labels.validate_scope(conf.default_repo.pr, restored)
 
 
-def test_frozen_scope_survives_label_failure_and_repair_without_republication(tmp_path, monkeypatch):
+@pytest.mark.parametrize("state", ["open", "closed", "merged"])
+def test_frozen_scope_survives_label_failure_and_repair_without_republication(tmp_path, monkeypatch, state):
     directory = tmp_path / "tracking"
     directory.mkdir()
     monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: directory)
@@ -126,7 +131,7 @@ def test_frozen_scope_survives_label_failure_and_repair_without_republication(tm
                                "fixture", "fixture", "windows", directory)
     path = directory / "fixture.yaml"
     record = tracking.load_record(path)
-    record.prs.append(tracking.PRRecord(repo="base/project", number=7, state="open", branch="topic"))
+    record.prs.append(tracking.PRRecord(repo="base/project", number=7, state=state, branch="topic"))
     tracking.save_record(record)
     backend = Backend()
     backend.fail = True
@@ -140,6 +145,21 @@ def test_frozen_scope_survives_label_failure_and_repair_without_republication(tm
     backend.fail = False
     assert labels.refresh(config(), fresh, fresh.prs[0])["ok"]
     assert tracking.load_record(path).prs[0].publication_labels["ok"]
+
+
+def test_provider_mismatch_refuses_before_credentials_or_scope_attachment(monkeypatch):
+    conf = labels.activate(config(), "control-plane")
+    target = tracking.PRRecord(repo="base/project", number=7, provider="azure-devops")
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("A foreign provider binding must not resolve credentials or a backend")
+
+    monkeypatch.setattr(providers, "get_provider", unexpected)
+    monkeypatch.setattr(providers, "account_token_for_slug", unexpected)
+    result = labels.refresh(conf, None, target)
+    assert not result["ok"] and result["publication_retained"]
+    assert "provider differs" in result["error"]
+    assert not target.publication_origin
 
 
 def test_successful_push_attaches_origin_to_preexisting_pr(monkeypatch):
@@ -187,11 +207,12 @@ def test_github_label_transport_is_add_only_and_host_scoped(monkeypatch):
     monkeypatch.setattr(github, "run_cli", run)
     provider = GitHubProvider()
     assert provider.get_publication_labels("base/project", 7, api_base="https://forge.invalid") == ("unrelated",)
-    provider.add_publication_labels("base/project", 7, ("source:control-plane",),
+    provider.add_publication_labels("base/project", 7, ("source:control-plane", "secondary"),
                                     api_base="https://forge.invalid", token="fixture")
     argv, kwargs = calls[-1]
     assert "--method" in argv and "POST" in argv and "DELETE" not in argv and "PATCH" not in argv
     assert "repos/base/project/issues/7/labels" in argv and "labels[]=source:control-plane" in argv
+    assert "labels[]=secondary" in argv
     assert kwargs["env"]["GH_HOST"] == "forge.invalid"
 
 
@@ -206,11 +227,13 @@ def test_azure_labels_use_per_label_post_and_encoded_target(monkeypatch):
 
     monkeypatch.setattr(provider, "_rest_call", request)
     assert provider.get_publication_labels("base project/repo", 7, api_base="https://dev.azure.com/example") == ("unrelated",)
-    provider.add_publication_labels("base project/repo", 7, ("source:control-plane",),
+    provider.add_publication_labels("base project/repo", 7, ("source:control-plane", "secondary"),
                                     api_base="https://dev.azure.com/example")
     assert calls[-1][0] == "POST"
     assert "/base%20project/_apis/git/repositories/repo/pullRequests/7/labels?" in calls[-1][1]
-    assert json.loads(calls[-1][2]) == {"name": "source:control-plane"}
+    assert [json.loads(payload) for method, _, payload in calls if method == "POST"] == [
+        {"name": "source:control-plane"}, {"name": "secondary"},
+    ]
 
 
 def test_unsupported_provider_is_a_repairable_partial_result():
@@ -229,8 +252,9 @@ def test_real_cli_subprocess_repairs_with_fake_backend_without_publication(tmp_p
     }), "utf-8")
     script = textwrap.dedent("""
         import sys
-        from agent_worktrees import pr_config, providers
+        from agent_worktrees import config as cfg, pr_config, providers
         from agent_worktrees.__main__ import _dispatch_lazy
+        cfg.set_active_project("fixture")
         class Backend:
             labels = ["unrelated"]
             def get_pull(self, *a, **k):
@@ -251,6 +275,8 @@ def test_real_cli_subprocess_repairs_with_fake_backend_without_publication(tmp_p
         for _ in range(2):
             assert _dispatch_lazy(args[0], args) == 0
         assert backend.labels == ["unrelated", "source:control-plane"]
+        missing = ["pr-publication-labels", "--config", sys.argv[1], "--json"]
+        assert _dispatch_lazy(missing[0], missing) == 1
     """)
     result = subprocess.run(
         [sys.executable, "-c", script, str(path)], cwd=tmp_path, env=dict(os.environ),
@@ -259,5 +285,8 @@ def test_real_cli_subprocess_repairs_with_fake_backend_without_publication(tmp_p
     assert result.returncode == 0, result.stdout + result.stderr
     decoder = json.JSONDecoder()
     first, end = decoder.raw_decode(result.stdout.lstrip())
-    second, end = decoder.raw_decode(result.stdout.lstrip()[end:].lstrip())
+    remaining = result.stdout.lstrip()[end:].lstrip()
+    second, end = decoder.raw_decode(remaining)
+    missing, end = decoder.raw_decode(remaining[end:].lstrip())
     assert first["ok"] and second["ok"] and second["added"] == []
+    assert "worktree ID" in missing["error"]

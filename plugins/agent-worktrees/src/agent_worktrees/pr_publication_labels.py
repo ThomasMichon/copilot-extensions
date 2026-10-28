@@ -113,7 +113,7 @@ def refresh(config, record, target) -> dict | None:
 def _refresh(config, record, target) -> dict | None:
     """Attach selected scope after publication, retaining identity on metadata failure."""
     from . import pr_publish, providers, tracking
-    from .pr_publication_state import copy_pr, matches
+    from .pr_publication_state import authority, copy_pr
 
     if target is None:
         return None
@@ -126,13 +126,16 @@ def _refresh(config, record, target) -> dict | None:
     origin = frozen or desired
     if origin is None:
         return None
-    validate_policy(config.default_repo.pr, origin)
+    prcfg = config.default_repo.pr
+    if target.provider and target.provider != prcfg.provider:
+        raise ValueError("Tracked PR provider differs from the current binding; resolve its owning binding before repair")
+    validate_policy(prcfg, origin)
     if record is not None:
         with pr_publish.metadata_lock(record.worktree_id, project=config.repo_name), tracking._RecordLock(
                 record.yaml_path, require_sidecar=True):
             fresh = tracking.load_record(record.yaml_path)
             current = pr_publish._publication_pr(fresh, target)
-            if not matches(current, target):
+            if current is None or authority(current) != authority(target):
                 return {"ok": False, "repo": target.repo, "number": target.number,
                         "error": "PR authority changed before publication-label attachment",
                         "publication_retained": True, "repair": "pr-publication-labels"}
@@ -143,7 +146,6 @@ def _refresh(config, record, target) -> dict | None:
         target.publication_origin = origin_dict(origin)
     if target.number is None:
         return None
-    prcfg = config.default_repo.pr
     try:
         provider = providers.get_provider(target.provider or prcfg.provider)
         token = providers.account_token_for_slug(target.repo, prcfg)
@@ -159,7 +161,7 @@ def _refresh(config, record, target) -> dict | None:
                 record.yaml_path, require_sidecar=True):
             fresh = tracking.load_record(record.yaml_path)
             current = pr_publish._publication_pr(fresh, target)
-            if matches(current, target):
+            if current is not None and authority(current) == authority(target):
                 current.publication_labels = target.publication_labels
                 tracking.save_record(fresh)
     return result

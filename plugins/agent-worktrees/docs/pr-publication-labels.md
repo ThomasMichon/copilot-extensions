@@ -52,6 +52,11 @@ a registered target and existing provider PR; it does not create a local PR
 association or authorize source publication. Supply the origin again when
 repairing an explicitly selected foreign PR.
 
+Metadata repair also accepts a tracked closed or merged PR, provided its recorded
+authority has not changed. Its provider must match the current repository
+binding; resolve the owning binding before repairing a different provider.
+These metadata-only operations never reopen a PR or authorize another push.
+
 Reconciliation reads existing labels, adds only missing labels and verifies the
 result. It never replaces/removes labels or reapplies create-only `pr.labels`.
 Configured consent and hold labels cannot be selected as publication labels.

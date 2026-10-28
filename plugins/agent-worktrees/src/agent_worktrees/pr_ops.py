@@ -447,8 +447,6 @@ def create_pr(
             record = tracking.load_record(yaml_path)
         except Exception:
             record = None
-    if not new:
-        pr_publication_labels.validate_scope(prcfg, record.active_pr() if record else None)
 
     # Round-22 finding: preflight the same allocation-time policy
     # `_open_via_provider`'s lazy backfill would otherwise only catch too
@@ -748,6 +746,10 @@ def create_pr(
     except ValueError as exc:
         return {**base, "error": str(exc)}
     reusing = bool(active_is_live and not new and active and active.branch == feature_branch and not provisional_retry)
+    try:
+        pr_publication_labels.validate_scope(prcfg, active if reusing or provisional_retry else None)
+    except ValueError as exc:
+        return {**base, "error": str(exc)}
     ahead = git_ops.get_commits_ahead(wt_branch, upstream, cwd=worktree_path)
     if reusing and not ahead and git_ops.local_branch_exists(
         feature_branch, cwd=worktree_path
@@ -2326,6 +2328,8 @@ def _push_existing_feature(
         None,
     )
     try:
+        from .pr_publication_labels import validate_scope
+        validate_scope(prcfg, existing_target)
         target = pr_publish.prepare_existing_publication(
             record, existing_target, feature_branch, prcfg, attribution, remote=remote, cwd=worktree_path,
         )

@@ -44,6 +44,8 @@ def cmd_publication_labels(args):
                                       api_base=prcfg.api_base, token=token)
         else:
             identity = worktree_identity._infer_worktree_id(args.worktree_id, config)
+            if not identity:
+                raise ValueError("Repair needs a worktree ID or a current managed worktree")
             identity = worktree_identity._resolve_worktree_id(identity, project=config.repo_name)
             record = tracking.load_record(cfg.tracking_dir(config.repo_name) / f"{identity}.yaml")
             target = record.active_pr()
