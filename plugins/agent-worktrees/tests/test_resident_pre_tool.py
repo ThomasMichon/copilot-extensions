@@ -21,6 +21,7 @@ PLUGIN = Path(__file__).resolve().parents[1]
     "real-malformed-guard", "real-throwing-guard",
     "python-empty", "report-failure", "bom", "python-legacy", "python-invalid-json",
     "real-allowed-shell", "real-allowed-tool",
+    "real-missing-policy",
 ])
 def test_resident_pre_tool_contract(case, tmp_path):
     node = shutil.which("node")
@@ -30,7 +31,7 @@ def test_resident_pre_tool_contract(case, tmp_path):
     for name in (
         "hook-read-policy.json", "statelessness_guard.py", "cross_repo_guard.py",
         "anchor_write_guard.py", "pr_supersede_guard.py",
-        "hook_runtime.py", "pretool_killswitch.py", "hook_pre_relevance.py",
+        "hook_runtime.py", "pretool_killswitch.py", "hook_pre_relevance.py", "hook_pre_policy.py",
     ):
         shutil.copyfile(PLUGIN / "scripts" / name, scripts / name)
     home = tmp_path / "home"
@@ -143,6 +144,23 @@ if (name === "reads" || name === "bom") {
   const actual = make(createPythonPolicy({ scriptsRoot: root, python, environment: env }));
   assert.deepEqual(await actual(payload), {});
   assert.deepEqual(reports, []);
+} else if (name === "real-missing-policy") {
+  unlinkSync(join(root, "hook_pre_policy.py"));
+  const payload = { ...input, toolName: "edit", cwd };
+  for (const kind of ["preToolUse", "preToolUseStrict"]) {
+    const raw = spawnSync(python, ["-X", "utf8", "-B", join(root, "hook_client.py"), kind], {
+      windowsHide: true, cwd, env, encoding: "utf8", timeout: 28000,
+      input: JSON.stringify(payload),
+    });
+    assert.equal(raw.error, undefined);
+    assert.equal(raw.status, 0, raw.stderr);
+    const decision = JSON.parse(raw.stdout);
+    assert.equal(decision.permissionDecision, "deny");
+    assert.match(decision.permissionDecisionReason, /policy helper is unavailable/);
+  }
+  const actual = make(createPythonPolicy({ scriptsRoot: root, python, environment: env }));
+  assert.equal((await actual(payload)).permissionDecision, "deny");
+  assert.deepEqual(reports, ["policy-unavailable"]);
 } else if (name.startsWith("real-")) {
   if (name === "real-invalid-context") env.COPILOT_EXTENSIONS_CONTEXT = join(cwd, "missing-context.json");
   if (name === "real-malformed-guard") writeFileSync(join(root, "statelessness_guard.py"), "def invalid(:\\n");

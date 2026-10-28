@@ -79,7 +79,7 @@ def test_all_installers_deploy_every_py_hook():
         "bind_nudge.py",
         "hook_runtime.py",
         "hook_process_identity.py",
-        "hook_pre_relevance.py",
+        "hook_pre_relevance.py", "hook_pre_policy.py",
         "hook_lifecycle_runtime.py",
         "native_source_context.py",
         "terminal_probe.py",

@@ -2911,6 +2911,10 @@ The adapter never interprets unexplained silence as approval. Its bounded,
 deduplicated error categories distinguish empty or malformed responses and
 process failures without reflecting arbitrary exception or response text.
 
+Guard-chain evaluation lives in the standalone `hook_pre_policy.py` helper.
+Every installer declares it in the helper closure. A missing helper returns
+an explicit denial from either standalone entry, never a silent no-op.
+
 SDK hooks are awaited decisions, not passive event listeners. Registration
 requires the host's capability approval and does **not** disable a command hook.
 With both registered, both run; registration alone is not a throughput win.

@@ -80,7 +80,7 @@ export function createPythonPolicy({ scriptsRoot, python, environment = process.
     throw new Error("resident pre-tool policy requires an absolute existing interpreter");
   }
   return payload => new Promise((resolve, reject) => {
-    for (const name of [...GUARDS, "hook_client.py", "hook_runtime.py", "pretool_killswitch.py", "hook_pre_relevance.py"]) {
+    for (const name of [...GUARDS, "hook_client.py", "hook_runtime.py", "pretool_killswitch.py", "hook_pre_relevance.py", "hook_pre_policy.py"]) {
       boundedFile(join(scriptsRoot, name), 131072);
     }
     const child = execFile(python, ["-X", "utf8", "-B", join(scriptsRoot, "hook_client.py"), "preToolUseStrict"], {
