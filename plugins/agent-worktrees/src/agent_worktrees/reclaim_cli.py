@@ -320,7 +320,8 @@ def _perform_remux(
             if settled.get("state_clear") is True:
                 return {
                     "ok": True, "worktree_id": worktree_id, "session_id": None,
-                    "action": "already-clear", "requires_resume": True, "reclaim": settled,
+                    "action": "reclaimed", "already_clear": True,
+                    "requires_resume": True, "reclaim": settled,
                 }
             return _fail(settled.get("reason", "worktree ownership remains unconfirmed"))
         return _fail("no Stop-unreachable bound Copilot found for the target")

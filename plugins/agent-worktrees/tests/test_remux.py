@@ -219,7 +219,8 @@ class TestWindowsRestore:
             worktree_path=None, force_sudo=None, apply_windows=True,
         )
         assert result["ok"] and result["requires_resume"]
-        assert result["action"] == "already-clear"
+        assert result["action"] == "reclaimed"
+        assert result["already_clear"] is True
         assert calls == [{
             "bare_only": True, "target_pids": set(), "session_ids": ["old-owner"],
         }]
