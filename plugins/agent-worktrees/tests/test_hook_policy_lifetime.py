@@ -80,6 +80,11 @@ def test_policy_scope_retires_descendant(tmp_path, termination, consumer):
     if consumer != "resident":
         for name in ("pre-tool-hook.ps1", "versioned_runtime_native.ps1"):
             shutil.copyfile(PLUGIN / "scripts" / name, scripts / name)
+        (scripts / "resolve-runtime.ps1").write_text(
+            "param([string]$TraceMode)\n$AwPy = '"
+            + interpreter.replace("'", "''") + "'\n",
+            encoding="utf-8-sig",
+        )
     home = tmp_path / "home"
     home.mkdir()
     marker = tmp_path / "descendant.json"
@@ -130,7 +135,10 @@ console.log("policy timeout denied after its owned scope was retired");
         shell = shutil.which(consumer)
         assert shell
         command = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(scripts / "pre-tool-hook.ps1")]
-        environment["PATH"] = str(Path(interpreter).parent) + os.pathsep + environment.get("PATH", "")
+        ambient = tmp_path / "ambient"
+        ambient.mkdir()
+        (ambient / "python.cmd").write_text("@exit /b 92\n", encoding="utf-8")
+        environment["PATH"] = str(ambient) + os.pathsep + environment.get("PATH", "")
     started = time.monotonic()
     process, job = spawn_sync_in_kill_on_close_job(
         command,
