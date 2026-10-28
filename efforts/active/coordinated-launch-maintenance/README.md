@@ -33,6 +33,27 @@ Manager permanently abandoned a cold recovery. Preserve a distinct admitted
 recovery-pending exception through that existing feed boundary as retryable
 `unready`; refused launches and malformed/live-peer failures remain terminal.
 No deadline, broker lifetime proof or installation authority is changed.
+Run 40781121144 at `b4b22cfc5a62f3db9fc7fbea25a0888e6390a4d5`
+passed actual cold Manager construction and both installed `LiveLoader` recovery
+cycles: concurrent current reads, one serving owner, all caller Jobs closed
+before health observations, resident survival and canonical cleanup. The
+correction also passed all 111 contained roster/feed tests. First test-venv
+preparation exhausted the unchanged aggregate budget; the completed warmed
+packet passed in 23.57 seconds including cleanup, not under a widened budget.
+
+The candidate was then rebased onto `17c8272e76` with a durable backup.
+Conflicts were a generated installer fingerprint, independent daemon-coverage
+entries (both retained), and equivalent test formatting (upstream retained).
+Canonical regeneration refreshed the fingerprint and three source-build copies.
+The installed constructor and feed source changes did not conflict. The joined
+materialization/fixture packet passed 159 tests with 15 explicit platform/link
+skips. Its first attempt exposed an ignored stale Ruff-cache directory,
+unstaged generated snapshot inputs and a missing host Python import; removing
+only that owned cache, staging the actual regenerated inputs and using the
+existing test runtime resolved all three without a product-code workaround.
+Install contract (13 plugins), source AST guards and contribution-scoped module
+size all pass, with no baseline widening. Final exact-source native
+qualification and fresh review remain open; no installed rollout is implied.
 
 An already-healthy session must not wait for unrelated runtime installation.
 Keep adopted automatic maintenance available, coordinated and observable rather

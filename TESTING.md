@@ -2158,6 +2158,18 @@ earlier capability probe; either failure rejects the job. Ordinary contained
 units never register a task. This lane is still synthetic source qualification,
 not permission to adopt or update a broker on a shared host.
 
+The separately selected `windows_broker_consumers` lane has a 15-minute cap
+and constructs actual Worktrees, SSH and Manager runtimes in a credential-free
+disposable profile. It exercises automatic maintenance, equivalent-request
+coalescing, distinct project delivery and manual exclusion through the real
+installer. After stopping the resident, two actual installed Manager
+`LiveLoader` readers recover concurrently; both caller Jobs close before two
+resident health observations. Two cold cycles must pass, followed by canonical
+resident shutdown and all three installers' owned cleanup. This is the actual
+Worktrees pivot data path, not a full interactive Picker run or shared-host
+rollout. Admitted cold recovery without an advisory roster must remain
+retryable; malformed live peers and refused launches do not gain that retry.
+
 ## Native file-link prerequisites
 
 `tools/test_dependency_uv_executable_native.py` qualifies both absolute and
@@ -3356,7 +3368,7 @@ tools, checking live tracking and telemetry after load, database restore and
 event-log rebuild.
 
 The shared `agent-procutil` daemon-broker unit suite covers authenticated frame
-bounds, WMI's JSON-stdin environment boundary, containment opt-out, partial-start
+bounds, adopted finite native handoff, containment opt-out, partial-start
 cleanup and adoption failures. Its Windows-only native regression launches from
 a windowless parent in both breakaway-permitted and breakaway-forbidden
 kill-on-close Jobs. Each mode runs two full launch/stop cycles and observes
