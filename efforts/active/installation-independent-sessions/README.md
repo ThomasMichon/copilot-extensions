@@ -1359,8 +1359,20 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   production hosting policy was weakened. Install-contract validation passed
   for all 13 runtime plugins.
 - The default-off, exact-SHA Windows acceptance job includes the two focused
-  overlap cases without expanding required unit CI. No publication or
-  external run has completed for this candidate yet.
+  overlap cases without expanding required unit CI. Draft #9320 published
+  head `f1f097ccfaa5aef7fed72746d39eff3a382ae8a0`; Windows run `40605886719`,
+  job `122545157686`, passed nine focused cases, 16 deselected and no skips,
+  in 81.04 seconds. This is native component acceptance, not rollout.
+- Direct final review found that a failed query after dispatch could be
+  mistaken for definite non-creation. Retain the pending pane arguments as
+  uncertain instead; the focused regression packet passed nine cases.
+  Required CI also caught growth beyond `sessions.py`'s shrink-only ceiling.
+  Move check/create orchestration into its existing mux-creation owner,
+  without widening the baseline. Fresh combined validation passed 135 cases,
+  without skips, and the focused native packet passed both cases with literal
+  spaces, embedded quotes, trailing backslashes and empty arguments.
+  The module-size gate passes without a baseline edit. Updated-head native
+  acceptance, review and required CI remain pending for that follow-up.
 - This is a bounded Windows creation primitive, not complete per-worktree
   launch admission: the tracked engine lifecycle fence still serializes its
   protected section across a repository, `pane_create` retains its separate

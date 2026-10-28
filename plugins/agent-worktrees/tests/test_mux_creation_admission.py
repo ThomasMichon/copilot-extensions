@@ -73,6 +73,48 @@ def test_detached_join_does_not_build_a_second_pane_or_emit_creation(monkeypatch
         "ok": True, "session": "wt-a", "new_pane": None, "error": None, "created": False,
     }
 
+def test_post_dispatch_query_failure_preserves_pending_pane_arguments(monkeypatch):
+    @contextmanager
+    def acquired(*args, **kwargs):
+        yield lambda: None
+
+    class Client:
+        killed = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def wait(self, timeout=None):
+            if not self.killed:
+                raise subprocess.TimeoutExpired(["psmux"], timeout)
+            return 1
+
+        def poll(self):
+            return 1 if self.killed else None
+
+        def kill(self):
+            self.killed = True
+
+    child = Client()
+    def failed_query(*args, **kwargs):
+        raise RuntimeError("query unavailable")
+
+    monkeypatch.setattr(mux_creation, "session_gate", acquired)
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: child)
+    monkeypatch.setattr(mux_creation, "has_session", failed_query)
+    monkeypatch.setattr(sessions.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(sessions, "_mux_bin", lambda mux=None: "psmux")
+    monkeypatch.setattr(sessions, "build_mux_new_session_argv", lambda *a, **k: ["psmux"])
+    monkeypatch.setattr(sessions, "cleanup_mux_pane_args",
+                        lambda argv: pytest.fail("post-dispatch is not definite non-creation"))
+    result = sessions.mux_new_session("a", "checkout", ["copilot"])
+    assert result["ok"] is False
+    assert "uncertain" in result["error"] and "query unavailable" in result["error"]
+    assert child.killed
+
 
 @pytest.mark.parametrize("acquisition", [False, True])
 def test_join_completion_never_claims_or_types_a_seed(monkeypatch, acquisition):

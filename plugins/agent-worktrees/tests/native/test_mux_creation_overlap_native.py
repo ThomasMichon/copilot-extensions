@@ -4,6 +4,7 @@ The mux protocol process is synthetic. No productive mux registry or backend
 is used; these controls are not full Picker/embody or lifecycle-fence parity.
 """
 
+import base64
 import json
 import hashlib
 import os
@@ -28,11 +29,13 @@ pytestmark = pytest.mark.skipif(
     reason="Native Windows PowerShell and system C# compiler",
 )
 ROOT = Path(__file__).resolve().parents[4]
+LITERALS = ["child with spaces", 'quote "inside"', "tail\\", "", "--allow-all"]
 
 MUX = r"""
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Threading;
 class Mux {
     static int Main(string[] args) {
@@ -44,6 +47,10 @@ class Mux {
                 Environment.GetEnvironmentVariable("MUX_ACTOR_ID"), "");
             return File.Exists("live-" + session) ? 0 : 1;
         }
+        string[] encoded = new string[args.Length];
+        for (int i = 0; i < args.Length; i++)
+            encoded[i] = Convert.ToBase64String(Encoding.UTF8.GetBytes(args[i]));
+        File.WriteAllLines("args-" + session, encoded);
         using (new FileStream("entered-" + session, FileMode.CreateNew)) {}
         Stopwatch clock = Stopwatch.StartNew();
         foreach (string phase in new[] {"publish-", "return-"}) {
@@ -68,6 +75,7 @@ sessions.activity.log_event = lambda *a, **k: None
 sessions.build_mux_new_session_argv = lambda wt, cwd, *a, **k: [
     sys.argv[3], "new-session", "-s", sessions.mux_session_name(wt),
     "-P", "-F", "#{pane_id}",
+    "child with spaces", 'quote "inside"', "tail\\", "", "--allow-all",
 ]
 home = Path(sys.argv[2])
 actor = os.environ["MUX_ACTOR_ID"]
@@ -100,7 +108,8 @@ def _manager_driver(path):
     path.write_text(
         "$ErrorActionPreference='Stop'\n"
         "$script:AwPsmuxBin=$args[0]\n$sessName='wt-'+$args[1]\n"
-        "$plan=@{work_dir=$args[2]}\n$envFlags=@()\n$paneCmd=@('unused')\n"
+        "$plan=@{work_dir=$args[2]}\n$envFlags=@('-e','FIXTURE=two words')\n"
+        "$paneCmd=@('child with spaces','quote \"inside\"','tail\\','','--allow-all')\n"
         "$script:CleanupCalled=$false\n"
         "function Stop-AwOwnedPsmuxSession { $script:CleanupCalled=$true }\n"
         "$joinedDuringCreate=$false\n" + helpers + "\n"
@@ -189,6 +198,12 @@ def test_same_target_joins_at_discovery_while_other_target_creates_in_parallel(
         (home / ("go-" + identities[parallel])).touch()
         _wait(lambda: (home / "entered-wt-other").exists(),
               "Different target was serialized", actors)
+        for wt in ("shared", "other"):
+            observed = [
+                base64.b64decode(line).decode("utf-8")
+                for line in (home / ("args-wt-" + wt)).read_text("utf-8-sig").splitlines()
+            ]
+            assert observed[-len(LITERALS):] == LITERALS
         assert creator.poll() is None and parallel.poll() is None
         (home / "publish-wt-shared").touch()
         stdout, stderr = contender.communicate(timeout=10)

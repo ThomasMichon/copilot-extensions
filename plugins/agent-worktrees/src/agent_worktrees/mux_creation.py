@@ -4,7 +4,7 @@ from contextlib import contextmanager
 import hashlib
 import locale
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import platform
 import subprocess
 import tempfile
@@ -12,6 +12,14 @@ import time
 
 from agent_procutil import no_window_kwargs
 from single_instance_lease import AlreadyRunningError, SingleInstance
+
+
+class CreationUncertain(RuntimeError):
+    """A dispatched mux client failed without disproving pane creation."""
+
+
+def is_psmux(binary: str) -> bool:
+    return PureWindowsPath(binary).stem.casefold() == "psmux"
 
 
 def has_session(binary: str, session: str, *, timeout: float = 2) -> bool:
@@ -77,6 +85,18 @@ def run(argv: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+def run_or_join(argv: list[str], *, binary: str, session: str, prepare):
+    """Prepare a new pane only after the native creation gate admits it."""
+    gated = platform.system() == "Windows" and is_psmux(binary)
+    with session_gate(
+        session, exists=lambda: has_session(binary, session), enabled=gated,
+    ) as release:
+        if not release:
+            return None
+        argv.extend(prepare())
+        return run_session(argv, session, release) if gated else run(argv)
+
+
 def run_session(argv: list[str], session: str, release) -> subprocess.CompletedProcess[str]:
     """Release check/create custody at discovery, not at client completion."""
     deadline = time.monotonic() + 15
@@ -108,8 +128,10 @@ def run_session(argv: list[str], session: str, release) -> subprocess.CompletedP
                     ):
                         release()
                         pending = False
-        except BaseException:
+        except BaseException as error:
             if child.poll() is None:
                 child.kill()
             child.wait()
+            if isinstance(error, Exception) and not isinstance(error, subprocess.TimeoutExpired):
+                raise CreationUncertain(f"PSMux creation outcome is uncertain: {error}") from error
             raise
