@@ -130,14 +130,20 @@ def source_closure(root: Path, builder) -> CoreSources:
                 requirement = Requirement(text)
                 dependency = canonicalize_name(requirement.name)
                 edges.append({"name": name, "extra": extra, "requirement": str(requirement)})
+                sources = data.get("tool", {}).get("uv", {}).get("sources", {})
+                mappings = [value for key, value in sources.items() if canonicalize_name(key) == dependency]
                 if dependency not in catalog:
+                    if any(
+                        isinstance(entry, dict) and "path" in entry
+                        for mapping in mappings
+                        for entry in (mapping if isinstance(mapping, list) else [mapping])
+                    ):
+                        raise PromotionArtifactError(f"{dependency}: local dependency has no canonical source")
                     continue
                 if requirement.url or not requirement.specifier.contains(
                     Version(catalog[dependency][1]["project"]["version"]), prereleases=True,
                 ):
                     raise PromotionArtifactError(f"{name}: incompatible first-party dependency {text}")
-                sources = data.get("tool", {}).get("uv", {}).get("sources", {})
-                mappings = [value for key, value in sources.items() if canonicalize_name(key) == dependency]
                 if mappings:
                     from standalone_consumers import local_dependency_source
                     mapped = local_dependency_source(directory, dependency, source_root=root)
@@ -145,7 +151,10 @@ def source_closure(root: Path, builder) -> CoreSources:
                     canonical = catalog[dependency][1]["project"]
                     if _runtime_metadata(mapped_project) != _runtime_metadata(canonical):
                         raise PromotionArtifactError(f"{dependency}: local and canonical runtime metadata differ")
-                pending.extend((dependency, value) for value in ("", *sorted(requirement.extras)))
+                pending.extend(
+                    (dependency, value)
+                    for value in ("", *sorted(canonicalize_name(value) for value in requirement.extras))
+                )
         if selected & {name for group in ("index-service", "index-engine") for name, _extra, _condition in groups[group]}:
             raise PromotionArtifactError("core dependency crosses an optional environment boundary")
         projects, resources, records = [], set(), []

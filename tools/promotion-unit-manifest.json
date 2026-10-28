@@ -1,6 +1,13 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
+        "tools/promotion_unit_tests/test_core_artifacts.py::test_missing_canonical_local_dependency_cannot_be_treated_as_external[direct]",
+        "tools/promotion_unit_tests/test_core_artifacts.py::test_missing_canonical_local_dependency_cannot_be_treated_as_external[conditional]",
+        "tools/promotion_unit_tests/test_core_artifacts.py::test_external_wheel_source_declarations_remain_data_not_first_party_sources[direct]",
+        "tools/promotion_unit_tests/test_core_artifacts.py::test_external_wheel_source_declarations_remain_data_not_first_party_sources[conditional]",
+        "tools/promotion_unit_tests/test_core_artifacts.py::test_first_party_extras_match_canonical_declarations[canonical]",
+        "tools/promotion_unit_tests/test_core_artifacts.py::test_first_party_extras_match_canonical_declarations[underscore]",
+        "tools/promotion_unit_tests/test_core_artifacts.py::test_first_party_extras_match_canonical_declarations[mixed-case]",
         "tools/promotion_unit_tests/test_core_artifacts.py::test_development_versions_use_explicit_prerelease_admission[unbounded]",
         "tools/promotion_unit_tests/test_core_artifacts.py::test_development_versions_use_explicit_prerelease_admission[declared-dev-floor]",
         "tools/promotion_unit_tests/test_core_artifacts.py::test_development_versions_use_explicit_prerelease_admission[incompatible-floor]",
@@ -2586,9 +2593,9 @@
         "tools/promotion_unit_tests/test_owned_workspace.py::test_bridge_receiving_result_is_usable_while_linkage_is_pending_but_not_unknown_creation"
     ],
     "sources": {
-        "tools/core_python_artifacts.py": "fcbe8e20d3ef40c786fb9eabf193149bf099ebf03712efdc599352a4fc86958d",
+        "tools/core_python_artifacts.py": "d58c3c8291b29587e2a35ffa0b621ed43aced7fcea1c271839ec486b1f9f0027",
         "tools/python_project_inventory.py": "6981a4cf50106c205847e5f946c23c09c5a0959cc5e2caf30920264c91c0b538",
-        "tools/promotion_unit_tests/test_core_artifacts.py": "6f5fa6a1ca24e167c5daf04239344910e9c49701bd179d5ff662def4059142a3",
+        "tools/promotion_unit_tests/test_core_artifacts.py": "b6f72890edd7b23bdafa84a75699ed3242fa77a62096d8f9f2cc8609cbe9e8bb",
         "tools/promotion_unit_tests/test_bundle_snapshot.py": "4122e4030eb49d3748acc70ae4360c597f273a224a2d257c8e7fd2825b3c48da",
         "tools/promotion_unit_tests/test_wheel_acquisition_budget.py": "3b84b0f4dde389f1a31c1b8d684576a29fb62e53b9696064749cf20c37ca0cf6",
         "tools/promotion_unit_tests/test_artifact_license_notices.py": "65956a73f5582f8c82876a7cf7b833d9f70f70789e72b78fb1de3476c830f76e",

@@ -298,3 +298,86 @@ def test_core_cli_selects_only_inside_the_resolved_toolchain(
     assert argv[argv.index("--python") + 1] == (selector or "/uv-default/python")
     assert argv[argv.index("--toolchain-venv") + 1] == str(tmp_path / "toolchain")
     assert options["capture_output"] and options["check"] is False
+
+
+@pytest.mark.parametrize("conditional", [False, True], ids=["direct", "conditional"])
+def test_missing_canonical_local_dependency_cannot_be_treated_as_external(
+    tmp_path, conditional
+):
+    _source(tmp_path)
+    plugin = tmp_path / "plugins" / "sample"
+    local = plugin / "libs" / "local"
+    local.mkdir(parents=True)
+    (local / "pyproject.toml").write_text(
+        '[project]\nname="local-helper"\nversion="1.0"\n'
+    )
+    mapping = '{path="libs/local"}'
+    if conditional:
+        mapping = '[{path="libs/local",marker="sys_platform == \'linux\'"}]'
+    manifest = plugin / "pyproject.toml"
+    manifest.write_text(
+        manifest.read_text().replace(
+            "helper>=1; sys_platform == 'linux'",
+            "local-helper",
+        )
+        + "\n[tool.uv.sources]\nlocal-helper="
+        + mapping
+        + "\n"
+    )
+    with pytest.raises(artifacts.PromotionArtifactError, match="canonical"):
+        core.source_closure(tmp_path, builder)
+
+
+@pytest.mark.parametrize("conditional", [False, True], ids=["direct", "conditional"])
+def test_external_wheel_source_declarations_remain_data_not_first_party_sources(
+    tmp_path, conditional
+):
+    _source(tmp_path)
+    mapping = '{url="https://example.invalid/qualified_helper-1.0-py3-none-any.whl"}'
+    if conditional:
+        mapping = "[" + mapping[:-1] + ",marker=\"sys_platform == 'linux'\"}]"
+    manifest = tmp_path / "plugins" / "sample" / "pyproject.toml"
+    manifest.write_text(
+        manifest.read_text().replace(
+            "helper>=1; sys_platform == 'linux'",
+            "qualified-helper",
+        )
+        + "\n[tool.uv.sources]\nqualified-helper="
+        + mapping
+        + "\n"
+    )
+    closure = core.source_closure(tmp_path, builder)
+    assert [item["name"] for item in closure.selection["projects"]] == ["sample"]
+    assert closure.selection["edges"] == [
+        {
+            "name": "sample",
+            "extra": "",
+            "requirement": "qualified-helper",
+        }
+    ]
+    assert "example.invalid" in manifest.read_text()
+
+
+@pytest.mark.parametrize(
+    "extra",
+    ["service-gateway", "service_gateway", "Service-Gateway"],
+    ids=["canonical", "underscore", "mixed-case"],
+)
+def test_first_party_extras_match_canonical_declarations(tmp_path, extra):
+    _source(tmp_path)
+    manifest = tmp_path / "libs" / "helper" / "pyproject.toml"
+    manifest.write_text(
+        manifest.read_text() + "\n[project.optional-dependencies]\nservice-gateway=[]\n"
+    )
+    manifest = tmp_path / "plugins" / "sample" / "pyproject.toml"
+    manifest.write_text(
+        manifest.read_text().replace(
+            "helper>=1; sys_platform == 'linux'",
+            f"helper[{extra}]>=1",
+        )
+    )
+    closure = core.source_closure(tmp_path, builder)
+    assert {item["name"] for item in closure.selection["projects"]} == {
+        "helper",
+        "sample",
+    }

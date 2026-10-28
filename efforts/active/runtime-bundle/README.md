@@ -415,3 +415,15 @@ choose the wheel path, not a reason to relax source identity.
   interpreter; re-entry now forwards the interpreter already recorded in the
   lock. Explicit selection remains unchanged. Both controls and the focused
   CLI/core decisions pass 20 cases after the correction.
+- Final selection review reproduces two previously missed cases: a local
+  dependency absent from the canonical inventory was treated as external, and
+  equivalent underscore/mixed-case extra spellings were not normalized.
+  Selection now refuses any direct or conditional local path mapping without a
+  canonical source and canonicalizes queued extras. Seven controls cover both
+  failures and retain external wheel URL mappings as data; all 25 core packet
+  cases pass. Four controls fail before the corrections. The qualified packet
+  gains those seven nodes and only the two affected source digests.
+- Independent validation with the exact pinned `packaging==25.0` verifies all
+  42 native wheel records and the unchanged selected payload identity in
+  32.391 seconds. The parser tooling used the existing governed source route;
+  neither live runtime state nor dependency source authority changed.
