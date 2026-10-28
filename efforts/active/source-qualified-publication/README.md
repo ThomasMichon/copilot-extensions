@@ -52,6 +52,14 @@ new service, alternate authority, or operator-specific integration.
 - No shared deployment, installation, force reset, or destructive live test.
 - The proposal is discoverable through its three issue claims. Avoid a
   concurrent rewrite of the shared effort index in this isolated plan PR.
+- **Direct retained outcomes:** Preserve the complete #7937/#7946
+  original/refined/inherited contract in the
+  [per-origin Plan and Validation](retained-publication-outcomes.md), with
+  the complete existing [validation matrix](validation.md).
+  Existing planning-only/source/resource and excluded entry/import hunk
+  custody remains. No F2 implementer is appointed. This paper intake changes
+  no Blocked status and does not waive the literal no-close-on-plan-only
+  condition; #7937/#7946 remain open.
 
 ## Context
 
@@ -125,8 +133,13 @@ or additional execution authorization.
 - [ ] Record source, release and any separately authorized rollout states
   independently. No live rollout is part of this plan-only turn.
 
-## Validation Plan
+### Direct retained per-origin acceptance
+- [ ] Complete every unfinished #7937/#7946
+  [direct Plan row](retained-publication-outcomes.md#plan), preserving exact
+  accepted F1 source credit, original nominal/consumer duties, compatibility,
+  alternatives, evidence tiers and unchanged source/resource custody.
 
+## Validation Plan
 - [ ] Locked revision 10 → point unlocked 11 → 20 unchanged feed ticks never
   regresses the row; exercise actual screen/loader/Inbox path.
 - [ ] Local and remote same-ID fixtures remain isolated; remote Refresh makes
@@ -144,6 +157,14 @@ or additional execution authorization.
 - [ ] Complete [validation.md](validation.md), including compatibility and
   command-boundary lanes, before asserting implementation success.
 
+- [ ] Complete the matching
+  [direct per-origin Validation rows](retained-publication-outcomes.md#validation-plan)
+  against their full Plan scope and complete existing validation matrix.
+  Actual compatibility/rollback/restart/native cases already exist; do not
+  replace them with a timestamp-only summary or duplicate source work.
+  Source hold release is not nominal or installed qualification, and the
+  plan-only closure restriction remains unchanged.
+
 ## Proposal
 
 **Reviewed in #8021; F1 execution admitted separately.** Keep one owner and one
@@ -158,6 +179,22 @@ and exact shared-file owners. Its source review merged in #8139;
 it does not expand F1 into launch, installer or owner-side effects.
 
 ## Journal
+
+### 2026-10-28 - Direct retained publication outcomes, no token retirement
+
+The complete #7937/#7946 current contracts are retained through the named
+Plan/Validation annex and unchanged Participants/Coordination. The bounded
+read-only study checked actual source-qualified compatibility, receipt and
+nominal cases against the current ROOT and full validation document.
+Those cases already exist; this is not another implementation proposal.
+
+The exact #8217 F1 source episode and its source approval hold remain credited
+complete/released at their accepted tier. Nominal performance, F2-F5,
+GUI/native/installed and original resource/hunk duties remain unfinished.
+The explicit prohibition on closing the original issues on a plan-only merge
+is retained: neither source tracker closes from this paper intake, no
+administrative exception is inferred, and this effort remains Blocked/open.
+No new timing job, functional edit, runtime, native or claim operation occurred.
 
 ### 2026-10-24 — F1 source slice merged; remaining campaign retained
 - #8217 actually merged at 06:02:01Z as

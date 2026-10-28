@@ -3,6 +3,7 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-10-28 - Cross-wave direct receiving-contract selection](<journal/2026/10.28 cross-wave-intake-selection.md>)
 - [2026-10-28 - Fourth-wave eligible-census coverage and scoped sequencing proposal](<journal/2026/10.28 fourth-wave-stabilization-findings.md>)
 - [2026-10-28 - First 200 vision-linked proposals and sixteen current-source audits](<journal/2026/10.28 first-wave-stabilization-findings.md>)
 - [2026-10-27 - Reviewed stabilization-roadmap method and first 200 metadata gates](<journal/2026/10.27 vision-linked-stabilization-roadmap.md>)

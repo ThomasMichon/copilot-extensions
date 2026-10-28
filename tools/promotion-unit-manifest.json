@@ -1,6 +1,16 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
+        "tools/promotion_unit_tests/test_core_profile_candidate.py::test_candidate_inspects_exact_external_bytes_and_binds_manifest",
+        "tools/promotion_unit_tests/test_core_profile_candidate.py::test_candidate_cannot_repair_or_drop_selected_inputs[metadata]",
+        "tools/promotion_unit_tests/test_core_profile_candidate.py::test_candidate_cannot_repair_or_drop_selected_inputs[digest]",
+        "tools/promotion_unit_tests/test_core_profile_candidate.py::test_candidate_cannot_repair_or_drop_selected_inputs[root]",
+        "tools/promotion_unit_tests/test_core_profile_candidate.py::test_candidate_cannot_repair_or_drop_selected_inputs[extra]",
+        "tools/promotion_unit_tests/test_core_profile_candidate.py::test_candidate_cannot_repair_or_drop_selected_inputs[unreachable]",
+        "tools/promotion_unit_tests/test_core_profile_candidate.py::test_candidate_cannot_repair_or_drop_selected_inputs[target]",
+        "tools/promotion_unit_tests/test_core_profile_candidate.py::test_candidate_cannot_repair_or_drop_selected_inputs[schema]",
+        "tools/promotion_unit_tests/test_core_profile_candidate.py::test_candidate_cannot_repair_or_drop_selected_inputs[schema-version]",
+        "tools/promotion_unit_tests/test_core_profile_candidate.py::test_raw_manifest_and_duplicate_properties_are_not_normalized_away",
         "tools/promotion_unit_tests/test_core_artifacts.py::test_core_cli_refuses_unsupported_build_python_before_execution[reentry]",
         "tools/promotion_unit_tests/test_core_artifacts.py::test_core_cli_refuses_unsupported_build_python_before_execution[already-locked]",
         "tools/promotion_unit_tests/test_core_artifacts.py::test_local_wheel_exception_stays_with_its_existing_owner[refused]",
@@ -2598,8 +2608,10 @@
     ],
     "sources": {
         "tools/core_python_artifacts.py": "cfeae35bfee4537022e1026ffae498b61b23508426a676d9dc09ca8ab8d4b4a0",
+        "tools/core_runtime_profile.py": "5319efe24a0a08652e0903baae6593a428d866a2cb302c0c10628cee6890fa1c",
         "tools/python_project_inventory.py": "6981a4cf50106c205847e5f946c23c09c5a0959cc5e2caf30920264c91c0b538",
         "tools/promotion_unit_tests/test_core_artifacts.py": "e8542733bfeb46480b68c50301f48874eb7c9f618ad336ee5e315e9bc0058e59",
+        "tools/promotion_unit_tests/test_core_profile_candidate.py": "c993a69c3187204b4b174912c2cb8bafbbb448e2e1bccd8769c42dc1ea2a3298",
         "tools/promotion_unit_tests/test_bundle_snapshot.py": "4122e4030eb49d3748acc70ae4360c597f273a224a2d257c8e7fd2825b3c48da",
         "tools/promotion_unit_tests/test_wheel_acquisition_budget.py": "3b84b0f4dde389f1a31c1b8d684576a29fb62e53b9696064749cf20c37ca0cf6",
         "tools/promotion_unit_tests/test_artifact_license_notices.py": "65956a73f5582f8c82876a7cf7b833d9f70f70789e72b78fb1de3476c830f76e",
@@ -2911,6 +2923,7 @@
         "tools/promotion_unit_tests/test_git_config_transaction.py": "d47c4b32c9ccbffdda2cc3813ae66871970a068be44fddcbde5449230db4da2b"
     },
     "coverage_targets": [
+        "tools/core_runtime_profile.py",
         "tools/core_python_artifacts.py",
         "tools/python_project_inventory.py",
         "libs/installer-engine/installer_wheel_snapshot.py",

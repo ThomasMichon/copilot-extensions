@@ -155,6 +155,7 @@ checkpoint remain separate completion duties.
 
 - [Research method and priority rubric](stabilization-roadmap.md)
 - [Next bounded decisions and first-slice queues](roadmap-next-slices.md)
+- [Current cross-wave receiving-contract unit](consolidation-current-unit.md)
 - [First-wave findings and exact evidence homes](roadmap-wave-1.md)
 - [Second-wave findings and exact evidence homes](roadmap-wave-2.md)
 - [Third-wave findings and exact evidence homes](roadmap-wave-3.md)

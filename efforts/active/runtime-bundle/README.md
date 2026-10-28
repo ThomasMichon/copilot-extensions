@@ -122,25 +122,44 @@ Comparison request (verbatim):
   registration or default-runtime pointer changes.
 
 ### Slice C - Consolidated first-party release binding
-- [ ] Derive the canonical core project closure from the existing inventories
+- [x] Derive the canonical core project closure from the existing inventories
   and selected root/extras declarations. Preserve target conditions and source
   indirections as data; do not resolve third-party dependencies or remove the
   qualified-origin workaround. Share this selection with the existing input
-  owner rather than maintaining another roster.
-- [ ] Extend the existing Python artifact manifest with a registered core
+  owner rather than maintaining another roster. The shared helper is available;
+  the pending input generator's adoption remains an explicit follow-up below.
+- [x] Extend the existing Python artifact manifest with a registered core
   composition, using the marketplace's existing version authority. Build each
   canonical first-party distribution once through the common locked builder;
   include the existing standalone build resources and source admission.
   Composition selection participates in the existing content identity.
-- [ ] Re-derive and verify the complete composition against candidate source
+- [x] Re-derive and verify the complete composition against candidate source
   through the existing promotion validator, then carry it in the existing
   artifact index and immutable first-party publisher. Keep signing and source
   admission with their current owners. No complete-environment archive, dummy
   metapackage, second resolver or parallel provenance channel.
-- [ ] Prove the emitted first-party artifact and release-profile binding with
+- [x] Prove the emitted first-party artifact and release-profile binding with
   real native inputs and failing-first identity/closure/resource controls.
   Record absent native lanes honestly. The first-party artifact does not
   publish third-party runtime bytes or enable ordinary installations.
+
+### Slice D - Release-bound complete profile candidate
+- [ ] Observe actual promotion/publication of the merged core implementation
+  and independently authenticate the released core asset through the existing
+  release-index/attestation owner. A source merge is not a published artifact.
+- [ ] Generate a complete profile candidate from the real core manifest,
+  inspected first-party wheel bytes and an independently selected exact
+  external closure. Derive roots/extras/conditions from the core's bound
+  selection, not another roster. Retain the selected target/backend and
+  acquisition policy; reject incompatible, missing or changed external bytes.
+- [ ] Reuse existing whole-profile validation, wheel-input custody and release
+  bindings to produce inert candidate data, not a resolver, approval map,
+  signer, transport format or ordinary consumer.
+- [ ] Prove the actual producer command against retained native inputs and
+  failing-first identity/closure/metadata controls. Candidate assembly does not
+  establish approval, feed access, publication authority or live activation.
+- [ ] Have the pending lock-input generator adopt the shared root selector
+  before that separate source slice lands; preserve its qualified-origin gate.
 
 ### Later slices - Explicitly retained, not completed by the first proof
 - [x] Retain an independently selected aggregate transport through the existing
@@ -202,6 +221,21 @@ profile/admission and constructor APIs. Source-tree conflicts are evidence to
 choose the wheel path, not a reason to relax source identity.
 
 ## Journal
+
+### 2026-10-28 - Core release-binding source completion
+- #9433 merged as `cb53be8e22be74f68ac9e310c37aa55be22fbedb` after exact-head
+  approval, required green CI and all review findings resolved. Its 29 bounded
+  core controls join the unchanged qualified packet. Coupled core/builder/unit
+  checks pass 266 cases with four platform skips.
+- The final native CLI builds all 42 wheels and independently verifies source
+  binding in 194.968 seconds. Selected inputs and all wheel member payloads
+  match the earlier API artifact; ZIP timestamps differ, so no bit-reproducible
+  wheel/archive claim is made. Pinned-parser source-bound readback also passes.
+- The parent stays Active. Actual post-merge promotion/publication is being
+  followed separately; the next producer slice binds complete exact-profile
+  candidates to this genuine core manifest. Existing toolkit, one-service
+  consumer and cache owners retain their scope. No aggregate host, third-party
+  upload, installed runtime, service registration or default selector changed.
 
 ### 2026-10-28 - Complete candidate delivery producer
 - Coordinated a non-overlapping packaging slice with #4876. The existing
@@ -446,3 +480,32 @@ choose the wheel path, not a reason to relax source identity.
   caller re-entry and already-locked invocation. This does not change legacy
   builders, emitted wheel Python ranges, installer target qualification or
   the shared toolchain's package set; broader native acceptance remains open.
+
+### 2026-10-28 - Repeatable core profile candidate producer
+
+- Added `tools/core_runtime_profile.py` to compose the real core manifest,
+  inspected first-party wheel bytes and an independently selected native lock.
+  The selected target, backend, acquisition policy and exact external pins
+  survive unchanged. First-party requirements come from release bytes; missing,
+  incompatible or unreachable closure refuses rather than resolving or dropping
+  a package. Raw manifest identity and existing release bindings remain exact.
+- The actual command produces a 116-wheel candidate from 42 native release
+  wheels and 74 unchanged external pins in 6.719 seconds. The command replaces
+  manual profile assembly; it does not qualify the existing experimental
+  dependency policy for production or publish dependency bytes.
+- Three schema controls reproduce acceptance of an unknown schema, a boolean
+  schema version and an uncontrolled non-object failure before correction.
+  The API and CLI now share the registered core-manifest boundary. The combined
+  producer, core artifact and release-binding controls pass 103 cases with one
+  unavailable native-symlink lane. Ten exact no-actor nodes cover candidate
+  decisions using actual wheel bytes and substituting only retained custody.
+  The packet's effect, coverage and time-budget rules are unchanged.
+- Validation tiers: native unit and actual CLI composition exercise the simple
+  end-to-end lane. A child without ambient repository import paths exercises
+  first-touch tooling imports, not fresh host provisioning. Native Linux/macOS
+  and ordinary updater/service activation are outside this source-only slice;
+  no available remote native venue is selected. Protected-Main artifact
+  promotion/publication is followed separately before claiming release
+  availability. No channel, live runtime or service registration changes.
+- Source review/merge, authenticated published-core readback, native input
+  generation and ordinary consumer adoption remain explicit next gates.

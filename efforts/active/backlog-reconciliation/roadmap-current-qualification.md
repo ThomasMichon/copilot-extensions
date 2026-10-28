@@ -19,6 +19,12 @@ were independently admitted after that publication unit was prepared. Source pin
 identify the actual inspected revision, not an assertion that a running
 installation or later development tip has the same behavior.
 
+**Reviewed publication:** #9426 merged on 2026-10-28 at 19:03:14 UTC
+(12:03:14 PDT) as `65d1fda593ab02e0d0229105333208beb975ab0d`.
+Its current-head approval includes the corrected #4220 omitted-revert
+description below. This completes the selected qualification publication,
+not any implementation or campaign-wide acceptance.
+
 ## Current decisions and retained boundaries
 
 ### #1803 - Large-response framing
@@ -267,6 +273,14 @@ at newer fixed `326a72d1332afe351e7f5e8ac0841ecba56a8230`.
 snapshot closure and #9412's P2 final-verdict shape remain selected-source gaps
 with their existing claimant. The excluded arrival stays metadata-only and
 counted. No implementation or broader native/rollout gate follows.
+
+The later complete 20:23 UTC inventory contains three further eligible
+arrivals, #9435/#9436/#9442, outside this qualified subset. Their separate
+[bounded P2 assessments](roadmap-inflow.md#later-inflow-at-fixed-94df-three-retained-p2-gaps)
+are independently admitted at `94df`, with actual later `611e` source delivery
+separately credited. Precise residual branches, unknown runtime/native causes
+and finite qualification remain explicit. They are not
+silently covered by the historical four-wave count or implementation grants.
 
 Qualifying these twelve first slices does not establish a complete execution
 order for every priority, qualify running systems or reach the numerical gate.

@@ -7,11 +7,15 @@ Selected priorities: [current slice qualification](roadmap-current-qualification
 Integration: [cross-wave sequencing](roadmap-sequencing.md).
 Actual dispositions and census: [follow-through register](roadmap-follow-through.md).
 
-**Status:** Three eligible arrivals were researched independently of the frozen
-682-assignment roster. All three use fixed source
-`326a72d1332afe351e7f5e8ac0841ecba56a8230`, not a moving branch or running
-installation. These are research/tracker decisions, not implementation grants.
-The excluded arrival remains metadata-only and counted.
+**Status:** Two bounded inflow groups are independently admitted outside the
+frozen 682-assignment roster. The first #9412/#9413/#9414 group uses
+`326a72d1332afe351e7f5e8ac0841ecba56a8230`; the later
+#9435/#9436/#9442 group starts at `94df27510cd6a6d6db1c659846e0ff5921d7aa7a`,
+with the actual #9435/#9442 delivery delta separately admitted at
+`611e819e298041a4f2b660d4c25900a4bc0149d5`.
+These fixed source snapshots are not moving branches or running installations.
+Research/tracker decisions grant no implementation or rollout. The earlier
+excluded arrival remains metadata-only and counted.
 
 ## #9413 - Finite producer completed
 
@@ -136,7 +140,7 @@ historical 145-row four-wave register; they are not four missing blockers or
 whole-issue DAG edges. Pipeline, materials and runtime adoption are interfaces,
 not new producer-completion prerequisites.
 
-## Independent admission and remaining work
+## First-group independent admission and remaining work
 
 Independent checks verified seventeen raw provider responses, six whole current
 texts, one actual edit plus its creation baseline, 23 pinned source captures
@@ -156,3 +160,129 @@ automatic body/history sweep. All original alternatives, venues, custody and
 finite evidence duties remain. The parent stays Active for remaining priority
 and sequencing decisions, provisional gaps, lossless consolidation, inflow and
 the fixed whole-queue checkpoint.
+
+## Later inflow at fixed `94df`: three retained P2 gaps
+
+The three arrivals #9435/#9436/#9442 were separately researched at
+`94df27510cd6a6d6db1c659846e0ff5921d7aa7a`, not the dirty receiving
+manuscripts or a moving runtime. Independent admission verified eleven raw
+provider responses, four whole current texts, complete stable actual
+eleven-member rosters/nested guards, twenty source captures and 97 source
+quotations. Eighteen additional own-text quotations support the two native-test
+records; no historical text, product import, test, build or native operation
+was requested or executed.
+
+These are three **P2** source/research follow-through assessments, not
+implemented fixes, a shared root cause, completed intakes or new source-owner
+assignments. The complete 935-open census and its zero new closure credit
+remain in the [follow-through register](roadmap-follow-through.md).
+
+### #9435 - Local adoption and diagnostic guard neutrality
+
+The complete original asks for explicit repository-local adoption/local-disable
+scope, not global plugin availability. The initial `94df` source retains the existing
+target-repository boundary and deliberate mention/unscannable-publication
+decisions, but does not establish that additional local-adoption gate.
+Operational helper/interpreter/unexpected-error paths do not establish the
+requested complete neutral result with bounded diagnostic.
+
+Preserve all seven finite clauses: explicit local adoption; unchanged target
+scope; attributable operational-error neutrality including the shell/host
+consumer; deliberate in-scope denies; unrelated settings/registrations;
+adopter/non-adopter/local-disable/real-shell controls; and the existing scoped
+claimant. This advisory guard's requested neutrality is **not** permission to
+fail open mandatory metadata, privacy, ownership, review or native permissions.
+Do not silently turn deliberate policy denial into allow or success.
+
+The later actual source delta credits **merged #9438**, approved head
+`fc4869df1d0ab4d627ae6eacfdda1fbb4eb9b504` and merge
+`16d99286ee1265d316f88dde0096102a0a25f17c`. All four changed
+guard/wrapper/test/README blobs are identical at that approved head, actual
+merge and selected `611e` source. The real `adopting_harness` function now
+implements local enable/disable and resolved workspace scope; operational
+exception/wrapper handling and focused control definitions are delivered.
+Do not invent another adoption API or duplicate that full implementation.
+
+Retain only the exact residual branches: missing internal pre-tool helper
+handling still continues the guard rather than taking the requested neutral
+path, and a handled-success wrapper suppresses its diagnostic; the silent
+no-interpreter branch needs interpretation against the original diagnostic
+promise; and actual executed-control/skip evidence remains unqualified.
+Successful aggregate CI and source fixtures alone do not identify which real
+shell controls ran. The existing claimant's next finite contribution addresses
+or qualifies those branches and an already-existing bounded witness, not a
+new all-host or installed VS Code programme.
+
+Preserve the original 1.5-second decision and 15-second hook bounds, deliberate
+denies and unrelated registrations/settings. Actual runtime cause and installed
+VS Code behavior remain unverified, not new completion gates. A complete
+canonical effort home is still unestablished; the existing issue and claimant
+remain the tracking/source boundary without new ownership or global cleanup.
+
+### #9436 - Preserve the failed cache; actual cause unknown
+
+The reported Windows access-denied removal occurs during ordinary
+freshness-triggered test-environment preparation, not a proven production
+installer defect or test assertion failure. Current source already has native
+path normalization, body/dependency fingerprinting, ordinary/link refusal,
+busy admission, environment-root identity and cleanup-failure/no-ready-stamp
+controls. Do not allocate a duplicate long-path fix.
+
+Preserve all five finite duties: characterize the ordinary leased preparation
+boundary; keep the affected cache for diagnosis; distinguish reported native
+observations from a proved cause; retain existing safety/identity/containment;
+and qualify any eventual cause-sensitive correction through the original
+ordinary entry under its owner.
+
+The actual blocking OS/file condition is **unknown**. Readability, Modify
+inheritance or a reported no-lock-owner result does not prove an ACL, disk,
+process, lease or transient diagnosis. This research inspected no cache,
+process, ACL or native state and approved no deletion, rename, reset or repair.
+The incumbent runner/cache owner first correlates the preserved phase/source/
+fingerprint/lease-root evidence; a separately leased fresh environment can
+distinguish cache state from test behavior but is not cache repair.
+
+Test Portfolio Rationalization is a proposed related preparation/cache home,
+not accepted whole-issue intake or a new assignment. The finite exit remains
+an attributed native condition **or** explicitly unresolved diagnosis, then
+the exact cause-sensitive regression and original qualification; no completed
+source fix or remediation is claimed.
+
+### #9442 - Individual worker overruns versus aggregate envelope
+
+Keep the original **20-second individual worker** bound and actual queued-
+engine/Manager invocation, scope, provenance, invisible/focus and completion
+controls. Individual native overruns are **unattributed**; no production
+queue-policy or installed latency defect was demonstrated.
+
+At initial `94df` there is a distinct source-supported fixture-envelope mismatch: the Manager
+case permits **two sequential 20-second workers** under the reported/default
+**30-second item envelope**. Their supported lifetimes alone can total
+40 seconds before setup/cleanup. That arithmetic is a conditional static
+counterexample, not a measured explanation for an individual worker timeout
+or a universal sum-of-timeouts rule for unrelated suites.
+
+The own refinement's aggregate-only **60-second** correction was unverified
+in that first snapshot. The later exact `611e` source now contains
+`@pytest.mark.timeout(60)` on this parametrized item, for both ordinary and
+Manager variants. The **20-second worker** and all seven original control
+function bodies are byte-identical; both direct helper blobs are unchanged.
+This is actual partial **source** delivery, not a production deadline, global
+runner override or newly measured native pass. No redundant annotation patch
+is needed.
+
+Preserve all six original/refined clauses and both failure classes. The
+incumbent retains the delivered aggregate correction at that exact tier and
+original worker timing as a separate gap with bounded
+per-stage monotonic attribution at the real fixture/owner path. The existing
+#7758 native-qualification context is related, not accepted new intake or
+authority to run an updater. Original source/runner/native/caller custody and
+the complete 20-second worker qualification remain; no all-parent or all-host
+acceptance gate is added.
+
+The two later delivery packets were independently checked against thirteen
+provider envelopes, including one preserved/corrected metadata-query syntax
+failure, exact selected source/blob identities and stable full-roster/whole-
+issue guards. Neither proposes whole-issue completion, reads a PR body or
+performs a guard, fixture, native, cache, source/claim or tracker action.
+The older `94df` reports remain immutable evidence of their actual snapshots.
