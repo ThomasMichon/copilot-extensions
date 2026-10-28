@@ -196,5 +196,65 @@ twelve first slices distinguish actual existing owners, home gaps, delivered
 foundations and bounded exits. No broad new body sweep, native operation,
 ownership transfer or source work is authorized by the matrix.
 
+## Supply refresh during continuing qualification
+
+The complete metadata-only inventory at **2026-10-28 17:46:14 UTC
+(10:46:14 PDT)** contains **934 whole open issues**: 681 creator-eligible,
+253 excluded, 717 original-cohort issues and 217 inflow. All twelve raw
+responses, pagination and unique identities were independently verified.
+The actual full roster is now eleven: the prior ten members remain and one
+was added. No older issue's creator eligibility changed.
+
+Four issues arrived since the actual 930-issue census; none departed. Three
+eligible new identities, #9412, #9413 and #9414, remain explicit unresearched
+metadata-only inflow; the fourth is excluded and counted without body research.
+No new priority, completion, receiving acceptance or source ownership is inferred
+from their titles. The fixed checkpoint is **205 issues away**, and this
+refresh receives no closure credit. The four finite completed outcomes remain
+completed; inflow does not undo their evidence.
+
 The parent remains Active for residual decisions, later inflow, lossless
 consolidation, reviewed documentation and the fixed whole-queue checkpoint.
+
+## 2026-10-28 - Finite producer completion and two retained inflow gaps
+
+The [bounded inflow decisions](roadmap-inflow.md) independently admit the
+three eligible arrivals at exact `326a72d1332afe351e7f5e8ac0841ecba56a8230`.
+#9413's whole original producer/source contract is delivered by actual #9417:
+deterministic exact-profile assembly, existing custody and consumer readback,
+explicit refusal/budgets, private verification and atomic non-replacing output.
+The attributed 58-case Windows and selected 116-wheel function/CLI witness
+cover the promised finite tier, not a newly executed run or runtime adoption.
+
+**#9413 closed as completed at 18:44:46 UTC (11:44:46 PDT).** Its
+[public explanation](https://github.com/ThomasMichon/copilot-extensions/issues/9413#issuecomment-6477590565)
+was read back with disclosure/privacy checks. Fresh full actor/roster and
+whole-issue guards matched the admitted issue; only that own explanation was
+added before closure. Provider state and terminal whole-record readback
+confirmed the completed disposition. Source/resource custody and the
+runtime-bundle parent's remaining gates are unchanged.
+
+#9414 remains a P1 selected-source standalone snapshot closure gap:
+fifteen declared sources versus thirteen copied/rewritten, specifically
+missing repository-policy and update-driver. Its original regression and
+claimant's **both PowerShell 5.1 and 7** promise remain. #9412 retains the
+independent P2 final-verdict empty/single/multiple shape gap. Both have an
+existing claimant and recorded OPEN candidate metadata, not qualified fixes
+or new implementation appointments. Their shared validation/edit interface
+is not a whole-issue semantic prerequisite.
+
+## Latest verified whole census
+
+The complete metadata-only inventory at **2026-10-28 18:48:14 UTC
+(11:48:14 PDT)** contains **933 whole open issues**: 680 creator-eligible,
+253 excluded, 717 original-cohort issues and 216 inflow. All twelve raw
+responses, ten issue pages, unique identities and the unchanged complete
+eleven-member roster were independently checked.
+
+Only #9413 disappeared since the actual 934-issue inventory; no issues arrived.
+This slice receives **one inflow closure credit and zero original-cohort
+closure credit**. The five finite completions recorded here remain distinct
+from the 741 original-cohort issues no longer open. The fixed 729 checkpoint
+is **204 issues away**. The three arrivals' bounded research is admitted; the
+excluded arrival remains untouched and counted. This does not close remaining
+priority/sequence, provisional or lossless-consolidation duties.
