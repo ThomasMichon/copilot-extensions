@@ -6,7 +6,9 @@
 . "${BASH_SOURCE[0]%/*}/native-seed-reply.sh"
 
 _aw_native_seed_run_phase() (
-    local helper="" result=0 index deadline=$((SECONDS + 10))
+    local helper="" result=0 index deadline="$1"
+    shift
+    [[ "$deadline" =~ ^[1-9][0-9]{0,8}$ ]] || return 3
     trap 'if [[ -n "$helper" ]]; then
               kill -KILL -- "-$helper" 2>/dev/null || true
               wait "$helper" 2>/dev/null || true
@@ -45,7 +47,7 @@ aw_native_seed_phase() (
     python="$slot/bin/python"
     bootstrap="$slot/.runtime-bootstrap/runtime_launcher.py"
     [[ -x "$python" && -f "$bootstrap" && -f "$slot/.install-complete.json" ]] || return 3
-    _aw_native_seed_run_phase env \
+    _aw_native_seed_run_phase "${_aw_native_seed_deadline:-$((SECONDS + 10))}" env \
         -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV -u __PYVENV_LAUNCHER__ \
         "$python" -I -S -B -X utf8 "$bootstrap" \
         -m agent_worktrees.launch_seed_native --contract-version 1 --root "$root" "$@"
@@ -53,19 +55,29 @@ aw_native_seed_phase() (
 
 _aw_native_seed_prepare_phase() {
     local _aw_native_seed_completion="$1"
-    export -n _aw_native_seed_completion
-    shift
-    aw_native_seed_phase "$@" || return 3
+    local _aw_native_seed_control="$2" _aw_native_seed_deadline="$3" phase_status=0
+    export -n _aw_native_seed_completion _aw_native_seed_control _aw_native_seed_deadline
+    shift 3
+    aw_native_seed_phase "$@" || phase_status=3
+    # This file contains only status, never reply/argument/environment bytes.
+    printf '%s\n' "$phase_status" > "$_aw_native_seed_control" || return 3
+    [[ "$phase_status" == 0 ]] || return 3
     printf '%s\0' "$_aw_native_seed_completion"
 }
 
 _aw_native_seed_collect_reply() {
-    local status=0 discarded
-    aw_native_seed_read_reply "$1" 2>/dev/null || status=3
-    if [[ "$status" != 0 ]]; then
-        # Keep the private pipe open until its finite supervisor has settled.
-        while IFS= builtin read -r -d '' -n 4096 discarded; do :; done
-    fi
+    local status=0 phase_status="" index
+    aw_native_seed_read_reply "$1" "$3" 2>/dev/null || status=3
+    # Rejection cannot depend on EOF from an out-of-group stdout writer.
+    # Keep the pipe open while the provider owner settles, with a 1s grace.
+    for ((index=0; index<220; index++)); do
+        IFS= builtin read -r phase_status < "$2" || phase_status=""
+        [[ "$phase_status" != 0 && "$phase_status" != 3 ]] || break
+        (( SECONDS < $3 + 1 )) || break
+        sleep 0.05
+    done
+    [[ "$phase_status" == 0 ]] || status=3
+    [[ "$status" == 0 ]] || _aw_native_seed_clear_reply
     return "$status"
 }
 
@@ -76,10 +88,18 @@ aw_native_seed_prepare() {
     # Bash 3.2 cannot wait for process substitutions. Only the finite phase
     # owner emits this per-call trailer, after its real provider wait/cleanup.
     local _aw_native_seed_completion="agent-worktrees.native-phase-complete.v1:$$:$RANDOM:$RANDOM:$RANDOM:$RANDOM"
-    export -n _aw_native_seed_completion
-    _aw_native_seed_collect_reply "$_aw_native_seed_completion" \
-        < <(_aw_native_seed_prepare_phase "$_aw_native_seed_completion" "$@") 2>/dev/null || status=3
+    local _aw_native_seed_deadline=$((SECONDS + 10)) _aw_native_seed_control=""
+    export -n _aw_native_seed_completion _aw_native_seed_deadline _aw_native_seed_control
+    _aw_native_seed_control="$(mktemp "${BASH_SOURCE[0]%/*}/.native-seed-phase.XXXXXXXX" 2>/dev/null)" || status=3
+    export -n _aw_native_seed_control
+    if [[ "$status" == 0 ]]; then
+        _aw_native_seed_collect_reply "$_aw_native_seed_completion" "$_aw_native_seed_control" "$_aw_native_seed_deadline" \
+            < <(_aw_native_seed_prepare_phase "$_aw_native_seed_completion" "$_aw_native_seed_control" "$_aw_native_seed_deadline" "$@") \
+            2>/dev/null || status=3
+        rm -f -- "$_aw_native_seed_control" 2>/dev/null || status=3
+    fi
     if [[ "$status" != 0 ]]; then
+        _aw_native_seed_clear_reply
         printf 'Native preparation is unconfirmed; no backend started.\n' >&2
     fi
     if [[ "$tracing" == 1 ]]; then set -x; fi

@@ -149,6 +149,40 @@ done
     ] * 4
 
 
+@pytest.mark.parametrize("deadline", ["0", "-1", "1+1", "9999999999", "$(exit 90)"])
+def test_reader_refuses_noncanonical_deadlines_without_evaluation(deadline: str) -> None:
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+if aw_native_seed_read_reply "" "$2"; then exit 90; fi
+[[ -z "$AW_NATIVE_SEED_OPERATION" && -z "${AW_NATIVE_SEED_ARGV[0]+x}" ]]
+''', [deadline], payload=nul_reply(_reply()).decode("utf-8"))
+    assert result.returncode == 0, result.stderr
+    assert not result.stdout
+    assert result.stderr == "Native preparation reply is invalid; no backend started.\n"
+
+
+def test_reader_uses_one_deadline_for_all_fields_and_eof() -> None:
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+deadline=$((SECONDS + 10))
+read() {
+    local code=0
+    builtin read "$@" || code=$?
+    if [[ "$code" == 0 && "${!#}" == field && "$field" == complete ]]; then
+        SECONDS="$deadline"
+    fi
+    return "$code"
+}
+if aw_native_seed_read_reply "" "$deadline"; then exit 90; fi
+[[ -z "$AW_NATIVE_SEED_OPERATION" && -z "${AW_NATIVE_SEED_ARGV[0]+x}" ]]
+''', payload=nul_reply(_reply()).decode("utf-8"))
+    assert result.returncode == 0, result.stderr
+    assert not result.stdout
+    assert result.stderr == "Native preparation reply is invalid; no backend started.\n"
+
+
 @pytest.mark.parametrize("nounset", ["on", "off"])
 def test_reader_refuses_real_bad_descriptor_after_complete_frame(nounset: str) -> None:
     result = _run(r'''

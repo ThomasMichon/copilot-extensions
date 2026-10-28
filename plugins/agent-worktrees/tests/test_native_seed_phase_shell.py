@@ -8,6 +8,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 import pytest
@@ -68,11 +69,19 @@ def _shell_path(path: Path) -> str:
 def _run(
     script: str, arguments: list[Path | str], *, payload: str = "", script_path: Path = SCRIPT,
 ) -> subprocess.CompletedProcess[str]:
-    return run_caller_owned(
-        [_bash(), "--noprofile", "--norc", "-c", script, "phase", _shell_path(script_path),
-         *(_shell_path(argument) if isinstance(argument, Path) else argument for argument in arguments)],
-        input_text=payload, timeout=15, max_stdout_bytes=8192, max_stderr_bytes=8192,
-    )
+    with tempfile.TemporaryDirectory(prefix="native-seed-launch-") as directory:
+        if script_path == SCRIPT:
+            for name in ("native-seed-boundary.sh", "native-seed-reply.sh"):
+                shutil.copy2(SCRIPT.with_name(name), Path(directory) / name)
+            script_path = Path(directory) / SCRIPT.name
+        result = run_caller_owned(
+            [_bash(), "--noprofile", "--norc", "-c", script, "phase", _shell_path(script_path),
+             *(_shell_path(argument) if isinstance(argument, Path) else argument
+               for argument in arguments)],
+            input_text=payload, timeout=15, max_stdout_bytes=8192, max_stderr_bytes=8192,
+        )
+        assert not list(script_path.parent.glob(".native-seed-phase.*"))
+        return result
 
 
 def test_finite_phase_streams_exact_reply_and_returns_provider_status(tmp_path: Path) -> None:
@@ -217,7 +226,10 @@ set +x
 
 def test_preparation_completion_is_not_exported_even_with_caller_allexport(tmp_path: Path) -> None:
     root = tmp_path / "runtime"
-    _slot(root, "A", tail='[[ -z "${_aw_native_seed_completion+x}" ]]')
+    _slot(root, "A", tail=(
+        '[[ -z "${_aw_native_seed_completion+x}${_aw_native_seed_control+x}'
+        '${_aw_native_seed_deadline+x}" ]]'
+    ))
     (root / "current-version").write_text("A", encoding="utf-8")
     result = _run(r'''
 set -euo pipefail
@@ -231,6 +243,25 @@ set +a
     assert result.returncode == 0, result.stderr
     assert not result.stdout and not result.stderr
     assert (root / "provider-status").read_text() == "0"
+
+
+def test_missing_private_control_path_refuses_before_starting_a_provider(tmp_path: Path) -> None:
+    root = tmp_path / "runtime"
+    _slot(root, "A")
+    (root / "current-version").write_text("A", encoding="utf-8")
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+mktemp() { return 1; }
+AW_NATIVE_SEED_OPERATION=previous
+AW_NATIVE_SEED_ARGV=(previous)
+if aw_native_seed_prepare "$2" --phase prepare --output-format nul; then exit 90; fi
+[[ -z "$AW_NATIVE_SEED_OPERATION" && -z "${AW_NATIVE_SEED_ARGV[0]+x}" ]]
+''', [root])
+    assert result.returncode == 0, result.stderr
+    assert not result.stdout
+    assert result.stderr == "Native preparation is unconfirmed; no backend started.\n"
+    assert not (root / "provider-pid").exists()
 
 
 @pytest.mark.parametrize("exit_code", [0, 7])

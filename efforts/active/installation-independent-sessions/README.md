@@ -527,6 +527,23 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   pass: 69 controls with three native-POSIX skips. The corrected drain still
   requires fresh native qualification; neither watchdog nor test deadline
   was increased.
+- Native run `40680633959` on `de066ca18e14c77e7e7b9ad4b5f79f1135e690f9`
+  then passed all three jobs: Linux and stock macOS Bash each passed 55
+  reader/phase/copy controls with 17 Windows-only skips, including both
+  malformed/hung-provider regressions. The exact-code unit packet passed
+  2,565 with 12 deselected. These results qualified the inherited-group fix,
+  not deliberate group escape.
+- Subsequent review found an escaped descendant could retain stdout past the
+  watchdog. Native Linux run `40684489735` on
+  `c5fbd22472d8a9d1e63f57350afd8ecb34b5faa6` reproduced both cases:
+  a valid frame authorized after 12.026 seconds and malformed input refused
+  only after 12.026 seconds. The escaped fixture had a hard lifetime armed
+  before `setsid`, an after-escape readiness barrier and observed retirement.
+  The new candidate shares one deadline across all reads and EOF, and replaces
+  rejection's EOF drain with a private, prompt-free supervisor-status receipt
+  in the existing copied launch directory. It preserves inherited-group
+  custody and refuses escaped stdout without claiming cross-group retirement.
+  Fresh native qualification and accepted review are still required.
 - Capability/rollback selection, canonical process-birth capture, backend
   custody and foreground terminal/signal behavior remain the next integration
   gates. Neither POSIX runtime waiter is removed, and no host installation,
