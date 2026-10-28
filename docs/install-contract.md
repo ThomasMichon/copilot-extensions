@@ -3714,7 +3714,32 @@ network call, new receipt, resolver, approval or live activation. Existing
 release/profile/feed admission and actual distribution obligations remain the
 installation owner's responsibility; a selected ZIP is not their substitute.
 
-`tools/runtime_profile_bundle.py` provides the matching repeatable producer:
+`tools/core_runtime_profile.py` assembles an inert core release-profile
+candidate before transport construction:
+
+```text
+python tools/core_runtime_profile.py --manifest core-manifest.json --native-profile native-profile.json --wheel-dir wheels --output profile.json
+```
+
+Run it with the repository's profile-tooling interpreter (`packaging` is
+required). The existing native lock supplies the exact target, backend,
+acquisition policy and external wheel pins. The core manifest supplies
+first-party content identity and root/extras/conditions; every first-party
+distribution must be represented in the native lock. The producer inspects
+retained wheel bytes, derives current first-party metadata from them and
+requires the complete applicable closure to satisfy the unchanged external
+pins. A new dependency requirement cannot silently select another version.
+Missing, changed, incompatible or unreachable inputs refuse the candidate.
+The output binds the exact raw manifest digest and passes the existing
+whole-profile and release-binding checks. Publication is atomic and refuses
+an existing output; the destination directory must support hard links.
+
+The `promotion-main` field names the intended release channel, not an
+approval. This command neither authenticates source/release admission nor
+acquires dependencies, signs, publishes, installs or activates anything.
+Its caller retains those existing authorities and distribution obligations.
+
+`tools/runtime_profile_bundle.py` provides the matching repeatable transport producer:
 
 ```text
 python tools/runtime_profile_bundle.py --profile profile.json --wheel-dir wheels --output core.zip
