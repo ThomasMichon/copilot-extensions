@@ -74,13 +74,52 @@ def _live_reconciling_plugins() -> list[str]:
     for lock_path in sorted(glob.glob(str(root / ".*" / "reconcile.lock"))):
         lock = Path(lock_path)
         try:
-            pid = int(lock.read_text(encoding="utf-8").strip())
+            parts = lock.read_text(encoding="utf-8").split()
+            if not 1 <= len(parts) <= 2:
+                continue
+            pid = int(parts[0])
+            if pid <= 0:
+                continue
+            recorded = int(parts[1]) if len(parts) == 2 else None
         except (OSError, ValueError):
             continue
         if not _pid_alive(pid):
             continue  # not alive -- not in flight
+        try:
+            birth = _reconcile_process_birth(pid)
+            if recorded is None:
+                if birth > lock.stat().st_mtime_ns // 1_000_000 + 999:
+                    continue
+            elif recorded != birth:
+                continue
+        except ProcessLookupError:
+            continue
+        except (ImportError, OSError, ValueError):
+            # Like the native watchdog, an unreadable birth remains possibly live.
+            pass
         live.append(lock.parent.name.lstrip("."))
     return live
+
+
+def _reconcile_process_birth(pid: int) -> int:
+    """Adapt the existing native identity reader to the watchdog's epoch milliseconds."""
+    from agent_procutil._daemon_instance_identity import birth_identity
+
+    identity = birth_identity(pid).split(":")
+    if identity[0] == "windows":
+        return int(identity[1]) // 10_000 - 11_644_473_600_000
+    if identity[0] == "linux":
+        boot = next((
+            line.split()[1] for line in Path("/proc/stat").read_text().splitlines()
+            if line.startswith("btime ")
+        ), None)
+        if boot is None:
+            raise OSError("native boot time unavailable")
+        return int(boot) * 1000 + int(identity[-1]) * 1000 // os.sysconf("SC_CLK_TCK")
+    if identity[0] == "darwin":
+        # Native ps/date fallback records whole seconds, not libproc microseconds.
+        return int(identity[1]) * 1000
+    raise OSError("native reconcile birth unavailable")
 
 
 

@@ -49,6 +49,8 @@ def _run(args: list[str], state_file: Path) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
         env=env,
+        timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
 
 
@@ -130,7 +132,10 @@ def test_on_detects_live_in_flight_reconcile(tmp_path) -> None:
     fake_home = tmp_path / "home"
     lock_dir = fake_home / ".fake-plugin"
     lock_dir.mkdir(parents=True)
-    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
     try:
         (lock_dir / "reconcile.lock").write_text(str(proc.pid), encoding="utf-8")
         env = dict(os.environ)
@@ -146,6 +151,8 @@ def test_on_detects_live_in_flight_reconcile(tmp_path) -> None:
             capture_output=True,
             text=True,
             env=env,
+            timeout=15,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
     finally:
         proc.terminate()
@@ -166,6 +173,8 @@ def test_on_reports_no_warning_when_no_lock_present(tmp_path) -> None:
         capture_output=True,
         text=True,
         env=env,
+        timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode == 0
     assert "WARNING" not in result.stdout
