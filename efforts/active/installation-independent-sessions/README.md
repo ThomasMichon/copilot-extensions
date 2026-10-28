@@ -230,9 +230,12 @@ and [repair register](reconstruction-findings.md) retain the evidence and limits
   - [x] Copy canonical Windows setup assets for actual seed-free and
     terminal-fallback cold embodiment without taking over prompt/admission
     custody or adding a Manager health probe (#9390).
-  - [ ] Move prepared Windows pane argument manifests and their receipts
+  - [x] Move prepared Windows pane argument manifests and their receipts
     outside removable runtimes while retaining legacy transport, scoped
-    cleanup and startup grace.
+    cleanup and startup grace (#9407).
+  - [ ] Consume canonical copied Windows setup's startup arguments through a
+    launch-owned one-shot handoff, preserving final correlation, literal argv
+    and same-host/seed/console custody without exempting unsafe consumers.
 - [ ] Resolve attributable, installation-scoped start/end entry points afresh
   at each boundary; no cached runtime Python, daemon endpoint or imported
   installed helper survives merely to wait.
@@ -429,6 +432,54 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
 
 ## Journal
 
+### 2026-10-28 - Engine mux setup startup handoff
+
+- The copied setup host still retained installation-root arguments in its
+  original process argv. The engine's final mux builder now serializes only
+  qualified copied Windows PowerShell setup after seed selection and launch
+  correlation. The copied command wrapper consumes/deletes that one-shot
+  manifest before setup; its original same-host optimization and alternate
+  host-option fallback stay intact. The uninstaller's conservative consumer
+  checks are unchanged.
+- Known rejected launches remove their matching nested handoff; uncertain
+  creation retains both files, and abandoned startup files reuse the existing
+  registered-project 24-hour expiry. Custom commands, older wrappers and
+  unsupported outer host options keep their prior invocation.
+- The final contained Windows startup/handoff/admission packet passed 182
+  controls, including 11 explicit native consumer tests. Earlier shell/launch
+  execution controls passed, as did embodiment controls in the expanded packet.
+  That expanded packet exposed a stale prepared-manifest fixture: detached
+  creation now has a separate native admission owner, but the fixture mocked
+  only the old subprocess path. Its corrected already-admitted double does
+  not alter production admission or uncertain-outcome semantics.
+- The native packet exercises actual copied setup after disposable source
+  removal, literal empty/date/quoted arguments, pre-backend consumption,
+  process argv without runtime roots, pane-appended prompts, original
+  non-inert-host fallback and sanitized malformed-input refusal. It is not
+  real mux/Copilot, supported uninstall or selected-host rollout evidence.
+  Install contract (13 plugins), Ruff, diff checking and the full-tree
+  module-size audit passed.
+- Documentation impact: updated the authoritative launch architecture, test
+  portfolio and this launch contract. The change closes part of the existing
+  installation-independent intent and follows the existing launch/state and
+  process-custody patterns; no new policy, service or process is introduced.
+  The new startup transport is marker-gated on the copied executing provider;
+  no old reader receives unsupported syntax.
+- Manager's separate retrying Picker producer remains an explicit next
+  dependency: it needs a fresh startup handoff per retry. Production parity,
+  release/installed qualification, actual same-process removal, standby and
+  task lifecycle remain parent gates. No live installation, session or task
+  trigger changed for this source slice.
+- Review found that adding the transport wrapper around direct setup also
+  added its own pre-setup reconciliation. Native unset-marker controls
+  reproduced an unwanted restore in recovery and duplicate restores in normal
+  mode. The added wrapper now bypasses its own reconciliation and leaves
+  both policies to setup. The corrected controls compare real direct and
+  serialized execution, including a failing synthetic restore, rather than
+  assuming that helper's exit behavior. The corrected startup packet passes
+  26 controls, including all 13 explicit native cases. Fresh accepted review
+  and required CI remain publication gates.
+
 ### 2026-10-28 - Provider-owned setup birth prerequisite
 
 - The continuing POSIX trace found that setup needs the existing shell PID's
@@ -504,6 +555,18 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
 - Post-review contained engine validation passes 65 controls, including the
   actual monitor sweep entry point and the new cross-project/failure controls.
   The already-passing 54 Manager consumer controls are unaffected.
+- Fresh Copilot approval on the corrected head, resolved review feedback and
+  all required checks preceded the managed merge of #9407 as
+  `1743ef4b8eff23470219c25c037bdb4b99e588bc`. The parent issue remains open.
+  Re-reading Plan and Validation Plan closes only the narrow pane-handoff
+  storage subitem, not overall launch-data independence or live survival.
+- Next slice: the setup process still retains installation-root startup
+  arguments. Trace their preparation/consumption boundary and relocate only
+  legitimate finite launch data through an existing owner. Do not exempt
+  active consumers from the uninstaller or treat copied scripts and passing
+  component tests as actual installation-removal proof. This merge is source
+  completion, pending containing release and authorized installed validation;
+  no host effects or task-trigger changes occurred.
 - Documentation impact: updated the authoritative launch architecture and
   test portfolio. This closes part of the existing installation-independent
   intent and follows the same launch/state owner; no new lifecycle authority,

@@ -29,7 +29,7 @@ a claim to constrain every action an agent can take.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| Planning author | Capture inception and submit the proposal | This effort and #9377 |
+| Planning author | Capture inception and reviewed planning amendments | This effort and #9377 |
 | Implementation owner | Claim the next admitted implementation slice | #9377 and its future sub-issues |
 
 ## Coordination
@@ -39,8 +39,9 @@ a claim to constrain every action an agent can take.
 - **Delegates:** none assigned; do not infer implementation ownership from this plan.
 - **Handoff:** update the Plan and Journal with results, remaining gates and the
   next claimed slice; keep the canonical effort here.
-- **Current assignment:** land this inception and reviewed plan. It does not
-  implement the companion, authorize rollout, or claim the effort is complete.
+- **Current assignment:** capture and land the paired-spike planning amendment.
+  It does not implement the companion, author its initial guidance, launch
+  experimental agents, authorize rollout, or claim the effort is complete.
 - **Adjacent owners:** [Worktree/Effort Railroad Binding](../worktree-effort-railroad-binding/README.md)
   and #3581/#3582/#3583 retain title, checklist-derived binding, and mid-session
   reminder work. No dispatch lifecycle, claims, or worktree-binding redesign is
@@ -74,11 +75,13 @@ a claim to constrain every action an agent can take.
 **Summary of settled intent:** extend the efforts plugin with a voluntary
 structured agenda companion. Keep it a process aide, outside agent-dispatch;
 consider optional CLI scaffolding and cursor support. Use the investigation as
-the inception for this implementation effort.
+the inception for this implementation effort. Once initial guidance is usable,
+compare concurrent attempts at the same task in separate worktrees, with the
+extra agenda layer present in only one arm.
 
-The latest operator request is preserved verbatim:
+The latest spike direction is preserved verbatim:
 
-> In general I like the nuanced direction you propose. Help land an extension/companion for efforts (in the efforts plugin) that hels give agents this structured way through an effort. Note that I intend this to be a process aide, not something built into agent-dispatch. We could consider a helper CLI toolset to scaffold out one of these, and help maintain/identify a "cursor" in the agenda, of we want more objective driving through these. Take what you wrote so far and set it as the inception text for an effort to build this idea out.
+> Great. We should figure out how to do a spike test, once we have some initial guidance. We can create a worktree, add in this extra guidance layer, and drive an agent to do a task, in parallel with driving an agent in a worktree without the guidance framework to attempt the same task.
 
 The [full inception exchange](inception-transcript.md) distinguishes operator
 requirements from agent recommendations and records publication-only omissions.
@@ -111,6 +114,21 @@ illustrative filenames or operations are not existing commands.
       ownership and standalone operation.
 - [ ] Ship efforts-owned authoring and usage guidance with a synthetic worked
       example. Ordinary efforts and manual agenda use stay first-class.
+
+### Phase 1S - Paired guidance spike
+- [ ] After a reviewed initial guidance candidate is usable, prepare the
+      [paired spike](paired-spike.md): identical task/starting revision,
+      independent worktrees and sessions, treatment-only agenda guidance.
+      A CLI toolset or completed Phase 1 rollout is not a prerequisite.
+- [ ] Predeclare the task, prerequisite detour, task-level acceptance checks,
+      matched agent configuration, finite budgets and scoring before either
+      arm starts; preserve the ordinary baseline's effort tools.
+- [ ] Run the two attempts concurrently, verify actual guidance exposure and
+      collect independent outputs without cross-arm steering or publication.
+- [ ] Compare correctness, parent-task resumption, scope drift, false completion
+      and available cost observations. Record the first pair as exploratory
+      and use its findings to revise guidance or choose bounded replications
+      before committing to a helper implementation.
 
 ### Phase 2 - Optional helper decision and bounded implementation
 - [ ] Evaluate whether a lightweight efforts-owned CLI adds enough objective
@@ -174,6 +192,14 @@ already run or a requirement to publish execution artifacts.
 - [ ] Guidance and any helpers are qualified on Windows and Linux/WSL. Helper
       tests use the repository's bounded test path; required CI remains scoped
       to the actual change and native qualification is reported honestly.
+- [ ] A paired spike follows [the protocol](paired-spike.md): both arms attempt
+      the same task concurrently with matched configuration and ordinary
+      planning tools; only the treatment receives the extra guidance layer.
+      Task-level scoring does not require the control to produce agenda syntax.
+- [ ] The spike verifies intended guidance exposure and independently checks
+      the prerequisite repair and parent outcome. Record invalid setup,
+      intervention and unavailable metrics honestly; one pair alone is not
+      evidence of general superiority.
 
 ## Proposal
 
@@ -215,3 +241,13 @@ limits, with the following explicit corrections:
 - The inception delivery item is resolved. The next step is explicit admission
   of a bounded Phase 1 contract/manual-aide slice on #9377; no implementation,
   optional-helper decision or rollout is reported complete.
+
+### 2026-10-28 - Paired spike requested
+- Captured the operator's request to compare parallel attempts at the same task,
+  with the extra guidance layer present in one worktree and absent in the other,
+  once initial guidance exists.
+- Added Phase 1S and a linked, agent-recommended protocol for comparable inputs,
+  an observable prerequisite detour and parent return, independent scoring and
+  honest interpretation of a first pair.
+- This amendment plans the experiment only. Initial guidance, fixture creation,
+  run admission and both agent attempts remain unstarted.
