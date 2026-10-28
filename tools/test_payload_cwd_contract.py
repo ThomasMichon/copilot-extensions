@@ -612,6 +612,7 @@ def test_watchdog_dispatch_cutover_lock_wait_extends_build_deadline(
         fixture = (
             'INSTALL_DIR="$HOME/runtime"\nmkdir -p "$INSTALL_DIR"\n'
             'SUPERVISOR_UNIT=fixture\nSUPERVISOR_ENV_FILE=fixture.env\nchecks=0\n'
+            '_maintenance_preflight() { [[ "$1" == update ]] && touch "$HOME/preflight"; }\n'
             '_ensure_runtime() { sleep 2; }\n'
             '_downgrade_guard() { :; }; _write_update_marker() { :; }; _clear_update_marker() { :; }\n'
             '_skip() { :; }; _supervisor_audit() { :; }; _install_supervisor_service() { :; }\n'
@@ -639,6 +640,8 @@ def test_watchdog_dispatch_cutover_lock_wait_extends_build_deadline(
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert time.monotonic() - started >= 9, "the actual lock wait never exceeded the build budget"
+    if extension == "sh":
+        assert (home / "preflight").is_file()
     assert (home / "lock-complete").is_file()
     assert (home / "reconciled").exists() is not superseded_after_lock
 
@@ -1308,7 +1311,10 @@ def test_all_reconcile_launchers_choose_home() -> None:
         for line in text.splitlines():
             if re.search(r"^\s*(?:\(.*)?nohup bash ", line):
                 assert line.lstrip().startswith("nohup bash "), script
-                before = text[:text.index(line)].rstrip().splitlines()[-1]
+                preceding = text[:text.index(line)].rstrip().splitlines()
+                before = preceding[-1]
+                if before.strip() == "assert_bootstrap_publication":
+                    before = preceding[-2]
                 assert before.lstrip().startswith('cd "$HOME" || '), script
 
 
