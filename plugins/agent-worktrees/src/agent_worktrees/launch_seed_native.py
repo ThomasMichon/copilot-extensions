@@ -69,6 +69,8 @@ def prepare(
     if not setup and (admission_only or preserve_seed_id or native_resume_session or pid or process_start_time):
         raise ValueError("Backend preparation cannot include setup admission")
     if setup:
+        if process_start_time is None and type(pid) is int and pid > 0:
+            process_start_time = locks.process_start_time(pid)
         _require_process(pid, process_start_time)
     if not launch_seed_exec._valid_request(
         record_path, invoke=not setup, seed_id=seed_id, admission_only=admission_only,
@@ -97,11 +99,15 @@ def prepare(
         execution.observed("execution-returned", exit_code=prepared)
         raise ValueError("Backend launch preparation was refused")
     if setup:
-        _require_process(pid, process_start_time)
-        execution.append(
-            "process-spawned", pid=pid, process_start_time=process_start_time,
-            boundary="launcher-command",
-        )
+        try:
+            _require_process(pid, process_start_time)
+            execution.append(
+                "process-spawned", pid=pid, process_start_time=process_start_time,
+                boundary="launcher-command",
+            )
+        except (*_ERRORS, KeyboardInterrupt):
+            execution.observed("unknown")
+            raise
     return {
         "version": 1, "argv": prepared.argv, "environment": prepared.environment,
         "attempt_id": execution.subject["attempt_id"],
@@ -112,7 +118,7 @@ def prepare(
     }
 
 
-def _require_process(pid: int, process_start_time: str) -> None:
+def _require_process(pid: int | None, process_start_time: str | None) -> None:
     if (
         type(pid) is not int or pid < 1 or not process_start_time
         or locks.process_start_time(pid) != process_start_time
@@ -218,6 +224,7 @@ def main() -> int:
     parser.add_argument("--describe-contract", action="version", version=json.dumps({
         "contract": "agent-worktrees.native-seed", "version": 1,
         "preparation_output_formats": ["json", "nul"], "nul_reply_schema": NUL_REPLY_SCHEMA,
+        "setup_process_start_time_sources": ["caller", "provider"],
     }))
     parser.add_argument("--contract-version", type=int, choices=[1], required=True)
     parser.add_argument("--output-format", choices=["json", "nul"], default="json")
