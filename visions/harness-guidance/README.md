@@ -298,15 +298,18 @@ checked-in, scheduled-sync-worker-maintained copy is strictly the
 **fallback**: the floor a session falls back to only when no pre-session
 hook could render anything fresher (a fully hookless/headless/sandboxed
 launch) or hasn't yet had the chance to (a pre-sync gap on an otherwise
-hook-capable path). A fallback a stale leftover local artifact can
-silently outrank is not actually safe, so precedence between the two must
-be decided by stable content provenance (e.g. a declared version), never
-by the local artifact's mere existence or render recency.
+hook-capable path). For managed instruction copies, the currently selected
+plugin and its declaration determine the primary file; no separate version,
+content-provenance or fingerprint comparison should choose between it and the
+fallback. Creation and session start should replace stale generated copies
+directly. A failed copy should be reported explicitly, with the offline fallback
+remaining available when no usable managed copy exists.
 
 Applicable worktree and session-creation boundaries should establish that
 local guidance is available before the agent begins loading instructions. Session-start
-should repair missing or stale local guidance as a backup, not be the sole
-delivery opportunity on a path that can prepare it earlier.
+should copy the current plugin files again, including while another session is
+running, not be the sole delivery opportunity on a path that can prepare them
+earlier. A restart is sufficient to let that running session load the update.
 
 ### ambient-delivery-fails-open
 
