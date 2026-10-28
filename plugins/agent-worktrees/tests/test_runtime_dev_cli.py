@@ -46,6 +46,39 @@ def test_original_legacy_build_without_receipt_does_not_invent_origins(tmp_path,
     runtime_candidate.verify_installed_origins()
 
 
+@pytest.mark.parametrize("source_wheel", [False, True])
+@pytest.mark.parametrize("changed", [False, True])
+def test_origin_verifier_normalizes_wheel_names_but_preserves_directory_names(
+    tmp_path, monkeypatch, source_wheel, changed,
+):
+    monkeypatch.setattr(runtime_candidate.sys, "prefix", str(tmp_path))
+    digest = "a" * 64
+    name = "example-app" if source_wheel else "Example_App"
+    url = "file:///gone/example.whl#sha256=" + digest if source_wheel else "file:///gone/example"
+    record = {
+        "schema": "installer-engine.frozen-input-origins", "version": 1,
+        "packages": {name: url},
+    }
+    if source_wheel:
+        record["source_wheels"] = {name: {"version": "1.0", "sha256": "sha256:" + digest}}
+    (tmp_path / ".runtime-input-origins.json").write_text(json.dumps(record), encoding="utf-8")
+    origin = {
+        "url": "file:///changed" if changed else url,
+        **({"archive_info": {"hashes": {"sha256": digest}}} if source_wheel else {"dir_info": {}}),
+    }
+    distribution = SimpleNamespace(
+        metadata={"Name": "Example_App"}, version="1.0",
+        locate_file=lambda _path: tmp_path,
+        read_text=lambda _path: json.dumps(origin),
+    )
+    monkeypatch.setattr(runtime_candidate, "distributions", lambda: [distribution])
+    if changed:
+        with pytest.raises(RuntimeError):
+            runtime_candidate.verify_installed_origins()
+    else:
+        runtime_candidate.verify_installed_origins()
+
+
 def test_deployed_release_uses_whole_operation_without_owner_checkout(tmp_path, monkeypatch):
     import sys
 

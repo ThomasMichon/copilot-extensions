@@ -67,11 +67,19 @@ def _read_receipt(entry: Path, key: str, max_archive_bytes: int) -> tuple[Path, 
 
 
 def _copy_wheel(
-    source: Path, output: Path, expected: str, size: int, deadline: float,
+    source: Path, output: Path | None, expected: str, size: int, deadline: float,
 ) -> Path:
     before = _ordinary(source)
     if before.st_size != size:
         raise WheelError("cached source wheel size differs from its receipt")
+    if output is None:
+        with _open(source) as incoming:
+            opened = _unchanged(source, before, incoming)
+            observed = _digest(incoming, size, deadline)
+            _unchanged(source, before, incoming, opened=opened)
+        if observed != (expected, size):
+            raise WheelError("cached source wheel digest differs from its receipt")
+        return source
     output.mkdir(parents=True, exist_ok=True)
     destination = output / source.name
     created = False
@@ -93,21 +101,23 @@ def _copy_wheel(
 
 
 def cached_source_wheel(
-    owner_root: Path, binding: bytes, output: Path, *, build, validate,
+    owner_root: Path, binding: bytes, output: Path | None, *, build, validate,
     max_archive_bytes: int, deadline: float,
 ) -> Path:
-    """Build once, publish atomically, and copy a held exact wheel to the caller.
+    """Build once and select an immutable exact wheel, optionally copying it.
 
-    Only offline callers with exact admitted build artifacts may enter here.
+    Only offline callers with exact admitted build inputs may enter here.
     ``build`` writes one wheel in its supplied private directory; ``validate``
     checks that fresh artifact against the caller's source and build selection.
     Corrupt/foreign entries are explicit errors, never silently rebuilt in place.
+    With no output directory, retain the stable content-bound archive URL so UV
+    can reuse its extracted wheel. Published entries are never replaced.
     """
     _check_deadline(deadline)
     if (
         not isinstance(binding, bytes) or not binding
         or type(max_archive_bytes) is not int or max_archive_bytes <= 0
-        or not owner_root.is_absolute() or not output.is_absolute()
+        or not owner_root.is_absolute() or (output is not None and not output.is_absolute())
     ):
         raise WheelError("source wheel caching requires bounded, owner-attributed inputs")
     key = hashlib.sha256(binding).hexdigest()

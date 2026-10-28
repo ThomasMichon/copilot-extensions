@@ -3,10 +3,15 @@ import base64
 import csv
 import hashlib
 import io
+import os
 import zipfile
 from pathlib import Path
 
 import tomllib
+
+
+def get_requires_for_build_wheel(config_settings=None):
+    return ["wheel"] if os.environ.get("TEST_SOURCE_BACKEND_REQUIRES_WHEEL") else []
 
 
 def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):

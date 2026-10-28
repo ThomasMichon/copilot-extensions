@@ -19,6 +19,7 @@ SUPPORT = (
     "installer_dependency_config.py", "runtime_launcher.py", "versioned_runtime.py",
     "versioned_runtime_leases.py", "versioned_runtime_construction.py",
     "versioned_runtime_source.py", "versioned_runtime_publication.py",
+    "installer_source_build.py", "installer_source_wheel_cache.py",
 )
 GENERATED = {
     ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist",

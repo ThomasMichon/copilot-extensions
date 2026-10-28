@@ -51,6 +51,10 @@ on:
         description: Exercise retained lock export and existing install seasoning with real UV
         type: boolean
         default: false
+      source_cache:
+        description: Qualify only source-wheel cache reuse and hardlinks with the pinned real backend
+        type: boolean
+        default: false
       candidate_profiles:
         description: Exercise role-selectable candidate construction and immutable reuse with real UV
         type: boolean
@@ -137,7 +141,7 @@ jobs:
           --timeout 120 --plugin-timeout 600 --test-timeout 60
 
   derived-diagnostics-posix:
-    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal }}
+    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal }}
     name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: ubuntu-latest
     timeout-minutes: 4
@@ -158,7 +162,7 @@ jobs:
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
 
   derived-diagnostics-windows:
-    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal }}
+    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal }}
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: windows-latest
     timeout-minutes: 4
@@ -1142,7 +1146,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: &source-build-matrix
-        suite: [profiles, refusals, manager]
+        suite: [profiles, refusals, manager, normal]
         include:
           - suite: profiles
             expression: not (unadmitted_source_build_inputs or rejected_native_source_settings or built_metadata_must_match or backend_timeout or revoked_source_policy)
@@ -1157,12 +1161,35 @@ jobs:
       - name: Validator tooling only
         run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest pyyaml packaging
       - name: Real authenticated source, admitted tools, offline build and health
-        if: ${{ matrix.suite != 'manager' }}
+        if: ${{ matrix.suite != 'manager' && matrix.suite != 'normal' }}
         run: >-
           python -m pytest -q
           tools/test_runtime_source_build.py
           tools/test_runtime_source_wheel_cache.py
           -k "${{ matrix.expression }}"
+      - &source-wheel-backend-step
+        name: Acquire the pinned real backend fixture before isolated feed tests
+        if: ${{ matrix.suite == 'normal' }}
+        shell: python
+        run: |
+          from datetime import datetime, timezone
+          import hashlib, os, pathlib, tempfile, urllib.request
+          filename = "setuptools-84.0.0-py3-none-any.whl"
+          url = ("https://files.pythonhosted.org/packages/95/9c/"  # feed-guard: allow hash-pinned hosted test fixture, not runtime acquisition
+                 "c510029fc6ef33a6275cd2c5d3cecd6613dfd6aa401d57c54f1c18852ccf/" + filename)
+          with urllib.request.urlopen(url, timeout=30) as response:
+              content = response.read(8 << 20)
+          assert hashlib.sha256(content).hexdigest() == "51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670"
+          prefix = "source-build-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S") + "-"
+          root = pathlib.Path(tempfile.mkdtemp(prefix=prefix, dir=os.environ["RUNNER_TEMP"]))
+          wheel = root / filename
+          wheel.write_bytes(content)
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              output.write("TEST_SOURCE_WHEEL_REAL_BACKEND=" + str(wheel) + "\n")
+      - &source-wheel-test-step
+        name: Ordinary constructors, real backend, per-project hits and failed-input controls
+        if: ${{ matrix.suite == 'normal' }}
+        run: python -m pytest -q tools/test_installer_source_build.py
       - name: Persisted Manager admission and fresh-process offline reuse
         if: ${{ matrix.suite == 'manager' }}
         run: >-
@@ -1172,6 +1199,39 @@ jobs:
           tools/test_runtime_source_reuse.py
           worktree-manager/tests/test_manager_update_check.py
           libs/versioned-runtime/tests/test_runtime_source_identity.py::test_source_and_repair_slots_preserve_the_declared_package_version
+
+  source-cache-linux:
+    if: ${{ inputs.source_cache }}
+    name: Source wheel cache and hardlinks (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [normal]
+    steps: &source-cache-steps
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Validator tooling only
+        run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest pyyaml packaging
+      - *source-wheel-backend-step
+      - *source-wheel-test-step
+
+  source-cache-windows:
+    if: ${{ inputs.source_cache }}
+    name: Source wheel cache and hardlinks (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [normal]
+    steps: *source-cache-steps
 
   packaging-seed-linux:
     if: ${{ inputs.dependency_compile }}

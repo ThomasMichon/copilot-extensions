@@ -41,6 +41,8 @@ PYTHON_FILES = (
     "installer_native_feed.py",
     "installer_feed_policy.py",
     "installer_packaging_seed.py",
+    "installer_source_build.py",
+    "installer_source_wheel_cache.py",
 )
 PYTHON_ADOPTERS = (
     "agent-worktrees", "agent-vault", "agent-pull-requests", "agent-ssh",

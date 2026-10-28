@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import shutil
 import sys
 import uuid
@@ -21,6 +22,7 @@ _LIFECYCLE_FILES = (
     "installer_engine_process.py", "installer_dependency_policy.py",
     "installer_wheel_snapshot.py", "installer_wheel_inputs.py",
     "installer_dependency_config.py", "registry_root.py", "command_binding.py", "command_lifecycle.py",
+    "installer_source_build.py", "installer_source_wheel_cache.py",
 )
 
 
@@ -58,12 +60,18 @@ def prepare_runtime_candidate(provenance: dict[str, str]) -> None:
         "runtime_generation": uuid.uuid4().hex,
     }
     info.pop("frozen_plugin")
-    (package / "_build_info.py").write_text(
+    info_path = package / "_build_info.py"
+    temporary_info = info_path.with_name(f".{info_path.name}.{uuid.uuid4().hex}")
+    temporary_info.write_text(
         '"""Build provenance -- generated before runtime publication."""\n'
         "from __future__ import annotations\n\n"
         f"BUILD_INFO: dict[str, str] = {info!r}\n",
         encoding="utf-8",
     )
+    try:
+        os.replace(temporary_info, info_path)
+    finally:
+        temporary_info.unlink(missing_ok=True)
     (slot / ".runtime-bootstrap" / "runtime-generation").write_text(
         info["runtime_generation"] + "\n", encoding="utf-8",
     )
@@ -127,6 +135,11 @@ def verify_installed_origins() -> None:
     ):
         raise RuntimeError("Frozen origin evidence has an unsupported schema")
     recorded = receipt["packages"]
+    source_wheels = receipt.get("source_wheels")
+    if source_wheels is not None and (
+        not isinstance(source_wheels, dict) or not source_wheels or set(source_wheels) != set(recorded)
+    ):
+        raise RuntimeError("Source wheel evidence differs from its frozen origins")
     observed = {}
     for distribution in distributions():
         direct_url = distribution.read_text("direct_url.json")
@@ -134,12 +147,23 @@ def verify_installed_origins() -> None:
             continue
         origin = json.loads(direct_url)
         name = distribution.metadata["Name"]
+        if source_wheels is not None:
+            name = re.sub(r"[-_.]+", "-", name).lower()
         if name not in recorded and "dir_info" not in origin:
             continue
+        valid_origin = origin.get("dir_info") in ({}, {"editable": False})
+        if source_wheels is not None and name in source_wheels:
+            wheel = source_wheels[name]
+            digest = wheel["sha256"].removeprefix("sha256:")
+            valid_origin = (
+                "dir_info" not in origin
+                and distribution.version == wheel["version"]
+                and origin.get("archive_info", {}).get("hashes") == {"sha256": digest}
+                and str(origin.get("url", "")).endswith("#sha256=" + digest)
+            )
         if (
             not Path(distribution.locate_file("")).resolve().is_relative_to(slot)
-            or origin.get("dir_info") not in ({}, {"editable": False})
-            or name in observed
+            or not valid_origin or name in observed
         ):
             raise RuntimeError(f"{name} is not an attributable non-editable installation")
         observed[name] = origin.get("url")

@@ -13,7 +13,7 @@ import pytest
 for library in ("installer-engine", "versioned-runtime"):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / library))
 
-import runtime_source_wheel_cache as cache
+import installer_source_wheel_cache as cache
 from installer_wheel_inputs import WheelError
 
 
@@ -39,6 +39,24 @@ def assembly(tmp_path):
         )
 
     return root, builds, assemble
+
+
+def test_stable_archive_selection_reuses_without_copying(assembly):
+    root, builds, assemble = assembly
+    copied = assemble("copied")
+    arguments = {
+        "build": lambda _output: pytest.fail("stable selection rebuilt a completed wheel"),
+        "validate": lambda _path: pytest.fail("stable selection revalidated a fresh build"),
+        "max_archive_bytes": 100, "deadline": time.monotonic() + 10,
+    }
+    selected = cache.cached_source_wheel(root, b"source+target+exact-backend", None, **arguments)
+    repeated = cache.cached_source_wheel(root, b"source+target+exact-backend", None, **arguments)
+    assert selected == repeated and selected.is_relative_to(root / ".source-wheel-cache")
+    assert selected.read_bytes() == copied.read_bytes()
+    assert len(builds) == 1
+    selected.write_bytes(b"X" * selected.stat().st_size)
+    with pytest.raises(WheelError, match="digest differs"):
+        cache.cached_source_wheel(root, b"source+target+exact-backend", None, **arguments)
 
 
 def test_fresh_output_reuses_exact_artifact_and_changed_inputs_rebuild(assembly):
