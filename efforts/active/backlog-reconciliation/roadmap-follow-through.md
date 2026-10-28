@@ -282,7 +282,73 @@ while crediting actual later source delivery without duplicate implementation
 or new closure credit. The separate
 [nineteen-identity receiving manuscripts](consolidation-current-unit.md)
 have independently admitted current contracts but no accepted intake or
-source supersession yet. Normal reviewed receiving delivery, complete current
-readback, actual #4477 keeper publication and fresh source guards still
-precede supported dispositions. No implementation, native/installed proof,
-resource release or source-owner assignment is inferred.
+source supersession at that observation. The completed receiving unit below
+subsequently resolves reviewed delivery, full current readback, actual #4477
+publication and separately guarded administrative dispositions. No
+implementation, native/installed proof, resource release or source-owner
+assignment is inferred.
+
+## Complete receiving unit: twelve administrative consolidations
+
+After actual #9446 merge, independent full readback verified all five
+receiving ROOTs, five per-origin annexes and the complete existing
+Source-Qualified Publication validation document. All eleven files match
+the actual reviewed merge, including 115 Plan/Validation pairs, existing
+Participants/Coordination, original first unchecked execution entries,
+closeouts AND remaining duties, and 54 checked PR-service source baselines.
+Source-Qualified Publication remains Blocked; the other four ROOTs remain
+Active. No technical checkbox was completed by this readback.
+
+The complete direct #4477 acceptance was published at **22:06:05 UTC
+(15:06:05 PDT)** and read back with its entire current body and discussion.
+Its 24 reviewed rows and four intake markers are live; all 32 incumbent
+checklist entries, 26 inherited rows, original markers and comments remain.
+The [direct acceptance record](receiving-4477.md) preserves finite
+alternatives and original custodians rather than becoming an implementation
+effort.
+
+Fresh complete author/editor/version/lock/assignee and actor/eleven-member
+roster guards, all 103 actual current source texts, separate per-source
+judgments, audited public explanations and provider terminal readbacks
+support these **administrative supersessions**, not completed fixes:
+
+| Retired source wrappers | Continuing canonical acceptance |
+|---|---|
+| #5225/#5750/#5754/#7170 | Actual open #4477 body: native-manager OR validated-guidance exit, both installer failure branches/current lifecycle policy, both transition-authority consumers, and all three candidate-admission/teardown entrypoints. |
+| #5738/#5973/#6039 | Machine Transport Convergence: complete Dispatch, WSL/mesh and Logger consumer Plan/Validation rows; delivered source/design credit, optional-provider/locality/packaging acceptance and unchanged custody. #6039 implementation remains unreserved. |
+| #6286/#7188 | Durable PR Watch Delegation/#6007: distinct finite installed-adoption and broader service/fleet/registration exits. #7778's contract-delivery/proof rules remain effective; no new signature rendezvous. |
+| #7029 | Source-Managed Runtime Installs/#7028: complete independently selected immutable-source integration, exact remaining Logger role/six-command qualification and original source/execution/maintenance boundaries. |
+| #8778/#8779 | Dispatch Fleet Reliability and Recovery: finite budget/backoff/exhaustion alternatives, typed registry uncertainty, original history/counters, and release OR flag only under existing positive authority. |
+
+The [dated evidence and live explanations](<journal/2026/10.28 cross-wave-intake-selection.md#complete-current-readback-direct-keeper-intake-and-twelve-administrative-folds>)
+record each outcome. GitHub's not-planned reason retires the duplicate
+wrapper; the work remains planned in its complete receiver. Original source
+bodies are unchanged. No implementation claim, source/resource reservation,
+lease, hold or owner was completed, expired, released or reassigned.
+
+#4477/#6007/#7028 remain open keepers. #5972/#5974 retain their specific
+active issue/claim continuations; #7937/#7946 retain the literal plan-only
+closure prohibition despite F1 source credit. The separate #4124/#4564
+acceptance gate remains deferred. None is generalized into an all-owner
+acknowledgment or whole-parent prerequisite.
+
+## Latest post-receiving whole census
+
+The complete metadata-only inventory at **2026-10-28 22:15:42 UTC
+(15:15:42 PDT)** contains **926 whole open issues**: 673 creator-eligible,
+253 excluded, 707 original-cohort issues and 219 inflow. Twelve raw
+responses, ten pages, unique issue identities and the unchanged complete
+eleven-member roster were verified.
+
+Since the actual 935-issue census, the twelve source wrappers above departed
+and #9443/#9444/#9448 arrived. There were no unrelated departures. This unit
+receives **twelve administrative closure credits: ten original-cohort and
+two inflow**, with zero technical-completion credit. The 751 original-cohort
+issues not currently open are not all campaign-attributable closures.
+
+The fixed whole-queue checkpoint remains 729, **197 issues away**. The three
+new arrivals are eligible metadata-only research gaps, not outcomes or
+priorities inferred from their titles. Frozen four-wave coverage, the five
+finite completed outcomes and all source/resource obligations remain distinct
+from this live count. The parent stays Active for remaining priority/sequence,
+provisional, inflow, consolidation and numerical gates.

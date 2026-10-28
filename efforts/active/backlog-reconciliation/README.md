@@ -161,7 +161,8 @@ outcomes from agent-recommended research and prioritization mechanics.
   The [roadmap follow-through register](roadmap-follow-through.md) records
   #8733/#7650/#8802/#9072/#9413 finite completions, #8796's exact retained claim
   duty, #9233's focused documentation gap and the independently verified
-  935-open census; the whole target remains unmet. The next-decision matrix
+  926-open census after twelve administrative consolidations; the whole
+  target remains unmet. The next-decision matrix
   preserves #8682's specific finite consumer-qualification gap.
   The [bounded inflow decisions](roadmap-inflow.md) preserve #9414's P1
   standalone closure and #9412's P2 final-verdict gaps under their existing
@@ -176,8 +177,12 @@ outcomes from agent-recommended research and prioritization mechanics.
   The [current receiving-contract unit](consolidation-current-unit.md)
   now has independently admitted current contracts for six conditional
   families/nineteen own identities and authored direct receiving amendments.
-  Normal reviewed delivery and whole-current receiving readback remain;
-  no receiving acceptance or disposition follows from draft admission.
+  #9446 completed reviewed file delivery; all five complete receiving ROOTs
+  and their annexes were read back, and the complete direct #4477 acceptance
+  was published and verified. Twelve separately guarded source wrappers are
+  administratively consolidated; #5972/#5974/#7937/#7946 retain their exact
+  open-token restrictions. The work, custodians and canonical keepers remain;
+  no technical completion or claim/resource release is inferred.
   The separate #4124/#4564 specific acceptance gate remains deferred.
 - [ ] Refresh live and original-cohort metrics, append journal checkpoints, and
   continue graph-backed consolidation with creation-oldest-first coverage until
