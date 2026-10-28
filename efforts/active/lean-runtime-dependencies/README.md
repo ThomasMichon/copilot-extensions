@@ -359,6 +359,24 @@ transfer without acceptance by a named tracked objective.
 
 ## Journal
 
+### 2026-10-28 - Restore explicit management authorization
+
+- The next #9354 review had no inline findings but flagged context fallback
+  for authorization assessment. Comparing the adapter with the original
+  implementation and documented management boundary confirmed a regression:
+  the broad fallback could turn an ambient receipt into an explicit management
+  argument.
+- Ambient selection is now limited to `resolve`, `validate` and the four
+  read-only mode actions. All nine activation/snapshot/slot management forms
+  preserve their original explicit-pointer behavior, including the management
+  validators; no receipt or generation check is weakened.
+- The new actor-free matrix reproduced 18 missing/empty-pointer failures before
+  correction. All 110 adapter controls now pass. The existing exhaustive
+  cross-runner activation refusal test also reproduced two PowerShell failures
+  while Python/POSIX stayed correct; all six cases now refuse without fixture
+  activation publication. Source copies are synchronized. Fresh PR review and
+  all aggregate qualification/helper-migration gates remain open.
+
 ### 2026-10-28 - Keep inherited payload expectations consistent
 
 - The full #9354 reassessment accepted the packaging-selector repair, then

@@ -142,7 +142,9 @@ def _powershell_arguments(
     arguments = [action]
     for name in names:
         value = parameters.get(name)
-        if name == "Context" and not value:
+        if name == "Context" and not value and action in {
+            "resolve", "validate", "status", "deployment-status", "probe-plugin-publication", "probe-legacy",
+        }:
             value = os.environ.get("COPILOT_EXTENSIONS_CONTEXT")
         if value is None:
             continue

@@ -222,6 +222,49 @@ def test_worker_expands_only_unprocessed_inherited_plugin_root(
     }) == 7
 
 
+@pytest.mark.parametrize("action", [
+    "activation-cas", "snapshot-stamp", "snapshot-validate", "slot-provision",
+    "slot-validate", "slot-complete", "slot-completion-validate", "slot-cutover", "slot-release",
+])
+@pytest.mark.parametrize("context", [None, ""])
+def test_management_actions_never_adopt_ambient_context_as_authorization(
+    sdk: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    action: str, context: str | None,
+) -> None:
+    ambient = str(tmp_path / "ambient/install.json")
+    explicit = str(tmp_path / "explicit/install.json")
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", ambient)
+    parameters = _parameters(
+        ExpectedPayloadRoot=str(tmp_path / "payload"), ExpectedPayloadVersion="1.0",
+    )
+    supplied: list[str] = []
+    if action.startswith("slot-") and action != "slot-release":
+        supplied += ["ExpectedPayloadRoot", "ExpectedPayloadVersion"]
+    else:
+        parameters.pop("ExpectedPayloadRoot")
+        parameters.pop("ExpectedPayloadVersion")
+    if context is not None:
+        parameters["Context"] = context
+        supplied.append("Context")
+    arguments = sdk._powershell_arguments(action, parameters, supplied)
+    assert not any(value.startswith("--context=") for value in arguments)
+    arguments = sdk._powershell_arguments(
+        action, {**parameters, "Context": explicit}, [*supplied, "Context"],
+    )
+    assert f"--context={explicit}" in arguments
+
+
+@pytest.mark.parametrize("action", [
+    "resolve", "validate", "status", "deployment-status", "probe-plugin-publication", "probe-legacy",
+])
+def test_read_only_actions_preserve_ambient_context_selection(
+    sdk: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, action: str,
+) -> None:
+    ambient = str(tmp_path / "ambient/install.json")
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", ambient)
+    assert f"--context={ambient}" in sdk._powershell_arguments(action, _parameters(), [])
+
+
 @pytest.mark.parametrize("from_file", [False, True])
 def test_raw_directory_declaration_expands_once_only_at_cli_intake(
     sdk: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, from_file: bool,
