@@ -26,7 +26,7 @@ function Read-PreToolJson([string]$Path, [int]$Limit) {
 function Get-NativePreToolStop {
     if ($env:COPILOT_EXTENSIONS_CONTEXT) { return $false }
     $path = $env:PRETOOL_KILLSWITCH_STATE_FILE
-    if ($path -and -not [IO.Path]::IsPathRooted($path)) { return $null }
+    if ($path -and $path -notmatch '^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+(?:[\\/]|$))') { return $null }
     if (-not $path) {
         $path = Join-Path $env:USERPROFILE '.copilot-extensions\killSwitches\pretool-killswitch.json'
     }

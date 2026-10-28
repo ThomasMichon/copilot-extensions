@@ -16,7 +16,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.mark.parametrize("case", ["read", "guard-drift", "missing-contract", "write", "context", "active", "invalid-flag", "future-flag-contract", "array-flag", "array-contract", "non-utf8-environment", "old-client", "empty-policy", "array-response", "invalid-decision-response", "invalid-context-response", "policy-error"])
+@pytest.mark.parametrize("case", ["read", "guard-drift", "missing-contract", "write", "context", "active", "invalid-flag", "future-flag-contract", "array-flag", "drive-relative-flag", "root-relative-flag", "array-contract", "non-utf8-environment", "old-client", "empty-policy", "array-response", "invalid-decision-response", "invalid-context-response", "policy-error"])
 @pytest.mark.parametrize("native_shell", ["powershell.exe", "pwsh"])
 def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_path):
     shell = shutil.which(native_shell)
@@ -61,6 +61,13 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
         flag.write_text('{"active":true,"contract":{"id":"copilot-extensions.pretool-killswitch","version":2}}', encoding="utf-8")
     if case == "array-flag":
         flag.write_text('[{"active":true}]', encoding="utf-8")
+    elif case in {"drive-relative-flag", "root-relative-flag"}:
+        flag = home / "pretool.json"
+        flag.write_text('{"active":true}', encoding="utf-8")
+        env["PRETOOL_KILLSWITCH_STATE_FILE"] = (
+            home.drive + flag.name if case == "drive-relative-flag"
+            else str(flag)[len(home.drive):]
+        )
     elif case == "array-contract":
         contract = scripts / "hook-read-policy.json"
         contract.write_text("[" + contract.read_text(encoding="utf-8") + "]", encoding="utf-8")
@@ -85,7 +92,7 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
         )
     payload = {"toolName": "view" if case in {
         "read", "guard-drift", "missing-contract", "context", "active", "invalid-flag",
-        "future-flag-contract", "array-contract",
+        "future-flag-contract", "drive-relative-flag", "root-relative-flag", "array-contract",
     } else "edit", "toolArgs": {"path": "non-ascii-\u00e9.txt"}}
     original = json.dumps(payload, ensure_ascii=False)
     command = "& '" + str(scripts / "pre-tool-hook.ps1").replace("'", "''") + "'"
