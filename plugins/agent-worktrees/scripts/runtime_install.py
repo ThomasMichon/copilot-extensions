@@ -595,6 +595,7 @@ def install(
                 frontend=frontend, recover_adopted_manager=recover_adopted_manager,
             )
         version = candidate.slot.name
+        engine.enter_install_phase("cutover")
         print(
             f"Runtime {version}: candidate healthy (reused={candidate.reused}); "
             "retaining through publication", flush=True,

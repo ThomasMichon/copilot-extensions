@@ -14,6 +14,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
@@ -79,6 +80,31 @@ class ReadyCandidate:
 
 class ContentRepairRequired(RuntimeError):
     """Published bytes differ; a caller must select a distinct generation."""
+
+
+def enter_install_phase(name: str) -> None:
+    """Publish the native watchdog contract after construction becomes healthy."""
+    if name != "cutover":
+        raise ValueError("unsupported installer phase")
+    path = os.environ.get("COPILOT_PLUGIN_INSTALL_PHASE_FILE")
+    if not path:
+        return
+    budget = int(os.environ.get("COPILOT_PLUGIN_INSTALL_CUTOVER_BUDGET_SEC", ""))
+    if not 0 < budget <= 2147483647:
+        raise ValueError("installer phase requires a positive 32-bit budget")
+    destination = Path(path)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=destination.parent,
+            prefix=destination.name + ".", suffix=".tmp", delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            json.dump({"phase": name, "extend_until": int(time.time()) + budget}, stream)
+        os.replace(temporary, destination)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _selected_extras(plugin: Path, extras: tuple[str, ...]) -> tuple[str, ...]:

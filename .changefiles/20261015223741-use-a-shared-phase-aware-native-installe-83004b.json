@@ -1,5 +1,5 @@
 {
-  "comment": "Use a shared phase-aware native installer watchdog with bounded cutover extension, matching marker/updater windows and live-owner bootstrap deferral.",
+  "comment": "Use a shared phase-aware native installer watchdog with bounded cutover extension, matching marker/updater windows, live-owner bootstrap deferral and Python healthy-candidate settlement phase publication.",
   "changes": [
     {
       "plugin": "agent-bridge",
