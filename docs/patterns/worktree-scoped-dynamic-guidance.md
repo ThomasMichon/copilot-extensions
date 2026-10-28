@@ -550,7 +550,14 @@ Admission holds a short kernel gate across reservation, process launch, and
 publication of the exact request nonce plus PID/start-time owner. The child
 claims only that request; another hook observes the live pending owner even
 before the child starts rendering. No lease or inherited log handle stays open
-in the Git administrative directory during rendering. The worker atomically
+in the Git administrative directory during rendering. A request arriving during
+an active copy records a pending rerun under that same admission gate. Completion
+checks and clears it under the gate, repeating discovery and copying without
+starting a second worker. Requests coalesce, but all copies share the original
+120-second budget; a pending copy at exhaustion reports failure, never success
+for an older snapshot. A caller that cannot acquire the short admission gate
+reports that its request was **not queued**, rather than acknowledging work it
+did not record. The worker atomically
 publishes a latest-result log capped at 8 KiB and its completed receipt.
 Snapshot replacement uses a short, bounded retry for transient Windows reader
 handles; persistent permission failures still propagate rather than reporting delivery.

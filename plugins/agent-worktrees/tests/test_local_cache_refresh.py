@@ -863,6 +863,40 @@ def test_publication_resolves_sources_after_acquiring_lock(copy_workspace, monke
     assert output.read_bytes() == b"new snapshot"
 
 
+def test_active_worker_repeats_copy_for_overlapping_sessionstart(copy_workspace, monkeypatch):
+    from agent_worktrees import local_cache_worker as worker
+
+    root, home = copy_workspace
+    template, output = provider(root, home, content=b"old instructions")
+    directory = lcr._worker_directory(root)
+    directory.mkdir()
+    entered, release = threading.Event(), threading.Event()
+    original = static._snapshot
+    snapshots = []
+
+    def snapshot(*args, **kwargs):
+        value = original(*args, **kwargs)
+        snapshots.append(value)
+        if len(snapshots) == 1:
+            entered.set()
+            assert release.wait(10)
+        return value
+
+    monkeypatch.setattr(static, "_snapshot", snapshot)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        running = executor.submit(worker.run, root, directory)
+        try:
+            assert entered.wait(10)
+            template.write_bytes(b"new instructions")
+            assert worker.queue(root, directory).status == "queued"
+        finally:
+            release.set()
+            assert running.result(timeout=15) == 0
+    assert output.read_bytes() == b"new instructions"
+    assert len(snapshots) == 2
+    assert worker._read(directory / "request.json")["phase"] == "done"
+
+
 def test_backup_budget_and_dry_run_do_not_publish(copy_workspace, monkeypatch):
     root, home = copy_workspace
     _, output = provider(root, home)

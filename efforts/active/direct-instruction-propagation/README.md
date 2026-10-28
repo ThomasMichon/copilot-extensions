@@ -168,3 +168,19 @@ promotion flow; rollout requires its normal authorization.
 - The source resolver, model-facing selectors/catch-all and independent
   compatibility renderer still need their copy-only changes. This publisher
   slice does not close #9329 or claim installed propagation is fixed.
+
+### 2026-10-27 - Overlapping backup requests retained
+
+- Reproduced the publisher review finding with a real worker and declaration
+  snapshot: while the first copy held old bytes, a second session-start request
+  returned queued but left those old bytes installed.
+- Active requests now record a pending rerun under the admission gate.
+  Completion consumes it under the same gate and repeats discovery/copying
+  within the original shared backup budget. Gate contention explicitly reports
+  an unqueued request; exhausted pending work cannot report success.
+- Focused native Windows publisher/worker/lifecycle/standalone regressions passed:
+  204 tests, with 10 platform-specific skips. These include real overlapping
+  snapshots, coalescing, completion-gate contention, bounded exhaustion and
+  retention of restart notices after an earlier pass changed files.
+- The source resolver, model-facing guidance and independent compatibility
+  path remain the next source slices. No rollout occurred.
