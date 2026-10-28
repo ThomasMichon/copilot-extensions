@@ -46,6 +46,16 @@ conformance and Worktrees publication/resource and credential/provider claims bo
 and unchanged. Continue through this Plan/Validation/Journal and eligible open bounded
 source claims, not a closed tracker or new generic sign-off rendezvous.
 
+The complete #6007 keeper and #6286/#7188 original/refined/inherited outcomes
+continue through the [direct per-origin Plan, Validation and Coordination](retained-pr-service-outcomes.md)
+under these same delegation, PR-service and domain custodians. Preserve
+#6286's own installed-adoption exit separately from #7188's broader fleet,
+provider/client/image and latest registration-intent duties. Existing
+implementation reservations, real source/resource holds and operational
+authorization remain; no source claim, task or resource state is released
+or changed by this tracker intake. #7778's supersession of signature-like
+source checkpoints remains in force, and #6007 stays open.
+
 - **Topology:** Serial, independently reviewable PRs against `dev`.
 - **Host (owns PRs):** Delegation driver.
 - **Delegates:** Any bounded implementation delegate receives an exclusive slice; the driver owns integration and completion.
@@ -200,7 +210,6 @@ pending an approved builder, pinned base and runtime closure. This does not
 waive image acceptance or authorize unrelated runtime repair.
 
 ## Plan
-
 ### Governed watch-owner cutover prerequisite
 
 _Agent-recommended design and validation, explicitly selected for review._
@@ -687,8 +696,15 @@ or silently expanding a bounded source claim.
   delivery. No live wait, evaluator, provider, task wake, service or runtime action is
   authorized.
 
-## Validation Plan
+### Direct retained keeper and per-origin acceptance
 
+- [ ] Complete every unfinished #6007/#6286/#7188
+  [direct per-origin Plan row](retained-pr-service-outcomes.md#plan),
+  preserving complete original/refined/inherited scope, distinct finite exits,
+  actual checked source/release credit, semantic choices, domain-specific
+  bounds and unchanged source/resource ownership.
+
+## Validation Plan
 - [ ] Resolve every directly retained #2874 Plan/Validation clause above at its original
   finite scope and evidence tier, preserving alternatives, same owners, holds, and
   current portfolio bounds. Administrative intake is not implementation, native
@@ -732,6 +748,18 @@ All items below are **agent-recommended** acceptance checks.
   evidence tier; a built wheel, synthetic lock or public CI run cannot certify
   governed-feed admission or fleet deployment.
 
+- [ ] Complete the matching
+  [direct per-origin Validation rows](retained-pr-service-outcomes.md#validation-plan)
+  against their full Plan scope and existing linked contract matrices.
+  Keep all original cell, provider/native-ADO, credential, service/client,
+  image/profile/feed/base, lifecycle/storage/cross-host, installed/fleet and
+  performance venues distinct. Source/native/release credit is not an
+  installed proof; no universal signature or native-every-host gate returns.
+- [ ] Read back every
+  [continuing per-origin Coordination row](retained-pr-service-outcomes.md#continuing-coordination),
+  retaining original holders, exact actual conditions and #7778's
+  nonblocking-consultation rule before separately supported tracker disposition.
+
 ## Proposal
 
 Reliable delivery is a prerequisite, not an optional follow-up. The watch
@@ -748,6 +776,27 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-28 - Direct retained keeper, adoption and fleet outcomes
+
+The complete #6007/#6286/#7188 originals, refinements and inherited acceptance
+are retained through the named Plan/Validation/Coordination ledger. The
+bounded read-only study checked forty-one actual current texts and complete
+nested eligibility under stable actor/roster guards, with current receiver,
+four directly needed contract sub-documents and selected intent read at one
+immutable source pin. No product code, test, credential or runtime was operated.
+
+All fifty-four existing checked source/documented-qualification baselines
+remain credited without duplicate implementation. #6286's remaining installed
+prerequisite is not expanded into all #7188 fleet work. Original domain bounds,
+single-operator authority, actual source/resource holders and the specific
+latest registration-intent receipt gap remain. The older source-owner
+signature rendezvous is not reinstated.
+
+Normal review, actual merge and full current receiving readback precede any
+separately supported administrative source consolidation. This does not mark
+native/installed/provider/image/fleet outcomes complete, release a claim,
+appoint an owner or authorize deployment. #6007 and this effort remain open.
 
 ### 2026-10-25 - Merge native credential-backed watcher integration
 

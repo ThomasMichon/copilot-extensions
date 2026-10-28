@@ -57,6 +57,14 @@ source-managed, adopter, native, and deployment owners. Candidate-health and
 retained-good-generation qualification remain distinct from best-effort handoff and
 separately authorized rollout.
 
+The complete #7028 keeper and #7029 selector original/refined/inherited scope
+continues in the [direct source-selection Plan and Validation](retained-source-selector.md)
+under these same implementation, maintenance/setup, transaction, source/adopter
+and native custodians. Preserve #184/#403, the actual maintenance WIP and
+#8545/#356 setup seam, separate #7758 authority and exact remaining Logger
+evidence. #7028 stays open; direct tracker intake neither appoints an
+implementer nor releases an original source/resource obligation.
+
 - **Topology:** serial, coherent PRs against `dev`; this plan clears review before implementation.
 - **Host (owns PRs):** Implementation coordinator.
 - **Delegates:** bounded evidence, implementation or validation scopes only; no shared mutable git ownership.
@@ -245,7 +253,6 @@ retains the exact words. This approves source implementation, not a concrete
 repair run on a host.
 
 ## Plan
-
 ### Phase 0 - Review the intent and plan
 - [x] Land the vision amendments and this canonical proposal through repository review.
 - [x] Confirm issue/slice ownership and preserve the existing dependency campaigns.
@@ -904,8 +911,14 @@ implementation, rollout or parent completion is declared.
   Active, and perform no update, installer, test, native experiment,
   service/process/credential or configuration action through this intake.
 
-## Validation Plan
+### Direct retained keeper and selector acceptance
 
+- [ ] Complete every unfinished #7028/#7029
+  [direct per-origin Plan row](retained-source-selector.md#plan), preserving
+  complete originals/refinements/inheritance, actual delivered credit,
+  alternatives, finite metrics/venues and unchanged source/resource ownership.
+
+## Validation Plan
 - [ ] **Critical connectivity:** resolve the [route/removal matrix and retention acceptance](connectivity-retention.md), distinguishing provisioning code from actual SSH/Gateway transport and protecting its complete live/reconnect dependency closure. Force or purge cannot bypass it; credential relays can be removed. Source audit/vision alignment is not installed survival proof.
 
 - [ ] **Disposable services and shared maintenance hold:** resolve the [YAML banner implementation/validation sequence](maintenance-banner.md#implementation-and-validation-sequence). Prove the same applicable banner blocks actual automatic updates/reprovisioning and explains agent standby, including Manager, queued execution and missing catalog tools. Retain durable state and independently hosted session continuity, native 30-minute polling and no self-repair during an explained hold; source text, an unrelated kill switch or a merged vision is not acceptance.
@@ -953,6 +966,13 @@ implementation, rollout or parent completion is declared.
 - [ ] **Agent-recommended - rollout evidence:** retain a concise qualification/soak record before marking a development snapshot stable; do not infer stability from a clean install alone.
 - [ ] **Contribution gates:** targeted bounded tests, required install-contract checks, appropriate clean-room evidence and reviewed merged PRs cover the final implementation.
 
+- [ ] Complete the matching #7028/#7029
+  [direct Validation rows](retained-source-selector.md#validation-plan)
+  against their full Plan scope and original evidence tiers. Retain the
+  freshness/provenance, interpreter diagnostics, maintenance/setup and Logger
+  specifics; a generic portfolio/SDK row does not establish those outcomes.
+  Paper intake is not implementation, native/installed acceptance or release.
+
 ## Proposal
 
 Keep deployment policy, source selection and serving-generation selection
@@ -966,5 +986,20 @@ independent configuration choice rather than forcing the Manager and suite
 onto one branch.
 
 ## Journal
+
+### 2026-10-28 - Direct retained keeper and source selector
+
+The complete #7028/#7029 original/refined/inherited acceptance is retained
+through the direct Plan/Validation annex and this continuing Coordination.
+The bounded read-only study checked full current contracts and actual current
+receiving rows, crediting delivered assembly, policy/acquisition/preparation,
+SDK and explicitly recorded native component witnesses at their finite tiers.
+
+The named #184/#403, maintenance/setup-holder and exact Logger role/six-command
+details remain explicit rather than disappearing into general portfolio rows.
+Existing implementation, transaction, source/resource and native custodians
+are unchanged. Normal review, actual merge and complete current receiving
+readback precede any supported #7029 tracker consolidation. #7028 stays open;
+no code, test, native, service, source claim or deployment action occurred.
 
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.
