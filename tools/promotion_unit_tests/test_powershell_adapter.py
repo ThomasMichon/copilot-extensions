@@ -119,7 +119,7 @@ def test_expanded_inputs_and_receipts_keep_literal_environment_tokens(
     raw = str(tmp_path / "%SDK_OUTER%")
     expanded = str(tmp_path / "%SDK_INNER%")
     parameters = _parameters(
-        CopilotHome=expanded, DurableHome=expanded, PayloadRoot=expanded,
+        CopilotHome=expanded, DurableHome=expanded, PayloadRoot=raw,
         Context=expanded + "/install.json", ExpectedPayloadRoot=raw,
         ExpectedCellRoot=raw, ProjectRoot=expanded,
     )
@@ -140,6 +140,29 @@ def test_expanded_inputs_and_receipts_keep_literal_environment_tokens(
     assert sdk._powershell_main(
         "status", parameters, ["ExpectedPayloadRoot", "ExpectedCellRoot"],
     ) == 0
+
+
+@pytest.mark.parametrize("action", [
+    "resolve", "status", "deployment-status", "probe-plugin-publication", "probe-legacy",
+])
+@pytest.mark.parametrize("pointer", ["explicit", "inherited", "absent"])
+def test_payload_root_expands_once_only_when_not_normalized_by_shell(
+    sdk: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    action: str, pointer: str,
+) -> None:
+    monkeypatch.setenv("SDK_OUTER", "%SDK_INNER%")
+    monkeypatch.setenv("SDK_INNER", "wrong-directory")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    expanded = str(tmp_path / "%SDK_INNER%")
+    values: dict[str, object] = {
+        "PayloadRoot": expanded if pointer == "absent" else str(tmp_path / "%SDK_OUTER%"),
+    }
+    if pointer == "explicit":
+        values["Context"] = str(tmp_path / "install.json")
+    elif pointer == "inherited":
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "install.json"))
+    arguments = sdk._powershell_arguments(action, _parameters(**values), list(values))
+    assert f"--payload-root={expanded}" in arguments
 
 
 @pytest.mark.parametrize("from_file", [False, True])

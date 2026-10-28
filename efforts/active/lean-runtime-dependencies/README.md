@@ -359,6 +359,30 @@ transfer without acceptance by a named tracked objective.
 
 ## Journal
 
+### 2026-10-27 - Preserve caller custody across SDK startup failures
+
+- The next #9354 review identified three additional defects. Pointer-based
+  resolution left `PayloadRoot` unexpanded; leader death also killed the only
+  POSIX lifetime watcher; cancellation before Windows receipt adoption could
+  leave the offered Job handle in a long-lived shell.
+- The adapter now distinguishes raw pointer-based payload expectations from
+  already-normalized paths. A forked POSIX watcher member pins the original
+  group independently of its leader and acknowledges startup before the
+  callback gate opens. The new actual Linux leader-death regression first
+  reproduced surviving callback/descendant processes, then confirmed their
+  retirement on original-pipe EOF before observer cleanup.
+- Windows now requires complete request delivery and explicit offer permission,
+  retains the original pinned process handle until adoption, and reclaims an
+  unadopted offer only on a nonce-bound abort. EOF or malformed acknowledgement
+  preserves unknown custody instead of closing a possibly reused numeric
+  handle. Raw bootstrap reads prevent a coalesced permission line from being
+  stranded in Python's buffered reader.
+- The actual Linux PowerShell lifetime matrix and bootstrap framing controls
+  pass. These source repairs have not run in a new Windows producer; the
+  retained negative qualification and consumed visible grant remain unchanged.
+  PR merge, current native Windows qualification, remaining helper migrations
+  and every aggregate completion gate remain open.
+
 ### 2026-10-27 - SDK review repairs and a stricter qualification source boundary
 
 - Review of #9354 found and resolved two runtime defects: POSIX exit zero

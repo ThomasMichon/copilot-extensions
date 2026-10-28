@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 import json
 import os
 import re
+import signal
 import stat
 import sys
 import threading
 import traceback
-from typing import Callable
+from collections.abc import Callable
+from dataclasses import asdict
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agent_procutil._windows_parent_job import _ParentJobOffer
 
 
 def _callback_code(callback: Callable[[], int]) -> int:
@@ -36,11 +41,60 @@ def _acknowledge(descriptor: int, nonce: str) -> None:
             raise RuntimeError("original caller did not acknowledge lifetime custody")
 
 
+def _windows_handoff(descriptor: int, nonce: str, offer: _ParentJobOffer) -> None:
+    try:
+        message = bytearray()
+        for _ in range(len(nonce) + 7):
+            part = os.read(descriptor, 1)
+            if not part:
+                break
+            message.extend(part)
+            if part == b"\n":
+                break
+        if message == (nonce + "\n").encode("ascii"):
+            offer.accept()
+            return
+        if message == ("abort:" + nonce + "\n").encode("ascii"):
+            offer.abort()
+            raise RuntimeError("original caller refused the unadopted Job offer")
+        raise RuntimeError(
+            "original caller did not acknowledge lifetime custody; Job adoption is unconfirmed"
+        )
+    finally:
+        if offer.parent:
+            # EOF is not proof of non-adoption. The caller could already have
+            # closed/reused its handle, so release only our pinned process ref.
+            offer._release_parent()
+
+
+def _posix_watch(descriptor: int, ready: int, group: int, closed: tuple[int, ...]) -> None:
+    """Remain an original group member so leader death cannot unpin custody."""
+    try:
+        for endpoint in closed:
+            os.close(endpoint)
+        with open(os.devnull, "wb") as empty:
+            os.dup2(empty.fileno(), 1)
+            os.dup2(empty.fileno(), 2)
+        if os.getpgrp() != group or os.getsid(0) != group or os.getpid() == group:
+            raise RuntimeError("caller lifetime watcher lost its original group")
+        if os.write(ready, b"1") != 1:
+            raise RuntimeError("caller lifetime watcher could not acknowledge startup")
+        os.close(ready)
+        os.read(descriptor, 1)
+    finally:
+        # This member never runs application code or changes groups. Its own
+        # membership keeps the original PGID occupied even after leader death.
+        if os.getpgrp() == group and os.getsid(0) == group and os.getpid() != group:
+            os.killpg(group, signal.SIGKILL)
+        os._exit(1)
+
+
 def _posix_callback(callback: Callable[[], int], descriptor: int, nonce: str) -> None:
     from agent_procutil._caller_owned import _retire
 
     reader, writer = os.pipe()
     completed_reader = completed_writer = -1
+    ready_reader = ready_writer = -1
     try:
         completed_reader, completed_writer = os.pipe()
         os.set_blocking(completed_reader, False)
@@ -73,15 +127,22 @@ def _posix_callback(callback: Callable[[], int], descriptor: int, nonce: str) ->
         os.close(completed_writer)
         completed_writer = -1
 
-        def watch() -> None:
-            try:
-                os.read(descriptor, 1)
-            finally:
-                _retire()
-
-        threading.Thread(
-            target=watch, name="shell-caller-lifetime", daemon=True,
-        ).start()
+        group = os.getpid()
+        if os.getpgrp() != group or os.getsid(0) != group:
+            raise RuntimeError("caller lifetime leader lost its original group")
+        ready_reader, ready_writer = os.pipe()
+        watcher = os.fork()
+        if watcher == 0:
+            _posix_watch(
+                descriptor, ready_writer, group,
+                (ready_reader, writer, completed_reader),
+            )
+        os.close(ready_writer)
+        ready_writer = -1
+        if os.read(ready_reader, 1) != b"1":
+            raise RuntimeError("caller lifetime watcher did not start")
+        os.close(ready_reader)
+        ready_reader = -1
         os.write(writer, b"1")
         os.close(writer)
         writer = -1
@@ -100,7 +161,9 @@ def _posix_callback(callback: Callable[[], int], descriptor: int, nonce: str) ->
         traceback.print_exc()
     finally:
         try:
-            for endpoint in (reader, writer, completed_reader, completed_writer):
+            for endpoint in (
+                reader, writer, completed_reader, completed_writer, ready_reader, ready_writer,
+            ):
                 if endpoint != -1:
                     os.close(endpoint)
         finally:
@@ -130,13 +193,24 @@ def serve(
     receipt: dict = {"version": 1, "nonce": nonce, "owner_pid": owner_pid}
     if os.name == "nt":
         import msvcrt
-        from agent_procutil._windows_parent_job import transfer_lifetime_to_pipe_server
 
-        job = transfer_lifetime_to_pipe_server(
+        from agent_procutil._windows_parent_job import _offer_lifetime_to_pipe_server
+
+        # Until the complete request is delivered, cancellation cannot leave a
+        # remote handle: the shell has not permitted creating an offer yet.
+        _acknowledge(descriptor, "offer:" + nonce)
+        offer = _offer_lifetime_to_pipe_server(
             parent_pid=owner_pid, parent_birth=owner_birth,
             pipe_handle=msvcrt.get_osfhandle(descriptor),
         )
-        receipt.update(scope="windows-job", job=asdict(job))
+        receipt.update(scope="windows-job", job=asdict(offer.receipt))
+        try:
+            sys.stdout.write(json.dumps(receipt, ensure_ascii=True) + "\n")
+            sys.stdout.flush()
+        finally:
+            # Even a failed publication must accept an explicit unadopted
+            # abort; a partial/failed write cannot tell us what the shell saw.
+            _windows_handoff(descriptor, nonce, offer)
     else:
         from agent_procutil._caller_owned import _require_posix_support
 
@@ -147,10 +221,10 @@ def serve(
         if os.getppid() != owner_pid:
             raise ProcessLookupError("original shell exited during lifetime admission")
         receipt.update(scope="posix-group", worker_pid=os.getpid())
-    sys.stdout.write(json.dumps(receipt, ensure_ascii=True) + "\n")
-    sys.stdout.flush()
-    _acknowledge(descriptor, nonce)
     if os.name != "nt":
+        sys.stdout.write(json.dumps(receipt, ensure_ascii=True) + "\n")
+        sys.stdout.flush()
+        _acknowledge(descriptor, nonce)
         _posix_callback(callback, descriptor, nonce)
         raise RuntimeError("caller-owned POSIX scope unexpectedly survived retirement")
     code = _callback_code(callback)

@@ -80,10 +80,18 @@ returned handle and pins the actual worker's birth before acknowledging work.
 The private `_shell_caller_owned.serve` adapter supplies this startup receipt,
 acknowledgement and correlated completion framing for synchronous shell
 callbacks. Windows keeps the continuing Job handle exclusively in the original
-shell; cancellation or shell death closes it. Linux/macOS retain the original
-shell's private stdin lifetime pipe in a session/group leader, run the callback
-in a forked member, and use the existing caller-owned group retirement after
-callback exit or pipe loss. The callback never inherits an application-input
+shell; cancellation or shell death closes it. Before creating a Windows offer,
+the worker requires the shell's explicit permission after complete request
+delivery. The offer retains the same birth-pinned parent process handle until
+adoption or an explicit nonce-bound **unadopted** abort. Only that abort permits
+remote-handle reclamation; EOF or a malformed acknowledgement preserves explicit
+uncertainty and never closes a numeric handle the shell might already have
+disposed or reused. A failed receipt write still consumes that decision.
+Linux/macOS retain the original shell's private stdin lifetime pipe in an
+independent forked watcher member, established before releasing the callback.
+The watcher's own membership pins the original group even if its leader dies;
+pipe loss retires that still-occupied group. Normal callback exit uses the
+existing leader-owned group retirement. The callback never inherits an application-input
 pipe or a continuing lifetime writer. The shell must reject missing completion
 or an unexpected owner-exit status; it closes the Job before awaiting captured
 pipe EOF, and its interruptible waits permit cancellation to run that cleanup.

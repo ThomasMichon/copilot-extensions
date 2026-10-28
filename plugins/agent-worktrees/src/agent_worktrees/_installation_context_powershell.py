@@ -130,7 +130,12 @@ def _powershell_arguments(
     raw_paths = {"ExpectedPayloadRoot", "ExpectedCellRoot", "ReservationRoot"}
     if action not in {"status", "deployment-status", "probe-plugin-publication", "probe-legacy"}:
         raw_paths.add("Context")
-    if action == "validate":
+    pointer = parameters.get("Context") or os.environ.get("COPILOT_EXTENSIONS_CONTEXT")
+    if action == "validate" or (
+        pointer and action in {
+            "resolve", "status", "deployment-status", "probe-plugin-publication", "probe-legacy",
+        }
+    ):
         raw_paths.add("PayloadRoot")
     if action == "activation-cas":
         raw_paths.add("LegacyRoot")

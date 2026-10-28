@@ -202,7 +202,7 @@ import base64,json,os,runpy,sys
 if sys.version_info < (3,10):
     sys.stderr.write('installation-context: Python 3.10+ is required on PATH; run the harness prerequisite setup or install the standalone prerequisite.\n')
     sys.exit(1)
-request=json.loads(base64.b64decode(sys.stdin.buffer.readline()).decode('utf-8'))
+request=json.loads(base64.b64decode(sys.stdin.buffer.raw.readline()).decode('utf-8'))
 worker=os.path.join(os.path.dirname(request['sdk']),'_installation_context_worker.py')
 sys.exit(runpy.run_path(worker)['main'](request))
 '@
@@ -220,7 +220,9 @@ sys.exit(runpy.run_path(worker)['main'](request))
     $process = [Diagnostics.Process]::Start($startInfo)
     $jobOwner = $null
     $workerOwner = $null
+    $inputWriter = $null
     $inputPipe = $null
+    $offerPermitted = $false
     $outputReader = $null
     $errorReader = $null
     try {
@@ -238,6 +240,11 @@ sys.exit(runpy.run_path(worker)['main'](request))
             if ($startupClock.ElapsedMilliseconds -ge 30000) {
                 Fail 'Caller-lifetime request delivery timed out before application admission.'
             }
+        }
+        if ($windowsHost) {
+            # No remote Job handle exists before complete request delivery.
+            $offerPermitted = $true
+            $inputWriter.WriteLine('offer:' + $nonce)
         }
         while (-not $ready.Wait(100)) {
             if ($startupClock.ElapsedMilliseconds -ge 30000) {
@@ -300,6 +307,17 @@ sys.exit(runpy.run_path(worker)['main'](request))
     }
     finally {
         try {
+            if ($windowsHost -and $offerPermitted -and $null -eq $jobOwner) {
+                # Only this explicit non-adoption declaration permits the
+                # helper to reclaim its offer through the same pinned parent.
+                try { $inputWriter.WriteLine('abort:' + $nonce) }
+                catch {
+                    [Console]::Error.WriteLine(
+                        'installation-context: Unadopted Job offer cleanup is unconfirmed: ' +
+                        $_.Exception.Message
+                    )
+                }
+            }
             if ($null -ne $jobOwner) { $jobOwner.Dispose() }
         } finally {
             try {

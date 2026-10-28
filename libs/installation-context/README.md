@@ -63,7 +63,9 @@ its whole working set rolled back.
   `%NAME%` expansion happens once at raw adapter-input/declaration intake,
   not during canonical path resolution. Already normalized paths, receipt
   paths and literal tokens produced by an expansion are never expanded again;
-  ordinary Python callers retain literal path semantics.
+  ordinary Python callers retain literal path semantics. For `resolve` and
+  the four mode actions, `PayloadRoot` is raw when an explicit or inherited
+  context pointer is present, and shell-normalized otherwise.
   A required missing path retains the PowerShell `Path does not exist`
   diagnostic. Ordinary Python, optional-path and permission/other resolution
   diagnostics remain unchanged.
@@ -78,6 +80,8 @@ its whole working set rolled back.
   launchers without interpreter attestation. The shell adopts that handle with
   stock .NET and pins the actual worker before acknowledgement. Linux/macOS
   use the shared caller-owned session/group and private lifetime-pipe boundary.
+  The shared [shell-lifetime adapter](../agent-procutil/README.md) owns
+  pre-adoption abort reclamation and leader-death-resistant pipe cleanup.
   Original caller death or pipeline cancellation retires the callback scope;
   ordinary callback completion also retires remaining descendants before
   captured output is accepted. Missing completion or unconfirmed retirement is
