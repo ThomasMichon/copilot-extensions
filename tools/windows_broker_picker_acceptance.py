@@ -12,11 +12,25 @@ from windows_broker_fixture import admit
 
 
 READER = """
-import json,sys
+import json,sys,time
 from pathlib import Path
 sys.path.insert(0,sys.argv[1])
-from worktree_manager import engine_client
-rows=engine_client.list_worktree_rows(sys.argv[3])
+from worktree_manager.production_picker import context
+from worktree_manager.production_picker.picker_tui.data_ssh import LiveLoader,Source
+context.set_project(sys.argv[3])
+source=Source('consumer-fixture','Win',None,local=True)
+loader=LiveLoader([source])
+loader.start()
+deadline=time.monotonic()+30
+try:
+    while loader.state(source.machine,source.env)!='ready':
+        if time.monotonic()>=deadline:
+            raise RuntimeError('Manager loader failed to publish a current roster: '+
+                str(loader.error(source.machine,source.env)))
+        time.sleep(0.05)
+    rows=loader.records()
+finally:
+    loader.cancel()
 from zdd import routing
 endpoint=routing.read_active_endpoint(Path(sys.argv[2])/'status-monitor-routing')
 if endpoint is None:
@@ -89,6 +103,11 @@ def qualify(root: Path, runtime: Path, command: list[str], projects: list[Path],
                     job.close()
                 process.wait(timeout=5)
             endpoint = routing.read_active_endpoint(runtime / "status-monitor-routing")
+            if endpoint is None and sys.exc_info()[0] is not None:
+                deadline = time.monotonic() + 30
+                while endpoint is None and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                    endpoint = routing.read_active_endpoint(runtime / "status-monitor-routing")
             if resident is None and endpoint is not None:
                 resident = WindowsDaemonProcess(endpoint.pid, ["owned-fixture-status-monitor"])
             if resident is not None:

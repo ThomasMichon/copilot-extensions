@@ -1,9 +1,10 @@
 # Testing copilot-extensions
 
 The opt-in Windows broker consumer lane also copies the actual Manager engine
-client into its credential-free disposable profile. Two concurrent current-roster
+live loader into its credential-free disposable profile. Two concurrent current-roster
 reads start from a stopped resident through the normal installed Worktrees
-front door. Both caller Jobs close before repeated resident health checks;
+front door, retaining the loader's existing bounded startup/reconnect behavior.
+Both caller Jobs close before repeated resident health checks;
 authenticated canonical shutdown and native exit confirmation finish each of
 two cycles. This is the actual Manager roster-consumer and resident recovery
 boundary, not a full interactive Picker/desktop-session launch or installed

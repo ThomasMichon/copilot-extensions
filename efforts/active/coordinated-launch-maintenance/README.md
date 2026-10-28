@@ -219,6 +219,14 @@ repository history.
   until its own hosted result passes. It is not a full interactive Picker run.
 - No shared-host installed change or retirement is authorized by these results.
   Source review/CI, release and eventual installed cutover remain separate.
+- The first reader fixture at `f60dd5c524` failed in run 40765081012: it called
+  the one-shot engine client instead of the Picker's live loader, so the first
+  half-second CLI recovery read failed before the new resident published a
+  roster. The fixture also omitted late-started resident cleanup on that error.
+  Correct the boundary to the actual live loader, preserving its existing
+  startup/reconnect policy and deadlines; capture an eventually published
+  fixture-owned route for canonical shutdown on failure. No production recovery
+  budget is increased and no advisory data is relabeled current.
 
 ### 2026-10-28 - Integrate the merged finite cleanup owner before release
 
