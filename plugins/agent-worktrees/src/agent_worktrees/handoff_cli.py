@@ -568,8 +568,17 @@ def cmd_embody(args: argparse.Namespace) -> int:
             return 3
         if refusal := agent_policy.json_refusal(work_dir):
             return refusal
+        from .launch_seed_exec import copied_setup_command
+
+        try:
+            mux_command = copied_setup_command(
+                embody_resume.with_resume(launch_cmd, resume_target),
+                cfg.tracking_dir() / f"{wt_id}.yaml",
+            )
+        except (OSError, ValueError) as exc:
+            return output._json_error(f"Could not prepare launch-owned setup: {exc}", exit_code=3)
         result = sessions.mux_new_session(
-            wt_id, work_dir, embody_resume.with_resume(launch_cmd, resume_target), env)
+            wt_id, work_dir, mux_command, env)
     finally:
         admission.close()
     if not result.get("ok"):

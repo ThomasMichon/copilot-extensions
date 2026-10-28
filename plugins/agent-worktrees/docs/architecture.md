@@ -676,6 +676,17 @@ Admission-only setup protects its direct backend wait with the same native
 console-control helper, including same-host PowerShell-script execution.
 The outer pane's handler does not substitute for this setup-host protection.
 
+Cold `embody` uses the same canonical Windows setup selector to copy those four
+assets before mux creation for seed-free and terminal-fallback launches, without
+adding finite seed/admission flags or claiming a prompt. Qualified startup
+prompts retain their existing deferred preparation; already-prepared commands
+are left unchanged. Resume arguments and the native argument envelope remain unchanged;
+copy failure refuses before spawn. Existing live-mux joins and previews do not
+copy assets. This closes an actual consumer's installed-script dependency, not
+the generic uninstaller's conservative rooted-argument refusal or live removal
+qualification. Setup-time runtime arguments remain attributable startup data,
+not evidence that uninstall admission has accepted a running session.
+
 The Windows `scripts/native-seed-boundary.ps1` adapter is dot-sourced
 into that existing setup owner. It retains the actual child handle and wait, selecting
 the current completed runtime from the original root for each finite callback.
