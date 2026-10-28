@@ -302,6 +302,10 @@ or changes a service. Controls cover per-project hits across fresh retained
 workspaces, library-only source changes, explicit unsupported-contract misses,
 pre-completion archive/content refusal, backend source/tool mutation and clean
 retry. POSIX source-mode cases remain explicit skips on Windows.
+Distinct build-requirement groups use independently admitted tool environments;
+the lower-bound control also runs with the real backend. A synthetic
+conflicting-pin control checks each actual backend's installed version and
+fresh-slot wheel reuse without unioning incompatible requirements.
 `test_manager_source_native.py` exercises the real standalone Manager adapter and immutable
 constructor with a complete synthetic Manager/process-owner wheel closure:
 offline construction, retained reuse, changed binding, missing first-party

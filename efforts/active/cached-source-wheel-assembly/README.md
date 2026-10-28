@@ -137,6 +137,9 @@ builder, publisher or composition plan.
 
 ### Phase 3 - Proportionate completion and adoption
 
+- [ ] Qualify exact-input reuse for static graphs with different declared
+  build requirements, retaining independently admitted tooling per requirement
+  set rather than merging their resolution environments.
 - [ ] Prioritize qualification of the released ordinary installer across the
   existing admitted machine scope. Preserve exact selected source, request,
   installed/serving identity, complete wall time and health in the deployment
@@ -219,6 +222,34 @@ claim for that substitution. Remove only the returned task folder after its
 evidence is no longer needed.
 
 ## Journal
+
+### 2026-10-28 - Ordinary graphs exposed a conservative cache miss
+
+- The released-installer canary reports Core168.9 seconds and a separate
+  payload-refresh snapshot of319.082 seconds. Core explicitly selected
+  `distinct-build-requirements` and retained isolated source builds. These
+  are partial observations, not the complete update equation or a health pass.
+  The performance evidence is tracked on #9290.
+- A read-only source-closure inspection finds two declaration groups in the
+  update driver, Worktrees and Bridge: `setuptools>=83.0.0` and
+  `setuptools>=68.0`. Manager additionally declares `setuptools>=68`.
+  The whole-graph eligibility guard therefore excludes these ordinary graphs.
+  This explains path selection, not all elapsed time or payload-refresh cost.
+- The bounded follow-up gives each exact declaration set its own privately
+  provisioned, policy-admitted tool environment. It never unions requirements.
+  Exact installed tool bytes, target, interpreter, UV, builder and source still
+  bind the existing cache key, with all tool environments rechecked.
+  The contained Windows packet passes27 controls with one POSIX-only skip,
+  including distinct lower bounds, conflicting pins and fresh-slot reuse
+  without rebuilding source wheels. The pinned real-backend lane also passes:
+  Linux26 controls/two synthetic-only skips, Windows25/three skips, in
+  run40666514713 at `d7b2277e381e25990c5fe7d5770a1f272ba731f3`.
+  The first required CI run refused the changed helper's old unit-admission
+  digest; that single source digest is updated without changing unit selection,
+  effects policy or coverage. Required CI and review remain delivery gates.
+- Source work resumes here from the completed native-startup source slice.
+  That effort's remaining POSIX/full-mux and installed gates remain under
+  #9364, with no rollout or retained-session restart.
 
 ### 2026-10-28 - Released-installer timing qualification first
 
