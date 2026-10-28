@@ -117,6 +117,7 @@ function Set-CopilotPersistentEnvironmentVariable { throw 'Forbidden host enviro
 Initialize-SourceRuntime
 try {
     if ($Action -eq 'stamp') { Invoke-Stamp }
+    elseif ($Action -eq 'prepare') { Install-Runtime -PrepareOnly }
     elseif ($Action -in @('install', 'provision', 'update')) { Install-Runtime }
     else { throw 'Unsupported fixture lifecycle action' }
 } finally {
@@ -159,9 +160,11 @@ _ensure_uv_index() {{ :; }}
 _supervisor_audit() {{ :; }}
 _register_pivot() {{ :; }}
 _versioned_gc() {{ :; }}
+ACTION="${{1:-provision}}"
 _initialize_source_runtime
 case "${{1:-provision}}" in
     stamp) do_stamp ;;
+    prepare) _ensure_runtime 1 ;;
     install|provision|update) _ensure_runtime ;;
     *) exit 2 ;;
 esac
@@ -256,6 +259,7 @@ def environment(tmp_path: Path) -> dict[str, str]:
         system = Path(env["SYSTEMROOT"])
         paths.extend((str(system / "System32"), str(system)))
     else:
+        env["WSL_DISTRO_NAME"] = "Fixture Distro"
         test_bin = Path(env["HOME"]) / "test-bin"
         test_bin.mkdir(exist_ok=True)
         getent = test_bin / "getent"
@@ -323,7 +327,10 @@ def stage(tmp_path: Path, *, broken_b: bool = False):
             '    print("agent-dispatch " + Path(sys.prefix).name)\n', encoding="utf-8",
         )
         (payload / "plugin.json").write_text(
-            json.dumps({"name": "agent-dispatch", "version": PACKAGE}), encoding="utf-8",
+            json.dumps({
+                "name": "agent-dispatch", "version": PACKAGE,
+                "repository": "https://github.com/ThomasMichon/copilot-extensions",
+            }), encoding="utf-8",
         )
         (payload / "pyproject.toml").write_text(
             f'[project]\nname = "agent-dispatch"\nversion = "{PACKAGE}"\n',
@@ -380,7 +387,9 @@ def activate(env: dict[str, str], root: Path, version: str) -> None:
     )
 
 
-def run(ext: str, entry: Path, args: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+def run(
+    ext: str, entry: Path, args: list[str], env: dict[str, str], *, cwd: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
     from agent_dispatch.procutil import run_background_capture
 
     executable = (
@@ -398,7 +407,7 @@ def run(ext: str, entry: Path, args: list[str], env: dict[str, str]) -> subproce
         file=sys.stderr, flush=True,
     )
     result = run_background_capture(
-        [executable, *prefix, str(entry), *args], env=env, timeout=90,
+        [executable, *prefix, str(entry), *args], env=env, cwd=cwd, timeout=90,
         max_output=65536,
     )
     assert result is not None, "publication fixture exceeded 90s or could not start"

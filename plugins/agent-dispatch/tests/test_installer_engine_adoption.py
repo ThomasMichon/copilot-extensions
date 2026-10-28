@@ -127,6 +127,7 @@ def _env(tmp_path: Path) -> dict[str, str]:
             "uname",
             "tr",
             "mv",
+            "mkdir",
             "mktemp",
             "cat",
             "git",
@@ -150,7 +151,8 @@ def _run(ext: str, script: str, tmp_path: Path, env: dict[str, str]):
     file.write_text(script, encoding="utf-8")
     command = ["/bin/bash", str(file)] if ext == "sh" else [PWSH, "-NoProfile", "-File", str(file)]
     return subprocess.run(
-        command, cwd=tmp_path, env=env, text=True, capture_output=True, timeout=30
+        command, cwd=tmp_path, env=env, text=True, capture_output=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
 
 
@@ -674,6 +676,7 @@ def test_fixture_checkout_accepts_already_materialized_input(tmp_path, monkeypat
 def _snapshot_prelude() -> str:
     script = _prelude("ps1")
     for name in (
+        "Assert-DispatchActions",
         "Resolve-VendoredLib",
         "Materialize-DispatchSnapshot",
         "Get-DispatchSnapshotHash",
