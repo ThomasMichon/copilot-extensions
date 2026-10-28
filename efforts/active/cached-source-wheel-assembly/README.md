@@ -109,20 +109,22 @@ builder, publisher or composition plan.
 - [x] Implement and qualify the first exact-input reuse slice in the existing
   offline source composer. #9296 merged; this does not enable ordinary
   constructors or qualify the portfolio.
-- [ ] Identify the complete existing admitted construction identity: source
+- [x] Identify the complete existing admitted construction identity: source
   contents and local dependency closure, selected extras/profile, interpreter
   compatibility, exact build backend/dependencies and packaging configuration.
   If a required input is not exact or attributable, retain an explicit miss
   rather than inventing cache equivalence.
-- [ ] Reuse complete locally built wheel artifacts for that exact identity,
+- [x] Reuse complete locally built wheel artifacts for that exact identity,
   under existing installer-owned storage/custody. Do not edit source checkouts,
   live payloads, UV cache internals or another installation's state.
-- [ ] Build a missing first-party artifact once from the already admitted
+- [x] Build a missing first-party artifact once from the already admitted
   staged source, then publish its complete cache entry atomically. Preserve
   failure, interruption and concurrent-builder settlement.
-- [ ] Assemble a new venv from the selected cached dependency and local wheel
+- [x] Assemble a new venv from the selected cached dependency and local wheel
   artifacts without explicit directory targets forcing unnecessary rebuilds.
   Preserve exact dependency selection and configured-source policy.
+  #9340 closes these constructor items for the explicitly supported static
+  source graph; unsupported contracts retain the original isolated path.
 
 ### Phase 3 - Proportionate completion and adoption
 
@@ -130,9 +132,11 @@ builder, publisher or composition plan.
   released installation path. Prove that the actual consumer skips local
   build-tool provisioning and first-party build hooks; producing a bundle
   without consuming it is not acceptance.
-- [ ] Use hardlinks from the extracted artifact cache for immutable candidate
+- [x] Use hardlinks from the extracted artifact cache for immutable candidate
   assembly. Keep generated or mutable files private and prove that preparation,
   update and cache retirement cannot change another generation's code.
+  #9340 qualifies the ordinary Python constructor and private provenance writes,
+  not release-artifact consumer adoption or every service lifecycle.
 - [ ] Separate necessary input admission and installed-content confirmation
   from repeated full-tree scans and optional broad diagnostics. Reuse existing
   held-input evidence where its actual custody makes that valid; do not omit
@@ -198,6 +202,24 @@ claim for that substitution. Remove only the returned task folder after its
 evidence is no longer needed.
 
 ## Journal
+
+### 2026-10-28,05:55 UTC - Ordinary constructor slice merged; service proof remains open
+
+#9340 actually merged as `1603cbbc0ac1f5a8838154d724e90eb4fa9f2724`
+at05:55:51 UTC. Final head `4696344356c48690844be39ff8dea19b7fc605f9`
+has current-head approval5678407122, no active issues, both resolved review
+threads and all required checks passing. Native qualification40640273964 passes
+the real-Setuptools cache/hardlink packets on Linux and Windows. The managed
+Maintainer merge used the repository's normal additional-review exception;
+no required CI or blocking review finding was bypassed.
+
+The completed Plan items above credit the supported ordinary source constructor
+and immutable hardlinks only. The effort stays Active. Source publication into
+Dev is not release promotion, installed rollout or the required real-service
+prepacked-artifact proof. The next slice composes with the existing #4876/#9032
+toolkit prerequisite and normal Worktrees lifecycle rather than duplicating it.
+Artifact consumption, one released service, serialized machine updates,
+portfolio adoption, broader timing and the retained #8949 boundary remain open.
 
 ### 2026-10-28 - Keep shared build identities compatible
 
