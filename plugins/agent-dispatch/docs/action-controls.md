@@ -73,13 +73,18 @@ effect.
 
 Legacy cutover captures its selected installation before reading `service.env`.
 That snapshot may supply ordinary host, port and credential pins, but cannot
-redirect the installation root or change `COPILOT_EXTENSIONS_CONTEXT`. A refused
+redirect the installation root or captured routing directory, or change
+`COPILOT_EXTENSIONS_CONTEXT`. A refused
 overlay leaves the caller's environment unchanged; select the intended
 installation explicitly before retrying. Root comparison preserves lexical
 parent traversal rather than normalizing away intermediate links.
 On Windows, the shared overlay canonicalizes environment keys before validation
 and publication, including mixed-case root/context entries; later pins retain
 native case-insensitive overwrite semantics. POSIX keys remain case-sensitive.
+An explicitly selected custom routing directory remains supported; an overlay
+cannot replace or clear it to retarget an already admitted attempt. Lock,
+recovery, routing publication and replacement environment use the same captured
+target rather than resolving ambient routing again mid-cutover.
 Internal conditional callers must supply the target's captured `install_root`
 alongside its captured `routing_dir` and conditional request. A missing policy
 root is an explicit refusal, not permission to use the caller's installation.

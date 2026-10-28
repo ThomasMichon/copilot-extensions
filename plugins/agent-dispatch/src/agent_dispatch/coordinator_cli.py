@@ -415,6 +415,7 @@ def _cmd_cutover(
     # check bind, not just for the replacement process's own spawn below.
     from .install_paths import apply_service_env_overlay
     runtime_root = policy_root
+    captured_routing_dir = _config.routing_dir()
     effective_env = dict(os.environ)
     apply_service_env_overlay(effective_env, runtime_root)
     proposed_root = effective_env.get(INSTALL_DIR_ENV)
@@ -428,7 +429,13 @@ def _cmd_cutover(
     context_key = "COPILOT_EXTENSIONS_CONTEXT"
     if effective_env.get(context_key, "").strip() != os.environ.get(context_key, "").strip():
         return refusal("service.env cannot change the selected cutover installation context")
+    routing_key = _config.ROUTING_DIR_ENV
+    if effective_env.get(routing_key) != os.environ.get(routing_key) and (
+        Path(effective_env.get(routing_key) or policy_root).expanduser() != captured_routing_dir
+    ):
+        return refusal("service.env cannot redirect the selected cutover routing directory")
     effective_env[INSTALL_DIR_ENV] = str(policy_root)
+    effective_env[routing_key] = str(captured_routing_dir)
     os.environ.update(effective_env)
     cfg = _config.load_config()
     token = _client_token_value()
@@ -477,7 +484,7 @@ def _cmd_cutover(
         # on a different token/database than the orchestration around it is
         # using, while the rest of this cutover keeps using the first
         # snapshot.
-        child_env = dict(os.environ)
+        child_env = dict(effective_env)
         # AGENT_DISPATCH_PORT must be set *after* the overlay snapshot above:
         # the orchestrator already selected this specific free `port` for the
         # passive process to bind (and passes it explicitly via `--port`
@@ -533,7 +540,7 @@ def _cmd_cutover(
 
     from .single_instance import SingleInstance, read_holder_pid
 
-    routing_lock_path = _config.routing_dir() / "serve-start.lock"
+    routing_lock_path = captured_routing_dir / "serve-start.lock"
     routing_lock = SingleInstance(routing_lock_path)
     acquired = routing_lock.acquire()
     if not acquired:
@@ -559,9 +566,9 @@ def _cmd_cutover(
     try:
         if not admitted():
             return 3
-        _pre_recovery_breadcrumb = breadcrumb.read_breadcrumb(_config.routing_dir())
+        _pre_recovery_breadcrumb = breadcrumb.read_breadcrumb(captured_routing_dir)
         recovery = breadcrumb.recover_stale_cutover(
-            _config.routing_dir(), make_client, health_check=liveness_check
+            captured_routing_dir, make_client, health_check=liveness_check
         )
         if recovery.get("refused"):
             reason = breadcrumb.refusal_reason(recovery)
@@ -591,7 +598,7 @@ def _cmd_cutover(
             )
 
         orch = CutoverOrchestrator(
-            _config.routing_dir(),
+            captured_routing_dir,
             bind=routing_bind,
             version=__version__,
             spawn_passive=spawn_passive,

@@ -98,7 +98,9 @@ def test_same_conditional_caller_observes_clear_and_repeated_inhibition(
     assert len(calls) == 2
 
 
-@pytest.mark.parametrize("selection", ["other-root", "other-context", "normalized-alias"])
+@pytest.mark.parametrize("selection", [
+    "other-root", "other-context", "normalized-alias", "other-route", "cleared-route",
+])
 @pytest.mark.parametrize("windows_keys", [False, True])
 def test_service_env_cannot_redirect_a_checked_cutover_installation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selection: str, windows_keys: bool,
@@ -107,7 +109,9 @@ def test_service_env_cannot_redirect_a_checked_cutover_installation(
 
     if windows_keys:
         monkeypatch.setattr(install_paths, "os", SimpleNamespace(**{**vars(os), "name": "nt"}))
-        for key in ("Agent_Dispatch_Install_Dir", "Copilot_Extensions_Context"):
+        for key in (
+            "Agent_Dispatch_Install_Dir", "Copilot_Extensions_Context", "Agent_Dispatch_Routing_Dir",
+        ):
             monkeypatch.delenv(key, raising=False)
 
     root = tmp_path / "selected"
@@ -120,6 +124,12 @@ def test_service_env_cannot_redirect_a_checked_cutover_installation(
     monkeypatch.setattr(config, "client_token", lambda: None)
     if selection == "other-context":
         line = f"COPILOT_EXTENSIONS_CONTEXT={tmp_path / 'other-context'}"
+    elif selection == "other-route":
+        _policy(other, "coordinator-replacement", True)
+        line = f"AGENT_DISPATCH_ROUTING_DIR={other}"
+    elif selection == "cleared-route":
+        monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(other))
+        line = "AGENT_DISPATCH_ROUTING_DIR="
     elif selection == "normalized-alias":
         nested = other / "nested"
         nested.mkdir()
@@ -143,26 +153,33 @@ def test_service_env_cannot_redirect_a_checked_cutover_installation(
 
     monkeypatch.setattr(single_instance, "SingleInstance", forbidden)
     args = argparse.Namespace(json=True, force=False, recover=False, drain_timeout=1)
+    before = dict(os.environ)
     assert _cmd_cutover(args) == 3
-    assert os.environ["AGENT_DISPATCH_INSTALL_DIR"] == str(root)
-    assert "COPILOT_EXTENSIONS_CONTEXT" not in os.environ
+    assert dict(os.environ) == before
 
 
 @pytest.mark.parametrize("windows_keys", [False, True])
+@pytest.mark.parametrize("custom_route", [False, True])
 def test_service_env_keeps_benign_pins_inside_the_selected_installation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, windows_keys: bool,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, windows_keys: bool, custom_route: bool,
 ) -> None:
     from agent_dispatch import config, install_paths, single_instance
 
     if windows_keys:
         monkeypatch.setattr(install_paths, "os", SimpleNamespace(**{**vars(os), "name": "nt"}))
-        for key in ("Agent_Dispatch_Install_Dir", "Agent_Dispatch_Host", "Agent_Dispatch_Port"):
+        for key in (
+            "Agent_Dispatch_Install_Dir", "Agent_Dispatch_Host", "Agent_Dispatch_Port",
+            "Agent_Dispatch_Routing_Dir",
+        ):
             monkeypatch.delenv(key, raising=False)
 
     root = tmp_path / "selected"
     root.mkdir()
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(root))
     monkeypatch.delenv("AGENT_DISPATCH_ROUTING_DIR", raising=False)
+    route = tmp_path / "captured-route" if custom_route else root
+    if custom_route:
+        monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(route))
     monkeypatch.delenv("AGENT_DISPATCH_HOST", raising=False)
     monkeypatch.delenv("AGENT_DISPATCH_PORT", raising=False)
     monkeypatch.setattr(config, "client_token", lambda: None)
@@ -170,6 +187,7 @@ def test_service_env_keeps_benign_pins_inside_the_selected_installation(
         "AGENT_DISPATCH_INSTALL_DIR": f"{root}/",
         "AGENT_DISPATCH_HOST": "127.0.0.2",
         "AGENT_DISPATCH_PORT": "61002",
+        "AGENT_DISPATCH_ROUTING_DIR": f"{route}/",
     }
     (root / "service.env").write_text("".join(
         f"{key.title() if windows_keys else key}={value}\n" for key, value in pins.items()
@@ -186,7 +204,7 @@ def test_service_env_keeps_benign_pins_inside_the_selected_installation(
     monkeypatch.setattr(single_instance, "SingleInstance", boundary)
     with pytest.raises(ReachedNativeLock):
         _cmd_cutover(argparse.Namespace(json=True, force=False, recover=False, drain_timeout=1))
-    assert targets == [root / "serve-start.lock"]
+    assert targets == [route / "serve-start.lock"]
     assert os.environ["AGENT_DISPATCH_INSTALL_DIR"] == str(root)
     assert os.environ["AGENT_DISPATCH_HOST"] == "127.0.0.2"
     assert os.environ["AGENT_DISPATCH_PORT"] == "61002"

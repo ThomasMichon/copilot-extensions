@@ -33,6 +33,11 @@ _SH = _PLUGIN_ROOT / "scripts" / "bootstrap-check.sh"
 _OPT_IN_KEY = f"background_reconcile_{_PLUGIN_NAME}"
 
 
+def _is_wsl_launcher(path: str) -> bool:
+    normalized = path.replace("\\", "/").casefold().rstrip("/") + "/"
+    return "windowsapps" in normalized or "/system32/" in normalized
+
+
 def _resolve_bash() -> str | None:
     """Resolve a REAL bash, not Windows' WSL-launcher `bash.exe` shim.
 
@@ -51,14 +56,13 @@ def _resolve_bash() -> str | None:
     if path:
         filtered = os.pathsep.join(
             part for part in path.split(os.pathsep)
-            if "WindowsApps" not in part
-            and part.rstrip("\\").lower() != r"c:\windows\system32"
+            if not _is_wsl_launcher(part)
         )
         bash = shutil.which("bash", path=filtered)
-        if bash:
+        if bash and not _is_wsl_launcher(bash):
             return bash
     bash = shutil.which("bash")
-    if bash and "WindowsApps" not in bash and "\\system32\\" not in bash.lower():
+    if bash and not _is_wsl_launcher(bash):
         return bash
     return None
 
@@ -71,13 +75,35 @@ def _bash_env_path(path: Path) -> str:
     if not (_BASH and len(text) >= 2 and text[1] == ":"):
         return text
     suffix = text[2:].replace("\\", "/")
-    bash_lower = _BASH.lower()
-    if bash_lower.endswith("bash.exe") and "\\git\\" in bash_lower:
+    bash_lower = _BASH.replace("\\", "/").casefold()
+    if bash_lower.endswith("bash.exe") and "/git/" in bash_lower:
         # Git Bash (MSYS2) uses `/c/...`, not WSL's `/mnt/c/...`.
         return f"/{text[0].lower()}{suffix}"
     if bash_lower.endswith("bash.exe"):
         return f"/mnt/{text[0].lower()}{suffix}"
     return text
+
+
+@pytest.mark.parametrize("bash", [
+    r"C:\Program Files\Git\bin\bash.exe",
+    "C:/Program Files/Git/bin/bash.exe",
+    "c:/program files/GIT/usr/bin/bash.exe",
+])
+def test_git_bash_home_path_accepts_both_windows_separator_forms(monkeypatch, bash):
+    monkeypatch.setitem(globals(), "_BASH", bash)
+    assert _bash_env_path(Path(r"C:\Users\Fixture User\home")) == "/c/Users/Fixture User/home"
+
+
+@pytest.mark.parametrize("bash", [
+    r"c:\users\fixture\appdata\local\microsoft\windowsapps\bash.exe",
+    "C:/Users/Fixture/AppData/Local/Microsoft/WindowsApps/bash.exe",
+    "C:/Windows/System32/bash.exe",
+])
+def test_windows_launcher_aliases_are_never_selected_as_native_bash(monkeypatch, bash):
+    monkeypatch.setattr(Path, "is_file", lambda _path: False)
+    monkeypatch.setattr(shutil, "which", lambda _name, **_kwargs: bash)
+    monkeypatch.setenv("PATH", "")
+    assert _resolve_bash() is None
 
 
 def test_hook_scripts_exist():
@@ -133,6 +159,11 @@ def _make_fake_plugin(root: Path, name: str) -> Path:
     (plugin_dir / "plugin.json").write_text(json.dumps({"name": name}), encoding="utf-8")
     (plugin_dir / "pyproject.toml").write_text('version = "1.0.1"\n', encoding="utf-8")
     shutil.copyfile(_SH, scripts_dir / "bootstrap-check.sh")
+    shutil.copyfile(_PLUGIN_ROOT / "scripts" / "action_controls.py", scripts_dir / "action_controls.py")
+    shutil.copytree(
+        _PLUGIN_ROOT / "src", plugin_dir / "src",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
     (scripts_dir / "install.sh").write_text(
         "#!/usr/bin/env bash\necho stub-install-ran\n", encoding="utf-8"
     )
@@ -148,6 +179,8 @@ def _clean_env(overrides: dict[str, str]) -> dict[str, str]:
     ``command -v python3`` resolve to a dud and silently short-circuit this
     hook before it ever reaches the gate under test."""
     env = dict(os.environ)
+    env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    env.pop("BOOTSTRAP_KILLSWITCH_STATE_FILE", None)
     if "PATH" in env:
         parts = env["PATH"].split(os.pathsep)
         env["PATH"] = os.pathsep.join(p for p in parts if "WindowsApps" not in p)
@@ -169,6 +202,7 @@ def test_sh_reconciles_without_any_opt_in_config(tmp_path):
     env = _clean_env(
         {
             "HOME": _bash_env_path(home),
+            "USERPROFILE": str(home),
             "COPILOT_PROJECT_DIR": _bash_env_path(project),
         }
     )
@@ -208,6 +242,7 @@ def test_sh_reconciles_even_with_stale_opt_in_key_present(tmp_path):
     env = _clean_env(
         {
             "HOME": _bash_env_path(home),
+            "USERPROFILE": str(home),
             "COPILOT_PROJECT_DIR": _bash_env_path(project),
         }
     )

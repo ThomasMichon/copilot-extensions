@@ -219,10 +219,12 @@ def test_cutover_spawn_passive_fresh_port_wins_over_service_env_port_pin(
 
     # The orchestrator picked a fresh free port (9999 here) for the passive
     # process to bind -- the service.env pin of 4444 must not win.
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(tmp_path / "later-caller-route"))
     captured["spawn_passive"](9999)
     assert len(daemon_calls) == 1
     _cmd, kwargs = daemon_calls[0]
     assert kwargs["env"]["AGENT_DISPATCH_PORT"] == "9999"
+    assert kwargs["env"]["AGENT_DISPATCH_ROUTING_DIR"] == str(tmp_path / "routing")
 
 
 def test_cutover_honors_durable_host_from_service_env(tmp_path, monkeypatch, daemon_calls):

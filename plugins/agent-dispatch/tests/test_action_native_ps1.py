@@ -634,6 +634,31 @@ def test_actual_bootstrap_denial_is_output_free_and_ready_is_ungated(
     assert not (root / "reconcile-status.json").exists()
 
 
+def test_windows_lifecycle_fixture_stages_real_action_policy_support(tmp_path: Path) -> None:
+    from .test_windows_bootstrap_reconcile_lifecycle import stage_action_policy_payload
+
+    payload = tmp_path / "fixture with ' quote"
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    stage_action_policy_payload(payload)
+    root = tmp_path / "runtime"
+    root.mkdir()
+    policy = root / "action-controls.json"
+    policy.write_text(json.dumps({
+        "automatic-runtime-reconcile": {"disabled": True},
+    }), encoding="utf-8")
+    body = function(BOOTSTRAP, "Get-BootstrapActionAdmission") + f"""
+$denied = Get-BootstrapActionAdmission -Root {quote(root)} -ScriptsRoot {quote(scripts)}
+if ($denied -ne 3) {{ throw "expected real policy denial, got $denied" }}
+[IO.File]::WriteAllText({quote(policy)}, '{{}}')
+$allowed = Get-BootstrapActionAdmission -Root {quote(root)} -ScriptsRoot {quote(scripts)}
+if ($allowed -ne 0) {{ throw "cleared fixture policy remained unavailable: $allowed" }}
+"""
+    result = run_ps(tmp_path, body)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "automatic-runtime-reconcile" in result.stderr
+
+
 def bootstrap_worker(tmp_path: Path, root: Path, installer: str) -> tuple[str, Path]:
     status = root / "reconcile-status.json"
     status.write_text(json.dumps({

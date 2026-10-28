@@ -419,3 +419,30 @@ Initial tests must prove the current gap before adding the guards.
   registry to commit a fictitious PID. Actual Dispatch environment, fresh-port,
   host, working-directory and resident-launch option assertions remain; shared
   native launch policy stays with its owning tests.
+
+### 2026-10-28 - Routing-target review assessment
+
+- The next independent review requested assessment of an unpublished critical
+  routing-policy bypass. Four actual cases reproduced a service overlay
+  replacing or clearing the routing directory after installation admission,
+  for canonical and Windows-style mixed-case keys.
+- Capture legacy routing before reading the service overlay, refuse retargeting
+  without mutating caller state, and retain that one target through lock,
+  recovery, publication and replacement environment. Explicit caller-selected
+  custom routing and identical durable route pins remain supported; conditional
+  deployment still uses its separately captured target without caller preludes.
+- The policy, conditional, deploy, overlay and launch-contract selection passed
+  all 55 cases, including a replacement spawn retaining its routing snapshot
+  after caller environment changes.
+- The native-fixture assessment reproduced two bootstrap cases exiting 126
+  because the copied payload omitted the real policy reader. Stage the actual
+  reader and source dependencies in POSIX/Windows lifecycle fixtures; the
+  PowerShell control now proves denial and admission after clear through that
+  copied payload, including a quoted payload path.
+- Four Windows-string regressions exposed Git Bash separator/case handling and
+  launcher aliases in the test helper. Normalize those representations while
+  continuing to refuse WSL-launcher aliases as native Bash.
+- Independent integration passed 66 contained routing/bootstrap cases and 55
+  actual host PowerShell cases. Nine native-Windows lifecycle cases remain
+  explicitly skipped on WSL; neither their staging nor the host PowerShell
+  execution establishes native Windows adoption.
