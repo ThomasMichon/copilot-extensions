@@ -66,6 +66,8 @@ the action and reports the error, while leaving its
 consumer available for another check. Mutation refuses invalid existing state
 instead of silently discarding it. Restore valid state and retry; no service
 restart is required. Reads are bounded to 64 KiB and refuse non-regular files.
+The atomic writer publishes UTF-8/LF on every platform, so a valid near-limit
+policy cannot become oversized through Windows newline translation.
 On POSIX, the reader also refuses files owned by another user; Windows relies
 on the installation's existing filesystem access controls for that ownership
 boundary.

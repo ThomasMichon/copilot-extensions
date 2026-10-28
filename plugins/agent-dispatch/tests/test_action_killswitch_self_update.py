@@ -15,6 +15,7 @@ def test_shared_switch_pauses_and_restores_same_supervisor(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, legacy: bool
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.delenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", raising=False)
     root = tmp_path / ".agent-dispatch"

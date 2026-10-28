@@ -206,3 +206,18 @@ Initial tests must prove the current gap before adding the guards.
   or completion of this effort. Next: review this bounded resident slice, then
   implement the remaining admission and native maintenance boundaries before
   controlled running qualification.
+
+### 2026-10-27 - Resident review corrections
+
+- #9345's current-head independent review identified three portability gaps:
+  shared-directory probing could escape the reader's error boundary, Windows
+  newline translation could invalidate a near-limit policy after publication,
+  and synthetic home isolation omitted Windows `USERPROFILE`.
+- Moved primary/fallback selection inside the bounded reader's shared-state
+  error handling. Permission errors remain visible legacy fail-open decisions,
+  and later checks observe restored access rather than a dead polling loop.
+- The existing atomic writer now emits UTF-8/LF on every platform, matching the
+  pre-publication byte limit. A maximum-size policy remains readable/clearable.
+  Added regressions for both fixes and set both home variables in shared-state
+  consumer tests. These portable contained cases do not assert native installed
+  Windows adoption.

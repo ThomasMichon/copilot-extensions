@@ -19,6 +19,7 @@ def action_decision(
 ) -> ActionDecision:
     selected = install_dir() if root is None else root
     shared = None
+    fallback = None
     if (automatic and action in AUTOMATIC_ACTIONS and uses_legacy_install_dir(selected)
             and not os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()):
         override = os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE")
@@ -27,10 +28,11 @@ def action_decision(
         else:
             base = Path.home() / ".copilot-extensions"
             shared = base / "killSwitches" / "bootstrap-killswitch.json"
-            legacy = base / "bootstrap-killswitch.json"
-            if not shared.exists() and legacy.is_file():
-                shared = legacy
-    return evaluate_action(action, selected, shared_bootstrap=shared)
+            fallback = base / "bootstrap-killswitch.json"
+    return evaluate_action(
+        action, selected, shared_bootstrap=shared,
+        shared_bootstrap_fallback=fallback,
+    )
 
 
 def action_inhibited(

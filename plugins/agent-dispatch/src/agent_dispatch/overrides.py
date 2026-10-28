@@ -91,6 +91,7 @@ def save_overrides(
 ) -> None:
     """Persist the override map atomically (write-temp-then-replace).
 
+    Uses UTF-8/LF on every platform so byte limits match the published file.
     Creates the parent directory if needed. The atomic replace means a concurrent
     daemon read never sees a half-written file.
     """
@@ -99,7 +100,7 @@ def save_overrides(
     payload = json.dumps(dict(overrides), indent=2, sort_keys=True)
     fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=".overrides-", suffix=".tmp")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(payload)
         os.replace(tmp, p)
     finally:

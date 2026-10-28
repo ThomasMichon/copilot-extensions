@@ -20,6 +20,7 @@ def test_ready_coordinator_rechecks_inhibition_without_restart(
 
     root = tmp_path / ".agent-dispatch"
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(root))
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.delenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", raising=False)

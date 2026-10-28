@@ -30,7 +30,7 @@ class ActionDecision:
     error: str | None = None
 
 
-def _read_object(path: Path) -> dict:
+def _read_object(path: Path, *, missing_ok: bool = True) -> dict:
     """Read bounded ordinary local state; never wait on a pipe or follow a link."""
     for candidate in (path, *path.parents):
         if candidate.is_symlink():
@@ -39,7 +39,9 @@ def _read_object(path: Path) -> dict:
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
                      | getattr(os, "O_NONBLOCK", 0))
     except FileNotFoundError:
-        return {}
+        if missing_ok:
+            return {}
+        raise
     with os.fdopen(fd, "rb") as stream:
         info = os.fstat(stream.fileno())
         if not stat.S_ISREG(info.st_mode):
@@ -73,6 +75,7 @@ def evaluate_action(
     root: Path,
     *,
     shared_bootstrap: Path | None = None,
+    shared_bootstrap_fallback: Path | None = None,
 ) -> ActionDecision:
     """Fresh decision; an invalid explicit policy inhibits effects, not services.
 
@@ -91,17 +94,25 @@ def evaluate_action(
     if record.get("disabled") is True:
         return ActionDecision(action, str(root), True, str(source), record.get("reason"))
     if shared_bootstrap is not None:
+        shared_source = shared_bootstrap
         try:
-            shared = _read_object(shared_bootstrap)
+            try:
+                shared = _read_object(shared_source, missing_ok=False)
+            except FileNotFoundError:
+                if shared_bootstrap_fallback is None:
+                    shared = {}
+                else:
+                    shared_source = shared_bootstrap_fallback
+                    shared = _read_object(shared_source)
             if shared.get("active") is True:
                 reason = shared.get("reason")
                 return ActionDecision(
-                    action, str(root), True, str(shared_bootstrap),
+                    action, str(root), True, str(shared_source),
                     reason if isinstance(reason, str) else None,
                 )
         except (OSError, UnicodeError, ValueError) as exc:
             return ActionDecision(
-                action, str(root), False, str(shared_bootstrap),
+                action, str(root), False, str(shared_source),
                 "invalid shared bootstrap state (legacy fail-open)", str(exc),
             )
     return ActionDecision(action, str(root), False)

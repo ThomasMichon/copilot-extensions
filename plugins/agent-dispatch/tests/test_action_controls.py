@@ -6,7 +6,9 @@ import argparse
 import json
 import logging
 import os
+from collections.abc import Callable
 from pathlib import Path
+from typing import BinaryIO, TextIO
 
 import pytest
 
@@ -88,6 +90,7 @@ def test_shared_bootstrap_is_default_automatic_only(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.delenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", raising=False)
     root = tmp_path / ".agent-dispatch"
@@ -109,6 +112,7 @@ def test_primary_shared_file_wins_and_corruption_retains_legacy_fail_open(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture,
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.delenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", raising=False)
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / ".agent-dispatch"))
@@ -187,3 +191,76 @@ def test_local_control_refuses_remote_target_flags(
     )) == 2
     assert not (tmp_path / STATE_NAME).exists()
     assert "installation-local" in json.loads(capsys.readouterr().out)["error"]
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_shared_directory_read_error_is_visible_and_rechecked(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+    legacy: bool,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / ".agent-dispatch"))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.delenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", raising=False)
+    base = tmp_path / ".copilot-extensions"
+    path = (base if legacy else base / "killSwitches") / "bootstrap-killswitch.json"
+    path.parent.mkdir(parents=True)
+    path.write_text('{"active": true}')
+    denied = [True]
+
+    def unreadable(probe: Callable[[Path], bool]) -> Callable[[Path], bool]:
+        def guarded(candidate: Path) -> bool:
+            if denied[0] and (candidate == base or base in candidate.parents):
+                raise PermissionError("synthetic shared-directory denial")
+            return probe(candidate)
+
+        return guarded
+
+    for name in ("exists", "is_file", "is_symlink"):
+        monkeypatch.setattr(Path, name, unreadable(getattr(Path, name)))
+    assert not action_inhibited(
+        "supervisor-self-update", automatic=True, logger=logging.getLogger(__name__),
+    )
+    assert "synthetic shared-directory denial" in caplog.text
+    assert "legacy fail-open" in caplog.text
+    denied[0] = False
+    assert action_decision("supervisor-self-update", automatic=True).inhibited
+    path.write_text('{"active": false}')
+    assert not action_decision("supervisor-self-update", automatic=True).inhibited
+
+
+def test_near_limit_policy_uses_exact_utf8_lf_bytes_and_remains_clearable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from agent_dispatch import action_controls_cli, overrides
+
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
+    timestamp = 1700000000.0
+    monkeypatch.setattr(action_controls_cli.time, "time", lambda: timestamp)
+    real_fdopen = os.fdopen
+    newlines: list[str | None] = []
+
+    def fdopen(
+        fd: int, mode: str, *, encoding: str | None = None, newline: str | None = None,
+    ) -> BinaryIO | TextIO:
+        if "b" in mode:
+            return real_fdopen(fd, mode)
+        newlines.append(newline)
+        return real_fdopen(fd, mode, encoding=encoding, newline=newline)
+
+    monkeypatch.setattr(overrides.os, "fdopen", fdopen)
+    action = "coordinator-replacement"
+    empty = {action: {"disabled": True, "reason": "", "at": timestamp}}
+    overhead = len(json.dumps(empty, indent=2, sort_keys=True).encode("utf-8"))
+    assert command(argparse.Namespace(
+        action_command="inhibit", action=action, reason="x" * (MAX_STATE_BYTES - overhead),
+    )) == 0
+    capsys.readouterr()
+    raw = (tmp_path / STATE_NAME).read_bytes()
+    assert len(raw) == MAX_STATE_BYTES
+    assert b"\r\n" not in raw
+    assert newlines == ["\n"]
+    assert action_decision(action).inhibited
+    assert command(argparse.Namespace(action_command="clear", action=action)) == 0
+    assert not action_decision(action).inhibited
