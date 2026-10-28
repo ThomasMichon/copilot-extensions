@@ -133,6 +133,47 @@ def test_non_inert_inner_host_options_keep_original_spawn_semantics(startup):
     assert not result.stderr
 
 
+@pytest.mark.parametrize("recovery", [False, True])
+def test_direct_setup_retains_reconciliation_policy_with_marker_unset(startup, recovery):
+    record, runtime, prepared = startup
+    backend = runtime.with_name("backend.ps1")
+    backend.write_text("[Console]::WriteLine('backend-started')\nexit 7\n", encoding="utf-8")
+    commands = runtime.with_name("commands")
+    commands.mkdir()
+    calls = runtime.with_name("restore-calls")
+    (commands / "agent-machines.ps1").write_text(
+        "[IO.File]::AppendAllText($env:TEST_RESTORE_CALLS, 'called' + [Environment]::NewLine)\n"
+        "exit 23\n",
+        encoding="utf-8",
+    )
+    command = [
+        shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-File", str(prepared.wrapper),
+        *(["-Recovery"] if recovery else []),
+        "-CopilotPath", str(backend), "-RuntimePython", str(runtime / "missing-python.exe"),
+    ]
+    compact = session_shell.startup_command(command)
+    env = environment(runtime)
+    env.pop("AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED", None)
+    env.update(PATH=str(commands) + os.pathsep + env["PATH"], TEST_RESTORE_CALLS=str(calls))
+    baseline_calls = calls.with_name("baseline-restore-calls")
+    baseline = run_caller_owned(
+        command, cwd=record.parent, env={**env, "TEST_RESTORE_CALLS": str(baseline_calls)}, timeout=30,
+        max_stdout_bytes=1024 * 1024, max_stderr_bytes=1024 * 1024,
+    )
+    result = run_caller_owned(
+        compact, cwd=record.parent, env=env, timeout=30,
+        max_stdout_bytes=1024 * 1024, max_stderr_bytes=1024 * 1024,
+    )
+    assert result.returncode == baseline.returncode, result.stdout + result.stderr
+    assert result.stdout == baseline.stdout
+    assert result.stderr == baseline.stderr
+    assert (baseline_calls.read_text().splitlines() if baseline_calls.exists() else []) == (
+        [] if recovery else ["called"]
+    )
+    assert (calls.read_text().splitlines() if calls.exists() else []) == ([] if recovery else ["called"])
+    assert not Path(compact[-1]).exists()
+
+
 @pytest.mark.parametrize("invalid", ["version", "float", "wrapper", "array", "value", "empty", "json"])
 def test_invalid_manifest_is_consumed_without_backend_or_private_diagnostics(startup, invalid):
     record, runtime, prepared = startup

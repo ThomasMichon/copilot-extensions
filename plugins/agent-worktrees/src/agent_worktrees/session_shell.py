@@ -187,7 +187,8 @@ def startup_command(command: list[str]) -> list[str]:
 
         if NATIVE_SETUP_MARKER not in script.read_text(encoding="utf-8-sig").splitlines():
             return command
-        arguments = ["--", *command]
+        # This added transport wrapper must leave reconciliation policy to setup.
+        arguments = ["--recovery", "--", *command]
     else:
         arguments = command[5:]
         if not arguments:

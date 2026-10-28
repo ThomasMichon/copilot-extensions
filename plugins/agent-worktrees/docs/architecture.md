@@ -803,7 +803,9 @@ the copied wrapper and manifest paths, not setup's runtime-Python/root values.
 The wrapper validates the version, its own identity and string argv, deletes
 the opened manifest before setup, and preserves pane-appended prompt arguments.
 Its same-host setup optimization, native console handling and outer Job owner
-are unchanged. Rejected outer publication/launch removes the matching nested
+are unchanged. When adding a wrapper around direct setup, its own
+reconciliation is bypassed so setup retains both normal and recovery policy.
+Rejected outer publication/launch removes the matching nested
 handoff; abandoned startup handoffs share the existing 24-hour expiry.
 Uncopied/custom commands, older copied wrappers and other host options retain
 their previous invocation. This transport does not exempt any process from

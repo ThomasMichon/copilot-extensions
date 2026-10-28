@@ -470,6 +470,15 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   release/installed qualification, actual same-process removal, standby and
   task lifecycle remain parent gates. No live installation, session or task
   trigger changed for this source slice.
+- Review found that adding the transport wrapper around direct setup also
+  added its own pre-setup reconciliation. Native unset-marker controls
+  reproduced an unwanted restore in recovery and duplicate restores in normal
+  mode. The added wrapper now bypasses its own reconciliation and leaves
+  both policies to setup. The corrected controls compare real direct and
+  serialized execution, including a failing synthetic restore, rather than
+  assuming that helper's exit behavior. The corrected startup packet passes
+  26 controls, including all 13 explicit native cases. Fresh accepted review
+  and required CI remain publication gates.
 
 ### 2026-10-28 - Provider-owned setup birth prerequisite
 

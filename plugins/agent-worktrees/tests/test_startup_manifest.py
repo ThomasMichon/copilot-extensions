@@ -62,7 +62,7 @@ def test_final_serialization_retains_typed_setup_until_pane_build(startup, launc
     assert not manifest.is_relative_to(runtime)
     document = json.loads(manifest.read_text())
     assert document["wrapper"] == compact[4]
-    assert document["argv"] == (command[5:] if wrapped else ["--", *command])
+    assert document["argv"] == (command[5:] if wrapped else ["--recovery", "--", *command])
     assert command == original
     transport.cleanup_mux_pane_args(pane)
     assert not manifest.exists()

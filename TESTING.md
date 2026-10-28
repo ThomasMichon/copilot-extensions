@@ -104,7 +104,10 @@ cleanup and reuse of the existing expiry. The explicit native packet
 after disposable source removal, checking literal arguments, consumed files
 and process argv without setup-time installation roots. Its same-host control
 also checks pane-appended interactive arguments. Malformed manifests are
-consumed with sanitized refusal before a backend. Run both with the contained
+consumed with sanitized refusal before a backend. With the reconciliation
+marker unset, direct and serialized setup are compared in normal and recovery
+mode against a failing synthetic restore, preventing extra wrapper effects.
+Run both with the contained
 runner and `--allow-explicit-tiers`. These are native consumer controls, not
 real mux/Copilot interaction, supported uninstall or installed rollout evidence.
 
