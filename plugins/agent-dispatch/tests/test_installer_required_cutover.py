@@ -22,7 +22,12 @@ _PWSH = shutil.which("pwsh")
 def ps_function(name: str) -> str:
     text = (_ROOT / "scripts" / "install.ps1").read_text(encoding="utf-8")
     start = text.index(f"function {name} {{")
-    return text[start:text.index("\n}\n", start) + 2]
+    admission = (
+        ps_function("Assert-DispatchActions")
+        if name in {"Invoke-CoordinatorCutover", "Invoke-VersionedActivate", "Invoke-Update"}
+        else ""
+    )
+    return admission + "\n" + text[start:text.index("\n}\n", start) + 2]
 
 
 def _run(tmp_path: Path, shell: str, script: str, *args: str) -> subprocess.CompletedProcess[str]:
@@ -189,6 +194,7 @@ def test_required_cutover_requires_explicit_boolean_success_and_zero_exit(
     if shell == "sh":
         script = "\n".join([
             "set -euo pipefail",
+            f"INSTALL_DIR={shlex.quote(str(tmp_path))}",
             "NO_SERVICE=0; REQUIRE_GRACEFUL_CUTOVER=1",
             f'VENV_PYTHON={shlex.quote(str(python))}; LINK_PYTHON="$VENV_PYTHON"',
             '_step() { :; }; _ok() { :; }; _warn() { echo "$1" >&2; }',
@@ -200,6 +206,7 @@ def test_required_cutover_requires_explicit_boolean_success_and_zero_exit(
     else:
         script = "\n".join([
             "$ErrorActionPreference = 'Stop'",
+            f"$InstallDir = '{tmp_path}'",
             "$RequireGracefulCutover = $true",
             f"$VenvPython = '{python}'; $LinkPython = $VenvPython",
             "function Write-Step { param($m) }; function Write-Ok { param($m) }",
@@ -218,6 +225,7 @@ def test_posix_required_cutover_rejects_missing_route_without_start(tmp_path: Pa
     python = _fake_python(tmp_path, json.dumps({"ok": True}), 0, routed=False)
     script = "\n".join([
         "set -euo pipefail",
+        f"INSTALL_DIR={shlex.quote(str(tmp_path))}",
         "NO_SERVICE=0; REQUIRE_GRACEFUL_CUTOVER=1",
         f'VENV_PYTHON={shlex.quote(str(python))}; LINK_PYTHON="$VENV_PYTHON"',
         'systemctl() { return 0; }',

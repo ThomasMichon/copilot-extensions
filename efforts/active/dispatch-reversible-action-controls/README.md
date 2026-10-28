@@ -29,7 +29,8 @@ configuration, a successful deployment or authority to discard existing work.
 
 - **Topology:** reviewed proposal, then dependent implementation PRs.
 - **Host (owns PRs):** `placid-staple`.
-- **Delegates:** none assigned.
+- **Delegates:** bounded PowerShell implementation/testing under host integration;
+  no independent publication, operational authority or workstream ownership.
 - **Handoff:** issue, effort checklists and merged source receipts; preserve
   unresolved release and installed-consumer qualification explicitly.
 - Existing #6820 preparation/sequencing and #7694 launch-maintenance owners
@@ -327,3 +328,25 @@ Initial tests must prove the current gap before adding the guards.
 - Added real-installer and late-publication cases, rather than relying only on
   a fixture's hardcoded status. No installed adoption or preparation interface
   is established by these source corrections.
+
+### 2026-10-27 - Native file-failure review
+
+- The next #9359 review found checked Bash callers suppressing `errexit` inside
+  their native helper bodies. Required directory, environment, launcher, unit
+  and removal failures could therefore reach later service effects and return
+  success. Thirteen actual failure cases reproduced status 0 before correction;
+  two ordinary-effect controls confirmed the fixture did not merely block all
+  maintenance.
+- Explicitly propagate required filesystem failures through native helpers,
+  profile/removal loops and their callers. Preserve refusal status and release
+  the cutover lock, while leaving existing audited best-effort native-manager
+  and diagnostic behavior unchanged.
+- Fixed the full missing-guard fixture class in required-cutover and disabled
+  master/profile tests, using the real guard and contained installation roots.
+  Their original cutover/hold assertions remain intact.
+- The combined contained selection passed 59 cases with 24 PowerShell skips;
+  the affected host-native harnesses actually ran and passed all 65 cases.
+  The expanded filesystem matrix separately passed all 20 cases, including
+  nested profiles/removal and the no-restart update branch.
+- Re-review and required checks remain separate. Preparation, release and
+  installed adoption are still open; this is not operational recovery.

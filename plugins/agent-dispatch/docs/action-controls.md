@@ -80,6 +80,12 @@ Callable PowerShell guards still throw; the real installer maps their tagged
 refusals to that distinct process result after cleanup. Unrelated errors keep
 their normal classification. Neither a generic failure status nor a successful
 cleanup may erase the refusal and admit another installer in the same attempt.
+Native filesystem/publication helpers explicitly return required write, mode,
+directory and removal failures through their nested callers. They do not rely
+on Bash `errexit`, which is suppressed when a caller checks a helper's status.
+Those failures stop later service effects, preserve their status and release
+the update's cutover lock. Existing audited best-effort native-manager and
+diagnostic behavior is unchanged.
 Existing activation locks, source receipts, conditional publication recovery,
 ownership fences and drain semantics remain authoritative.
 
