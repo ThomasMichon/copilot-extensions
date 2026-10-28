@@ -1200,17 +1200,16 @@ jobs:
           worktree-manager/tests/test_manager_update_check.py
           libs/versioned-runtime/tests/test_runtime_source_identity.py::test_source_and_repair_slots_preserve_the_declared_package_version
 
-  source-cache:
+  source-cache-linux:
     if: ${{ inputs.source_cache }}
-    name: Source wheel cache and hardlinks (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Source wheel cache and hardlinks (Linux)
+    runs-on: ubuntu-latest
     timeout-minutes: 6
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
         suite: [normal]
-    steps:
+    steps: &source-cache-steps
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -1222,6 +1221,17 @@ jobs:
         run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest pyyaml packaging
       - *source-wheel-backend-step
       - *source-wheel-test-step
+
+  source-cache-windows:
+    if: ${{ inputs.source_cache }}
+    name: Source wheel cache and hardlinks (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [normal]
+    steps: *source-cache-steps
 
   packaging-seed-linux:
     if: ${{ inputs.dependency_compile }}

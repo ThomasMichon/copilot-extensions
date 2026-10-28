@@ -78,6 +78,18 @@ is the broader direction, not a prerequisite for this performance slice.
 The mechanisms and ordering below are agent-recommended implementation design,
 not additional operator requirements or authority to bypass admission.
 
+**Proof and rollout sequencing, verbatim:**
+> Once we get a proof-of-concept shipped in at least once service, we'll want to go to each machine and run an update. Then, we'll probably want to continue our install-focused detour here and just take on the work to align all service installers to reuse vendored code.
+
+The first gate is an actual service consuming the prepacked inputs and using
+hardlinked cache assembly, not merely a helper or disposable construction proof.
+The addressed rollout follows release availability and existing per-machine
+deployment authority. Portfolio installer convergence follows that wave; the
+broader Manager/plugin ownership split remains outside this immediate slice.
+Reuse the existing governed-artifact and
+[core bundle](../runtime-bundle/README.md) work instead of creating another
+builder, publisher or composition plan.
+
 ## Plan
 
 ### Phase 1 - Review the bounded contract
@@ -132,8 +144,13 @@ not additional operator requirements or authority to bypass admission.
 - [ ] Integrate through the canonical engine and synchronized consumers, with
   a measured adopter ledger. Shared helper presence is not executed-path proof.
 - [ ] Publish source changes through normal review, CI and release gates;
-  record promotion and installed rollout separately. No production rollout is
-  authorized by this proposal.
+  record promotion and installed rollout separately.
+- [ ] Prove the fast path in at least one released service before the
+  operator-directed machine update wave. Record actual installed/serving identity
+  through the owning deployment flow; do not infer rollout from a source merge.
+- [ ] After that update wave, continue the proposed portfolio work to align
+  service installers with shared vendored implementation, preserving each
+  service's declared lifecycle and qualification boundary.
 
 ## Validation Plan
 
