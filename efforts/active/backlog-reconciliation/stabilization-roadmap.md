@@ -1,9 +1,10 @@
 # Vision-Linked Stabilization Roadmap
 
 **Status:** Research method with the reviewed [first-200-issue planning
-proposal](roadmap-wave-1.md) and a [second disjoint 200-issue
-proposal](roadmap-wave-2.md); later eligible coverage and full execution
-sequencing remain open.
+proposal](roadmap-wave-1.md) and the reviewed [second disjoint 200-issue
+proposal](roadmap-wave-2.md), plus the [third-wave
+proposal](roadmap-wave-3.md) awaiting reviewed publication; later eligible
+coverage and full execution sequencing remain open.
 
 Parent: [Backlog Reconciliation](README.md), Phase 2b.
 
@@ -67,8 +68,24 @@ Its [dependency register](roadmap-wave-2-dependencies.md) records 32 directed
 slice proposals and two interface edges. These 200 assessments include no
 new product-code audit; important possible fixes start with actual consumer
 characterization, separately from existing-owner integration and qualification.
-The cumulative 400 planning records do not rank the remaining eligible supply
-or count the excluded-author issues as researched.
+The [third-wave proposal](roadmap-wave-3.md) adds 176 researched proposals,
+23 provisional outcomes and one history-gated, unranked issue. Its four
+appendices retain exact per-issue vision and effort evidence, without a new
+product-code audit. The [third-wave register](roadmap-wave-3-dependencies.md)
+adds 34 scoped directed relationships and eight additional interfaces;
+four Lifecycle interface rows are already in the 34. A separately admitted
+#8669 refinement credits reported source completion, not installed/removal
+qualification. #6934's unavailable necessary history remains an unranked stop.
+
+The cumulative 600 assignments comprise 513 researched proposals,
+86 provisional outcomes and one history-gated issue. They do not rank the
+remaining eligible supply or count excluded-author issues as researched.
+
+The [cross-wave sequencing proposal](roadmap-sequencing.md) joins those
+evidence classes and existing work homes. Its 109 recorded relationships retain
+the three scoped registers, including same-issue slice dependencies, rather than
+collapsing them into whole-issue barriers. Later research can change the
+selection; it is not an implementation charter.
 
 ## Per-issue decision record
 
