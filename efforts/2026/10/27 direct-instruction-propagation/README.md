@@ -4,8 +4,9 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Proposal and implementation PRs against `dev`
 - **Created:** 2026-10-27
-- **Status:** Active
-- **Vision:** [Harness guidance](../../../visions/harness-guidance/README.md):
+- **Completed:** 2026-10-27
+- **Status:** Done
+- **Vision:** [Harness guidance](../../../../visions/harness-guidance/README.md):
   `simple-local-static-delivery`, `authoritative-ownership`, `resume-stable-context`
 - **Umbrella issue:** #9329
 
@@ -43,7 +44,7 @@ some effective activation layers. Consequently a legitimate generated file
 can fail a required verification step. Prepared-generation/input/output
 fingerprints also make startup copy conditional on a separate evidence graph.
 
-The [owning pattern](../../../docs/patterns/worktree-scoped-dynamic-guidance.md)
+The [owning pattern](../../../../docs/patterns/worktree-scoped-dynamic-guidance.md)
 already calls for simple declaration-driven copying. This effort removes the
 runtime authentication/reuse layers that contradict that intent rather than
 adding another compatibility proof chain.
@@ -67,53 +68,53 @@ The operator confirmed the slug `direct-instruction-propagation`.
 
 ### Phase 2 - Implement copy-only propagation
 
-- [ ] Copy all currently enabled, declared plugin instruction files on every
+- [x] Copy all currently enabled, declared plugin instruction files on every
   creation/session-start boundary, including the existing paired preparation
   and independent compatibility paths.
-- [ ] Remove content hashes, fingerprint matching, provenance envelopes and
+- [x] Remove content hashes, fingerprint matching, provenance envelopes and
   prepared-generation reuse as runtime copy or generated-source admission gates.
   Do not replace them with a different attestation, version comparison or receipt.
-- [ ] Replace generated files even during a running session. Update selectors,
+- [x] Replace generated files even during a running session. Update selectors,
   catch-all instructions and source-resolution procedures so they trust the
   managed copies without asking the model to authenticate them.
-- [ ] Preserve effective activation/configuration and complete-set composition.
+- [x] Preserve effective activation/configuration and complete-set composition.
   Keep path containment, tracked-file protection and declaration ambiguity
   checks as file/configuration boundaries, not instruction-content judgments.
   _(Agent-recommended implementation constraints.)_
-- [ ] Keep checked-in authoring/sync separate from runtime copying; retain the
+- [x] Keep checked-in authoring/sync separate from runtime copying; retain the
   offline fallback without allowing stale selectors or fallback integrity checks
   to block otherwise available generated instructions.
-- [ ] Update owning docs/tests and add changefiles for every changed plugin.
+- [x] Update owning docs/tests and add changefiles for every changed plugin.
 
 ### Phase 3 - Qualify and land
 
-- [ ] Exercise focused synthetic regressions and existing refusal controls;
+- [x] Exercise focused synthetic regressions and existing refusal controls;
   self-review and satisfy CI, Copilot verdict and the target's acceptance gates.
-- [ ] Merge the implementation and journal the actual source result; resolve
+- [x] Merge the implementation and journal the actual source result; resolve
   every Plan/Validation Plan item or transfer it to a named tracked objective.
-- [ ] Set this source effort Done and archive it. Retain the release/rollout
+- [x] Set this source effort Done and archive it. Retain the release/rollout
   distinction and do not claim installed behavior changed.
 
 ## Validation Plan
 
 - [x] Creation and session start each copy the selected plugin version rather
   than returning a prepared-generation reuse result.
-- [ ] Changed plugin content, same-version edits, missing or edited generated
+- [x] Changed plugin content, same-version edits, missing or edited generated
   files and malformed/absent old receipts converge to current plugin bytes
   without hash/fingerprint admission.
-- [ ] Generated files can be overwritten while a session is live; reporting
+- [x] Generated files can be overwritten while a session is live; reporting
   distinguishes filesystem delivery from model reload/restart.
-- [ ] Effective user/repository/local activation, paired-only providers and
+- [x] Effective user/repository/local activation, paired-only providers and
   independently usable compatibility delivery select the intended sources.
-- [ ] Generated source selection works without provenance markers, content
+- [x] Generated source selection works without provenance markers, content
   equality checks, version precedence or a valid legacy selector/fallback lock.
-- [ ] Traversal/link escape, tracked targets, ambiguous destinations and genuinely
+- [x] Traversal/link escape, tracked targets, ambiguous destinations and genuinely
   malformed/unavailable plugin configuration still report real failures.
   Partial discovery does not delete unresolved providers' instructions.
   _(Agent-recommended regression controls.)_
-- [ ] Existing offline checked-in maintenance remains usable and does not become
+- [x] Existing offline checked-in maintenance remains usable and does not become
   a prerequisite to the current managed-copy path.
-- [ ] Run focused bounded tests and applicable lint/structure/docs checks; assess
+- [x] Run focused bounded tests and applicable lint/structure/docs checks; assess
   repeated-copy startup cost without restoring fingerprint-based skip gates or
   expanding required CI into a native integration matrix.
 
@@ -285,3 +286,46 @@ promotion flow; rollout requires its normal authorization.
   platform-specific skips. Lint and whitespace checks passed.
 - Full current-head validation and a passing review remain required. No rollout
   or machine hold was performed.
+
+### 2026-10-27 - Reader and compatibility implementation merged
+
+- #9350 merged as `98789dc924` after assessing every named finding against
+  the corrections and focused controls. The final owner-authored current-head
+  Copilot verdict was Comment with no Medium/High finding in its full body or
+  inline comments; this is the repository's accepted verdict shape, not an
+  assertion that the bot issued Approve. Required checks were green.
+- That verdict retained a generic caveat requesting human assessment of
+  discovery/publication risks. No separate human-assessment evidence is
+  recorded here, and this closeout does not claim the caveat was withdrawn.
+  The author assessed the concrete earlier findings against the corrections
+  and regressions, then applied the repository owner's clean-Comment completion
+  policy. That disposition is source review, not native or installed acceptance.
+- The immutable-commit packet at reviewed head `d308772717` passed 2,560 tests
+  with 12 deselected and coverage recorded once. The complete customization,
+  scanner and standalone publisher packet passed 615 tests with six
+  platform-specific skips; the focused compatibility packet passed 41.
+  Existing publisher/lifecycle controls and the 32-file repeated-copy
+  measurements remain the earlier source qualification. No required native
+  integration matrix or fingerprint skip gate was introduced.
+- Re-read the complete Plan and Validation Plan after merge. All implementation
+  and source-validation items are resolved by #9336 and #9350, including
+  independent copying, effective activation, ordinary failure retention and
+  reviewed offline maintenance. Phase 3 now owns the reviewed Done/archive
+  closeout; the worktree remains retained until that gate clears.
+- The source result does not certify native model admission or installed
+  behavior. Existing promotion owns release; normal authorized rollout and
+  session restart remain outside this source effort. No installed payload,
+  service, machine hold or protected session was changed.
+
+### 2026-10-27 - Source effort closed
+
+- Marked every Plan and Validation Plan item resolved and moved the source
+  effort to its dated archive. #9331 records the reviewed replacement intent;
+  #9336 and #9350 deliver and qualify its publisher, reader and independent
+  compatibility paths. No source item was silently dropped or transferred.
+- Durable behavior is documented in the owning worktree-scoped guidance
+  pattern and plugin procedures. #9097 retains its separate owner and effort;
+  this closeout does not declare that objective complete.
+- This is source completion only. Release follows normal promotion, and
+  installed rollout remains separately authorized. No updater, installation
+  drill, service operation or session restart was performed by this effort.
