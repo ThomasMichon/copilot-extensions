@@ -75,6 +75,7 @@ def reconcile(tmp_path):
     (plugin / "pyproject.toml").write_text('version = "1.0.1"\n', encoding="utf-8")
     shutil.copyfile(HOOK, scripts / HOOK.name)
     stage_action_policy_payload(plugin)
+    shutil.copyfile(HOOK.with_name("installer-watchdog.ps1"), scripts / "installer-watchdog.ps1")
     (scripts / "install.ps1").write_text(
         r"""
 param([string]$Action)
@@ -171,7 +172,9 @@ def test_completion_records_worker_failure_and_clears_inherited_staging(reconcil
     assert status["launched_pid"] == stub["pid"] != status["wrapper_pid"]
     assert status["worker_started_at"] and status["attempt_id"]
     assert status["exit_code"] == 9 and status["success"] is False
-    assert int((runtime / "reconcile.lock").read_text()) == stub["pid"]
+    owner, birth = (runtime / "reconcile.lock").read_text().split()
+    assert int(owner) == stub["pid"]
+    assert int(birth) > 0
     assert not stub["staged"] and not stub["staged_from"]
     assert Path(stub["cwd"]) == runtime.parent
     assert "fixture installer failure" in (runtime / "reconcile.log").read_text()
@@ -256,18 +259,38 @@ def test_reused_pid_is_not_retired(reconcile):
     assert alive(stub["pid"]) and alive(stub["child"])
 
 
-def test_legacy_pid_without_birth_evidence_is_not_retired(reconcile):
+def test_legacy_pid_lock_defers_to_its_original_live_owner(reconcile):
     runtime, run_hook, read, _ = reconcile
     (runtime / "block").touch()
     run_hook()
     stub = wait_for(lambda: read("stub.json"), lambda s: s.get("child"))
     status = read("reconcile-status.json")
     (runtime / "reconcile-status.json").unlink()
-    result = run_hook()
-    assert "has no verified process birth time" in result.stderr
+    (runtime / "reconcile.lock").write_text(str(stub["pid"]), encoding="utf-8")
+    run_hook()
     assert alive(stub["pid"]) and alive(stub["child"])
     assert len(list(runtime.glob("started-*"))) == 1
     (runtime / "reconcile-status.json").write_text(json.dumps(status), encoding="utf-8")
+
+
+def test_legacy_lock_older_than_live_process_allows_retry_without_retiring_it(reconcile):
+    runtime, run_hook, read, _ = reconcile
+    (runtime / "block").touch()
+    run_hook()
+    stub = wait_for(lambda: read("stub.json"), lambda s: s.get("child"))
+    status = read("reconcile-status.json")
+    (runtime / "reconcile-status.json").unlink()
+    lock = runtime / "reconcile.lock"
+    lock.write_text(str(stub["pid"]), encoding="utf-8")
+    old = time.time() - 1200
+    os.utime(lock, (old, old))
+    (runtime / "block").unlink()
+    run_hook()
+    wait_for(
+        lambda: read("reconcile-status.json"),
+        lambda s: s.get("attempt_id") != status["attempt_id"] and "completed_at" in s,
+    )
+    assert alive(stub["pid"]) and alive(stub["child"])
 
 
 def test_inherited_staging_cannot_disable_real_installer_watchdog(reconcile):

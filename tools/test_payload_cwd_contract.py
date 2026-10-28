@@ -830,6 +830,80 @@ def test_watchdog_bootstrap_never_reaps_a_live_reconcile_from_age(
 
 
 @pytest.mark.parametrize("extension", ["ps1", "sh"])
+@pytest.mark.parametrize("name", ["agent-containers", "agent-dispatch", "agent-mcp", "budget-guidance"])
+@pytest.mark.parametrize("receipt,started,expected", [
+    ("12345 1000000", 1000000, False),
+    ("12345 1000000", 2000000, True),
+    ("12345", 1000000, False),
+    ("12345", 3000000, True),
+])
+def test_watchdog_bootstrap_qualifies_reconcile_lock_owner(
+    tmp_path, extension, name, receipt, started, expected,
+):
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    lock = runtime / "reconcile.lock"
+    lock.write_text(receipt, encoding="utf-8")
+    os.utime(lock, (2000, 2000))
+    source = (ROOT / "plugins" / name / "scripts" / f"bootstrap-check.{extension}").read_text("utf-8")
+    start = source.index("# --- Good boot-citizen guard")
+    if extension == "ps1":
+        end = source.index('    [Console]::Error.WriteLine("[$name] runtime', start)
+        body = (
+            f"$InstallDir='{runtime}'; $name='{name}'\n"
+            "$statusFile=Join-Path $InstallDir 'reconcile-status.json'\n"
+            "$lockFile=Join-Path $InstallDir 'reconcile.lock'\n"
+            "function Get-Process { param($Id) return @{Id=$Id} }\n"
+            f"function Get-InstallProcessBirth {{ param($ProcessId) return {started}L }}\n"
+            "function Stop-Process { throw 'Unexpected signal' }\n"
+            "function Exit-SessionStart { exit 0 }\n"
+            + source[start:end] + "\n'relaunch'\n"
+        )
+    else:
+        end = source.index('echo "[$name] runtime', start)
+        body = (
+            f'InstallDir="{runtime.as_posix()}"\n'
+            f'get_install_process_birth() {{ printf "%s\\n" {started}; }}\n'
+            'kill() { [[ "$1" == -0 ]] || exit 99; }\n'
+            + source[start:end] + '\nprintf "relaunch\\n"\n'
+        )
+    result = _native_watchdog(tmp_path, extension, {extension: body}, [])
+    assert result.returncode == 0, result.stderr
+    assert ("relaunch" in result.stdout) is expected
+    assert lock.read_text("utf-8") == receipt
+
+
+@pytest.mark.parametrize("extension", ["ps1", "sh"])
+def test_native_reconcile_lock_writer_round_trips_process_birth(tmp_path, extension):
+    lock = tmp_path / "reconcile.lock"
+    result = _native_watchdog(tmp_path, extension, {
+        "ps1": (
+            "Write-InstallReconcileLock -Path $args[0] -ProcessId $PID\n"
+            "if (-not (Test-InstallReconcileLock -Path $args[0])) { exit 21 }\n"
+            "$parts = ([IO.File]::ReadAllText($args[0])).Trim() -split '\\s+'\n"
+            "if ($parts.Count -ne 2) { exit 22 }\n"
+            "if ([long]$parts[1] -ne (Get-InstallProcessBirth -ProcessId $PID)) { exit 23 }\n"
+        ),
+        "sh": (
+            'write_install_reconcile_lock "$1" "$$"\n'
+            'test_install_reconcile_lock "$1" || exit 21\n'
+            'read -r owner birth < "$1"\n'
+            '[[ "$owner" == "$$" && "$birth" == "$(get_install_process_birth "$$")" ]] || exit 23\n'
+        ),
+    }, [lock.as_posix()])
+    assert result.returncode == 0, result.stdout + result.stderr
+    owner, birth = lock.read_text("utf-8").split()
+    assert int(owner) > 0
+    assert 0 < int(birth) <= time.time() * 1000
+
+
+@pytest.mark.skipif(os.name != "nt" or not shutil.which("powershell"), reason="Windows PowerShell 5.1")
+def test_native_reconcile_lock_writer_supports_windows_powershell(tmp_path, monkeypatch):
+    monkeypatch.setitem(globals(), "PWSH", shutil.which("powershell"))
+    test_native_reconcile_lock_writer_round_trips_process_birth(tmp_path, "ps1")
+
+
+@pytest.mark.parametrize("extension", ["ps1", "sh"])
 @pytest.mark.parametrize("name,minimum", [
     ("agent-dispatch", 450 + 420 + 60 + 300),
     ("agent-index", 420 + 60 + 300),
@@ -980,6 +1054,30 @@ def test_native_watchdog_supports_windows_powershell(tmp_path: Path, monkeypatch
     assert result.stdout.strip() == "8 7"
     assert json.loads(phase.read_text(encoding="utf-8"))["phase"] == "cutover"
     assert not list(tmp_path.glob("phase.json.*.tmp"))
+
+
+@pytest.mark.skipif(os.name != "nt" or not shutil.which("powershell"), reason="Windows PowerShell 5.1")
+@pytest.mark.parametrize("build_seconds", [0, -1])
+def test_watchdog_disabled_preserves_windows_powershell_child_failure(
+    tmp_path: Path, monkeypatch, build_seconds: int,
+) -> None:
+    monkeypatch.setitem(globals(), "PWSH", shutil.which("powershell"))
+    child_script = tmp_path / "failed child.ps1"
+    child_script.write_text("Start-Sleep -Milliseconds 100\nexit 23\n", encoding="utf-8")
+    result = _native_watchdog(tmp_path, "ps1", {
+        "ps1": (
+            "$hostExe = (Get-Process -Id $PID).Path\n"
+            "$childArguments = '-NoProfile -NonInteractive -File \"' + $args[0] + '\"'\n"
+            "$child = Start-Process -FilePath $hostExe -ArgumentList $childArguments "
+            "-NoNewWindow -PassThru\n"
+            "$budget = [pscustomobject]@{ BuildSec = [long]$args[1]; CutoverSec = 1 }\n"
+            "$exitCode = Wait-InstallWatchdog -Child $child -Budget $budget "
+            "-StartedAt ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) "
+            "-PhaseFile 'absent-phase' -Name 'fixture' -Stage $PWD -LogPath 'watchdog.log'\n"
+            "exit $exitCode"
+        ),
+    }, [str(child_script), str(build_seconds)])
+    assert result.returncode == 23, result.stdout + result.stderr
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows reader sharing modes")
