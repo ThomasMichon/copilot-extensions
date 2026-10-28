@@ -644,8 +644,11 @@ def main() -> int:
             args = json.loads(args)
         command = args.get("command", "") if isinstance(args, dict) else ""
         # Plugin process CWD may be its payload, not the calling workspace.
-        session_cwd = data.get("cwd") or data.get("workingDirectory") or os.environ.get("COPILOT_PROJECT_DIR")
-        hook_cwd = session_cwd or (args.get("cwd") if isinstance(args, dict) else None)
+        hook_cwd = (
+            data.get("cwd") or data.get("workingDirectory")
+            or (args.get("cwd") if isinstance(args, dict) else None)
+            or os.environ.get("COPILOT_PROJECT_DIR")
+        )
     except Exception:
         return 0
     if not isinstance(command, str):
@@ -653,7 +656,7 @@ def main() -> int:
     statements = _publication_statements(command)
     if not statements:
         return 0
-    if not adopting_harness(session_cwd, deadline):
+    if not adopting_harness(hook_cwd, deadline):
         return 0
     plugin_root = Path(
         os.environ.get("COPILOT_PLUGIN_ROOT")

@@ -943,3 +943,29 @@ def test_plugin_process_directory_is_not_session_adoption(tmp_path, monkeypatch)
     assert not guard.adopting_harness(None, time.monotonic() + 1)
     monkeypatch.setenv("COPILOT_PROJECT_DIR", str(tmp_path))
     assert guard.adopting_harness(None, time.monotonic() + 1)
+
+
+@pytest.mark.parametrize("nested_adopted", [False, True])
+def test_explicit_tool_directory_precedes_project_fallback(tmp_path, monkeypatch, capsys, nested_adopted):
+    guard = _load_guard()
+    _enable_harness(tmp_path)
+    nested = tmp_path / "nested"
+    (nested / ".git").mkdir(parents=True)
+    if nested_adopted:
+        _enable_harness(nested)
+    monkeypatch.setenv("COPILOT_PROJECT_DIR", str(tmp_path))
+    inspected = []
+    def matches(target, cwd, **kwargs):
+        inspected.append(cwd)
+        return True
+    monkeypatch.setattr(guard, "current_repo_matches", matches)
+    monkeypatch.setattr(guard, "target_repo_from_manifest", lambda *a: "o/r")
+    monkeypatch.setattr(guard.sys, "stdin", io.StringIO(json.dumps({
+        "toolName": "powershell", "toolArgs": {
+            "cwd": str(nested), "command": 'gh pr comment 1 --body "@copilot review"',
+        },
+    })))
+    assert guard.run_guard() == 0
+    output = capsys.readouterr().out
+    assert bool(output) == nested_adopted
+    assert inspected == ([str(nested)] if nested_adopted else [])
