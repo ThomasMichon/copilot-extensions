@@ -128,7 +128,7 @@ def test_cached_native_pre_command_uses_real_relevance(client, monkeypatch, tmp_
     scripts.mkdir(parents=True)
     cwd.mkdir()
     (cwd / ".git").mkdir()
-    for name in ("hook_client.py", "hook_runtime.py", "hook_pre_relevance.py", "pretool_killswitch.py", "statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py", "anchor_shell_parser.py", "pr_supersede_guard.py", "registry_root.py"):
+    for name in ("hook_client.py", "hook_runtime.py", "hook_pre_relevance.py", "hook_pre_policy.py", "hook_policy_process.py", "pretool_killswitch.py", "statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py", "anchor_shell_parser.py", "pr_supersede_guard.py", "registry_root.py"):
         shutil.copyfile(SCRIPTS / name, scripts / name)
     (scripts.parent / "repos.yaml").write_text(
         "repos:\n  fixture:\n    class: worktree\n    windows: '" + str(cwd) + "'\n", encoding="utf-8",

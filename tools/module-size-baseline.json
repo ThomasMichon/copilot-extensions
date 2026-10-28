@@ -68,7 +68,7 @@
   "plugins/agent-worktrees/src/agent_worktrees/pr_ops.py": 2448,
   "plugins/agent-worktrees/src/agent_worktrees/providers/gitea.py": 1118,
   "plugins/agent-worktrees/src/agent_worktrees/providers/github.py": 1080,
-  "plugins/agent-worktrees/src/agent_worktrees/reconcile.py": 2193,
+  "plugins/agent-worktrees/src/agent_worktrees/reconcile.py": 2094,
   "plugins/agent-worktrees/src/agent_worktrees/related.py": 1850,
   "plugins/agent-worktrees/src/agent_worktrees/repos.py": 1436,
   "plugins/agent-worktrees/src/agent_worktrees/session_projection.py": 2123,

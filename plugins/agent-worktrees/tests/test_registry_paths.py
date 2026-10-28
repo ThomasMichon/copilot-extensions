@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import shutil
@@ -969,3 +970,122 @@ def test_namespaced_doctor_reports_repo_registry_write_failure(
     assert not missing.fixable
     assert "denied" in missing.fix_detail
     assert any(f.kind == "registry_write_failed" for f in findings)
+
+
+@pytest.mark.parametrize("legacy_grant", [False, True])
+def test_cross_repo_guard_isolates_shared_checkout_by_installation(
+    monkeypatch, tmp_path, legacy_grant
+):
+    scripts = PLUGIN_ROOT / "scripts"
+    monkeypatch.syspath_prepend(str(scripts))
+    spec = importlib.util.spec_from_file_location(
+        "cell_test_cross_repo_guard", scripts / "cross_repo_guard.py"
+    )
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    payload = _payload(tmp_path, "payload")
+    cells = [
+        _stamp(
+            tmp_path / "durable", payload,
+            marketplace=label, repository=f"Example-Org/{label}",
+        )
+        for label in ("unprotected", "protected")
+    ]
+    interpreters = []
+    for _, root in cells:
+        slot = root / "versions" / "1.0.0"
+        python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        python.parent.mkdir(parents=True)
+        python.touch()
+        (root / "current-version").write_text("1.0.0", encoding="utf-8")
+        (slot / ".install-complete.json").write_text(json.dumps({
+            "version": "1.0.0", "completed_at": "2026-10-28T00:00:00Z", "pid": 1,
+        }), encoding="utf-8")
+        interpreters.append(str(python))
+    consumer = tmp_path / "consumer"
+    (consumer / ".git").mkdir(parents=True)
+    target = tmp_path / "delegated" / "never-written.txt"
+    request = {
+        "toolName": "create", "cwd": str(consumer),
+        "toolArgs": {"path": str(target)},
+    }
+    legacy = tmp_path / ".agent-worktrees"
+    legacy.mkdir()
+    guard._write_cache(guard._cache_path(str(consumer), tmp_path), [])
+    if legacy_grant:
+        (legacy / "allow-edits.json").write_text(json.dumps({"grants": {
+            "delegated": {"expires_at_ms": 9999999999999},
+        }}), encoding="utf-8")
+    calls = []
+
+    def related(argv, **kwargs):
+        calls.append(argv)
+        assert argv[:3] == [interpreters[selected[0]], "-m", "agent_worktrees"]
+        assert kwargs["cwd"] == str(consumer)
+        if argv[4] == "list":
+            data = {"related": [] if selected[0] == 0 else [
+                {"name": "delegated", "delegate": "agent-bridge"},
+            ]}
+        else:
+            data = {"registry": {"path": str(target.parent)}}
+        return SimpleNamespace(returncode=0, stdout=json.dumps(data))
+
+    monkeypatch.setattr(guard.subprocess, "run", related)
+    client_spec = importlib.util.spec_from_file_location(
+        "cell_test_hook_client", scripts / "hook_client.py"
+    )
+    client = importlib.util.module_from_spec(client_spec)
+    client_spec.loader.exec_module(client)
+    registry = SimpleNamespace(resolve_registry_root=guard.resolve_registry_root)
+    other_policy = SimpleNamespace(decide=lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        client, "_load_sibling",
+        lambda name: guard if name == "cross_repo_guard.py" else (
+            registry if name == "registry_root.py" else other_policy
+        ),
+    )
+    selected = [0]
+    for index in (0, 1, 0, 1):
+        selected[0] = index
+        context, _ = cells[index]
+        _select(monkeypatch, context, payload)
+        decision = guard.decide(request, home=tmp_path)
+        if index:
+            assert decision and decision["permissionDecision"] == "deny"
+        else:
+            assert decision is None
+        assert client.decide(
+            "preToolUse", request, home=tmp_path, require_policy=True,
+        ) == (decision or {})
+    assert len(calls) == 3
+    assert guard._read_cache(guard._cache_path(str(consumer), tmp_path)) == []
+    assert all(list((root / "cache").glob("guarded-roots.*.json")) for _, root in cells)
+    (cells[1][1] / "allow-edits.json").write_text(json.dumps({"grants": {
+        "delegated": {"expires_at_ms": 9999999999999},
+    }}), encoding="utf-8")
+    assert client.decide(
+        "preToolUse", request, home=tmp_path, require_policy=True,
+    ) == {}
+    assert len(calls) == 3
+    assert not target.exists()
+
+
+def test_cross_repo_guard_invalid_cell_never_reuses_legacy_cache(monkeypatch, tmp_path):
+    scripts = PLUGIN_ROOT / "scripts"
+    monkeypatch.syspath_prepend(str(scripts))
+    spec = importlib.util.spec_from_file_location(
+        "invalid_cell_cross_repo_guard", scripts / "cross_repo_guard.py"
+    )
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    consumer = tmp_path / "consumer"
+    (consumer / ".git").mkdir(parents=True)
+    guard._write_cache(guard._cache_path(str(consumer), tmp_path), [])
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "missing.json"))
+    monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(PLUGIN_ROOT))
+    monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
+    with pytest.raises(ValueError):
+        guard.decide({
+            "toolName": "create", "cwd": str(consumer),
+            "toolArgs": {"path": str(tmp_path / "delegated" / "file")},
+        }, home=tmp_path)

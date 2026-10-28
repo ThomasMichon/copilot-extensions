@@ -623,7 +623,7 @@ def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypat
         declared = text.split("foreach ($script in @(", 1)[1].split(")) {", 1)[0]
         declared = [name.strip().strip("'") for name in declared.split(",")]
     for name in (
-        "hook_client.py", "hook_runtime.py", "hook_lifecycle_runtime.py",
+        "hook_client.py", "hook_runtime.py", "hook_pre_policy.py", "hook_policy_process.py", "hook_lifecycle_runtime.py",
         "native_source_context.py",
     ):
         assert name in declared, f"{installer} does not deploy {name}"
@@ -631,7 +631,7 @@ def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypat
         fixture_scripts = tmp_path / "payload" / "scripts"
         fixture_scripts.mkdir(parents=True)
         for name in (
-            "hook_client.py", "hook_runtime.py", "hook_lifecycle_runtime.py",
+            "hook_client.py", "hook_runtime.py", "hook_pre_policy.py", "hook_policy_process.py", "hook_lifecycle_runtime.py",
             "native_source_context.py",
         ):
             relative = (
@@ -690,7 +690,7 @@ def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypat
                 if source.is_file():
                     shutil.copy2(source, installed / name)
     for name in (
-        "hook_client.py", "hook_runtime.py", "hook_lifecycle_runtime.py",
+        "hook_client.py", "hook_runtime.py", "hook_pre_policy.py", "hook_policy_process.py", "hook_lifecycle_runtime.py",
         "native_source_context.py",
     ):
         source = (
