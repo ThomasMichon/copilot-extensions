@@ -208,6 +208,35 @@ printf 'late' >&9
     assert "private-value" not in result.stderr
 
 
+@pytest.mark.parametrize("close_after", ["0", "1", "9"])
+def test_reader_suppresses_real_read_errors_before_complete_frame(close_after: str) -> None:
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+read_count=0
+read() {
+    local builtin_status=0
+    builtin read "$@" || builtin_status=$?
+    if [[ "$builtin_status" == 0 ]]; then
+        read_count=$((read_count+1))
+        if [[ "$read_count" == "$close_after" ]]; then exec 0<&-; fi
+    fi
+    return "$builtin_status"
+}
+close_after="$2"
+if [[ "$close_after" == 0 ]]; then exec 0<&-; fi
+AW_NATIVE_SEED_OPERATION=previous
+AW_NATIVE_SEED_ARGV=(previous)
+code=0
+aw_native_seed_read_reply || code=$?
+[[ "$code" == 3 && -z "$AW_NATIVE_SEED_OPERATION" && \
+    -z "${AW_NATIVE_SEED_ARGV[0]+x}" && -z "${AW_NATIVE_SEED_ENV[0]+x}" ]]
+''', [close_after], payload=nul_reply(_reply({"PRIVATE": "private-value"})).decode("utf-8"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not result.stdout
+    assert result.stderr == "Native preparation reply is invalid; no backend started.\n"
+
+
 def test_invalid_frames_clear_previous_reply_without_evaluating_counts_or_leaking_data(tmp_path):
     forbidden = tmp_path / "must-not-run"
     valid = nul_reply(_reply({"SECRET": "must-not-appear"})).decode("utf-8")

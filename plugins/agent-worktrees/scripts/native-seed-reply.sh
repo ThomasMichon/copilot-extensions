@@ -33,6 +33,8 @@ _aw_native_seed_read_reply() {
     [[ -n "${argv[0]}" ]] || return 3
     IFS= read -r -d '' field || return 3
     [[ "$field" == complete ]] || return 3
+    # Refuse closed stdin before command substitution can reuse fd 0 for its pipe.
+    : 2>/dev/null <&0 || return 3
     # Bash also returns 1 for EAGAIN/EBADF. Capture only the probe's diagnostics.
     eof_diagnostics="$(
         extra=
@@ -66,7 +68,7 @@ aw_native_seed_read_reply() {
         nocasematch=1
         shopt -u nocasematch
     fi
-    _aw_native_seed_read_reply || status=3
+    _aw_native_seed_read_reply 2>/dev/null || status=3
     if [[ "$nocasematch" == 1 ]]; then shopt -s nocasematch; fi
     if [[ "$tracing" == 1 ]]; then set -x; fi
     if [[ "$status" != 0 ]]; then

@@ -664,6 +664,9 @@ nonblocking-pipe and bad-descriptor errors. One finite Bash subshell probes EOF,
 requiring status 1, no trailing bytes and no read diagnostics. Only diagnostics
 pass through command substitution; reply fields stay in the original shell.
 This adds no external executable or resident helper.
+Closed stdin is refused before that subshell can reuse descriptor 0 for its
+capture pipe. Internal parser diagnostics are suppressed; every input refusal
+uses the same generic diagnostic.
 Parsing uses ASCII collation and case-sensitive matching independently of
 caller settings, restoring the caller's locale and `nocasematch` option on
 success and refusal.

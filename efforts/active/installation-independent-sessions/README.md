@@ -486,6 +486,15 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   actual Linux and stock macOS Bash acceptance remain required before merging.
   This still does not activate a production POSIX consumer or close callback,
   exact-birth, terminal or installation-survival gates.
+- Native run 40665465954 passed the real nonblocking-pipe control on Linux and
+  stock macOS Bash, but both closed-stdin controls hit their unchanged
+  15-second deadline. Refuse closed stdin before command substitution can reuse
+  descriptor 0 for its capture pipe. The existing Windows terminal/mux packet
+  passed; the failed native reader packet is not complete qualification.
+- Actual early closed-descriptor controls also reproduced raw parser stderr
+  before the generic refusal at three frame positions. Suppress the internal
+  parser's stderr while retaining its refusal status and the final probe's own
+  diagnostic capture. Exact-source native qualification remains required.
 
 ### 2026-10-27 - Literal POSIX preparation transport prerequisite
 

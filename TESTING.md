@@ -85,7 +85,8 @@ share one Bash process with `nocasematch` both on and off, reject uppercase
 identities/markers and preserve the caller's option and locale. A separate
 xtrace control checks private-field suppression and restoration after success
 and refusal. EOF-status fault injection covers interrupted and timeout reads;
-actual closed-descriptor controls exercise refusal with nounset on and off.
+actual closed-descriptor controls exercise refusal with nounset on and off,
+and before the header or after actual header/environment reads.
 A native POSIX control prewrites the complete frame into a nonblocking pipe
 while retaining a live writer, requiring refusal rather than accepting EAGAIN
 as EOF. The fixture executes Bash in place under the finite process owner.
