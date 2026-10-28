@@ -37,7 +37,10 @@ def _run(prefix, environment, cwd, *arguments):
     return result.stdout
 
 
-def _plan(tmp_path, installed, bash, seed_kind, *, interactive=False, env_script=None):
+def _plan(
+    tmp_path, installed, bash, seed_kind, *, interactive=False, env_script=None,
+    arguments=None, expect_native=True,
+):
     root, plugin, prefix, environment = installed
     scripts = root / "scripts"
     scripts.mkdir(exist_ok=True)
@@ -140,7 +143,7 @@ prepared = launch_seed_exec.deferred_command(
     admission_only=seed is None, correlation=correlation,
 )
 index = launch_seed_exec.native_setup_index(prepared)
-assert (index is not None) == (bool(seed_kind) and not sys.argv[8]), prepared
+assert (index is not None) == (bool(seed_kind) and not sys.argv[8] and sys.argv[9] == "1"), prepared
 print(json.dumps({
     "record": str(created.yaml_path), "command": prepared,
     "copied": prepared[index] if index is not None else str(root / "scripts/default-setup.sh"),
@@ -149,8 +152,10 @@ print(json.dumps({
 '''
     plan = json.loads(_run(
         prefix, environment, checkout, "-c", initialize,
-        str(checkout), str(root), str(backend), bash, seed_kind or "", SEED, json.dumps(ARGUMENTS),
+        str(checkout), str(root), str(backend), bash, seed_kind or "", SEED,
+        json.dumps(ARGUMENTS if arguments is None else arguments),
         str(env_script) if env_script is not None else "",
+        "1" if expect_native else "",
     ))
     env = {
         **environment, "FIXTURE_CASE": str(tmp_path), "FIXTURE_RECORD": plan["record"],
@@ -314,6 +319,25 @@ def test_native_exec_preserves_non_utf8_environment_bytes_without_serializing_th
     assert (tmp_path / "backend-raw-env").read_bytes() == os.fsencode(environment["FIXTURE_NON_UTF8"])
     fields = (tmp_path / "backend-python-env").read_bytes().split(b"\0")
     assert fields[:2] == [b"x", os.fsencode(environment["PYTHONPATH"])]
+    _assert_return(plan, 7, True)
+
+
+def test_non_utf8_backend_arguments_keep_legacy_ownership_and_literal_bytes(
+    tmp_path, installed_native_runtime, native_bash,
+):
+    arguments = ["--add-dir", "path\udcff", *ARGUMENTS]
+    plan, environment, checkout = _plan(
+        tmp_path, installed_native_runtime, native_bash, "new",
+        arguments=arguments, expect_native=False,
+    )
+    result = run_caller_owned(
+        plan["command"], env=environment, cwd=checkout, input_text="retained stdin\n",
+        timeout=60, max_stdout_bytes=65536, max_stderr_bytes=65536,
+    )
+    assert result.returncode == 7, result.stdout + result.stderr + repr(_observations(plan))
+    reply = json.loads((tmp_path / "backend.json").read_text())
+    assert reply["argv"] == arguments + ["--interactive", SEED]
+    assert "python" in reply["parent_command"].lower()
     _assert_return(plan, 7, True)
 
 

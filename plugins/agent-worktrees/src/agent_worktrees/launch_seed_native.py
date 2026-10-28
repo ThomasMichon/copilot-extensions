@@ -263,6 +263,9 @@ def main() -> int:
             raise ValueError("Literal field replies are only available for preparation")
         if args.environment_reply != "full" and args.phase not in {"prepare", "setup"}:
             raise ValueError("Environment reply modes are only available for preparation")
+        if args.output_format == "nul":
+            for value in (str(args.record), *command):
+                value.encode("utf-8")
         require_current_runtime(args.root)
         correlation = launch_execution.Correlation(
             args.launch_attempt_id, args.launch_resolution_id, args.launch_parent_id,

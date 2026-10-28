@@ -480,10 +480,11 @@ def test_posix_native_selection_requires_the_selected_runtime_contract(
 @pytest.mark.skipif(os.name != "posix", reason="Native POSIX setup plan")
 @pytest.mark.parametrize("arguments, legacy", [
     (["--env-script", "prime.sh"], True),
+    (["--add-dir", "path\udcff"], True),
     (["--prompt", "--env-script"], False),
     (["--", "--env-script", "literal"], False),
 ])
-def test_posix_env_script_keeps_legacy_owner_without_matching_literal_values(
+def test_posix_unsupported_inputs_keep_legacy_owner_without_matching_literal_values(
     launch, monkeypatch, arguments, legacy,
 ):
     from agent_worktrees import launch_seed_contract
@@ -495,7 +496,7 @@ def test_posix_env_script_keeps_legacy_owner_without_matching_literal_values(
     monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: runtime.with_name("manager"))
 
     def support(_root):
-        assert not legacy, "env_script must refuse before querying or copying"
+        assert not legacy, "Unsupported input must retain legacy before querying or copying"
         return True
 
     monkeypatch.setattr(launch_seed_contract, "supports_posix_setup", support)

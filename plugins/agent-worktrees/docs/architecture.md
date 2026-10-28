@@ -745,6 +745,9 @@ ten-second deadline. Both producer and validator must succeed; an escaped
 stdout holder cannot extend collection indefinitely. Control utilities use the
 shell's standard utility search to resolve an absolute executable independently
 of the backend's unchanged PATH, without applying that search PATH to the child.
+Lookup removes a matching inherited shell function only in its subshell and
+uses `getconf PATH`; stock macOS Bash's `command -p -v` does not reliably locate
+utilities under a restricted caller PATH.
 Validation uses neither shell evaluation nor a second identity RPC. Effect-side current-runtime
 validation remains authoritative across a selector race. Admission-only launches,
 including native resume, retain the legacy owner and its launch fence: finite
@@ -758,6 +761,10 @@ hint. The actual seeded backend receives only its own new hint. POSIX
 `env_script` launches retain the legacy owner before capability discovery or
 asset copying: arbitrary sourced early exits and replacement EXIT traps cannot
 share the native setup's sole EXIT callback without changing shell semantics.
+Plans containing non-UTF-8 POSIX command or record-path bytes also retain that
+owner before discovery or copying; the literal reply remains strict UTF-8.
+Direct NUL preparation with such arguments refuses before runtime selection or
+seed claim rather than admitting an unencodable handoff.
 The existing outer owner records the actual final setup status. A stale/direct
 native envelope with an environment script refuses before admission or sourcing.
 This unsupported path remains an installation-survival gap, not native closure.

@@ -7,7 +7,11 @@
 
 _aw_native_seed_control() {
     local utility
-    utility="$(builtin unset -f -- "$1" && builtin command -p -v "$1")" || return 3
+    utility="$(
+        builtin unset -f -- "$1" || exit 3
+        PATH="$(builtin command -p getconf PATH)" || exit 3
+        builtin command -v "$1"
+    )" || return 3
     [[ "$utility" == /* && -x "$utility" ]] || return 3
     shift
     "$utility" "$@"

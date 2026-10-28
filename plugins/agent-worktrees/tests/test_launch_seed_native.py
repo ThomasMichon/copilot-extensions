@@ -655,6 +655,27 @@ def test_hint_reply_does_not_encode_unused_non_utf8_environment(record, monkeypa
     assert held.seed_id == seed.seed_id and held.handoff_id
 
 
+def test_non_utf8_nul_command_refuses_before_runtime_or_seed_claim(record, monkeypatch, capsys):
+    seed = seeds.stage(record, kind="new", text="must remain staged")
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Unrepresentable argv must refuse before runtime selection or seed effects")
+
+    monkeypatch.setattr(native, "require_current_runtime", forbidden)
+    monkeypatch.setattr(sys, "argv", [
+        "launch_seed_native", "--contract-version", "1",
+        "--root", str(cfg.install_dir()), "--record", str(record),
+        "--phase", "prepare", "--output-format", "nul",
+        "--environment-reply", "execution-hint", "--seed-id", seed.seed_id,
+        "--", "copilot", "--add-dir", "path\udcff",
+    ])
+    assert native.main() == 3
+    captured = capsys.readouterr()
+    assert not captured.out and "do not automatically retry" in captured.err
+    assert seeds.peek(record) == seed
+    assert not list((record.parent / "launch-attempts").glob("*/*.execution.json"))
+
+
 def test_unrepresentable_prepared_prompt_remains_held_with_unknown_outcome(record, monkeypatch, capsysbinary):
     seed = seeds.stage(record, kind="new", text="invalid\0prompt")
     correlation = audit.Correlation(uuid4().hex, uuid4().hex)

@@ -166,6 +166,11 @@ def _native_setup_command(
     if posix and not copy_only:
         from .launch_seed_contract import supports_posix_setup
 
+        try:
+            for value in (str(record_path), *command):
+                value.encode("utf-8")
+        except UnicodeError:
+            return None
         # Arbitrary sourced shell exits/traps retain the legacy setup owner.
         option = index + 1
         while option < len(command) and command[option] != "--":
