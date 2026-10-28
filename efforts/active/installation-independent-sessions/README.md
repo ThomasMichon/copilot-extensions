@@ -209,6 +209,9 @@ and [repair register](reconstruction-findings.md) retain the evidence and limits
 - [x] Land and natively qualify the dormant finite POSIX phase transport
   (#9395), including shared read/EOF deadlines and provider-group settlement.
   Production selection, exact process birth and backend lifetime remain open.
+- [x] Let the existing setup provider resolve an omitted canonical birth token
+  and record post-preparation identity uncertainty (#9401). Native consumer
+  selection and actual backend child/exec ownership remain open.
 - [ ] Remove both deferred-setup and final-backend runtime-Python waiters.
   Reuse finite seed preparation, existing seed custody and execution receipts;
   the native shell owns the actual child handle and wait. The normalized
@@ -530,8 +533,43 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   installed qualification. No source merge is installed-removal, shared
   standby or task-lifecycle acceptance, and no selected-host effect occurred.
 
+### 2026-10-28 - Dormant POSIX exec-boundary qualification
+
+- The next source trace confirmed that starting a Bash asynchronous job is
+  not a backend exec receipt and changes stdin/signal behavior. Keep the
+  native foreground child and exec-replace its transient interpreter instead.
+  A finite close-on-exec observer uses the existing seed/execution owners;
+  double-fork/reap prevents an observer zombie under the live backend, while
+  remaining in the caller's containment group preserves bounded test custody.
+- This provider-first candidate adds an optional described exec mode, not a
+  production consumer. Fast backend exit may make live PID/birth observation
+  unknown; it must never become definite exec failure or seed restoration.
+  Physical-terminal interrupt, current-runtime consumer selection and both
+  production POSIX waiter removals remain unchecked.
+- Windows provider compatibility passed 68 focused controls. Native Linux
+  and stock macOS Bash 3.2 execution, full required gates and review remain
+  pending; this entry is not acceptance or rollout evidence.
+
 ### 2026-10-28 - Provider-owned setup birth prerequisite
 
+- #9401 merged as `dead00dd6d7cb85743d77270cd83abf8b3689984` after genuine
+  exact-head Copilot approval `5682889134` on
+  `f2c7d37c3440b9050da59b3b84020b84dd296c57`, no findings and all required
+  provider checks green. Normal managed completion verified the actual merge
+  and reconciled the retained source worktree; the recovery ref remains.
+- Exact-head native run `40690933057` passed all three jobs. Linux Bash 5.2.21
+  and stock macOS Bash 3.2.57 each passed 127 provider/reader/phase/copy controls
+  with 17 Windows-only skips; Windows passed nine setup/admission controls
+  and the independent Picker-handoff control. The prepublication unit packet
+  passed 2,565 with 12 deselected in 87.000 seconds, coverage once; managed
+  publication changed only unrelated upstream documentation, not admitted
+  unit inputs or the tested provider implementation.
+- Re-read the parent Plan and Validation Plan after merge. Closed only this
+  setup-provider prerequisite. Continue conditional copied POSIX consumer
+  selection and actual native backend child/exec ownership, including fast
+  exit, real stdin/TTY, Ctrl+C, exact birth and post-exit receipts. Both
+  production POSIX runtime waiters and whole-effort live/standby/release
+  acceptance remain open. No selected-host action or rollout was performed.
 - The continuing POSIX trace found that setup needs the existing shell PID's
   canonical birth token before any preparation effect. Resolve an omitted
   setup token inside the existing finite provider with `locks.process_start_time`,

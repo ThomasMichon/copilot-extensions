@@ -225,11 +225,12 @@ def main() -> int:
         "contract": "agent-worktrees.native-seed", "version": 1,
         "preparation_output_formats": ["json", "nul"], "nul_reply_schema": NUL_REPLY_SCHEMA,
         "setup_process_start_time_sources": ["caller", "provider"],
+        "backend_execution_modes": ["posix-exec-v1"] if os.name == "posix" else [],
     }))
     parser.add_argument("--contract-version", type=int, choices=[1], required=True)
     parser.add_argument("--output-format", choices=["json", "nul"], default="json")
     parser.add_argument(
-        "--phase", choices=["prepare", "setup", "spawned", "spawn-failed", "returned", "interrupted"],
+        "--phase", choices=["prepare", "setup", "spawned", "spawn-failed", "returned", "interrupted", "exec"],
         required=True,
     )
     parser.add_argument("--root", type=Path, required=True)
@@ -246,10 +247,13 @@ def main() -> int:
     parser.add_argument("--process-start-time")
     parser.add_argument("--exit-code", type=int)
     parser.add_argument("--receipt-uncertain", action="store_true")
+    parser.add_argument("--completion-file", type=Path)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     try:
+        if args.completion_file is not None and args.phase != "exec":
+            raise ValueError("Exec completion cannot be used by another phase")
         if args.output_format == "nul" and args.phase not in {"prepare", "setup"}:
             raise ValueError("Literal field replies are only available for preparation")
         require_current_runtime(args.root)
@@ -269,6 +273,19 @@ def main() -> int:
                 native_resume_session=args.native_resume_session, pid=args.pid,
                 process_start_time=args.process_start_time,
             )
+        elif args.phase == "exec":
+            if (
+                not correlation or not args.operation_id or not args.completion_file
+                or args.output_format != "json" or args.seed_id or args.admission_only
+                or args.preserve_seed_id or args.native_resume_session or args.receipt_uncertain
+                or any(value is not None for value in (args.pid, args.process_start_time, args.exit_code))
+            ):
+                raise ValueError("Exec requires only its prepared backend identity and completion file")
+            from .launch_seed_posix import execute
+
+            code = execute(args.record, correlation, args.operation_id, command, args.completion_file)
+            print("Native backend exec was not confirmed; inspect the retained handoff.", file=sys.stderr)
+            return code
         else:
             if (
                 not correlation or not args.operation_id or command or args.seed_id
