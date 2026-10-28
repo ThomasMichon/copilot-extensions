@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** `visions/session-hosting/README.md` - installation-independent-running-sessions; `visions/plugin-services/disposable-runtimes/README.md` - shared-maintenance-banner and service-independent-agent-standby; `visions/plugin-services/README.md` - process-count-scales-with-services-not-sessions and hooks-and-callbacks-are-transient
 - **Umbrella issue:** #8669
-- **Related issues:** #5579 (existing launch-depth owner), #8410 (Linux uninstall), #8312 (Windows updater handoff), #8864 (supported Manager uninstall)
+- **Related issues:** #5579 (existing launch-depth owner), #8410 (Linux uninstall), #8312 (Windows updater handoff), #8864 (supported Manager uninstall), #9357 (disabled-task cold start), #9358 (native-GC diagnostics); existing reconstruction/maintenance owners in [the repair register](reconstruction-findings.md)
 
 ## Guiding Intent
 
@@ -153,6 +153,15 @@ again around those replacement sessions. Cleanup explicitly excludes runtime
 state and configuration. The [literal follow-up](inception-transcript.md#operator---per-worktree-admission-and-two-cycle-live-test)
 retains these constraints; private host identity stays outside this repository.
 
+**Reconstruction and task-lifecycle clarification (summary):** track all
+reconstruction findings in this effort, reusing existing owners and adding the
+two scoped issues #9357/#9358. Installed background tasks should remain runnable
+but do no work while the applicable KillSwitch is active; they wait, check
+occasionally, then resume loops/subscriptions on clearance. This is not
+OS-level disablement. Separately, uninstall de-registers owned tasks, whereas
+normal in-place update preserves registrations. The [literal follow-up](inception-transcript.md#operator---reconstruction-findings-and-cooperative-task-standby)
+and [repair register](reconstruction-findings.md) retain the evidence and limits.
+
 ## Plan
 
 ### Phase 1 - Reviewed contract and shared ownership
@@ -204,6 +213,10 @@ retains these constraints; private host identity stays outside this repository.
     preserve the separate seed and lifecycle owners. POSIX parity and removal
     of broader tracked-launch serialization, plus the separate `pane_create`
     new-session fallback, remain separate unchecked work.
+  - [x] Land provider-first per-worktree lifecycle exclusion in native launch
+    and tracked retirement, retaining the legacy repository barrier (#9339).
+    This does not activate narrower launch locking for independently running
+    retirement peers.
 - [ ] Prepare launch arguments/environment before the stable wrapper; copy
   its self-contained platform shell into launch-owned storage outside both
   removable runtime/config roots, with installer/pruning ownership explicit.
@@ -255,6 +268,23 @@ retains these constraints; private host identity stays outside this repository.
 
 ### Phase 5 - Release, installed acceptance and closure
 
+- [ ] Audit executable scripts, configuration, durable runtime state and
+  disposable temporary state as separate lifetimes. Record mixed storage
+  boundaries and derive follow-up work against the disposable-runtimes vision;
+  do not turn this audit into a prerequisite for the authorized live cleanup.
+- [ ] Resolve the [reconstruction repair register](reconstruction-findings.md):
+  stale selectors and wrappers, cold-start/maintenance interaction, lost
+  diagnostics, opaque GC deferral, readiness scope and complete owner coverage.
+  Reuse linked existing owners; tracking does not claim their implementation.
+- [ ] Implement the operator's cooperative task/registrar standby requirement:
+  remain runnable, check the applicable KillSwitch, do no work and wait while
+  held, then resume existing loops and subscriptions after clearance. Do not
+  substitute OS-level task disablement, silent re-enablement or a direct-start
+  bypass. Coordinate #7694/#6820 and #9357.
+- [ ] Keep lifecycle operations distinct: supported uninstall de-registers
+  owned tasks; a normal in-place update preserves registrations and enablement
+  intent; a maintenance hold keeps installed tasks runnable but quiescent.
+  The manual program wipe is not supported-uninstaller conformance evidence.
 - [ ] Verify containing normal Main release and exact released behavior.
 - [ ] Obtain any required selected-host rollout approval, use the canonical
   updater, and validate a fresh native launch/exit. Existing sessions may
@@ -300,9 +330,10 @@ operator's installation-survival contract.
     `sessions.mux_new_session`, actual shared kernel-lease release, literal
     arguments and failure handoff retention (#9320). This does not qualify
     actual PSMux, complete tracked-launch parallelism or the pane fallback.
-  - [ ] Expand native launch and all tracked-retirement readers to the same
+  - [x] Expand native launch and all tracked-retirement readers to the same
     separate per-worktree lifecycle lease while retaining the legacy repository
-    barrier. Qualify independently running retirement peers before migration
+    barrier (#9339).
+  - [ ] Qualify independently running retirement peers before migration
     removes that barrier; source/payload freshness is not peer support.
 - [ ] Linux clean room: install A, launch an interactive owned session,
   actually uninstall both systems, prove their runtime roots are gone, install
@@ -340,6 +371,17 @@ operator's installation-survival contract.
   accidentally release an established hold. Applicable clearance ends only the
   owned standby poll; restored capability is verified before continuation,
   independent disables stay disabled, and unknown effects are not replayed.
+- [ ] Background tasks and registrars remain runnable across a maintenance
+  hold. Prove no work is admitted while held, occasional checks continue, and
+  clearance resumes the existing loops/subscriptions without lost custody,
+  duplicate workers, scheduler enablement changes or dependence on a removed
+  runtime merely to wait. Preserve a separately explicit OS/service disable.
+- [ ] Actual supported uninstall removes owned task registrations, while
+  ordinary in-place update preserves them and their enablement intent.
+  Exercise this separately from manual program-folder cleanup.
+- [ ] Every [reconstruction finding](reconstruction-findings.md) has a resolved
+  implementation/validation result or an explicit transfer to its named
+  tracked owner; later success does not retroactively diagnose an earlier error.
 - [ ] Existing exit-noise controls still pass: successful finalization stays
   quiet, cleanup remains a bounded summary and updated batch tails remain valid.
 - [ ] Normal release, explicitly approved selected-host installed validation,
@@ -373,6 +415,32 @@ and does not delay final Copilot exit indefinitely merely to deliver a lifecycle
 notice; the existing bounded/quiet absent-handler contract remains intact.
 
 ## Journal
+
+### 2026-10-28 - Reconstruction findings and cooperative standby direction
+
+- The selected-host program cleanup and ordinary reconstruction exposed stale
+  selection records, a disabled-task cold-start boundary and missing nested
+  installer diagnostics. Created #9357/#9358 and retained existing
+  uninstall/repair, diagnostics, readiness and maintenance owners in the
+  [repair register](reconstruction-findings.md). Operational identifiers,
+  backups and adopter-specific artifacts remain outside this public effort.
+- Rebuilt runtimes and later serving checks are recovery evidence, not proof
+  that every original failure is diagnosed. In particular, the Bridge
+  disabled-task explanation is source-grounded but its original exception
+  was not retained. The Index status/health differential still needs scope
+  classification rather than assuming a broken opt-in gate.
+- The operator clarified **run, but do no work**: tasks/registrars remain
+  runnable, periodically check the KillSwitch, and resume loops/subscriptions
+  after clearance. Updated the standing vision and explicit Plan/Validation
+  gates. `Disable-ScheduledTask` is not that mechanism; current independent
+  disablement must not be bypassed while implementing the replacement.
+- The operator separately clarified that uninstall de-registers owned tasks,
+  unlike normal in-place update. Recorded this as explicit Plan/Validation
+  acceptance. The manual wipe retained registrations and is not evidence that
+  a supported uninstaller violates that requirement.
+- The fresh baseline had no active mux panes. This cleanup/reconstruction
+  does not close same-process interactive mux survival, native standby,
+  full launch parity or the two-cycle acceptance gates. The effort stays Active.
 
 ### 2026-10-27 - Literal POSIX preparation transport prerequisite
 
@@ -1473,3 +1541,27 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   exclusion intent, not closure of whole-path or either live cycle.
 - The effort remains Active in this same worktree. No selected-host backup,
   installation, service, banner or native conversation has been changed.
+
+### 2026-10-27 - Additive lifecycle fence merged; migration remains gated
+
+- #9339 merged as `5456dacedae6e3f6a94cedef90f708ee18c0e295`.
+  Copilot review `5677462473` approved exact head
+  `42c427580cc5694dfe87fdc831d9859390e01d26` with no open findings;
+  required CI and source attribution passed. The managed Maintainer flow
+  used its ordinary additional-review exception, not a CI bypass.
+- Managed publication rebased onto current `dev` without changing the ten
+  tested source/test paths. The 217-test retirement packet and final
+  119-test launch packet remain applicable. Normal managed pull-forward
+  then advanced this worktree to the verified merge, retaining recovery refs.
+- Re-read every Plan and Validation item. Closed only the provider-first
+  lifecycle expansion subitems; split peer qualification into its own open
+  gate. Whole-path parallel admission, pane creation, POSIX, real mux/TTY,
+  maintenance standby, release/installed proof and both live cycles stay open.
+- Next stretch: trace the existing resident retirement owner's readiness and
+  version/capability/cutover contract. Determine how launch can qualify the
+  actual independently running owner before narrowing repository locking,
+  including old/unknown-peer and rollback controls. Do not equate current
+  source or payload with current resident support, introduce a parallel
+  daemon, or activate a fleet update as a side effect of that investigation.
+- This same worktree continues the effort and is not finalized. No host
+  installation, service or native conversation was changed.

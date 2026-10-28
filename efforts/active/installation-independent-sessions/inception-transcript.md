@@ -5,6 +5,30 @@ Back to the [canonical effort](README.md).
 The operator's literal proposal is retained below, including original typos.
 The effort README labels subsequent agent-recommended controls separately.
 
+## Operator - Reconstruction findings and cooperative task standby
+
+> Don't re-enable the task triggers
+
+> Let's track all these issues and put them into our effort for fixing
+
+The operator selected reuse of existing trackers plus two scoped new issues.
+
+> What disabled the task? My wish for the way tasks are disabled is that they run, but check for a KillSwitch, and if the KillSwitch id active, they just no-op and sleep, checking occasionally for the KillSwitch to clear. When it clears, they go back to work, resuming their loops and subscriptions. Basically a "run, but do no work" mode, not a disabled-in-system mode
+
+> Oh, I see. Ideally uninstall would have *de-registered* the task, too, though (a normal in-place update wouldn't)
+
+The agent acknowledged that it had used `Disable-ScheduledTask`, which disables
+the whole Windows task, not just automatic triggers. That is not the requested
+cooperative standby behavior. The manual program wipe retained registrations;
+it was not a complete supported uninstall and does not prove that a supported
+uninstaller fails to de-register them. Current operational settings and the public
+should-be requirement are separate; an implementation proposal is not evidence
+that a running task already honors the hold.
+
+## Operator - Storage lifetime separation
+
+> It's worth auditing how entangled config state, persisted runtime state, temporary runtime state, and runtime scripts are with each other. This could stand to be segmented better, so that our desired "safe uninstall" could practically be done by deleting a handful of folders. Obviously, we want a proper uninstall flow for each service, and worktree manager, but conceptually this is a good "goal"
+
 ## Operator - Reviewed native phase deadline
 
 The agent presented this decision after actual Windows current-runtime phases
