@@ -59,6 +59,7 @@ def test_native_pane_fixture_drops_parent_mux_session(tmp_path, monkeypatch, key
 
 def _powershell_producer(
     tmp_path: Path, wrapper: Path, argv: list[str], *, timeout: float = 15,
+    launch_owned: bool = False,
 ) -> list[str]:
     source = (WRAPPER.parent / "launch-session.ps1").read_text("utf-8")
     start = source.index("                    $paneArgsRoot = Join-Path")
@@ -69,7 +70,8 @@ def _powershell_producer(
     script.write_text(
         "$paneWrapper=$args[0]\n"
         "$RuntimeDir=$args[2]\n"
-        "$paneLaunch=Join-Path (Split-Path -Parent $paneWrapper) 'pane-launch.ps1'\n"
+        + ("$paneManagerRoot=$args[2]\n" if launch_owned else "$paneManagerRoot=$null\n")
+        + "$paneLaunch=Join-Path (Split-Path -Parent $paneWrapper) 'pane-launch.ps1'\n"
         "$inputJson=[System.Text.Json.JsonDocument]::Parse([IO.File]::ReadAllText($args[1]))\n"
         "$wrapperArgs=@($inputJson.RootElement.EnumerateArray() | ForEach-Object { $_.GetString() })\n"
         "$inputJson.Dispose()\n"
@@ -87,16 +89,20 @@ def _powershell_producer(
     return json.loads(result.stdout)
 
 
-def _run(manifest: Path, env: dict[str, str], *, receipt: Path | None = None) -> subprocess.CompletedProcess:
+def _run(
+    manifest: Path, env: dict[str, str], *, receipt: Path | None = None,
+    launcher: Path = LAUNCHER,
+) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [PWSH, "-NoProfile", "-NoLogo", "-File", str(LAUNCHER),
+        [PWSH, "-NoProfile", "-NoLogo", "-File", str(launcher),
          "-Manifest", str(manifest), *(["-Receipt", str(receipt)] if receipt else [])],
         capture_output=True, text=True, encoding="utf-8", timeout=15, env=env,
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
 
 
-def test_manifest_round_trip_and_fresh_retry(tmp_path):
+@pytest.mark.parametrize("launch_owned", [False, True])
+def test_manifest_round_trip_and_fresh_retry(tmp_path, launch_owned):
     child = tmp_path / "child with spaces.ps1"
     child.write_text(
         "[IO.File]::WriteAllText($args[0], "
@@ -106,16 +112,29 @@ def test_manifest_round_trip_and_fresh_retry(tmp_path):
     expected = ["", "two words", 'a"quote', "a'quote", "trailing\\",
                 "$literal; & text", "--allow-all", "\u03bb", "2026-10-08T12:00:00Z"]
     env = _test_env(tmp_path)
+    wrapper = WRAPPER
+    if launch_owned:
+        shell = tmp_path / "launch-attempts" / ("a" * 32) / ("b" * 32 + ".shell")
+        shell.mkdir(parents=True)
+        wrapper = shell / WRAPPER.name
+        shutil.copy2(WRAPPER, wrapper)
+        shutil.copy2(LAUNCHER, shell / LAUNCHER.name)
     for attempt in range(2):
         output = tmp_path / f"captured-{attempt}.json"
         command = _powershell_producer(
-            tmp_path, WRAPPER,
+            tmp_path, wrapper,
             [PWSH, "-NoProfile", "-File", str(child), str(output), *expected],
+            launch_owned=launch_owned,
         )
         manifest = Path(command[-1][1:-1].replace("''", "'"))
         receipt = Path(str(manifest) + ".receipt.json")
         try:
-            result = _run(manifest, env, receipt=receipt)
+            if launch_owned:
+                assert manifest.parent == wrapper.parent / "pane-args"
+                assert not manifest.is_relative_to(tmp_path / "runtime")
+            result = _run(
+                manifest, env, receipt=receipt, launcher=wrapper.with_name(LAUNCHER.name),
+            )
             assert result.returncode == 0, result.stderr
             assert json.loads(output.read_text("utf-8")) == expected
             assert not manifest.exists()
@@ -495,6 +514,12 @@ def test_launcher_retry_regenerates_consumed_manifest(tmp_path):
         "$wrapperArgs=@('payload','two words')\n$ahpArgs=@()\n$envFlags=@()\n"
         "function Assert-AwColdResume {}\n"
         "function Write-SetupLog {}\nfunction Write-SetupStatus {}\n"
+        "function Enter-AwMuxCreation { [IO.File]::Open("
+        "(Join-Path $RuntimeDir 'fixture-creation.lock'),"
+        "[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None) }\n"
+        "function Invoke-AwPsmuxCreation([string[]]$CommandArgs,[IO.FileStream]$Lease) {\n"
+        " & $script:AwPsmuxBin @CommandArgs\n"
+        " Set-Variable -Name LASTEXITCODE -Value $LASTEXITCODE -Scope 1\n}\n"
         "$script:stops=0\nfunction Stop-AwOwnedPsmuxSession { $script:stops++ }\n"
         "function Read-AwMuxRetryChoice { $false }\n"
         + source[helper_start:helper_end] + "\n"
@@ -548,8 +573,9 @@ def test_manifest_write_failure_keeps_original_error_through_retry_cleanup(tmp_p
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {
-        "attempts": 3, "stops": 3, "code": 1, "error": "synthetic manifest write failure",
+        "attempts": 3, "stops": 0, "code": 1, "error": "synthetic manifest write failure",
     }
+    assert not list((tmp_path / "pane-args").glob("aw-pane-*"))
     assert not result.stderr
 
 

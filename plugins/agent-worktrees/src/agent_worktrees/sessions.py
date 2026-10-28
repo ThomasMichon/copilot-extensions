@@ -1804,7 +1804,10 @@ def _mux_pane_cmd(
             return clean + [
                 "bash", wrapper, "--aw-wt", worktree_id, *controls, *cmd,
             ]
-        return file_mux_pane_cmd(wrapper, ["-AwWt", worktree_id, *controls, *cmd])
+        return file_mux_pane_cmd(
+            wrapper, ["-AwWt", worktree_id, *controls, *cmd],
+            launch_owned=bool(boundary_controls),
+        )
     if controls:
         raise RuntimeError(
             "pane wrapper is required for launch receipt or native interactive prompt transport"
