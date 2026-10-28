@@ -193,6 +193,23 @@ evicts -- the primary's relay; local elevated agents reuse the primary's relay o
 the same host. The `enable_credential_relay` config flag (default `true`) gates
 relay startup in the `app.py` lifespan.
 
+## HTTP contract compatibility
+
+The HTTP client selects the highest shared contract from its own supported range
+and the running daemon's `/health` advertisement, then checks the operation's
+feature floor. Package-release equality is not required. Negative, inverted or
+disjoint numeric ranges cannot authorize a versioned operation.
+
+The existing per-attempt request fence rechecks both range endpoints and required
+capabilities before sending, including after a definite connection refusal or
+peer replacement. A disjoint range produces a 426 response naming both ranges
+without sending that attempt; an ambiguous prior mutation is never replayed.
+Unversioned peers retain the documented legacy baseline, not assumed support for
+versioned features. This implements the existing
+[version-skew-safe contract pattern](../../../docs/patterns/service-contract-evolution.md)
+without adding a handshake, changing wire generations or completing the separate
+durable/session-pinning programme.
+
 ## Persistent SSH Carrier Foundation
 
 Agent Bridge owns a persistent SSH carrier pool through the same
