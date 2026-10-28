@@ -249,7 +249,7 @@ is still running and its failures must be resolved before publication.
 The exact #8949 overlap was inspected and a disjoint boundary recorded in its
 thread: its bounded retained-content reader block is unchanged. No response
 from that owner is claimed. The current synchronized engine consumers are
-seven runtime plugins, standalone Manager and the update-driver foundation;
+the Python adopters declared by `tools/installer_engine_ref.py`;
 this is not a claim that all thirteen runtime installers execute this path.
 An actual-backend hosted partition is added for Linux and Windows. Local
 upstream-wheel retrieval failed TLS negotiation through two clients, so that
