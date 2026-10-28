@@ -55,6 +55,7 @@ def _confirm_clear_publication(worktree_id: str, *, after: float, timeout: float
                     and not any(row.get(name) for name in (
                         "mux_session", "session_lock_live", "session_bound_live",
                         "session_bridge_live", "session_bare_orphan", "live_session_ids",
+                        "session_lock_stale", "stale_lock_pids",
                     ))
                 ):
                     return {"confirmed": True, "projection": head}
@@ -535,7 +536,10 @@ def reclaim_one(
     reaped = reclaim.reap_bound_copilots(
         targets, table=table, exit_timeout=3.0,
     ) if targets else []
-    ok = all(
+    selected_complete = target_start_times is None or set(target_start_times) <= {
+        item["pid"] for item in targets
+    }
+    ok = selected_complete and all(
         r["killed"] and not r.get("children_unconfirmed") and not r.get("children_identity_mismatch")
         for r in reaped
     )
@@ -546,6 +550,7 @@ def reclaim_one(
         worktree_id=worktree_id,
         force_pids=set(),
         table=table,
+        **({"session_ids": session_ids} if session_ids is not None else {}),
     )
     # A bridge Copilot reaped out from under agent-bridge can't run the bridge's
     # on-exit lock cleanup, so unlink the now-dead bridge.lock too -- otherwise

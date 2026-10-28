@@ -551,7 +551,7 @@ class TestReapBoundCopilots:
 
 
 @pytest.mark.parametrize("outcome", [
-    "clear", "timeout", "new-owner", "probe-error", "reused-pid", "protected-owner",
+    "clear", "timeout", "new-owner", "probe-error", "reused-pid", "protected-owner", "lost-lock",
 ])
 def test_reclaim_one_requires_fresh_clear_binding_before_success(monkeypatch, tmp_path, outcome):
     from agent_worktrees import reclaim_cli
@@ -567,6 +567,8 @@ def test_reclaim_one_requires_fresh_clear_binding_before_success(monkeypatch, tm
     replacement = {"session_id": "replacement", "pid": 77778, "start_time": "200", "homing": "bare"}
     protected = {"session_id": "protected", "pid": 77779, "start_time": "300", "homing": "mux"}
     live = [original, protected] if outcome == "protected-owner" else [original]
+    if outcome == "lost-lock":
+        live = []
     monkeypatch.setattr(reclaim, "build_process_table", lambda: {})
     monkeypatch.setattr(reclaim, "descendants_of", lambda *a: set())
     monkeypatch.setattr(reclaim, "resolve_bridge_bound", lambda *a, **k: [])
@@ -613,6 +615,26 @@ def test_reclaim_one_requires_fresh_clear_binding_before_success(monkeypatch, tm
     elif outcome == "protected-owner":
         assert result["remaining_pids"] == [protected["pid"]]
         assert result["reason"] == "protected mux owner preserved"
+    elif outcome == "lost-lock":
+        assert result["targets"] == 0
+        assert result["reason"] == "process retirement unconfirmed"
+
+
+@pytest.mark.parametrize("live", [False, True])
+def test_registered_residue_cleanup_uses_binding_not_foreign_cwd(monkeypatch, tmp_path, live):
+    sid = "a18ec4d3-7288-4567-8444-123456789012"
+    entry = tmp_path / sid
+    entry.mkdir()
+    lock = entry / "inuse.77777.lock"
+    lock.write_text("fixture")
+    monkeypatch.setattr(reclaim.sessions, "_session_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(reclaim, "_session_cwd", lambda *a: r"C:\worktrees\other")
+    monkeypatch.setattr(reclaim, "_resolve_worktree_id_for_cwd", lambda *a: "other")
+    monkeypatch.setattr(reclaim.sessions, "_is_process_alive", lambda *a: live)
+    monkeypatch.setattr(reclaim.sessions, "_is_copilot_process", lambda *a: True)
+    result = reclaim.clear_lock_residue(worktree_id="wtA", session_ids=[sid])
+    assert lock.exists() is live
+    assert len(result) == (0 if live else 1)
 
 
 def test_reclaim_completion_waits_for_current_clear_publication(monkeypatch):

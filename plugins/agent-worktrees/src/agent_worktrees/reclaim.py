@@ -832,6 +832,7 @@ def clear_lock_residue(
     worktree_path: str | None = None,
     force_pids: set[int] | None = None,
     table: dict[int, dict] | None = None,
+    session_ids: list[str] | None = None,
 ) -> list[dict]:
     """Remove ``inuse.<pid>.lock`` residue for a worktree's session dirs.
 
@@ -862,7 +863,15 @@ def clear_lock_residue(
     removed: list[dict] = []
     if not state_dir.exists():
         return removed
-    for entry in sorted(state_dir.iterdir()):
+    if session_ids is None:
+        entries = sorted(state_dir.iterdir())
+    else:
+        from .session_projection import _valid_session_id
+
+        if any(not _valid_session_id(sid) for sid in session_ids):
+            raise ValueError("Invalid registered session identity")
+        entries = [state_dir / sid for sid in sorted(set(session_ids))]
+    for entry in entries:
         if not entry.is_dir():
             continue
         # Cheap gate: skip a dir with no lock file at all before paying for the
@@ -870,7 +879,10 @@ def clear_lock_residue(
         if not any(entry.glob("inuse.*.lock")):
             continue
         cwd = _session_cwd(entry)
-        wt = _resolve_worktree_id_for_cwd(cwd) if cwd else None
+        wt = (
+            worktree_id if session_ids is not None
+            else _resolve_worktree_id_for_cwd(cwd) if cwd else None
+        )
         if wt is None:
             try:
                 wt = tracking.find_worktree_id_by_session(entry.name)
