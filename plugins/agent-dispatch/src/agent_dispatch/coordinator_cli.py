@@ -342,15 +342,31 @@ def _add_cutover_flags(p: argparse.ArgumentParser) -> None:
 
 def _cmd_cutover(
     args: argparse.Namespace, *, conditional: ConditionalCutover | None = None,
-    routing_dir: Path | None = None,
+    routing_dir: Path | None = None, install_root: Path | None = None,
 ) -> int:
     """Zero-downtime graceful cutover -- shared by ``deploy`` and ``_cutover``."""
     from zdd import breadcrumb
     from zdd.cutover import CutoverOrchestrator
     from .action_controls import action_decision
-    from .install_paths import install_dir
+    from .install_paths import INSTALL_DIR_ENV, install_dir
 
-    policy_root = install_dir()
+    def refusal(message: str) -> int:
+        print(f"[FAIL] {message}", file=sys.stderr)
+        if getattr(args, "json", False):
+            _emit({
+                "ok": False, "error": message, "action": "coordinator-replacement",
+                "retryable": True,
+            })
+        return 3
+
+    if conditional is not None:
+        if install_root is None:
+            return refusal("conditional cutover requires its captured installation policy root")
+        policy_root = install_root
+    else:
+        if install_root is not None:
+            raise ValueError("an explicit installation root requires captured conditional context")
+        policy_root = install_dir()
 
     def admitted() -> bool:
         decision = action_decision("coordinator-replacement", root=policy_root)
@@ -361,9 +377,7 @@ def _cmd_cutover(
             f"source={decision.source} reason={decision.reason or '(none)'}"
             f"{'; ' + decision.error if decision.error else ''}"
         )
-        print(f"[FAIL] {message}", file=sys.stderr)
-        if getattr(args, "json", False):
-            _emit({"ok": False, "error": message, "action": decision.action, "retryable": True})
+        refusal(message)
         return False
 
     if not admitted():
@@ -394,16 +408,28 @@ def _cmd_cutover(
     core_time = getattr(cli, "time", time)
     reap_abandoned = _core_helper("_reap_abandoned_passive", _reap_abandoned_passive)
     reap_superseded = _core_helper("_reap_superseded_coordinators", _reap_superseded_coordinators)
-    # Overlay the installed service.env onto this process's own environment
-    # *before* deriving the cutover configuration, so a durable host/port (or
+    # Validate the installed service.env snapshot before publishing it into this
+    # process or deriving cutover configuration, so a durable host/port (or
     # control-token) pin set only in service.env -- not in the triggering
     # process's own ambient environment -- is honored for the cutover/health-
     # check bind, not just for the replacement process's own spawn below.
     from .install_paths import apply_service_env_overlay
-    from .install_paths import install_dir as runtime_install_dir
-
-    runtime_root = runtime_install_dir()
-    apply_service_env_overlay(os.environ, runtime_root)
+    runtime_root = policy_root
+    effective_env = dict(os.environ)
+    apply_service_env_overlay(effective_env, runtime_root)
+    proposed_root = effective_env.get(INSTALL_DIR_ENV)
+    if proposed_root != os.environ.get(INSTALL_DIR_ENV) and (
+        not proposed_root or Path(proposed_root).expanduser() != policy_root
+    ):
+        return refusal(
+            "service.env cannot redirect the selected cutover installation; "
+            "select the target installation before retrying"
+        )
+    context_key = "COPILOT_EXTENSIONS_CONTEXT"
+    if effective_env.get(context_key, "").strip() != os.environ.get(context_key, "").strip():
+        return refusal("service.env cannot change the selected cutover installation context")
+    effective_env[INSTALL_DIR_ENV] = str(policy_root)
+    os.environ.update(effective_env)
     cfg = _config.load_config()
     token = _client_token_value()
     wildcard_v4 = ".".join(("0", "0", "0", "0"))

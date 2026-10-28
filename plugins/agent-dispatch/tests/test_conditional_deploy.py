@@ -39,7 +39,9 @@ def test_conditional_legacy_refusal_preserves_native_route(tmp_path, monkeypatch
     args = argparse.Namespace(
         json=True, force=False, recover=False, health_timeout=0, drain_timeout=0
     )
-    assert coordinator_cli._cmd_cutover(args, conditional=request, routing_dir=tmp_path) == 1
+    assert coordinator_cli._cmd_cutover(
+        args, conditional=request, routing_dir=tmp_path, install_root=tmp_path,
+    ) == 1
     result = json.loads(capsys.readouterr().out)
     assert not result["ok"] and "snapshot unavailable" in result["error"]
     assert not result["retirement_requested"]

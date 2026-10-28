@@ -71,6 +71,19 @@ does not bypass policy. `--no-supervisor`/`-NoSupervisor` still removes native
 definitions; it is not a preservation option and remains a reconciliation
 effect.
 
+Legacy cutover captures its selected installation before reading `service.env`.
+That snapshot may supply ordinary host, port and credential pins, but cannot
+redirect the installation root or change `COPILOT_EXTENSIONS_CONTEXT`. A refused
+overlay leaves the caller's environment unchanged; select the intended
+installation explicitly before retrying. Root comparison preserves lexical
+parent traversal rather than normalizing away intermediate links.
+Internal conditional callers must supply the target's captured `install_root`
+alongside its captured `routing_dir` and conditional request. A missing policy
+root is an explicit refusal, not permission to use the caller's installation.
+Conditional deployment still skips caller configuration, `service.env` and
+legacy lock/recovery preludes; its native snapshot and ownership fences remain
+authoritative, including deliberately customized target routing.
+
 An inhibition of a required effect is not a successful full update. Early
 denial leaves active publication untouched. A later denial after an earlier
 effect committed remains a partial operation, not an atomic rollback guarantee.

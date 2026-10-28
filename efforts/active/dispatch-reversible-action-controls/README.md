@@ -380,3 +380,22 @@ Initial tests must prove the current gap before adding the guards.
   roots still refuse without changing policy or active state.
 - Re-review, release, the accepted preparation interface and real running
   qualification remain separate gates.
+
+### 2026-10-28 - Captured cutover policy scope
+
+- Assessed the next review's cross-installation warning against actual cutover
+  paths. Four regressions reproduced service-environment root/context redirects,
+  lexical alias normalization and a conditional target checked against the
+  caller's installation.
+- Legacy cutover validates its captured environment snapshot before publishing
+  any overlay. It refuses root/context redirects without changing caller state,
+  while retaining ordinary same-root, host and port pins.
+- Conditional callers now supply the target's captured policy root explicitly.
+  Missing context refuses before reading ambient installation state. Preserve
+  the existing conditional contract: no caller configuration or service overlay,
+  no legacy prelude, and no inferred relationship between caller routing and an
+  authoritative captured target snapshot.
+- The contained policy, conditional-deploy and deploy-CLI selection passed all
+  32 cases, including unrelated caller configuration and custom target routing.
+  Re-review and required checks remain pending; preparation, release and actual
+  adoption are still separate.
