@@ -226,14 +226,9 @@ try {
     catch [Threading.AbandonedMutexException] { $ownsReconcileMutex = $true }
     if (-not $ownsReconcileMutex) { Exit-SessionStart }
 
-    # Allow the installer's own bounded build + graceful cutover to finish first.
-    $deadlineSeconds = 1050
-    $deadlineRaw = $env:AGENT_DISPATCH_INSTALL_DEADLINE_SEC
-    if (-not $deadlineRaw) { $deadlineRaw = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC }
-    if ($deadlineRaw -and -not [int]::TryParse($deadlineRaw, [ref]$deadlineSeconds)) {
-        throw 'Invalid agent-dispatch installer deadline'
-    }
-    $staleSeconds = [Math]::Max(600, $deadlineSeconds + 60)
+    . (Join-Path $PSScriptRoot 'installer-watchdog.ps1')
+    # --- Good boot-citizen guard: single-flight + live-owner deferral ---
+    # Only the installer's native watchdog owns bounded tree termination.
     try {
         if (Test-Path $statusFile) {
             $prev = Get-Content -LiteralPath $statusFile -Raw -ErrorAction Stop |
@@ -250,37 +245,12 @@ try {
                     [DateTimeOffset]$recordedStart
                 } else { [DateTimeOffset]::Parse([string]$recordedStart) }
                 if ($previousProcess.StartTime.ToUniversalTime() -eq $startedAt.UtcDateTime) {
-                    $at = if ($prev.at -is [DateTime]) {
-                        [DateTimeOffset]$prev.at
-                    } else { [DateTimeOffset]::Parse([string]$prev.at) }
-                    if (([DateTimeOffset]::UtcNow - $at).TotalSeconds -lt $staleSeconds) {
-                        Exit-SessionStart
-                    }
-                    $reapProcess = Get-Process -Id ([int]$prev.launched_pid) -ErrorAction Stop
-                    try {
-                        [void]$reapProcess.Handle
-                        if ($reapProcess.HasExited -or
-                            $reapProcess.StartTime.ToUniversalTime() -ne $startedAt.UtcDateTime) {
-                            throw 'Reconcile process identity changed before retirement'
-                        }
-                        Assert-BootstrapAction
-                        & taskkill.exe /PID $reapProcess.Id /T /F *> $null
-                        if ($LASTEXITCODE -ne 0 -and -not $reapProcess.HasExited) {
-                            throw 'Could not retire the stale reconcile process tree'
-                        }
-                    } finally { $reapProcess.Dispose() }
+                    Exit-SessionStart
                 }
             }
-        } elseif (Test-Path $lockFile) {
-            $lockPid = 0
-            [void][int]::TryParse((Get-Content $lockFile -Raw -ErrorAction SilentlyContinue), [ref]$lockPid)
-            if ($lockPid -gt 0 -and (Get-Process -Id $lockPid -ErrorAction SilentlyContinue)) {
-                [Console]::Error.WriteLine("[$name] legacy reconcile PID $lockPid has no verified process birth time; leaving it running")
-                Exit-SessionStart
-            }
-        }
+        } elseif (Test-InstallReconcileLock -Path $lockFile) { Exit-SessionStart }
     } catch {
-        [Console]::Error.WriteLine("[$name] could not validate or retire prior reconcile: $($_.Exception.Message)")
+        [Console]::Error.WriteLine("[$name] could not validate prior reconcile: $($_.Exception.Message)")
         Exit-SessionStart
     }
 
@@ -291,6 +261,7 @@ try {
     # The worker claims its own identity after the parent publishes this attempt.
     $worker = @'
 $ErrorActionPreference = 'Continue'
+. '__WATCHDOG__'
 function Get-BootstrapActionAdmission {
 __ACTION_READER__
 }
@@ -323,7 +294,7 @@ function Update-ReconcileAttempt([bool]$Completed, [int]$Code, [string]$Diagnost
         }
         $utf8 = New-Object Text.UTF8Encoding($false)
         [IO.File]::WriteAllText('__STATUSFILE__', ($status | ConvertTo-Json -Compress), $utf8)
-        [IO.File]::WriteAllText('__LOCKFILE__', [string]$PID, $utf8)
+        Write-InstallReconcileLock -Path '__LOCKFILE__' -ProcessId $PID
         return $true
     } finally {
         if ($held) { $mutex.ReleaseMutex() }
@@ -375,6 +346,7 @@ exit $code
         Replace('__INSTALL_ROOT__', $InstallDir.Replace("'", "''")).`
         Replace('__SCRIPTS_ROOT__', $PSScriptRoot.Replace("'", "''")).`
         Replace('__MUTEX__', $mutexName).Replace('__ATTEMPT__', $attemptId).`
+        Replace('__WATCHDOG__', (Join-Path $PSScriptRoot 'installer-watchdog.ps1').Replace("'", "''")).`
         Replace('__STATUSFILE__', $statusFile.Replace("'", "''")).`
         Replace('__LOCKFILE__', $lockFile.Replace("'", "''")).`
         Replace('__RECONCILELOG__', $reconcileLog.Replace("'", "''")).Replace('__INSTALLER__', $reInner)
@@ -396,7 +368,7 @@ exit $code
         log = $reconcileLog
     } | ConvertTo-Json -Compress
     [IO.File]::WriteAllText($statusFile, $status, $utf8)
-    [IO.File]::WriteAllText($lockFile, [string]$proc.Id, $utf8)
+    Write-InstallReconcileLock -Path $lockFile -ProcessId $proc.Id
 } catch {
     [Console]::Error.WriteLine("[agent-dispatch] background reconcile could not start: $($_.Exception.Message)")
 } finally {

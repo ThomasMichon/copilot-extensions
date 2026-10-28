@@ -90,16 +90,16 @@ def test_platform_installers_honor_structured_runtime_root():
     assert "CONTEXTUAL_INSTALL=true" in posix
     assert "does not match validated installation context" in posix
     assert "structured installation context does not support action" in posix
-    assert "__aw_child" in posix
-    assert "__aw_watcher" in posix
+    assert "start_install_watchdog" in posix
+    assert '"$__aw_staged_payload"' in posix
     assert 'ok "Context runtime updated at $INSTALL_DIR"' in posix
 
     assert "[string]$InstallDir" in powershell
     assert "$ContextualInstall = [bool]$env:COPILOT_EXTENSIONS_CONTEXT" in powershell
     assert "-InstallDir does not match validated installation context." in powershell
     assert "Structured installation context does not support action" in powershell
-    assert "$contextChild.WaitForExit" in powershell
-    assert "taskkill.exe /PID $contextChild.Id /T /F" in powershell
+    assert "Wait-InstallWatchdog -Child $contextChild -Budget $contextBudget" in powershell
+    assert "-PhaseFile $env:COPILOT_PLUGIN_INSTALL_PHASE_FILE" in powershell
     assert 'Write-ServiceOk "Context runtime updated at $InstallDir"' in powershell
 
 

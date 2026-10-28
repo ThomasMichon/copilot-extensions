@@ -9,6 +9,7 @@
     "server/pyproject.toml"
   ],
   "installerReadiness": "installer-readiness.json",
+  "cutoverDeadlineSeconds": 900,
   "zeroDowntimeUpdate": true,
   "author": {
     "name": "Thomas Michon"

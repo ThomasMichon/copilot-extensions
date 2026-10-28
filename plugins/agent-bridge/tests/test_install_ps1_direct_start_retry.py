@@ -52,6 +52,7 @@ def test_failed_direct_starts_are_drained_and_retried(tmp_path, host):
     script = tmp_path / "harness.ps1"
     script.write_text(
         "$ErrorActionPreference = 'Stop'\n"
+        f". '{_INSTALL_PS1.with_name('installer-watchdog.ps1')}'\n"
         f"$LinkPython = '{fake_python}'\n"
         "$TaskName = 'agent-bridge-test-task-that-does-not-exist'\n"
         "function Test-ActiveIsForward { $false }\n"

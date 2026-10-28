@@ -80,6 +80,48 @@ except Exception:
 ' "$ReadStateFile" 2>/dev/null || echo ""
 }
 
+# Compatibility fallback for older/guard-only payloads without installer-watchdog.sh.
+# Keep its birth representation and legacy mtime tolerance identical to that helper.
+_reconcile_process_birth() {
+  local owner="$1" fields boot ticks rate started epoch
+  if [[ -r "/proc/$owner/stat" && -r /proc/stat ]]; then
+    fields="$(cat "/proc/$owner/stat")" || return 1
+    fields="${fields##*) }"
+    read -r -a fields <<<"$fields"
+    ticks="${fields[19]:-}"
+    boot="$(awk '$1 == "btime" {print $2}' /proc/stat)"
+    rate="$(getconf CLK_TCK)"
+    [[ "$ticks" =~ ^[0-9]+$ && "$boot" =~ ^[0-9]+$ &&
+       "$rate" =~ ^[0-9]+$ && "$rate" -gt 0 ]] || return 1
+    printf '%s\n' "$((boot * 1000 + ticks * 1000 / rate))"
+  else
+    started="$(LC_ALL=C TZ=UTC ps -p "$owner" -o lstart= 2>/dev/null)" || return 1
+    [[ -n "$started" ]] || return 1
+    epoch="$(LC_ALL=C date -u -d "$started" +%s 2>/dev/null ||
+      LC_ALL=C date -u -j -f '%a %b %e %T %Y' "$started" +%s 2>/dev/null)" || return 1
+    printf '%s\n' "$((epoch * 1000))"
+  fi
+}
+
+_reconcile_lock_live() {
+  local path="$1" owner recorded extra birth written
+  [[ -f "$path" ]] || return 1
+  if declare -F test_install_reconcile_lock >/dev/null; then
+    test_install_reconcile_lock "$path"
+    return $?
+  fi
+  read -r owner recorded extra <"$path" || true
+  [[ "$owner" =~ ^[0-9]+$ && "$owner" -gt 0 ]] || return 1
+  kill -0 "$owner" 2>/dev/null || return 1
+  birth="$(_reconcile_process_birth "$owner")" || return 0
+  if [[ -z "$recorded" ]]; then
+    written="$(stat -c %Y "$path" 2>/dev/null || stat -f %m "$path" 2>/dev/null)" || return 0
+    [[ "$birth" -le $((written * 1000 + 999)) ]]
+  else
+    [[ -z "$extra" && "$recorded" =~ ^[0-9]+$ && "$recorded" == "$birth" ]]
+  fi
+}
+
 _live_reconciling_plugins() {
   # Best-effort: the switch only prevents a NEW reconcile from starting; it
   # cannot stop one already running (a detached background process that
@@ -90,13 +132,13 @@ _live_reconciling_plugins() {
   # adopters (agent-bridge, agent-machines, agent-worktrees) don't use this
   # exact lock convention and aren't detected here -- see README.md's Known
   # limitations.
-  local scan_root lock pid name
+  local scan_root lock name watchdog
+  watchdog="$(dirname "${BASH_SOURCE[0]}")/installer-watchdog.sh"
+  if [[ -f "$watchdog" ]]; then source "$watchdog"; fi
   scan_root="${BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT:-$HOME}"
   for lock in "$scan_root"/.*/reconcile.lock; do
     [ -f "$lock" ] || continue
-    pid="$(tr -d '[:space:]' < "$lock" 2>/dev/null)"
-    [ -n "$pid" ] || continue
-    kill -0 "$pid" 2>/dev/null || continue
+    _reconcile_lock_live "$lock" || continue
     name="$(basename "$(dirname "$lock")")"
     echo "${name#.}"
   done

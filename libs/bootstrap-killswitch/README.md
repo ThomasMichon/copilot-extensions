@@ -90,12 +90,27 @@ it, when, and why, so a forgotten switch is discoverable rather than silent.
   that process is detached and outlives the session-start hook that spawned
   it. `on` best-effort detects this: most adopters guard their own
   background reconcile with a `~/.<plugin>/reconcile.lock` single-flight
-  file naming the live PID, and `on` scans every such lock under
+  file naming the live PID (optionally followed by its birth in epoch
+  milliseconds), and `on` scans every such lock under
   `$BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT` (defaults to the home
   directory; this override exists mainly for tests, since Windows
   PowerShell 5.1's `$HOME` automatic variable does not honor a reassigned
   `HOME` env var the way pwsh/bash do), warning by name if any are still
-  alive. This is **not exhaustive** -- `agent-bridge`, `agent-machines`,
+  alive. A recorded birth must match; a legacy PID-only lock must not
+  predate the current process's birth (with the native watchdog's 999ms
+  filesystem timestamp tolerance). If a live process's birth cannot be
+  queried, detection remains conservative, as in the watchdog. Scanning
+  never signals a process or modifies a lock.
+
+  Guards use their sibling native watchdog reader when available; older
+  or guard-only payloads retain equivalent self-contained checks, so the
+  switch does not acquire an installer dependency. The Python CLI adapts
+  its existing `agent-procutil` identity reader to the same epoch format.
+  Windows uses native process times, Linux uses boot time plus process
+  start ticks, and the macOS shell fallback uses whole-second `ps`/`date`
+  times. Windows or Git Bash tests do not qualify native Linux/macOS behavior.
+
+  This is **not exhaustive** -- `agent-bridge`, `agent-machines`,
   and `agent-worktrees` don't use this exact lock convention and are never
   detected this way. If `on` reports no warning, a diagnosis can still
   theoretically race one of those three plugins' own in-flight reconcile;

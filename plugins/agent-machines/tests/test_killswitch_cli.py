@@ -1,10 +1,52 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 
+import pytest
+
 from agent_machines import __main__ as cli
+
+
+@pytest.mark.parametrize(
+    "identity,expected",
+    [
+        ("windows:116444736123450000", 12345),
+        ("linux:boot:namespace:250", 1_002_500),
+        ("darwin:123:456789", 123_000),
+    ],
+)
+def test_reconcile_birth_uses_existing_identity_reader(monkeypatch, identity, expected):
+    from agent_procutil import _daemon_instance_identity
+    from agent_machines import killswitch_cli as switch
+
+    monkeypatch.setattr(_daemon_instance_identity, "birth_identity", lambda pid: identity)
+    monkeypatch.setattr(switch.Path, "read_text", lambda *args, **kwargs: "btime 1000\n")
+    monkeypatch.setattr(switch.os, "sysconf", lambda name: 100, raising=False)
+    assert switch._reconcile_process_birth(42) == expected
+
+
+@pytest.mark.parametrize("record", ["42 2000", "42"])
+def test_unreadable_birth_remains_conservatively_visible(
+    tmp_path, monkeypatch, capsys, record
+):
+    from agent_machines import killswitch_cli as switch
+
+    lock = tmp_path / ".example-plugin" / "reconcile.lock"
+    lock.parent.mkdir()
+    lock.write_text(record, encoding="utf-8")
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT", str(tmp_path))
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(tmp_path / "ks.json"))
+    monkeypatch.setattr(switch, "_pid_alive", lambda pid: True)
+
+    def unreadable(pid):
+        raise OSError("birth observation unavailable")
+
+    monkeypatch.setattr(switch, "_reconcile_process_birth", unreadable)
+    assert _run(["bootstrap-killswitch", "on", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["in_flight_reconciles"] == ["example-plugin"]
 
 
 def _run(argv: list[str]) -> int:
@@ -139,7 +181,10 @@ def test_on_detects_live_in_flight_reconcile(tmp_path, monkeypatch, capsys) -> N
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT", str(fake_home))
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(fake_home / "ks.json"))
 
-    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
     try:
         (lock_dir / "reconcile.lock").write_text(str(proc.pid), encoding="utf-8")
         rc = _run(["bootstrap-killswitch", "on", "test"])
@@ -186,7 +231,10 @@ def test_on_json_mode_includes_in_flight_reconciles(tmp_path, monkeypatch, capsy
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT", str(fake_home))
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(fake_home / "ks.json"))
 
-    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
     try:
         (lock_dir / "reconcile.lock").write_text(str(proc.pid), encoding="utf-8")
         rc = _run(["bootstrap-killswitch", "on", "test", "--json"])

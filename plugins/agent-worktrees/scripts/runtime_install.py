@@ -543,6 +543,7 @@ def install(
                 frontend=frontend, recover_adopted_manager=recover_adopted_manager,
             )
         version = candidate.slot.name
+        engine.enter_install_phase("cutover")
         print(
             f"Runtime {version}: candidate healthy (reused={candidate.reused}); "
             "retaining through publication", flush=True,
@@ -618,6 +619,10 @@ def settle_candidate(
         ))
         if previous is not None:
             custody.enter_context(runtime.retention_lease(root, previous))
+        # The ordinary parent already published its absolute deadline.
+        phase_file = os.environ.get("COPILOT_PLUGIN_INSTALL_PHASE_FILE")
+        if phase_file and not Path(phase_file).exists():
+            engine.enter_install_phase("cutover")
         print(f"Runtime {version}: verifying publication under its own interpreter", flush=True)
         _load_installed(lifecycle_slot if lifecycle_slot is not None else candidate_slot)
         if recover_adopted_manager:

@@ -150,6 +150,8 @@ function ConvertTo-NativeArgument {
     return $builder.ToString()
 }
 
+. (Join-Path $PSScriptRoot 'installer-watchdog.ps1')
+
 # === install-contract:test-persistent-environment -- keep byte-identical across installers ===
 function Get-CopilotPersistentEnvironmentVariable {
     param(
@@ -679,21 +681,9 @@ if ($ContextualInstall) {
         $env:COPILOT_PLUGIN_INSTALL_STAGED = 'context-install'
         $env:COPILOT_PLUGIN_STAGED_FROM = $contextPayload
         $env:AGENT_WORKTREES_RUNTIME_INPUTS = $RuntimeInputPlugin
-        $contextDeadline = 480
-        $contextDeadlineRaw = $env:AGENT_WORKTREES_INSTALL_DEADLINE_SEC
-        if (-not $contextDeadlineRaw) {
-            $contextDeadlineRaw = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC
-        }
-        if ($contextDeadlineRaw) {
-            $parsedContextDeadline = 0
-            $parsedContextDeadlineOk = [int]::TryParse(
-                [string]$contextDeadlineRaw,
-                [ref]$parsedContextDeadline
-            )
-            if ($parsedContextDeadlineOk) {
-                $contextDeadline = $parsedContextDeadline
-            }
-        }
+        $contextBudget = Get-InstallWatchdogBudget -Payload $contextStagedPayload -Name 'agent-worktrees'
+        $env:COPILOT_PLUGIN_INSTALL_PHASE_FILE = Join-Path $contextStage 'phase.json'
+        $env:COPILOT_PLUGIN_INSTALL_CUTOVER_BUDGET_SEC = [string]$contextBudget.CutoverSec
         $contextArguments = @(
             '-NoProfile',
             '-ExecutionPolicy',
@@ -717,6 +707,7 @@ if ($ContextualInstall) {
         $contextStart.CreateNoWindow = $true
         $contextStart.RedirectStandardOutput = $true
         $contextStart.RedirectStandardError = $true
+        $contextStartedAt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
         $contextChild = [Diagnostics.Process]::Start($contextStart)
         if (-not $contextChild) {
             Write-Error 'Context installer child could not be started.'
@@ -724,46 +715,18 @@ if ($ContextualInstall) {
         }
         $contextStdout = $contextChild.StandardOutput.ReadToEndAsync()
         $contextStderr = $contextChild.StandardError.ReadToEndAsync()
-        if (
-            $contextDeadline -gt 0 -and
-            -not $contextChild.WaitForExit($contextDeadline * 1000)
-        ) {
-            try {
-                & taskkill.exe /PID $contextChild.Id /T /F 2>&1 | Out-Null
-            } catch {}
-            try {
-                Stop-Process -Id $contextChild.Id -Force -ErrorAction SilentlyContinue
-            } catch {}
-            try {
-                Add-Content -LiteralPath (
-                    Join-Path $InstallDir 'reconcile.err.log'
-                ) -Value (
-                    (
-                        "[{0}] WATCHDOG-KILL agent-worktrees context install " +
-                        "exceeded {1}s deadline (child pid {2}); killed tree. " +
-                        "Stage: {3}"
-                    ) -f
-                    ((Get-Date).ToUniversalTime().ToString('s') + 'Z'),
-                    $contextDeadline,
-                    $contextChild.Id,
-                    $contextStage
-                )
-            } catch {}
-            $contextExitCode = 124
-        } else {
-            if ($contextDeadline -le 0) {
-                if (-not $contextChild.WaitForExit(10000)) {
-                    throw "Context installer child teardown is unsettled; retaining stage: $contextStage"
-                }
-                if (-not [Threading.Tasks.Task]::WaitAll(
-                    [Threading.Tasks.Task[]]@($contextStdout, $contextStderr), 10000
-                )) {
-                    throw "Context installer output is unsettled; retaining stage: $contextStage"
-                }
-            }
-            $contextExitCode = $contextChild.ExitCode
+        $contextExitCode = Wait-InstallWatchdog -Child $contextChild -Budget $contextBudget `
+            -StartedAt $contextStartedAt -PhaseFile $env:COPILOT_PLUGIN_INSTALL_PHASE_FILE `
+            -Name 'agent-worktrees' -Stage $contextStage `
+            -LogPath (Join-Path $InstallDir 'reconcile.err.log')
+        if (-not $contextChild.WaitForExit(10000)) {
+            throw "Context installer child teardown is unsettled; retaining stage: $contextStage"
         }
-        $contextChild.WaitForExit()
+        if (-not [Threading.Tasks.Task]::WaitAll(
+            [Threading.Tasks.Task[]]@($contextStdout, $contextStderr), 10000
+        )) {
+            throw "Context installer output is unsettled; retaining stage: $contextStage"
+        }
         [Console]::Out.Write($contextStdout.GetAwaiter().GetResult())
         [Console]::Error.Write($contextStderr.GetAwaiter().GetResult())
         Remove-Item -LiteralPath $contextStage -Recurse -Force -ErrorAction SilentlyContinue
@@ -793,7 +756,7 @@ if ($Action -eq 'uninstall') {
     }
 }
 
-# === install-contract:v4 self-stage -- keep byte-identical across plugins ===
+# === install-contract:v5 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
 # or times out -- it holds the SINGLETON `installed-plugins/<mkt>/<plugin>`
@@ -885,35 +848,23 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 # and log. The killed child's stage dir has a dead owner pid, so
                 # the next run's pid-guarded reap cleans it; its half-built slot
                 # has no completion marker, so it is tossed + rebuilt (retry).
-                # Deadline: <NAME>_INSTALL_DEADLINE_SEC, else
-                # COPILOT_PLUGIN_INSTALL_DEADLINE_SEC, else 480s; <=0 disables.
-                $__wdDeadline = 480
-                $__wdEnvVar = (($__selfStageName -replace '[^A-Za-z0-9]+', '_').ToUpper()) + '_INSTALL_DEADLINE_SEC'
-                $__wdRaw = [Environment]::GetEnvironmentVariable($__wdEnvVar)
-                if (-not $__wdRaw) { $__wdRaw = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC }
-                if ($__wdRaw) { [void][int]::TryParse([string]$__wdRaw, [ref]$__wdDeadline) }
+                $__wdBudget = Get-InstallWatchdogBudget -Payload $__selfStagedPayload -Name $__selfStageName
+                $env:COPILOT_PLUGIN_INSTALL_PHASE_FILE = Join-Path $__selfStageDir 'phase.json'
+                $env:COPILOT_PLUGIN_INSTALL_CUTOVER_BUDGET_SEC = [string]$__wdBudget.CutoverSec
                 $__selfStageArgs = (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $__selfStagedEntry) + $__selfStageFwd |
                     ForEach-Object {
                         '"' + ([regex]::Replace(
                             [regex]::Replace([string]$_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1'
                         )) + '"'
                     }) -join ' '
+                $__wdStartedAt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
                 $__wdChild = Start-Process -FilePath $__selfStageExe -PassThru -NoNewWindow `
                     -WorkingDirectory $env:USERPROFILE `
                     -ArgumentList $__selfStageArgs
-                # Windows PowerShell must retain the handle before waiting to preserve ExitCode.
-                $null = $__wdChild.Handle
-                if ($__wdDeadline -gt 0 -and -not $__wdChild.WaitForExit($__wdDeadline * 1000)) {
-                    try { & taskkill.exe /PID $__wdChild.Id /T /F 2>&1 | Out-Null } catch {}
-                    try { Stop-Process -Id $__wdChild.Id -Force -ErrorAction SilentlyContinue } catch {}
-                    $__wdLog = Join-Path (Join-Path $env:USERPROFILE ".$__selfStageName") 'reconcile.err.log'
-                    try {
-                        Add-Content -LiteralPath $__wdLog -Value ("[{0}] WATCHDOG-KILL {1}: install exceeded {2}s deadline (child pid {3}); killed tree. Slot lacks a completion marker -> will be tossed + retried. Stage: {4}" -f ((Get-Date).ToUniversalTime().ToString('s') + 'Z'), $__selfStageName, $__wdDeadline, $__wdChild.Id, $__selfStageDir)
-                    } catch {}
-                    exit 124
-                }
-                $__wdChild.WaitForExit()
-                exit $__wdChild.ExitCode
+                exit (Wait-InstallWatchdog -Child $__wdChild -Budget $__wdBudget `
+                    -StartedAt $__wdStartedAt -PhaseFile $env:COPILOT_PLUGIN_INSTALL_PHASE_FILE `
+                    -Name $__selfStageName -Stage $__selfStageDir `
+                    -LogPath (Join-Path (Join-Path $env:USERPROFILE ".$__selfStageName") 'reconcile.err.log'))
             } else {
                 throw 'self-stage requires a plugin identity before leaving the payload'
             }
@@ -923,9 +874,9 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
         exit 1
     }
 }
-# === end install-contract:v4 self-stage ===
+# === end install-contract:v5 self-stage ===
 
-# === install-contract:v4 smoke seam (test-only) -- keep byte-identical ===
+# === install-contract:v5 smoke seam (test-only) -- keep byte-identical ===
 # #935 install-flow test hook. When COPILOT_PLUGIN_INSTALL_SMOKE is set, prove
 # the self-stage/lock behavior WITHOUT a heavy venv build: this (post-stage)
 # process records where it is running from + the recorded marketplace origin,
@@ -944,10 +895,14 @@ if ($env:COPILOT_PLUGIN_INSTALL_SMOKE) {
         $__smokeGrandPid = 0
         if ($env:COPILOT_PLUGIN_INSTALL_SMOKE_GRANDCHILD) {
             try {
-                $__g = Start-Process -FilePath (Get-Process -Id $PID).Path -PassThru -WindowStyle Hidden `
-                    -ArgumentList @('-NoProfile', '-Command', "Start-Sleep -Seconds $([Math]::Max($__smokeSleep, 3600))")
+                $__grandStart = [Diagnostics.ProcessStartInfo]::new()
+                $__grandStart.FileName = (Get-Process -Id $PID).Path
+                $__grandStart.Arguments = "-NoProfile -Command `"Start-Sleep -Seconds $([Math]::Max($__smokeSleep, 3600))`""
+                $__grandStart.UseShellExecute = $false
+                $__grandStart.CreateNoWindow = $true
+                $__g = [Diagnostics.Process]::Start($__grandStart)
                 $__smokeGrandPid = $__g.Id
-            } catch {}
+            } catch { throw "Smoke grandchild launch failed: $_" }
         }
         ([ordered]@{
             ran_from     = $PSScriptRoot
@@ -957,11 +912,17 @@ if ($env:COPILOT_PLUGIN_INSTALL_SMOKE) {
             child_pid    = $PID
             grandchild_pid = $__smokeGrandPid
         } | ConvertTo-Json -Compress) | Set-Content -LiteralPath (Join-Path $__smokeHome 'smoke.json')
+        if ($env:COPILOT_PLUGIN_INSTALL_SMOKE_PHASE) {
+            Enter-InstallPhase -Name $env:COPILOT_PLUGIN_INSTALL_SMOKE_PHASE
+        }
         Start-Sleep -Seconds $__smokeSleep
-    } catch {}
+    } catch {
+        [Console]::Error.WriteLine("Smoke seam failed: $_")
+        exit 1
+    }
     exit 0
 }
-# === end install-contract:v4 smoke seam ===
+# === end install-contract:v5 smoke seam ===
 
 # #935: bound uv's per-request network wait so a hung index/download degrades to
 # "failed + retryable" rather than wedging the install; the self-stage watchdog
@@ -1205,6 +1166,7 @@ function Invoke-VersionedActivateInner {
             Write-ServiceWarn "Could not touch superseded slot mtime ($prevSlot): $($_.Exception.Message)"
         }
     }
+    Enter-InstallPhase -Name cutover
     $monitorWasLive = $false
     if (-not $ContextualInstall) {
         $prevHealthPP = $env:PYTHONPATH

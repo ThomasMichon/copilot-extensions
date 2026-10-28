@@ -2095,7 +2095,7 @@ to replace that dir with **os error 32** ("used by another process") — the pay
 freezes at the old version and reconcile keeps reverting the runtime toward it (the
 dev214↔dev230 drift saga).
 
-Fix — the **`install-contract:v4 self-stage`** prologue (byte-identical, at each
+Fix — the **`install-contract:v5 self-stage`** prologue (byte-identical, at each
 installer entry): when running from the marketplace payload, copy the **whole**
 payload into a **unique per-invocation** dir `~/.<name>/.install-stage/<ts>-<pid>/`
 and **re-exec from there**. The singleton payload is then touched only for the fast
@@ -2162,19 +2162,65 @@ piled up one-per-session and (pre-self-stage) locked the payload.
 Fix — the **self-stage parent doubles as a watchdog**: already outside the payload and
 wrapping the child's whole lifetime, it enforces a deadline and, on expiry, kills the
 **whole tree** via `taskkill /T` (Windows' subprocess-kill leaves grandchildren),
-logs `WATCHDOG-KILL` to `~/.<name>/reconcile.err.log`, and exits `124`. Deadline:
-`<NAME>_INSTALL_DEADLINE_SEC` → `COPILOT_PLUGIN_INSTALL_DEADLINE_SEC` → **480s**
-default; `<=0` disables. Secondary: `UV_HTTP_TIMEOUT` bounds each uv request so a hung
-download degrades to "failed + retryable" rather than wedging. Backstop:
-`bootstrap-check`'s single-flight + stale-reap.
+logs `WATCHDOG-KILL` with the current phase to `~/.<name>/reconcile.err.log`, and
+exits `124`. The build budget is selected by
+`<NAME>_INSTALL_DEADLINE_SEC` → `COPILOT_PLUGIN_INSTALL_DEADLINE_SEC` →
+`plugin.json`'s `installerDeadlineSeconds` → **480s**; an environment override
+`<=0` disables the inner watchdog. Secondary: `UV_HTTP_TIMEOUT` bounds each uv request so a hung
+download degrades to "failed + retryable" rather than wedging.
+`bootstrap-check` defers to a live reconcile owner regardless of its cached
+timestamp; it is not a second timeout authority. The native watchdog owns
+bounded tree termination and cleanup. A session hook never signals an existing
+process merely because a PID record is old. An explicitly disabled watchdog is
+therefore not silently overridden by a ten-minute hook timer.
+
+On Windows the parent retains the native child process handle and validates
+the captured birth identity before PID-based tree termination. An identity
+mismatch refuses termination explicitly; root fallback uses that retained
+`Process` instance, not an unbound PID. A child that exits during the deadline
+check returns its own exit status without a false timeout or PID action.
+The timeout log distinguishes a requested termination from a refused/failed
+attempt rather than claiming every attempt succeeded.
 
 Unified `agent-worktrees update` gives module and registered-runtime installers
-the selected positive watchdog deadline plus 30 seconds for cleanup and failure
-publication, instead of preempting the default watchdog at 300 seconds. A disabled
-watchdog (`<=0`) still leaves a finite 510-second updater safety bound. The
-worktrees self-installer retains its existing 600-second minimum, extended when
-a positive watchdog override plus cleanup grace exceeds it. Invalid deadline
-values fail explicitly before launching the installer.
+the selected positive build budget **plus the cutover budget plus 30 seconds**
+for cleanup and failure publication. A disabled inner watchdog still leaves a
+finite outer bound: 480 seconds plus the selected cutover budget plus 30
+(810 seconds with defaults). The worktrees self-installer retains its existing
+600-second minimum when that is larger. Invalid deadline values fail explicitly
+before launching the installer.
+Budgets use signed 32-bit integer seconds on every platform; out-of-range
+values fail explicitly rather than overflowing into a disabled watchdog.
+
+Every self-staging runtime packages the same native
+`scripts/installer-watchdog.ps1` / `.sh` helpers from `libs/installer-engine`;
+`tools/sync-installer-engine.py` maintains these independently of full engine
+adoption. This policy is available before a runtime or Python has been built,
+including Worktrees' separate structured-context staging path. Daemon cutover
+and start paths call `Enter-InstallPhase -Name cutover` /
+`enter_install_phase cutover`. The writer atomically publishes
+`{"phase":"cutover","extend_until":<Unix seconds>}` to the parent's unique
+`COPILOT_PLUGIN_INSTALL_PHASE_FILE` (`<stage>/phase.json`).
+The Python installer engine exposes `enter_install_phase("cutover")` for the
+same receipt contract. Worktrees calls it after the candidate passes health
+and before starting its synchronous settlement child, so settlement receives
+the selected cutover window while construction still uses the build deadline.
+Without an inherited phase path, the Python writer does nothing; invalid
+budgets or failed receipt publication refuse the transition before settlement.
+
+The v5 parent polls at most every five seconds, shortening the final wait to
+the deadline. Its deadline is `max(start + build, phase.extend_until)`,
+**capped at `start + build + cutover`** even across repeated phase entries.
+An absent receipt leaves the build deadline unchanged; an invalid receipt is
+reported and cannot extend it. `cutoverDeadlineSeconds` in `plugin.json` is
+an optional positive integer, defaulting to **300 seconds**. The parent's
+selected value is inherited by the phase writer, not rediscovered from a
+different installation. The smoke-only `COPILOT_PLUGIN_INSTALL_SMOKE_PHASE=cutover`
+seam exercises the same writer and deadline policy without starting a daemon.
+Its PowerShell seams fail nonzero when phase publication or fixture-child
+startup fails. The native smoke check requires a fresh boundary receipt and
+a child still running beyond the build budget before accepting successful
+completion; a fast exit alone cannot prove deadline extension.
 
 The shared command-lifecycle runner passes the caller's stdout and stderr
 explicitly to its native installer child, including the strict Windows Job
@@ -2188,11 +2234,41 @@ Plugins with a watchdog default other than 480 seconds declare that positive
 integer as `installerDeadlineSeconds` in `plugin.json`; unified update reads it
 only when neither deadline environment override is set. The declaration must
 match the plugin's own cross-platform installer defaults. Agent-dispatch declares
-1050 seconds for its longer activation/cutover lifecycle, so its default caller
-budget is 1080 seconds; an explicit disabled-watchdog override still uses the
-finite 510-second fallback. Invalid declarations fail before installer launch.
+1050 seconds for its longer activation lifecycle.
 
-The **agent-bridge Windows hook** serializes reconcile admission and status
+The daemon adopters declare longer cutover budgets rather than inheriting the
+generic 300 seconds: Index and MCP use 900 seconds; Bridge and
+Worktrees use 1200 seconds; Dispatch uses 1500 seconds. Index and MCP cover a 420-second cutover-lease wait
+followed by 60-second health and 300-second drain windows, with 120 seconds
+for surrounding lifecycle work. Bridge covers its Windows 180-second health
+window, 300-second drain and resulting 540-second lease wait. Worktrees also
+covers its separate 300-second installer-cutover lock before the standard
+lease/health/drain sequence. Dispatch publishes its receipt before waiting
+for the additional 450-second activation lock, while retaining the live
+supersession check inside that lock. Its cutover budget includes both lock
+windows, health, drain and surrounding lifecycle work. Discovery of
+supersession after waiting can leave a cutover receipt but still skips all
+service work. The generic default remains unchanged.
+
+Dispatch's actual default outer budget is therefore 2580 seconds
+(1050 build + 1500 cutover + 30 cleanup). Disabling its inner watchdog leaves
+2010 seconds (480 + 1500 + 30), not the generic 810-second fallback.
+Invalid declarations fail before installer launch. Operator-increased service
+windows beyond these declared bounds are not an unbounded watchdog extension.
+
+Bridge, CodeSpaces, Logger, Pull Requests, SSH and Vault bootstrap hooks submit
+through the [installation driver](../libs/update-driver/README.md), retaining
+their own installed-source admission and lifecycle contracts. They do not restore
+the older inline reconcile supervisor or add another timeout authority.
+Containers, Dispatch, MCP and Budget Guidance retain their inline single-flight
+guards; a live recorded owner is deferred to, never killed on age alone.
+Their native `reconcile.lock` receipts record the PID and process creation time
+in Unix milliseconds. A different birth permits a retry without signalling the
+unrelated process. Legacy PID-only locks defer only when the process predates
+the lock's write time, or its birth cannot be read; newly written locks always
+include birth evidence.
+
+The **agent-dispatch Windows hook** serializes reconcile admission and status
 publication with an installation-root-scoped global mutex, including across
 Windows login sessions. Each launch has an
 `attempt_id`; after the launch record is published, `launched_pid` identifies
@@ -2200,9 +2276,9 @@ the actual PowerShell installer supervisor, with `worker_started_at` guarding
 against PID reuse and `wrapper_pid` retaining the headless console wrapper for
 diagnostics (`wrapper_started_at` protects the initial pre-worker record).
 Legacy live PIDs without birth evidence are not automatically force-reaped.
-Stale reaping terminates that supervisor's whole tree, not only
-the console wrapper. The target's native handle is pinned and its birth identity
-revalidated immediately before signaling. Completion updates only its own
+The installer watchdog, not a session hook's cached timestamp, owns bounded
+tree termination using the pinned native handle and birth identity.
+Completion updates only its own
 attempt, so a late worker
 cannot overwrite a replacement's status. Invalid prior ownership metadata
 defers reconciliation with a diagnostic instead of risking another installer.
@@ -2610,8 +2686,9 @@ self-update cutovers that nothing ever wraps.
 
 Each live-service installer (`agent-bridge`, `agent-dispatch`) writes its
 own well-known, documented marker at `$INSTALL_DIR/update-in-progress`: a
-file containing a single epoch-seconds expiry (20 minutes past write time
-by default — generous past any observed real cutover), atomically published
+file containing a single epoch-seconds expiry (at least 20 minutes past write
+time, extended to cover the effective build-plus-cutover-plus-cleanup outer
+window), atomically published
 (temp-file + rename, never a truncate-then-write race for a reader) at the
 start of `do_update`'s/`do_start`'s live-service branch, **after** every
 "nothing to do" early return (an already-healthy daemon, a forwarded host
@@ -2631,8 +2708,9 @@ a small on-disk counter with a dedicated lock — **`flock` on a separate fd
 (never the main install-lock fd)** for `.sh`, a named
 **`System.Threading.Mutex`** for `.ps1` (the Windows cross-process
 primitive; `flock` has no Windows equivalent) — so the first caller to
-enter (count 0→1) writes the marker with a fresh expiry, later concurrent
-callers just increment, and only the caller that brings the count back to
+enter (count 0→1) writes the marker with a fresh expiry. A later concurrent
+caller increments the count and extends the expiry to cover its own full
+window, never shortening another holder's expiry. Only the caller that brings the count back to
 0 actually removes the marker. A same-process nested call (`do_update`
 calling `do_start` internally, where that pattern exists) is tracked via a
 process-local "already held" flag so it reuses the outer holder's slot
@@ -2944,7 +3022,7 @@ See [Manager's source contract](../worktree-manager/README.md#independent-runtim
 Namespaced source execution and profile-specific target selection
 are not inferred from this internal API.
 
-> **Self-stage caveat (#935).** When the `install-contract:v4 self-stage` prologue
+> **Self-stage caveat (#935).** When the `install-contract:v5 self-stage` prologue
 > re-execs out of the marketplace payload, the installer's *live* path is a
 > throwaway `~/.<name>/.install-stage/…` dir — which would read as `local`. The
 > resolver therefore honors **`COPILOT_PLUGIN_STAGED_FROM`** (the real payload path

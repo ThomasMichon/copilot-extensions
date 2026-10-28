@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,6 +26,221 @@ def modes(monkeypatch):
         monkeypatch.setitem(sys.modules, name, module)
         spec.loader.exec_module(module)
     return sys.modules["runtime_install_modes"]
+
+
+def _watched_settlement_probe(directory: Path, scenario: str, unhealthy: bool, watched: bool):
+    """Keep the real install -> mode bootstrap -> mode owner dispatch in one child."""
+    from contextlib import nullcontext
+    from agent_worktrees import status_monitor_cutover as cutover
+
+    with pytest.MonkeyPatch.context() as patch:
+        module = modes.__wrapped__(patch)
+        lifecycle = module.lifecycle
+        root, plugin = directory / "runtime", directory / "plugin"
+        (root / ".installer-inputs").mkdir(parents=True)
+        plugin.mkdir()
+        (plugin / "pyproject.toml").write_text(
+            '[project]\nname="agent-worktrees"\nversion="1.0.0"\n', encoding="utf-8",
+        )
+        phase = Path(os.environ["COPILOT_PLUGIN_INSTALL_PHASE_FILE"]) if watched else None
+        if not watched:
+            assert "COPILOT_PLUGIN_INSTALL_PHASE_FILE" not in os.environ
+        events = []
+        published_phases = []
+        enter_phase = lifecycle.engine.enter_install_phase
+
+        def publish_phase(name):
+            published_phases.append(name)
+            enter_phase(name)
+
+        patch.setattr(lifecycle.engine, "enter_install_phase", publish_phase)
+        provenance = dict(version="1.0.0", source="fixture", commit=None, branch=None,
+                          deployment_source='{"path":"fixture"}')
+        source = lifecycle.runtime_source
+        identity = source.SourceIdentity(
+            "agent-worktrees", "1.0.0", "a" * 40, "b" * 40, "c" * 64,
+            source.runtime_version("1.0.0", "a" * 40, "c" * 64),
+        ) if scenario == "fallback" else None
+        patch.setattr(source, "read_source_identity", lambda *a, **k: identity)
+        patch.setattr(source, "publish_source_snapshot", lambda *a: plugin)
+        patch.setattr(lifecycle, "_source_provenance", lambda *a: dict(provenance))
+        patch.setattr(lifecycle, "_load_installed", lambda *a: None)
+        patch.setitem(sys.modules, "agent_worktrees._build_info",
+                      SimpleNamespace(BUILD_INFO=provenance))
+        patch.setattr(lifecycle, "Governance", lambda requested, payload: SimpleNamespace(
+            root=requested, payload=payload, signature=lambda: {},
+            held=lambda **k: nullcontext(),
+        ))
+        patch.setattr(cutover, "_acquire_cutover_lock",
+                      lambda *a, **k: SimpleNamespace(release=lambda: None))
+        patch.setattr(lifecycle.engine, "freeze_inputs",
+                      lambda *a: SimpleNamespace(plugin=plugin))
+        patch.setattr(lifecycle.runtime, "slot_python", lambda *a: Path(sys.executable))
+        patch.setattr(lifecycle.runtime, "claim_dev", lambda *a, **k: None)
+        patch.setattr(module, "_resolve_owner", lambda *a, **k: directory)
+
+        @contextmanager
+        def candidate(requested, version=None, **kwargs):
+            assert phase is None or not phase.exists(), "construction left the build phase"
+            if scenario == "fallback" and not events:
+                events.append("failed-selected-health")
+                raise lifecycle.engine.HealthRepairRequired("selected runtime failed health")
+            events.append("control" if version == "control" else "candidate")
+            if unhealthy and version != "control":
+                raise RuntimeError("unhealthy construction")
+            yield SimpleNamespace(
+                frozen_plugin=plugin, payload_hash="healthy", reused=False,
+                slot=root / "versions" / str(version),
+            )
+
+        original_settle = lifecycle.settle_candidate
+
+        class SettlementObserved(Exception):
+            pass
+
+        def settle(*args, **kwargs):
+            def observe(_slot):
+                events.append("settle")
+                assert published_phases == (["cutover"] if watched else []), (
+                    "settlement must not renew its deadline or publish without a watchdog"
+                )
+                if watched:
+                    assert phase.is_file(), f"{scenario}: healthy settlement has no cutover receipt"
+                    assert json.loads(phase.read_text(encoding="utf-8"))["phase"] == "cutover"
+                else:
+                    assert "COPILOT_PLUGIN_INSTALL_PHASE_FILE" not in os.environ
+                raise SettlementObserved
+
+            with pytest.MonkeyPatch.context() as boundary:
+                boundary.setattr(lifecycle.runtime, "retention_custody",
+                                 lambda *a, **k: nullcontext((root / "versions" / "healthy", 0)))
+                boundary.setattr(lifecycle, "_load_installed", observe)
+                with pytest.raises(SettlementObserved):
+                    original_settle(*args, **kwargs)
+            return {"runtime_version": "settled"}
+
+        class Owner:
+            returncode = 0
+
+            def __init__(self, argv, **kwargs):
+                assert kwargs["env"].get("COPILOT_PLUGIN_INSTALL_PHASE_FILE") == (
+                    str(phase) if phase is not None else None
+                )
+                assert lifecycle.main(argv[4:]) == 0
+
+            def wait(self):
+                return 0
+
+            def communicate(self):
+                return "", ""
+
+        patch.setattr(lifecycle.engine, "numbered_candidate", candidate)
+        patch.setattr(lifecycle.engine, "dev_candidate", candidate)
+        if scenario == "dev-release":
+            (root / "versions" / "original").mkdir(parents=True)
+            lifecycle.runtime.mark_complete(root, "original", payload_hash="original-content")
+            claim = {"owner": str(directory), "previous_version": "original"}
+            patch.setattr(lifecycle.runtime, "read_dev_claim", lambda *a, **k: claim)
+            patch.setattr(lifecycle.runtime, "release_dev", lambda *a: None)
+
+            def health(*args, **kwargs):
+                assert phase is None or not phase.exists(), "rollback health left the build phase"
+                if unhealthy:
+                    raise RuntimeError("unhealthy construction")
+                return SimpleNamespace(stdout='"1.0.0"')
+
+            patch.setattr(lifecycle.engine, "run_owned", health)
+        patch.setattr(lifecycle, "settle_candidate", settle)
+        patch.setattr(module.subprocess, "Popen", Owner)
+        arguments = dict(payload=plugin, uv=directory / "uv", base_python=Path(sys.executable))
+        try:
+            if scenario in ("ordinary", "fallback"):
+                lifecycle.install(root, plugin, **arguments)
+            else:
+                module.run(root, plugin, mode=scenario, owner=directory, **arguments)
+        except RuntimeError as error:
+            if not unhealthy or str(error) != "unhealthy construction":
+                raise
+        assert ("settle" in events) is not unhealthy
+        if unhealthy:
+            assert phase is None or not phase.exists()
+            assert not published_phases
+        if scenario == "fallback":
+            assert events[:2] == ["failed-selected-health", "control"]
+        print(json.dumps({"events": events, "watched": watched}), flush=True)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows watchdog ownership")
+@pytest.mark.parametrize("shell", ["powershell.exe", "pwsh.exe"])
+@pytest.mark.parametrize(("scenario", "unhealthy", "watched"), [
+    ("repair", False, True),
+    ("fallback", False, True),
+    ("dev", False, True),
+    ("dev-release", False, True),
+    ("repair", True, True),
+    ("dev-release", True, True),
+    ("ordinary", False, True),
+    ("dev", False, False),
+    ("dev-release", False, False),
+])
+def test_native_watchdog_mode_health_boundary(tmp_path, shell, scenario, unhealthy, watched):
+    executable = shutil.which(shell)
+    if executable is None:
+        pytest.skip(f"native shell unavailable: {shell}")
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    # install.ps1:619-733 stages context repair/dev with a watchdog; 774-869
+    # does the same for marketplace repair/ordinary (including health fallback).
+    # Deploy-PythonRuntime:2935-2951 forwards these actions to this exact driver.
+    # A direct checkout dev invocation skips both staging branches: no receipt.
+    child = tmp_path / "probe.py"
+    child.write_text(
+        "import importlib.util, pathlib\n"
+        f"spec = importlib.util.spec_from_file_location('mode_probe', {str(Path(__file__))!r})\n"
+        "module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)\n"
+        f"module._watched_settlement_probe(pathlib.Path({str(tmp_path)!r}), "
+        f"{scenario!r}, {unhealthy!r}, {watched!r})\n",
+        encoding="utf-8",
+    )
+    parent = tmp_path / "watch.ps1"
+    parent.write_text(
+        "param($Helper, $Payload, $Python, $Probe, $Root, $Watched)\n"
+        "$ErrorActionPreference = 'Stop'\n"
+        ". $Helper\n"
+        "$env:AGENT_WORKTREES_INSTALL_DEADLINE_SEC = '10'\n"
+        "$budget = Get-InstallWatchdogBudget -Payload $Payload -Name 'agent-worktrees'\n"
+        "if ($budget.BuildSec -le 0) { throw 'Fixture requires an active positive watchdog' }\n"
+        "if ($Watched -eq 'yes') {\n"
+        "  $env:COPILOT_PLUGIN_INSTALL_PHASE_FILE = Join-Path $Root 'phase.json'\n"
+        "  $env:COPILOT_PLUGIN_INSTALL_CUTOVER_BUDGET_SEC = [string]$budget.CutoverSec\n"
+        "} else { Remove-Item Env:COPILOT_PLUGIN_INSTALL_PHASE_FILE -ErrorAction SilentlyContinue }\n"
+        "$info = [Diagnostics.ProcessStartInfo]::new()\n"
+        "$info.FileName = $Python\n"
+        "$info.Arguments = '\"' + $Probe + '\"'\n"
+        "$info.UseShellExecute = $false; $info.CreateNoWindow = $true\n"
+        "$info.RedirectStandardOutput = $true; $info.RedirectStandardError = $true\n"
+        "$started = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()\n"
+        "$child = [Diagnostics.Process]::Start($info)\n"
+        "$stdout = $child.StandardOutput.ReadToEndAsync()\n"
+        "$stderr = $child.StandardError.ReadToEndAsync()\n"
+        "if ($Watched -eq 'yes') {\n"
+        "  $code = Wait-InstallWatchdog -Child $child -Budget $budget -StartedAt $started "
+        "-PhaseFile $env:COPILOT_PLUGIN_INSTALL_PHASE_FILE -Name 'agent-worktrees' "
+        "-Stage $Root -LogPath (Join-Path $Root 'watchdog.log')\n"
+        "} else { $child.WaitForExit(); $code = $child.ExitCode }\n"
+        "[Console]::Out.Write($stdout.GetAwaiter().GetResult())\n"
+        "[Console]::Error.Write($stderr.GetAwaiter().GetResult())\n"
+        "exit $code\n",
+        encoding="utf-8",
+    )
+    started = time.monotonic()
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-File", str(parent),
+         str(scripts / "installer-watchdog.ps1"), str(scripts.parent),
+         sys.executable, str(child), str(tmp_path), "yes" if watched else "no"],
+        capture_output=True, text=True, timeout=20, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert time.monotonic() - started < 20
 
 
 @pytest.mark.parametrize(("mode", "recover_manager"), [

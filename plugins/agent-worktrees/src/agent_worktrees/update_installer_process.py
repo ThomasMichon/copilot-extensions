@@ -25,13 +25,8 @@ def _installer_timeout(
     """Leave the installer watchdog time to terminate its tree and publish failure."""
     variable = re.sub(r"[^A-Za-z0-9]+", "_", name).upper() + "_INSTALL_DEADLINE_SEC"
     raw = environment.get(variable) or environment.get("COPILOT_PLUGIN_INSTALL_DEADLINE_SEC")
-    deadline = 480
-    if raw:
-        try:
-            deadline = int(raw)
-        except ValueError as error:
-            raise ValueError(f"{name}: invalid installer deadline {raw!r}; expected integer seconds") from error
-    elif plugin_dir is not None:
+    data = {}
+    if plugin_dir is not None:
         manifest = plugin_dir / "plugin.json"
         try:
             manifest_text = manifest.read_text(encoding="utf-8")
@@ -41,11 +36,22 @@ def _installer_timeout(
             data = json.loads(manifest_text)
             if not isinstance(data, dict):
                 raise ValueError(f"{name}: installer manifest must be an object")
-            deadline = data.get("installerDeadlineSeconds", 480)
-            if type(deadline) is not int or deadline <= 0:
-                raise ValueError(f"{name}: installerDeadlineSeconds must be a positive integer")
+    if raw:
+        try:
+            deadline = int(raw)
+        except ValueError as error:
+            raise ValueError(f"{name}: invalid installer deadline {raw!r}; expected integer seconds") from error
+        if not -(2**31) <= deadline < 2**31:
+            raise ValueError(f"{name}: installer deadline must fit 32-bit integer seconds")
+    else:
+        deadline = data.get("installerDeadlineSeconds", 480)
+        if type(deadline) is not int or not 0 < deadline < 2**31:
+            raise ValueError(f"{name}: installerDeadlineSeconds must be a positive integer")
+    cutover = data.get("cutoverDeadlineSeconds", 300)
+    if type(cutover) is not int or not 0 < cutover < 2**31:
+        raise ValueError(f"{name}: cutoverDeadlineSeconds must be a positive integer")
     # Disabling the inner watchdog must not disable the updater's safety bound.
-    return (deadline if deadline > 0 else 480) + 30
+    return (deadline if deadline > 0 else 480) + cutover + 30
 
 
 def installer_deadline_status(error: Exception) -> str:

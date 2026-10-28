@@ -1,0 +1,9 @@
+{
+  "comment": "Keep the shared installer engine cutover-phase writer synchronized with healthy runtime settlement.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
