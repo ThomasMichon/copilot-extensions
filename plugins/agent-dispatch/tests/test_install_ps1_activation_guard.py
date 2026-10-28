@@ -529,6 +529,7 @@ def test_service_reconciliation_phase_covers_lock_wait_and_preserves_live_guards
         "$script:events = [System.Collections.Generic.List[string]]::new()\n"
         "function Write-Skip { param($m) }\n"
         "function Write-Step { param($m) }\n"
+        "function Write-Ok { param($m) }\n"
         "function Install-Runtime { }\n"
         "function Invoke-DowngradeGuard { }\n"
         "function Write-UpdateMarker { }\n"

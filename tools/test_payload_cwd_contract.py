@@ -22,8 +22,9 @@ BASH = str(GIT_BASH) if os.name == "nt" and GIT_BASH.is_file() else shutil.which
 
 def _block(path: Path, name: str) -> str:
     text = path.read_text(encoding="utf-8")
-    start = text.index(f"# === install-contract:v5 {name}")
-    end_marker = f"# === end install-contract:v5 {name.split(' (')[0]} ==="
+    version = "v4" if name == "payload-copy" else "v5"
+    start = text.index(f"# === install-contract:{version} {name}")
+    end_marker = f"# === end install-contract:{version} {name.split(' (')[0]} ==="
     end = text.index(end_marker, start) + len(end_marker)
     return text[start:end]
 
@@ -584,6 +585,7 @@ def test_watchdog_dispatch_cutover_lock_wait_extends_build_deadline(
             "function Install-Runtime { Start-Sleep -Seconds 2 }\n"
             "function Invoke-DowngradeGuard { }; function Write-UpdateMarker { }\n"
             "function Clear-UpdateMarker { }; function Write-Skip { param($m) }\n"
+            "function Write-Step { param($m) }; function Write-Ok { param($m) }\n"
             "function Test-ActivationSupersededNow {\n"
             "  $script:checks++\n"
             f"  return (${str(superseded_after_lock).lower()} -and $script:checks -eq 2)\n"
@@ -613,6 +615,7 @@ def test_watchdog_dispatch_cutover_lock_wait_extends_build_deadline(
             '_ensure_runtime() { sleep 2; }\n'
             '_downgrade_guard() { :; }; _write_update_marker() { :; }; _clear_update_marker() { :; }\n'
             '_skip() { :; }; _supervisor_audit() { :; }; _install_supervisor_service() { :; }\n'
+            '_step() { :; }; _ok() { :; }; _lifecycle_finish() { :; }\n'
             '_activation_superseded_now() {\n'
             '  checks=$((checks + 1))\n'
             f'  [[ "{int(superseded_after_lock)}" == 1 && "$checks" == 2 ]]\n'
