@@ -87,6 +87,12 @@ for example, #4173's accepted model precedes its affected migration, and #4417's
 exact conversation/seed evidence precedes its delivery-success decision. A
 whole-issue graph would erase that distinction and manufacture cycles.
 
+The [next bounded-decision matrix](roadmap-next-slices.md) proposes twelve
+consequential first slices and separates three finite completion candidates
+from current-predicate characterization. It preserves historical evidence pins
+and exact owners; nomination is neither current execution readiness nor a new
+hard prerequisite.
+
 Selected entry decisions already supported by the registers are:
 
 | Selected contribution | What actually precedes it | What does not have to finish first |
@@ -140,6 +146,7 @@ checkpoint remain separate completion duties.
 ## See also
 
 - [Research method and priority rubric](stabilization-roadmap.md)
+- [Next bounded decisions and first-slice queues](roadmap-next-slices.md)
 - [First-wave findings and exact evidence homes](roadmap-wave-1.md)
 - [Second-wave findings and exact evidence homes](roadmap-wave-2.md)
 - [Third-wave findings and exact evidence homes](roadmap-wave-3.md)
