@@ -91,8 +91,14 @@ else
     fail_context "$RESOLUTION"
 fi
 [[ "$RUNTIME_ROOT" == /* ]] || fail_context 'canonical runtime root is missing'
+DEFAULT_RUNTIME_ROOT="$(value "$RESOLUTION" $'environment\034homeRealPath')/.agent-dispatch"
 ACTION_POLICY_ROOT="$RUNTIME_ROOT"
-if [[ -z "$CONTEXT" ]]; then ACTION_POLICY_ROOT="$LEGACY_ROOT"; fi
+if [[ -z "$CONTEXT" ]]; then
+    ACTION_POLICY_ROOT="$LEGACY_ROOT"
+    if [[ "$GLOBAL" == 1 && "$RUNTIME_ROOT" == "$DEFAULT_RUNTIME_ROOT" ]]; then
+        ACTION_POLICY_ROOT="$HOME/.agent-dispatch"
+    fi
+fi
 
 resolve_runtime() {
     AGENT_RT_PY=""
@@ -177,7 +183,7 @@ assert_publication() {
         printf '[agent-dispatch] installation-cell first-use provisioning is unavailable; use explicit installation management for this context.\n' >&2
         exit 126
     fi
-    if [[ "$RUNTIME_ROOT" != "$(value "$RESOLUTION" $'environment\034homeRealPath')/.agent-dispatch" ]]; then
+    if [[ "$RUNTIME_ROOT" != "$DEFAULT_RUNTIME_ROOT" ]]; then
         printf '[agent-dispatch] scoped first-use provisioning is unavailable; use explicit installation management for this root.\n' >&2
         exit 126
     fi

@@ -777,6 +777,194 @@ def test_namespaced_admission_does_not_consult_an_unselected_legacy_root(tmp_pat
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def global_gate_fixture(tmp_path: Path, *, warm: bool = False):
+    if PWSH is None:
+        pytest.skip("actual PowerShell is required")
+    from . import source_publication_fixture as fixture
+
+    env, root, sources = fixture.stage(tmp_path)
+    payload, identity = sources[0]
+    scripts = payload / "scripts"
+    bin_dir = root / "bin"
+    bin_dir.mkdir()
+    for name in ("runtime-gate.ps1", "resolve-runtime.ps1"):
+        shutil.copyfile(SCRIPTS / name, bin_dir / name)
+    shutil.copytree(scripts / "installation-context", bin_dir / "installation-context")
+    decision = {
+        "status": "ready", "actualMode": "legacy", "desiredMode": "legacy",
+        "installGeneration": "owned-fixture", "policy": {"enabled": False},
+        "legacy": {"root": str(root), "disposition": "active", "tombstone": None},
+        "environment": {"homeRealPath": env["HOME"]}, "allowMutation": True,
+        "deployment": {
+            "allowPluginPublication": True, "path": str(root / "runtime-deployment.json"),
+        },
+    }
+    # The caller consumes this owned canonical decision; guest registration is not under test.
+    (bin_dir / "installation-context" / "installation-context.ps1").write_text(
+        f"Write-Output {quote(json.dumps(decision))}\nexit 0\n", encoding="utf-8",
+    )
+    (root / "payload-dir").write_text(str(payload), encoding="utf-8")
+    env["AGENT_DISPATCH_PAYLOAD_ROOT"] = str(payload)
+    env["AGENT_DISPATCH_PROVISION_OFFLINE"] = "1"
+    env.pop("BOOTSTRAP_KILLSWITCH_STATE_FILE", None)
+    installer_called = tmp_path / "installer-called"
+    if warm:
+        fixture.activate(env, root, identity.runtime_version)
+    else:
+        (root / "versions").rename(tmp_path / "qualified-fixture-versions")
+        (scripts / "install.ps1").write_text(
+            f"[IO.File]::WriteAllText({quote(installer_called)}, 'called')\nexit 17\n",
+            encoding="utf-8",
+        )
+    shared = Path(env["HOME"]) / ".copilot-extensions" / "bootstrap-killswitch.json"
+    shared.parent.mkdir(exist_ok=True)
+    shared.write_text('{"active":true}', encoding="utf-8")
+    return env, root, bin_dir / "runtime-gate.ps1", shared, installer_called
+
+
+def run_global_gate(tmp_path: Path, entry: Path, env: dict[str, str], prefix: str = ""):
+    if PWSH is None:
+        pytest.skip("actual PowerShell is required")
+    harness = tmp_path / "global-entry.ps1"
+    harness.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        + prefix
+        + "\nfunction Invoke-WebRequest { throw 'forbidden network boundary' }\n"
+        + f"& {quote(entry)} --version\nexit $LASTEXITCODE\n",
+        encoding="utf-8",
+    )
+    return subprocess.run(
+        [PWSH, "-NoProfile", "-NonInteractive", "-File", str(harness)],
+        env=env, capture_output=True, text=True, timeout=25, creationflags=HEADLESS,
+    )
+
+
+@pytest.mark.parametrize(("selection", "active", "warm"), [
+    ("plain", True, False), ("home-alias", True, False),
+    ("invocation-alias", True, False), ("plain", False, False),
+    ("home-alias", True, True),
+])
+def test_full_global_entry_keeps_default_bootstrap_veto_and_warm_availability(
+    tmp_path: Path, selection: str, active: bool, warm: bool,
+) -> None:
+    env, root, entry, shared, installer = global_gate_fixture(tmp_path, warm=warm)
+    shared.write_text(json.dumps({"active": active}), encoding="utf-8")
+    if active:
+        env.pop("AGENT_DISPATCH_PROVISION_OFFLINE", None)
+    if selection != "plain":
+        alias = tmp_path / "home-alias"
+        try:
+            alias.symlink_to(Path(env["HOME"]), target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"native symbolic-link support is unavailable: {exc}")
+        if selection == "home-alias":
+            env["HOME"] = env["USERPROFILE"] = str(alias)
+        else:
+            entry = alias / ".agent-dispatch" / "bin" / "runtime-gate.ps1"
+    ignored = tmp_path / "ignored-custom-root"
+    ignored.mkdir()
+    (ignored / "action-controls.json").write_text(
+        '{"automatic-runtime-reconcile":{"disabled":true}}', encoding="utf-8",
+    )
+    env["AGENT_DISPATCH_INSTALL_DIR"] = str(ignored)
+    status = root / ".provision-status"
+    if warm:
+        status.write_text("historical provisioning", encoding="utf-8")
+    result = run_global_gate(tmp_path, entry, env)
+    assert result.returncode == (0 if warm else 3 if active else 17), result.stdout + result.stderr
+    assert "forbidden network boundary" not in result.stderr
+    if warm:
+        assert "agent-dispatch " in result.stdout
+        assert status.read_text(encoding="utf-8") == "historical provisioning"
+    elif active:
+        assert not status.exists()
+        assert "automatic-runtime-reconcile" in result.stderr
+    else:
+        assert status.read_text(encoding="utf-8") == "failed rc=17"
+    assert installer.exists() is (not warm and not active)
+    if warm or active:
+        assert not (root / ".provision.lock").exists()
+
+
+@pytest.mark.parametrize("unwritable_status", [False, True])
+def test_full_global_late_refusal_settles_only_its_owned_provision_status(
+    tmp_path: Path, unwritable_status: bool,
+) -> None:
+    env, root, entry, shared, installer = global_gate_fixture(tmp_path)
+    shared.write_text('{"active":false}', encoding="utf-8")
+    env.pop("AGENT_DISPATCH_PROVISION_OFFLINE", None)
+    status = root / ".provision-status"
+    policy = root / "action-controls.json"
+    harness = tmp_path / "late-global-entry.ps1"
+    harness.write_text(f"""
+$ErrorActionPreference = 'Stop'
+function Invoke-WebRequest {{
+    param($Uri, [switch]$UseBasicParsing, $TimeoutSec, $OutFile)
+    [IO.File]::WriteAllText({quote(policy)},
+        '{{"automatic-runtime-reconcile":{{"disabled":true,"reason":"late cold refusal"}}}}')
+    [IO.File]::WriteAllText($OutFile, 'throw "forbidden installer boundary"')
+    {
+        f"[IO.File]::Move({quote(status)}, {quote(root / 'owned-status-before-refusal')}); "
+        f"[void][IO.Directory]::CreateDirectory({quote(status)})"
+        if unwritable_status else ""
+    }
+}}
+& {quote(entry)} --version
+exit $LASTEXITCODE
+""", encoding="utf-8")
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-NonInteractive", "-File", str(harness)],
+        env=env, capture_output=True, text=True, timeout=25, creationflags=HEADLESS,
+    )
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "late cold refusal" in result.stderr
+    assert "forbidden installer boundary" not in result.stderr
+    assert not installer.exists()
+    if unwritable_status:
+        assert "provision status" in result.stderr.lower()
+        assert (root / "owned-status-before-refusal").read_text(encoding="utf-8") == "provisioning"
+    else:
+        assert status.read_text(encoding="utf-8") == "failed rc=3"
+    with (root / ".provision.lock").open("r+b") as lock:
+        assert lock.read() == b""
+
+
+def test_full_global_exception_settles_its_started_attempt_without_installer(tmp_path: Path) -> None:
+    env, root, entry, shared, installer = global_gate_fixture(tmp_path)
+    shared.write_text('{"active":false}', encoding="utf-8")
+    result = run_global_gate(
+        tmp_path, entry, env,
+        "function Get-Process { param($Id) throw 'contained termination with owned lock' }\n",
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "contained termination with owned lock" in result.stderr
+    assert (root / ".provision-status").read_text(encoding="utf-8") == "failed rc=1"
+    assert not installer.exists()
+
+
+def test_global_custom_effect_root_does_not_consult_a_default_home_alias(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    alias = tmp_path / "home-alias"
+    try:
+        alias.symlink_to(home, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"native symbolic-link support is unavailable: {exc}")
+    root = tmp_path / "custom-installation"
+    (root / "bin").mkdir(parents=True)
+    body = (
+        f"$env:HOME = {quote(alias)}\n$env:USERPROFILE = {quote(alias)}\n"
+        f"$payloadRoot = {quote(SCRIPTS.parent)}\n$runtimeRoot = {quote(root)}\n"
+        f"$legacyPolicyRoot = {quote(str(root) + '/bin/..')}\n"
+        f"$resolution = [pscustomobject]@{{environment=[pscustomobject]@{{homeRealPath={quote(home)}}}}}\n"
+        "$context = ''; $globalSurface = $true\n"
+        + function(GATE, "Assert-AutomaticRuntimeReconcile")
+        + "\nAssert-AutomaticRuntimeReconcile\n"
+    )
+    result = run_ps(tmp_path, body)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def bootstrap_worker(tmp_path: Path, root: Path, installer: str) -> tuple[str, Path]:
     status = root / "reconcile-status.json"
     status.write_text(json.dumps({

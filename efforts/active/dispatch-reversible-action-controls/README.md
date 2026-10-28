@@ -578,3 +578,29 @@ Initial tests must prove the current gap before adding the guards.
   with 19 platform skips and exposed one stale exact-manifest expectation;
   include the already-declared `installerLifecycle: true` field, then that
   targeted declaration control passes too. No manifest behavior was changed.
+
+### 2026-10-28 - Global default entrypoints and owned cold termination
+
+- The next assessment identified global entrypoints resolving away the original
+  home spelling, so the shared default bootstrap veto was not observed. Actual
+  full-script cases reproduced the bypass through both aliased and physical
+  entrypoints with a linked home; ordinary veto, warm execution and clear
+  controls remained available.
+- Reuse governance's existing canonical-home/default-root decision to retain
+  the original platform-home spelling only for that GLOBAL legacy default.
+  Keep canonical effect arguments, ignored ambient install overrides, custom
+  and namespace isolation, and qualified warm execution unchanged. No shared
+  installation/service identity classifier or new root resolver is introduced.
+- PowerShell cold callers now settle their own successfully published attempt
+  in `finally` while holding the provision lock, retaining refusal classification
+  on status-write failure. This does not repair other/historical attempts or
+  claim SIGKILL finalization. POSIX owned SIGTERM status settlement is exercised
+  through an actual controlled installer process.
+- Reconciled the real base conflict with the current `dev`: preserve both
+  independent qualification contracts and all 17 source commits in order.
+  Dispatch script bytes were unchanged by that rebase; the intervening shared
+  source-build cache change is covered by the installed-source portfolio.
+- Independent contained global/source-publication compatibility passed 92 cases
+  with 19 platform skips; actual host PowerShell passed 84 with 11 explicitly
+  native-Windows-only skips on WSL. Fresh exact-head native qualification and
+  independent source review remain required.

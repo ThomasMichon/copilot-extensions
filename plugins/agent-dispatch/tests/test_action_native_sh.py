@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -146,6 +148,61 @@ def _linked_selection(
     }
 
 
+def _global_gate_fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path, dict[str, str]]:
+    gate, root, started, provisioned, env = _gate_fixture(tmp_path)
+    binary = root / "bin"
+    binary.mkdir()
+    for name in ("runtime-gate.sh", "resolve-runtime.sh"):
+        shutil.copyfile(gate.with_name(name), binary / name)
+    shutil.copytree(gate.parent / "installation-context", binary / "installation-context")
+    (root / "payload-dir").write_text(str(gate.parent.parent))
+    env["AGENT_DISPATCH_PROVISION_OFFLINE"] = "1"
+    env["AGENT_DISPATCH_INSTALL_DIR"] = "unselected-caller-root"
+    return binary / gate.name, root, started, provisioned, env
+
+
+@pytest.mark.parametrize("entry", ["ordinary", "aliased-entrypoint", "physical-entrypoint"])
+def test_global_gate_keeps_default_bootstrap_veto_with_a_linked_home(
+    tmp_path: Path, entry: str,
+) -> None:
+    gate, root, started, provisioned, env = _global_gate_fixture(tmp_path)
+    state = root.parent / ".copilot-extensions" / "bootstrap-killswitch.json"
+    state.parent.mkdir()
+    state.write_text('{"active":true}')
+    if entry != "ordinary":
+        home = tmp_path / "linked-home"
+        home.symlink_to(root.parent, target_is_directory=True)
+        env["HOME"] = str(home)
+        env["USERPROFILE"] = str(home)
+        if entry == "aliased-entrypoint":
+            gate = home / ".agent-dispatch" / "bin" / gate.name
+    result = subprocess.run(
+        [BASH, str(gate), "serve"], env=env, capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "automatic-runtime-reconcile" in result.stderr
+    assert not started.exists() and not provisioned.exists()
+    assert not (root / ".provision-status").exists()
+
+
+def test_global_gate_default_veto_clear_and_warm_execution_remain_independent(tmp_path: Path) -> None:
+    gate, root, started, provisioned, env = _global_gate_fixture(tmp_path)
+    state = root.parent / ".copilot-extensions" / "bootstrap-killswitch.json"
+    state.parent.mkdir()
+    state.write_text('{"active":true}')
+    warm = subprocess.run(
+        [BASH, str(gate), "serve"], env=env | {"TEST_READY": "1"},
+        capture_output=True, text=True, timeout=15,
+    )
+    assert warm.returncode == 0 and started.exists() and not provisioned.exists(), warm.stderr
+    state.write_text('{"active":false}')
+    cold = subprocess.run(
+        [BASH, str(gate), "serve"], env=env, capture_output=True, text=True, timeout=15,
+    )
+    assert provisioned.exists(), cold.stderr
+    assert cold.returncode != 0  # The fixture does not construct a qualified runtime.
+
+
 @pytest.mark.parametrize("entry", ["runtime-gate.sh", "bootstrap-check.sh"])
 @pytest.mark.parametrize("spelling", ["direct", "parent-traversal"])
 def test_cold_callers_preserve_selected_ancestry(
@@ -233,6 +290,42 @@ def test_late_policy_refusal_updates_owned_provision_status(
     finally:
         if status.exists():
             status.chmod(0o600)
+
+
+def test_owned_cold_attempt_settles_status_on_termination(tmp_path: Path) -> None:
+    gate, root, _, _, env = _gate_fixture(tmp_path)
+    entered = tmp_path / "installer-entered"
+    release = tmp_path / "release-installer"
+    gate.with_name("install.sh").write_text(
+        "#!/bin/bash\n"
+        f"touch {str(entered)!r}\n"
+        f"while [[ ! -e {str(release)!r} ]]; do sleep 0.05; done\nexit 0\n",
+    )
+    process = subprocess.Popen(
+        [BASH, str(gate), "serve"], env=env, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        deadline = time.monotonic() + 10
+        while not entered.exists() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert entered.exists(), "controlled installer did not start"
+        assert (root / ".provision-status").read_text().startswith("provisioning ")
+        process.send_signal(signal.SIGTERM)
+        release.touch()
+        stdout, stderr = process.communicate(timeout=10)
+        assert process.returncode == 143, stdout + stderr
+        assert (root / ".provision-status").read_text().startswith("failed rc=143 ")
+        assert "Provisioning attempt ended before completion (rc=143)" in stderr
+    finally:
+        release.touch()
+        if process.poll() is None:
+            process.terminate()
+        try:
+            process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate(timeout=5)
 
 
 def test_missing_cold_policy_reader_is_a_named_prerequisite_failure(tmp_path: Path) -> None:

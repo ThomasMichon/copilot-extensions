@@ -152,10 +152,19 @@ and does not consult an unselected legacy root. Normalization must not erase a
 linked ancestor before policy sees it. Automatic maintenance requires a fully
 qualified selected root; relative and Windows drive/root-relative spellings
 fail explicitly without changing the warm-runtime startup path.
+For a GLOBAL legacy entrypoint, governance's existing canonical-home marker
+identifies whether the effect root is the default installation. Only then is
+the original platform-home default spelling checked too. Resolving an entrypoint
+through a home alias must not evade the shared bootstrap veto. Custom and
+namespaced installations do not acquire a veto from an unrelated home/default
+root, and GLOBAL entrypoints continue to ignore unrelated ambient install-root
+overrides.
 
 Late refusal must not leave a successful or indefinitely provisioning diagnostic.
-The POSIX cold caller settles its owned provisioning status before releasing its
-lock. PowerShell background workers attach refusal diagnostics to their existing
+Both cold frontends settle only their own successfully published provisioning
+attempt before releasing its lock. They do not repair historical attempts from
+age or promise a finalizer after an uncatchable process kill.
+PowerShell background workers attach refusal diagnostics to their existing
 attempt-fenced status and log; a superseded worker cannot overwrite replacement
 evidence. Diagnostic-write failures are explicit and retain the original refusal
 classification rather than admitting fallback or reporting success.
