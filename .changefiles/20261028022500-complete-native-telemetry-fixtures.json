@@ -1,0 +1,6 @@
+{
+  "comment": "Copy packaged installer support scripts into native telemetry fixtures while preserving the deliberately missing human-output helper control.",
+  "changes": [
+    {"plugin": "agent-worktrees", "type": "patch"}
+  ]
+}
