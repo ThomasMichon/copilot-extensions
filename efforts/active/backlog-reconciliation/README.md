@@ -166,6 +166,9 @@ outcomes from agent-recommended research and prioritization mechanics.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
+- [x] _(Agent-recommended)_ Establish the reviewed research method and
+  prioritization rubric; #9370 records the direction and method, not completed
+  issue rankings or an approved implementation order.
 - [ ] Research each eligible remaining issue against the relevant current
   vision; retain excluded issues as counted, metadata-only coverage gaps.
 - [ ] Identify high-priority fixes and their actual existing efforts, retained
@@ -176,6 +179,9 @@ outcomes from agent-recommended research and prioritization mechanics.
 - [ ] _(Agent-recommended)_ Run larger, disjoint research waves, initially
   four sets of 50 issues, reusing unchanged admitted evidence and refreshing
   changed source/refinements rather than restarting the entire corpus.
+  The [first 200-issue proposal](roadmap-wave-1.md) accounts for 169 researched
+  proposals and 31 provisional outcomes, with sixteen bounded current-source
+  audits; later eligible waves remain open.
 - [ ] _(Agent-recommended)_ Integrate the
   [stabilization roadmap](stabilization-roadmap.md), including per-issue
   coverage, provisional decisions, priority rationale and wave exit criteria,
@@ -215,6 +221,8 @@ outcomes from agent-recommended research and prioritization mechanics.
   has attributable evidence, an existing or explicitly proposed owning effort,
   preserved custody and a bounded validation exit; unresolved cycles and
   source-versus-installed uncertainty remain visible.
+  The [first-wave dependency register](roadmap-wave-1-dependencies.md) records
+  scoped prerequisites, not whole-issue or repository-wide gates.
 - [ ] The operational ledger can reconstruct the next batch and live
   researchers, PRs, watches and schedule after native context rollover.
 - [ ] The final whole-queue open count is at most 729; numerical progress never
