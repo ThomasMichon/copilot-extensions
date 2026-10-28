@@ -119,7 +119,15 @@ def managed_destination(destination: str, plugin: str) -> str:
     identifier = re.compile(r"^[a-z0-9](?:[a-z0-9.-]{0,62}[a-z0-9])?$")
     if not separator or not identifier.fullmatch(name) or not identifier.fullmatch(market):
         raise ValueError("invalid managed instruction plugin identity")
-    local = local_destination(destination).removeprefix(".github/instructions/")
+    path = PurePosixPath(destination)
+    if (
+        path.parts[:2] != (".github", "instructions") or len(path.parts) < 3
+        or path.as_posix() != destination or "\\" in destination
+        or any(part in {".", ".."} for part in path.parts)
+        or not path.name.endswith(".instructions.md")
+    ):
+        raise ValueError("invalid managed instruction destination")
+    local = str(PurePosixPath(*path.parts[2:])).removesuffix(".instructions.md") + ".local.instructions.md"
     return f"{MANAGED_NAMESPACE}/{market}/{local}"
 
 

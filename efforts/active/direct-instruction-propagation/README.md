@@ -243,3 +243,24 @@ promotion flow; rollout requires its normal authorization.
   route runtime settings through the separate committed-authoring validator.
 - These corrections remain on the same implementation PR, with review and
   current-head validation still required before merge. No rollout occurred.
+
+### 2026-10-27 - Declaration and preparation parity corrections
+
+- The next #9350 review confirmed all five earlier findings resolved, then
+  identified catalog identity and four additional runtime parity gaps.
+- Focused controls reproduced acceptance of invalid/missing plugin manifests,
+  rejection of top-level destinations, publication during pending pairing and
+  loss of staged-deleted/renamed copies. The initial focused run failed 15
+  cases while accepting the explicitly mapped catalog control.
+- Runtime discovery now requires the existing explicit local catalog mapping
+  when registration and catalog identity differ. Payload manifests validate
+  plugin name only, without restoring instruction/version attestation.
+- Runtime destination mapping accepts startup's top-level and suffix forms.
+  Compatibility checks the existing pending-pair marker under its shared lease
+  before discovery, including linked-worktree metadata. Tracking probes include
+  staged deletions with rename detection disabled before copy and cleanup.
+- The focused compatibility packet passed all 31 cases, and the complete
+  customization/scanner/standalone packet passed 605 tests with six
+  platform-specific skips. Lint and whitespace checks passed. Immutable
+  current-head validation and another passing review remain open; no rollout
+  occurred.

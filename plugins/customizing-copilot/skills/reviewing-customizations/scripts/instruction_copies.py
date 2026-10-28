@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
+import stat
 from typing import Callable, Iterable
 import unicodedata
 
@@ -61,6 +62,18 @@ def load_declarations(
                     raise ValueError("instruction source overlaps the disposable output namespace")
 
             outside_output(root)
+            for relative in ("plugin.json", ".claude-plugin/plugin.json"):
+                manifest_path = io.safe(root, PurePosixPath(relative))
+                try:
+                    manifest_path.lstat()
+                except FileNotFoundError:
+                    continue
+                manifest = load_json(io.read(manifest_path, 64 * 1024))
+                if not isinstance(manifest, dict) or manifest.get("name") != _name:
+                    raise ValueError("enabled plugin manifest identity is invalid")
+                break
+            else:
+                raise ValueError("enabled plugin manifest is missing")
             declaration = io.safe(root, PurePosixPath("instruction-projections.json"))
             try:
                 declaration.lstat()
@@ -88,9 +101,8 @@ def load_declarations(
                 destination = validate_path(entry.get("destination"), field_name="destination")
                 if (
                     destination.parts[:2] != (".github", "instructions")
-                    or len(destination.parts) < 4
+                    or len(destination.parts) < 3
                     or not destination.name.endswith(".instructions.md")
-                    or destination.name.endswith(".local.instructions.md")
                 ):
                     raise ValueError("invalid instruction destination")
                 template = io.safe(
@@ -108,6 +120,28 @@ def load_declarations(
         except (OSError, ValueError) as exc:
             result.failures[origin] = f"{origin}: {exc}"
     return result
+
+
+def require_pair_complete(root: Path, io: DeliveryIO) -> None:
+    marker = io.safe(root, PurePosixPath(".git"))
+    try:
+        info = marker.lstat()
+    except FileNotFoundError:
+        return
+    if stat.S_ISDIR(info.st_mode):
+        git_dir = marker
+    else:
+        text = io.read(marker, 4096).decode("utf-8")
+        if not text.startswith("gitdir:") or not text[len("gitdir:"):].strip():
+            raise ValueError("invalid Git administrative pointer")
+        target = Path(text[len("gitdir:"):].strip())
+        git_dir = target if target.is_absolute() else root / target
+    pending = io.safe(git_dir, PurePosixPath("agent-worktrees-local-guidance/pair-pending"))
+    try:
+        pending.lstat()
+    except FileNotFoundError:
+        return
+    raise ValueError("paired worktree preparation is incomplete; repair the pair before publishing instructions")
 
 
 def select_copy(

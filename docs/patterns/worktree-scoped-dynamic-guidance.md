@@ -350,7 +350,13 @@ those old bodies as current copies.
 Git worktrees must adopt ignore coverage before compatibility publication:
 missing coverage reports `projection-local-cache-ignore`. Plain non-Git
 directories remain supported. Index queries are batched and rechecked before
-mutation; they protect tracked files, not instruction-content authority.
+mutation, including cached deletions with rename detection disabled. Staged
+deletions and paths renamed out of the namespace remain protected. The cached
+deletion query adds one Git operation per tracking probe; it protects files,
+not instruction-content authority.
+Compatibility publication also checks startup's pending-pair marker under the
+shared lease, before discovery. Incomplete pairing cannot publish an interim
+selection or remove earlier outputs.
 Checked-in fallback retirement remains a separate reviewed integrity operation.
 
 Before dependent/consequential action the reader acquires authoritative
@@ -371,6 +377,13 @@ Malformed selected settings report errors rather than silently dropping a layer.
 Native built-in plugin settings are filtered before marketplace-entry validation.
 Runtime discovery accepts startup's local/remote source kinds and all four
 marketplace-manifest layouts, without a network fetch.
+Local catalog identity must match its registration or an explicit valid
+`source.manifestName` mapping. Supported plugin manifests identify the enabled
+plugin before declarations or their absence are accepted; missing, malformed
+or mismatched manifests are incomplete discovery, not authority to delete old
+copies. These are configuration identity checks, not instruction attestation.
+Runtime destination mapping also accepts top-level declared instruction files;
+the stricter subdirectory/suffix rules remain authoring-only.
 Reviewed offline lock/artifact validation remains available without source
 freshness or folder trust. Explicit committed-source maintenance sync is a
 separate reviewable consent-owned write path, not authentication evidence.

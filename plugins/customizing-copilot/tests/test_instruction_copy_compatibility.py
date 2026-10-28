@@ -1,12 +1,16 @@
 """Compatibility publication and startup-equivalent source discovery."""
 
 import json
+import os
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 
 import pytest
 
 from test_instruction_delivery import delivery, fixture, projections
+from test_instruction_delivery import SCRIPTS
 
 
 @pytest.mark.parametrize("reverse", [False, True])
@@ -151,3 +155,155 @@ def test_runtime_local_catalog_layouts_match_startup(tmp_path: Path, relative: s
     assert not result.blocking, result.findings
     selected = projections.resolve_instruction_source(repo, spec.destination, sources)
     assert selected["selectedPath"] == result.written[0]
+
+
+@pytest.mark.parametrize("mapping", [None, "actual-catalog", ""])
+def test_runtime_catalog_alias_requires_an_explicit_valid_mapping(tmp_path: Path, mapping: str | None) -> None:
+    repo, source, _spec = fixture(tmp_path)
+    home = tmp_path / "home"
+    market = repo / "marketplace"
+    shutil.copytree(source.payload_root, market / "policy")
+    (market / "marketplace.json").write_text(json.dumps({
+        "name": "actual-catalog", "plugins": [{"name": "policy", "source": "policy"}],
+    }))
+    configured = {"source": "directory", "path": str(market)}
+    if mapping is not None:
+        configured["manifestName"] = mapping
+    _runtime_settings(repo, home, configured)
+    sources = projections.discover_enabled_sources(repo, home=home, require_trust=True, runtime=True)
+    assert bool(sources[0].error) is (mapping != "actual-catalog")
+    result = projections.render_local_cache(repo, lambda: sources)
+    assert bool(result.blocking) is (mapping != "actual-catalog")
+
+
+@pytest.mark.parametrize("invalid", ["missing", "malformed", "wrong-name", "unpacked"])
+def test_invalid_plugin_manifest_is_incomplete_discovery(tmp_path: Path, invalid: str) -> None:
+    repo, source, spec = fixture(tmp_path)
+    assert not projections.render_local_cache(repo, lambda: [source]).blocking
+    current = repo / delivery.managed_destination(spec.destination, spec.plugin)
+    before = current.read_bytes()
+    manifest = source.payload_root / "plugin.json"
+    if invalid in {"missing", "unpacked"}:
+        manifest.unlink()
+        if invalid == "unpacked":
+            (source.payload_root / "instruction-projections.json").unlink()
+    else:
+        manifest.write_bytes(b"{" if invalid == "malformed" else b'{"name":"other"}')
+    result = projections.render_local_cache(repo, lambda: [source])
+    assert result.blocking and not result.written and not result.removed
+    assert current.read_bytes() == before
+    with pytest.raises(ValueError, match="no managed copy"):
+        projections.resolve_instruction_source(repo, spec.destination, [source])
+
+
+@pytest.mark.parametrize("name", ["rules.instructions.md", "rules.local.instructions.md"])
+def test_runtime_top_level_destinations_match_startup(tmp_path: Path, name: str) -> None:
+    repo, source, spec = fixture(tmp_path)
+    declaration = source.payload_root / "instruction-projections.json"
+    data = json.loads(declaration.read_bytes())
+    destination = f".github/instructions/{name}"
+    data["projections"][0]["destination"] = destination
+    declaration.write_text(json.dumps(data))
+    expected = (
+        ".github/instructions/agent-worktrees-generated/market/"
+        + name.removesuffix(".instructions.md") + ".local.instructions.md"
+    )
+    target = repo / expected
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"current upstream copy")
+    selection = projections.resolve_instruction_source(repo, destination, [source])
+    assert selection["selectedPath"] == expected
+    result = projections.render_local_cache(repo, lambda: [source])
+    assert not result.blocking, result.findings
+    assert target.read_bytes() == (source.payload_root / spec.template).read_bytes()
+
+
+@pytest.mark.parametrize("linked", [False, True])
+def test_pending_pair_blocks_compatibility_discovery(tmp_path: Path, linked: bool) -> None:
+    repo, source, spec = fixture(tmp_path)
+    assert not projections.render_local_cache(repo, lambda: [source]).blocking
+    current = repo / delivery.managed_destination(spec.destination, spec.plugin)
+    before = current.read_bytes()
+    git_dir = tmp_path / "linked-admin" if linked else repo / ".git"
+    pending = git_dir / "agent-worktrees-local-guidance/pair-pending"
+    pending.parent.mkdir(parents=True)
+    pending.write_bytes(b"unfinished composition")
+    if linked:
+        (repo / ".git").write_text(f"gitdir: {git_dir}\n")
+
+    def forbidden():
+        pytest.fail("pending pairing must be checked before source discovery")
+
+    result = projections.render_local_cache(repo, forbidden)
+    assert result.blocking and not result.changed
+    assert current.read_bytes() == before
+    assert any("paired" in finding.message for finding in result.findings)
+
+
+def _git(repo: Path, *args: str) -> None:
+    result = subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, timeout=15,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_pending_pair_blocks_the_independent_compatibility_cli(tmp_path: Path) -> None:
+    repo, source, spec = fixture(tmp_path)
+    assert not projections.render_local_cache(repo, lambda: [source]).blocking
+    current = repo / delivery.managed_destination(spec.destination, spec.plugin)
+    before = current.read_bytes()
+    _git(repo, "init", "-q")
+    pending = repo / ".git/agent-worktrees-local-guidance/pair-pending"
+    pending.parent.mkdir()
+    pending.write_bytes(b"unfinished composition")
+    home = tmp_path / "home"
+    shutil.copytree(source.payload_root, home / ".copilot/installed-plugins/market/policy")
+    (repo / ".gitignore").write_text("*.local.instructions.md\n")
+    _runtime_settings(repo, home, {"source": "github", "repo": "example/plugins"})
+    completed = subprocess.run(
+        [sys.executable, "-B", str(SCRIPTS / "manage-instruction-projections.py"),
+         "render-local-cache", str(repo), "--json"],
+        cwd=repo, env=dict(os.environ, HOME=str(home), USERPROFILE=str(home)),
+        capture_output=True, text=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    result = json.loads(completed.stdout)
+    assert completed.returncode != 0 and result["blocking"]
+    assert any("paired" in finding["message"] for finding in result["findings"])
+    assert current.read_bytes() == before
+    pending.unlink()
+    resumed = subprocess.run(
+        completed.args, cwd=repo, env=dict(os.environ, HOME=str(home), USERPROFILE=str(home)),
+        capture_output=True, text=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert resumed.returncode == 0, resumed.stdout + resumed.stderr
+    assert json.loads(resumed.stdout)["written"] == [current.relative_to(repo).as_posix()]
+
+
+@pytest.mark.parametrize("mutation", ["delete", "rename"])
+@pytest.mark.parametrize("selected", [False, True])
+def test_staged_removal_protects_the_remaining_working_copy(
+    tmp_path: Path, mutation: str, selected: bool,
+) -> None:
+    repo, source, spec = fixture(tmp_path)
+    assert not projections.render_local_cache(repo, lambda: [source]).blocking
+    current = repo / delivery.managed_destination(spec.destination, spec.plugin)
+    relative = current.relative_to(repo).as_posix()
+    before = current.read_bytes()
+    _git(repo, "init", "-q")
+    (repo / ".gitignore").write_text("*.local.instructions.md\n")
+    _git(repo, "add", "--force", relative)
+    _git(repo, "-c", "user.name=Test User", "-c", "user.email=test@example.com",
+         "commit", "-q", "-m", "Record the fixture copy")
+    if mutation == "delete":
+        _git(repo, "rm", "--cached", "--quiet", relative)
+    else:
+        _git(repo, "mv", relative, "retained.md")
+        current.write_bytes(before)
+    (source.payload_root / spec.template).write_bytes(b"must not replace staged source")
+    result = projections.render_local_cache(repo, lambda: [source] if selected else [])
+    assert not result.written and not result.removed
+    assert any("tracked" in finding.check for finding in result.findings)
+    assert current.read_bytes() == before

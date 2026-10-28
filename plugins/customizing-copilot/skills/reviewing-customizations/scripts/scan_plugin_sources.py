@@ -590,6 +590,7 @@ def _directory_marketplace_plugin(
     base: Path,
     *,
     agent_worktrees_command: str | None = None,
+    strict: bool = False,
 ) -> Path | None:
     """Resolve one directory-marketplace entry with runtime-equivalent checks."""
     source = declaration.get("source")
@@ -634,7 +635,14 @@ def _directory_marketplace_plugin(
     # never compares that key with the catalog's own `name`, so a repo may
     # register a published catalog under a distinct local id. Only the
     # repository-registry source keeps the stricter identity check.
-    if source_kind not in {"directory", "local"} and manifest.get("name") != source.get("manifestName", marketplace):
+    if strict:
+        expected = (
+            source.get("manifestName", marketplace)
+            if source_kind in {"directory", "local"} else marketplace
+        )
+        if not isinstance(expected, str) or not expected.strip() or manifest.get("name") != expected.strip():
+            return None
+    elif source_kind not in {"directory", "local"} and manifest.get("name") != marketplace:
         return None
     plugin_root = manifest_root
     metadata = manifest.get("metadata")
@@ -735,6 +743,7 @@ def assemble_enabled_plugins(
             footprint = _directory_marketplace_plugin(
                 mkt, name, declaration, base,
                 agent_worktrees_command=agent_worktrees_command,
+                strict=strict,
             )
             if strict and src_kind in {"directory", "local", "agent-worktrees-repo"} and footprint is None:
                 raise ValueError(f"configured marketplace cannot resolve enabled plugin: {origin}")

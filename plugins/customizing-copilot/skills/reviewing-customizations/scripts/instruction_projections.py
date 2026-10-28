@@ -928,6 +928,9 @@ def render_local_cache(
         # blocking finding, not crash this best-effort call out from under
         # a worktree-create/resume or sessionStart caller.
         try:
+            import instruction_copies
+
+            instruction_copies.require_pair_complete(root, _delivery_io())
             sources = list(discover_sources())
         except (OSError, ValueError) as exc:
             result.add(
@@ -1142,6 +1145,7 @@ def _resolve_git_tracked_paths(
             capture_output=True,
             timeout=5,
             env=env,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except FileNotFoundError:
         return set(), any((p / ".git").exists() for p in [root, *root.parents])
@@ -1168,14 +1172,21 @@ def _resolve_git_tracked_paths(
             capture_output=True,
             timeout=5,
             env=env,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        removed = subprocess.run(
+            ["git", "-C", str(root), "--literal-pathspecs", "diff", "--cached",
+             "--name-only", "--diff-filter=D", "--no-renames", "-z", "--", *relatives],
+            capture_output=True, timeout=5, env=env,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, subprocess.SubprocessError):
         return set(), True
-    if proc.returncode != 0:
+    if proc.returncode != 0 or removed.returncode != 0:
         return set(), True
     tracked = {
         entry
-        for entry in proc.stdout.decode("utf-8", "surrogateescape").split("\0")
+        for entry in (proc.stdout + removed.stdout).decode("utf-8", "surrogateescape").split("\0")
         if entry
     }
     return tracked, False
