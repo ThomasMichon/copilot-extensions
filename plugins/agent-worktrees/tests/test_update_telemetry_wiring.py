@@ -355,16 +355,11 @@ def test_real_unrequested_entrypoint_smoke_needs_no_output_helper(shell, plugin,
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
     entrypoint = "install.ps1" if plugin in {"agent-worktrees", "budget-guidance"} else "init.ps1"
-    assets = [entrypoint, "versioned_runtime_native.ps1"]
-    if plugin == "agent-worktrees":
-        assets.append("source-runtime.ps1")
-    for name in assets:
-        shutil.copyfile(source / "scripts" / name, scripts / name)
+    shutil.copytree(
+        source / "scripts", scripts, dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns("installer-human-output.ps1", "__pycache__"),
+    )
     if plugin == "agent-machines":
-        context = scripts / "installation-context"
-        context.mkdir()
-        for name in ("legacy-entrypoint-probe.ps1", "installation-context.ps1", "guest-environment.ps1"):
-            shutil.copyfile(source / "scripts" / "installation-context" / name, context / name)
         shutil.copyfile(source / "payload-invocation.json", payload / "payload-invocation.json")
     shutil.copyfile(source / "plugin.json", payload / "plugin.json")
     home = tmp_path / "home"
@@ -424,25 +419,13 @@ def test_real_standalone_first_stamp_uses_declared_human_adapter(shell, plugin, 
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
     entrypoint = "install.ps1" if plugin == "budget-guidance" else "init.ps1"
-    assets = [
-        entrypoint, Path(entrypoint).with_suffix(".human-output.json").name,
-        "installer-human-output.ps1",
-        "versioned_runtime_native.ps1",
-    ]
-    if plugin == "agent-mcp":
-        assets.append("source-runtime.ps1")
-    for name in assets:
-        shutil.copyfile(source / "scripts" / name, scripts / name)
+    shutil.copytree(
+        source / "scripts", scripts, dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
     if plugin == "agent-containers":
-        shutil.copytree(
-            source / "scripts" / "installation-context", scripts / "installation-context",
-        )
         shutil.copyfile(source / "plugin.json", payload / "plugin.json")
     if plugin == "agent-machines":
-        context = scripts / "installation-context"
-        context.mkdir()
-        for name in ("legacy-entrypoint-probe.ps1", "installation-context.ps1", "guest-environment.ps1"):
-            shutil.copyfile(source / "scripts" / "installation-context" / name, context / name)
         shutil.copyfile(source / "plugin.json", payload / "plugin.json")
         shutil.copyfile(source / "payload-invocation.json", payload / "payload-invocation.json")
     if plugin == "budget-guidance":

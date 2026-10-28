@@ -261,7 +261,8 @@ def fold(
                  and isinstance(event["details"]["auth"].get("id"), str)]
     cleanup_offers = [
         event["details"]["cleanup_offer"] for event in events
-        if event.get("phase") == "auth_cleanup_offer" and event.get("event") == "info"
+        if event.get("phase") == "auth_cleanup" and event.get("action") == "offer"
+        and event.get("event") == "info"
         and isinstance(event.get("details"), dict)
         and isinstance(event["details"].get("cleanup_offer"), dict)
     ]

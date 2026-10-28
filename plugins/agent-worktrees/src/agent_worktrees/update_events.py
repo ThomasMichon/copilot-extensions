@@ -40,7 +40,9 @@ def auth_cleanup_offer(offer: dict) -> None:
             from update_telemetry.fold import retain_auth_cleanup_offer
 
             retained = retain_auth_cleanup_offer(_run.events_path, offer)
-            _run.emit("auth_cleanup_offer", "run", "info", details={"cleanup_offer": retained})
+            _run.emit(
+                "auth_cleanup", "run", "info", action="offer", details={"cleanup_offer": retained},
+            )
         except Exception:
             pass
 

@@ -199,7 +199,7 @@ def test_cleanup_offer_is_retained_in_status():
 
     offer = {"status": "offered", "plan": {"plan_sha256": SHA}}
     payload = update_telemetry.fold([{
-        "phase": "auth_cleanup_offer", "event": "info",
+        "phase": "auth_cleanup", "action": "offer", "event": "info",
         "details": {"cleanup_offer": offer},
     }], run={})
     assert payload["auth"]["cleanup_offer"] == offer
@@ -372,8 +372,10 @@ def test_update_offer_uses_selected_repository_not_process_cwd(tmp_path, monkeyp
     assert calls == [selected]
 
 
-def test_large_preview_survives_the_real_emitter_and_status_fold(tmp_path, monkeypatch):
+@pytest.mark.parametrize("lines", [1, 1000])
+def test_large_preview_survives_the_real_emitter_and_status_fold(tmp_path, monkeypatch, lines):
     import update_telemetry as ut
+    from test_update_telemetry_lib import _schema, _validate
 
     from agent_worktrees import update_events
 
@@ -385,12 +387,13 @@ def test_large_preview_survives_the_real_emitter_and_status_fold(tmp_path, monke
     monkeypatch.setattr(update_events, "_run", run)
     offer = {
         "status": "offered", "plan": {
-            "plan_sha256": SHA, "diff": "declared helper policy\n" * 1000,
+            "plan_sha256": SHA, "diff": "declared helper policy\n" * lines,
         },
     }
     update_events.auth_cleanup_offer(offer)
     events, errors = ut.read_events(events_path)
     assert errors == 0
+    assert all(_validate(event, _schema("update-event")) == [] for event in events)
     status = ut.fold(events, run={"events_path": str(events_path)})
     assert status["auth"]["cleanup_offer"] == offer
 
