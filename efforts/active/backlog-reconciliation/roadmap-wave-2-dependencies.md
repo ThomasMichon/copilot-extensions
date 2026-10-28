@@ -3,7 +3,11 @@
 # Second-Wave Scoped Dependency Register
 
 Parent: [second-wave proposal](roadmap-wave-2.md).
-Evidence: its four per-issue appendices at
+Evidence: the [Bridge](roadmap-wave-2-bridge.md),
+[Lifecycle](roadmap-wave-2-lifecycle.md),
+[Transport](roadmap-wave-2-transport.md) and
+[Worktrees](roadmap-wave-2-worktree.md) publication appendices.
+Their underlying vision, effort and source evidence is pinned separately to
 [`9dc3491fc527`](https://github.com/ThomasMichon/copilot-extensions/tree/9dc3491fc527bbf5561a082341c2b12c44343087).
 
 These **32 directed proposals and two interface edges** are agent-recommended
