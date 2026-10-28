@@ -266,7 +266,11 @@ Its portable policy controls are in
 is a different lane and must never appear in required unit-only CI.
 The source manifest must include the runner helpers and the explicit SDK
 closure declared in `sdk_visibility_sources.py`, all beneath the selected
-SDK root. Both caller and isolated worker verify that closure; the worker
+SDK root. It must match that exact closure, not mix in separately located
+runner/observer copies. The running runner and every already-loaded helper
+must also originate at their declared locations in that same SDK tree.
+Both caller and isolated worker refuse a mixed-root request before native
+binding or any visible attempt and verify the source hashes; the worker
 binds its source-only procutil import before pytest, never an ambient installed
 copy. `test_sdk_visibility_source.py` is the separate cold `-I` subprocess
 regression, including real pytest collection, not a promotion unit.

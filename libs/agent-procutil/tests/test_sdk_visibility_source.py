@@ -5,12 +5,72 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
 
 ROOT = Path(__file__).resolve().parents[3]
 RUNNER = Path(__file__).with_name("sdk_visibility.py")
+
+
+def test_isolated_older_runner_cannot_qualify_another_sdk_root(tmp_path):
+    helper_root = tmp_path / "older-sdk/libs/agent-procutil/tests"
+    helper_root.mkdir(parents=True)
+    for name in (
+        "sdk_visibility.py", "sdk_desktop_observer.py", "sdk_desktop_win32.py",
+        "sdk_visibility_sources.py", "sdk_visibility_cases.py",
+    ):
+        shutil.copyfile(RUNNER.with_name(name), helper_root / name)
+    script = """
+import hashlib, json, runpy, sys, time
+from pathlib import Path
+runner, source, output = sys.argv[1:]
+namespace = runpy.run_path(runner)
+binding = sys.modules['sdk_visibility_sources']
+sdk = Path(source)
+sources = []
+for relative in binding.SDK_FILES:
+    path = sdk / relative
+    data = path.read_bytes()
+    sources.append({'path': str(path), 'bytes': len(data),
+                    'sha256': hashlib.sha256(data).hexdigest()})
+cases = sys.modules['sdk_visibility_cases']
+nodes = [
+    str(sdk / cases.NATIVE_TEST) + '::'
+    + f'{cases.FUNCTION}[{cycle}-{mode}-{composition}-powershell.exe]'
+    for cycle in (0, 1)
+    for mode in ('completed', 'abrupt', 'caller-exit', 'cancel')
+    for composition in ('path', 'test-venv')
+]
+def forbidden():
+    raise AssertionError('mixed checkout reached a native binding')
+namespace['worker'].__globals__['new_api'] = forbidden
+request = {'nonce': 'a' * 32, 'deadline': time.monotonic() + 10,
+           'parent_pid': 1, 'parent_birth': 2, 'sdk_root': source,
+           'output': output, 'sources': sources, 'nodes': nodes, 'packet': 0}
+for invoke in (
+    lambda: namespace['validate_request']('worker', request),
+    lambda: namespace['worker'](request),
+):
+    try:
+        invoke()
+    except namespace['ObservationBlocked'] as error:
+        assert 'runner belongs to another SDK root' in str(error)
+    else:
+        raise AssertionError('mixed-root runner was accepted')
+assert 'sdk_desktop_win32' not in sys.modules
+assert not Path(output).exists()
+print(json.dumps({'kind': 'mixed-root-refused', 'native_binding': False}))
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", script,
+         str(helper_root / RUNNER.name), str(ROOT), str(tmp_path / "output")],
+        capture_output=True, text=True, timeout=10,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == {"kind": "mixed-root-refused", "native_binding": False}
 
 
 def test_isolated_worker_collects_against_verified_source_not_ambient(tmp_path):
@@ -42,7 +102,7 @@ for relative in binding.SDK_FILES:
     data = path.read_bytes()
     sources.append({'path': str(path), 'bytes': len(data),
                     'sha256': hashlib.sha256(data).hexdigest()})
-namespace['require_sdk_sources'](sdk, sources)
+namespace['require_sdk_sources'](sdk, sources, runner=Path(runner))
 namespace['verify_sources'](sources)
 sys.path.insert(0, ambient)
 state = namespace['worker'].__globals__

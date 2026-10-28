@@ -89,16 +89,9 @@ def validate_request(mode: str, value: object) -> dict:
             ):
                 raise ObservationBlocked("qualification source manifest entry is invalid")
             paths.append(os.path.normcase(item["path"]))
-        required = {
-            os.path.normcase(str(Path(__file__).with_name(name)))
-            for name in (
-                "sdk_visibility.py", "sdk_desktop_observer.py", "sdk_desktop_win32.py",
-                "sdk_visibility_sources.py", "sdk_visibility_cases.py",
-            )
-        }
-        if len(set(paths)) != len(paths) or not required <= set(paths):
+        if len(set(paths)) != len(paths):
             raise ObservationBlocked("qualification source closure is duplicated or incomplete")
-        require_sdk_sources(Path(value["sdk_root"]), files)
+        require_sdk_sources(Path(value["sdk_root"]), files, runner=Path(__file__))
     if mode == "probe":
         validate_case_packets(Path(value["sdk_root"]), value["case_packets"])
     elif mode == "worker":
@@ -418,7 +411,7 @@ def canary(request: dict, allow_visible: bool) -> int:
 
 
 def worker(request: dict) -> int:
-    require_sdk_sources(Path(request["sdk_root"]), request["sources"])
+    require_sdk_sources(Path(request["sdk_root"]), request["sources"], runner=Path(__file__))
     verify_sources(request["sources"])
     validate_case_packet(Path(request["sdk_root"]), request["nodes"])
     bind_sdk_import(Path(request["sdk_root"]))
@@ -478,7 +471,7 @@ def restore_incomplete_control(api: WinAPI, original: dict, pin, report: dict) -
 def probe(request: dict, allow_visible: bool) -> int:
     if not allow_visible or request.get("visible_controls") != 1:
         raise ObservationBlocked("single visible control consent is required")
-    require_sdk_sources(Path(request["sdk_root"]), request["sources"])
+    require_sdk_sources(Path(request["sdk_root"]), request["sources"], runner=Path(__file__))
     source_before = verify_sources(request["sources"])
     packets = validate_case_packets(Path(request["sdk_root"]), request["case_packets"])
     start = time.monotonic()

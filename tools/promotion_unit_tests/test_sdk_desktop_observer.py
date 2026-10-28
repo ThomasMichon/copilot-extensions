@@ -313,19 +313,11 @@ def test_known_unchanged_sources_are_verified_not_assumed(tmp_path):
 
 
 def source_request(tmp_path):
-    root = tmp_path / "sdk"
-    root.mkdir()
+    root = ROOT
     files = [
-        {"path": str(SOURCE / name), "bytes": 0, "sha256": "a" * 64}
-        for name in (
-            "sdk_visibility.py", "sdk_desktop_observer.py", "sdk_desktop_win32.py",
-            "sdk_visibility_sources.py", "sdk_visibility_cases.py",
-        )
-    ]
-    files.extend(
         {"path": str(root / name), "bytes": 0, "sha256": "b" * 64}
         for name in sys.modules["sdk_visibility_sources"].SDK_FILES
-    )
+    ]
     return {
         "nonce": "a" * 32, "deadline": time.monotonic() + 10, "output": str(tmp_path / "output"),
         "python": "python", "sdk_root": str(root), "sources": files, "visible_controls": 1,
@@ -361,6 +353,51 @@ def test_manifest_for_one_sdk_cannot_label_another_tree_verified(tmp_path):
     request["sdk_root"] = str(tmp_path / "another-sdk")
     with pytest.raises(observer.ObservationBlocked, match="another root"):
         runner.validate_request("probe", request)
+
+
+@pytest.mark.parametrize("operation", ["probe", "worker"])
+@pytest.mark.parametrize("foreign", [
+    "sdk_visibility.py", "sdk_desktop_observer.py", "sdk_desktop_win32.py",
+    "sdk_visibility_sources.py", "sdk_visibility_cases.py",
+])
+def test_running_runner_and_loaded_helpers_cannot_qualify_another_sdk(
+    tmp_path, monkeypatch, operation, foreign,
+):
+    request = source_request(tmp_path)
+    if operation == "worker":
+        packets = request.pop("case_packets")
+        request = {
+            key: value for key, value in request.items() if key not in {"python", "visible_controls"}
+        }
+        request.update(parent_pid=1, parent_birth=2, nodes=packets[0], packet=0)
+    origin = str(tmp_path / "older-sdk/libs/agent-procutil/tests" / foreign)
+    if foreign == "sdk_visibility.py":
+        monkeypatch.setattr(runner, "__file__", origin)
+    else:
+        monkeypatch.setitem(
+            sys.modules, Path(foreign).stem, SimpleNamespace(__file__=origin),
+        )
+    monkeypatch.setattr(runner, "new_api", lambda: pytest.fail("native binding before root admission"))
+    with pytest.raises(observer.ObservationBlocked, match="another SDK root"):
+        runner.validate_request(operation, request)
+    with pytest.raises(observer.ObservationBlocked, match="another SDK root"):
+        if operation == "worker":
+            runner.worker(request)
+        else:
+            runner.probe(request, True)
+
+
+def test_manifest_cannot_mix_separately_located_runner_helpers_with_sdk_files(tmp_path, monkeypatch):
+    request = source_request(tmp_path)
+    binding = sys.modules["sdk_visibility_sources"]
+    for item in request["sources"]:
+        if Path(item["path"]).name in binding.RUNNER_FILES:
+            item["path"] = str(tmp_path / "older-runner" / Path(item["path"]).name)
+    monkeypatch.setattr(runner, "new_api", lambda: pytest.fail("native binding before root admission"))
+    with pytest.raises(observer.ObservationBlocked, match="SDK source closure"):
+        runner.validate_request("probe", request)
+    with pytest.raises(observer.ObservationBlocked, match="SDK source closure"):
+        runner.probe(request, True)
 
 
 def test_ui_only_source_manifest_is_refused_before_any_native_or_visible_attempt(tmp_path, monkeypatch):
@@ -404,7 +441,10 @@ def test_required_source_closure_covers_current_package_and_every_sdk_fragment()
         "libs/installation-context/" + name for name in ast.literal_eval(assignment.value)
     }
     assert expected <= set(binding.SDK_FILES)
-    binding.require_sdk_sources(ROOT, [{"path": str(ROOT / name)} for name in binding.SDK_FILES])
+    binding.require_sdk_sources(
+        ROOT, [{"path": str(ROOT / name)} for name in binding.SDK_FILES],
+        runner=SOURCE / "sdk_visibility.py",
+    )
 
 
 def test_worker_import_refuses_already_loaded_procutil_instead_of_relabelling_it(monkeypatch):
@@ -615,7 +655,7 @@ def probe_failure_fixture(monkeypatch, tmp_path):
     monkeypatch.setattr(runner, "DesktopObserver", Capture)
     monkeypatch.setattr(runner, "Child", FixtureChild)
     monkeypatch.setattr(runner, "new_api", lambda: api)
-    monkeypatch.setattr(runner, "require_sdk_sources", lambda *args: None)
+    monkeypatch.setattr(runner, "require_sdk_sources", lambda *args, **kwargs: None)
     monkeypatch.setattr(runner, "verify_sources", lambda *args: [])
     monkeypatch.setattr(runner, "validate_calibration", lambda *args: None)
     monkeypatch.setattr(runner, "verify_native_junit", lambda *args: {})

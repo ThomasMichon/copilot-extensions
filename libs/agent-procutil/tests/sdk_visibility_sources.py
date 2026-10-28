@@ -26,7 +26,12 @@ FRAGMENT_FILES = (
     "activation", "legacy_attribution", "legacy_transition", "legacy_retirement",
     "maintenance", "mode_cli", "deployment", "publication", "powershell",
 )
+RUNNER_FILES = (
+    "sdk_visibility.py", "sdk_desktop_observer.py", "sdk_desktop_win32.py",
+    "sdk_visibility_sources.py", "sdk_visibility_cases.py",
+)
 SDK_FILES = (
+    *(f"libs/agent-procutil/tests/{name}" for name in RUNNER_FILES),
     *(f"libs/agent-procutil/src/agent_procutil/{name}" for name in PACKAGE_FILES),
     *(f"libs/installation-context/_installation_context_{name}.py" for name in FRAGMENT_FILES),
     "libs/installation-context/installation_context.py",
@@ -39,13 +44,24 @@ SDK_FILES = (
 )
 
 
-def require_sdk_sources(sdk: Path, sources: list[dict]) -> None:
+def require_sdk_sources(sdk: Path, sources: list[dict], *, runner: Path) -> None:
     """Bind the required fixture, SDK fragments and import package to one root."""
     if not sdk.is_absolute() or sdk.resolve() != sdk:
         raise ObservationBlocked("SDK source root is missing or redirected")
     supplied = {Path(item["path"]) for item in sources}
-    if not {sdk / name for name in SDK_FILES} <= supplied:
+    if len(supplied) != len(sources) or supplied != {sdk / name for name in SDK_FILES}:
         raise ObservationBlocked("SDK source closure is incomplete or bound to another root")
+    helpers = sdk / "libs/agent-procutil/tests"
+    if runner != helpers / "sdk_visibility.py" or runner.resolve() != runner:
+        raise ObservationBlocked("running qualification runner belongs to another SDK root")
+    if Path(__file__) != helpers / "sdk_visibility_sources.py":
+        raise ObservationBlocked("loaded qualification helper belongs to another SDK root")
+    for name in RUNNER_FILES[1:]:
+        module = sys.modules.get(Path(name).stem)
+        if module is not None:
+            origin = getattr(module, "__file__", None)
+            if not origin or Path(origin) != helpers / name or Path(origin).resolve() != Path(origin):
+                raise ObservationBlocked("loaded qualification helper belongs to another SDK root")
 
 
 def bind_sdk_import(sdk: Path) -> Path:

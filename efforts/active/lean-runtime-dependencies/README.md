@@ -359,6 +359,30 @@ transfer without acceptance by a named tracked objective.
 
 ## Journal
 
+### 2026-10-27 - SDK review repairs and a stricter qualification source boundary
+
+- Review of #9354 found and resolved two runtime defects: POSIX exit zero
+  did not prove the callback returned, and repeated path canonicalization
+  could expand a literal environment token a second time. Separate return
+  witnesses and raw-input-only expansion now preserve those boundaries.
+  Actual Linux SDK lifetime, zero/nonzero return-versus-abrupt and chained
+  percent-path controls pass; Windows has not rerun these repairs.
+- A later review found that the fixture could mix a runner/observer checkout
+  with another SDK source root. The exact manifest now includes every runner
+  helper under the selected SDK; the running runner and loaded helper origins
+  must match that tree before native binding or visible work. The focused
+  controls pass 109 actor-free cases and three cold subprocess cases,
+  including a separately copied runner refused against the selected SDK.
+- The retained Windows request used separately located, hash-bound runner
+  helpers. It therefore does not meet the corrected single-root gate either.
+  Its negative result, raw capture, original consent consumption and
+  independent reconciliation of the already-observed properties remain
+  historical and unchanged, not acceptance of the corrected qualifier or
+  newer runtime bytes. No new window, native producer or replay occurred.
+- The 13 shipped synchronous SDK workers are explicitly caller-contained in
+  the lifecycle census. Normal PR review and merge remain open; no remaining
+  helper, release, rollout or aggregate Plan/Validation item closes here.
+
 ### 2026-10-27 - Retained SDK desktop properties independently reconciled
 
 - The consented source-only witness recorded a 0.125-second visible control,
