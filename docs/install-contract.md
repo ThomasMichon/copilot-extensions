@@ -3703,6 +3703,10 @@ caller's complete wheel/hash map. It verifies the aggregate SHA-256 before
 opening members, rejects duplicate/extra/unsafe members, and checks each wheel's
 size and digest before handing it to the same `WheelSnapshot` owner. The outer
 archive and original unpacked files may disappear once retention succeeds.
+The existing bounded ZIP reader preflights the actual central-directory extent
+and count before `ZipFile` builds an index, and validates each complete compressed
+stream rather than a prefix truncated to a forged member size. Malformed filename
+encoding produces `WheelError`, like other invalid transport bytes.
 `open_wheel_bundle_snapshot` exposes the same adapter for a caller-owned private
 root. Its inclusive storage budget counts both unpacked and retained wheel
 copies; all operations share the caller's absolute deadline. There is no
