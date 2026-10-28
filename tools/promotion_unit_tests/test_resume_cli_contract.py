@@ -279,6 +279,64 @@ def test_unsupported_daemon_refuses_before_effect(
     assert all(method == "GET" for method, _, _ in boundary.calls)
 
 
+@pytest.mark.parametrize("range_kind", ["overlap", "disjoint", "invalid"])
+def test_resume_requires_shared_protocol_range(
+    boundary: ResumeBoundary, capsys: Any, range_kind: str,
+) -> None:
+    protocol = sys.modules[f"{PACKAGE}.protocol"]
+    boundary.health.update(
+        protocol_version=protocol.HTTP_PROTOCOL_VERSION + 2,
+        min_protocol_version={
+            "overlap": 1, "disjoint": protocol.HTTP_PROTOCOL_VERSION + 1, "invalid": -1,
+        }[range_kind],
+    )
+    supported = range_kind == "overlap"
+    assert boundary.client.daemon_supports(40) is supported
+    if supported:
+        boundary.client.assert_client_supported()
+        boundary.invoke("--json", "resume", "--worktree-id", "worktree-123")
+        assert json.loads(capsys.readouterr().out)["worktree_id"] == "worktree-123"
+        assert len([call for call in boundary.calls if call[0] == "POST"]) == 1
+    else:
+        with pytest.raises(boundary.errors.BridgeClientError) as raised:
+            boundary.client.assert_client_supported()
+        assert raised.value.status == 426
+        with pytest.raises(SystemExit):
+            boundary.invoke("--json", "resume", "--worktree-id", "worktree-123")
+        assert "error" in json.loads(capsys.readouterr().out)
+        assert all(method == "GET" for method, _, _ in boundary.calls)
+
+
+def test_effectful_retry_rechecks_both_supported_range_endpoints(
+    boundary: ResumeBoundary, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol = sys.modules[f"{PACKAGE}.protocol"]
+    floor = sys.modules[f"{PACKAGE}.client_protocol_floor"]
+    failure = boundary.errors.BridgeConnectionError("retired")
+    failure.__cause__ = ConnectionRefusedError("not admitted")
+    boundary.failures.append(failure)
+    original = boundary.client._request
+
+    def replacing_request(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return original(*args, **kwargs)
+        except boundary.errors.BridgeConnectionError:
+            boundary.health.update(
+                protocol_version=protocol.HTTP_PROTOCOL_VERSION + 2,
+                min_protocol_version=protocol.HTTP_PROTOCOL_VERSION + 1,
+            )
+            raise
+
+    monkeypatch.setattr(boundary.client, "_request", replacing_request)
+    monkeypatch.setattr(floor.time, "sleep", lambda _: None)
+    request = floor.protocol_floored_request(boundary.client, 40)
+    with pytest.raises(boundary.errors.BridgeClientError) as raised:
+        request("POST", "/api/v1/sessions", {"agent": "worker"})
+    assert raised.value.status == 426
+    assert "no compatible" in str(raised.value)
+    assert [method for method, _, _ in boundary.calls] == ["GET", "POST", "GET"]
+
+
 @pytest.mark.parametrize("failure", ["refused", "lost", "downgraded", "capability"])
 def test_hosting_fence_survives_exact_selection_without_effect_retry(
     boundary: ResumeBoundary, capsys: Any, failure: str,
