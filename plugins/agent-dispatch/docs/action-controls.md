@@ -203,6 +203,19 @@ qualify an old consumer, or authorize effects on protected workers. A failed
 graceful cutover still reports failure with possible prior selection changes;
 there is no restart fallback or automatic rollback.
 
+This is a provider-only expansion of the native installer boundary. Existing
+callers keep their ordinary syntax; no automatic caller is migrated to these
+modes. An explicit caller must select and verify the actual immutable installer
+entrypoint against a reviewed source revision containing this contract before
+sending the new syntax. The selected file's source/content identity, not a
+newer marketplace payload, package-version equality or a running coordinator's
+version, establishes support. There is no new coordinator capability field.
+Older installers do not support `prepare`; older PowerShell also rejects the
+new preservation parameter. Older Bash may silently ignore an unknown option,
+so never use the preservation flag against an unverified older installer or
+retry as an ordinary update after incompatibility. Rollback uses the existing
+retained-runtime contract, not this new syntax against a historical installer.
+
 The existing **Installation context full** manual workflow offers the
 `dispatch-maintenance` portfolio for focused native Windows qualification at its
 immutable dispatch SHA. Its three bounded packets cover real policy/overlay

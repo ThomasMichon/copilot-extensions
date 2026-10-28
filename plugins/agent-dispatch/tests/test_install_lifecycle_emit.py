@@ -66,7 +66,7 @@ def _run(tmp_path: Path, action: str, failure: str = "", *, blocked: bool = Fals
                 "Initialize-SourceRuntime", "Assert-SourceRuntime", "Invoke-Install",
                 "Invoke-Provision", "Invoke-Update", "Invoke-Start", "Invoke-Stop",
                 "Invoke-Status", "Invoke-Stamp", "Invoke-Uninstall",
-                "Stop-RuntimeConstruction", "Exit-InstallLock",
+                "Install-Runtime", "Stop-RuntimeConstruction", "Exit-InstallLock",
             )
         )
         script = (
@@ -74,6 +74,7 @@ def _run(tmp_path: Path, action: str, failure: str = "", *, blocked: bool = Fals
             "$PluginDir = $env:TEST_PLUGIN\n$InstallDir = $env:TEST_INSTALL_ROOT\n"
             "$VenvDir = $env:TEST_RUNTIME\n$LinkDir = $env:TEST_RUNTIME\n"
             "$SrcVersion = '1.2.3'\n$Action = $env:TEST_ACTION\n"
+            "$PreserveSupervisors = $false\n"
             "$global:LASTEXITCODE = 47\n"
             "$installerActionRefusal = $null\n"
             "$script:ActionControlsHelper = Join-Path $PluginDir 'scripts/action_controls.py'\n"
@@ -106,13 +107,14 @@ def _run(tmp_path: Path, action: str, failure: str = "", *, blocked: bool = Fals
             for name in (
                 "_initialize_source_runtime", "_assert_source_runtime", "do_install",
                 "do_update", "do_start", "do_stop", "do_status", "do_stamp",
-                "do_uninstall",
+                "do_uninstall", "_ensure_runtime",
             )
         )
         script = (
             "set -euo pipefail\nPLUGIN_DIR=\"$TEST_PLUGIN\"\nINSTALL_DIR=\"$TEST_INSTALL_ROOT\"\n"
             "SCRIPT_DIR=\"$PLUGIN_DIR/scripts\"\n"
             "SRC_VERSION=1.2.3\nACTION=\"$TEST_ACTION\"\nLINK_DIR=\"$TEST_RUNTIME\"\n"
+            "PRESERVE_SUPERVISORS=0\n"
             "_warn() { printf '%s\\n' \"$*\" >&2; }\n"
             "_fail() { printf '%s\\n' \"$*\" >&2; }\n"
             + _function(support, "_require_actions") + "\n"
@@ -149,6 +151,13 @@ def _run(tmp_path: Path, action: str, failure: str = "", *, blocked: bool = Fals
     events = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()] \
         if log.is_file() else []
     return result, events
+
+
+@pytest.mark.parametrize("powershell", [False, True], ids=["bash", "powershell"])
+def test_prepare_has_no_live_service_lifecycle(tmp_path: Path, powershell: bool) -> None:
+    result, events = _run(tmp_path, "prepare", powershell=powershell)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert events == []
 
 
 def _launcher_fixture() -> str:
