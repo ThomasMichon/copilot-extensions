@@ -384,6 +384,15 @@ or mismatched manifests are incomplete discovery, not authority to delete old
 copies. These are configuration identity checks, not instruction attestation.
 Runtime destination mapping also accepts top-level declared instruction files;
 the stricter subdirectory/suffix rules remain authoring-only.
+Source-qualified activation keys must be well formed before discovery can
+authorize cleanup. Runtime identity components follow startup's portable-name
+rules, including case and underscores; stricter authoring identifiers do not
+gate copies. Declaration and plugin-manifest JSON accept an optional UTF-8 BOM,
+while copied instruction templates remain byte-identical.
+The complete declaration set is checked for equal and ancestor/descendant
+portable output collisions before publication or selection. All conflicting
+copies are excluded with visible findings; independently safe new paths remain
+eligible. Compatibility results retain the declared-source count.
 Reviewed offline lock/artifact validation remains available without source
 freshness or folder trust. Explicit committed-source maintenance sync is a
 separate reviewable consent-owned write path, not authentication evidence.

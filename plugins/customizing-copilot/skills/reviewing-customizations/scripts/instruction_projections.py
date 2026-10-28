@@ -975,15 +975,16 @@ def _render_local_cache_locked(
     import instruction_copies
 
     declarations = instruction_copies.load_declarations(
-        sources, _delivery_io(), workspace=root, identity=_plugin_identity,
+        sources, _delivery_io(), workspace=root,
         validate_path=_validate_relative, load_json=_load_json_bytes,
     )
+    result.declared = declarations.declared
     for message in declarations.failures.values():
         result.add(BLOCKING, "projection-declaration", "<plugin-stack>", message)
-    grouped: dict[str, list[instruction_copies.DeclaredCopy]] = {}
-    for copy in declarations.copies:
-        key = unicodedata.normalize("NFC", copy.local_destination).casefold()
-        grouped.setdefault(key, []).append(copy)
+    grouped = {
+        unicodedata.normalize("NFC", copy.local_destination).casefold(): copy
+        for copy in declarations.copies
+    }
     desired = {copy.local_destination for copy in declarations.copies}
     existing = list(_iter_local_cache_files(root))
     existing_relatives = {path.relative_to(root).as_posix() for path in existing}
@@ -1006,15 +1007,10 @@ def _render_local_cache_locked(
     )
     ignored = delivery_io.ignored_local_paths(root, sorted(desired))
     aggregate = 0
-    discovery_incomplete = bool(declarations.failures) or any(len(copies) != 1 for copies in grouped.values())
+    discovery_incomplete = bool(declarations.failures)
     incomplete = discovery_incomplete
-    for copies in grouped.values():
-        copy = copies[0]
+    for copy in declarations.copies:
         relative = copy.local_destination
-        if len(copies) != 1:
-            result.add(BLOCKING, "projection-local-cache-ambiguous", relative,
-                       "multiple enabled declarations name the same output")
-            continue
         try:
             raw = _read_bounded_regular(copy.template, MAX_LOCAL_TEMPLATE_BYTES)
             aggregate += len(raw)
@@ -1072,14 +1068,13 @@ def _render_local_cache_locked(
         try:
             path = _safe_destination(root, PurePosixPath(relative))
             key = unicodedata.normalize("NFC", relative).casefold()
-            for copy in grouped.get(key, []):
+            copy = grouped.get(key)
+            if copy is not None:
                 target = _safe_destination(root, PurePosixPath(copy.local_destination))
                 try:
                     same_file = path.samefile(target)
                 except FileNotFoundError:
                     same_file = False
-                if same_file:
-                    break
             else:
                 same_file = False
             if same_file:
@@ -1516,7 +1511,7 @@ def resolve_instruction_source(
     root = validate_repository_root(root)
     relative = _validate_relative(destination, field_name="selector destination")
     declarations = instruction_copies.load_declarations(
-        sources or [], _delivery_io(), workspace=root, identity=_plugin_identity,
+        sources or [], _delivery_io(), workspace=root,
         validate_path=_validate_relative, load_json=_load_json_bytes,
     )
     selected = instruction_copies.select_copy(root, destination, declarations, _delivery_io())

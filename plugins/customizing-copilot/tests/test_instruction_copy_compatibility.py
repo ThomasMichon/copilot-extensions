@@ -307,3 +307,92 @@ def test_staged_removal_protects_the_remaining_working_copy(
     assert not result.written and not result.removed
     assert any("tracked" in finding.check for finding in result.findings)
     assert current.read_bytes() == before
+
+
+@pytest.mark.parametrize("identity", ["@market", "policy@", "policy@market@other"])
+def test_malformed_activation_identity_cannot_authorize_cleanup(tmp_path: Path, identity: str) -> None:
+    repo, source, spec = fixture(tmp_path)
+    assert not projections.render_local_cache(repo, lambda: [source]).blocking
+    current = repo / delivery.managed_destination(spec.destination, spec.plugin)
+    before = current.read_bytes()
+    home = tmp_path / "home"
+    settings = _runtime_settings(repo, home, {"source": "github", "repo": "example/plugins"})
+    data = json.loads(settings.read_bytes())
+    data["enabledPlugins"] = {identity: True}
+    settings.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="identity"):
+        projections.discover_enabled_sources(repo, home=home, require_trust=True, runtime=True)
+    result = projections.render_local_cache(repo, lambda: projections.discover_enabled_sources(
+        repo, home=home, require_trust=True, runtime=True,
+    ))
+    assert result.blocking and not result.written and not result.removed
+    assert current.read_bytes() == before
+    assert any("identity" in finding.message for finding in result.findings)
+
+
+@pytest.mark.parametrize("identity", ["policy_tools@team_market", "Policy@Market"])
+def test_runtime_portable_plugin_identities_match_startup(tmp_path: Path, identity: str) -> None:
+    repo, source, spec = fixture(tmp_path)
+    name, market = identity.split("@")
+    (source.payload_root / "plugin.json").write_text(json.dumps({"name": name}))
+    source.origin = f"{market}/{name}"
+    result = projections.render_local_cache(repo, lambda: [source])
+    assert not result.blocking, result.findings
+    selected = projections.resolve_instruction_source(repo, spec.destination, [source])
+    assert selected["identity"]["plugin"] == identity
+    assert selected["selectedPath"] == delivery.managed_destination(spec.destination, identity)
+    assert (repo / selected["selectedPath"]).read_bytes() == (source.payload_root / spec.template).read_bytes()
+
+
+@pytest.mark.parametrize("filename", ["instruction-projections.json", "plugin.json"])
+def test_runtime_json_bom_matches_startup(tmp_path: Path, filename: str) -> None:
+    repo, source, spec = fixture(tmp_path)
+    path = source.payload_root / filename
+    path.write_bytes(b"\xef\xbb\xbf" + path.read_bytes())
+    result = projections.render_local_cache(repo, lambda: [source])
+    assert not result.blocking, result.findings
+    selected = projections.resolve_instruction_source(repo, spec.destination, [source])
+    assert selected["selectedPath"] == result.written[0]
+    assert (repo / result.written[0]).read_bytes() == (source.payload_root / spec.template).read_bytes()
+
+
+@pytest.mark.parametrize("cross_provider", [False, True])
+def test_runtime_excludes_all_ancestor_descendant_output_collisions(
+    tmp_path: Path, cross_provider: bool,
+) -> None:
+    from types import SimpleNamespace
+
+    repo, source, spec = fixture(tmp_path)
+    declaration = source.payload_root / "instruction-projections.json"
+    data = json.loads(declaration.read_bytes())
+    first = dict(data["projections"][0],
+                 destination=".github/instructions/policy/topic.instructions.md")
+    child = dict(first, id="child",
+                 destination=".github/instructions/policy/topic.local.instructions.md/body.instructions.md")
+    safe = dict(first, id="safe", destination=".github/instructions/policy/safe.instructions.md")
+    data["projections"] = [first, safe] if cross_provider else [first, child, safe]
+    declaration.write_text(json.dumps(data))
+    sources = [source]
+    if cross_provider:
+        other_root = tmp_path / "other-plugin"
+        shutil.copytree(source.payload_root, other_root)
+        (other_root / "plugin.json").write_text('{"name":"other"}')
+        (other_root / declaration.name).write_text(json.dumps(dict(data, projections=[child])))
+        sources.append(SimpleNamespace(origin="market/other", payload_root=other_root))
+    previous = repo / delivery.managed_destination(first["destination"], spec.plugin)
+    previous.parent.mkdir(parents=True)
+    previous.write_bytes(b"retain the earlier copy, but do not select it as current")
+    result = projections.render_local_cache(repo, lambda: sources)
+    expected = delivery.managed_destination(safe["destination"], spec.plugin)
+    assert result.blocking
+    assert result.written == [expected] and not result.removed
+    assert previous.read_bytes() == b"retain the earlier copy, but do not select it as current"
+    with pytest.raises(ValueError, match="ambiguous|no managed copy"):
+        projections.resolve_instruction_source(repo, first["destination"], sources)
+
+
+def test_compatibility_result_preserves_declared_source_count(tmp_path: Path) -> None:
+    repo, source, _spec = fixture(tmp_path)
+    result = projections.render_local_cache(repo, lambda: [source])
+    assert not result.blocking
+    assert result.declared == result.to_dict()["declared"] == 1

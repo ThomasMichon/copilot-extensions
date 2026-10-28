@@ -114,11 +114,25 @@ def legacy_local_destination(destination: str) -> str:
     )
 
 
+def managed_identity(plugin: str) -> tuple[str, str]:
+    if not isinstance(plugin, str) or plugin.count("@") != 1:
+        raise ValueError("plugin identity must be name@marketplace")
+    name, market = (part.strip() for part in plugin.split("@"))
+    reserved = {"con", "prn", "aux", "nul",
+                *(f"com{index}" for index in range(1, 10)),
+                *(f"lpt{index}" for index in range(1, 10))}
+    for part in (name, market):
+        if (
+            not part or part in {".", ".."} or part.endswith((" ", "."))
+            or any(ord(char) < 32 or char in '<>:"/\\|?*' for char in part)
+            or part.split(".", 1)[0].casefold() in reserved
+        ):
+            raise ValueError("plugin identity contains an invalid portable component")
+    return name, market
+
+
 def managed_destination(destination: str, plugin: str) -> str:
-    name, separator, market = plugin.partition("@")
-    identifier = re.compile(r"^[a-z0-9](?:[a-z0-9.-]{0,62}[a-z0-9])?$")
-    if not separator or not identifier.fullmatch(name) or not identifier.fullmatch(market):
-        raise ValueError("invalid managed instruction plugin identity")
+    _name, market = managed_identity(plugin)
     path = PurePosixPath(destination)
     if (
         path.parts[:2] != (".github", "instructions") or len(path.parts) < 3

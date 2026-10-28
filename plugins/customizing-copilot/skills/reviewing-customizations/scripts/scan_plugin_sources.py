@@ -150,6 +150,10 @@ def _strict_settings(path: Path) -> dict:
         for name, value in values.items():
             if key == "enabledPlugins" and "@" not in name:
                 continue
+            if key == "enabledPlugins" and (
+                name.count("@") != 1 or not all(part.strip() for part in name.split("@"))
+            ):
+                raise ValueError(f"invalid plugin identity {name!r}: {path}")
             if not isinstance(value, expected):
                 raise ValueError(f"invalid {key}: {path}")
     return data

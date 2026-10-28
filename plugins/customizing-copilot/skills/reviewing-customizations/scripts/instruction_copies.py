@@ -9,7 +9,7 @@ from typing import Callable, Iterable
 import unicodedata
 
 from instruction_delivery_io import DeliveryIO
-from instruction_delivery import managed_destination
+from instruction_delivery import managed_destination, managed_identity
 
 
 @dataclass(frozen=True)
@@ -26,12 +26,12 @@ class DeclaredCopy:
 class Declarations:
     copies: list[DeclaredCopy] = field(default_factory=list)
     failures: dict[str, str] = field(default_factory=dict)
+    declared: int = 0
 
 
 def load_declarations(
     sources: Iterable[object], io: DeliveryIO, *,
     workspace: Path,
-    identity: Callable[[str], tuple[str, str, str]],
     validate_path: Callable[..., PurePosixPath],
     load_json: Callable[[bytes], object],
 ) -> Declarations:
@@ -43,7 +43,11 @@ def load_declarations(
         try:
             if getattr(source, "error", ""):
                 raise ValueError(source.error)
-            plugin, _name, _market = identity(origin)
+            market, separator, name = origin.partition("/")
+            if not separator:
+                raise ValueError("plugin source must have marketplace/plugin identity")
+            _name, _market = managed_identity(f"{name}@{market}")
+            plugin = f"{_name}@{_market}"
             if plugin in seen:
                 result.copies = [copy for copy in result.copies if copy.plugin != plugin]
                 raise ValueError("enabled plugin is declared more than once")
@@ -68,7 +72,7 @@ def load_declarations(
                     manifest_path.lstat()
                 except FileNotFoundError:
                     continue
-                manifest = load_json(io.read(manifest_path, 64 * 1024))
+                manifest = load_json(io.read(manifest_path, 64 * 1024).removeprefix(b"\xef\xbb\xbf"))
                 if not isinstance(manifest, dict) or manifest.get("name") != _name:
                     raise ValueError("enabled plugin manifest identity is invalid")
                 break
@@ -79,7 +83,7 @@ def load_declarations(
                 declaration.lstat()
             except FileNotFoundError:
                 continue
-            data = load_json(io.read(declaration, 256 * 1024))
+            data = load_json(io.read(declaration, 256 * 1024).removeprefix(b"\xef\xbb\xbf"))
             if (
                 not isinstance(data, dict)
                 or data.get("schema") != "copilot-extensions.instruction-projections"
@@ -117,8 +121,23 @@ def load_declarations(
                     managed_destination(destination.as_posix(), plugin), template, scope,
                 ))
             result.copies.extend(copies)
+            result.declared += len(copies)
         except (OSError, ValueError) as exc:
             result.failures[origin] = f"{origin}: {exc}"
+    conflicting: set[DeclaredCopy] = set()
+    keyed = [
+        (copy, unicodedata.normalize("NFC", copy.local_destination).casefold())
+        for copy in result.copies
+    ]
+    for index, (copy, key) in enumerate(keyed):
+        for other, previous in keyed[:index]:
+            if key == previous or key.startswith(previous + "/") or previous.startswith(key + "/"):
+                conflicting.update((copy, other))
+    for copy in sorted(conflicting, key=lambda copy: (copy.local_destination, copy.plugin, copy.source_id)):
+        result.failures[f"{copy.plugin}:{copy.source_id}"] = (
+            f"ambiguous instruction output destination: {copy.local_destination}"
+        )
+    result.copies = [copy for copy in result.copies if copy not in conflicting]
     return result
 
 

@@ -264,3 +264,24 @@ promotion flow; rollout requires its normal authorization.
   platform-specific skips. Lint and whitespace checks passed. Immutable
   current-head validation and another passing review remain open; no rollout
   occurred.
+
+### 2026-10-27 - Activation and complete-declaration parity corrections
+
+- #9350's next review reported no new inline issue, but its full body contained
+  one High and four Medium previously missed findings. Those remain blocking
+  regardless of the overview's zero-open-issues wording.
+- Added ten failing controls for malformed qualified activation keys, startup's
+  portable case/underscore identities, BOM-prefixed JSON, complete-set
+  ancestor/descendant collisions and declared-count reporting.
+- Runtime discovery now rejects malformed activation identities before an empty
+  result can authorize cleanup. Runtime declarations use portable identities
+  rather than the stricter authoring identifier validator, and accept optional
+  JSON BOMs without changing copied instruction bytes.
+- Complete-set declaration validation excludes every conflicting output before
+  copy or selection, including across providers, while retaining independent
+  safe paths. The compatibility result again reports its declared-source count.
+  The focused compatibility packet passed all 41 cases; the complete
+  customization/scanner/standalone packet passed 615 tests with six
+  platform-specific skips. Lint and whitespace checks passed.
+- Full current-head validation and a passing review remain required. No rollout
+  or machine hold was performed.

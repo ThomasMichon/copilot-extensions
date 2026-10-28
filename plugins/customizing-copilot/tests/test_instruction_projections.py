@@ -462,7 +462,7 @@ def test_render_local_cache_rejects_ambiguous_destination_collisions(
     result = projections.render_local_cache(repo, lambda: [source])
 
     assert any(
-        finding.check == "projection-local-cache-ambiguous"
+        finding.check == "projection-declaration" and "ambiguous" in finding.message
         for finding in result.findings
     )
     local_path = (
