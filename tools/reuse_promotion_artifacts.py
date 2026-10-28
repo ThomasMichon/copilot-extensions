@@ -9,7 +9,7 @@ from pathlib import Path
 import promotion_artifact_readiness as readiness
 import publish_python_artifacts as publisher
 from promotion_python_artifacts import (
-    INDEX_NAME, SCHEMA, PromotionArtifactError, candidate_projects, validate_artifacts,
+    INDEX_LIMIT, INDEX_NAME, SCHEMA, PromotionArtifactError, candidate_projects, validate_artifacts,
 )
 
 _BUNDLE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*-[0-9][A-Za-z0-9.+-]*-[0-9a-f]{64}\.zip")
@@ -95,7 +95,7 @@ def read_admitted_source_index(
 
     _download(
         directory, repository=repository, tag=tag, name=INDEX_NAME,
-        asset=assets[INDEX_NAME], limit=1 << 20,
+        asset=assets[INDEX_NAME], limit=INDEX_LIMIT,
     )
     index = json.loads((directory / INDEX_NAME).read_text(encoding="utf-8"))
     if (
