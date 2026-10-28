@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import py_compile
 import shutil
 import subprocess
 import sys
@@ -31,7 +32,7 @@ def private_home(tmp_path, monkeypatch):
     monkeypatch.delenv("WORKTREE_MANAGER_ROOT", raising=False)
 
 
-def fixture_slot(root, version="1.2.3"):
+def fixture_slot(root, version="1.2.3", *, python_source=False):
     """Seal real fixture files through the production construction inventory."""
     runtime = removal.runtime
     slot = root / "versions" / version
@@ -47,6 +48,10 @@ def fixture_slot(root, version="1.2.3"):
         python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         python.parent.mkdir()
         shutil.copyfile(sys.executable, python)
+        if python_source:
+            module = slot / "Lib" / "site-packages" / "sample" / "__init__.py"
+            module.parent.mkdir(parents=True)
+            module.write_text("VALUE = 42\n", encoding="utf-8")
         stubs = si._expected_binstub_contents()
         provider = si._expected_control_plane_provider_manifest(root=root)
         removal.seal_inventory(slot, frontdoors=stubs, provider=provider)
@@ -147,6 +152,117 @@ def test_preview_and_removal_preserve_durable_bytes(tmp_path, capsys):
     assert removal.uninstall(root, apply=True, as_json=True) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "absent"
     assert tree_bytes(tmp_path) == after
+
+
+@pytest.mark.parametrize("mode", list(py_compile.PycInvalidationMode))
+@pytest.mark.parametrize("optimization", [0, 1, 2])
+def test_post_construction_bytecode_is_removed_without_resealing(tmp_path, capsys, mode, optimization):
+    root = tmp_path / "manager"
+    slot = fixture_slot(root, python_source=True)
+    source = slot / "Lib" / "site-packages" / "sample" / "__init__.py"
+    inventory = (slot / removal.INVENTORY).read_bytes()
+    compiled = run_owned(
+        [getattr(sys, "_base_executable", sys.executable), "-I", "-S", "-c",
+         "import py_compile,sys; py_compile.compile(sys.argv[1], doraise=True, "
+         "invalidation_mode=py_compile.PycInvalidationMode[sys.argv[2]], optimize=int(sys.argv[3]))",
+         str(source), mode.name, str(optimization)],
+        timeout=15,
+    )
+    assert compiled.returncode == 0, compiled.stdout + compiled.stderr
+    assert list(source.parent.glob("__pycache__/*.pyc"))
+    before = tree_bytes(tmp_path)
+    assert removal.uninstall(root, apply=False, as_json=True) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "planned"
+    assert tree_bytes(tmp_path) == before
+    assert (slot / removal.INVENTORY).read_bytes() == inventory
+    assert removal.uninstall(root, apply=True, as_json=True) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "removed"
+    assert not slot.exists()
+
+
+def test_bytecode_from_another_cpython_tag_is_still_source_bound(tmp_path, capsys):
+    root = tmp_path / "manager"
+    slot = fixture_slot(root, python_source=True)
+    source = slot / "Lib" / "site-packages" / "sample" / "__init__.py"
+    cache = Path(py_compile.compile(
+        str(source), doraise=True, invalidation_mode=py_compile.PycInvalidationMode.CHECKED_HASH,
+    ))
+    cache.rename(cache.with_name("__init__.cpython-999.pyc"))
+    assert removal.uninstall(root, apply=True, as_json=True) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "removed"
+    assert not slot.exists()
+
+
+def test_bytecode_change_after_planning_refuses_before_withdrawal(tmp_path, monkeypatch, capsys):
+    root = tmp_path / "manager"
+    slot = fixture_slot(root, python_source=True)
+    cache = Path(py_compile.compile(
+        str(slot / "Lib" / "site-packages" / "sample" / "__init__.py"), doraise=True,
+    ))
+    original = removal._remove
+
+    def race(root, plan, removed):
+        cache.write_bytes(cache.read_bytes() + b"changed")
+        original(root, plan, removed)
+
+    monkeypatch.setattr(removal, "_remove", race)
+    assert removal.uninstall(root, apply=True, as_json=True) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "refused" and result["removed"] == []
+    assert (root / "current-version").is_file()
+    assert cache.read_bytes().endswith(b"changed")
+
+
+@pytest.mark.parametrize("apply", [False, True])
+@pytest.mark.parametrize("state", [None, {}, {"kind": "file"}])
+def test_missing_sealed_entry_refuses_before_withdrawal(tmp_path, capsys, apply, state):
+    root = tmp_path / "manager"
+    slot = fixture_slot(root, python_source=True)
+    record = json.loads((slot / removal.INVENTORY).read_text(encoding="utf-8"))
+    record["entries"]["missing.py"] = state
+    (slot / removal.INVENTORY).write_text(json.dumps(record), encoding="utf-8")
+    before = tree_bytes(tmp_path)
+    assert removal.uninstall(root, apply=apply, as_json=True) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "refused" and result["removed"] == []
+    assert tree_bytes(tmp_path) == before
+
+
+@pytest.mark.parametrize("change", [
+    "unknown-file", "empty-directory", "unsealed-source", "source-changed",
+    "bad-header", "bad-binding", "sealed-cache-changed",
+])
+def test_added_cache_does_not_hide_unowned_or_changed_artifacts(tmp_path, capsys, change):
+    root = tmp_path / "manager"
+    slot = fixture_slot(root, python_source=True)
+    source = slot / "Lib" / "site-packages" / "sample" / "__init__.py"
+    cache = Path(py_compile.compile(str(source), doraise=True))
+    if change == "unknown-file":
+        (cache.parent / "notes.txt").write_bytes(b"retain")
+    elif change == "empty-directory":
+        (source.parent / "other" / "__pycache__").mkdir(parents=True)
+    elif change == "unsealed-source":
+        unknown = source.parent / "foreign.py"
+        unknown.write_text("VALUE = 1\n", encoding="utf-8")
+        py_compile.compile(str(unknown), doraise=True)
+    elif change == "source-changed":
+        source.write_text("VALUE = 43\n", encoding="utf-8")
+    elif change == "bad-header":
+        cache.write_bytes(b"not bytecode")
+    elif change == "bad-binding":
+        data = bytearray(cache.read_bytes())
+        data[8] ^= 1
+        cache.write_bytes(data)
+    else:
+        record = json.loads((slot / removal.INVENTORY).read_text(encoding="utf-8"))
+        record["entries"] = removal._tree(slot)
+        (slot / removal.INVENTORY).write_text(json.dumps(record), encoding="utf-8")
+        cache.write_bytes(cache.read_bytes() + b"changed")
+    before = tree_bytes(tmp_path)
+    assert removal.uninstall(root, apply=True, as_json=True) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "refused" and result["removed"] == []
+    assert tree_bytes(tmp_path) == before
 
 
 @pytest.mark.parametrize("absolute", [False, True])
