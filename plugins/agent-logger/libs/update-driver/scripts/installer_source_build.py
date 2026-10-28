@@ -223,8 +223,6 @@ def _eligibility(inputs) -> tuple[list[dict], str | None]:
         ):
             return [], name + ":non-static-setuptools-contract"
         manifests.append(data)
-    if len({frozenset(data["build-system"]["requires"]) for data in manifests}) > 1:
-        return [], "distinct-build-requirements"
     return manifests, None
 
 
@@ -347,36 +345,11 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
         raise WheelError("native UV did not identify an absolute cache directory")
     with _temporary_inputs(None) as temporary:
         workspace = _private_retained_root(Path(temporary)).resolve()
-        tooling = workspace / "tools"
-        run(
-            [str(base_python), "-I", "-m", "venv", "--without-pip", "--copies", str(tooling)],
-            environment=transaction.environment, cwd=transaction.cwd,
-        )
-        python = tooling / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        requirements = sorted({value for data in manifests for value in data["build-system"]["requires"]})
         cutoffs = [
             argument for option, value in _argument_pairs(transaction.argv[3:])
             if option in ("--exclude-newer", "--exclude-newer-package")
             for argument in (option, value)
         ]
-        with retain_uv_install(
-            str(uv), ["--python", str(python), "--only-binary", ":all:", "--link-mode", "copy",
-                      *requirements, *cutoffs],
-            env=transaction.environment, cwd=transaction.cwd, deadline=deadline,
-        ) as admitted:
-            run(list(admitted.argv), environment=admitted.environment, cwd=admitted.cwd)
-        observed = run(
-            [str(python), "-I", "-c",
-             "import json,sys,sysconfig;print(json.dumps(dict("
-             "version=list(sys.version_info),implementation=sys.implementation.name,"
-             "platform=sysconfig.get_platform(),purelib=sysconfig.get_path('purelib'))))"],
-            environment=transaction.environment, cwd=workspace,
-        )
-        target = json.loads(observed.stdout)
-        tools_root = Path(target.pop("purelib"))
-        if not tools_root.is_relative_to(tooling):
-            raise WheelError("build tools are outside their private environment")
-        tool_content = _tool_tree(tools_root, deadline)
         environment = dict(transaction.environment)
         # Resolution is finished. Build hooks cannot consult another UV config,
         # index or interpreter selection through the source-build subprocess.
@@ -387,15 +360,46 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
             "UV_NO_CONFIG": "1", "UV_OFFLINE": "1", "UV_CACHE_DIR": cache,
             "PYTHONDONTWRITEBYTECODE": "1",
         })
-        common = {
+        identity = {
             "schema": "installer-engine.source-build", "version": 1,
-            "target": target, "tools": tool_content,
             "python": _digest_file(base_python.resolve(strict=True), 256 << 20, deadline),
             "uv": _digest_file(uv, 256 << 20, deadline),
             "builder": _digest_file(builder, 1 << 20, deadline),
             "environment": hashlib.sha256(_canonical(environment)).hexdigest(),
         }
-        tools_seconds = time.monotonic() - started
+        tool_sets = {}
+        tools_seconds = 0.0
+
+        def build_tools(requirements):
+            nonlocal tools_seconds
+            tools_started = time.monotonic()
+            tooling = workspace / ("tools-" + str(len(tool_sets)))
+            run(
+                [str(base_python), "-I", "-m", "venv", "--without-pip", "--copies", str(tooling)],
+                environment=transaction.environment, cwd=transaction.cwd,
+            )
+            python = tooling / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+            with retain_uv_install(
+                str(uv), ["--python", str(python), "--only-binary", ":all:", "--link-mode", "copy",
+                          *requirements, *cutoffs],
+                env=transaction.environment, cwd=transaction.cwd, deadline=deadline,
+            ) as admitted:
+                run(list(admitted.argv), environment=admitted.environment, cwd=admitted.cwd)
+            observed = run(
+                [str(python), "-I", "-c",
+                 "import json,sys,sysconfig;print(json.dumps(dict("
+                 "version=list(sys.version_info),implementation=sys.implementation.name,"
+                 "platform=sysconfig.get_platform(),purelib=sysconfig.get_path('purelib'))))"],
+                environment=transaction.environment, cwd=workspace,
+            )
+            target = json.loads(observed.stdout)
+            tools_root = Path(target.pop("purelib"))
+            if not tools_root.is_relative_to(tooling):
+                raise WheelError("build tools are outside their private environment")
+            tool_content = _tool_tree(tools_root, deadline)
+            tools_seconds += time.monotonic() - tools_started
+            return python, tools_root, tool_content, {**identity, "target": target, "tools": tool_content}
+
         built = 0
         archives, records = {}, {}
         selected = tuple(package for package, data in zip(inputs.packages, manifests) if (
@@ -403,12 +407,17 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
             or re.sub(r"[-_.]+", "-", data["project"]["name"]).lower() in inputs.local_packages
         ))
         for index, package in enumerate(selected):
+            manifest = manifests[inputs.packages.index(package)]
+            requirements = tuple(sorted(set(manifest["build-system"]["requires"])))
+            if requirements not in tool_sets:
+                tool_sets[requirements] = build_tools(requirements)
+            python, tools_root, tool_content, common = tool_sets[requirements]
             compact = workspace / ("source-" + str(index))
             source = _tree(package, deadline, excluded={
                 path.relative_to(package).as_posix() for path in inputs.packages
                 if path != package and path.is_relative_to(package)
             })
-            name = re.sub(r"[-_.]+", "-", manifests[inputs.packages.index(package)]["project"]["name"]).lower()
+            name = re.sub(r"[-_.]+", "-", manifest["project"]["name"]).lower()
 
             def verify_source():
                 if _tree(compact, deadline) != source or _tool_tree(tools_root, deadline) != tool_content:
@@ -464,8 +473,9 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
                 return
             records[name] = _wheel_record(archive, name, deadline)
             archives[package] = archive
-        if _tool_tree(tools_root, deadline) != tool_content:
-            raise WheelError("installed build tools changed during source construction")
+        for _python, tools_root, tool_content, _common in tool_sets.values():
+            if _tool_tree(tools_root, deadline) != tool_content:
+                raise WheelError("installed build tools changed during source construction")
         arguments = []
         selected_manifests = {package / "pyproject.toml" for package in selected}
         for option, value in _argument_pairs(transaction.argv[3:]):

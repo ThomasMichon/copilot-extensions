@@ -308,29 +308,19 @@ def test_canonical_setuptools_setup_boilerplate_keeps_the_graph_cacheable(engine
             assert len(counter.read_text().splitlines()) == 3
 
 
-@pytest.mark.parametrize("change", ["bundled-wheel", "conflicting-build-tools"])
 def test_unsupported_source_or_build_graph_preserves_the_held_transaction(
-    engine, ordinary, tmp_path, change, capsys,
+    engine, ordinary, tmp_path, capsys,
 ):
     plugin, uv, counter, _state = ordinary
     manifest = plugin / "pyproject.toml"
     content = manifest.read_text()
-    if change == "bundled-wheel":
-        content = content.replace('name="example-app"', 'name="copilot-extensions-worktree-manager"')
-        content += '\ndbus-next={path="vendor/dbus_next-0.2.3-py3-none-any.whl"}\n'
-        wheel = plugin / "vendor" / "dbus_next-0.2.3-py3-none-any.whl"
-        wheel.parent.mkdir()
-        shutil.copyfile(
-            Path(__file__).resolve().parents[1] / "worktree-manager" / "vendor" / wheel.name, wheel,
-        )
-        reason = "non-project-source-mapping"
-    else:
-        content = content.replace('requires=["setuptools>=83"]', 'requires=["setuptools==83.0.0"]')
-        leaf = plugin.parent / "leaf" / "pyproject.toml"
-        leaf.write_text(leaf.read_text().replace(
-            'requires=["setuptools>=83"]', 'requires=["setuptools==84.0.0"]',
-        ))
-        reason = "distinct-build-requirements"
+    content = content.replace('name="example-app"', 'name="copilot-extensions-worktree-manager"')
+    content += '\ndbus-next={path="vendor/dbus_next-0.2.3-py3-none-any.whl"}\n'
+    wheel = plugin / "vendor" / "dbus_next-0.2.3-py3-none-any.whl"
+    wheel.parent.mkdir()
+    shutil.copyfile(
+        Path(__file__).resolve().parents[1] / "worktree-manager" / "vendor" / wheel.name, wheel,
+    )
     manifest.write_text(content)
     packages = engine._package_roots(plugin)
     inputs = engine.FrozenInputs(
@@ -339,12 +329,11 @@ def test_unsupported_source_or_build_graph_preserves_the_held_transaction(
     root = tmp_path / "installation"
     with engine._retained_inputs(inputs, uv, tmp_path / "absent-python", refresh=False) as retained:
         arguments = retained.transaction.argv
-        if change == "bundled-wheel":
-            import tomllib
+        import tomllib
 
-            mapping = tomllib.loads((retained.plugin / "pyproject.toml").read_text())["tool"]["uv"]["sources"]
-            admitted_wheel = retained.plugin / mapping["dbus-next"]["path"]
-            assert admitted_wheel.read_bytes() == wheel.read_bytes()
+        mapping = tomllib.loads((retained.plugin / "pyproject.toml").read_text())["tool"]["uv"]["sources"]
+        admitted_wheel = retained.plugin / mapping["dbus-next"]["path"]
+        assert admitted_wheel.read_bytes() == wheel.read_bytes()
         with builds.retained_source_wheels(
             retained, root, uv, Path(sys.executable),
             run=lambda *_args, **_kwargs: pytest.fail("unsupported graph provisioned combined build tools"),
@@ -355,7 +344,74 @@ def test_unsupported_source_or_build_graph_preserves_the_held_transaction(
             assert str(retained.plugin / "pyproject.toml") in arguments
             assert admitted.source_wheels is None
     assert not root.exists() and not counter.exists()
-    assert reason in capsys.readouterr().err
+    assert "non-project-source-mapping" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("requirement_mode", ["lower-bounds", "different-pins"])
+def test_distinct_build_requirements_get_separate_tooling_and_cached_wheels(
+    engine, ordinary, tmp_path, monkeypatch, requirement_mode,
+):
+    plugin, _uv, counter, state = ordinary
+    requirements = ("setuptools>=83", "setuptools>=83.0.0")
+    if requirement_mode == "different-pins":
+        if os.environ.get("TEST_SOURCE_WHEEL_REAL_BACKEND"):
+            pytest.skip("Conflicting pins use two synthetic backend versions")
+        backend = Path(__file__).with_name("fixtures").joinpath("source-runtime-backend.py").read_text()
+        backend += """
+_original_requirements = get_requires_for_build_wheel
+def get_requires_for_build_wheel(config_settings=None):
+    import importlib.metadata
+    requires = tomllib.loads(Path("pyproject.toml").read_text())["build-system"]["requires"]
+    for requirement in requires:
+        if "==" in requirement:
+            assert importlib.metadata.version("setuptools") == requirement.split("==")[1]
+    return _original_requirements(config_settings)
+"""
+        files = []
+        for version in ("83.0.0", "84.0.0"):
+            filename = f"setuptools-{version}-py3-none-any.whl"
+            data = wheel_bytes(
+                name="setuptools", prefix=f"setuptools-{version}.dist-info/",
+                metadata=f"Metadata-Version: 2.4\nName: setuptools\nVersion: {version}\n\n".encode(),
+                extra={"setuptools/__init__.py": b"", "setuptools/build_meta.py": backend.encode()},
+            )
+            state["routes"]["/files/" + filename] = (200, {}, data)
+            files.append({
+                "filename": filename, "url": "/files/" + filename,
+                "hashes": {"sha256": hashlib.sha256(data).hexdigest()},
+                "upload-time": "2020-01-01T00:00:00Z",
+            })
+        state["routes"]["/simple/setuptools/"] = (
+            200, {"Content-Type": "application/vnd.pypi.simple.v1+json"},
+            json.dumps({"meta": {"api-version": "1.1"}, "name": "setuptools", "files": files}).encode(),
+        )
+        requirements = ("setuptools==83.0.0", "setuptools==84.0.0")
+    for package in engine._package_roots(plugin):
+        manifest = package / "pyproject.toml"
+        selected = requirements[1] if package.name == "leaf" else requirements[0]
+        manifest.write_text(manifest.read_text().replace("setuptools>=83", selected))
+    child = engine._child
+    admitted_tools = []
+
+    def trace(argv, **options):
+        if argv[1:3] == ["pip", "install"] and "--only-binary" in argv:
+            admitted_tools.append((
+                argv[argv.index("--python") + 1],
+                tuple(argument for argument in argv if argument.startswith("setuptools")),
+            ))
+        return child(argv, **options)
+
+    monkeypatch.setattr(engine, "_child", trace)
+    root = tmp_path / "installation"
+    for index in range(2):
+        with _candidate(engine, root, ordinary, f"1.0.0+groups{index}") as ready:
+            assert _value(engine, ready) == 1
+            receipt = json.loads((ready.slot / ".runtime-input-origins.json").read_text())
+            assert set(receipt["source_wheels"]) == {"example-app", "example-leaf", "agent-procutil"}
+            assert len(counter.read_text().splitlines()) == 3
+    assert len(admitted_tools) == 4
+    assert len({python for python, _requirements in admitted_tools}) == 4
+    assert {values for _python, values in admitted_tools} == {(value,) for value in requirements}
 
 
 @pytest.mark.parametrize("shared_executable", ["uv", "python", "helper"])

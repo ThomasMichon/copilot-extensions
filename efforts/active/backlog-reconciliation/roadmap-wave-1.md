@@ -118,7 +118,8 @@ substituting improvised success.
   and ownership homes; do not convert uncertainty into a new blanket gate.
 - [ ] Refresh changed issue/source/custody facts before downstream execution or
   any requirement transfer; this snapshot creates no closure credit.
-- [ ] Review this first-wave plan through the normal PR flow, then reconcile
-  the parent effort without marking the full roadmap or numerical gate Done.
+- [x] Review this first-wave plan through the normal PR flow in #9382 and
+  reconcile the parent effort without marking the full roadmap or numerical
+  gate Done.
 - [ ] Complete the full roadmap, whole-queue threshold and operator-guidance
   steps in the [parent effort](README.md).
