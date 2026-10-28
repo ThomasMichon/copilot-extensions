@@ -129,7 +129,7 @@ def test_native_launch_acceptance_is_explicit_and_source_pinned() -> None:
     trigger = workflow.get("on", workflow.get(True))
     assert set(trigger) == {"workflow_dispatch"}
     assert trigger["workflow_dispatch"]["inputs"]["native_launch"] == {
-        "description": "Qualify copied Windows setup interrupts and the POSIX seed reply reader",
+        "description": "Qualify copied Windows setup, cross-entrypoint mux admission and the POSIX seed reply reader",
         "type": "boolean", "default": False,
     }
     job = workflow["jobs"]["native-launch-windows"]
@@ -141,10 +141,16 @@ def test_native_launch_acceptance_is_explicit_and_source_pinned() -> None:
     }
     preflight = next(step for step in job["steps"] if step.get("name", "").startswith("Verify native"))
     assert "$actual -cne $env:GITHUB_SHA" in preflight["run"]
-    execution = job["steps"][-1]["run"]
+    execution = next(
+        step["run"] for step in job["steps"]
+        if "tests/native/test_native_seed_console.py" in step.get("run", "")
+    )
     assert "tests/native/test_native_seed_console.py" in execution
     assert "tests/test_native_seed_shell.py" in execution
-    assert '-k "copied_setup_admission or real_copied_setup"' in execution
+    arguments = shlex.split(execution)
+    assert set(arguments[arguments.index("-k") + 1].split(" or ")) == {
+        "copied_setup_admission", "real_copied_setup", "same_target_joins_at_discovery",
+    }
     assert "--allow-host-state" not in execution
     assert not any(step.get("continue-on-error", False) for step in job["steps"])
     for name in ("derived-diagnostics-posix", "derived-diagnostics-windows"):
@@ -488,7 +494,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "immutable_runtime", "immutable_runtime_ref",
         "interactive_completion", "native_launch", "ssh_service",
         "ssh_headless", "update_diagnostics",
-        "runtime_removal",
+        "runtime_removal", "source_cache",
     }
     assert inputs["watch_owner"]["type"] == "boolean"
     assert inputs["watch_owner"]["default"] is False
@@ -506,6 +512,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "pr-artifacts-linux", "pr-artifacts-windows",
         "dependency-compile-linux", "dependency-compile-windows",
         "source-build-linux", "source-build-windows",
+        "source-cache-linux", "source-cache-windows",
         "marketplace-source-linux", "marketplace-source-windows",
         "installer-latency-linux", "installer-latency-windows",
         "packaging-seed-linux", "packaging-seed-windows",
@@ -534,7 +541,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
             "${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime "
             "&& !inputs.guardian_followthrough && !inputs.watch_owner "
             "&& !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service "
-            "&& !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles "
+            "&& !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.candidate_profiles "
             "&& !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless "
             "&& !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics "
             "&& !inputs.runtime_removal }}"
