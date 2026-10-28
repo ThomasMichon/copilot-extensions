@@ -526,12 +526,14 @@ def test_service_reconciliation_phase_covers_lock_wait_and_preserves_live_guards
         "$NoService = $false\n"
         "$script:phase = 'build'\n"
         "$script:guards = 0\n"
+        "$script:admissions = 0\n"
         "$script:events = [System.Collections.Generic.List[string]]::new()\n"
         "function Write-Skip { param($m) }\n"
         "function Write-Step { param($m) }\n"
         "function Write-Ok { param($m) }\n"
         "function Install-Runtime { }\n"
         "function Invoke-DowngradeGuard { }\n"
+        "function Assert-DispatchActions { param($Actions) $script:admissions++ }\n"
         "function Write-UpdateMarker { }\n"
         "function Clear-UpdateMarker { }\n"
         "function Remove-CoordinatorFirewallRule { }\n"
@@ -565,6 +567,7 @@ def test_service_reconciliation_phase_covers_lock_wait_and_preserves_live_guards
         + _extract_function_block(f"Invoke-{action}")
         + f"\nInvoke-{action}\n"
         + 'Write-Output ("EVENTS:" + ($script:events -join ","))\n'
+        + 'Write-Output ("ADMISSIONS:" + $script:admissions)\n'
     )
     script_path = tmp_path / "phase-order.ps1"
     script_path.write_text(script, encoding="utf-8")
@@ -578,6 +581,8 @@ def test_service_reconciliation_phase_covers_lock_wait_and_preserves_live_guards
         "cutover" if action == "Update" and superseded_check == 2 else ""
     )
     assert f"EVENTS:{expected}\n" in result.stdout
+    admitted = int(action == "Update" and healthy and superseded_check == 0)
+    assert f"ADMISSIONS:{admitted}\n" in result.stdout
 
 
 @pytest.mark.guard
