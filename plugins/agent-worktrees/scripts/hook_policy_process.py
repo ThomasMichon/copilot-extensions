@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import os
 from pathlib import Path
 import subprocess
@@ -22,9 +24,20 @@ def _watch_caller() -> None:
 
 
 def main() -> int:
-    frame = sys.stdin.buffer.readline(_MAX_INPUT + 1)
-    if len(frame) > _MAX_INPUT or not frame.endswith(b"\n"):
+    if sys.argv[1:] not in ([], ["--base64-input"]):
         return 2
+    encoded = bool(sys.argv[1:])
+    limit = 4 * ((_MAX_INPUT + 2) // 3) + 1 if encoded else _MAX_INPUT
+    frame = sys.stdin.buffer.readline(limit + 1)
+    if len(frame) > limit or not frame.endswith(b"\n"):
+        return 2
+    if encoded:
+        try:
+            frame = base64.b64decode(frame[:-1], validate=True)
+        except (binascii.Error, ValueError):
+            return 2
+        if len(frame) > _MAX_INPUT:
+            return 2
     threading.Thread(target=_watch_caller, name="policy-caller-lifetime", daemon=True).start()
     try:
         from agent_procutil import direct_python

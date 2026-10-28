@@ -36,7 +36,7 @@ function Get-NativePreToolStop {
         if ($state -isnot [Collections.IDictionary] -or $state.active -isnot [bool]) { return $null }
         if ($state.ContainsKey('contract')) {
             $contract = $state.contract
-            if ($contract -isnot [Collections.IDictionary] -or
+            if ($contract -isnot [Collections.IDictionary] -or $contract.id -isnot [string] -or
                 $contract.id -cne 'copilot-extensions.pretool-killswitch' -or
                 ($contract.version -isnot [int] -and $contract.version -isnot [long]) -or $contract.version -ne 1) { return $null }
         }
@@ -51,7 +51,7 @@ function Test-NativePreToolRead([object]$Payload) {
     if ($name -isnot [string] -or $name -cnotin @('view', 'rg', 'glob')) { return $false }
     try {
         $policy = Read-PreToolJson (Join-Path $PSScriptRoot 'hook-read-policy.json') 4096
-        if ($policy.schema -cne 'agent-worktrees.native-read-policy' -or
+        if ($policy.schema -isnot [string] -or $policy.schema -cne 'agent-worktrees.native-read-policy' -or
             ($policy.version -isnot [int] -and $policy.version -isnot [long]) -or $policy.version -ne 1 -or
             $policy.guards -isnot [Collections.IDictionary]) { return $false }
         $names = @('statelessness_guard.py', 'cross_repo_guard.py', 'anchor_write_guard.py', 'pr_supersede_guard.py')
@@ -73,6 +73,44 @@ function Test-NativePreToolRead([object]$Payload) {
         }
         return $true
     } catch { return $false }
+}
+
+function Invoke-PreToolPolicy([string]$Python, [string]$Payload, [ref]$Diagnostic) {
+    $worker = Join-Path $PSScriptRoot 'hook_policy_process.py'
+    $info = [Diagnostics.ProcessStartInfo]::new()
+    $info.FileName = $Python
+    $info.Arguments = '-X utf8 -B "' + $worker + '" --base64-input'
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.RedirectStandardInput = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $info.StandardOutputEncoding = $utf8
+    $info.StandardErrorEncoding = $utf8
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $proc = [Diagnostics.Process]::Start($info)
+    try {
+        $stdout = $proc.StandardOutput.ReadToEndAsync()
+        $stderr = $proc.StandardError.ReadToEndAsync()
+        $frame = [Convert]::ToBase64String($utf8.GetBytes($Payload)) + "`n"
+        $bytes = $utf8.GetBytes($frame)
+        $writing = $proc.StandardInput.BaseStream.WriteAsync($bytes, 0, $bytes.Length)
+        if (-not $writing.Wait([Math]::Max(0, 28000 - [int]$clock.ElapsedMilliseconds)) -or
+            -not $proc.StandardInput.BaseStream.FlushAsync().Wait([Math]::Max(0, 28000 - [int]$clock.ElapsedMilliseconds)) -or
+            -not $proc.WaitForExit([Math]::Max(0, 28000 - [int]$clock.ElapsedMilliseconds)) -or
+            -not [Threading.Tasks.Task]::WaitAll(@($stdout, $stderr), [Math]::Max(0, 28000 - [int]$clock.ElapsedMilliseconds))) {
+            throw 'Pre-tool policy exceeded its owned deadline'
+        }
+        $global:LASTEXITCODE = $proc.ExitCode
+        $Diagnostic.Value = $stderr.Result
+        return $stdout.Result
+    } finally {
+        # EOF cancels the real SDK worker even behind a virtual-environment launcher.
+        try { $proc.StandardInput.Close() } finally {
+            if (-not $proc.HasExited) { $proc.Kill() }
+            $proc.Dispose()
+        }
+    }
 }
 
 try {
@@ -107,18 +145,15 @@ try {
             Where-Object { $_.Source -notlike '*\WindowsApps\*' } |
             Select-Object -First 1 -ExpandProperty Source
     }
-    $client = Join-Path $PSScriptRoot 'hook_client.py'
-    $runner = Join-Path $PSScriptRoot 'versioned_runtime_native.ps1'
-    if (-not $python -or -not [IO.File]::Exists($client) -or -not [IO.File]::Exists($runner)) {
+    $client = Join-Path $PSScriptRoot 'hook_policy_process.py'
+    if (-not $python -or -not [IO.File]::Exists($client)) {
         throw 'Required pre-tool policy interpreter/client/runner is unavailable'
     }
-    . $runner
     $diagnostic = ''
     $previousPythonEncoding = [Environment]::GetEnvironmentVariable('PYTHONIOENCODING', 'Process')
     try {
         [Environment]::SetEnvironmentVariable('PYTHONIOENCODING', 'utf-8', 'Process')
-        $result = Invoke-Hidden -FilePath $python -ArgList @('-X', 'utf8', '-B', $client, 'preToolUseStrict') `
-            -InputText $raw -ErrorOutput ([ref]$diagnostic)
+        $result = Invoke-PreToolPolicy $python $raw ([ref]$diagnostic)
     } finally {
         [Environment]::SetEnvironmentVariable('PYTHONIOENCODING', $previousPythonEncoding, 'Process')
     }

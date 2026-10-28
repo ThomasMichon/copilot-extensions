@@ -16,7 +16,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.mark.parametrize("case", ["read", "guard-drift", "missing-contract", "write", "context", "active", "invalid-flag", "future-flag-contract", "array-flag", "drive-relative-flag", "root-relative-flag", "array-contract", "non-utf8-environment", "old-client", "empty-policy", "array-response", "invalid-decision-response", "invalid-context-response", "policy-error"])
+@pytest.mark.parametrize("case", ["read", "guard-drift", "missing-contract", "write", "context", "active", "invalid-flag", "future-flag-contract", "array-flag", "array-contract-id", "empty-contract-id", "drive-relative-flag", "root-relative-flag", "array-contract", "non-utf8-environment", "old-client", "empty-policy", "array-response", "invalid-decision-response", "invalid-context-response", "policy-error"])
 @pytest.mark.parametrize("native_shell", ["powershell.exe", "pwsh"])
 def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_path):
     shell = shutil.which(native_shell)
@@ -26,7 +26,7 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     for name in (
-        "pre-tool-hook.ps1", "hook-read-policy.json", "versioned_runtime_native.ps1",
+        "pre-tool-hook.ps1", "hook-read-policy.json", "versioned_runtime_native.ps1", "hook_policy_process.py",
         "statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py", "pr_supersede_guard.py",
     ):
         shutil.copyfile(SCRIPTS / name, scripts / name)
@@ -61,6 +61,11 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
         flag.write_text('{"active":true,"contract":{"id":"copilot-extensions.pretool-killswitch","version":2}}', encoding="utf-8")
     if case == "array-flag":
         flag.write_text('[{"active":true}]', encoding="utf-8")
+    elif case in {"array-contract-id", "empty-contract-id"}:
+        flag.write_text(json.dumps({"active": True, "contract": {
+            "id": ["copilot-extensions.pretool-killswitch"] if case == "array-contract-id" else [],
+            "version": 1,
+        }}), encoding="utf-8")
     elif case in {"drive-relative-flag", "root-relative-flag"}:
         flag = home / "pretool.json"
         flag.write_text('{"active":true}', encoding="utf-8")
@@ -92,9 +97,9 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
         )
     payload = {"toolName": "view" if case in {
         "read", "guard-drift", "missing-contract", "context", "active", "invalid-flag",
-        "future-flag-contract", "drive-relative-flag", "root-relative-flag", "array-contract",
+        "future-flag-contract", "array-contract-id", "empty-contract-id", "drive-relative-flag", "root-relative-flag", "array-contract",
     } else "edit", "toolArgs": {"path": "non-ascii-\u00e9.txt"}}
-    original = json.dumps(payload, ensure_ascii=False)
+    original = json.dumps(payload, ensure_ascii=False, indent=2)
     command = "& '" + str(scripts / "pre-tool-hook.ps1").replace("'", "''") + "'"
     result = subprocess.run(
         [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],

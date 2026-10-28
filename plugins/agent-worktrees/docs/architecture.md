@@ -2884,6 +2884,17 @@ malformed and down-level unknown-entry responses deny. Child UTF-8 settings
 override inherited standard-I/O encodings, including during native fallback.
 Strict hot-stop responses explicitly acknowledge `{}` without loading guards;
 legacy command-hook stop/no-op responses retain their empty-output behavior.
+Stop overrides must be fully qualified drive/UNC paths, and contract identifiers
+must be strings; relative overrides or array-valued identifiers retain policy.
+
+Native fallback uses the same existing caller-owned SDK worker as the resident
+adapter. The event-local wrapper keeps its stdin lifetime channel open, reads
+both outputs asynchronously, and bounds input transfer, process completion and
+output completion within one 28-second deadline. Its optional base64 frame
+preserves raw multiline JSON bytes. Closing the channel on caller death or
+failure cancels the real worker behind a virtual-environment launcher; the SDK
+owns the policy's descendants under its 25-second budget. The shared installer
+native runner is unchanged; no generic installer lifetime behavior is widened.
 
 ### Opt-in resident pre-tool pilot
 

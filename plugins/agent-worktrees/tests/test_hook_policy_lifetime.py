@@ -64,7 +64,8 @@ def _pin_descendant(pid: int, expected_birth: str):
 
 
 @pytest.mark.parametrize("termination", ["timeout", "caller-exit"])
-def test_policy_scope_retires_descendant(tmp_path, termination):
+@pytest.mark.parametrize("consumer", ["resident", "powershell.exe", "pwsh"])
+def test_policy_scope_retires_descendant(tmp_path, termination, consumer):
     node = shutil.which("node")
     assert node
     scripts = tmp_path / "scripts"
@@ -74,6 +75,9 @@ def test_policy_scope_retires_descendant(tmp_path, termination):
     shutil.copyfile(
         PLUGIN / "scripts" / "hook-read-policy.json", scripts / "hook-read-policy.json"
     )
+    if consumer != "resident":
+        for name in ("pre-tool-hook.ps1", "versioned_runtime_native.ps1"):
+            shutil.copyfile(PLUGIN / "scripts" / name, scripts / name)
     home = tmp_path / "home"
     home.mkdir()
     marker = tmp_path / "descendant.json"
@@ -118,19 +122,31 @@ console.log("policy timeout denied after its owned scope was retired");
     environment = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
     environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     environment["PRETOOL_KILLSWITCH_STATE_FILE"] = str(tmp_path / "absent-stop.json")
+    if consumer == "resident":
+        command = [node, str(driver), str(module), str(scripts), sys.executable, str(home)]
+    else:
+        shell = shutil.which(consumer)
+        assert shell
+        command = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(scripts / "pre-tool-hook.ps1")]
+        environment["PATH"] = str(Path(sys.executable).parent) + os.pathsep + environment.get("PATH", "")
+    started = time.monotonic()
     process, job = spawn_sync_in_kill_on_close_job(
-        [node, str(driver), str(module), str(scripts), sys.executable, str(home)],
+        command,
         require_job=True,
         allow_breakaway=False,
         env=environment,
         cwd=home,
-        stdin=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL if consumer == "resident" else subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     close_observer = None
     try:
+        if consumer != "resident":
+            process.stdin.write(b'{"toolName":"edit","toolArgs":{}}')
+            process.stdin.close()
+            process.stdin = None
         deadline = time.monotonic() + 15
         while not marker.is_file():
             assert process.poll() is None, process.communicate(timeout=5)
@@ -141,10 +157,14 @@ console.log("policy timeout denied after its owned scope was retired");
         retired, close_observer = _pin_descendant(record["pid"], record["birth"])
         if termination == "caller-exit":
             process.kill()
+            assert retired(), "policy descendant survived its caller"
             process.communicate(timeout=10)
         else:
             stdout, stderr = process.communicate(timeout=40)
             assert process.returncode == 0, (stdout, stderr)
+            if consumer != "resident":
+                assert json.loads(stdout)["permissionDecision"] == "deny"
+            assert time.monotonic() - started < 30, "policy exceeded the host hook deadline"
         assert retired(), "policy descendant survived its invocation/caller"
     finally:
         if close_observer is not None:
