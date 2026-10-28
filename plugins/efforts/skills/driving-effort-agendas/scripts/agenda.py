@@ -22,8 +22,8 @@ def _object(value: Any, label: str) -> dict[str, Any]:
 
 
 def _text(value: Any, label: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise AgendaError(f"{label} must be nonempty text")
+    if not isinstance(value, str) or not value.strip() or "\x00" in value:
+        raise AgendaError(f"{label} must be nonempty text without NUL characters")
     return value
 
 
@@ -66,7 +66,7 @@ def _local(home: Path, value: Any) -> Path:
         raise AgendaError("agenda path must be relative to state home")
     try:
         path = (home / name).resolve()
-    except (OSError, RuntimeError) as exc:
+    except (OSError, ValueError, RuntimeError) as exc:
         raise AgendaError("cannot resolve agenda path") from exc
     try:
         path.relative_to(home)
@@ -142,7 +142,10 @@ def inspect(
     home: Path, expected_revision: int | None = None, worktree: str | None = None
 ) -> Snapshot:
     """Validate a local snapshot, not its source's real-world completion."""
-    home = home.resolve()
+    try:
+        home = home.resolve()
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise AgendaError("cannot resolve state home") from exc
     cursor = _read(home / "cursor.json")
     version = cursor.get("version", 1)
     if type(version) is not int or version != 1:

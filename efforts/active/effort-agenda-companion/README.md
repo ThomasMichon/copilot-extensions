@@ -351,3 +351,14 @@ limits, with the following explicit corrections:
   into v1 acceptance.
 - Code and qualification are ready for source review. Continue to merge,
   source/release reconciliation and final root/fixture obligation settlement.
+
+### 2026-10-28 - Review diagnostic fix
+- The helper review identified an uncaught filesystem error for NUL-bearing
+  agenda paths. Text/path checks now reject that input before filesystem access
+  and map invalid state-home resolution to the documented diagnostic.
+- Added no-write regressions for active and queued NUL paths plus an invalid
+  state-home case. The updated full packet passed **77 tests, 9 skipped** with
+  cleanup verified; all 22 focused helper cases pass.
+- The source-review gate remains open until the updated head is reviewed.
+  Both offline fixture outcomes and journals have been retained outside
+  cleanup-eligible worktrees, and their managed obligations are settled.

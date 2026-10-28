@@ -199,3 +199,24 @@ def test_oversized_snapshot_is_refused_without_rewriting(home: Path) -> None:
     with pytest.raises(AGENDA.AgendaError, match="128 KiB"):
         AGENDA.inspect(home)
     assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("location", ["active", "queued"])
+def test_nul_agenda_path_is_a_no_write_diagnostic(
+    home: Path, location: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    if location == "active":
+        edit(
+            home, "cursor.json", lambda c: c["frames"][0].update(agenda="bad\x00.json")
+        )
+    else:
+        edit(home, "cursor.json", lambda c: c.update(queue=["bad\x00.json"]))
+    before = (home / "cursor.json").read_bytes()
+    assert AGENDA.main(["check", "--state-home", str(home)]) == 2
+    assert "NUL" in capsys.readouterr().err
+    assert (home / "cursor.json").read_bytes() == before
+
+
+def test_invalid_state_home_is_a_diagnostic(capsys: pytest.CaptureFixture[str]) -> None:
+    assert AGENDA.main(["next", "--state-home", "bad\x00directory"]) == 2
+    assert "state home" in capsys.readouterr().err
