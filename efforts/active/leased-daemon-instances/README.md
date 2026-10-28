@@ -215,6 +215,7 @@ runtime rollout was authorized or performed.
 All original entries and qualification details are retained in dated sidecars,
 newest first:
 
+- [2026-10-28 - SDK caller bounds and negative native qualification](../lean-runtime-dependencies/journal/2026/10.28%20sdk-caller-qualification.md)
 - [2026-10-26 - compiler-free amendment](journal/2026/10.26%20compiler-free-amendment.md)
 - [2026-10-25 - retirement and completion](journal/2026/10.25%20retirement-and-completion.md)
 - [2026-10-24 - native and installer qualification](journal/2026/10.24%20native-and-installer-qualification.md)

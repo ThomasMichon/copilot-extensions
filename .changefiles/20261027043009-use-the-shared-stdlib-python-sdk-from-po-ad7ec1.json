@@ -1,5 +1,5 @@
 {
-  "comment": "Use the shared stdlib Python SDK from PowerShell without native compilation; preserve CLI, path and original-caller lifetime contracts.",
+  "comment": "Use the shared stdlib Python SDK from PowerShell without native compilation; preserve CLI, path and original-caller lifetime contracts, bounded cell installers and complete snapshot payload identity.",
   "changes": [
     {
       "plugin": "libs/agent-procutil",

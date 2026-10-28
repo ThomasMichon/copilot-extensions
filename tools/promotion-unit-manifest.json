@@ -2984,7 +2984,20 @@
         "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_native_junit_requires_all_44_actual_case_results[empty-classname]",
         "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_unbounded_or_incomplete_native_packet_matrices_are_refused[missing-startup-mode]",
         "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_native_junit_requires_all_44_actual_case_results[wrong-prefix]",
-        "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_native_junit_requires_all_44_actual_case_results[missing-classname]"
+        "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_native_junit_requires_all_44_actual_case_results[missing-classname]",
+        "tools/promotion_unit_tests/test_cell_installer.py::test_release_hash_binds_copied_content_and_membership",
+        "tools/promotion_unit_tests/test_cell_installer.py::test_release_hash_rejects_replaced_version_without_source_metadata[plugin.json]",
+        "tools/promotion_unit_tests/test_cell_installer.py::test_release_hash_rejects_replaced_version_without_source_metadata[pyproject.toml]",
+        "tools/promotion_unit_tests/test_cell_installer.py::test_release_hash_excludes_only_root_publication_owner",
+        "tools/promotion_unit_tests/test_cell_installer.py::test_watchdog_uses_whole_tree_owner_and_preserves_output",
+        "tools/promotion_unit_tests/test_cell_installer.py::test_watchdog_refuses_an_inherited_changed_payload",
+        "tools/promotion_unit_tests/test_cell_installer.py::test_watchdog_timeout_is_failure_after_owned_retirement",
+        "tools/promotion_unit_tests/test_cell_installer.py::test_watchdog_refuses_unbounded_deadlines[0]",
+        "tools/promotion_unit_tests/test_cell_installer.py::test_watchdog_refuses_unbounded_deadlines[-1]",
+        "tools/promotion_unit_tests/test_cell_installer.py::test_watchdog_refuses_unbounded_deadlines[nan]",
+        "tools/promotion_unit_tests/test_cell_installer.py::test_watchdog_refuses_unbounded_deadlines[inf]",
+        "tools/promotion_unit_tests/test_cell_installer.py::test_watchdog_refuses_unbounded_deadlines[True]",
+        "tools/promotion_unit_tests/test_cell_installer.py::test_release_hash_also_binds_source_identity_metadata"
     ],
     "sources": {
         "tools/core_python_artifacts.py": "cfeae35bfee4537022e1026ffae498b61b23508426a676d9dc09ca8ab8d4b4a0",
@@ -3103,7 +3116,7 @@
         "libs/versioned-runtime/standalone_build.py": "76c7baa65fcdf2458cbb9ac426d5e95f352e2e183a3721d40f7eb4d9f6626ee9",
         "libs/versioned-runtime/versioned_runtime.py": "75d34e04afcd59d3799c535640ee608a8b961b147abe162c98b563fe8378599d",
         "libs/versioned-runtime/versioned_runtime_leases.py": "c7ad2a0e14dcc626653f57137f1ceaee4cbee4d710e8aeaf35ceaf11f244b13b",
-        "libs/versioned-runtime/versioned_runtime_source.py": "3fb80868ea309307255818cdf9af62c27499c40cbe4dcdd8badf8417de356a9f",
+        "libs/versioned-runtime/versioned_runtime_source.py": "59848e2e24b6e10c04a4948a6a3e7a8e58bc7676f6981c889fcea0d792071a37",
         "libs/worktree-identity/src/worktree_identity/__init__.py": "de51a510bb20790f5f9c69f5d924f9f167445f4675f08063fdac526702308716",
         "libs/worktree-identity/tests/test_worktree_identity.py": "cd299c03a4d40e115cdef14baa67bdb7cb57e084613a79f7232ed6fd939da5b2",
         "plugins/agent-bridge/src/agent_bridge/agent_registry_common.py": "73de7083d14afe3d31b96702efc137fb15f7a948bc97e3b915f5547a82898d40",
@@ -3334,7 +3347,10 @@
         "libs/agent-procutil/tests/sdk_visibility_sources.py": "202d284dd0d3e5e592c8a449ffd23b7b413a58083d657d5e6643f6d60a2c33aa",
         "libs/agent-procutil/tests/sdk_visibility_cases.py": "88e26d52424879491a8d622fcb043c542e43fe5a8f3f05f3aa25afc5ce109444",
         "libs/installation-context/_installation_context_worker.py": "6c10396cb0555736155b25bf3f52d507c9e36b189eb06a175d0a27fc778f6c8d",
-        "libs/agent-procutil/tests/test_shell_caller_owned_native.py": "89e0e3bc4da7c2779a13d04d151caa3e52735d938879062d8074de493d17489d"
+        "libs/agent-procutil/tests/test_shell_caller_owned_native.py": "89e0e3bc4da7c2779a13d04d151caa3e52735d938879062d8074de493d17489d",
+        "tools/promotion_unit_tests/test_cell_installer.py": "ee2ee29fa92a18839e2c0d4fed2a646f0275a957269b00a96d45c2523634a028",
+        "plugins/agent-machines/tests/test_cell_installer.py": "eb54567792f913e97fe20345c8ab0a115a6e6f0401a2edf2be3bb776cc75d79d",
+        "plugins/agent-machines/scripts/cell_installer.py": "34155ebe5c1964b7e39afe7485e58a9e2b11649f4edff9c4254c632eb37c9c0c"
     },
     "coverage_targets": [
         "tools/core_runtime_profile.py",
@@ -3490,7 +3506,8 @@
         "libs/agent-procutil/tests/sdk_visibility.py",
         "libs/agent-procutil/tests/sdk_visibility_sources.py",
         "libs/agent-procutil/tests/sdk_visibility_cases.py",
-        "libs/installation-context/_installation_context_worker.py"
+        "libs/installation-context/_installation_context_worker.py",
+        "plugins/agent-machines/scripts/cell_installer.py"
     ],
     "max_seconds": 300
 }

@@ -397,7 +397,9 @@ def _runtime() -> ModuleType:
     return module
 
 
-def assembly_hash(payload: Path) -> str:
+def assembly_hash(
+    payload: Path, *, excluded_root_files: frozenset[str] = frozenset(),
+) -> str:
     files: list[Path] = []
 
     def scan_error(error: OSError) -> None:
@@ -428,7 +430,9 @@ def assembly_hash(payload: Path) -> str:
             require_plain(path)
             # Installation-cell provenance is published after source assembly;
             # its separate receipt validator owns this non-runtime root sidecar.
-            if path == payload / "snapshot-provenance.json":
+            if path == payload / "snapshot-provenance.json" or (
+                path.parent == payload and name in excluded_root_files
+            ):
                 continue
             files.append(path)
     if not files:

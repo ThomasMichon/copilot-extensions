@@ -17,6 +17,20 @@ The legacy decision child suppresses PowerShell module-preparation progress,
 not diagnostics or refusal status. Ordinary invocation, native command decoding,
 runtime construction and publication authority remain unchanged.
 
+Cell/slot actions do not allocate the legacy `.agent-machines/.install-stage`.
+The PowerShell entrypoint retains a compiler-free, caller-owned whole-tree
+watchdog, including provisioning-lock waits and runtime construction. Its default
+deadline is 480 seconds; `AGENT_MACHINES_INSTALL_DEADLINE_SEC`, then
+`COPILOT_PLUGIN_INSTALL_DEADLINE_SEC`, may select another positive deadline.
+Nonpositive or malformed deadlines are refused instead of disabling containment.
+Captured UTF-8 stdout/stderr are returned at completion, with separate 16 MiB
+budgets; timeout returns 124 only after the canonical owner confirms retirement.
+Both native adapters bind the selected package version and complete assembly
+before waiting for the cell lock, recheck the recursive child, and verify copied
+snapshot bytes before publication. This also covers ordinary marketplace payloads
+without `runtime-source.json`; publication sidecars retain their separate
+ownership/provenance checks.
+
 ## Legacy runtime removal
 
 The native `scripts/init.ps1 -Action uninstall -InstallDir <root>` and

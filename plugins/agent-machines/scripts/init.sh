@@ -295,6 +295,11 @@ _ensure_cell_snapshot() {
         _fail "Cannot copy the payload into the cell snapshot staging directory"
         return 1
     fi
+    if ! _assert_cell_payload_identity "$stage" ||
+       ! _assert_source_runtime_identity; then
+        _remove_owned_cell_snapshot "$stage" || true
+        return 1
+    fi
     if [[ -e "$snapshot_root" || -L "$snapshot_root" ]]; then
         _remove_owned_cell_snapshot "$stage" || true
         if ! bash "$SLOT_RUNNER" snapshot-validate \
@@ -741,6 +746,7 @@ _initialize_source_runtime() {
 
 _assert_source_runtime_identity() {
     local payload="${1:-$PLUGIN_DIR}" identity
+    _assert_cell_payload_identity "$payload" || return 1
     if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" || -e "$payload/runtime-source.json" || -L "$payload/runtime-source.json" ]]; then
         identity="$(_source_runtime_identity "$payload" "$SRC_VERSION")" || return 1
         if [[ "$identity" != "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
@@ -750,8 +756,35 @@ _assert_source_runtime_identity() {
     fi
 }
 
+_assert_cell_payload_identity() {
+    local payload="${1:-$PLUGIN_DIR}" identity
+    if [[ -n "${AGENT_MACHINES_EXPECTED_PAYLOAD_HASH:-}" ]]; then
+        identity="$(_cell_payload_identity "$payload")" || return 1
+        if [[ "$identity" != "$AGENT_MACHINES_EXPECTED_PAYLOAD_HASH" ]]; then
+            _fail 'Payload content changed after selection; refusing publication'
+            return 1
+        fi
+    fi
+}
+
+_cell_payload_identity() {
+    local py
+    py="$(_source_python)" || return 1
+    "$py" -I -B "$SCRIPT_DIR/cell_installer.py" identity \
+        --payload "${1:-$PLUGIN_DIR}" --version "$PACKAGE_VERSION"
+}
+
 PACKAGE_VERSION="$SRC_VERSION"
 _initialize_source_runtime || exit 1
+if [[ "$__cell_slot_direct" == 1 ]]; then
+    SELECTED_PAYLOAD_HASH="$(_cell_payload_identity)" || exit 1
+    if [[ -n "${AGENT_MACHINES_EXPECTED_PAYLOAD_HASH:-}" &&
+          "$AGENT_MACHINES_EXPECTED_PAYLOAD_HASH" != "$SELECTED_PAYLOAD_HASH" ]]; then
+        _fail 'Payload changed across the installation transaction'
+        exit 1
+    fi
+    export AGENT_MACHINES_EXPECTED_PAYLOAD_HASH="$SELECTED_PAYLOAD_HASH"
+fi
 SELECTED_SOURCE_IDENTITY="$SOURCE_RUNTIME_IDENTITY"
 [[ -n "$SELECTED_SOURCE_IDENTITY" ]] || SELECTED_SOURCE_IDENTITY='{}'
 if [[ -n "${AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY:-}" &&

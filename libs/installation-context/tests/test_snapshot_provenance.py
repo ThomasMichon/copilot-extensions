@@ -10,6 +10,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
@@ -1000,6 +1001,7 @@ def _run_agent_machines_snapshot_harness(
     tmp_path: Path,
     *,
     fail_before_stamp: bool = False,
+    mutate_copy: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     _, _, style = exemplar
     version = next(
@@ -1028,6 +1030,8 @@ def _run_agent_machines_snapshot_harness(
             None,
         )
     if style == "powershell":
+        for component in source_script.parent.glob("versioned_runtime*.py"):
+            shutil.copyfile(component, harness_root / component.name)
         fake_runner = harness_root / "fake-context.ps1"
         fake_runner.write_text(
             """param(
@@ -1062,6 +1066,7 @@ exit 1
                     "Set-StrictMode -Version 2.0",
                     "$ErrorActionPreference = 'Stop'",
                     f"$PluginDir = '{ps(installed_plugin)}'",
+                    f"$InstallDir = '{ps(layout['plugin_root'])}'",
                     f"$snapshotsRoot = '{ps(layout['snapshots'])}'",
                     f"$SrcVersion = '{ps(version)}'",
                     "$PackageVersion = $SrcVersion",
@@ -1069,6 +1074,7 @@ exit 1
                     f". '{ps(source_script.with_name('versioned_runtime_native.ps1'))}'",
                     _source_runtime_functions(source_script, style),
                     "Initialize-SourceRuntime",
+                    "$env:AGENT_MACHINES_EXPECTED_PAYLOAD_HASH = Get-CellPayloadIdentity",
                     f"$ExpectedMarketplaceId = '{ps(layout['marketplace_id'])}'",
                     f"$Context = '{ps(layout['install'])}'",
                     "$cellNamespaceGeneration = '1'",
@@ -1081,6 +1087,16 @@ exit 1
                         "function Get-CellSnapshotOwnerText {",
                         "\n# -- Paths",
                     ).rstrip(),
+                    (
+                        """function Copy-Item {
+    param($LiteralPath, $Destination, [switch]$Recurse, [switch]$Force, $ErrorAction)
+    Microsoft.PowerShell.Management\\Copy-Item @PSBoundParameters
+    if ([IO.Path]::GetFileName($LiteralPath) -ceq 'source.py') {
+        [IO.File]::WriteAllText($Destination, 'changed during copy')
+    }
+}"""
+                        if mutate_copy else ""
+                    ),
                     "try {",
                     f"    Ensure-CellSnapshot -SnapshotRoot '{ps(layout['snapshot_root'])}'",
                     "    exit 0",
@@ -1125,6 +1141,7 @@ esac
                     "#!/usr/bin/env bash",
                     "set -u",
                     f"PLUGIN_DIR={shlex.quote(str(installed_plugin))}",
+                    f"INSTALL_DIR={shlex.quote(str(layout['plugin_root']))}",
                     f"SNAPSHOTS_ROOT={shlex.quote(str(layout['snapshots']))}",
                     f"SRC_VERSION={shlex.quote(version)}",
                     'PACKAGE_VERSION="$SRC_VERSION"',
@@ -1139,11 +1156,19 @@ esac
                     "_fail() { printf '%s\\n' \"$1\" >&2; }",
                     _source_runtime_functions(source_script, style),
                     "_initialize_source_runtime",
+                    'export AGENT_MACHINES_EXPECTED_PAYLOAD_HASH="$(_cell_payload_identity)"',
                     _function_source(
                         source_script,
                         "_cell_snapshot_owner_text() {",
                         "\nFORCE=0",
                     ).rstrip(),
+                    (
+                        """cp() {
+    command cp "$@" || return
+    printf 'changed during copy' >"${@: -1}/source.py"
+}"""
+                        if mutate_copy else ""
+                    ),
                     f"_ensure_cell_snapshot {shlex.quote(str(layout['snapshot_root']))}",
                     "",
                 )
@@ -1160,6 +1185,167 @@ esac
         env=environment,
         check=False,
     )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX kernel lock and native adapter qualification")
+@pytest.mark.parametrize("mutation", ("content", "version"))
+def test_agent_machines_refuses_payload_replaced_during_lock_wait(tmp_path, mutation):
+    import fcntl
+
+    exemplar = next(
+        item for item in EXEMPLAR_INSTALLERS
+        if item[0] == "agent-machines" and item[2] != "powershell"
+    )
+    _, installed, _ = _installed_exemplar(exemplar, tmp_path)
+    version = next(
+        line.split('"')[1] for line in (installed / "pyproject.toml").read_text().splitlines()
+        if line.startswith("version = ")
+    )
+    layout = _receipt_layout(
+        tmp_path, plugin_id="agent-machines", payload_version=version,
+        snapshot_id=version, payload_root=installed,
+    )
+    ready = tmp_path / "selected"
+    witness = tmp_path / "entered"
+    script = installed / "scripts/init.sh"
+    marker = 'export AGENT_MACHINES_EXPECTED_PAYLOAD_HASH="$SELECTED_PAYLOAD_HASH"'
+    script.write_text(script.read_text().replace(
+        marker, marker + f"\n    printf selected > {shlex.quote(str(ready))}", 1,
+    ))
+    lock_path = Path(layout["plugin_root"]) / ".payload-provision.lock"
+    with lock_path.open("w") as lock, ThreadPoolExecutor(max_workers=1) as pool:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        future = pool.submit(
+            _run_exemplar_slot_action, exemplar, "cell-provision", layout, tmp_path,
+            environment_overrides={"AGENT_MACHINES_CELL_PROVISION_LOCK_SMOKE": str(witness)},
+        )
+        try:
+            deadline = time.monotonic() + 10
+            while not ready.exists() and not future.done() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert ready.exists(), future.result() if future.done() else "selection timed out"
+            if mutation == "content":
+                (installed / "changed.py").write_text("replaced = True\n")
+            else:
+                for name in ("plugin.json", "pyproject.toml"):
+                    path = installed / name
+                    path.write_text(path.read_text().replace(version, "9.9.9"))
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+        result = future.result(timeout=15)
+    assert result.returncode != 0, result.stdout
+    assert "changed" in result.stderr.lower()
+    assert not witness.exists()
+    assert not (Path(layout["plugin_root"]) / "versions").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX kernel lock and native PowerShell qualification")
+def test_agent_machines_powershell_watchdog_bounds_cell_lock_wait(tmp_path):
+    import fcntl
+
+    exemplar = next(
+        item for item in EXEMPLAR_INSTALLERS
+        if item[0] == "agent-machines" and item[2] == "powershell"
+    )
+    _, installed, home = _installed_exemplar(exemplar, tmp_path)
+    version = next(
+        line.split('"')[1] for line in (installed / "pyproject.toml").read_text().splitlines()
+        if line.startswith("version = ")
+    )
+    layout = _receipt_layout(
+        tmp_path, plugin_id="agent-machines", payload_version=version,
+        snapshot_id=version, payload_root=installed,
+    )
+    witness = tmp_path / "entered"
+    waiting = tmp_path / "waiting"
+    script = installed / "scripts/init.ps1"
+    marker = "    while (-not $lock) {"
+    script.write_text(script.read_text().replace(
+        marker, f"    [IO.File]::WriteAllText('{str(waiting).replace(chr(39), chr(39) * 2)}', 'waiting')\n" + marker, 1,
+    ))
+    lock_path = Path(layout["plugin_root"]) / ".payload-provision.lock"
+    with lock_path.open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        started = time.monotonic()
+        result = _run_exemplar_slot_action(
+            exemplar, "cell-provision", layout, tmp_path,
+            environment_overrides={
+                "AGENT_MACHINES_CELL_PROVISION_LOCK_SMOKE": str(witness),
+                "AGENT_MACHINES_INSTALL_DEADLINE_SEC": "4",
+            },
+        )
+        elapsed = time.monotonic() - started
+    assert result.returncode == 124, result.stderr
+    assert "WATCHDOG" in result.stderr
+    assert elapsed < 12
+    assert waiting.exists()
+    assert not witness.exists()
+    assert not (home / ".agent-machines").exists()
+
+
+@pytest.mark.parametrize(
+    "exemplar",
+    tuple(item for item in EXEMPLAR_INSTALLERS if item[0] == "agent-machines"),
+    ids=lambda exemplar: exemplar[2],
+)
+def test_agent_machines_rejects_changed_copy_before_snapshot_publication(exemplar, tmp_path):
+    _, installed, home = _installed_exemplar(exemplar, tmp_path)
+    (installed / "source.py").write_text("original = True\n")
+    version = next(
+        line.split('"')[1] for line in (installed / "pyproject.toml").read_text().splitlines()
+        if line.startswith("version = ")
+    )
+    layout = _receipt_layout(
+        tmp_path, plugin_id="agent-machines", payload_version=version,
+        snapshot_id=version, payload_root=installed,
+    )
+    snapshot = Path(layout["snapshot_root"])
+    shutil.rmtree(snapshot)
+    result = _run_agent_machines_snapshot_harness(
+        exemplar, installed, layout, tmp_path, mutate_copy=True,
+    )
+    assert result.returncode != 0, result.stdout
+    assert "Payload content changed after selection" in result.stderr
+    assert not snapshot.exists()
+    assert not list(Path(layout["snapshots"]).glob(".agent-machines-snapshot-*"))
+    assert not (home / ".agent-machines/.install-stage").exists()
+
+
+@pytest.mark.parametrize(
+    "exemplar",
+    tuple(item for item in EXEMPLAR_INSTALLERS if item[0] == "agent-machines"),
+    ids=lambda exemplar: exemplar[2],
+)
+def test_agent_machines_preserves_source_managed_snapshot_identity(exemplar, tmp_path):
+    _, installed, _ = _installed_exemplar(exemplar, tmp_path)
+    version = next(
+        line.split('"')[1] for line in (installed / "pyproject.toml").read_text().splitlines()
+        if line.startswith("version = ")
+    )
+    spec = importlib.util.spec_from_file_location(
+        "snapshot_source_identity_fixture", installed / "scripts/versioned_runtime_source.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    digest = module.assembly_hash(installed)
+    source = module.SourceIdentity(
+        "agent-machines", version, "a" * 40, "b" * 40, digest,
+        module.runtime_version(version, "a" * 40, digest),
+    )
+    metadata = installed / "runtime-source.json"
+    metadata.write_text(json.dumps(source.document()))
+    layout = _receipt_layout(
+        tmp_path, plugin_id="agent-machines", payload_version=version,
+        snapshot_id=source.runtime_version, payload_root=installed,
+    )
+    snapshot = Path(layout["snapshot_root"])
+    shutil.rmtree(snapshot)
+    result = _run_agent_machines_snapshot_harness(exemplar, installed, layout, tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert (snapshot / "runtime-source.json").read_bytes() == metadata.read_bytes()
+    assert (snapshot / "snapshot-provenance.json").is_file()
+    assert not (snapshot / ".agent-machines-snapshot-publish-owner").exists()
 
 
 @pytest.mark.parametrize(

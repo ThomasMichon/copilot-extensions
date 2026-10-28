@@ -38,7 +38,8 @@ param(
     [string]$SnapshotId,
     [string]$RuntimeVersion,
     [string]$MaintenanceToken,
-    [switch]$Force
+    [switch]$Force,
+    [Parameter(DontShow)][switch]$CellWatchdogChild
 )
 
 Set-StrictMode -Version 2.0
@@ -189,6 +190,41 @@ $cellSlotAction = $Action -in @(
 if ($cellSlotAction) {
     Set-Location -LiteralPath $env:USERPROFILE
     [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
+    if (-not $CellWatchdogChild) {
+        $python = @(Get-Command python -CommandType Application -ErrorAction Stop)[0]
+        $deadline = 480
+        $deadlineText = $env:AGENT_MACHINES_INSTALL_DEADLINE_SEC
+        if (-not $deadlineText) { $deadlineText = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC }
+        if ($deadlineText -and (
+            -not [int]::TryParse($deadlineText, [ref]$deadline) -or $deadline -le 0
+        )) { throw 'Cell installer deadline must be a positive number of seconds.' }
+        $forward = @()
+        foreach ($key in $PSBoundParameters.Keys) {
+            $value = $PSBoundParameters[$key]
+            if ($value -is [Management.Automation.SwitchParameter]) {
+                if ($value.IsPresent) { $forward += "-$key" }
+            } else {
+                $forward += @("-$key", [string]$value)
+            }
+        }
+        $request = @{
+            argv = @($probeHost, '-NoProfile', '-ExecutionPolicy', 'Bypass',
+                '-File', $PSCommandPath, '-CellWatchdogChild') + $forward
+            cwd = $env:USERPROFILE
+            payload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+            timeout = $deadline
+        } | ConvertTo-Json -Depth 4 -Compress
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($request))
+        $watchdogError = ''
+        $watchdogOutput = Invoke-Hidden -FilePath $python.Path -ArgList @(
+            '-I', '-B', (Join-Path $PSScriptRoot 'cell_installer.py'),
+            'watchdog', '--request-base64', $encoded
+        ) -ErrorOutput ([ref]$watchdogError)
+        $watchdogStatus = $LASTEXITCODE
+        [Console]::Out.Write($watchdogOutput)
+        [Console]::Error.Write($watchdogError)
+        exit $watchdogStatus
+    }
 }
 
 # Review finding (round 10): `stamp-binstub` (#3303, full-harness-startup-
@@ -736,6 +772,13 @@ function Ensure-CellSnapshot {
         [void](Remove-OwnedCellSnapshot -Root $stage)
         throw 'Cannot copy the payload into the cell snapshot staging directory'
     }
+    try {
+        Assert-CellPayloadIdentity -Payload $stage
+        Assert-SourceRuntimeIdentity
+    } catch {
+        [void](Remove-OwnedCellSnapshot -Root $stage)
+        throw
+    }
     if (
         (Test-Path -LiteralPath $SnapshotRoot) -or
         $null -ne (Get-Item -LiteralPath $SnapshotRoot -Force -ErrorAction SilentlyContinue)
@@ -905,6 +948,7 @@ function Initialize-SourceRuntime {
 
 function Assert-SourceRuntimeIdentity {
     param([string]$Payload = $PluginDir)
+    Assert-CellPayloadIdentity -Payload $Payload
     $metadataPresent = $true
     try {
         [IO.File]::GetAttributes((Join-Path $Payload 'runtime-source.json')) | Out-Null
@@ -919,6 +963,27 @@ function Assert-SourceRuntimeIdentity {
             throw 'Source runtime identity changed after runtime selection; refusing publication'
         }
     }
+}
+
+function Assert-CellPayloadIdentity {
+    param([string]$Payload = $PluginDir)
+    if ($env:AGENT_MACHINES_EXPECTED_PAYLOAD_HASH) {
+        $identity = Get-CellPayloadIdentity -Payload $Payload
+        if ($identity -cne $env:AGENT_MACHINES_EXPECTED_PAYLOAD_HASH) {
+            throw 'Payload content changed after selection; refusing publication'
+        }
+    }
+}
+
+function Get-CellPayloadIdentity {
+    param([string]$Payload = $PluginDir)
+    $python = @(Get-Command python -CommandType Application -ErrorAction Stop)[0]
+    $detail = Invoke-Hidden -FilePath $python.Path -ArgList @(
+        '-I', '-B', (Join-Path $PluginDir 'scripts/cell_installer.py'), 'identity',
+        '--payload', $Payload, '--version', $PackageVersion
+    )
+    if ($LASTEXITCODE -ne 0) { throw 'Selected cell payload identity validation failed.' }
+    return $detail.Trim()
 }
 
 function Get-GitInfo {
@@ -940,6 +1005,14 @@ function Get-GitInfo {
 
 $PackageVersion = $SrcVersion
 Initialize-SourceRuntime
+if ($cellSlotAction) {
+    $script:SelectedPayloadHash = Get-CellPayloadIdentity
+    if ($env:AGENT_MACHINES_EXPECTED_PAYLOAD_HASH -and
+        $env:AGENT_MACHINES_EXPECTED_PAYLOAD_HASH -cne $SelectedPayloadHash) {
+        throw 'Payload changed across the installation transaction'
+    }
+    $env:AGENT_MACHINES_EXPECTED_PAYLOAD_HASH = $SelectedPayloadHash
+}
 $selectedSourceIdentity = if ($SourceRuntimeIdentity) { $SourceRuntimeIdentity } else { '{}' }
 if ($env:AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY -and
     $env:AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY -cne $selectedSourceIdentity) {

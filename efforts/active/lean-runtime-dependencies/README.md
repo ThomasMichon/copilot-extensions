@@ -359,6 +359,8 @@ transfer without acceptance by a named tracked objective.
 
 ## Journal
 
+- [2026-10-28 - SDK caller bounds and negative native qualification](journal/2026/10.28%20sdk-caller-qualification.md)
+
 ### 2026-10-28 - Complete the full installation-context fixture repair
 
 - The remaining snapshot packet now exhausts all 377 distinct cases:

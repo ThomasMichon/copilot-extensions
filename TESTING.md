@@ -2612,6 +2612,15 @@ The runner rejects process, network, native-loader,
 Git-storage, thread and sleep effects, including attempted effects caught by a
 test. Test writes are confined to synthetic temporary storage.
 
+`tools/promotion_unit_tests/test_cell_installer.py` admits the original thirteen
+actor-free Machines release-payload and watchdog controls, with only the owned
+process runner substituted. It excludes the original module's real Linux
+descendant-retirement test. The separate snapshot-provenance suite exercises
+actual POSIX payload replacement during a held provisioning lock, both adapters'
+copy-before-publication checks, and a native PowerShell cell-lock deadline on
+Linux. These process tests remain outside promotion units and do not establish
+Windows Job or desktop qualification.
+
 Release-helper qualification additionally resolves the canonical repository
 import closure from controller-discovered commands and registered executable
 build inputs. Candidate verification includes both the preserved Main control
