@@ -8,6 +8,7 @@ import time
 import httpx
 
 from .bridge import BridgeUnavailable
+from .action_controls import action_inhibited
 from .client import DispatchError
 from .queue import SpawnState, Status
 from .spawn_factories import _parse_local_body_handle
@@ -23,6 +24,8 @@ class RestrictedStartupMixin:
             or reservation.get("release_requested")
             or not callable(selected) or not selected(task)
         ):
+            return 0
+        if action_inhibited("worker-admission", logger=log):
             return 0
         prepared = self._prepare_spawn_task(task, reservation)
         ok, handle = self.spawn_fn(prepared)

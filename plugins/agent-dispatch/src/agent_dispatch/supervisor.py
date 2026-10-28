@@ -3141,6 +3141,25 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 except Exception:
                     sverdict = tracking.UNKNOWN
                 if sverdict == tracking.GONE:
+                    if status == Status.QUEUED and not owner:
+                        from .action_controls import action_inhibited
+
+                        if (
+                            res.get("startup_complete") is not True
+                            or action_inhibited("worker-admission", logger=log)
+                        ):
+                            continue
+                        try:
+                            self.client.fail_spawn(
+                                res["key"],
+                                detail="script body exited before acquiring the task",
+                                release_requested=True,
+                            )
+                            _cleanup_script_task_file(task_file)
+                            recovered += 1
+                        except DispatchError:
+                            log.exception("failed to release unclaimed script startup %s", res["key"])
+                        continue
                     _cleanup_script_task_file(task_file)
                     detail = (
                         "script body exited without explicit complete/abandon "
@@ -3236,6 +3255,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         prompt so it can claim/start/complete the task. Only a confirmed live
         worktree session is re-driven; unknown bridge state is left untouched.
         """
+        from .action_controls import action_inhibited
+
         redriven = 0
         for res in self._pool_reservations(state=SpawnState.SPAWNED):
             key = res.get("key")
@@ -3267,6 +3288,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 session = None
             if not session:
                 continue
+            if action_inhibited("worker-admission", logger=log):
+                break
             try:
                 pending = self.client.record_spawn(
                     key,

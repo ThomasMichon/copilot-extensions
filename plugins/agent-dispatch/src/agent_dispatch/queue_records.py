@@ -28,6 +28,19 @@ class TaskError(RuntimeError):
     """Raised on an illegal state transition or a lease/ownership violation."""
 
 
+class WorkerAdmissionInhibited(TaskError):
+    """A retryable action denial, never a failed or absent task."""
+
+    def __init__(self) -> None:
+        super().__init__("worker-admission is inhibited; retry after the action is cleared")
+
+    def detail(self) -> dict[str, object]:
+        return {
+            "code": "action_inhibited", "action": "worker-admission",
+            "retryable": True, "message": str(self),
+        }
+
+
 class ExclusiveKeyBusyError(TaskError):
     """Reacquiring ``exclusive_key`` collided with an active sibling -- retry
     later, not a hard failure (same discipline as ``SpawnState.DEFERRED``)."""

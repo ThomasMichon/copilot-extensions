@@ -49,3 +49,11 @@ def action_inhibited(
             f"; {decision.error}" if decision.error else "",
         )
     return decision.inhibited
+
+
+def require_worker_admission() -> None:
+    """Production queue boundary; embeddings select their policy explicitly."""
+    from .queue_records import WorkerAdmissionInhibited
+
+    if action_inhibited("worker-admission", logger=logging.getLogger(__name__)):
+        raise WorkerAdmissionInhibited()

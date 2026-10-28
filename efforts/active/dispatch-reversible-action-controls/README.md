@@ -90,12 +90,12 @@ worker termination or cross-plugin rollout.
       replacement. Keep their polls alive while inhibited; clear must resume
       normal eligibility checks without a manual restart. Existing static
       configuration remains an independent veto.
-- [ ] Keep lane polling and existing-work settlement alive while new-job
+- [x] Keep lane polling and existing-work settlement alive while new-job
       admission is inhibited. Guard the actual reservation/claim/launch paths
       used by supported consumers, not only a UI toggle or candidate listing.
       Document the exact scope rather than claiming a global fence from a
       local supervisor check.
-- [ ] Preserve original task/reservation/session identity and independent
+- [x] Preserve original task/reservation/session identity and independent
       safety checks. Inhibition does not consume work, exhaust retry budgets,
       clear claims, authorize replay or classify an unknown effect as absent.
 
@@ -221,3 +221,54 @@ Initial tests must prove the current gap before adding the guards.
   Added regressions for both fixes and set both home variables in shared-state
   consumer tests. These portable contained cases do not assert native installed
   Windows adoption.
+
+### 2026-10-27 - Resident slice merged
+
+- #9345 merged as `25303a9926` after current-head independent review, correction
+  of all Medium findings and required checks. Re-running its exact attribution
+  job validated the repaired description without changing the source head.
+- Only the resident-control mechanism items above are complete. Admission,
+  native maintenance, release and actual consumer qualification remain open.
+- Next: guard coordinator claim/reservation mutations and supervisor new-launch
+  attempts while leaving existing-work settlement and polling available.
+
+### 2026-10-27 - Worker admission
+
+- Five actual coordinator/lane/redrive regressions failed at their effect
+  boundaries before implementation. The coordinator now injects an explicit
+  queue admission callback; pure library embeddings remain policy-neutral.
+- Claims recheck before mutation, new reservations check before consuming an
+  attempt, and redrives check before their startup fence. Existing-work
+  settlement remains available. A single already-admitted launch can finish;
+  later attempts recheck rather than caching denial for the daemon lifetime.
+- The [owning guide](../../../plugins/agent-dispatch/docs/action-controls.md)
+  records supported scopes, explicit REST/MCP denial, retry behavior and skew
+  limits. Final bounded selection: 112 cases passed, including actual HTTP MCP
+  retry against the same coordinator, pending identity and independent holds.
+- Native maintenance, release and installed-consumer qualification remain open.
+- Followed the same launch trace through restricted startup reconciliation and
+  optional one-shot handoff fallback. Two further regressions proved both
+  bypasses before adding guards ahead of preparation/attempt consumption.
+
+### 2026-10-27 - Admission review corrections
+
+- #9351's independent review found atomic create-and-claim bypassing the
+  callback, and a launched script treating startup denial as terminal failure.
+  Actual REST/script regressions reproduced both gaps.
+- Guarded atomic create-and-claim after deduplication and before mutation, with
+  a second check before claim publication. A denial rolls back task/audit and
+  supersession writes rather than leaving a partially accepted request.
+- Added a structured retryable REST denial and same-worker script startup retry.
+  Cancellation preserves the unclaimed task. Gone unclaimed scripts retain
+  their reservation while inhibited, then use the existing failed-spawn retry
+  after clear; claimed scripts keep their prior failure semantics.
+- A second review found the pending flag cleared before validating a returned
+  claim. An independent hold applied during inhibition could therefore trigger
+  terminal abandonment after clear, although the script never owned the task.
+  Keep the pending flag until the claim is a mapping for this exact task.
+  Regressions cover a real coordinator hold/clear transition and all invalid
+  claim shapes without start or abandonment.
+- Extended the pending-cancellation guard to normal context exit after the
+  script handles cancellation internally. No terminal report is required or
+  sent while admission is still pending, whether cancellation escapes or is
+  caught by the body; claimed script terminal reporting remains unchanged.

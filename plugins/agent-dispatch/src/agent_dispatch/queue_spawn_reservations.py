@@ -250,6 +250,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin):
                     f"task {task_id!r} is {task.status!r} with owner "
                     f"{task.owner!r}; spawn reservation requires queued and unowned"
                 )
+            self.require_worker_admission()
             attempt = (max(r["attempt"] for r in rows) + 1) if rows else 1
             key = spawn_key(task_id, attempt)
             allocation_reservation_key = (
