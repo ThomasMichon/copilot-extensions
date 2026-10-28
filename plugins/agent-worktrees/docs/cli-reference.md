@@ -480,7 +480,10 @@ It does **not** set `seeded`, `seed_ready` or `seed_submitted` merely because
 the mux accepted the command. Observe the existing seed/execution receipts or
 native conversation for the eventual outcome; this response is not a consumed
 prompt receipt or permission to replay. Superseded or uncertain handoffs refuse
-instead of delivering twice. Invalid NUL input refuses before staging/claim.
+instead of delivering twice. Explicit replacement compares the sampled seed,
+revision and unclaimed New custody inside the existing record writer's lock;
+concurrent Resume, replacement or claimed handoff remains intact.
+Invalid NUL input refuses before staging/claim.
 Platform command-length failures retain the staged intent through the existing
 definite-spawn-failure restoration path rather than truncating it.
 
@@ -490,6 +493,14 @@ attempted after selecting native startup. Already-live sessions, anchor launches
 handoff cutover and Bridge-owned deferred acquisition retain their existing
 delivery paths. Subsequent Bridge messages still use the SDK inbox and its
 receipts; startup transport does not change their authority.
+
+The existing `launch_seed_stage` writer advertises version 8 for guarded
+creation replacement. Only calls carrying `creation_snapshot` require that
+version; ordinary legacy staging still uses its existing version-7 baseline.
+A guarded caller never sends the new conditional operation to a version-7
+resident. The established dispatch path may use its current canonical writer
+fallback, retaining the same record/admission checks; this is not a second
+mutation owner or an effectful new-form/old-form retry.
 
 ### Parent worktree PR visibility
 

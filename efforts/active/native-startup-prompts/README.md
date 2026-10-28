@@ -160,7 +160,7 @@ instead of weakening those guarantees.
 - Existing setup markers and direct-backend support determine selection
   without adding a provider option or a per-launch probe. Unmarked/custom and
   intermediary commands keep their previous terminal fallback. The selected
-  deferred runtime retains its existing protocol/version and refusal checks;
+  deferred runtime retains its existing invocation protocol and refusal checks;
   unsupported setup cannot silently become prompt consumption.
 - Actual CLI 1.0.100-1, offline loopback provider, empty workspace and isolated
   configuration: one exact native conversation accepted a literal multiline,
@@ -185,6 +185,15 @@ instead of weakening those guarantees.
   external target, and rollout/restart is explicitly forbidden. Bash/setup
   framing controls are not native Linux evidence. Those gates remain open
   under #9364; no installation-independent POSIX consumer is activated.
+- Review corrections keep snapshot validation and explicit replacement atomic
+  inside the existing record writer. Conditional creation staging requires
+  writer version 8; legacy calls retain the version-7 baseline and a guarded
+  call never reaches an unaware resident. The existing canonical direct writer
+  fallback retains ownership. Interleaving claim/New/Resume/absent-state controls
+  and a real legacy-rendezvous refusal pass. Nested PowerShell/Bash wrappers
+  now preserve intermediary exclusion recursively rather than selecting a
+  startup path that will refuse `gh copilot`. The changed packet passed 266
+  tests after both corrections.
 
 ### 2026-10-28 - Proposal reviewed
 

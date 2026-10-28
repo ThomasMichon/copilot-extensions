@@ -100,6 +100,54 @@ def test_embody_native_startup_does_not_replace_typed_resume(tmp_path):
     assert state.peek(path) == original
 
 
+@pytest.mark.parametrize("interleaving", ["claim", "resume", "new", "absent-to-new"])
+def test_embody_replacement_checks_snapshot_inside_writer(tmp_path, monkeypatch, interleaving):
+    from agent_worktrees import embody_completion
+
+    path = _record(tmp_path)
+    if interleaving != "absent-to-new":
+        state.stage(path, kind="new", text="sampled")
+    stage = state.stage
+    retained = []
+
+    def race(record_path, **kwargs):
+        if interleaving == "claim":
+            state.take(path, seed_id=state.peek(path).seed_id)
+        else:
+            stage(path, kind="resume" if interleaving == "resume" else "new", text="concurrent")
+        retained.append(state.peek(path))
+        return stage(record_path, **kwargs)
+
+    monkeypatch.setattr(state, "stage", race)
+    with pytest.raises(ValueError, match="custody changed"):
+        embody_completion.prepare_startup_seed(["copilot"], path, "replacement", explicit=True)
+    assert state.peek(path) == retained[0]
+
+
+def test_guarded_creation_replacement_never_dials_legacy_v7_writer(tmp_path, monkeypatch):
+    from agent_worktrees import locks, status_monitor_runtime
+
+    path = _record(tmp_path)
+    original = state.stage(path, kind="new", text="original")
+    old = {
+        "tracking_write_endpoint": "127.0.0.1:49152",
+        "tracking_write_token": "fixture-token",
+        "tracking_write_verbs": ["launch_seed_stage"],
+        "tracking_write_verb_versions": {"launch_seed_stage": 7},
+    }
+    monkeypatch.setattr(locks, "read_lock", lambda *a: old)
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
+    monkeypatch.setattr(
+        tracking_write, "_send_tracking_write_request",
+        lambda *a, **k: pytest.fail("guarded replacement reached an unaware resident"),
+    )
+    updated = state.stage(
+        path, kind="new", text="replacement",
+        creation_snapshot={"seed": dataclasses.asdict(original)},
+    )
+    assert updated.text == "replacement" and updated.revision > original.revision
+
+
 @pytest.mark.parametrize("shell", ["bash", "pwsh"])
 def test_embody_marked_setup_keeps_prompt_unclaimed_until_backend(tmp_path, monkeypatch, shell):
     from agent_worktrees import embody_completion
@@ -133,6 +181,27 @@ def test_embody_unsupported_startup_preserves_legacy_fallback_without_staging(tm
         command, path, "explicit", explicit=True,
     ) == (command, None)
     assert state.peek(path) == original
+
+
+@pytest.mark.parametrize("shell", ["bash", "pwsh"])
+def test_wrapped_intermediary_keeps_terminal_fallback(tmp_path, monkeypatch, shell):
+    from agent_worktrees import embody_completion
+
+    path = _record(tmp_path)
+    scripts = tmp_path / "installation" / "scripts"
+    scripts.mkdir(parents=True)
+    monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: scripts.parent)
+    script = scripts / ("launch-command.sh" if shell == "bash" else "launch-command.ps1")
+    script.write_text("", encoding="utf-8")
+    command = [shell, *([] if shell == "bash" else ["-File"]), str(script), "--", "gh", "copilot"]
+    # More than one recognized wrapper must retain the innermost qualification.
+    command = [*command[:-2], *command]
+    original = state.stage(path, kind="new", text="retain")
+    assert embody_completion.prepare_startup_seed(command, path, "explicit", explicit=True) == (
+        command, None,
+    )
+    assert state.peek(path) == original
+    assert launch_seed_exec._setup_command(path, original.seed_id, command) is not None
 
 
 def _settled_pair_receipt(path):

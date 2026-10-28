@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 from . import launch_seed_exec, launch_seed_state
@@ -21,7 +22,10 @@ def prepare_startup_seed(
     if current is not None and current.kind != "new":
         raise ValueError("Typed Resume prompt belongs to its existing launch owner")
     if explicit:
-        current = launch_seed_state.stage(record_path, kind="new", text=seed)
+        current = launch_seed_state.stage(
+            record_path, kind="new", text=seed,
+            creation_snapshot={"seed": dataclasses.asdict(current) if current is not None else None},
+        )
     elif current is None or current.kind != "new" or current.text != seed:
         raise ValueError("Staged New prompt changed before launch; refresh and retry")
     if current is None:

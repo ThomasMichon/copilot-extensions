@@ -358,8 +358,9 @@ class TestCmdEmbody:
         monkeypatch.setattr(launch_seed_state, "pending", lambda *a: None)
         staged = {}
 
-        def stage(path, *, kind, text):
+        def stage(path, *, kind, text, creation_snapshot):
             staged.update(path=path, kind=kind, text=text)
+            assert creation_snapshot == {"seed": None}
             return launch_seed_state.LaunchSeed("native-seed", kind, text, 1)
 
         monkeypatch.setattr(launch_seed_state, "stage", stage)

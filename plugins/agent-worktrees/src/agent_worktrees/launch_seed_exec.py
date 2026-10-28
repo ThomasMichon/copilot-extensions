@@ -204,6 +204,7 @@ def _invocation_command(
 def _setup_command(
     record_path: Path, seed_id: str, command: list[str],
     correlation: launch_execution.Correlation | None = None,
+    *, native_only: bool = False,
 ) -> list[str] | None:
     index = _script_index(command)
     if index is not None:
@@ -220,7 +221,10 @@ def _setup_command(
                 )
                 if delimiter is None:
                     return None
-                inner = _setup_command(record_path, seed_id, command[delimiter + 1:], correlation)
+                inner = _setup_command(
+                    record_path, seed_id, command[delimiter + 1:], correlation,
+                    native_only=native_only,
+                )
                 return [*command[:delimiter + 1], *inner] if inner is not None else None
         markers = script.read_text(encoding="utf-8-sig").splitlines() if script.is_file() else []
         if BOUNDARY_MARKER in markers:
@@ -248,6 +252,8 @@ def _setup_command(
             return [*command[:index + 1], *flags, *command[index + 1:]]
         return None
     host = Path(command[0]).name.lower() if command else ""
+    if native_only and host in {"gh", "gh.exe"}:
+        return None
     if host in {"copilot", "copilot.exe", "copilot.cmd"} or (
         host in {"gh", "gh.exe"} and command[1:2] == ["copilot"]
     ):
@@ -257,10 +263,7 @@ def _setup_command(
 
 def supports_seed_command(command: list[str], record_path: Path) -> bool:
     """Recognize the existing finite setup/direct-backend contract without effects."""
-    host = Path(command[0]).name.lower() if command else ""
-    if host in {"gh", "gh.exe"}:
-        return False
-    return _setup_command(record_path, "preview", command) is not None
+    return _setup_command(record_path, "preview", command, native_only=True) is not None
 
 
 def launch(
