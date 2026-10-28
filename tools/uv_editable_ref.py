@@ -19,7 +19,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from standalone_consumers import STANDALONE_CONSUMERS
 
@@ -139,6 +139,167 @@ def iter_consumer_dirs() -> list[tuple[str, Path]]:
     return out
 
 
+def _read_pyproject(consumer_dir: Path) -> dict:
+    pyproject = consumer_dir / "pyproject.toml"
+    if pyproject.is_symlink() or not pyproject.is_file():
+        return {}
+    try:
+        return tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise ManifestUnreadable(f"{pyproject}: could not read/parse: {exc}") from exc
+
+
+def read_uv_sources(consumer_dir: Path, *, data: dict | None = None) -> dict:
+    """Read declared sources, refusing unreadable or malformed manifests."""
+    pyproject = consumer_dir / "pyproject.toml"
+    if data is None:
+        data = _read_pyproject(consumer_dir)
+    tool = data.get("tool", {})
+    if not isinstance(tool, dict):
+        raise ManifestUnreadable(f"{pyproject}: [tool] is not a table")
+    uv_table = tool.get("uv", {})
+    if not isinstance(uv_table, dict):
+        raise ManifestUnreadable(f"{pyproject}: [tool.uv] is not a table")
+    sources = uv_table.get("sources", {})
+    if not isinstance(sources, dict):
+        raise ManifestUnreadable(f"{pyproject}: [tool.uv.sources] is not a table")
+    return sources
+
+
+def _direct_local_requirements(data: dict) -> list[str]:
+    project = data.get("project", {})
+    build = data.get("build-system", {})
+    if not isinstance(project, dict) or not isinstance(build, dict):
+        raise ManifestUnreadable("project and build-system must be tables")
+    optional = project.get("optional-dependencies", {})
+    dependency_groups = data.get("dependency-groups", {})
+    uv = data.get("tool", {}).get("uv", {})
+    extra_build = uv.get("extra-build-dependencies", {})
+    if any(not isinstance(table, dict) for table in (optional, dependency_groups, extra_build)):
+        raise ManifestUnreadable("dependency groups and extra build dependencies must be tables")
+    groups = [
+        project.get("dependencies", []), build.get("requires", []), *optional.values(),
+        *dependency_groups.values(),
+        *(uv.get(key, []) for key in (
+            "dev-dependencies", "constraint-dependencies", "override-dependencies",
+            "build-constraint-dependencies",
+        )),
+    ]
+    metadata = uv.get("dependency-metadata", [])
+    if not isinstance(metadata, list) or any(not isinstance(entry, dict) for entry in metadata):
+        raise ManifestUnreadable("tool.uv.dependency-metadata must be a list of tables")
+    groups.extend(entry.get("requires-dist", []) for entry in metadata)
+    for entries in extra_build.values():
+        if not isinstance(entries, list):
+            raise ManifestUnreadable("extra build dependencies must be lists")
+        groups.append([
+            entry.get("requirement") if isinstance(entry, dict) else entry for entry in entries
+        ])
+    local: list[str] = []
+    for requirements in groups:
+        if not isinstance(requirements, list):
+            raise ManifestUnreadable("dependency requirements must be lists")
+        for requirement in requirements:
+            if isinstance(requirement, dict) and set(requirement) == {"include-group"}:
+                continue
+            if not isinstance(requirement, str):
+                raise ManifestUnreadable("dependency requirements must be strings")
+            match = re.match(
+                r"^[A-Za-z0-9_.-]+\s*(?:\[[^]]*\]\s*)?@\s*(\S+)", requirement.strip(),
+            )
+            if not match:
+                continue
+            location = match.group(1)
+            scheme = re.match(r"[A-Za-z][A-Za-z0-9+.-]*:", location)
+            if (
+                scheme is None or scheme.group().lower().rsplit("+", 1)[-1] == "file:"
+                or PureWindowsPath(location).drive
+            ):
+                local.append(requirement)
+    return local
+
+
+def materialized_local_source_problems(consumer_dir: Path) -> list[str]:
+    """Require the reachable local dependency closure to stay inside one payload."""
+    linked = _find_symlink(consumer_dir)
+    if linked is not None:
+        return [f"local source {consumer_dir / linked}: linked payload content"]
+    root = consumer_dir.resolve()
+    pending = [root]
+    seen: set[Path] = set()
+    problems: list[str] = []
+    while pending:
+        current = pending.pop()
+        resolved = current.resolve()
+        manifest = current / "pyproject.toml"
+        if _find_symlinked_ancestor(manifest, root) or not manifest.is_file():
+            problems.append(f"local source {manifest}: missing or linked package manifest")
+            continue
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        try:
+            data = _read_pyproject(current)
+            sources = read_uv_sources(current, data=data)
+            for requirement in _direct_local_requirements(data):
+                problems.append(
+                    f"local source {manifest}: direct local requirement {requirement!r} "
+                    "must be declared through tool.uv.sources for vendoring"
+                )
+        except ManifestUnreadable as exc:
+            problems.append(f"local source {exc}")
+            continue
+        for name, declaration in sources.items():
+            entries = declaration if isinstance(declaration, list) else [declaration]
+            for entry in entries:
+                if isinstance(entry, dict) and any(
+                    isinstance(entry.get(key), str)
+                    and re.match(r"(?i)(?:git\+)?file:", entry[key].strip())
+                    for key in ("git", "url")
+                ):
+                    problems.append(f"local source {manifest}:{name}: file URI mapping remains")
+                    continue
+                if isinstance(entry, dict) and "workspace" in entry:
+                    problems.append(f"local source {manifest}:{name}: workspace mapping remains")
+                    continue
+                if not isinstance(entry, dict) or "path" not in entry:
+                    continue
+                label = f"local source {manifest}:{name}"
+                raw_path = entry["path"]
+                if not isinstance(raw_path, str) or not raw_path:
+                    problems.append(f"{label}: path must be a nonempty string")
+                    continue
+                if entry.get("editable", False) is not False:
+                    problems.append(f"{label}: editable dependency remains after materialization")
+                    continue
+                target = current / raw_path
+                if (
+                    Path(raw_path).is_absolute() or PureWindowsPath(raw_path).drive
+                    or escapes_root(target, root)
+                ):
+                    problems.append(f"{label}: {raw_path!r} is not relative to its own payload")
+                    continue
+                if _find_symlinked_ancestor(target, root):
+                    problems.append(f"{label}: {raw_path!r} traverses a linked directory")
+                    continue
+                route = current
+                for component in Path(raw_path).parts:
+                    route /= component
+                    if escapes_root(route, root):
+                        problems.append(f"{label}: {raw_path!r} leaves its owning payload")
+                        break
+                    if not route.exists():
+                        problems.append(f"{label}: {raw_path!r} has a missing path component")
+                        break
+                else:
+                    if target.is_file() and target.name.endswith(
+                        (".whl", ".zip", ".tar.gz", ".tar.bz2", ".tar.xz")
+                    ):
+                        continue
+                    pending.append(target)
+    return problems
+
+
 def find_uv_editable_refs(consumer_dir: Path) -> list[tuple[str, str, str, bool]]:
     """Every ``[tool.uv.sources]`` entry in ``consumer_dir/pyproject.toml``
     whose ``path`` escapes ``consumer_dir``'s own root -- the `uv`-editable
@@ -164,28 +325,7 @@ def find_uv_editable_refs(consumer_dir: Path) -> list[tuple[str, str, str, bool]
     returns ``[]`` (a distinct, already-explicit refusal every caller
     checks for directly via ``.is_symlink()``)."""
     pyproject = consumer_dir / "pyproject.toml"
-    if pyproject.is_symlink():
-        return []
-    if not pyproject.is_file():
-        return []
-    try:
-        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
-        raise ManifestUnreadable(f"{pyproject}: could not read/parse: {exc}") from exc
-    tool = data.get("tool", {})
-    if not isinstance(tool, dict):
-        raise ManifestUnreadable(f"{pyproject}: [tool] is not a table")
-    uv_table = tool.get("uv", {})
-    if not isinstance(uv_table, dict):
-        raise ManifestUnreadable(f"{pyproject}: [tool.uv] is not a table")
-    sources = uv_table.get("sources", {})
-    if not isinstance(sources, dict):
-        # A TOML-valid but structurally malformed manifest (e.g.
-        # `[tool.uv] sources = []`) must never crash both --check and
-        # promotion with a raw AttributeError from sources.items() below
-        # -- fail closed through the same explicit diagnostic every other
-        # malformed-manifest case already uses.
-        raise ManifestUnreadable(f"{pyproject}: [tool.uv.sources] is not a table")
+    sources = read_uv_sources(consumer_dir)
     consumer_root = consumer_dir.resolve()
     out: list[tuple[str, str, str, bool]] = []
     for name, entry in sources.items():
@@ -218,12 +358,12 @@ def _find_symlinked_ancestor(path: Path, root: Path) -> Path | None:
     accept that case instead of rejecting the symlink outright, the same
     real-directory invariant ``convert_to_uv_editable()`` already enforces
     on the dev-time conversion side."""
-    root_r = root.resolve()
-    current = path
+    root_r = root.absolute()
+    current = path.absolute()
     while True:
         if current.is_symlink():
             return current
-        if current.resolve() == root_r or current.parent == current:
+        if current == root_r or current.parent == current:
             return None
         current = current.parent
 

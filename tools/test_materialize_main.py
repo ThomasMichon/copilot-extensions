@@ -17,6 +17,143 @@ import materialize_main as mm
 import uv_editable_ref as uer
 
 
+@pytest.mark.parametrize(
+    "reference",
+    [
+        '{ path = "libs/missing" }',
+        '{ path = "libs/first", editable = true }',
+        '{ path = "libs/first", editable = "false" }',
+    ],
+)
+def test_materialize_refuses_incomplete_already_local_sources(tmp_path, reference):
+    consumer = tmp_path / "plugins" / "example"
+    first = consumer / "libs" / "first"
+    first.mkdir(parents=True)
+    (first / "pyproject.toml").write_text('[project]\nname = "first"\nversion = "1"\n')
+    (consumer / "pyproject.toml").write_text(
+        '[project]\nname = "example"\nversion = "1"\n'
+        f"[tool.uv.sources]\nfirst = {reference}\n",
+    )
+    log = mm.materialize(tmp_path, canonical_root=tmp_path)
+    assert any(line.startswith("SKIP") and "local source" in line for line in log), log
+
+
+@pytest.mark.parametrize("escape", [False, True])
+def test_materialize_refuses_incomplete_nested_local_sources(tmp_path, escape):
+    consumer = tmp_path / "plugins" / "example"
+    first = consumer / "libs" / "first"
+    first.mkdir(parents=True)
+    target = tmp_path / "libs" / "outside"
+    target.mkdir(parents=True)
+    (target / "pyproject.toml").write_text('[project]\nname = "outside"\nversion = "1"\n')
+    reference = "../../../../libs/outside" if escape else "../missing"
+    (first / "pyproject.toml").write_text(
+        '[project]\nname = "first"\nversion = "1"\n'
+        f'[tool.uv.sources]\nsecond = {{ path = "{reference}" }}\n',
+    )
+    (consumer / "pyproject.toml").write_text(
+        '[project]\nname = "example"\nversion = "1"\n'
+        '[tool.uv.sources]\nfirst = { path = "libs/first" }\n',
+    )
+    log = mm.materialize(tmp_path, canonical_root=tmp_path)
+    assert any(line.startswith("SKIP") and "local source" in line for line in log), log
+
+
+def test_materialize_accepts_complete_local_sibling_closure(tmp_path):
+    consumer = tmp_path / "plugins" / "example"
+    for name, dependency in (("first", "second"), ("second", "first")):
+        library = consumer / "libs" / name
+        library.mkdir(parents=True)
+        (library / "pyproject.toml").write_text(
+            f'[project]\nname = "{name}"\nversion = "1"\n'
+            f'[tool.uv.sources]\n{dependency} = {{ path = "../{dependency}" }}\n',
+        )
+    (consumer / "vendor").mkdir()
+    (consumer / "vendor" / "fixture-1-py3-none-any.whl").write_bytes(b"fixture")
+    (consumer / "pyproject.toml").write_text(
+        '[project]\nname = "example"\nversion = "1"\n'
+        '[tool.uv.sources]\nfirst = { path = "libs/first" }\n'
+        'fixture = { path = "vendor/fixture-1-py3-none-any.whl" }\n'
+        'external = { index = "approved" }\n',
+    )
+    log = mm.materialize(tmp_path, canonical_root=tmp_path)
+    assert not any(line.startswith("SKIP") for line in log), log
+
+
+def test_materialize_requires_existing_standalone_manifest_but_allows_skill_plugins(tmp_path):
+    (tmp_path / "worktree-manager").mkdir()
+    (tmp_path / "plugins" / "skill-only").mkdir(parents=True)
+    log = mm.materialize(tmp_path, canonical_root=tmp_path)
+    assert len(log) == 1 and "worktree-manager" in log[0] and "missing" in log[0], log
+
+
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize(
+    "requirements",
+    [
+        '[project]\ndependencies = ["missing @ file:///unavailable/package"]\n',
+        '[project.optional-dependencies]\nextra = ["missing @ ../unavailable"]\n',
+        '[build-system]\nrequires = ["missing @ file:///unavailable/package"]\n',
+    ],
+)
+def test_materialize_refuses_direct_local_requirements(tmp_path, nested, requirements):
+    consumer = tmp_path / "plugins" / "example"
+    package = consumer / "libs" / "nested" if nested else consumer
+    package.mkdir(parents=True)
+    (package / "pyproject.toml").write_text(requirements)
+    if nested:
+        (consumer / "pyproject.toml").write_text(
+            '[tool.uv.sources]\nnested = { path = "libs/nested" }\n',
+        )
+    log = mm.materialize(tmp_path, canonical_root=tmp_path)
+    assert any("direct local requirement" in line for line in log), log
+
+
+@pytest.mark.parametrize("kind", ["source", "inside-traversal", "outside-traversal"])
+def test_materialize_refuses_linked_source_content(tmp_path, native_file_symlink, kind):
+    consumer = tmp_path / "plugins" / "example"
+    package = consumer / "libs" / "dependency"
+    package.mkdir(parents=True)
+    (package / "pyproject.toml").write_text('[project]\nname = "dependency"\nversion = "1"\n')
+    original = tmp_path / "original-source"
+    original.mkdir()
+    (original / "module.py").write_text("value = 1\n")
+    if kind != "source":
+        (consumer / "anchor").mkdir()
+        link = original / "link" if kind == "outside-traversal" else consumer / "link"
+        native_file_symlink(link, consumer / "anchor", target_is_directory=True)
+        prefix = "../../original-source/" if kind == "outside-traversal" else ""
+        reference = prefix + "link/../libs/dependency"
+    else:
+        native_file_symlink(package / "src", original, target_is_directory=True)
+        reference = "libs/dependency"
+    (consumer / "pyproject.toml").write_text(
+        f'[tool.uv.sources]\ndependency = {{ path = "{reference}" }}\n',
+    )
+    log = mm.materialize(tmp_path, canonical_root=tmp_path)
+    assert any("linked" in line for line in log), log
+
+
+def test_materialized_closure_allows_an_aliased_parent(tmp_path, native_file_symlink):
+    root = tmp_path / "real" / "repository"
+    consumer = root / "plugins" / "example"
+    consumer.mkdir(parents=True)
+    (consumer / "pyproject.toml").write_text('[project]\nname = "example"\nversion = "1"\n')
+    alias = tmp_path / "alias"
+    native_file_symlink(alias, root.parent, target_is_directory=True)
+    aliased_repo = alias / "repository"
+    assert uer.materialized_local_source_problems(aliased_repo / "plugins" / "example") == []
+    _canonical_lib(root, "shared", version="1.0.0", content="value = 1\n")
+    source_consumer = root / "plugins" / "source"
+    source_consumer.mkdir()
+    (source_consumer / "pyproject.toml").write_text(
+        '[tool.uv.sources]\nshared = {path = "../../libs/shared", editable = true}\n',
+    )
+    assert uer.uv_editable_problems(
+        "source", aliased_repo / "plugins" / "source", repo=aliased_repo,
+    ) == []
+
+
 @pytest.mark.parametrize("nested", [False, True])
 @pytest.mark.parametrize("editable", [False, True])
 def test_materialize_declared_flat_python_modules(tmp_path, nested, editable):
@@ -249,7 +386,7 @@ def test_materialize_skips_file_pointer_with_missing_canonical(tmp_path: Path):
     assert pointer.read_text().startswith("<!-- VENDOR_POINTER:")
 
 
-def test_materialize_refuses_a_symlinked_file_pointer(tmp_path: Path):
+def test_materialize_refuses_a_symlinked_file_pointer(tmp_path: Path, native_file_symlink):
     # find_file_pointers()'s own is_file() check follows a symlink, and
     # pointer_path.write_bytes() would follow it again -- a symlinked
     # pointer path (or an ancestor between it and dest) would let
@@ -266,7 +403,7 @@ def test_materialize_refuses_a_symlinked_file_pointer(tmp_path: Path):
     )
     pointer_path = root / "plugins" / "agent-bridge" / "docs" / "thing.md"
     pointer_path.parent.mkdir(parents=True)
-    pointer_path.symlink_to(victim)
+    native_file_symlink(pointer_path, victim)
 
     log = mm.materialize(root, canonical_root=root)
     assert any("SKIP" in line and "(file pointer)" in line and "is a symlink" in line
@@ -387,13 +524,15 @@ def test_build_overwrites_a_stale_existing_dest(tmp_path: Path):
     assert (dest / "marker.txt").read_text() == "v2\n"
 
 
-def test_build_preserves_a_symlink_instead_of_dereferencing_its_content(tmp_path: Path):
+def test_build_preserves_a_symlink_instead_of_dereferencing_its_content(
+    tmp_path: Path, native_file_symlink,
+):
     source_root = tmp_path / "repo"
     secret = tmp_path / "outside-repo-secret"
     secret.mkdir()
     (secret / "leaked.txt").write_text("do not leak\n", encoding="utf-8")
     (source_root / "some-dir").mkdir(parents=True)
-    (source_root / "some-dir" / "a-link").symlink_to(secret, target_is_directory=True)
+    native_file_symlink(source_root / "some-dir" / "a-link", secret, target_is_directory=True)
     (source_root / "README.md").write_text("hello\n", encoding="utf-8")
     dest = tmp_path / "dest"
 
@@ -722,7 +861,9 @@ def test_materialize_uv_editable_ref_into_refuses_a_canonical_lib_missing_pyproj
     assert not (consumer / "libs/zdd").exists()
 
 
-def test_materialize_uv_editable_ref_into_refuses_a_symlinked_source_pyproject(tmp_path: Path):
+def test_materialize_uv_editable_ref_into_refuses_a_symlinked_source_pyproject(
+    tmp_path: Path, native_file_symlink,
+):
     root = tmp_path / "repo"
     _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
     real = tmp_path / "outside-pyproject.toml"
@@ -732,7 +873,7 @@ def test_materialize_uv_editable_ref_into_refuses_a_symlinked_source_pyproject(t
     )
     consumer = root / "plugins/agent-bridge"
     consumer.mkdir(parents=True)
-    (consumer / "pyproject.toml").symlink_to(real)
+    native_file_symlink(consumer / "pyproject.toml", real)
 
     log = mm.materialize_uv_editable_ref_into(
         source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
@@ -742,7 +883,7 @@ def test_materialize_uv_editable_ref_into_refuses_a_symlinked_source_pyproject(t
 
 
 def test_materialize_uv_editable_ref_into_catches_a_symlinked_canonical_before_resolving(
-    tmp_path: Path,
+    tmp_path: Path, native_file_symlink,
 ):
     # The symlink-ancestor check must run on the UNRESOLVED, clean
     # canonical_root/libs/<lib> path BEFORE any .resolve() call -- resolving
@@ -757,7 +898,7 @@ def test_materialize_uv_editable_ref_into_catches_a_symlinked_canonical_before_r
         '[project]\nname = "x"\nversion = "0.0.0"\n', encoding="utf-8"
     )
     (root / "libs").mkdir(parents=True)
-    (root / "libs/zdd").symlink_to(real_lib, target_is_directory=True)
+    native_file_symlink(root / "libs/zdd", real_lib, target_is_directory=True)
     consumer = _uv_editable_consumer(root, "plugins/agent-bridge", "agent-zdd", "../../libs/zdd")
 
     log = mm.materialize_uv_editable_ref_into(
@@ -819,6 +960,12 @@ def test_real_repo_uv_editable_materialization_matches_current_canonical_trees(
             pyproject_text,
             encoding="utf-8",
         )
+        for directory in ("libs", "vendor"):
+            retained = consumer_dir / directory
+            if retained.is_dir():
+                shutil.copytree(
+                    retained, actual_consumer_dir / directory, ignore=mm._ignore,
+                )
         for ext in ("sh", "ps1"):
             installer = consumer_dir / "scripts" / f"install.{ext}"
             if not installer.is_file():
@@ -935,7 +1082,7 @@ def test_materialize_one_uv_editable_ref_scopes_rewrite_to_uv_sources_table(tmp_
 
 
 def test_materialize_uv_editable_ref_into_refuses_a_symlinked_destination_manifest(
-    tmp_path: Path,
+    tmp_path: Path, native_file_symlink,
 ):
     root = tmp_path / "repo"
     _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
@@ -949,7 +1096,7 @@ def test_materialize_uv_editable_ref_into_refuses_a_symlinked_destination_manife
         'agent-zdd = { path = "../../libs/zdd", editable = true }\n',
         encoding="utf-8",
     )
-    (consumer / "pyproject.toml").symlink_to(victim)
+    native_file_symlink(consumer / "pyproject.toml", victim)
 
     # find_uv_editable_refs() reads via the symlink (so the ref is
     # discovered), but the destination-manifest symlink itself must still
@@ -1004,7 +1151,7 @@ def test_materialize_one_uv_editable_ref_copies_files_outside_the_four_known_sub
 
 
 def test_materialize_one_uv_editable_ref_refuses_a_symlink_anywhere_in_canonical(
-    tmp_path: Path,
+    tmp_path: Path, native_file_symlink,
 ):
     canonical = tmp_path / "libs/zdd"
     (canonical / "src/zdd").mkdir(parents=True)
@@ -1014,7 +1161,7 @@ def test_materialize_one_uv_editable_ref_refuses_a_symlink_anywhere_in_canonical
     )
     victim = tmp_path / "victim.txt"
     victim.write_text("victim\n", encoding="utf-8")
-    (canonical / "sneaky-link").symlink_to(victim)
+    native_file_symlink(canonical / "sneaky-link", victim)
     consumer = tmp_path / "plugins/agent-bridge"
     consumer.mkdir(parents=True)
     pyproject = consumer / "pyproject.toml"
@@ -1062,7 +1209,7 @@ def test_materialize_uv_editable_ref_into_rewrites_all_aliases_of_the_same_lib(t
 
 
 def test_materialize_uv_editable_ref_into_refuses_a_symlinked_dest_consumer_ancestor(
-    tmp_path: Path,
+    tmp_path: Path, native_file_symlink,
 ):
     # dest_root bounds the destination-side ancestor check all the way to
     # the real snapshot root -- checking only up to dest_consumer_dir
@@ -1082,7 +1229,7 @@ def test_materialize_uv_editable_ref_into_refuses_a_symlinked_dest_consumer_ance
     )
     dest.mkdir(parents=True)
     dest_plugins = dest / "plugins"
-    dest_plugins.symlink_to(outside, target_is_directory=True)
+    native_file_symlink(dest_plugins, outside, target_is_directory=True)
     dest_consumer_dir = dest_plugins / "agent-bridge"
 
     log = mm.materialize_uv_editable_ref_into(
@@ -1093,7 +1240,9 @@ def test_materialize_uv_editable_ref_into_refuses_a_symlinked_dest_consumer_ance
     assert not (consumer / "libs/zdd").exists()
 
 
-def test_materialize_uv_editable_refs_passes_dest_root_for_the_ancestor_check(tmp_path: Path):
+def test_materialize_uv_editable_refs_passes_dest_root_for_the_ancestor_check(
+    tmp_path: Path, native_file_symlink,
+):
     root = tmp_path / "repo"
     _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
     dest = tmp_path / "dest"
@@ -1106,14 +1255,16 @@ def test_materialize_uv_editable_refs_passes_dest_root_for_the_ancestor_check(tm
         encoding="utf-8",
     )
     dest.mkdir(parents=True)
-    (dest / "plugins").symlink_to(outside, target_is_directory=True)
+    native_file_symlink(dest / "plugins", outside, target_is_directory=True)
 
     log = mm.materialize_uv_editable_refs(dest, canonical_root=root)
     assert any("is a symlink" in line for line in log)
     assert not (consumer / "libs/zdd").exists()
 
 
-def test_materialize_uv_editable_ref_into_refuses_a_symlinked_canonical_root(tmp_path: Path):
+def test_materialize_uv_editable_ref_into_refuses_a_symlinked_canonical_root(
+    tmp_path: Path, native_file_symlink,
+):
     # canonical_root.resolve() must never run before its own is_symlink()
     # is checked -- resolving first discards that fact, so every later
     # _find_symlinked_ancestor() walk (which terminates AT the resolved
@@ -1122,7 +1273,7 @@ def test_materialize_uv_editable_ref_into_refuses_a_symlinked_canonical_root(tmp
     real_root = tmp_path / "real-repo"
     _canonical_lib(real_root, "zdd", version="0.1.0-dev1", content="real\n")
     root = tmp_path / "repo-symlink"
-    root.symlink_to(real_root, target_is_directory=True)
+    native_file_symlink(root, real_root, target_is_directory=True)
     consumer = _uv_editable_consumer(root, "plugins/agent-bridge", "agent-zdd", "../../libs/zdd")
 
     log = mm.materialize_uv_editable_ref_into(
@@ -1352,7 +1503,9 @@ def test_materialize_nested_uv_editable_refs_refuses_a_path_traversal_raw_path(
     assert not (root / "plugins" / "other").exists()
 
 
-def test_materialize_nested_uv_editable_refs_refuses_a_symlinked_canonical(tmp_path: Path):
+def test_materialize_nested_uv_editable_refs_refuses_a_symlinked_canonical(
+    tmp_path: Path, native_file_symlink,
+):
     """Review finding (PR #4372): the nested materializer must check the
     UNRESOLVED canonical path for a symlinked ancestor BEFORE ever calling
     ``.resolve()`` on it -- resolving first would silently follow (and
@@ -1366,7 +1519,7 @@ def test_materialize_nested_uv_editable_refs_refuses_a_symlinked_canonical(tmp_p
         "smuggled = True\n", encoding="utf-8"
     )
     (root / "libs").mkdir(parents=True)
-    (root / "libs" / "agent-procutil").symlink_to(
+    native_file_symlink(root / "libs" / "agent-procutil",
         outside / "agent-procutil", target_is_directory=True
     )
     _canonical_lib_with_dependency(
@@ -1535,7 +1688,7 @@ def test_materialize_installer_engine_ref_into_refuses_an_escaping_reference(tmp
 
 
 def test_materialize_installer_engine_ref_into_refuses_a_symlinked_canonical_ancestor(
-    tmp_path: Path,
+    tmp_path: Path, native_file_symlink,
 ):
     root = tmp_path / "repo"
     outside = tmp_path / "outside"
@@ -1545,7 +1698,7 @@ def test_materialize_installer_engine_ref_into_refuses_a_symlinked_canonical_anc
     (real_engine / "installer-engine.sh").write_text("# canonical sh\n", encoding="utf-8")
     (real_engine / "installer-engine.ps1").write_text("# canonical ps1\n", encoding="utf-8")
     (root / "libs").mkdir(parents=True)
-    (root / "libs" / "installer-engine").symlink_to(real_engine, target_is_directory=True)
+    native_file_symlink(root / "libs" / "installer-engine", real_engine, target_is_directory=True)
     consumer = root / "plugins" / "agent-pull-requests"
     (consumer / "scripts").mkdir(parents=True)
     (consumer / "scripts" / "install.sh").write_text(

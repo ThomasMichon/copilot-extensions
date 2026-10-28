@@ -2313,6 +2313,10 @@ whole-packet budget. Any missing, duplicate, unexpected, failed or skipped node
 or phase rejects the result. Each admitted file is collected once; an exact
 node whitelist deselects other cases before execution and restores manifest
 order. Missing or duplicate admitted nodes reject collection before execution.
+`test_materialized_local_sources.py` supplies bounded synthetic closure controls
+for missing/editable/escaping local sources, literal conditional paths, standalone
+manifests, and root/nested requirement declarations. Real Git promotion and
+native symlink/aliased-parent controls remain in the existing integration suites.
 The runner rejects process, network, native-loader,
 Git-storage, thread and sleep effects, including attempted effects caught by a
 test. Test writes are confined to synthetic temporary storage.
