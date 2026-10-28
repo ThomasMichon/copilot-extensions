@@ -13,33 +13,12 @@ _aw_native_setup_prepare() {
     aw_native_seed_prepare "$@"
 }
 
-aw_native_setup_preserve_exit() {
-    local declaration
-    declaration="$(trap -p EXIT)"
-    AW_NATIVE_SETUP_REPO_EXIT=""
-    if [[ -n "$declaration" && "$declaration" != "trap -- '_aw_native_setup_finish' EXIT" ]]; then
-        # Decode only Bash's own rendering of the sourced repository trap,
-        # never a provider reply or environment value.
-        declaration="${declaration#trap -- }"
-        declaration="${declaration% EXIT}"
-        builtin eval "AW_NATIVE_SETUP_REPO_EXIT=$declaration"
-    fi
-    trap _aw_native_setup_finish EXIT
-}
-
 _aw_native_setup_finish() {
     local code=$?
     trap - EXIT
-    aw_native_seed_phase "$LAUNCH_SEED_NATIVE_ROOT" --phase returned --exit-code "$code" \
-        "${AW_NATIVE_SETUP_CALLBACK[@]}" >/dev/null || \
-        printf 'Native setup return is unconfirmed; inspect the retained launch.\n' >&2
-    if [[ -n "${AW_NATIVE_SETUP_REPO_EXIT:-}" ]]; then
-        if (exit "$code"); then
-            builtin eval -- "$AW_NATIVE_SETUP_REPO_EXIT"
-        else
-            builtin eval -- "$AW_NATIVE_SETUP_REPO_EXIT"
-        fi
-    fi
+    aw_native_seed_return "$LAUNCH_SEED_NATIVE_ROOT" \
+        'Native setup return is unconfirmed; inspect the retained launch.' \
+        --phase returned --exit-code "$code" "${AW_NATIVE_SETUP_CALLBACK[@]}"
     exit "$code"
 }
 
@@ -102,14 +81,14 @@ aw_native_setup_backend() {
         return "$code"
     fi
     _aw_native_setup_require_contract || return 3
-    completion="$(mktemp "${BASH_SOURCE[0]%/*}/.native-seed-exec.XXXXXXXX")" || return 3
+    completion="$(_aw_native_seed_control mktemp "${BASH_SOURCE[0]%/*}/.native-seed-exec.XXXXXXXX")" || return 3
     local -a preparation=(
         --phase prepare --output-format nul --record "$LAUNCH_SEED_RECORD" --seed-id "$LAUNCH_SEED_ID"
         --launch-attempt-id "$LAUNCH_ATTEMPT_ID" --launch-resolution-id "$LAUNCH_RESOLUTION_ID"
         --launch-parent-id "$LAUNCH_PARENT_ID"
     )
     if ! _aw_native_setup_prepare "$LAUNCH_SEED_NATIVE_ROOT" "${preparation[@]}" -- "$@"; then
-        rm -f -- "$completion"
+        _aw_native_seed_control rm -f -- "$completion"
         return 3
     fi
     local -a callback=(
@@ -131,20 +110,20 @@ aw_native_setup_backend() {
             --completion-file "$completion" --backend-environment-fd 3
             "${callback[@]}" -- "${AW_NATIVE_SEED_ARGV[@]}"
         )
-        env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV -u __PYVENV_LAUNCHER__ \
+        _aw_native_seed_control env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV -u __PYVENV_LAUNCHER__ \
             "${command[@]}" 3< <(_aw_native_setup_backend_environment) || code=$?
         for ((index=0; index<220; index++)); do
             [[ ! -s "$completion" ]] || break
-            sleep 0.05
+            _aw_native_seed_control sleep 0.05
         done
         IFS= read -r status < "$completion" || status=""
     else
         code=3
     fi
     if [[ "$status" == 0 ]]; then
-        aw_native_seed_phase "$LAUNCH_SEED_NATIVE_ROOT" --phase returned --exit-code "$code" \
-            "${callback[@]}" >/dev/null || \
-            printf 'Native backend return is unconfirmed; inspect the retained handoff.\n' >&2
+        aw_native_seed_return "$LAUNCH_SEED_NATIVE_ROOT" \
+            'Native backend return is unconfirmed; inspect the retained handoff.' \
+            --phase returned --exit-code "$code" "${callback[@]}"
     else
         if [[ "$status" != 3 ]]; then
             aw_native_seed_phase "$LAUNCH_SEED_NATIVE_ROOT" --phase interrupted \
@@ -152,6 +131,6 @@ aw_native_setup_backend() {
         fi
         printf 'Native backend exec is unconfirmed; inspect the retained handoff.\n' >&2
     fi
-    rm -f -- "$completion"
+    _aw_native_seed_control rm -f -- "$completion"
     return "$code"
 }

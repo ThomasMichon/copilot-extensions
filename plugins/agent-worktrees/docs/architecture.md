@@ -676,7 +676,7 @@ bytes, to the private completion file.
 
 `posix-exec-env-v1` additionally accepts an inherited
 `--backend-environment-fd` greater than 2. Copied setup requires this capability:
-it preserves its primed environment, applies only the new backend execution hint
+it preserves its inherited environment, applies only the new backend execution hint
 from the preparation reply, and never puts environment values in external argv.
 The exec interpreter starts with Python overrides removed. A finite, private
 NUL pipe carries the original export-presence/value pairs for `PYTHONPATH`,
@@ -719,6 +719,10 @@ Bash settles the bounded status-only observer receipt and resolves the return
 handler afresh. Every unconfirmed observer result, including status 3, warns
 without changing the actual backend exit code; an already settled status 3
 does not trigger a second mutation. Exec never runs through the finite provider timeout.
+Return callbacks first discover the then-current version-1 handler read-only.
+Missing or incompatible handlers close quietly without claiming receipt
+delivery. A compatible callback failure warns unless a fresh read-only probe
+confirms removal or incompatibility; no effectful callback is replayed.
 Ordinary provider syntax/default replies and Windows child-handle ownership
 are unchanged. Real Copilot/mux and supported installation-removal acceptance
 remain separate from the copied native consumer controls.
@@ -728,8 +732,12 @@ runtime's retention bootstrap before selecting native setup. The copied
 consumer checks again at entry and before backend preparation, without a
 capability cache. Each query, its preparation and its exec use the same selected
 interpreter array; a selector change cannot substitute another provider between
-discovery and seed effects. Descriptor validation uses that interpreter's stdlib,
-not shell evaluation or a second identity RPC. Effect-side current-runtime
+discovery and seed effects. Descriptor output streams directly into a separately
+bounded validator using that interpreter's stdlib, with a 64-KiB input cap and
+ten-second deadline. Both producer and validator must succeed; an escaped
+stdout holder cannot extend collection indefinitely. Control utilities use the
+shell's standard utility search independently of the backend's unchanged PATH.
+Validation uses neither shell evaluation nor a second identity RPC. Effect-side current-runtime
 validation remains authoritative across a selector race. Admission-only launches,
 including native resume, retain the legacy owner and its launch fence: finite
 copied setup does not supply equivalent exclusion through child startup.
@@ -738,9 +746,13 @@ does not query capabilities or add admission flags: cold `embody` retains its
 existing prompt owner. Custom setup and unsupported runtimes keep their
 legacy path; no effectful invocation is retried in another mode.
 After setup admission, the copied shell clears an inherited backend execution
-hint. The actual seeded backend receives only its own new hint. Repository
-`env_script` EXIT traps are retained and chained after the outer setup return
-callback; clearing that trap during priming does not remove the callback.
+hint. The actual seeded backend receives only its own new hint. POSIX
+`env_script` launches retain the legacy owner before capability discovery or
+asset copying: arbitrary sourced early exits and replacement EXIT traps cannot
+share the native setup's sole EXIT callback without changing shell semantics.
+The existing outer owner records the actual final setup status. A stale/direct
+native envelope with an environment script refuses before admission or sourcing.
+This unsupported path remains an installation-survival gap, not native closure.
 
 The NUL reply is one fully encoded UTF-8 byte sequence, with a NUL after every
 field, in this order:

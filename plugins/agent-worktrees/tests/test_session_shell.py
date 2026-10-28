@@ -478,6 +478,39 @@ def test_posix_native_selection_requires_the_selected_runtime_contract(
 
 
 @pytest.mark.skipif(os.name != "posix", reason="Native POSIX setup plan")
+@pytest.mark.parametrize("arguments, legacy", [
+    (["--env-script", "prime.sh"], True),
+    (["--prompt", "--env-script"], False),
+    (["--", "--env-script", "literal"], False),
+])
+def test_posix_env_script_keeps_legacy_owner_without_matching_literal_values(
+    launch, monkeypatch, arguments, legacy,
+):
+    from agent_worktrees import launch_seed_contract
+
+    record, runtime, _assets = launch
+    scripts = runtime / "scripts"
+    shutil.copytree(Path(__file__).resolve().parents[1] / "scripts", scripts)
+    monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: runtime)
+    monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: runtime.with_name("manager"))
+
+    def support(_root):
+        assert not legacy, "env_script must refuse before querying or copying"
+        return True
+
+    monkeypatch.setattr(launch_seed_contract, "supports_posix_setup", support)
+    command = ["/bin/bash", str(scripts / "default-setup.sh"), *arguments]
+    prepared = launch_seed_exec.deferred_command(command, record, seed_id="staged")
+    if legacy:
+        assert prepared[1:3] == ["-m", "agent_worktrees.launch_seed_exec"]
+        assert prepared[-len(command):] == command
+        assert not (record.parent / "launch-attempts").exists()
+    else:
+        assert launch_seed_exec.native_setup_index(prepared) == 1
+        assert prepared[-len(arguments):] == arguments
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Native POSIX setup plan")
 @pytest.mark.parametrize("native_resume", [None, "native-original"])
 def test_posix_admission_retains_the_existing_owner_fence(launch, monkeypatch, native_resume):
     from agent_worktrees import launch_seed_contract

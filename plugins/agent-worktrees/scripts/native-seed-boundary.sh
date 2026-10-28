@@ -5,9 +5,14 @@
 # shellcheck source=native-seed-reply.sh
 . "${BASH_SOURCE[0]%/*}/native-seed-reply.sh"
 
+_aw_native_seed_control() {
+    builtin command -p "$@"
+}
+
 _aw_native_seed_run_phase() (
     local helper="" result=0 index deadline="$1"
     shift
+    if [[ "${1:-}" == --stdin ]]; then shift; else exec </dev/null; fi
     [[ "$deadline" =~ ^[1-9][0-9]{0,8}$ ]] || return 3
     trap 'if [[ -n "$helper" ]]; then
               kill -KILL -- "-$helper" 2>/dev/null || true
@@ -16,13 +21,13 @@ _aw_native_seed_run_phase() (
     trap 'exit 3' HUP INT TERM
     # A separate job group contains only the finite provider and its children.
     set -m || return 3
-    "$@" </dev/null 2>/dev/null &
+    "$@" <&0 2>/dev/null &
     helper=$!
     set +m
     for ((index=0; index<200; index++)); do
         (( SECONDS < deadline )) || break
         kill -0 "$helper" 2>/dev/null || break
-        sleep 0.05
+        _aw_native_seed_control sleep 0.05
     done
     if kill -0 "$helper" 2>/dev/null; then
         return 3
@@ -58,40 +63,67 @@ aw_native_seed_phase() (
         _aw_native_seed_runtime "$root" || return 3
     fi
     shift
-    _aw_native_seed_run_phase "${_aw_native_seed_deadline:-$((SECONDS + 10))}" env \
+    _aw_native_seed_run_phase "${_aw_native_seed_deadline:-$((SECONDS + 10))}" _aw_native_seed_control env \
         -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV -u __PYVENV_LAUNCHER__ \
         "${AW_NATIVE_SEED_RUNTIME[@]}" \
         -m agent_worktrees.launch_seed_native --contract-version 1 --root "$root" "$@"
 )
 
-aw_native_seed_supports_posix_setup() {
+_aw_native_seed_supports_contract() {
     case $- in *x*) set +x ;; esac
     set +a
-    local descriptor root="$1"
+    local root="$1" mode="$2"
     _aw_native_seed_runtime "$root" || return 3
     local -a AW_NATIVE_SEED_PHASE_RUNTIME=("${AW_NATIVE_SEED_RUNTIME[@]}")
-    descriptor="$(aw_native_seed_phase "$root" --describe-contract)" || return 3
-    _aw_native_seed_run_phase "$((SECONDS + 10))" env \
+    local -a statuses
+    if aw_native_seed_phase "$root" --describe-contract |
+        _aw_native_seed_run_phase "$((SECONDS + 10))" --stdin _aw_native_seed_control env \
         -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV -u __PYVENV_LAUNCHER__ \
         "${AW_NATIVE_SEED_RUNTIME[0]}" -I -S -B -X utf8 -c '
 import json, sys
 try:
-    value = json.loads(sys.argv[1])
+    raw = sys.stdin.buffer.read(65537)
+    if len(raw) > 65536:
+        raise ValueError("Descriptor exceeds its budget")
+    value = json.loads(raw)
     supported = (
         isinstance(value, dict)
         and value.get("contract") == "agent-worktrees.native-seed"
         and type(value.get("version")) is int and value["version"] == 1
-        and value.get("nul_reply_schema") == "agent-worktrees.native-seed-reply.v1"
+    )
+    if sys.argv[1] == "setup":
+        supported = (
+        supported and value.get("nul_reply_schema") == "agent-worktrees.native-seed-reply.v1"
         and all(isinstance(value.get(key), list) and item in value[key] for key, item in (
             ("preparation_output_formats", "nul"),
             ("setup_process_start_time_sources", "provider"),
             ("backend_execution_modes", "posix-exec-env-v1"),
         ))
-    )
-except (ValueError, TypeError):
+        )
+except (ValueError, TypeError, OSError):
     supported = False
 raise SystemExit(0 if supported else 3)
-' "$descriptor" 2>/dev/null
+' "$mode" 2>/dev/null; then
+        statuses=("${PIPESTATUS[@]}")
+    else
+        statuses=("${PIPESTATUS[@]}")
+    fi
+    [[ "${statuses[0]}" == 0 && "${statuses[1]}" == 0 ]] || return 3
+}
+
+aw_native_seed_supports_posix_setup() {
+    _aw_native_seed_supports_contract "$1" setup
+}
+
+aw_native_seed_return() {
+    local root="$1" warning="$2"
+    shift 2
+    _aw_native_seed_supports_contract "$root" return || return 0
+    local -a AW_NATIVE_SEED_PHASE_RUNTIME=("${AW_NATIVE_SEED_RUNTIME[@]}")
+    aw_native_seed_phase "$root" "$@" >/dev/null && return 0
+    # Removal/incompatibility is a quiet close, not a delivered receipt.
+    _aw_native_seed_supports_contract "$root" return || return 0
+    printf '%s\n' "$warning" >&2
 }
 
 _aw_native_seed_prepare_phase() {
@@ -115,7 +147,7 @@ _aw_native_seed_collect_reply() {
         IFS= builtin read -r phase_status < "$2" || phase_status=""
         [[ "$phase_status" != 0 && "$phase_status" != 3 ]] || break
         (( SECONDS < $3 + 1 )) || break
-        sleep 0.05
+        _aw_native_seed_control sleep 0.05
     done
     [[ "$phase_status" == 0 ]] || status=3
     [[ "$status" == 0 ]] || _aw_native_seed_clear_reply
@@ -131,13 +163,13 @@ aw_native_seed_prepare() {
     local _aw_native_seed_completion="agent-worktrees.native-phase-complete.v1:$$:$RANDOM:$RANDOM:$RANDOM:$RANDOM"
     local _aw_native_seed_deadline=$((SECONDS + 10)) _aw_native_seed_control=""
     export -n _aw_native_seed_completion _aw_native_seed_deadline _aw_native_seed_control
-    _aw_native_seed_control="$(mktemp "${BASH_SOURCE[0]%/*}/.native-seed-phase.XXXXXXXX" 2>/dev/null)" || status=3
+    _aw_native_seed_control="$(_aw_native_seed_control mktemp "${BASH_SOURCE[0]%/*}/.native-seed-phase.XXXXXXXX" 2>/dev/null)" || status=3
     export -n _aw_native_seed_control
     if [[ "$status" == 0 ]]; then
         _aw_native_seed_collect_reply "$_aw_native_seed_completion" "$_aw_native_seed_control" "$_aw_native_seed_deadline" \
             < <(_aw_native_seed_prepare_phase "$_aw_native_seed_completion" "$_aw_native_seed_control" "$_aw_native_seed_deadline" "$@") \
             2>/dev/null || status=3
-        rm -f -- "$_aw_native_seed_control" 2>/dev/null || status=3
+        _aw_native_seed_control rm -f -- "$_aw_native_seed_control" 2>/dev/null || status=3
     fi
     if [[ "$status" != 0 ]]; then
         _aw_native_seed_clear_reply

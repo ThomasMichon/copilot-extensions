@@ -166,6 +166,15 @@ def _native_setup_command(
     if posix and not copy_only:
         from .launch_seed_contract import supports_posix_setup
 
+        # Arbitrary sourced shell exits/traps retain the legacy setup owner.
+        option = index + 1
+        while option < len(command) and command[option] != "--":
+            if command[option] == "--env-script":
+                return None
+            takes_value = command[option] in (
+                VALUE_OPTIONS | SETUP_VALUE_OPTIONS | {"-C", "--execution-directory"}
+            )
+            option += 2 if takes_value else 1
         # Finite native setup cannot retain the admission-only owner's fence.
         if admission_only or not supports_posix_setup(installer.install_dir()):
             return None

@@ -99,6 +99,10 @@ done
 say() { if $STDIO; then echo "$@" >&2; else echo "$@"; fi; }
 
 if [[ -n "$LAUNCH_SEED_PREPARATION" ]]; then
+    if [[ -n "$ENV_SCRIPT" ]]; then
+        printf 'Native POSIX setup cannot own env_script; no backend started.\n' >&2
+        exit 3
+    fi
     . "${BASH_SOURCE[0]%/*}/native-seed-setup.sh"
     aw_native_setup_begin "$BASH" "${BASH_SOURCE[0]}" || exit 3
 fi
@@ -165,10 +169,6 @@ if [[ -n "$ENV_SCRIPT" ]]; then
     fi
 fi
 
-if [[ -n "$LAUNCH_SEED_PREPARATION" ]]; then
-    aw_native_setup_preserve_exit
-fi
-
 # -- Environment ----------------------------------------------------------
 # Resolve the project from CWD (git-like); fall back to the directory name if
 # the CLI is unavailable (e.g. recovery mode).
@@ -181,7 +181,7 @@ export WORKTREE_MACHINE="$MACHINE"
 
 # Direct agent-bridge launches may enter through this setup script without the
 # outer launch-session wrapper. Source the same optional reconciliation helper.
-_MACHINE_SETTINGS_HELPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reconcile-machine-settings.sh"
+_MACHINE_SETTINGS_HELPER="$(cd "$(builtin command -p dirname "${BASH_SOURCE[0]}")" && pwd)/reconcile-machine-settings.sh"
 if [[ -f "$_MACHINE_SETTINGS_HELPER" ]]; then
     _MACHINE_SETTINGS_ARGS=()
     [[ "$RECOVERY" == true ]] && _MACHINE_SETTINGS_ARGS+=(--recovery)

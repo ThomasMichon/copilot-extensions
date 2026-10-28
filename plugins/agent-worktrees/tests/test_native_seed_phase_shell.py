@@ -95,12 +95,15 @@ def test_finite_phase_streams_exact_reply_and_returns_provider_status(tmp_path: 
     assert not result.stderr
 
 
-def _contract_slot(root: Path, version: str, *, supported=True, discovery_tail="") -> None:
+def _contract_slot(
+    root: Path, version: str, *, supported=True, discovery_tail="", discovery_exit=0,
+    contract_version=1,
+) -> None:
     _slot(root, version)
     python = root / "versions" / version / "bin" / "python"
     preparation = python.read_text(encoding="utf-8")
     descriptor = json.dumps({
-        "contract": "agent-worktrees.native-seed", "version": 1,
+        "contract": "agent-worktrees.native-seed", "version": contract_version,
         "preparation_output_formats": ["nul"],
         "nul_reply_schema": "agent-worktrees.native-seed-reply.v1",
         "setup_process_start_time_sources": ["provider"],
@@ -114,7 +117,7 @@ def _contract_slot(root: Path, version: str, *, supported=True, discovery_tail="
         f'  printf "%s\\n" {shlex.quote(version)} >> "$root/described"\n'
         f"  {discovery_tail or ':'}\n"
         f"  printf '%s\\n' {shlex.quote(descriptor)}\n"
-        '  exit 0\n fi\n'
+        f'  exit {discovery_exit}\n fi\n'
         ' if [[ "$argument" == -c ]]; then\n'
         f"  exec {shlex.quote(_shell_path(Path(sys.executable)))} \"$@\"\n"
         ' fi\ndone\n'
@@ -166,6 +169,56 @@ if _aw_native_setup_require_contract; then exit 90; fi
     assert not (root / "effects").exists()
 
 
+@pytest.mark.parametrize("fault", ["oversized", "failed-provider"])
+def test_descriptor_refuses_oversized_output_or_valid_json_from_a_failed_provider(
+    tmp_path: Path, fault: str,
+) -> None:
+    root = tmp_path / "runtime"
+    _contract_slot(
+        root, "A", discovery_exit=7 if fault == "failed-provider" else 0,
+        discovery_tail="printf '%65537s' x" if fault == "oversized" else "",
+    )
+    (root / "current-version").write_text("A", encoding="utf-8")
+    result = _run('. "$1"; if aw_native_seed_supports_posix_setup "$2"; then exit 90; fi', [root])
+    assert result.returncode == 0, result.stderr
+    assert not result.stdout and not result.stderr
+    assert not (root / "effects").exists()
+
+
+@pytest.mark.parametrize("state", ["absent", "incompatible", "compatible-failure", "removed"])
+def test_return_handler_closes_quietly_only_when_delivery_is_unavailable(
+    tmp_path: Path, state: str,
+) -> None:
+    root = tmp_path / "runtime"
+    _contract_slot(root, "A", contract_version=2 if state == "incompatible" else 1)
+    if state != "absent":
+        (root / "current-version").write_text("A", encoding="utf-8")
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+state="$3"
+aw_native_seed_phase() {
+    if [[ "$2" == --describe-contract ]]; then
+        _aw_native_seed_run_phase "$((SECONDS + 10))" _aw_native_seed_control env \
+            -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV -u __PYVENV_LAUNCHER__ \
+            "${AW_NATIVE_SEED_PHASE_RUNTIME[@]}" --describe-contract
+    else
+        printf 'attempted\n' >> "$1/callbacks"
+        [[ "$state" != removed ]] || printf 'missing\n' > "$1/current-version"
+        return 7
+    fi
+}
+aw_native_seed_return "$2" 'Return unconfirmed.' --phase returned --exit-code 7
+''', [root, state])
+    assert result.returncode == 0, result.stderr
+    assert not result.stdout
+    assert result.stderr == ("Return unconfirmed.\n" if state == "compatible-failure" else "")
+    callbacks = root / "callbacks"
+    assert (callbacks.read_text() if callbacks.exists() else "") == (
+        "attempted\n" if state in {"compatible-failure", "removed"} else ""
+    )
+
+
 @pytest.mark.parametrize("backend_code", [0, 7])
 def test_uncertain_observer_warns_without_a_second_mutation_or_changed_exit(
     tmp_path: Path, backend_code: int,
@@ -180,14 +233,13 @@ LAUNCH_SEED_RECORD=record
 LAUNCH_ATTEMPT_ID=attempt
 LAUNCH_RESOLUTION_ID=resolution
 LAUNCH_PARENT_ID=parent
-mktemp() { command mktemp "$LAUNCH_SEED_NATIVE_ROOT/.native-seed-exec.XXXXXXXX"; }
 _aw_native_setup_require_contract() { AW_NATIVE_SEED_RUNTIME=(_fixture_exec); }
 _aw_native_setup_prepare() {
     AW_NATIVE_SEED_ATTEMPT=attempt
     AW_NATIVE_SEED_RESOLUTION=resolution
     AW_NATIVE_SEED_OPERATION=operation
     AW_NATIVE_SEED_PARENT=parent
-    AW_NATIVE_SEED_ENV=('AGENT_WORKTREES_LAUNCH_EXECUTION=fixture')
+    AW_NATIVE_SEED_ENV=('AGENT_WORKTREES_LAUNCH_EXECUTION=fixture' 'PRIVATE=not-for-argv')
     AW_NATIVE_SEED_ARGV=(backend)
 }
 _fixture_exec() {
@@ -195,9 +247,17 @@ _fixture_exec() {
     printf '3\n' > "$2"
     return "$FIXTURE_CODE"
 }
-env() {
-    while [[ "$1" == -u ]]; do shift 2; done
-    "$@"
+_aw_native_seed_control() {
+    local argument
+    for argument; do [[ "$argument" != *not-for-argv* ]] || exit 92; done
+    case "$1" in
+        mktemp) builtin command -p mktemp "$LAUNCH_SEED_NATIVE_ROOT/.native-seed-exec.XXXXXXXX" ;;
+        env)
+            shift
+            while [[ "$1" == -u ]]; do shift 2; done
+            "$@" ;;
+        *) builtin command -p "$@" ;;
+    esac
 }
 aw_native_seed_phase() { printf 'UNEXPECTED MUTATION\n'; return 3; }
 code=0
@@ -209,31 +269,15 @@ aw_native_setup_backend backend || code=$?
     assert result.stderr == "Native backend exec is unconfirmed; inspect the retained handoff.\n"
 
 
-@pytest.mark.parametrize("repo_trap", ["replace", "clear"])
-def test_setup_return_callback_chains_the_repository_exit_trap(tmp_path: Path, repo_trap: str) -> None:
-    result = _run(r'''
-set -euo pipefail
-. "$1"
-. "${1%/*}/native-seed-setup.sh"
-LAUNCH_SEED_NATIVE_ROOT="$2"
-AW_NATIVE_SETUP_CALLBACK=(--record fixture)
-aw_native_seed_phase() { printf '%s\n' "$@" > "$LAUNCH_SEED_NATIVE_ROOT/callback"; }
-trap _aw_native_setup_finish EXIT
-REPO_TRAP
-aw_native_setup_preserve_exit
-exit 7
-'''.replace(
-        "REPO_TRAP",
-        'trap \'printf "%s" "$?" > "$LAUNCH_SEED_NATIVE_ROOT/repo-exit"\' EXIT'
-        if repo_trap == "replace" else "trap - EXIT",
-    ), [tmp_path])
-    assert result.returncode == 7, result.stderr
-    assert not result.stdout and not result.stderr
-    assert (tmp_path / "callback").read_text().splitlines()[-4:] == [
-        "--exit-code", "7", "--record", "fixture",
-    ]
-    if repo_trap == "replace":
-        assert (tmp_path / "repo-exit").read_text() == "7"
+def test_stale_native_env_script_envelope_refuses_before_sourcing(tmp_path: Path) -> None:
+    primer = tmp_path / "prime.sh"
+    primer.write_text("exit 91\n", encoding="utf-8")
+    result = _run(
+        'exec "$BASH" "$2" --launch-seed-preparation seed --env-script "$3"',
+        [SCRIPT.with_name("default-setup.sh"), primer],
+    )
+    assert result.returncode == 3, result.stderr
+    assert result.stderr == "Native POSIX setup cannot own env_script; no backend started.\n"
 
 
 def test_finite_phase_preserves_pipe_fields_cwd_stdin_and_caller_descriptors(tmp_path: Path) -> None:
@@ -394,7 +438,10 @@ def test_missing_private_control_path_refuses_before_starting_a_provider(tmp_pat
     result = _run(r'''
 set -euo pipefail
 . "$1"
-mktemp() { return 1; }
+_aw_native_seed_control() {
+    [[ "$1" != mktemp ]] || return 1
+    builtin command -p "$@"
+}
 AW_NATIVE_SEED_OPERATION=previous
 AW_NATIVE_SEED_ARGV=(previous)
 if aw_native_seed_prepare "$2" --phase prepare --output-format nul; then exit 90; fi
@@ -430,7 +477,10 @@ def test_control_write_error_is_bounded_and_does_not_expose_its_path(tmp_path: P
 set -euo pipefail
 . "$1"
 failed_control="$2/missing/private-control-path"
-mktemp() { printf '%s\n' "$failed_control"; }
+_aw_native_seed_control() {
+    if [[ "$1" == mktemp ]]; then printf '%s\n' "$failed_control"
+    else builtin command -p "$@"; fi
+}
 if aw_native_seed_prepare "$2" --phase prepare --output-format nul; then exit 90; fi
 [[ -z "$AW_NATIVE_SEED_OPERATION" && -z "${AW_NATIVE_SEED_ARGV[0]+x}" ]]
 ''', [root])
@@ -553,8 +603,9 @@ state="$(ps -o stat= -p "$descendant" || true)"
 
 @pytest.mark.skipif(os.name == "nt", reason="Native POSIX escaped-session stdout deadline")
 @pytest.mark.parametrize("malformed", [False, True])
+@pytest.mark.parametrize("phase", ["prepare", "descriptor"])
 def test_escaped_stdout_never_extends_the_preparation_deadline(
-    tmp_path: Path, malformed: bool,
+    tmp_path: Path, malformed: bool, phase: str,
 ) -> None:
     root = tmp_path / "runtime"
     ready = root / "escaped-ready"
@@ -564,17 +615,18 @@ def test_escaped_stdout_never_extends_the_preparation_deadline(
         f"Path({str(ready)!r}).write_text(str(os.getpid())); "
         "time.sleep(13)"
     )
-    _slot(
-        root, "A", malformed=malformed,
-        tail=(
-            f"{shlex.quote(sys.executable)} -I -S -B -c {shlex.quote(child)} &\n"
-            'for ((index=0; index<100; index++)); do\n'
-            '    [[ ! -f "${0%/versions/*}/escaped-ready" ]] || break\n'
-            '    sleep 0.01\n'
-            'done\n'
-            '[[ -f "${0%/versions/*}/escaped-ready" ]]'
-        ),
+    tail = (
+        f"{shlex.quote(sys.executable)} -I -S -B -c {shlex.quote(child)} &\n"
+        'for ((index=0; index<100; index++)); do\n'
+        '    [[ ! -f "${0%/versions/*}/escaped-ready" ]] || break\n'
+        '    sleep 0.01\n'
+        'done\n'
+        '[[ -f "${0%/versions/*}/escaped-ready" ]]'
     )
+    if phase == "descriptor":
+        _contract_slot(root, "A", contract_version=2 if malformed else 1, discovery_tail=tail)
+    else:
+        _slot(root, "A", malformed=malformed, tail=tail)
     (root / "current-version").write_text("A", encoding="utf-8")
     clock = f"{shlex.quote(sys.executable)} -I -S -B -c 'import time; print(time.monotonic())'"
     started = time.monotonic()
@@ -584,13 +636,17 @@ set -euo pipefail
 . "$1"
 started="$(''' + clock + r''')"
 code=0
-aw_native_seed_prepare "$2" --phase prepare --output-format nul || code=$?
+if [[ "$3" == descriptor ]]; then
+    aw_native_seed_supports_posix_setup "$2" || code=$?
+else
+    aw_native_seed_prepare "$2" --phase prepare --output-format nul || code=$?
+fi
 finished="$(''' + clock + r''')"
 printf '%s %s %s\n' "$code" "$started" "$finished"
-if [[ "$code" != 0 ]]; then
+if [[ "$code" != 0 && "$3" != descriptor ]]; then
     [[ -z "$AW_NATIVE_SEED_OPERATION" && -z "${AW_NATIVE_SEED_ARGV[0]+x}" ]]
 fi
-''', [root])
+''', [root, phase])
     finally:
         # This deliberately out-of-group writer has its own hard TTL. Observe
         # retirement even when the preparation assertion or outer owner fails.
@@ -610,4 +666,6 @@ fi
     code, began, finished = result.stdout.split()
     assert code == "3", result.stdout
     assert float(finished) - float(began) < 11, result.stdout
-    assert result.stderr == "Native preparation is unconfirmed; no backend started.\n"
+    assert result.stderr == (
+        "" if phase == "descriptor" else "Native preparation is unconfirmed; no backend started.\n"
+    )
