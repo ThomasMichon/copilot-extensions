@@ -908,7 +908,7 @@ def test_unexpected_guard_failure_is_a_successful_noop(monkeypatch, capsys):
     assert "private exception details" not in captured.err
 
 
-@pytest.mark.parametrize("failure", ["missing", "crash"])
+@pytest.mark.parametrize("failure", ["missing", "crash", "caught"])
 @pytest.mark.parametrize("native_shell", ["powershell.exe", "pwsh", "bash"])
 def test_shipped_wrapper_fails_open_on_unavailable_guard(tmp_path, failure, native_shell):
     shell = shutil.which(native_shell)
@@ -921,6 +921,13 @@ def test_shipped_wrapper_fails_open_on_unavailable_guard(tmp_path, failure, nati
     if failure == "crash":
         (payload / "scripts" / "copilot-mention-guard.py").write_text(
             "import sys\nprint('invalid partial output')\nraise SystemExit(7)\n", encoding="utf-8")
+    if failure == "caught":
+        source = str(PLUGIN / "scripts" / "copilot-mention-guard.py")
+        (payload / "scripts" / "copilot-mention-guard.py").write_text(
+            "import runpy,sys\nns=runpy.run_path(" + repr(source) + ")\n"
+            + "def fail(): raise RuntimeError('private exception details')\n"
+            + "ns['run_guard'].__globals__['main']=fail\n"
+            + "raise SystemExit(ns['run_guard'](**({'wrapped':True} if '--wrapped' in sys.argv else {})))\n", encoding="utf-8")
     hook = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["preToolUse"][0]
     command = hook["bash" if native_shell == "bash" else "powershell"]
     argv = [shell, "-c", command] if native_shell == "bash" else [
@@ -933,6 +940,8 @@ def test_shipped_wrapper_fails_open_on_unavailable_guard(tmp_path, failure, nati
     assert result.returncode == 0, result.stderr
     assert not result.stdout.strip()
     assert "Traceback" not in result.stderr
+    assert "skipped" in result.stderr
+    assert "private exception details" not in result.stderr
 
 
 def test_plugin_process_directory_is_not_session_adoption(tmp_path, monkeypatch):
@@ -969,3 +978,33 @@ def test_explicit_tool_directory_precedes_project_fallback(tmp_path, monkeypatch
     output = capsys.readouterr().out
     assert bool(output) == nested_adopted
     assert inspected == ([str(nested)] if nested_adopted else [])
+
+
+@pytest.mark.parametrize("body_args", [
+    "--body-file body.txt", "--body-file=body.txt", "-F body=@body.txt",
+    "--input body.json", "--input=body.json",
+])
+@pytest.mark.parametrize("mention_in_workspace", [False, True])
+def test_relative_body_reads_use_resolved_workspace(tmp_path, monkeypatch, capsys, body_args, mention_in_workspace):
+    guard = _load_guard()
+    workspace = tmp_path / "workspace"
+    process = tmp_path / "process"
+    workspace.mkdir()
+    process.mkdir()
+    _enable_harness(workspace)
+    for directory, mention in ((workspace, mention_in_workspace), (process, not mention_in_workspace)):
+        text = "@copilot review" if mention else "safe body"
+        (directory / "body.txt").write_text(text, encoding="utf-8")
+        (directory / "body.json").write_text(json.dumps({"body": text}), encoding="utf-8")
+    monkeypatch.chdir(process)
+    monkeypatch.setattr(guard, "current_repo_matches", lambda *a, **kw: True)
+    monkeypatch.setattr(guard, "target_repo_from_manifest", lambda *a: "o/r")
+    monkeypatch.setattr(guard.sys, "stdin", io.StringIO(json.dumps({
+        "cwd": str(workspace), "toolName": "bash", "toolArgs": {
+            "command": ("gh pr comment 1 " if body_args.startswith("--body-file")
+                        else "gh api repos/o/r/issues/1/comments --method POST ") + body_args,
+        },
+    })))
+    assert guard.run_guard() == 0
+    output = capsys.readouterr().out
+    assert bool(output) == mention_in_workspace

@@ -334,7 +334,7 @@ def _is_api_comment_or_review_write(tokens: list[str]) -> bool:
 
 def _read_bounded(
     path: str, limit: int = 200_000, *, deadline: float | None = None,
-    errors: str = "replace",
+    errors: str = "replace", cwd: str | None = None,
 ) -> str | None:
     """Contents of *path*, or ``None`` if it can't be read/is too large to
     fully inspect -- NEVER an empty or truncated string on failure, either
@@ -346,7 +346,10 @@ def _read_bounded(
     cut-off prefix as the complete body."""
     def read() -> str | None:
         try:
-            with open(path, encoding="utf-8", errors=errors) as fh:
+            source = Path(path)
+            if cwd and not source.is_absolute():
+                source = Path(cwd) / source
+            with open(source, encoding="utf-8", errors=errors) as fh:
                 content = fh.read(limit + 1)
         except (OSError, UnicodeError):
             return None
@@ -378,7 +381,9 @@ _UNSCANNABLE = object()  # sentinel: the body is sourced from stdin, which a
 # unverifiable publish through.
 
 
-def _extract_input_json_body(path: str, deadline: float | None = None) -> str | object:
+def _extract_input_json_body(
+    path: str, deadline: float | None = None, *, cwd: str | None = None,
+) -> str | object:
     """``gh api --input <file>`` (or ``--input -`` for stdin) sends a raw
     JSON request body -- read *path*, parse it, and return its ``"body"``
     field if present as a string. Any failure (stdin, unreadable file,
@@ -387,7 +392,7 @@ def _extract_input_json_body(path: str, deadline: float | None = None) -> str | 
     if path == "-":
         return _UNSCANNABLE
     try:
-        content = _read_bounded(path, deadline=deadline, errors="strict")
+        content = _read_bounded(path, deadline=deadline, errors="strict", cwd=cwd)
         if content is None:
             return _UNSCANNABLE
         payload = json.loads(content)
@@ -425,7 +430,9 @@ def _contains_unexpanded_reference(value: str) -> bool:
     return bool(_UNEXPANDED_REFERENCE_RE.search(value))
 
 
-def _extract_body_text(tokens: list[str], deadline: float | None = None) -> str | object:
+def _extract_body_text(
+    tokens: list[str], deadline: float | None = None, *, cwd: str | None = None,
+) -> str | object:
     """Best-effort: the literal body text this invocation would publish, or
     the ``_UNSCANNABLE`` sentinel if the body is sourced from stdin
     (``--body-file -`` / ``-F body=@-``, gh's stdin convention) or is an
@@ -460,7 +467,7 @@ def _extract_body_text(tokens: list[str], deadline: float | None = None) -> str 
             if token == flag and index + 1 < len(tokens):
                 if tokens[index + 1] == "-":
                     return _UNSCANNABLE
-                content = _read_bounded(tokens[index + 1], deadline=deadline)
+                content = _read_bounded(tokens[index + 1], deadline=deadline, cwd=cwd)
                 if content is None:
                     return _UNSCANNABLE
                 parts.append(content)
@@ -470,7 +477,7 @@ def _extract_body_text(tokens: list[str], deadline: float | None = None) -> str 
                 value = token[len(flag) + 1 :]
                 if value == "-":
                     return _UNSCANNABLE
-                content = _read_bounded(value, deadline=deadline)
+                content = _read_bounded(value, deadline=deadline, cwd=cwd)
                 if content is None:
                     return _UNSCANNABLE
                 parts.append(content)
@@ -480,14 +487,14 @@ def _extract_body_text(tokens: list[str], deadline: float | None = None) -> str 
             index += 2 if token in FILE_BODY_FLAGS else 1
             continue
         if token == "--input" and index + 1 < len(tokens):
-            result = _extract_input_json_body(tokens[index + 1], deadline)
+            result = _extract_input_json_body(tokens[index + 1], deadline, cwd=cwd)
             if result is _UNSCANNABLE:
                 return _UNSCANNABLE
             parts.append(result)
             index += 2
             continue
         if token.startswith("--input="):
-            result = _extract_input_json_body(token[len("--input=") :], deadline)
+            result = _extract_input_json_body(token[len("--input=") :], deadline, cwd=cwd)
             if result is _UNSCANNABLE:
                 return _UNSCANNABLE
             parts.append(result)
@@ -515,7 +522,7 @@ def _extract_body_text(tokens: list[str], deadline: float | None = None) -> str 
                 if value == "@-":
                     return _UNSCANNABLE
                 if value.startswith("@"):
-                    content = _read_bounded(value[1:], deadline=deadline)
+                    content = _read_bounded(value[1:], deadline=deadline, cwd=cwd)
                     if content is None:
                         return _UNSCANNABLE
                     parts.append(content)
@@ -556,7 +563,7 @@ def _publication_statements(command: str) -> list[list[str]]:
 
 def command_publishes_copilot_mention(
     command: str, *, statements: list[list[str]] | None = None,
-    deadline: float | None = None,
+    deadline: float | None = None, cwd: str | None = None,
 ) -> str | None:
     """Returns a deny-reason string if *command* should be blocked, else
     ``None``. Two distinct reasons: an actual ``@copilot`` mention, or a
@@ -564,7 +571,7 @@ def command_publishes_copilot_mention(
     for tokens in _publication_statements(command) if statements is None else statements:
         if deadline is not None and time.monotonic() >= deadline:
             return "unscannable"
-        body_text = _extract_body_text(tokens, deadline)
+        body_text = _extract_body_text(tokens, deadline, cwd=cwd)
         if deadline is not None and time.monotonic() >= deadline:
             return "unscannable"
         if body_text is _UNSCANNABLE:
@@ -670,7 +677,7 @@ def main() -> int:
         # at all, is never touched by this guard (fail open, not closed).
         return 0
     reason = command_publishes_copilot_mention(
-        command, statements=statements, deadline=deadline,
+        command, statements=statements, deadline=deadline, cwd=hook_cwd,
     )
     if reason == "mention":
         print(
@@ -715,13 +722,13 @@ def main() -> int:
     return 0
 
 
-def run_guard() -> int:
+def run_guard(*, wrapped: bool = False) -> int:
     try:
         return main()
     except Exception:
         print("[copilot-extensions-harness] mention guard unavailable; skipped", file=sys.stderr)
-        return 0
+        return 1 if wrapped else 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(run_guard())
+    raise SystemExit(run_guard(wrapped=sys.argv[1:] == ["--wrapped"]))

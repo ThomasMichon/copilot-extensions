@@ -79,11 +79,14 @@ enablement alone is not adoption: unrelated workspaces (including VS Code)
 return a no-op, without repository or body discovery. Adoption lookup stops at
 the nearest repository boundary; a nested checkout cannot inherit its parent's
 opt-in. Missing or malformed project settings do not activate the guard.
+Relative body-file and API-input paths use that same resolved workspace, never
+the plugin payload/process directory.
 
 The shell entries also fail open when the helper/interpreter is unavailable or
 exits unsuccessfully, discarding partial output and emitting only a bounded,
-sanitized diagnostic. Unexpected Python exceptions use the same successful
-no-op behavior. Deliberate mention/uninspectable-body denials in an adopted,
+sanitized diagnostic. Unexpected Python exceptions signal the cooperating
+wrapper to report that diagnostic while the host-facing hook still exits
+successfully; direct legacy callers retain a zero exit code. Deliberate mention/uninspectable-body denials in an adopted,
 matching repository remain policy decisions, not execution failures.
 
 The guard first classifies publication syntax locally, using the same tokenizer
