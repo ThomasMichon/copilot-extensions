@@ -1186,6 +1186,10 @@ def test_reload_key_keeps_rendered_row_and_reverifies_actions(
         async with app.run_test(size=(118, 40)) as pilot:
             screen = app.query_one(PickerScreen)
             await wait_for_current_setup_epoch_applied(pilot, screen)
+            first_refresh = asyncio.Event()
+            screen.call_after_refresh(first_refresh.set)
+            screen.refresh()
+            await asyncio.wait_for(first_refresh.wait(), 5)
             previous_epoch = screen._setup_epoch
             previous = _ReplacementLoader()
             previous.rows = [old]
@@ -1201,6 +1205,14 @@ def test_reload_key_keeps_rendered_row_and_reverifies_actions(
                 ),
             )
             monkeypatch.setattr(screen, "_collect_setup_payload", lambda: payload)
+            request_status = []
+            start_reload = screen._start_setup_reload_worker
+
+            def record_request():
+                request_status.append(screen.debug)
+                return start_reload()
+
+            monkeypatch.setattr(screen, "_start_setup_reload_worker", record_request)
             screen.wt_sel.replace({screen._row_key(old)})
             screen.sel = ("L", 0)
 
@@ -1211,6 +1223,7 @@ def test_reload_key_keeps_rendered_row_and_reverifies_actions(
             assert screen._setup_applied_epoch == previous_epoch + 1
             assert previous.cancelled
             assert screen.machine_state(screen.local_index()) == "loading"
+            assert request_status == ["worktree reload requested"]
             body = screen.query_one("#nf-body-data")
             row_index = body._l_rows[screen._row_key(old)][0]
             assert old["id4"] in body.get_option_at_index(row_index).prompt.plain
@@ -1608,7 +1621,7 @@ def test_non_live_mount_eventually_matches_sync_test_setup_result(
         (
             "manual-reload-key",
             lambda screen: screen._dispatch_key("r"),
-            "refreshed · reloaded worktrees",
+            "worktree reload requested",
         ),
         (
             "config-section-rescan",
@@ -1680,6 +1693,22 @@ def test_setup_reload_ui_entrypoints_do_not_block_while_collecting_payload(
     assert tuple(screen.htabs) == (f"{label}-result Tasks",)
 
 
+def test_manual_reload_admission_failure_keeps_diagnostic(monkeypatch):
+    screen = _SetupRaceScreen()
+
+    def fail_invalidation():
+        raise RuntimeError("configuration unavailable")
+
+    monkeypatch.setattr(screen, "_invalidate_setup_reload_caches", fail_invalidation)
+
+    screen._dispatch_key("r")
+
+    assert screen._setup_failed_epoch == screen._setup_epoch == 1
+    assert screen._setup_applied_epoch == 0
+    assert screen._busy_label == "Load failed"
+    assert screen.debug == "setup-failed: configuration unavailable"
+
+
 def test_manual_reload_key_prefers_newer_epoch():
     screen = _SetupRaceScreen()
     race = _install_setup_race(screen, first_tag="stale", second_tag="fresh")
@@ -1698,7 +1727,7 @@ def test_manual_reload_key_prefers_newer_epoch():
     assert screen._setup_epoch == 2
     assert screen._setup_applied_epoch == 0
     assert screen.sel == ("L", 0)
-    assert screen.debug == "refreshed · reloaded worktrees"
+    assert screen.debug == "worktree reload requested"
 
     race["second_release"].set()
     _wait_for_current_setup_epoch_applied_sync(screen)
@@ -1740,7 +1769,7 @@ def test_config_section_rescan_race_prefers_newer_epoch(order, expected_title):
         started = time.monotonic()
         screen._dispatch_key("r")
         elapsed_second = time.monotonic() - started
-        assert screen.debug == "refreshed · reloaded worktrees"
+        assert screen.debug == "worktree reload requested"
     else:
         started = time.monotonic()
         screen._dispatch_key("r")
@@ -1804,7 +1833,7 @@ def test_worktree_action_rescan_race_prefers_newer_epoch(order, expected_title):
         started = time.monotonic()
         screen._dispatch_key("r")
         elapsed_second = time.monotonic() - started
-        assert screen.debug == "refreshed · reloaded worktrees"
+        assert screen.debug == "worktree reload requested"
     else:
         started = time.monotonic()
         screen._dispatch_key("r")
