@@ -85,6 +85,10 @@ setup assets and refusal before partial publication when the reader is absent.
 The existing callback inventory/publication controls cover its installer-owned
 copy scope. These are framing/copy controls, not finite callback execution,
 foreground terminal, PID/birth or native installation-survival qualification.
+The existing optional installation-context acceptance workflow's `native_launch`
+input also selects this focused reader/copy packet on Linux and macOS, using
+`/bin/bash` and explicitly requiring stock macOS Bash 3.2. It stays outside
+required PR CI; the Windows terminal packet selected by that input is unchanged.
 The real PowerShell
 seed-delivery consumer uses the existing finite process-tree owner so a timeout
 settles descendants rather than blocking on inherited capture pipes.
