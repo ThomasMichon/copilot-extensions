@@ -231,6 +231,48 @@ def test_unresolved_owner_does_not_inherit_active_binding(monkeypatch):
     assert not target.publication_origin
 
 
+@pytest.mark.parametrize("frozen", [False, True])
+@pytest.mark.parametrize(("repository", "path", "matches"), [
+    ("My Project/My Repo", "My%20Project/_git/My%20Repo", True),
+    ("My Project/My Repo", "Other%20Project/_git/My%20Repo", False),
+    ("My Project/My Repo", "My%20Project/_git/Other%20Repo", False),
+    ("My%20Project/My Repo", "My%2520Project/_git/My%20Repo", True),
+])
+def test_encoded_azure_identity_labels_and_repairs_only_the_matching_target(
+        monkeypatch, frozen, repository, path, matches):
+    conf = config()
+    conf.repos["fixture"] = replace(conf.default_repo, pr=replace(
+        conf.default_repo.pr, provider="azure-devops", repository=repository,
+        api_base="https://dev.azure.com/own"))
+    if not frozen:
+        conf = labels.activate(conf, "control-plane")
+    target = tracking.PRRecord(
+        repo=repository, number=7, provider="azure-devops",
+        url=f"https://dev.azure.com/own/{path}/pullrequest/7",
+        publication_origin=ORIGIN if frozen else {},
+    )
+    backend = Backend()
+
+    def read(repo, number, **kwargs):
+        assert (repo, number, kwargs["api_base"]) == (repository, 7, "https://dev.azure.com/own")
+        return tuple(backend.labels)
+
+    backend.get_publication_labels = read
+    monkeypatch.setattr(providers, "get_provider", lambda _: backend)
+    bindings = []
+    monkeypatch.setattr(providers, "account_token_for_slug",
+                        lambda repo, prcfg: bindings.append((repo, prcfg)))
+    result = labels.refresh(conf, None, target)
+    assert result["ok"] is matches
+    if matches:
+        assert bindings == [(repository, conf.default_repo.pr)]
+        assert backend.labels == ["unrelated", "source:control-plane"]
+    else:
+        assert not bindings and not backend.additions
+        assert "owning binding endpoint" in result["error"]
+        assert target.publication_origin == (ORIGIN if frozen else {})
+
+
 def test_successful_push_attaches_origin_to_preexisting_pr(monkeypatch):
     backend = Backend()
     conf = config()

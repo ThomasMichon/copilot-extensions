@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from contextvars import ContextVar
 import re
+from urllib.parse import unquote
 
 last_result: ContextVar[dict | None] = ContextVar("publication_label_result", default=None)
 
@@ -139,6 +140,8 @@ def _refresh(config, record, target) -> dict | None:
     if target.number is not None:
         endpoint = claims_find_cli.canonical_authority(provider.authority_endpoint(prcfg.api_base))
         identity = pr_sweep.pr_identity(target.url)
+        if identity and prcfg.provider == "azure-devops":
+            identity = (identity[0], unquote(identity[1], errors="strict").lower(), identity[2])
         if not endpoint or identity != (endpoint, target.repo.lower(), target.number):
             raise ValueError("Tracked PR identity differs from its owning binding endpoint; repair its binding before labeling")
     if record is not None:
