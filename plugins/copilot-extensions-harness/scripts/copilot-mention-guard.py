@@ -577,6 +577,46 @@ def command_publishes_copilot_mention(
     return None
 
 
+def adopting_harness(cwd: str | None, deadline: float) -> bool:
+    """Require project adoption; a globally installed payload is not consent."""
+    raw = cwd or os.environ.get("COPILOT_PROJECT_DIR")
+    if not isinstance(raw, str) or not raw:
+        return False
+    root = Path(raw)
+    if not root.is_absolute():
+        return False
+    for directory in (root, *root.parents):
+        if time.monotonic() >= deadline:
+            return False
+        settings = directory / ".github" / "copilot"
+        enabled = {}
+        found = False
+        for name in ("settings.json", "settings.local.json"):
+            path = settings / name
+            if not path.is_file():
+                continue
+            found = True
+            text = _read_bounded(str(path), deadline=deadline, errors="strict")
+            if text is None:
+                return False
+            try:
+                value = json.loads(text)
+            except ValueError:
+                return False
+            if not isinstance(value, dict) or not isinstance(value.get("enabledPlugins", {}), dict):
+                return False
+            enabled.update(value.get("enabledPlugins", {}))
+        if found:
+            return any(
+                isinstance(key, str) and key.startswith("copilot-extensions-harness@")
+                and key.split("@", 1)[1] and value is True
+                for key, value in enabled.items()
+            )
+        if (directory / ".git").exists():
+            return False
+    return False
+
+
 def main() -> int:
     spec = importlib.util.spec_from_file_location(
         "pretool_killswitch", Path(__file__).with_name("pretool_killswitch.py"),
@@ -603,16 +643,17 @@ def main() -> int:
         if isinstance(args, str):
             args = json.loads(args)
         command = args.get("command", "") if isinstance(args, dict) else ""
-        # Prefer an explicit cwd on the tool-call payload if the host
-        # provides one; fall back to this hook process's own cwd (which the
-        # CLI sets to match the session's current directory).
-        hook_cwd = data.get("cwd") or (args.get("cwd") if isinstance(args, dict) else None)
+        # Plugin process CWD may be its payload, not the calling workspace.
+        session_cwd = data.get("cwd") or data.get("workingDirectory") or os.environ.get("COPILOT_PROJECT_DIR")
+        hook_cwd = session_cwd or (args.get("cwd") if isinstance(args, dict) else None)
     except Exception:
         return 0
     if not isinstance(command, str):
         return 0
     statements = _publication_statements(command)
     if not statements:
+        return 0
+    if not adopting_harness(session_cwd, deadline):
         return 0
     plugin_root = Path(
         os.environ.get("COPILOT_PLUGIN_ROOT")
@@ -671,5 +712,13 @@ def main() -> int:
     return 0
 
 
+def run_guard() -> int:
+    try:
+        return main()
+    except Exception:
+        print("[copilot-extensions-harness] mention guard unavailable; skipped", file=sys.stderr)
+        return 0
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run_guard())
