@@ -199,6 +199,18 @@ evidence is no longer needed.
 
 ## Journal
 
+### 2026-10-28 - Keep lifecycle origin verification consistent
+
+The subsequent review found the same canonical-name boundary in Worktrees'
+installed-origin verifier, used by rollback and dev release. That owner now
+normalizes metadata names only for source-wheel evidence, matching the engine
+while preserving legacy directory-origin keys. All ten direct origin controls
+pass in the contained plugin runner, including mixed-case/underscore wheel and
+directory receipts and changed-origin refusals. The latest exact engine/helper
+bytes pass the real-Setuptools cache/hardlink jobs on Linux and Windows in
+run40633105108; this final lifecycle-verifier correction is separately covered
+by its direct tests. Ordinary prepacked-artifact consumption remains open.
+
 ### 2026-10-28 - Normalize source-wheel names and preserve script layouts
 
 The next review identified two further boundary cases. `script-files` projects

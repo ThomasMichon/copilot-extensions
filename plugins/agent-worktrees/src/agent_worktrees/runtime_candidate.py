@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import shutil
 import sys
 import uuid
@@ -146,6 +147,8 @@ def verify_installed_origins() -> None:
             continue
         origin = json.loads(direct_url)
         name = distribution.metadata["Name"]
+        if source_wheels is not None:
+            name = re.sub(r"[-_.]+", "-", name).lower()
         if name not in recorded and "dir_info" not in origin:
             continue
         valid_origin = origin.get("dir_info") in ({}, {"editable": False})
