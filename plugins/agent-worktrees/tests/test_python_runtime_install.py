@@ -260,6 +260,9 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
 ):
     from agent_worktrees import config as cfg, status_monitor_cutover as cutover
 
+    phase = tmp_path / "watchdog-phase.json"
+    monkeypatch.setenv("COPILOT_PLUGIN_INSTALL_PHASE_FILE", str(phase))
+    monkeypatch.setenv("COPILOT_PLUGIN_INSTALL_CUTOVER_BUDGET_SEC", "17")
     root = tmp_path / "runtime"
     previous = _slot(driver, root, "1.0.0")
     driver.runtime.activate(root, "1.0.0", link_free=True)
@@ -301,6 +304,7 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
             authority.append("cutover-released")
 
     def construct(inputs, slot, *_args):
+        assert not phase.exists(), "construction must retain the build deadline"
         python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         python.parent.mkdir(parents=True)
         python.write_bytes(b"interpreter")
@@ -327,6 +331,10 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
         returncode = 0
 
         def __init__(self, argv, **_kwargs):
+            receipt = json.loads(phase.read_text(encoding="utf-8"))
+            assert receipt["phase"] == "cutover"
+            assert type(receipt["extend_until"]) is int and receipt["extend_until"] > 0
+
             def argument(name):
                 return argv[argv.index(name) + 1]
 

@@ -2201,6 +2201,12 @@ and start paths call `Enter-InstallPhase -Name cutover` /
 `enter_install_phase cutover`. The writer atomically publishes
 `{"phase":"cutover","extend_until":<Unix seconds>}` to the parent's unique
 `COPILOT_PLUGIN_INSTALL_PHASE_FILE` (`<stage>/phase.json`).
+The Python installer engine exposes `enter_install_phase("cutover")` for the
+same receipt contract. Worktrees calls it after the candidate passes health
+and before starting its synchronous settlement child, so settlement receives
+the selected cutover window while construction still uses the build deadline.
+Without an inherited phase path, the Python writer does nothing; invalid
+budgets or failed receipt publication refuse the transition before settlement.
 
 The v5 parent polls at most every five seconds, shortening the final wait to
 the deadline. Its deadline is `max(start + build, phase.extend_until)`,

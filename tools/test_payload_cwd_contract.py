@@ -1032,6 +1032,78 @@ def test_watchdog_native_phase_writer_publishes_an_atomic_receipt(tmp_path: Path
     assert list(tmp_path.glob("phase.json.*.tmp")) == []
 
 
+def _python_phase_writer():
+    import ast
+    import tempfile
+
+    path = ROOT / "libs/installer-engine/installer_engine.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    function = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                    and node.name == "enter_install_phase")
+    namespace = {"os": os, "json": json, "time": time, "tempfile": tempfile, "Path": Path}
+    exec(compile(ast.Module(body=[function], type_ignores=[]), str(path), "exec"), namespace)
+    return namespace["enter_install_phase"]
+
+
+@pytest.mark.parametrize("extension", ["ps1", "sh"])
+@pytest.mark.parametrize("healthy", [False, True], ids=["stalled-build", "healthy-settlement"])
+def test_python_settlement_receipt_selects_native_watchdog_budget(
+    tmp_path: Path, monkeypatch, extension: str, healthy: bool,
+) -> None:
+    phase = tmp_path / "phase.json"
+    monkeypatch.setenv("COPILOT_PLUGIN_INSTALL_PHASE_FILE", str(phase))
+    monkeypatch.setenv("COPILOT_PLUGIN_INSTALL_CUTOVER_BUDGET_SEC", "17")
+    writer = _python_phase_writer()
+    if healthy:
+        monkeypatch.setattr(time, "time", lambda: 100)
+        writer("cutover")
+    result = _native_watchdog(tmp_path, extension, {
+        "ps1": (
+            "$s = Get-InstallWatchdogDeadline -BuildSec 10 -CutoverSec 20 -StartedAt 100 "
+            '-PhaseFile $args[0]\n"$($s.Deadline) $($s.Phase)"'
+        ),
+        "sh": 'get_install_watchdog_deadline 10 20 100 "$1"',
+    }, [phase.as_posix()])
+    assert result.returncode == 0, result.stderr
+    deadline, state = result.stdout.split()
+    assert (int(deadline), state) == ((117, "cutover") if healthy else (110, "build"))
+    assert not list(tmp_path.glob("phase.json.*.tmp"))
+
+
+@pytest.mark.parametrize("budget", ["", "0", "-1", "1.5", "2147483648"])
+def test_python_phase_writer_refuses_invalid_budget_without_replacing_receipt(
+    tmp_path: Path, monkeypatch, budget: str,
+) -> None:
+    phase = tmp_path / "phase.json"
+    phase.write_bytes(b"previous receipt")
+    monkeypatch.setenv("COPILOT_PLUGIN_INSTALL_PHASE_FILE", str(phase))
+    monkeypatch.setenv("COPILOT_PLUGIN_INSTALL_CUTOVER_BUDGET_SEC", budget)
+    with pytest.raises(ValueError):
+        _python_phase_writer()("cutover")
+    assert phase.read_bytes() == b"previous receipt"
+    assert not list(tmp_path.glob("phase.json.*.tmp"))
+
+
+def test_python_phase_writer_is_optional_and_cleans_failed_publication(tmp_path: Path, monkeypatch) -> None:
+    writer = _python_phase_writer()
+    monkeypatch.delenv("COPILOT_PLUGIN_INSTALL_PHASE_FILE", raising=False)
+    monkeypatch.delenv("COPILOT_PLUGIN_INSTALL_CUTOVER_BUDGET_SEC", raising=False)
+    writer("cutover")
+    phase = tmp_path / "phase.json"
+    phase.write_bytes(b"previous receipt")
+    monkeypatch.setenv("COPILOT_PLUGIN_INSTALL_PHASE_FILE", str(phase))
+    monkeypatch.setenv("COPILOT_PLUGIN_INSTALL_CUTOVER_BUDGET_SEC", "17")
+
+    def refuse(*_args):
+        raise PermissionError("fixture replacement denied")
+
+    monkeypatch.setattr(os, "replace", refuse)
+    with pytest.raises(PermissionError, match="fixture"):
+        writer("cutover")
+    assert phase.read_bytes() == b"previous receipt"
+    assert not list(tmp_path.glob("phase.json.*.tmp"))
+
+
 @pytest.mark.skipif(os.name != "nt" or not shutil.which("powershell"), reason="Windows PowerShell 5.1")
 def test_native_watchdog_supports_windows_powershell(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setitem(globals(), "PWSH", shutil.which("powershell"))
