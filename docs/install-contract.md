@@ -4193,6 +4193,9 @@ and frozen seasoning cutoffs admit a private copied build-tool environment.
 Its actual installed bytes and modes, selected interpreter/target, UV, build
 helper and build environment identify subsequent offline, no-isolation builds.
 An open build requirement or a backend version alone is not a cache identity.
+The base interpreter is resolved in the caller's context before changing child
+directories. Native `uv cache dir` selects the retained transaction's cache;
+offline builds keep that exact location even after feed configuration is removed.
 
 Each compact project binds its own content and modes, excluding separately
 declared nested vendored projects. A library-only edit therefore need not rebuild

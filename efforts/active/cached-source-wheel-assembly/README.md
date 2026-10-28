@@ -199,6 +199,19 @@ evidence is no longer needed.
 
 ## Journal
 
+### 2026-10-28 - Preserve caller interpreter and native cache context
+
+The review's remaining summary concern was concrete even without an inline
+finding: sanitizing the offline build environment removed the selected cache,
+and entering retained child directories before resolving a relative interpreter
+could change its meaning. The helper now resolves the caller's interpreter and
+asks native `uv cache dir` for the held transaction's effective cache, retaining
+that exact directory in offline builds without restoring feed configuration.
+Ten affected controls pass, including actual fresh construction with a
+caller-relative interpreter and both environment- and configuration-selected
+cache directories. All nine helper mirrors and their admitted source hash are
+synchronized. This is not a cache clear, feed change or timeout increase.
+
 ### 2026-10-28 - Keep lifecycle origin verification consistent
 
 The subsequent review found the same canonical-name boundary in Worktrees'

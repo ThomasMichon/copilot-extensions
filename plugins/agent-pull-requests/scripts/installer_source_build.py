@@ -314,6 +314,17 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
 
     transaction = inputs.transaction
     uv = Path(transaction.argv[0]).resolve(strict=True)
+    base_python = base_python.resolve(strict=True)
+    cache_arguments = [
+        argument for option, value in _argument_pairs(transaction.argv[3:])
+        if option == "--cache-dir" for argument in (option, value)
+    ]
+    cache = run(
+        [str(uv), "cache", "dir", *cache_arguments],
+        environment=transaction.environment, cwd=transaction.cwd,
+    ).stdout.strip()
+    if len(cache) > 32_768 or not Path(cache).is_absolute():
+        raise WheelError("native UV did not identify an absolute cache directory")
     with _temporary_inputs(None) as temporary:
         workspace = _private_retained_root(Path(temporary)).resolve()
         tooling = workspace / "tools"
@@ -352,7 +363,10 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
         environment = {key: value for key, value in environment.items()
                        if not key.upper().startswith(("UV_", "PIP_", "PYTHON"))
                        and key.upper() not in ("VIRTUAL_ENV", "CONDA_PREFIX")}
-        environment.update({"UV_NO_CONFIG": "1", "UV_OFFLINE": "1", "PYTHONDONTWRITEBYTECODE": "1"})
+        environment.update({
+            "UV_NO_CONFIG": "1", "UV_OFFLINE": "1", "UV_CACHE_DIR": cache,
+            "PYTHONDONTWRITEBYTECODE": "1",
+        })
         common = {
             "schema": "installer-engine.source-build", "version": 1,
             "target": target, "tools": tool_content,

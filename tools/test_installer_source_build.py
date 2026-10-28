@@ -192,6 +192,39 @@ def test_source_change_between_cache_key_and_build_refuses_publication(
     assert not list((root / ".source-wheel-cache" / "inputs").glob("*/wheel.json"))
 
 
+@pytest.mark.parametrize("cache_source", ["environment", "configuration"])
+def test_offline_builds_keep_native_cache_selection_and_caller_relative_interpreter(
+    engine, ordinary, tmp_path, monkeypatch, cache_source,
+):
+    child = engine._child
+    expected_python = Path(sys.executable).resolve()
+    selected_cache = tmp_path / "uv-cache"
+    if cache_source == "configuration":
+        monkeypatch.delenv("UV_CACHE_DIR")
+        config = Path(os.environ["UV_CONFIG_FILE"])
+        config.write_text('cache-dir=' + json.dumps(str(selected_cache)) + "\n" + config.read_text())
+    monkeypatch.chdir(expected_python.parent)
+    observed = []
+
+    def trace(argv, **options):
+        if argv[1:5] == ["-I", "-m", "venv", "--without-pip"]:
+            assert argv[0] == str(expected_python)
+        if argv[1:2] == ["build"]:
+            assert Path(options["environment"]["UV_CACHE_DIR"]).resolve() == selected_cache.resolve()
+            assert options["environment"]["UV_NO_CONFIG"] == "1"
+            assert options["environment"]["UV_OFFLINE"] == "1"
+            observed.append(argv[-1])
+        return child(argv, **options)
+
+    monkeypatch.setattr(engine, "_child", trace)
+    with engine.numbered_candidate(
+        tmp_path / "installation", "1.0.0", plugin=ordinary[0], uv=ordinary[1],
+        base_python=Path(expected_python.name), health_module="example_app", child_timeout=120,
+    ) as ready:
+        assert _value(engine, ready) == 1
+    assert len(observed) == 3
+
+
 @pytest.mark.parametrize("change", [
     "dynamic", "custom-backend", "setup-script", "setup-extra-code", "build-settings", "script-files",
 ])
