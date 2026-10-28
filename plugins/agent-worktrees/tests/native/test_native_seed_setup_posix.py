@@ -158,6 +158,25 @@ print(json.dumps({
         "FIXTURE_LITERAL": "literal environment ' \u03a9\n\n",
         "AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED": "1",
     }
+    plan["probe"] = str(tmp_path / "probe-status")
+    if seed_kind and env_script is None:
+        boundary = Path(plan["copied"]).with_name("native-seed-boundary.sh")
+        source = boundary.read_text()
+        source = source.replace(
+            'statuses=("${PIPESTATUS[@]}")',
+            'statuses=("${PIPESTATUS[@]}")\n'
+            '        printf "descriptor %s %s\\n" "$mode" "${statuses[*]}" >> "$FIXTURE_CASE/probe-status"',
+        )
+        source = source.replace("aw_native_seed_phase() (", "_fixture_native_seed_phase() (")
+        source += r'''
+aw_native_seed_phase() {
+    local code=0
+    _fixture_native_seed_phase "$@" || code=$?
+    printf 'phase %s %s %s\n' "$2" "${3:-}" "$code" >> "$FIXTURE_CASE/probe-status"
+    return "$code"
+}
+'''
+        boundary.write_text(source, encoding="utf-8")
     return plan, env, checkout
 
 
@@ -172,7 +191,12 @@ def _assert_return(plan, code, seeded):
     observations = _observations(plan)
     assert len(observations) == (2 if seeded else 1)
     for saved in observations:
-        assert saved["events"][-1]["phase"] == "execution-returned", saved
+        probe = Path(plan["probe"])
+        assert saved["events"][-1]["phase"] == "execution-returned", {
+            "setup": saved["parent_id"] is None,
+            "phases": [event["phase"] for event in saved["events"]],
+            "probe": probe.read_text() if probe.exists() else "",
+        }
         assert saved["events"][-1]["details"]["exit_code"] == code
     if seeded:
         backend, = [saved for saved in observations if saved["parent_id"]]
@@ -196,7 +220,10 @@ def test_copied_setup_preserves_native_wait_literal_streams_and_seed_custody(
     assert result.stdout == "BACKEND READY\nbackend stdout\n"
     assert result.stderr.splitlines().count("backend stderr") == 1
     if seed_kind:
-        assert result.stderr.endswith("backend stderr\n")
+        probe = Path(plan["probe"])
+        assert result.stderr.endswith("backend stderr\n"), (
+            result.stderr, probe.read_text() if probe.exists() else "",
+        )
     reply = json.loads((tmp_path / "backend.json").read_text())
     assert reply["argv"] == ARGUMENTS + (["--interactive", SEED] if seed_kind else [])
     assert reply["stdin"] == "retained stdin\n"
@@ -223,6 +250,7 @@ def test_inherited_python_environment_and_execution_hint_survive_native_exec(
     plan, environment, checkout = _plan(tmp_path, installed_native_runtime, native_bash, "new")
     # Set these after planning: macOS Python consumes __PYVENV_LAUNCHER__.
     environment.update(zip(("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "__PYVENV_LAUNCHER__"), values))
+    environment["FIXTURE_PYVENV_LAUNCHER"] = environment.pop("__PYVENV_LAUNCHER__")
     if missing:
         environment.pop("PYTHONHOME", None)
         environment.pop("VIRTUAL_ENV", None)
@@ -230,7 +258,9 @@ def test_inherited_python_environment_and_execution_hint_survive_native_exec(
         "attempt_id": "f" * 32, "resolution_id": "e" * 32, "operation_id": "d" * 32,
     })
     result = run_caller_owned(
-        plan["command"], env=environment, cwd=checkout, input_text="retained stdin\n",
+        ["/bin/sh", "-c",
+         'export __PYVENV_LAUNCHER__="$FIXTURE_PYVENV_LAUNCHER"; exec "$@"', "launcher",
+         *plan["command"]], env=environment, cwd=checkout, input_text="retained stdin\n",
         timeout=60, max_stdout_bytes=65536, max_stderr_bytes=65536,
     )
     assert result.returncode == 7, result.stdout + result.stderr + repr(_observations(plan))
@@ -264,6 +294,30 @@ def test_native_control_utilities_do_not_change_a_restricted_backend_path(
     )
     assert result.returncode == 7, result.stdout + result.stderr + repr(_observations(plan))
     assert (tmp_path / "backend-path").read_text() == environment["PATH"]
+    _assert_return(plan, 7, True)
+
+
+def test_native_exec_preserves_non_utf8_environment_bytes_without_serializing_them(
+    tmp_path, installed_native_runtime, native_bash,
+):
+    plan, environment, checkout = _plan(tmp_path, installed_native_runtime, native_bash, "new")
+    environment["FIXTURE_NON_UTF8"] = "literal\udcff"
+    environment["PYTHONPATH"] = "path\udcfe"
+    backend = tmp_path / "backend"
+    backend.write_text(
+        backend.read_text().replace(
+            "#!/bin/sh\n",
+            '#!/bin/sh\nprintf "%s" "$FIXTURE_NON_UTF8" > "$FIXTURE_CASE/backend-raw-env"\n',
+        ), encoding="utf-8",
+    )
+    result = run_caller_owned(
+        plan["command"], env=environment, cwd=checkout, input_text="retained stdin\n",
+        timeout=60, max_stdout_bytes=65536, max_stderr_bytes=65536,
+    )
+    assert result.returncode == 7, result.stdout + result.stderr + repr(_observations(plan))
+    assert (tmp_path / "backend-raw-env").read_bytes() == os.fsencode(environment["FIXTURE_NON_UTF8"])
+    fields = (tmp_path / "backend-python-env").read_bytes().split(b"\0")
+    assert fields[:2] == [b"x", os.fsencode(environment["PYTHONPATH"])]
     _assert_return(plan, 7, True)
 
 

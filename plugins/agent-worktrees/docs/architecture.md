@@ -636,6 +636,12 @@ after discovering support from the selected current runtime. Unsupported or
 unknown providers retain the legacy launch plan; a changed/incompatible runtime
 at copied setup entry refuses before admission rather than replaying effects.
 Existing JSON callers need no capability probe or migration.
+The optional preparation-only `--environment-reply execution-hint` returns only
+the new execution hint, advertised separately in `preparation_environment_modes`.
+Copied POSIX setup requires it before using the option: unused inherited values,
+including non-UTF-8 POSIX environment bytes, never enter its NUL preparation
+reply. The shell still inherits those bytes unchanged. The default `full` mode
+and existing JSON/NUL callers retain their complete reply semantics.
 Both preparation forms reject an empty executable before any seed claim or
 process query; the NUL encoder and reader retain the same nonempty-executable
 rule. Empty subsequent arguments remain supported.
@@ -722,7 +728,8 @@ does not trigger a second mutation. Exec never runs through the finite provider 
 Return callbacks first discover the then-current version-1 handler read-only.
 Missing or incompatible handlers close quietly without claiming receipt
 delivery. A compatible callback failure warns unless a fresh read-only probe
-confirms removal or incompatibility; no effectful callback is replayed.
+confirms removal or incompatibility; a timeout, producer or validator error
+remains indeterminate and warns. No effectful callback is replayed.
 Ordinary provider syntax/default replies and Windows child-handle ownership
 are unchanged. Real Copilot/mux and supported installation-removal acceptance
 remain separate from the copied native consumer controls.
@@ -736,7 +743,8 @@ discovery and seed effects. Descriptor output streams directly into a separately
 bounded validator using that interpreter's stdlib, with a 64-KiB input cap and
 ten-second deadline. Both producer and validator must succeed; an escaped
 stdout holder cannot extend collection indefinitely. Control utilities use the
-shell's standard utility search independently of the backend's unchanged PATH.
+shell's standard utility search to resolve an absolute executable independently
+of the backend's unchanged PATH, without applying that search PATH to the child.
 Validation uses neither shell evaluation nor a second identity RPC. Effect-side current-runtime
 validation remains authoritative across a selector race. Admission-only launches,
 including native resume, retain the legacy owner and its launch fence: finite

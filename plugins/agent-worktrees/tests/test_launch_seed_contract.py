@@ -9,7 +9,9 @@ import pytest
 from agent_worktrees import launch_seed_contract as contract
 
 
-@pytest.mark.parametrize("fault", [None, "old", "malformed", "failed", "selector-changed", "custody-unknown"])
+@pytest.mark.parametrize("fault", [
+    None, "old", "full-environment-only", "malformed", "failed", "selector-changed", "custody-unknown",
+])
 def test_discovery_queries_only_the_selected_completed_runtime_without_admission(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str | None,
 ) -> None:
@@ -30,6 +32,9 @@ def test_discovery_queries_only_the_selected_completed_runtime_without_admission
         "nul_reply_schema": "agent-worktrees.native-seed-reply.v1",
         "setup_process_start_time_sources": ["caller", "provider"],
         "backend_execution_modes": ["posix-exec-v1"] if fault == "old" else ["posix-exec-env-v1"],
+        "preparation_environment_modes": (
+            ["full"] if fault == "full-environment-only" else ["full", "execution-hint"]
+        ),
     }
     queries = []
 

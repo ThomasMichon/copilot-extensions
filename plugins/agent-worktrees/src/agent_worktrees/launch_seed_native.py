@@ -224,11 +224,13 @@ def main() -> int:
     parser.add_argument("--describe-contract", action="version", version=json.dumps({
         "contract": "agent-worktrees.native-seed", "version": 1,
         "preparation_output_formats": ["json", "nul"], "nul_reply_schema": NUL_REPLY_SCHEMA,
+        "preparation_environment_modes": ["full", "execution-hint"],
         "setup_process_start_time_sources": ["caller", "provider"],
         "backend_execution_modes": ["posix-exec-v1", "posix-exec-env-v1"] if os.name == "posix" else [],
     }))
     parser.add_argument("--contract-version", type=int, choices=[1], required=True)
     parser.add_argument("--output-format", choices=["json", "nul"], default="json")
+    parser.add_argument("--environment-reply", choices=["full", "execution-hint"], default="full")
     parser.add_argument(
         "--phase", choices=["prepare", "setup", "spawned", "spawn-failed", "returned", "interrupted", "exec"],
         required=True,
@@ -259,6 +261,8 @@ def main() -> int:
             raise ValueError("Backend environment cannot be used by another phase")
         if args.output_format == "nul" and args.phase not in {"prepare", "setup"}:
             raise ValueError("Literal field replies are only available for preparation")
+        if args.environment_reply != "full" and args.phase not in {"prepare", "setup"}:
+            raise ValueError("Environment reply modes are only available for preparation")
         require_current_runtime(args.root)
         correlation = launch_execution.Correlation(
             args.launch_attempt_id, args.launch_resolution_id, args.launch_parent_id,
@@ -276,6 +280,11 @@ def main() -> int:
                 native_resume_session=args.native_resume_session, pid=args.pid,
                 process_start_time=args.process_start_time,
             )
+            if args.environment_reply == "execution-hint":
+                result["environment"] = {
+                    key: value for key, value in (result["environment"] or {}).items()
+                    if key == launch_execution.NATIVE_HINT_ENV
+                }
         elif args.phase == "exec":
             if (
                 not correlation or not args.operation_id or not args.completion_file

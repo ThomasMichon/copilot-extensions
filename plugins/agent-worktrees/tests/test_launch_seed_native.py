@@ -614,7 +614,12 @@ def test_cli_preparation_output_formats_keep_actual_seed_custody(
     assert seed.text not in json.dumps(saved)
 
 
-def test_nul_callback_request_is_rejected_before_runtime_or_receipt_mutation(record, monkeypatch, capsys):
+@pytest.mark.parametrize("option", [
+    ["--output-format", "nul"], ["--environment-reply", "execution-hint"],
+])
+def test_nul_callback_request_is_rejected_before_runtime_or_receipt_mutation(
+    record, monkeypatch, capsys, option,
+):
     def forbidden(*args, **kwargs):
         pytest.fail("A callback output-format error must precede runtime selection and mutation")
     monkeypatch.setattr(native, "require_current_runtime", forbidden)
@@ -622,12 +627,32 @@ def test_nul_callback_request_is_rejected_before_runtime_or_receipt_mutation(rec
     monkeypatch.setattr(sys, "argv", [
         "launch_seed_native", "--contract-version", "1",
         "--root", str(cfg.install_dir()), "--record", str(record),
-        "--phase", "returned", "--output-format", "nul", "--exit-code", "0",
+        "--phase", "returned", *option, "--exit-code", "0",
     ])
     assert native.main() == 3
     captured = capsys.readouterr()
     assert not captured.out and "do not automatically retry" in captured.err
     assert not list((record.parent / "launch-attempts").glob("*/*.execution.json"))
+
+
+def test_hint_reply_does_not_encode_unused_non_utf8_environment(record, monkeypatch, capsysbinary):
+    seed = seeds.stage(record, kind="new", text="literal prompt")
+    monkeypatch.setenv("FIXTURE_NON_UTF8", "value\udcff")
+    monkeypatch.setattr(native, "require_current_runtime", lambda root: None)
+    monkeypatch.setattr(sys, "argv", [
+        "launch_seed_native", "--contract-version", "1",
+        "--root", str(cfg.install_dir()), "--record", str(record),
+        "--phase", "prepare", "--output-format", "nul",
+        "--environment-reply", "execution-hint", "--seed-id", seed.seed_id, "--", "copilot",
+    ])
+    assert native.main() == 0
+    captured = capsysbinary.readouterr()
+    fields = captured.out.decode("utf-8").split("\0")
+    assert fields[6:8] == ["1", audit.NATIVE_HINT_ENV]
+    assert os.environ["FIXTURE_NON_UTF8"] == "value\udcff"
+    assert not captured.err
+    held = seeds.peek(record)
+    assert held.seed_id == seed.seed_id and held.handoff_id
 
 
 def test_unrepresentable_prepared_prompt_remains_held_with_unknown_outcome(record, monkeypatch, capsysbinary):
@@ -705,6 +730,7 @@ def test_selected_runtime_describes_literal_output_support_without_preparation()
     assert json.loads(result.stdout) == {
         "contract": "agent-worktrees.native-seed", "version": 1,
         "preparation_output_formats": ["json", "nul"],
+        "preparation_environment_modes": ["full", "execution-hint"],
         "nul_reply_schema": "agent-worktrees.native-seed-reply.v1",
         "setup_process_start_time_sources": ["caller", "provider"],
         "backend_execution_modes": ["posix-exec-v1", "posix-exec-env-v1"] if os.name == "posix" else [],

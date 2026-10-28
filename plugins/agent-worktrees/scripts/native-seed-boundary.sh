@@ -6,7 +6,10 @@
 . "${BASH_SOURCE[0]%/*}/native-seed-reply.sh"
 
 _aw_native_seed_control() {
-    builtin command -p "$@"
+    local utility
+    utility="$(builtin command -p -v "$1")" || return 3
+    shift
+    "$utility" "$@"
 }
 
 _aw_native_seed_run_phase() (
@@ -33,22 +36,23 @@ _aw_native_seed_run_phase() (
         return 3
     fi
     wait "$helper" || result=$?
-    [[ "$result" == 0 ]] || return 3
     # A provider that left descendants holding the pipe is not complete.
     ! kill -0 -- "-$helper" 2>/dev/null || return 3
+    return "$result"
 ) 2>/dev/null
 
 _aw_native_seed_runtime() {
     local LC_ALL=C
     local root="${1:-}" version="" slot python bootstrap
     AW_NATIVE_SEED_RUNTIME=()
-    [[ "$root" == /* && -f "$root/current-version" ]] || return 3
+    [[ "$root" == /* ]] || return 3
+    [[ -f "$root/current-version" ]] || return 4
     IFS= read -r version < "$root/current-version" || [[ -n "$version" ]] || return 3
     [[ "$version" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,255}$ ]] || return 3
     slot="$root/versions/$version"
     python="$slot/bin/python"
     bootstrap="$slot/.runtime-bootstrap/runtime_launcher.py"
-    [[ -x "$python" && -f "$bootstrap" && -f "$slot/.install-complete.json" ]] || return 3
+    [[ -x "$python" && -f "$bootstrap" && -f "$slot/.install-complete.json" ]] || return 4
     AW_NATIVE_SEED_RUNTIME=("$python" -I -S -B -X utf8 "$bootstrap")
 }
 
@@ -66,14 +70,15 @@ aw_native_seed_phase() (
     _aw_native_seed_run_phase "${_aw_native_seed_deadline:-$((SECONDS + 10))}" _aw_native_seed_control env \
         -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV -u __PYVENV_LAUNCHER__ \
         "${AW_NATIVE_SEED_RUNTIME[@]}" \
-        -m agent_worktrees.launch_seed_native --contract-version 1 --root "$root" "$@"
+        -m agent_worktrees.launch_seed_native --contract-version 1 --root "$root" "$@" || return 3
 )
 
 _aw_native_seed_supports_contract() {
     case $- in *x*) set +x ;; esac
     set +a
-    local root="$1" mode="$2"
-    _aw_native_seed_runtime "$root" || return 3
+    local root="$1" mode="$2" status=0
+    _aw_native_seed_runtime "$root" || status=$?
+    [[ "$status" == 0 ]] || return "$status"
     local -a AW_NATIVE_SEED_PHASE_RUNTIME=("${AW_NATIVE_SEED_RUNTIME[@]}")
     local -a statuses
     if aw_native_seed_phase "$root" --describe-contract |
@@ -98,17 +103,20 @@ try:
             ("preparation_output_formats", "nul"),
             ("setup_process_start_time_sources", "provider"),
             ("backend_execution_modes", "posix-exec-env-v1"),
+            ("preparation_environment_modes", "execution-hint"),
         ))
         )
 except (ValueError, TypeError, OSError):
-    supported = False
-raise SystemExit(0 if supported else 3)
+    raise SystemExit(3)
+raise SystemExit(0 if supported else 4)
 ' "$mode" 2>/dev/null; then
         statuses=("${PIPESTATUS[@]}")
     else
         statuses=("${PIPESTATUS[@]}")
     fi
-    [[ "${statuses[0]}" == 0 && "${statuses[1]}" == 0 ]] || return 3
+    [[ "${statuses[0]}" == 0 ]] || return 3
+    [[ "${statuses[1]}" == 0 || "${statuses[1]}" == 4 ]] || return 3
+    return "${statuses[1]}"
 }
 
 aw_native_seed_supports_posix_setup() {
@@ -116,14 +124,21 @@ aw_native_seed_supports_posix_setup() {
 }
 
 aw_native_seed_return() {
-    local root="$1" warning="$2"
+    local root="$1" warning="$2" availability=0
     shift 2
-    _aw_native_seed_supports_contract "$root" return || return 0
+    _aw_native_seed_supports_contract "$root" return || availability=$?
+    [[ "$availability" != 4 ]] || return 0
+    if [[ "$availability" != 0 ]]; then
+        printf '%s\n' "$warning" >&2
+        return 0
+    fi
     local -a AW_NATIVE_SEED_PHASE_RUNTIME=("${AW_NATIVE_SEED_RUNTIME[@]}")
     aw_native_seed_phase "$root" "$@" >/dev/null && return 0
     # Removal/incompatibility is a quiet close, not a delivered receipt.
-    _aw_native_seed_supports_contract "$root" return || return 0
-    printf '%s\n' "$warning" >&2
+    availability=0
+    _aw_native_seed_supports_contract "$root" return || availability=$?
+    [[ "$availability" == 4 ]] || printf '%s\n' "$warning" >&2
+    return 0
 }
 
 _aw_native_seed_prepare_phase() {

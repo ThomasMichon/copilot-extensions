@@ -105,6 +105,7 @@ def _contract_slot(
     descriptor = json.dumps({
         "contract": "agent-worktrees.native-seed", "version": contract_version,
         "preparation_output_formats": ["nul"],
+        "preparation_environment_modes": ["full", "execution-hint"],
         "nul_reply_schema": "agent-worktrees.native-seed-reply.v1",
         "setup_process_start_time_sources": ["provider"],
         "backend_execution_modes": ["posix-exec-env-v1"] if supported else ["posix-exec-v1"],
@@ -185,7 +186,9 @@ def test_descriptor_refuses_oversized_output_or_valid_json_from_a_failed_provide
     assert not (root / "effects").exists()
 
 
-@pytest.mark.parametrize("state", ["absent", "incompatible", "compatible-failure", "removed"])
+@pytest.mark.parametrize("state", [
+    "absent", "incompatible", "compatible-failure", "removed", "transient", "initial-transient",
+])
 def test_return_handler_closes_quietly_only_when_delivery_is_unavailable(
     tmp_path: Path, state: str,
 ) -> None:
@@ -199,6 +202,8 @@ set -euo pipefail
 state="$3"
 aw_native_seed_phase() {
     if [[ "$2" == --describe-contract ]]; then
+        [[ "$state" != initial-transient ]] || return 7
+        if [[ "$state" == transient && -f "$1/callbacks" ]]; then return 7; fi
         _aw_native_seed_run_phase "$((SECONDS + 10))" _aw_native_seed_control env \
             -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV -u __PYVENV_LAUNCHER__ \
             "${AW_NATIVE_SEED_PHASE_RUNTIME[@]}" --describe-contract
@@ -212,11 +217,32 @@ aw_native_seed_return "$2" 'Return unconfirmed.' --phase returned --exit-code 7
 ''', [root, state])
     assert result.returncode == 0, result.stderr
     assert not result.stdout
-    assert result.stderr == ("Return unconfirmed.\n" if state == "compatible-failure" else "")
+    assert result.stderr == (
+        "Return unconfirmed.\n" if state in {"compatible-failure", "transient", "initial-transient"} else ""
+    )
     callbacks = root / "callbacks"
     assert (callbacks.read_text() if callbacks.exists() else "") == (
-        "attempted\n" if state in {"compatible-failure", "removed"} else ""
+        "attempted\n" if state in {"compatible-failure", "removed", "transient"} else ""
     )
+
+
+@pytest.mark.parametrize("from_exit", [False, True])
+def test_compatible_return_handler_is_actually_invoked(tmp_path: Path, from_exit: bool) -> None:
+    root = tmp_path / "runtime"
+    _contract_slot(root, "A")
+    (root / "current-version").write_text("A", encoding="utf-8")
+    ending = (
+        'trap \'aw_native_seed_return "$2" "Return unconfirmed." --phase returned --exit-code 7\' EXIT\nexit 7'
+        if from_exit else 'aw_native_seed_return "$2" "Return unconfirmed." --phase returned --exit-code 7'
+    )
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+_aw_native_seed_supports_contract "$2" return
+''' + ending, [root])
+    assert result.returncode == (7 if from_exit else 0), result.stderr
+    assert not result.stdout and not result.stderr
+    assert (root / "effects").read_text().splitlines() == ["A"]
 
 
 @pytest.mark.parametrize("backend_code", [0, 7])

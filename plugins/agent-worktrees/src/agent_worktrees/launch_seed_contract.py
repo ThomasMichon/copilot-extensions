@@ -43,6 +43,7 @@ def supports_posix_setup(root: Path) -> bool:
                     ("preparation_output_formats", "nul"),
                     ("setup_process_start_time_sources", "provider"),
                     ("backend_execution_modes", "posix-exec-env-v1"),
+                    ("preparation_environment_modes", "execution-hint"),
                 )
             )
             and (root / "current-version").read_text(encoding="utf-8").strip() == version

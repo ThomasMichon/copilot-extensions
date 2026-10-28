@@ -33,7 +33,10 @@ aw_native_setup_begin() {
         printf 'Current runtime cannot own native POSIX setup; no backend started.\n' >&2
         return 3
     }
-    local -a arguments=(--phase setup --output-format nul --record "$LAUNCH_SEED_RECORD" --pid "$$")
+    local -a arguments=(
+        --phase setup --output-format nul --environment-reply execution-hint
+        --record "$LAUNCH_SEED_RECORD" --pid "$$"
+    )
     [[ -z "$LAUNCH_SEED_ID" ]] || arguments+=(--seed-id "$LAUNCH_SEED_ID")
     [[ -z "$LAUNCH_SEED_PRESERVE_ID" ]] || arguments+=(--preserve-seed-id "$LAUNCH_SEED_PRESERVE_ID")
     [[ -z "$LAUNCH_NATIVE_RESUME_SESSION" ]] || arguments+=(--native-resume-session "$LAUNCH_NATIVE_RESUME_SESSION")
@@ -83,7 +86,8 @@ aw_native_setup_backend() {
     _aw_native_setup_require_contract || return 3
     completion="$(_aw_native_seed_control mktemp "${BASH_SOURCE[0]%/*}/.native-seed-exec.XXXXXXXX")" || return 3
     local -a preparation=(
-        --phase prepare --output-format nul --record "$LAUNCH_SEED_RECORD" --seed-id "$LAUNCH_SEED_ID"
+        --phase prepare --output-format nul --environment-reply execution-hint
+        --record "$LAUNCH_SEED_RECORD" --seed-id "$LAUNCH_SEED_ID"
         --launch-attempt-id "$LAUNCH_ATTEMPT_ID" --launch-resolution-id "$LAUNCH_RESOLUTION_ID"
         --launch-parent-id "$LAUNCH_PARENT_ID"
     )
