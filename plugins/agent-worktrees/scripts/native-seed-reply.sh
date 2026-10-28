@@ -53,9 +53,7 @@ _aw_native_seed_read_reply() {
     AW_NATIVE_SEED_ARGV=("${argv[@]}")
 }
 
-aw_native_seed_read_reply() {
-    local nocasematch=0 tracing=0 status=0
-    case $- in *x*) tracing=1; set +x ;; esac
+_aw_native_seed_clear_reply() {
     AW_NATIVE_SEED_ATTEMPT=""
     AW_NATIVE_SEED_RESOLUTION=""
     AW_NATIVE_SEED_OPERATION=""
@@ -64,6 +62,12 @@ aw_native_seed_read_reply() {
     AW_NATIVE_SEED_ENV_COUNT=""
     AW_NATIVE_SEED_ENV=()
     AW_NATIVE_SEED_ARGV=()
+}
+
+aw_native_seed_read_reply() {
+    local nocasematch=0 tracing=0 status=0
+    case $- in *x*) tracing=1; set +x ;; esac
+    _aw_native_seed_clear_reply
     if shopt -q nocasematch; then
         nocasematch=1
         shopt -u nocasematch

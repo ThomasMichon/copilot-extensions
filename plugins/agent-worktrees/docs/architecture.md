@@ -675,10 +675,29 @@ the original tracing setting afterward; it never traces reply data itself.
 The existing installers, publication inventory and uninstall profile own this
 asset; `session_shell.prepare` can copy it with the POSIX normalized setup,
 launch-command and reconciliation scripts outside the removable roots.
-No production POSIX caller selects that setup path yet. A future caller must
-also verify successful, bounded producer exit before using these arrays;
-the reader alone does not establish a successful callback, child custody,
-terminal ownership or removal of either runtime-Python waiter.
+The copied, dormant `scripts/native-seed-boundary.sh` adds a finite transport.
+`aw_native_seed_phase <root> <provider-arguments...>` reselects that root's
+current completed numbered runtime on every call, invoking its retention
+bootstrap and version-1 backend provider with closed stdin. It neither searches
+PATH for an engine nor falls through to another installation. An absent,
+incomplete or incompatible provider returns 3. Python-specific environment
+overrides are removed only in the finite child.
+The copied shell owns a separate provider job group, a ten-second deadline and
+group cleanup; its 50-millisecond sleep children exist only during the call.
+It streams stdout without prompt-bearing temporary files. Nonzero provider
+exit, timeout or descendants retaining the pipe are unconfirmed, not successful
+preparation. `aw_native_seed_prepare` takes the same arguments, consumes the
+NUL frame with the sibling reader and retains the actual process-substitution
+PID before parsing. It waits for successful finite producer exit and clears
+all reply fields on refusal, including a complete frame followed by a failed
+producer. It does not apply the reply environment or execute backend arguments.
+Caller stdin, descriptors and tracing settings remain owned by the caller.
+
+No production POSIX caller selects that setup path yet. Capability discovery
+and upgrade/rollback selection, canonical process-birth capture, backend
+custody, foreground terminal/signal behavior and removal of both runtime-Python
+waiters remain separate integration gates. This finite transport does not
+authorize replay of an uncertain preparation or qualify installation survival.
 
 On Windows, a current engine recognizes its canonical normalized setup's
 `native-setup-owner-v1` marker, a PowerShell 7 host and the selected canonical

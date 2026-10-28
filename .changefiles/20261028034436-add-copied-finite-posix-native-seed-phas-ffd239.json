@@ -1,0 +1,9 @@
+{
+  "comment": "Add copied finite POSIX native-seed phase transport without activating backend lifetime ownership.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

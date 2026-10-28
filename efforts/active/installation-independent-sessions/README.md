@@ -204,7 +204,7 @@ and [repair register](reconstruction-findings.md) retain the evidence and limits
   waits and normal script return without an explicit exit.
 - [x] Land provider-first literal preparation transport and selected-runtime
   contract discovery (#9318), without activating a POSIX lifetime owner.
-- [ ] Land the dormant Bash frame reader and copied POSIX setup assets;
+- [x] Land the dormant Bash frame reader and copied POSIX setup assets (#9321);
   keep bounded callback execution and native lifetime activation separate.
 - [ ] Remove both deferred-setup and final-backend runtime-Python waiters.
   Reuse finite seed preparation, existing seed custody and execution receipts;
@@ -493,6 +493,55 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   as rooted. No product was removed and no guard or process was bypassed.
   Next classify the actual mux manifest/data references and descendant setup
   lifetime through existing launch/removal owners before retrying removal.
+
+### 2026-10-28 - Finite POSIX transport qualification
+
+- Added the dormant copied phase transport: reselect the owning root's current
+  completed runtime at each boundary, retain literal reply bytes on a pipe,
+  require actual successful producer exit and settle the finite provider group.
+  Complete output followed by nonzero exit is still unconfirmed and clears
+  the collected reply. No reply environment is applied or backend dispatched.
+- The focused Windows/Git Bash framing/copy packet passed 55 controls with
+  three native-POSIX skips. The selected native publication/uninstall packet
+  passed nine controls. Native Linux/macOS deadline/group qualification remains
+  pending; these local results are not native terminal or removal evidence.
+- Capability/rollback selection, canonical process-birth capture, backend
+  custody and foreground terminal/signal behavior remain the next integration
+  gates. Neither POSIX runtime waiter is removed, and no host installation,
+  running service, session, release or rollout permission changed.
+
+### 2026-10-28 - Dormant reader merged; finite POSIX consumer next
+
+- #9321 merged as `a1e629c7d884cb1af9f0138fd330e3c20a6f718e`.
+  Exact-head Copilot review `5680991863` on
+  `0eadfa38a6589fe792301d3888bea98c8aad9c57` reported no open issues;
+  its clean owner-authored `COMMENTED` shape satisfies repository policy.
+  The overview's pending-native observation was superseded by the completed
+  exact-head run below. All four review threads are resolved, and the fresh
+  metadata-triggered required CI passed before managed completion. The
+  authorized Maintainer exception covered only the additional review vote.
+- Native run `40670087559` passed all three selected jobs: Linux Bash 5.2.21
+  and stock macOS Bash 3.2.57 each passed 36 reader/copy controls with 10
+  Windows-only skips; Windows passed nine copied-setup/creation controls
+  and the independent uncertain-Picker-handoff control. The real nonblocking
+  pipe, actual closed descriptors, caller-descriptor preservation and
+  prompt-free refusal all passed without increasing their deadlines.
+- The final no-actor unit packet passed 2,565 cases, 12 deselected, with
+  coverage collected once. Real-process reader tests are selected explicitly,
+  not admitted as fast structural guards. Earlier native failures above
+  remain failures rather than being relabeled as passing qualification.
+- Normal pull-forward attempted to replay the landed series and aborted.
+  The complete local PR delta and actual squash delta had the same stable
+  patch ID; retained recovery refs preserved the published tip. Advanced only
+  that proven merged range, then completed normal reconciliation. The broader
+  aggregate-squash repair remains tracked in #4130.
+- Re-read the complete Plan and Validation Plan. Closed only the dormant
+  reader/copy item. Continue finite current-runtime POSIX callback execution
+  and native lifetime integration, preserving the existing seed/receipt
+  owners, exact process birth, stdin, terminal signals and #5579's forwarding
+  ownership. Production POSIX activation, release, installed acceptance,
+  shared YAML standby and both live cycles remain open. No host installation,
+  service or running session changed; this effort remains Active.
 
 ### 2026-10-28 - Reconstruction findings and cooperative standby direction
 
