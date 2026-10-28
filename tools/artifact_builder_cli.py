@@ -17,7 +17,7 @@ def _core_in_toolchain(args, toolchain, venv: Path) -> dict:
     command = [
         str(toolchain.venv_python), str(Path(__file__).with_name("build_python_artifacts.py")),
         "core", "--core", "--out-dir", str(args.out_dir),
-        "--toolchain-venv", str(venv), "--python", args.python or sys.executable,
+        "--toolchain-venv", str(venv), "--python", args.python or toolchain.record["provenance"]["python"],
         "--toolchain-source", args.toolchain_source,
     ]
     if args.toolchain_min_age_days is not None:

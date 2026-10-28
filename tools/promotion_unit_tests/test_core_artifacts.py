@@ -240,30 +240,34 @@ def test_development_versions_use_explicit_prerelease_admission(
             core.source_closure(tmp_path, builder)
 
 
-def test_core_cli_selects_only_inside_the_resolved_toolchain(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "selector", [None, "/selected/python"], ids=["uv-default", "explicit"]
+)
+def test_core_cli_selects_only_inside_the_resolved_toolchain(
+    tmp_path, monkeypatch, selector
+):
     import sys
 
     import artifact_builder_cli as cli
 
     lock = SimpleNamespace(
-        venv_python=tmp_path / "toolchain" / "bin" / "python", record={"locked": True}
+        venv_python=tmp_path / "toolchain" / "bin" / "python",
+        record={"locked": True, "provenance": {"python": "/uv-default/python"}},
     )
     monkeypatch.setattr(cli, "resolve_toolchain_lock", lambda *args, **kwargs: lock)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "builder",
-            "core",
-            "--core",
-            "--out-dir",
-            str(tmp_path / "out"),
-            "--toolchain-venv",
-            str(tmp_path / "toolchain"),
-            "--python",
-            "/selected/python",
-        ],
-    )
+    arguments = [
+        "builder",
+        "core",
+        "--core",
+        "--out-dir",
+        str(tmp_path / "out"),
+        "--toolchain-venv",
+        str(tmp_path / "toolchain"),
+    ]
+    if selector is not None:
+        arguments.extend(["--python", selector])
+    monkeypatch.setattr(sys, "argv", arguments)
+    monkeypatch.setattr(sys, "executable", "/calling/python")
     calls = []
 
     def run(argv, **kwargs):
@@ -291,6 +295,6 @@ def test_core_cli_selects_only_inside_the_resolved_toolchain(tmp_path, monkeypat
     assert cli.main(None, "", core_builder=ambient) == 0
     argv, options = calls[0]
     assert argv[0] == str(lock.venv_python)
-    assert argv[argv.index("--python") + 1] == "/selected/python"
+    assert argv[argv.index("--python") + 1] == (selector or "/uv-default/python")
     assert argv[argv.index("--toolchain-venv") + 1] == str(tmp_path / "toolchain")
     assert options["capture_output"] and options["check"] is False

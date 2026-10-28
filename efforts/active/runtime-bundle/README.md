@@ -404,9 +404,14 @@ choose the wheel path, not a reason to relax source identity.
   seconds with the retained toolchain. This rebuild has archive SHA-256
   `efc450c3b78da2fea085aede68506476e444658ce72c333fdf3d7336e4f8b1b9`;
   member payloads match the API build, while ZIP timestamps remain distinct.
-- Seventeen bounded core controls join the existing exact-input unit packet,
+- Eighteen bounded core controls join the existing exact-input unit packet,
   with only changed/new source bindings and the two new helper coverage targets.
   The existing five-minute budget and effect/coverage rules are unchanged.
   The native Windows full-packet attempt stops at an unchanged long-path
   source-publication fixture after 1,743 passing cases and eight platform
   skips; it is not passing packet evidence. Hosted Linux CI remains required.
+- A second review catches omitted-selector interpreter drift during CLI
+  re-entry. The new control reproduces uv's default differing from the calling
+  interpreter; re-entry now forwards the interpreter already recorded in the
+  lock. Explicit selection remains unchanged. Both controls and the focused
+  CLI/core decisions pass 20 cases after the correction.
