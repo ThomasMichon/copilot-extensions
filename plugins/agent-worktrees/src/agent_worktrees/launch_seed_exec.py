@@ -86,17 +86,22 @@ def deferred_command(
 def native_setup_index(command: list[str]) -> int | None:
     """Recognize the typed native setup envelope, not arbitrary Copilot argv."""
     index = _script_index(command)
-    if index is not None and Path(command[index]).name == "launch-command.ps1":
+    if index is not None and Path(command[index]).name in {"launch-command.ps1", "launch-command.sh"}:
         delimiter = _wrapper_delimiter(command, index)
         if delimiter is not None:
             inner = native_setup_index(command[delimiter + 1:])
             return delimiter + 1 + inner if inner is not None else None
-    if (
-        index is not None and Path(command[index]).name == "default-setup.ps1"
-        and "-LaunchSeedPreparation" in command[index + 1:]
-        and "-LaunchSeedNativeRoot" in command[index + 1:]
-    ):
-        return index
+    if index is not None:
+        name = Path(command[index]).name
+        flags = command[index + 1:]
+        if (
+            name == "default-setup.ps1"
+            and "-LaunchSeedPreparation" in flags and "-LaunchSeedNativeRoot" in flags
+        ) or (
+            name == "default-setup.sh"
+            and "--launch-seed-preparation" in flags and "--launch-seed-native-root" in flags
+        ):
+            return index
     return None
 
 
@@ -121,12 +126,16 @@ def _native_setup_command(
     correlation: launch_execution.Correlation | None,
     copy_only: bool = False,
 ) -> list[str] | None:
-    if os.name != "nt" or not command or PureWindowsPath(command[0]).stem.casefold() != "pwsh":
+    if not command:
+        return None
+    posix = os.name == "posix" and Path(command[0]).name == "bash"
+    if not posix and (os.name != "nt" or PureWindowsPath(command[0]).stem.casefold() != "pwsh"):
         return None
     from .process_launcher import _normalized_setup_index
 
     outer = _script_index(command)
-    wrapper = installer.install_dir() / "scripts" / "launch-command.ps1"
+    suffix = ".sh" if posix else ".ps1"
+    wrapper = installer.install_dir() / "scripts" / ("launch-command" + suffix)
     if outer is not None and Path(command[outer]).resolve() == wrapper.resolve():
         delimiter = _wrapper_delimiter(command, outer)
         if delimiter is None:
@@ -140,11 +149,11 @@ def _native_setup_command(
             return None
         copied_setup = Path(inner[_script_index(inner)])
         return [
-            *command[:outer], str(copied_setup.with_name("launch-command.ps1")),
+            *command[:outer], str(copied_setup.with_name("launch-command" + suffix)),
             *command[outer + 1:delimiter + 1], *inner,
         ]
     index = _normalized_setup_index(command)
-    if index is None or Path(command[index]).name != "default-setup.ps1":
+    if index is None or Path(command[index]).name != "default-setup" + suffix:
         return None
     script = Path(command[index])
     if not script.is_file() or NATIVE_SETUP_MARKER not in script.read_text(
@@ -154,7 +163,12 @@ def _native_setup_command(
     from . import session_shell
     from .manager_launch_cli import _worktree_manager_root
 
-    if not copy_only:
+    if posix and not copy_only:
+        from .launch_seed_contract import supports_posix_setup
+
+        if not supports_posix_setup(installer.install_dir()):
+            return None
+    elif not copy_only:
         from .manager_launch_cli import _usable_worktree_manager_launcher_dir
 
         launch_dir = _usable_worktree_manager_launcher_dir()
@@ -190,6 +204,19 @@ def _native_setup_command(
         ):
             if value is not None:
                 flags += ["-" + name, value]
+    if posix:
+        names = {
+            "-LaunchSeedPreparation": "--launch-seed-preparation",
+            "-LaunchSeedNativeRoot": "--launch-seed-native-root",
+            "-LaunchSeedRecord": "--launch-seed-record",
+            "-LaunchSeedId": "--launch-seed-id",
+            "-LaunchSeedPreserveId": "--launch-seed-preserve-id",
+            "-LaunchNativeResumeSession": "--launch-native-resume-session",
+            "-LaunchAttemptId": "--launch-attempt-id",
+            "-LaunchResolutionId": "--launch-resolution-id",
+            "-LaunchParentId": "--launch-parent-id",
+        }
+        flags = [names.get(value, value) if i % 2 == 0 else value for i, value in enumerate(flags)]
     return [*command[:index], str(prepared.wrapper), *flags, *command[index + 1:]]
 
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # agent-worktrees:launch-seed-boundary-v1
 # agent-worktrees:launch-attempt-boundary-v1
+# agent-worktrees:native-setup-owner-v1
 # Default / normalized session setup script for repos.
 #
 # Used by agent-worktrees as the normalized launcher. Prepends any
@@ -30,6 +31,10 @@ RUNTIME_PYTHON=""
 LAUNCH_SEED_RECORD=""
 LAUNCH_SEED_ID=""
 LAUNCH_SEED_RUNTIME_PYTHON=""
+LAUNCH_SEED_PREPARATION=""
+LAUNCH_SEED_NATIVE_ROOT=""
+LAUNCH_SEED_PRESERVE_ID=""
+LAUNCH_NATIVE_RESUME_SESSION=""
 LAUNCH_ATTEMPT_ID=""
 LAUNCH_RESOLUTION_ID=""
 LAUNCH_PARENT_ID=""
@@ -71,6 +76,10 @@ while [[ $# -gt 0 ]]; do
         --launch-seed-record) LAUNCH_SEED_RECORD="$2"; shift 2 ;;
         --launch-seed-id) LAUNCH_SEED_ID="$2"; shift 2 ;;
         --launch-seed-runtime-python) LAUNCH_SEED_RUNTIME_PYTHON="$2"; shift 2 ;;
+        --launch-seed-preparation) LAUNCH_SEED_PREPARATION="$2"; shift 2 ;;
+        --launch-seed-native-root) LAUNCH_SEED_NATIVE_ROOT="$2"; shift 2 ;;
+        --launch-seed-preserve-id) LAUNCH_SEED_PRESERVE_ID="$2"; shift 2 ;;
+        --launch-native-resume-session) LAUNCH_NATIVE_RESUME_SESSION="$2"; shift 2 ;;
         --launch-attempt-id) LAUNCH_ATTEMPT_ID="$2"; shift 2 ;;
         --launch-resolution-id) LAUNCH_RESOLUTION_ID="$2"; shift 2 ;;
         --launch-parent-id) LAUNCH_PARENT_ID="$2"; shift 2 ;;
@@ -88,6 +97,11 @@ for _a in "${COPILOT_ARGS[@]:-}"; do
     [[ "$_a" == "--stdio" ]] && STDIO=true
 done
 say() { if $STDIO; then echo "$@" >&2; else echo "$@"; fi; }
+
+if [[ -n "$LAUNCH_SEED_PREPARATION" ]]; then
+    . "${BASH_SOURCE[0]%/*}/native-seed-setup.sh"
+    aw_native_setup_begin "$BASH" "${BASH_SOURCE[0]}" || exit 3
+fi
 
 # -- Runtime --------------------------------------------------------------
 # Contextual/cell launches validate and export their runtime root as
@@ -228,6 +242,13 @@ _log_copilot_invoked() {
 
 # -- Launch Copilot -------------------------------------------------------
 _exec_copilot_backend() {
+    if [[ -n "$LAUNCH_SEED_PREPARATION" ]]; then
+        case $- in *x*) set +x ;; esac
+        set +a
+        local code=0
+        aw_native_setup_backend "$@" "${COPILOT_ARGS[@]}" || code=$?
+        exit "$code"
+    fi
     if [[ -n "$LAUNCH_SEED_RECORD" ]]; then
         if [[ -z "$LAUNCH_SEED_RUNTIME_PYTHON" || ! -x "$LAUNCH_SEED_RUNTIME_PYTHON" ]]; then
             echo 'ERROR: Launch-seed runtime is unavailable; the prompt remains staged.' >&2

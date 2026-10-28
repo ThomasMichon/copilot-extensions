@@ -33,24 +33,60 @@ _aw_native_seed_run_phase() (
     ! kill -0 -- "-$helper" 2>/dev/null || return 3
 ) 2>/dev/null
 
-aw_native_seed_phase() (
-    case $- in *x*) set +x ;; esac
-    set +a
+_aw_native_seed_runtime() {
     local LC_ALL=C
     local root="${1:-}" version="" slot python bootstrap
-    [[ $# -ge 2 && "$root" == /* && -f "$root/current-version" ]] || return 3
-    shift
-    shopt -u nocasematch
+    AW_NATIVE_SEED_RUNTIME=()
+    [[ "$root" == /* && -f "$root/current-version" ]] || return 3
     IFS= read -r version < "$root/current-version" || [[ -n "$version" ]] || return 3
     [[ "$version" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,255}$ ]] || return 3
     slot="$root/versions/$version"
     python="$slot/bin/python"
     bootstrap="$slot/.runtime-bootstrap/runtime_launcher.py"
     [[ -x "$python" && -f "$bootstrap" && -f "$slot/.install-complete.json" ]] || return 3
+    AW_NATIVE_SEED_RUNTIME=("$python" -I -S -B -X utf8 "$bootstrap")
+}
+
+aw_native_seed_phase() (
+    case $- in *x*) set +x ;; esac
+    set +a
+    [[ $# -ge 2 ]] || return 3
+    local root="$1"
+    _aw_native_seed_runtime "$root" || return 3
+    shift
     _aw_native_seed_run_phase "${_aw_native_seed_deadline:-$((SECONDS + 10))}" env \
         -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV -u __PYVENV_LAUNCHER__ \
-        "$python" -I -S -B -X utf8 "$bootstrap" \
+        "${AW_NATIVE_SEED_RUNTIME[@]}" \
         -m agent_worktrees.launch_seed_native --contract-version 1 --root "$root" "$@"
+)
+
+aw_native_seed_supports_posix_setup() (
+    case $- in *x*) set +x ;; esac
+    set +a
+    local descriptor root="$1"
+    _aw_native_seed_runtime "$root" || return 3
+    descriptor="$(aw_native_seed_phase "$root" --describe-contract)" || return 3
+    _aw_native_seed_run_phase "$((SECONDS + 10))" env \
+        -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV -u __PYVENV_LAUNCHER__ \
+        "${AW_NATIVE_SEED_RUNTIME[0]}" -I -S -B -X utf8 -c '
+import json, sys
+try:
+    value = json.loads(sys.argv[1])
+    supported = (
+        isinstance(value, dict)
+        and value.get("contract") == "agent-worktrees.native-seed"
+        and type(value.get("version")) is int and value["version"] == 1
+        and value.get("nul_reply_schema") == "agent-worktrees.native-seed-reply.v1"
+        and all(isinstance(value.get(key), list) and item in value[key] for key, item in (
+            ("preparation_output_formats", "nul"),
+            ("setup_process_start_time_sources", "provider"),
+            ("backend_execution_modes", "posix-exec-v1"),
+        ))
+    )
+except (ValueError, TypeError):
+    supported = False
+raise SystemExit(0 if supported else 3)
+' "$descriptor" 2>/dev/null
 )
 
 _aw_native_seed_prepare_phase() {

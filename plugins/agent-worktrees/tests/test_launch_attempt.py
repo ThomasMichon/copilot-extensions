@@ -69,24 +69,32 @@ def test_resolution_binds_only_allowlisted_returned_evidence(receipts, plan, pha
 
 
 @pytest.mark.parametrize("wrapped", [False, True])
-def test_native_setup_owner_gets_exact_resolution_correlation_without_outer_waiter(receipts, wrapped):
+@pytest.mark.parametrize("posix", [False, True])
+def test_native_setup_owner_gets_exact_resolution_correlation_without_outer_waiter(receipts, wrapped, posix):
     attempt_id = uuid4().hex
-    command = [
+    command = ([
+        "bash", str(receipts / "default-setup.sh"),
+        "--launch-seed-preparation", "admission", "--launch-seed-native-root", str(receipts / "engine"),
+        "--", "literal",
+    ] if posix else [
         "pwsh.exe", "-NoProfile", "-File", str(receipts / "default-setup.ps1"),
         "-LaunchSeedPreparation", "admission", "-LaunchSeedNativeRoot", str(receipts / "engine"),
         "-NativeArgumentsJson", json.dumps({"args": ["--", "literal"]}),
-    ]
+    ])
     if wrapped:
-        command = [
+        command = ([
+            "bash", str(receipts / "launch-command.sh"), "--", *command,
+        ] if posix else [
             "pwsh.exe", "-NoProfile", "-File", str(receipts / "launch-command.ps1"), "--", *command,
-        ]
+        ])
     code, returned = _run(attempt_id, {"action": "exec", "cmd": command})
     assert code == 0
     result = returned["cmd"]
-    start = 9 if wrapped else 4
+    start = ((5 if wrapped else 2) if posix else (9 if wrapped else 4))
     assert result[:start] == command[:start] and result[-2:] == command[-2:]
     assert result[start:start + 4] == [
-        "-LaunchAttemptId", attempt_id, "-LaunchResolutionId",
+        "--launch-attempt-id" if posix else "-LaunchAttemptId", attempt_id,
+        "--launch-resolution-id" if posix else "-LaunchResolutionId",
         returned["launch_attempt_receipt"]["operation_id"],
     ]
     assert "agent_worktrees.launch_seed_exec" not in result
