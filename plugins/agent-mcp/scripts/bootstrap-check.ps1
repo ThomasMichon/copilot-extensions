@@ -134,18 +134,13 @@ try {
 
     Assert-BootstrapPublication
 
+    . (Join-Path $PSScriptRoot 'installer-watchdog.ps1')
     # --- Good boot-citizen guard: single-flight + live-owner deferral ---
     # The native watchdog owns bounded tree termination. A cached PID's age
     # never authorizes this separate session hook to kill that process.
     $lockFile = Join-Path $InstallDir 'reconcile.lock'
     try {
-        if (Test-Path $lockFile) {
-            $lockPid = 0
-            [void][int]::TryParse((Get-Content $lockFile -Raw -ErrorAction SilentlyContinue), [ref]$lockPid)
-            if ($lockPid -gt 0 -and (Get-Process -Id $lockPid -ErrorAction SilentlyContinue)) {
-                Exit-SessionStart
-            }
-        }
+        if (Test-InstallReconcileLock -Path $lockFile) { Exit-SessionStart }
     } catch { }
 
     [Console]::Error.WriteLine("[$name] runtime $deployed -> $current; reconciling in background...")
@@ -161,7 +156,7 @@ try {
     $proc = Start-Process -FilePath 'conhost.exe' -WorkingDirectory $env:USERPROFILE -PassThru -WindowStyle Hidden `
         -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc)
     try {
-        if ($proc) { Set-Content -LiteralPath $lockFile -Value ([string]$proc.Id) -NoNewline -ErrorAction SilentlyContinue }
+        if ($proc) { Write-InstallReconcileLock -Path $lockFile -ProcessId $proc.Id }
     } catch { }
 } catch { }
 Exit-SessionStart

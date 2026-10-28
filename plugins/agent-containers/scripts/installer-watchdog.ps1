@@ -1,4 +1,40 @@
 # Native first-touch helpers, packaged independently of the Python installer engine.
+function Get-InstallProcessBirth {
+    param([int]$ProcessId)
+
+    $process = Get-Process -Id $ProcessId -ErrorAction Stop
+    return ([DateTimeOffset]$process.StartTime.ToUniversalTime()).ToUnixTimeMilliseconds()
+}
+
+function Test-InstallReconcileLock {
+    param([string]$Path)
+
+    if (-not [IO.File]::Exists($Path)) { return $false }
+    $parts = ([IO.File]::ReadAllText($Path)).Trim() -split '\s+'
+    $ownerId = 0
+    if (-not [int]::TryParse($parts[0], [ref]$ownerId) -or $ownerId -le 0) { return $false }
+    if (-not (Get-Process -Id $ownerId -ErrorAction SilentlyContinue)) { return $false }
+    try { $birth = Get-InstallProcessBirth -ProcessId $ownerId }
+    catch { return $true }
+    if ($parts.Count -eq 1) {
+        # A legacy PID can only own a lock written after that process started.
+        $written = ([DateTimeOffset][IO.File]::GetLastWriteTimeUtc($Path)).ToUnixTimeMilliseconds()
+        return $birth -le ($written + 999)
+    }
+    $recorded = 0L
+    return $parts.Count -eq 2 -and [long]::TryParse($parts[1], [ref]$recorded) -and
+        $recorded -eq $birth
+}
+
+function Write-InstallReconcileLock {
+    param([string]$Path, [int]$ProcessId)
+
+    try {
+        $birth = Get-InstallProcessBirth -ProcessId $ProcessId
+        [IO.File]::WriteAllText($Path, "$ProcessId $birth")
+    } catch { }
+}
+
 function Get-InstallWatchdogBudget {
     param([string]$Payload, [string]$Name)
 
@@ -136,12 +172,13 @@ function Wait-InstallWatchdog {
         [string]$PhaseFile, [string]$Name, [string]$Stage, [string]$LogPath
     )
 
+    # Windows PowerShell loses ExitCode if its native handle is not retained before waiting.
+    [void]$Child.Handle
     if ($Budget.BuildSec -le 0) {
         $Child.WaitForExit()
         return $Child.ExitCode
     }
     if ($Child.HasExited) { return $Child.ExitCode }
-    [void]$Child.Handle
     $expectedStartTimeTicks = $Child.StartTime.ToUniversalTime().Ticks
     $invalidReported = $false
     while (-not $Child.HasExited) {

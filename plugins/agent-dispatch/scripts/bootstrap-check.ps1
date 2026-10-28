@@ -226,6 +226,7 @@ try {
     catch [Threading.AbandonedMutexException] { $ownsReconcileMutex = $true }
     if (-not $ownsReconcileMutex) { Exit-SessionStart }
 
+    . (Join-Path $PSScriptRoot 'installer-watchdog.ps1')
     # --- Good boot-citizen guard: single-flight + live-owner deferral ---
     # Only the installer's native watchdog owns bounded tree termination.
     try {
@@ -247,14 +248,7 @@ try {
                     Exit-SessionStart
                 }
             }
-        } elseif (Test-Path $lockFile) {
-            $lockPid = 0
-            [void][int]::TryParse((Get-Content $lockFile -Raw -ErrorAction SilentlyContinue), [ref]$lockPid)
-            if ($lockPid -gt 0 -and (Get-Process -Id $lockPid -ErrorAction SilentlyContinue)) {
-                [Console]::Error.WriteLine("[$name] legacy reconcile PID $lockPid has no verified process birth time; leaving it running")
-                Exit-SessionStart
-            }
-        }
+        } elseif (Test-InstallReconcileLock -Path $lockFile) { Exit-SessionStart }
     } catch {
         [Console]::Error.WriteLine("[$name] could not validate prior reconcile: $($_.Exception.Message)")
         Exit-SessionStart
@@ -267,6 +261,7 @@ try {
     # The worker claims its own identity after the parent publishes this attempt.
     $worker = @'
 $ErrorActionPreference = 'Continue'
+. '__WATCHDOG__'
 function Get-BootstrapActionAdmission {
 __ACTION_READER__
 }
@@ -299,7 +294,7 @@ function Update-ReconcileAttempt([bool]$Completed, [int]$Code, [string]$Diagnost
         }
         $utf8 = New-Object Text.UTF8Encoding($false)
         [IO.File]::WriteAllText('__STATUSFILE__', ($status | ConvertTo-Json -Compress), $utf8)
-        [IO.File]::WriteAllText('__LOCKFILE__', [string]$PID, $utf8)
+        Write-InstallReconcileLock -Path '__LOCKFILE__' -ProcessId $PID
         return $true
     } finally {
         if ($held) { $mutex.ReleaseMutex() }
@@ -351,6 +346,7 @@ exit $code
         Replace('__INSTALL_ROOT__', $InstallDir.Replace("'", "''")).`
         Replace('__SCRIPTS_ROOT__', $PSScriptRoot.Replace("'", "''")).`
         Replace('__MUTEX__', $mutexName).Replace('__ATTEMPT__', $attemptId).`
+        Replace('__WATCHDOG__', (Join-Path $PSScriptRoot 'installer-watchdog.ps1').Replace("'", "''")).`
         Replace('__STATUSFILE__', $statusFile.Replace("'", "''")).`
         Replace('__LOCKFILE__', $lockFile.Replace("'", "''")).`
         Replace('__RECONCILELOG__', $reconcileLog.Replace("'", "''")).Replace('__INSTALLER__', $reInner)
@@ -372,7 +368,7 @@ exit $code
         log = $reconcileLog
     } | ConvertTo-Json -Compress
     [IO.File]::WriteAllText($statusFile, $status, $utf8)
-    [IO.File]::WriteAllText($lockFile, [string]$proc.Id, $utf8)
+    Write-InstallReconcileLock -Path $lockFile -ProcessId $proc.Id
 } catch {
     [Console]::Error.WriteLine("[agent-dispatch] background reconcile could not start: $($_.Exception.Message)")
 } finally {

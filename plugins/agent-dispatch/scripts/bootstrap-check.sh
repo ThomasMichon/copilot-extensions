@@ -180,16 +180,12 @@ fi
 
 assert_bootstrap_publication
 
+. "$ScriptDir/installer-watchdog.sh"
 # --- Good boot-citizen guard: single-flight + live-owner deferral ---
 # The native watchdog owns bounded tree termination. A cached PID's age
 # never authorizes this separate session hook to kill that process.
 lockFile="$InstallDir/reconcile.lock"
-if [ -f "$lockFile" ]; then
-  lockPid="$(tr -d '[:space:]' < "$lockFile" 2>/dev/null)"
-  if [ -n "$lockPid" ] && kill -0 "$lockPid" 2>/dev/null; then
-    exit 0
-  fi
-fi
+if test_install_reconcile_lock "$lockFile"; then exit 0; fi
 
 echo "[$name] runtime $deployed -> $current; reconciling in background..." >&2
 cd "$HOME" || { echo "reconcile launch failed: HOME is unavailable" >&2; exit 1; }
@@ -200,5 +196,5 @@ nohup bash -c '
   exec bash "$@"
 ' agent-dispatch-reconcile "$py" "$ScriptDir/action_controls.py" "$InstallDir" \
     "${target[@]}" >"$InstallDir/reconcile.log" 2>&1 &
-echo $! > "$lockFile" 2>/dev/null || true
+write_install_reconcile_lock "$lockFile" "$!"
 exit 0

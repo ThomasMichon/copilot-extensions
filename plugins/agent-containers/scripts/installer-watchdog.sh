@@ -1,5 +1,47 @@
 # shellcheck shell=bash
 # Native first-touch helpers, packaged independently of the Python installer engine.
+get_install_process_birth() {
+    local owner="$1" fields boot ticks rate started epoch
+    if [[ -r "/proc/$owner/stat" && -r /proc/stat ]]; then
+        fields="$(cat "/proc/$owner/stat")" || return 1
+        fields="${fields##*) }"
+        read -r -a fields <<<"$fields"
+        ticks="${fields[19]:-}"
+        boot="$(awk '$1 == "btime" {print $2}' /proc/stat)"
+        rate="$(getconf CLK_TCK)"
+        [[ "$ticks" =~ ^[0-9]+$ && "$boot" =~ ^[0-9]+$ &&
+           "$rate" =~ ^[0-9]+$ && "$rate" -gt 0 ]] || return 1
+        printf '%s\n' "$((boot * 1000 + ticks * 1000 / rate))"
+    else
+        started="$(LC_ALL=C TZ=UTC ps -p "$owner" -o lstart= 2>/dev/null)" || return 1
+        [[ -n "$started" ]] || return 1
+        epoch="$(LC_ALL=C date -u -d "$started" +%s 2>/dev/null ||
+            LC_ALL=C date -u -j -f '%a %b %e %T %Y' "$started" +%s 2>/dev/null)" || return 1
+        printf '%s\n' "$((epoch * 1000))"
+    fi
+}
+
+test_install_reconcile_lock() {
+    local path="$1" owner recorded extra birth written
+    [[ -f "$path" ]] || return 1
+    read -r owner recorded extra <"$path" || true
+    [[ "$owner" =~ ^[0-9]+$ && "$owner" -gt 0 ]] || return 1
+    kill -0 "$owner" 2>/dev/null || return 1
+    birth="$(get_install_process_birth "$owner")" || return 0
+    if [[ -z "$recorded" ]]; then
+        written="$(stat -c %Y "$path" 2>/dev/null || stat -f %m "$path" 2>/dev/null)" || return 0
+        [[ "$birth" -le $((written * 1000 + 999)) ]]
+    else
+        [[ -z "$extra" && "$recorded" =~ ^[0-9]+$ && "$recorded" == "$birth" ]]
+    fi
+}
+
+write_install_reconcile_lock() {
+    local path="$1" owner="$2" birth
+    birth="$(get_install_process_birth "$owner")" || return 0
+    printf '%s %s\n' "$owner" "$birth" >"$path" 2>/dev/null || true
+}
+
 _install_integer_seconds() {
     local raw="$1" label="$2" digits limit=2147483647
     digits="${raw#-}"

@@ -2256,6 +2256,11 @@ their own installed-source admission and lifecycle contracts. They do not restor
 the older inline reconcile supervisor or add another timeout authority.
 Containers, Dispatch, MCP and Budget Guidance retain their inline single-flight
 guards; a live recorded owner is deferred to, never killed on age alone.
+Their native `reconcile.lock` receipts record the PID and process creation time
+in Unix milliseconds. A different birth permits a retry without signalling the
+unrelated process. Legacy PID-only locks defer only when the process predates
+the lock's write time, or its birth cannot be read; newly written locks always
+include birth evidence.
 
 The **agent-dispatch Windows hook** serializes reconcile admission and status
 publication with an installation-root-scoped global mutex, including across
