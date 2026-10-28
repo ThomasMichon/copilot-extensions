@@ -85,3 +85,9 @@ global origin activation. A worker selects the origin at its actual
 `create-pr`/`push-changes` boundary, using its own authorized repository binding.
 Older runtimes reject the new flags; inspect the selected executable's help
 before using this optional interface rather than silently dropping metadata.
+
+Legacy PR records remain valid and unscoped. Older tools continue their existing
+publication workflow without the new options, but may discard the optional
+origin and label-result fields when saving a record written by a newer tool.
+Use compatible writer versions when relying on persisted origin scope; this
+mixed-version limitation does not remove labels already attached at the provider.
