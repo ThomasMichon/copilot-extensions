@@ -4,7 +4,7 @@
 
 _aw_native_seed_read_reply() {
     local LC_ALL=C
-    local field count index name value extra
+    local field count index name value extra eof_status=0
     local -a header=() environment=() argv=()
     for ((index=0; index<7; index++)); do
         IFS= read -r -d '' field || return 3
@@ -33,7 +33,8 @@ _aw_native_seed_read_reply() {
     [[ -n "${argv[0]}" ]] || return 3
     IFS= read -r -d '' field || return 3
     [[ "$field" == complete ]] || return 3
-    if IFS= read -r -d '' extra || [[ -n "$extra" ]]; then return 3; fi
+    IFS= read -r -d '' extra || eof_status=$?
+    [[ "$eof_status" == 1 && -z "$extra" ]] || return 3
     AW_NATIVE_SEED_ATTEMPT="${header[1]}"
     AW_NATIVE_SEED_RESOLUTION="${header[2]}"
     AW_NATIVE_SEED_OPERATION="${header[3]}"

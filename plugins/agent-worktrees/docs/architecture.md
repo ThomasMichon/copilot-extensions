@@ -658,6 +658,8 @@ arguments; an environment count of `-1` stays distinct from empty replacement.
 Invalid or truncated input returns 3 with a prompt-free diagnostic and no
 partially published reply. Counts use canonical decimal with at most nine
 digits, never provider text evaluated as arithmetic.
+The final read must report EOF specifically; an interrupted or otherwise failed
+empty read is not proof of stream completion.
 Parsing uses ASCII collation and case-sensitive matching independently of
 caller settings, restoring the caller's locale and `nocasematch` option on
 success and refusal.

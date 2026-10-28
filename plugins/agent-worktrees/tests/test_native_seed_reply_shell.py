@@ -100,6 +100,31 @@ printf '%s\n' "$valid_flags" "$invalid_flags"
     assert "Native preparation reply is invalid; no backend started." in result.stderr
 
 
+def test_reader_requires_real_eof_not_an_interrupted_or_failed_read(tmp_path):
+    frame = tmp_path / "valid-frame"
+    frame.write_bytes(nul_reply(_reply()))
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+read() {
+    local code=0
+    builtin read "$@" || code=$?
+    if [[ "${!#}" == extra && "$code" == 1 ]]; then return "$injected_status"; fi
+    return "$code"
+}
+for injected_status in 1 2 130 138 142; do
+    code=0
+    aw_native_seed_read_reply < "$2" || code=$?
+    printf '%s:%s\n' "$injected_status" "$code"
+done
+''', [frame.as_posix()])
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["1:0", "2:3", "130:3", "138:3", "142:3"]
+    assert result.stderr.splitlines() == [
+        "Native preparation reply is invalid; no backend started.",
+    ] * 4
+
+
 def test_invalid_frames_clear_previous_reply_without_evaluating_counts_or_leaking_data(tmp_path):
     forbidden = tmp_path / "must-not-run"
     valid = nul_reply(_reply({"SECRET": "must-not-appear"})).decode("utf-8")

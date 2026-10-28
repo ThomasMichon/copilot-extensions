@@ -84,7 +84,8 @@ frames, stale-output clearing and prompt-free failures. The malformed cases
 share one Bash process with `nocasematch` both on and off, reject uppercase
 identities/markers and preserve the caller's option and locale. A separate
 xtrace control checks private-field suppression and restoration after success
-and refusal. `test_session_shell.py` checks complete copied POSIX
+and refusal. EOF-status fault injection distinguishes real EOF from empty
+interrupted, timeout and other failed reads. `test_session_shell.py` checks complete copied POSIX
 setup assets and refusal before partial publication when the reader is absent.
 The existing callback inventory/publication controls cover its installer-owned
 copy scope. These are framing/copy controls, not finite callback execution,
