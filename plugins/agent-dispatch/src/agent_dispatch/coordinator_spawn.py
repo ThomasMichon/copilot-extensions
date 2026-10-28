@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, FiniteFloat, Field
 
 from .events import EventBus
 from .queue import RoutingAssignment, SpawnReservation, TaskError, TaskQueue
+from .queue_records import WorkerAdmissionInhibited
 
 
 class ReserveSpawnBody(BaseModel):
@@ -234,6 +235,8 @@ def register_spawn_routes(
                 driver=body.driver,
                 allocation_revision=body.allocation_revision,
             )
+        except WorkerAdmissionInhibited as exc:
+            raise HTTPException(status_code=409, detail=exc.detail()) from exc
         except TaskError as exc:
             msg = str(exc)
             status = 404 if msg.startswith("no such task") else 409

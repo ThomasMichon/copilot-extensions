@@ -53,7 +53,7 @@ def action_inhibited(
 
 def require_worker_admission() -> None:
     """Production queue boundary; embeddings select their policy explicitly."""
-    from .queue_records import TaskError
+    from .queue_records import WorkerAdmissionInhibited
 
     if action_inhibited("worker-admission", logger=logging.getLogger(__name__)):
-        raise TaskError("worker-admission is inhibited; retry after the action is cleared")
+        raise WorkerAdmissionInhibited()

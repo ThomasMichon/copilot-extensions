@@ -249,3 +249,16 @@ Initial tests must prove the current gap before adding the guards.
 - Followed the same launch trace through restricted startup reconciliation and
   optional one-shot handoff fallback. Two further regressions proved both
   bypasses before adding guards ahead of preparation/attempt consumption.
+
+### 2026-10-27 - Admission review corrections
+
+- #9351's independent review found atomic create-and-claim bypassing the
+  callback, and a launched script treating startup denial as terminal failure.
+  Actual REST/script regressions reproduced both gaps.
+- Guarded atomic create-and-claim after deduplication and before mutation, with
+  a second check before claim publication. A denial rolls back task/audit and
+  supersession writes rather than leaving a partially accepted request.
+- Added a structured retryable REST denial and same-worker script startup retry.
+  Cancellation preserves the unclaimed task. Gone unclaimed scripts retain
+  their reservation while inhibited, then use the existing failed-spawn retry
+  after clear; claimed scripts keep their prior failure semantics.

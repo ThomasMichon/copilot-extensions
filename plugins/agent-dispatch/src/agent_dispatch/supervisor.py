@@ -3141,6 +3141,25 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 except Exception:
                     sverdict = tracking.UNKNOWN
                 if sverdict == tracking.GONE:
+                    if status == Status.QUEUED and not owner:
+                        from .action_controls import action_inhibited
+
+                        if (
+                            res.get("startup_complete") is not True
+                            or action_inhibited("worker-admission", logger=log)
+                        ):
+                            continue
+                        try:
+                            self.client.fail_spawn(
+                                res["key"],
+                                detail="script body exited before acquiring the task",
+                                release_requested=True,
+                            )
+                            _cleanup_script_task_file(task_file)
+                            recovered += 1
+                        except DispatchError:
+                            log.exception("failed to release unclaimed script startup %s", res["key"])
+                        continue
                     _cleanup_script_task_file(task_file)
                     detail = (
                         "script body exited without explicit complete/abandon "

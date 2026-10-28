@@ -12,6 +12,15 @@ class DispatchError(RuntimeError):
         self.status_code = status_code
         self.detail = detail
 
+    def is_action_inhibited(self, action: str) -> bool:
+        """Only an explicit structured denial is safe to retry as inhibition."""
+        return (
+            self.status_code == 409 and isinstance(self.detail, dict)
+            and self.detail.get("code") == "action_inhibited"
+            and self.detail.get("action") == action
+            and self.detail.get("retryable") is True
+        )
+
     def as_dict(self) -> dict[str, object]:
         if isinstance(self.detail, dict):
             return self.detail

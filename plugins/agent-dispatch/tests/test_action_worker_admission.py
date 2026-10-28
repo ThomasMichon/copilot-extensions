@@ -81,7 +81,7 @@ def test_rest_claim_and_reservation_report_explicit_retryable_denial(
         ):
             result = api.post(path, json=body)
             assert result.status_code == 409
-            assert "worker-admission" in result.json()["detail"]
+            assert result.json()["detail"]["action"] == "worker-admission"
         _policy(root, False)
         assert api.post("/claim", json={
             "worker_id": "host/wt", "repo": TEST_REPO, "task_id": task.id,
