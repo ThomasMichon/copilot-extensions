@@ -206,6 +206,10 @@ design derived from this request, not additional verbatim operator requirements.
 This supersedes the earlier planning-only assignment; the canonical effort
 remains the whole implementation and qualification gate.
 
+## Operator direction on state placement
+
+> I would expect the stateful agenda to exist somewhere near the "worktree journal", as this is an agent's specific agenda, built from the efforts, tasks, random asides, etc. that it may wind up getting assigned during its existence.
+
 ## See Also
 
 - [Canonical effort and current proposal](README.md)

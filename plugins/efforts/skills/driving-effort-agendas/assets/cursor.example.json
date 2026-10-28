@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "worktree": "replace-with-the-assigned-worktree-or-lane-identity",
   "revision": 0,
   "status": "working",
   "max_depth": 3,
@@ -7,7 +8,7 @@
   "detours_without_progress": 0,
   "frames": [
     {
-      "agenda": "efforts/active/example/agenda.json",
+      "agenda": "agenda.json",
       "agenda_revision": "replace-with-reviewed-definition-identity",
       "node": "implement",
       "visits": {"implement": 1},

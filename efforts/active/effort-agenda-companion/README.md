@@ -19,6 +19,10 @@ detours. A coarse graph describes the current work package, its exit condition,
 and permitted advancement, branch, loop, or reset. A saved continuation makes a
 child effort a detour with a return point, rather than a replacement objective.
 
+The stateful agenda belongs to the worktree's continuing agent and lives near
+its journal, accumulating assigned efforts, tasks and asides rather than
+belonging to a single effort or session.
+
 The companion belongs in the **efforts plugin**, not agent-dispatch. Optional
 local CLI helpers may scaffold an agenda and inspect or maintain its cursor;
 neither a scheduler nor another plugin is required. The effort README remains
@@ -85,9 +89,13 @@ planning-only slice. Agents should progressively complete assigned efforts,
 bound detours and serendipity, understand their work stack and exit criteria,
 and always derive their next concrete action.
 
-Latest direction, verbatim:
+Execution direction, verbatim:
 
 > Great. Start working on this. Goal is that through these additions, agents will be able to focus on iterating down their assigned efforts, detouring in limited capacity when appropriate, and always be able to self-answer the question of "what do it do next?" For example, you keep stopping after each thing I say, which means we failed to assign an agenda based on my goal: taking inspiration from graph code, add a companion set of guidance, perhaps aided by lightweight CLI tooling, which helps an agent impsoe structure on itself when driving one or more efforts within its worktree lane, ensuring that agent progressively completes tasks, understands the exit criteria, and understands its "work stack" when following detours or dealing with serendipity.
+
+Latest placement direction, verbatim:
+
+> I would expect the stateful agenda to exist somewhere near the "worktree journal", as this is an agent's specific agenda, built from the efforts, tasks, random asides, etc. that it may wind up getting assigned during its existence.
 
 The [full inception exchange](inception-transcript.md) distinguishes operator
 requirements from agent recommendations and records publication-only omissions.
@@ -109,9 +117,13 @@ illustrative filenames or operations are not existing commands.
       Plan/Validation references, exit criteria, named outcomes and permitted
       transitions, including loop bounds and explicit exhaustion behavior;
       do not copy the plan or maintain a second completion checklist.
-- [ ] Separate the reviewed agenda from participant-local mutable execution
-      position, attempts, evidence references and saved continuations. Define
+- [ ] Separate reusable effort/board templates from the worktree-local mutable
+      agenda, execution position, attempts, evidence and saved continuations. Define
       cursor discovery/resumption without requiring a managed worktree.
+- [ ] Keep the agent-specific agenda, cursor and assignment queue beside the
+      worktree journal through an explicit owner/adopter locator; retain them
+      across sessions and reference multiple canonical effort/task sources.
+      Do not put the live agenda in each effort or invent a journal provider.
 - [ ] Specify nested call/return, blocked-child handling and return-time
       revalidation; distinguish a blocking child detour from parallel delegation.
 - [ ] Define guidance reconciliation so an adopted position or child detour is
@@ -268,3 +280,12 @@ limits, with the following explicit corrections:
 - Initial implementation adds an opt-in skill, manual JSON companion examples
   and a bounded continuous action/exit/detour/return procedure. Its limitations
   are explicit; no automatic executor or dispatch integration is introduced.
+
+### 2026-10-28 - Worktree agenda placement clarified
+- The operator placed the stateful agenda near the worktree journal: it belongs
+  to the continuing agent and can accumulate several efforts, tasks and assigned
+  asides over the worktree's lifetime.
+- The initial guidance now keeps its agenda/cursor together in an explicit
+  worktree journal/state home, referencing canonical sources rather than making
+  the live agenda a file owned by one effort. Provider discovery remains an
+  optional owner boundary; no staged journal API is presumed available.

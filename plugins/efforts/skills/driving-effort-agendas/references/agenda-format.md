@@ -6,13 +6,17 @@ It is a manual format, not a promise of executable schema enforcement.
 
 ## Reviewed definition
 
-An agenda contains `version: 1`, the canonical repository-relative `effort`
-README path, an `entry` node and a `nodes` object keyed by stable node IDs.
+An agenda contains `version: 1`, a `source` object identifying the current
+assignment (`kind`: `effort`, `task` or `aside`; `ref`: its canonical reference),
+an `entry` node and a `nodes` object keyed by stable node IDs.
+Additional accepted assignments can be queued as other boards in the same
+worktree state home. These are parts of the worktree's personal agenda, not
+separate repository-global agendas or copies of canonical work.
 Each node has:
 
 | Field | Meaning |
 |-------|---------|
-| `plan_ref` | Stable heading/item reference in the effort, not copied checklist state |
+| `source_ref` | Stable plan/validation heading or task criterion, not copied completion state |
 | `action` | Broad work package; the current concrete action lives in the cursor |
 | `exit` | Nonempty list of criteria to check before a declared transition |
 | `on` | Named outcome -> existing destination node |
@@ -20,7 +24,7 @@ Each node has:
 | `terminal` | Optional true value: reconcile the canonical gate before finishing |
 
 Use `on: {}` for a terminal node. Reference changes need an explicit
-reconciliation decision. The effort, not a terminal node, determines completion.
+reconciliation decision. The source contract, not a terminal node, determines completion.
 Do not put shell commands to execute or effectful expressions into this format.
 
 ## Lane cursor
@@ -35,13 +39,16 @@ The example's fields are deliberately small:
 - `queue`: other already-authorized root agenda paths, in order.
 - `parked`: nonblocking discoveries and their tracked references.
 
-A frame records `agenda`, `agenda_revision` (definition identity, not the
+A cursor records its `worktree` identity; a frame records `agenda`,
+`agenda_revision` (definition identity, not the
 whole README including its journal), `node`, `visits`, `evidence`,
 `next_action` and `return_to`. The root's `return_to` is null. A child's
 `return_to` records the parent's agenda, node and concrete next action.
 
-The agenda path resolves relative to the working repository root. A
-cross-repository continuation must additionally identify the owning repository
+The agenda path resolves relative to the cursor's state home, so moving through
+efforts does not move or replace the worktree's agenda. Source references resolve
+through their owning repository/task context, not against the state directory.
+A cross-repository continuation must additionally identify the owning repository
 and its authoritative checkout through the existing repository owner; do not
 guess a machine-local path or place a duplicate effort in the host.
 A changed/archive path is reconciled explicitly, not treated as a fresh run.
@@ -61,9 +68,10 @@ open. Avoid secrets and raw private execution artifacts in published records.
 6. Answer "what next?" and continue. Cursor movement alone never ticks the
    canonical checklist or proves an entire effort is Done.
 
-For a terminal node, check every remaining canonical Plan/Validation item,
-record any permitted transfer, and reconcile effort status before setting the
-cursor complete or selecting a queued root.
+For an effort terminal node, check every remaining canonical Plan/Validation
+item, record any permitted transfer, and reconcile effort status before
+selecting a queued root or completing the cursor. A task/assigned aside instead
+uses its own stated acceptance gate; do not manufacture an effort for it.
 
 ## Worked detour and return
 
@@ -96,11 +104,17 @@ child.
 
 ## Adoption and recovery
 
-Persist the definition with the reviewed effort; keep the lane cursor local or
-in the explicitly selected participant state home. Record the cursor locator
-in the assignment/handoff so a fresh session need not guess which lane is active.
-Do not create a repository-wide pointer or write into another participant's
-cursor.
+Keep the stateful agenda and cursor together beside the worktree journal in its
+owner-provided worktree-specific home. Reusable graph templates may be published
+with an effort, but the live roster, cursor, queue and work stack are agent-local.
+Record the state-home locator and worktree identity in the assignment/handoff
+so successor sessions continue the same agenda.
+
+Do not assume an unimplemented semantic-journal API or write into a provider's
+private tracking layout. An explicit caller-provided journal/state-home path
+is a valid standalone boundary; without a journal provider, the adopter may
+select a worktree-local `.effort-agenda/<lane>/` fallback. Do not create a
+repository-wide pointer or write into another participant's cursor.
 
 No cursor exists by default. Opting out leaves ordinary efforts, bindings and
 claims intact; explicitly settle or transfer any active child/root

@@ -15,9 +15,11 @@ description: >
 
 # Driving Effort Agendas
 
-This is an **opt-in process aide**, owned by efforts. It runs without a service,
-executor plugin or CLI helper. Use `planning-efforts` for the canonical effort
-contract; this skill supplies execution position, not another completion ledger.
+This is an **opt-in process aide**, owned by efforts. The stateful agenda belongs
+to the worktree's continuing agent, not an individual effort or session.
+It can draw from several efforts, tasks and assigned asides. Use
+`planning-efforts` for canonical effort contracts; this skill supplies the
+agent's execution position and work stack, not another completion ledger.
 
 ## 1. Adopt a lane
 
@@ -26,17 +28,26 @@ in. Identify the assigned root effort(s), permitted scope and current execution
 lane. For a managed worktree, keep its existing participant/slice and claims:
 adopting a cursor does not reserve a different participant's work.
 
-Create a small reviewed `agenda.json` beside the effort README using
-[`assets/agenda.example.json`](assets/agenda.example.json). Reference stable
-Plan/Validation headings; do not copy their completion state. Nodes represent
-work packages such as implement, validate, review and reconcile, not tool calls.
+Resolve the worktree journal's **worktree-specific state home** through its
+owner's published locator or an explicit assignment/adopter setting. Keep
+`agenda.json` and `cursor.json` together there, near the journal, without
+rewriting its records or guessing an implementation-private path. A shared
+journal home needs an owner-allocated compartment for this worktree.
+There is no mandatory journal provider: when none is available, choose an
+explicit worktree-local home such as `.effort-agenda/<lane>/`, excluded from
+publication using the repository's normal ignore convention.
 
-Keep one mutable cursor **per lane**, with its exact path in the assignment and
-handoff. Start from [`assets/cursor.example.json`](assets/cursor.example.json).
-A suggested local path is `.effort-agenda/<lane>/cursor.json` inside the working
-checkout, excluded from publication using the repository's normal ignore
-convention. This is not a repository-global "current effort." Independent
-worktrees and participants use independent cursors.
+Use [`assets/agenda.example.json`](assets/agenda.example.json) and
+[`assets/cursor.example.json`](assets/cursor.example.json) as starting examples.
+The mutable agenda is the agent's accepted roster and sequencing, not a file
+owned by one effort. Reference canonical efforts/tasks and stable plan headings;
+do not copy their completion state. Shared effort-local boards may be reusable
+templates, never the active worktree cursor.
+
+Keep the exact state-home/cursor locator in the assignment and handoff, stable
+across the worktree's sessions. Independent worktrees and participants use
+independent homes. This is neither a repository-global "current effort" nor a
+new session's scratch plan.
 
 The [format and worked return](references/agenda-format.md) define the small
 manual JSON convention. The examples require adaptation to actual plan
@@ -45,12 +56,12 @@ embedded in the data.
 
 ## 2. Answer "what next?" before each work unit
 
-Read the canonical effort, current agenda node and **top frame** of the cursor.
+Read the current agenda node, its canonical source and the **top frame** of the cursor.
 After a merge, validation outcome, detour return, handoff or context rollover,
 refresh them before choosing work. Produce this short answer:
 
 ```text
-Root goal: <assigned outcome and canonical effort>
+Root goal: <assigned outcome and canonical effort/task reference>
 Work stack: <root node -> child node -> active node>
 Now: <one concrete action at the active node>
 Exit: <criteria not yet met; relevant evidence>
@@ -105,7 +116,7 @@ blocking stack frame.
 
 ## 5. Return and continue
 
-Check the child's own effort completion gate, not merely its PR/task/worktree
+Check the child's own effort/task acceptance gate, not merely its PR or worktree
 state. Preserve a blocked/failed child on the stack with a concrete next action
 or steering need; do not silently pop it.
 
@@ -114,9 +125,15 @@ parent node/action, and **revalidate against current reality**. Child changes
 may invalidate old evidence. Re-observe uncertain effects instead of replaying
 them. Increment the parent-progress/detour counters honestly.
 
-After completing one root effort, choose the next already-authorized queued
-root, if any. New unrelated objectives require assignment, not opportunistic
-queue growth. Finish only when the canonical effort gates and assigned queue
+An incoming assignment can extend the worktree's roster: record its source,
+scope and exit criteria, then explicitly queue it or accept a priority change.
+Do not silently discard the existing stack. A task or assigned aside need not
+be inflated into an effort; use its stated acceptance gate. Incidental
+discoveries stay parked until assigned or justified as bounded prerequisites.
+
+After completing one root, choose the next already-authorized queued root, if
+any. New unrelated objectives require assignment, not opportunistic queue
+growth. Finish only when the canonical effort/task gates and assigned queue
 are resolved, or preserve the open stack through a real blocker or handoff.
 
 ## Resume, reminders and manual limitations
