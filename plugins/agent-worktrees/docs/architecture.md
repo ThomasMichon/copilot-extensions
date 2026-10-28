@@ -658,6 +658,9 @@ arguments; an environment count of `-1` stays distinct from empty replacement.
 Invalid or truncated input returns 3 with a prompt-free diagnostic and no
 partially published reply. Counts use canonical decimal with at most nine
 digits, never provider text evaluated as arithmetic.
+Parsing uses ASCII collation and case-sensitive matching independently of
+caller settings, restoring the caller's locale and `nocasematch` option on
+success and refusal.
 The existing installers, publication inventory and uninstall profile own this
 asset; `session_shell.prepare` can copy it with the POSIX normalized setup,
 launch-command and reconciliation scripts outside the removable roots.

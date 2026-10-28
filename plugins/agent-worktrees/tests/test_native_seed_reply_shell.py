@@ -79,9 +79,13 @@ def test_invalid_frames_clear_previous_reply_without_evaluating_counts_or_leakin
     forbidden = tmp_path / "must-not-run"
     valid = nul_reply(_reply({"SECRET": "must-not-appear"})).decode("utf-8")
     fields = valid[:-1].split("\0")
-    malformed = [valid[:-1], valid + "tail", valid + "\0", "", valid.replace("complete", "unfinished")]
+    malformed = [
+        valid[:-1], valid + "tail", valid + "\0", "", valid.replace("complete", "unfinished"),
+        valid.replace("complete", "COMPLETE"),
+    ]
     for index, value in [
-        (0, "unknown"), (1, ""), (2, "wrong-id"), (3, "A" * 32), (4, "wrong-parent"),
+        (0, "unknown"), (0, fields[0].upper()), (1, ""), (2, "wrong-id"),
+        (3, "A" * 32), (4, "wrong-parent"),
         (6, "-2"), (6, "01"), (6, "999999999999999999999999"),
         (6, f"index[$(touch '{forbidden.as_posix()}')]"), (7, ""), (7, "BAD=NAME"),
         (9, "0"), (9, "01"), (9, "1+1"), (10, ""),
@@ -89,7 +93,9 @@ def test_invalid_frames_clear_previous_reply_without_evaluating_counts_or_leakin
         changed = fields.copy()
         changed[index] = value
         malformed.append("\0".join(changed) + "\0")
-    paths = []
+    valid_path = tmp_path / "valid-frame"
+    valid_path.write_bytes(valid.encode("utf-8"))
+    paths = [valid_path.as_posix()]
     for index, frame in enumerate(malformed):
         path = tmp_path / f"frame-{index}"
         path.write_bytes(frame.encode("utf-8"))
@@ -97,19 +103,34 @@ def test_invalid_frames_clear_previous_reply_without_evaluating_counts_or_leakin
     result = _run(r'''
 set -euo pipefail
 . "$1"
-shift
-for frame in "$@"; do
-    AW_NATIVE_SEED_ARGV=(previous)
-    AW_NATIVE_SEED_ENV=(previous)
-    AW_NATIVE_SEED_OPERATION=previous
-    if aw_native_seed_read_reply < "$frame"; then exit 90; else code=$?; fi
-    [[ $code == 3 && -z "$AW_NATIVE_SEED_OPERATION" && \
-        -z "${AW_NATIVE_SEED_ARGV[0]+x}" && -z "${AW_NATIVE_SEED_ENV[0]+x}" ]]
+valid="$2"
+shift 2
+assert_mode() {
+    local actual
+    if shopt -q nocasematch; then actual=on; else actual=off; fi
+    [[ "$actual" == "$nocase" ]]
+}
+original_locale="${LC_ALL-unset}"
+for nocase in off on; do
+    if [[ "$nocase" == on ]]; then shopt -s nocasematch; else shopt -u nocasematch; fi
+    aw_native_seed_read_reply < "$valid"
+    assert_mode
+    [[ "${LC_ALL-unset}" == "$original_locale" ]]
+    for frame in "$@"; do
+        AW_NATIVE_SEED_ARGV=(previous)
+        AW_NATIVE_SEED_ENV=(previous)
+        AW_NATIVE_SEED_OPERATION=previous
+        if aw_native_seed_read_reply < "$frame"; then exit 90; else code=$?; fi
+        [[ $code == 3 && -z "$AW_NATIVE_SEED_OPERATION" && \
+            -z "${AW_NATIVE_SEED_ARGV[0]+x}" && -z "${AW_NATIVE_SEED_ENV[0]+x}" ]]
+        assert_mode
+        [[ "${LC_ALL-unset}" == "$original_locale" ]]
+    done
 done
 ''', paths)
     assert result.returncode == 0, result.stdout + result.stderr
     assert not result.stdout
     assert result.stderr.splitlines() == [
         "Native preparation reply is invalid; no backend started.",
-    ] * len(malformed)
+    ] * (len(malformed) * 2)
     assert not forbidden.exists()

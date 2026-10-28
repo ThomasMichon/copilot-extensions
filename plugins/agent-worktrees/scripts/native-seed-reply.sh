@@ -3,6 +3,7 @@
 # Dot-source only. Reading a reply neither launches a child nor applies its env.
 
 _aw_native_seed_read_reply() {
+    local LC_ALL=C
     local field count index name value extra
     local -a header=() environment=() argv=()
     for ((index=0; index<7; index++)); do
@@ -44,6 +45,7 @@ _aw_native_seed_read_reply() {
 }
 
 aw_native_seed_read_reply() {
+    local nocasematch=0 status=0
     AW_NATIVE_SEED_ATTEMPT=""
     AW_NATIVE_SEED_RESOLUTION=""
     AW_NATIVE_SEED_OPERATION=""
@@ -52,7 +54,13 @@ aw_native_seed_read_reply() {
     AW_NATIVE_SEED_ENV_COUNT=""
     AW_NATIVE_SEED_ENV=()
     AW_NATIVE_SEED_ARGV=()
-    if ! _aw_native_seed_read_reply; then
+    if shopt -q nocasematch; then
+        nocasematch=1
+        shopt -u nocasematch
+    fi
+    _aw_native_seed_read_reply || status=3
+    if [[ "$nocasematch" == 1 ]]; then shopt -s nocasematch; fi
+    if [[ "$status" != 0 ]]; then
         printf 'Native preparation reply is invalid; no backend started.\n' >&2
         return 3
     fi
