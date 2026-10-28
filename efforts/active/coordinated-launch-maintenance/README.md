@@ -234,6 +234,14 @@ repository history.
   installed slot, and retain the same caller-Job and live-loader contract.
   Canonical Manager removal and absence of its additional owned Task join final
   cleanup. Do not patch the Worktrees environment with individual packages.
+- The real Manager constructor at `434c79d709` failed in run 40768772886
+  before enqueue: cold `request_context()` eagerly imported the normal engine
+  client and its not-yet-installed `worktree_identity` dependency. Capture the
+  existing environment allowlist without importing that client; preserve any
+  already-consumed provider when the client is already loaded. A real isolated
+  `-I -S` source-only subprocess now exercises the cold boundary, while the
+  warm consumed-provider and credential-exclusion controls remain passing.
+  Three focused Manager controls passed; fresh native construction is required.
 
 ### 2026-10-28 - Integrate the merged finite cleanup owner before release
 

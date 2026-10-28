@@ -132,12 +132,13 @@ def source_identity() -> dict[str, object]:
 
 
 def request_context() -> dict[str, str]:
-    from .engine_client import ENGINE_ARGV_ENV, inherited_engine_command
-
     context = {key: os.environ[key] for key in _CONTEXT_KEYS if key in os.environ}
-    accepted = inherited_engine_command()
-    if accepted is not None:
-        context[ENGINE_ARGV_ENV] = json.dumps(accepted)
+    if f"{__package__}.engine_client" in sys.modules:
+        from .engine_client import ENGINE_ARGV_ENV, inherited_engine_command
+
+        accepted = inherited_engine_command()
+        if accepted is not None:
+            context[ENGINE_ARGV_ENV] = json.dumps(accepted)
     return context
 
 
