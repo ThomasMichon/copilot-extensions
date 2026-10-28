@@ -72,6 +72,10 @@ installation or rollout was performed in this wave.** Current reports and
 pinned intent cannot establish a demonstrated remaining implementation defect.
 The first wave's twelve bounded source counterexamples retain their historical
 audit pin; #5791, #5754 and #5356 do not become duplicate implementations.
+At this wave's pin, #7940's configuration and supplier integration is also
+documented source-complete in #8286. Its next work belongs to the retained
+#7939 release/installed and #7935 native qualification, not another source
+claim or a reopened extraction proposal.
 
 ## What should be worked first
 
