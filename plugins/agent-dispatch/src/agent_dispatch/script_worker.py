@@ -128,7 +128,7 @@ class ScriptTaskRuntime:
         return self
 
     def __exit__(self, exc_type, exc, _tb) -> bool:
-        if exc is not None and self._admission_pending and not self._started:
+        if self._admission_pending and not self._started:
             self.close()
             return False
         if exc is not None and not self._terminal:

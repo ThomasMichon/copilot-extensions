@@ -268,3 +268,7 @@ Initial tests must prove the current gap before adding the guards.
   Keep the pending flag until the claim is a mapping for this exact task.
   Regressions cover a real coordinator hold/clear transition and all invalid
   claim shapes without start or abandonment.
+- Extended the pending-cancellation guard to normal context exit after the
+  script handles cancellation internally. No terminal report is required or
+  sent while admission is still pending, whether cancellation escapes or is
+  caught by the body; claimed script terminal reporting remains unchanged.

@@ -185,8 +185,9 @@ def test_exited_unclaimed_script_preserves_task_and_inhibition(
         assert queue.get_reservation(reservation.key) == pending
 
 
+@pytest.mark.parametrize("handled", [False, True])
 def test_canceled_admission_wait_does_not_report_terminal_failure(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, handled: bool,
 ) -> None:
     from agent_dispatch import script_worker
 
@@ -202,9 +203,20 @@ def test_canceled_admission_wait_does_not_report_terminal_failure(
 
     monkeypatch.setattr(client, "claim", deny)
     monkeypatch.setattr(script_worker.time, "sleep", cancel)
-    with pytest.raises(KeyboardInterrupt):
+
+    def run() -> None:
         with ScriptTaskRuntime(client, "pending", "worker") as runtime:
-            runtime.announce_start()
+            try:
+                runtime.announce_start()
+            except KeyboardInterrupt:
+                if not handled:
+                    raise
+
+    if handled:
+        run()
+    else:
+        with pytest.raises(KeyboardInterrupt):
+            run()
     assert not client.abandon_calls and client.closed
 
 
