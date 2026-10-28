@@ -99,7 +99,7 @@ def installed_native_runtime(tmp_path_factory, native_runtime_source):
     assert built.returncode == 0, log.read_text(encoding="utf-8")
     installed = json.loads(result_path.read_text(encoding="utf-8"))
     slot = root / "versions" / installed["runtime_version"]
-    python = slot / "Scripts/python.exe"
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     prefix = [str(python), "-I", "-B", "-X", "utf8"]
     checked = run_caller_owned(
         [*prefix, "-c",

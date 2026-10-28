@@ -71,7 +71,8 @@ def prepare(
         ),
         "default-setup.sh": (
             "default-setup.sh", "launch-command.sh",
-            "native-seed-reply.sh", "native-seed-boundary.sh", "reconcile-machine-settings.sh",
+            "native-seed-reply.sh", "native-seed-boundary.sh", "native-seed-setup.sh",
+            "reconcile-machine-settings.sh",
         ),
     }.get(wrapper.name)
     if names is None:

@@ -631,11 +631,17 @@ The provider's read-only `--describe-contract` reports
 formats from the executing runtime. JSON remains the default, with unchanged
 fields and effects. The additive `--output-format nul` is available only for
 `prepare` and `setup`; callback phases reject it before runtime selection or
-receipt mutation. It is provider-first groundwork, not an activated POSIX
-consumer. A future caller must discover support from the selected current
-runtime before sending new syntax, retain a supported legacy path for older
-providers or rollback, and never retry an uncertain preparation using another
-format. Existing JSON callers need no capability probe or migration.
+receipt mutation. Copied canonical POSIX setup conditionally consumes this form
+after discovering support from the selected current runtime. Unsupported or
+unknown providers retain the legacy launch plan; a changed/incompatible runtime
+at copied setup entry refuses before admission rather than replaying effects.
+Existing JSON callers need no capability probe or migration.
+The optional preparation-only `--environment-reply execution-hint` returns only
+the new execution hint, advertised separately in `preparation_environment_modes`.
+Copied POSIX setup requires it before using the option: unused inherited values,
+including non-UTF-8 POSIX environment bytes, never enter its NUL preparation
+reply. The shell still inherits those bytes unchanged. The default `full` mode
+and existing JSON/NUL callers retain their complete reply semantics.
 Both preparation forms reject an empty executable before any seed claim or
 process query; the NUL encoder and reader retain the same nonempty-executable
 rule. Empty subsequent arguments remain supported.
@@ -649,17 +655,18 @@ preparation records `unknown`, not a confirmed spawn or automatic replay.
 The read-only descriptor advertises this additive behavior in
 `setup_process_start_time_sources: ["caller", "provider"]`. Existing callers
 continue supplying their token unchanged, and the JSON/NUL preparation replies
-are unchanged. No caller selects provider-query mode yet: a future consumer
-must establish this capability on its selected runtime before omitting the
-token and handle supported rollback without replaying effects. Backend
+are unchanged. Copied POSIX setup establishes this capability on its selected
+runtime before omitting the token and never retries an uncertain preparation.
+Backend
 `spawned` callbacks still require the native child's captured birth token;
 this setup-only query is neither a retained child handle nor backend
 exec/terminal/signal qualification. No Bash-specific process ABI, separate
 identity command, subprocess preflight or lifetime helper is introduced.
 
-The dormant POSIX `exec` phase is a separate, optional backend execution mode,
-advertised as `backend_execution_modes: ["posix-exec-v1"]` by that same selected
-POSIX runtime (the Windows list is empty). It takes the original prepared
+The POSIX `exec` phase is a separate, optional backend execution mode,
+advertised in `backend_execution_modes` as `posix-exec-v1` and the additive
+`posix-exec-env-v1` by that same selected POSIX runtime (the Windows list is
+empty). It takes the original prepared
 correlation/operation, literal backend command and an empty
 `.native-seed-exec.*` status file in the launch-owned
 `.shell` directory. It does not prepare or claim a second prompt. The helper
@@ -672,6 +679,27 @@ observer child or zombie. The observer remains in caller containment, ignores
 only terminal interrupt/quit, and is bounded to ten seconds plus a one-second
 hard termination grace. It writes only `0` or `3`, never prompt/argv/environment
 bytes, to the private completion file.
+Immediately before exec, the child closes unrelated descriptors discovered
+through the native descriptor directory, retaining only stdio and its
+close-on-exec observer writer. This matches the legacy `Popen(close_fds=True)`
+backend boundary, including inherited descriptors above a subsequently lowered
+file-descriptor limit. The environment pipe has already been consumed and
+closed; the finite observer keeps its own protocol and runtime custody.
+
+`posix-exec-env-v1` additionally accepts an inherited
+`--backend-environment-fd` greater than 2. Copied setup requires this capability:
+it preserves its inherited environment, applies only the new backend execution hint
+from the preparation reply, and never puts environment values in external argv.
+The exec interpreter starts with Python overrides removed. A finite, private
+NUL pipe carries the original export-presence/value pairs for `PYTHONPATH`,
+`PYTHONHOME`, `VIRTUAL_ENV` and `__PYVENV_LAUNCHER__`, including empty or unset
+values. The last variable can be consumed by macOS Python before application
+code runs. The provider reads a versioned frame with a ten-second/16-MiB bound,
+closes the descriptor before observer creation, and restores those four entries
+only in the environment passed to the actual backend exec. It does not evaluate
+shell text, import the finite provider's sanitized environment, or add a resident
+environment helper. Existing exec callers without the descriptor are unchanged;
+other phases reject it before runtime selection or receipt effects.
 
 The exec pipe is not backend readiness or application acknowledgement. A fast
 exit before the live PID/birth check, observer loss, or incomplete observation
@@ -693,13 +721,73 @@ the pipe is closed and the helper's handlers are restored. Successful exec
 resets the caught handler in the kernel. An already ignored `SIGINT` remains
 ignored. Cleanup-time interruption cannot turn a failed exec into success-shaped
 EOF.
-Only the explicit exec-error path permits restoration. A future native
-consumer must discover this capability before invoking the new phase, retain
-the actual foreground wait and exit code, settle the finite status boundary,
-and resolve the return handler afresh. No production caller selects this mode
-yet. Ordinary provider syntax/default replies and Windows child-handle
-ownership are unchanged; copied setup activation, actual TTY/Ctrl+C behavior
-and installation-removal acceptance remain separate work.
+Only the explicit exec-error path permits restoration. The copied
+`native-seed-setup.sh` consumer discovers this capability before invoking the
+phase. Bash retains the actual foreground wait, original stdin/terminal and
+exit code; the backend's direct child exec-replaces Python instead of retaining
+a Python lifetime waiter. Bash catches its own terminal interrupt while the
+backend receives and handles the original signal. After the child returns,
+Bash settles the bounded status-only observer receipt and resolves the return
+handler afresh. Every unconfirmed observer result, including status 3, warns
+without changing the actual backend exit code; an already settled status 3
+does not trigger a second mutation. Exec never runs through the finite provider timeout.
+Return callbacks first discover the then-current version-1 handler read-only.
+Missing or incompatible handlers close quietly without claiming receipt
+delivery. A compatible callback failure warns unless a fresh read-only probe
+confirms removal or incompatibility; a timeout, producer or validator error
+remains indeterminate and warns. An existing but non-executable interpreter
+also remains indeterminate, rather than being classified as absent.
+No effectful callback is replayed.
+Ordinary provider syntax/default replies and Windows child-handle ownership
+are unchanged. Real Copilot/mux and supported installation-removal acceptance
+remain separate from the copied native consumer controls.
+
+The planner queries the descriptor through the exact current completed
+runtime's retention bootstrap before selecting native setup. The copied
+consumer checks again at entry and before backend preparation, without a
+capability cache. Each query, its preparation and its exec use the same selected
+interpreter array; a selector change cannot substitute another provider between
+discovery and seed effects. Descriptor output streams directly into a separately
+bounded validator using that interpreter's stdlib, with a 64-KiB input cap and
+ten-second deadline. Both producer and validator must succeed; an escaped
+stdout holder cannot extend collection indefinitely. Control utilities use the
+shell's standard utility search to resolve an absolute executable independently
+of the backend's unchanged PATH, without applying that search PATH to the child.
+Lookup removes a matching inherited shell function only in its subshell and
+uses `getconf PATH`; stock macOS Bash's `command -p -v` does not reliably locate
+utilities under a restricted caller PATH.
+Validation uses neither shell evaluation nor a second identity RPC. Effect-side current-runtime
+validation remains authoritative across a selector race. Admission-only launches,
+including native resume, retain the legacy owner and its launch fence: finite
+copied setup does not supply equivalent exclusion through child startup.
+Copy-only relocation
+does not query capabilities or add admission flags: cold `embody` retains its
+existing prompt owner. Custom setup and unsupported runtimes keep their
+legacy path; no effectful invocation is retried in another mode.
+After setup admission, the copied shell clears an inherited backend execution
+hint. The actual seeded backend receives only its own new hint. POSIX
+`env_script` launches and a nonempty effective `BASH_ENV` retain the legacy owner before capability discovery or
+asset copying: arbitrary sourced early exits and replacement EXIT traps cannot
+share the native setup's sole EXIT callback without changing shell semantics.
+The planner uses the selected session/profile environment over inherited
+values, including an explicit empty override. Direct/stale native setup also
+refuses a pre-existing EXIT trap before admission instead of replacing it.
+Mux plans require a known effective environment before selecting this owner:
+the server/session environment can differ from the planning client. The
+literal Python pane builder can forward an explicit empty `BASH_ENV` override;
+a nonempty one retains legacy ownership. Opaque shell-rendered creation,
+JSON and Launcher mux plans always retain the legacy owner, even with an
+explicit empty override: Manager's shell renderer currently passes the shell
+quotation characters literally. Correct literal forwarding and qualification
+of that Manager path remain pending under #8669; this fence does not fix its
+general environment quoting or establish installation survival for that path.
+Plans containing non-UTF-8 POSIX command or record-path bytes also retain that
+owner before discovery or copying; the literal reply remains strict UTF-8.
+Direct NUL preparation with such arguments refuses before runtime selection or
+seed claim rather than admitting an unencodable handoff.
+The existing outer owner records the actual final setup status. A stale/direct
+native envelope with an environment script refuses before admission or sourcing.
+This unsupported path remains an installation-survival gap, not native closure.
 
 The NUL reply is one fully encoded UTF-8 byte sequence, with a NUL after every
 field, in this order:
@@ -723,7 +811,7 @@ word splitting, or source the fields as shell code. The provider does not
 spawn a backend or retain a parser to wait for one; prompt-bearing reply bytes
 remain on the private preparation pipe, outside execution receipts and logs.
 
-`scripts/native-seed-reply.sh` is a dormant Bash reader for this frame.
+`scripts/native-seed-reply.sh` is the Bash reader for this frame.
 Dot-sourcing it only defines functions. `aw_native_seed_read_reply` consumes
 stdin through EOF, clears previous output, validates framing and correlation,
 and then publishes literal `AW_NATIVE_SEED_ARGV` / `AW_NATIVE_SEED_ENV` arrays
@@ -749,7 +837,7 @@ the original tracing setting afterward; it never traces reply data itself.
 The existing installers, publication inventory and uninstall profile own this
 asset; `session_shell.prepare` can copy it with the POSIX normalized setup,
 launch-command and reconciliation scripts outside the removable roots.
-The copied, dormant `scripts/native-seed-boundary.sh` adds a finite transport.
+The copied `scripts/native-seed-boundary.sh` adds a finite transport.
 `aw_native_seed_phase <root> <provider-arguments...>` reselects that root's
 current completed numbered runtime on every call, invoking its retention
 bootstrap and version-1 backend provider with closed stdin. It neither searches

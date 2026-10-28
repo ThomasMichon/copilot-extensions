@@ -428,6 +428,7 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
         "native-seed-boundary.ps1",
         "native-seed-reply.sh",
         "native-seed-boundary.sh",
+        "native-seed-setup.sh",
         "default-setup.sh",
         "launch-command.ps1",
         "launch-command.sh",

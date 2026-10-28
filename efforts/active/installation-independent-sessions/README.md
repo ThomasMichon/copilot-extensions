@@ -212,6 +212,10 @@ and [repair register](reconstruction-findings.md) retain the evidence and limits
 - [x] Let the existing setup provider resolve an omitted canonical birth token
   and record post-preparation identity uncertainty (#9401). Native consumer
   selection and actual backend child/exec ownership remain open.
+- [x] Land and natively qualify the dormant POSIX exec-replacement provider
+  (#9405), including literal exec failure, fast-exit custody, interpreter
+  signal defaults and interrupted attempt/cleanup boundaries. Conditional
+  copied consumer selection and actual terminal ownership remain open.
 - [ ] Remove both deferred-setup and final-backend runtime-Python waiters.
   Reuse finite seed preparation, existing seed custody and execution receipts;
   the native shell owns the actual child handle and wait. The normalized
@@ -478,6 +482,100 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   separation. The shared batch deadline and all content checks are unchanged.
   R9 records the remaining native installed-batch acceptance; these component
   results do not close the parent effort or establish the sole timeout cause.
+
+### 2026-10-28 - Copied POSIX consumer review corrections
+
+- The previous exact-head native packet `40754070011` passed 173 Linux and
+  173 stock macOS Bash 3.2 controls, plus the selected Windows packet.
+  Copilot review `5688607493` on `d976a95b8dce0dfc60a43b3d15d5516bef24aeec`
+  nevertheless found eight correctness gaps; that verdict blocks merge.
+- Retain the legacy owner for admission-only/native-resume plans rather than
+  replace its exclusion with a finite check or introduce a lifetime lease.
+  The seeded copied path now binds descriptor discovery, preparation and exec
+  to one interpreter array without a cross-generation capability cache.
+- Keep environment values out of external argv. Require the additive,
+  selected-provider `posix-exec-env-v1` capability before using a private
+  literal environment pipe; preserve primed Python variables without letting
+  them redirect the exec interpreter. Clear the inherited setup hint, apply
+  only the actual backend's new hint, chain repository EXIT traps after the
+  setup return callback, warn on observer status 3 without another mutation,
+  and treat discovery custody uncertainty as unsupported/legacy selection.
+- Focused local validation passed 167 controls with 32 explicit
+  native-platform skips in 52.06 seconds; bounded cleanup was verified.
+  Earlier shell validation caught and corrected a delimiter error in this
+  repair. Fresh native qualification, required checks and a current-head
+  review remain pending. No rollout or real removal acceptance has run;
+  admission-only native replacement and the parent live gates remain open.
+
+### 2026-10-28 - Conditional copied POSIX consumer candidate
+
+- Continue the already qualified provider prerequisites with canonical Bash
+  setup selection. Query the exact selected completed runtime before choosing
+  the native envelope; unknown/older providers retain the legacy plan.
+  Copied entry rechecks before admission and refuses a changed incompatible
+  selection without replay. Copy-only relocation preserves cold embodiment's
+  existing prompt and admission owners.
+- The copied setup helper obtains setup birth through the existing provider,
+  consumes the counted literal frame and leaves the actual foreground wait
+  with Bash. Its direct child invokes the optional exec phase without the
+  finite phase timeout. Current-root callbacks record actual backend/setup
+  returns; the status-only observer receipt remains bounded and prompt-free.
+  Capability evidence is reused only for the unchanged selected interpreter.
+- Retain platform-specific resolution correlation and native argument
+  boundaries. Ship the helper through all existing installer, publication,
+  copy and uninstall inventories. This closes existing session-hosting intent
+  and follows the service-contract evolution and transient-hook patterns; no
+  new lifecycle, prompt, process-birth or maintenance authority is introduced.
+- Local reader/copy/capability controls passed 75 tests with nine platform
+  skips. A broader publication run exhausted its 180-second aggregate budget
+  without an assertion failure and is not a pass; the narrowed affected
+  shipping/publication packet passed all 15 selected controls. The generated
+  installer declaration was refreshed after its contract check reported drift.
+- New native controls use the real copied setup and disposable installed
+  runtime on Linux and stock macOS Bash 3.2, including seeded/resumed literal
+  streams, actual nested returns, pre-admission selector loss, and a real PTY
+  with foreground input and Ctrl+C beyond the finite-provider deadline.
+  Native execution, required gates and review remain pending. No source or
+  component result closes real Copilot/mux, supported-removal, installed
+  rollout, standby or the parent effort's live acceptance.
+- First exact-head native run `40752002050` on
+  `3c219b1a3f347e1d4189ea01d4182603fca87c1e` passed 172 controls on Linux
+  and stock macOS Bash 3.2, with 17 Windows-only skips and one PTY failure
+  on each platform; Windows passed. The new PTY test's substring barrier
+  mistakenly accepted `BACKEND READ` inside `BACKEND READY`, permitting
+  Ctrl+C before input consumption. Use a distinct acknowledgement and exact
+  line matching. This is a fixture synchronization correction, not a passing
+  native packet or evidence that terminal acceptance can be skipped.
+
+### 2026-10-28 - Dormant POSIX exec prerequisite merged
+
+- #9405 merged as `236950f312c23e7afdd4d5dde062311e489c6a34` after genuine
+  exact-head Copilot approval `5687661695` on
+  `1473c0b57f6e3998012b56cde7b04ae7651fc840`, all three findings resolved
+  and every required provider check green. The final review reported no
+  active issues. This is a dormant provider, not an activated native consumer.
+- Exact-head native run `40742193709` passed all three jobs. Linux Bash 5.2.21
+  and stock macOS Bash 3.2.57 each passed 156 controls with 17 Windows-only
+  skips; Windows passed nine setup/admission controls and the independent
+  Picker-handoff control. The required local unit packet passed 2,565 with
+  12 deselected and coverage once at the cleanup candidate; later changes
+  touched only the native exec module, native tests and documentation.
+  Final provider-required CI also passed.
+- All three signal findings were reproduced and fixed through real native
+  controls. Preserve interpreter-default restoration, immediate interruption
+  during an exec attempt, cleanup-only deferral and unknown seed custody.
+  Neither an observer's status file nor PID/birth identity is application
+  readiness or kernel exec attestation.
+- Post-merge pull-forward initially replayed the already-squashed series and
+  auto-aborted. The retained pre-completion ref and identical whole-series /
+  merged patch IDs proved every local commit was already merged before
+  advancing only that range through the supported rebase recovery. Normal
+  managed completion then confirmed the retained source worktree at upstream.
+- Re-read the parent Plan and Validation Plan after merge. Closed only the
+  dormant exec prerequisite. Continue conditional copied POSIX consumer
+  selection, actual foreground/TTY/Ctrl+C ownership and current-handler
+  return callbacks; both production POSIX waiter removals, release, standby
+  and selected-host acceptance remain open. No rollout or host effect ran.
 
 ### 2026-10-28 - Picker per-attempt startup handoff
 

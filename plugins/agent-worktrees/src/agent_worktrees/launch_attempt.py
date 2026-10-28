@@ -220,9 +220,11 @@ def resolve(args, work: Callable[[], int]) -> int:
 
         native_setup = native_setup_index(command) if isinstance(command, list) else None
         if native_setup is not None:
+            posix = Path(command[native_setup]).suffix == ".sh"
             launch["cmd"] = [
                 *command[:native_setup + 1],
-                "-LaunchAttemptId", attempt_id, "-LaunchResolutionId", operation_id,
+                "--launch-attempt-id" if posix else "-LaunchAttemptId", attempt_id,
+                "--launch-resolution-id" if posix else "-LaunchResolutionId", operation_id,
                 *command[native_setup + 1:],
             ]
         if (

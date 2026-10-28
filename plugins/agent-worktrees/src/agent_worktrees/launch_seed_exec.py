@@ -58,11 +58,15 @@ def deferred_command(
     native_resume_session: str | None = None,
     correlation: launch_execution.Correlation | None = None,
     prepare_native: bool = True,
+    environment: dict[str, str] | None = None,
+    environment_known: bool = True,
 ) -> list[str]:
     native = _native_setup_command(
         command, record_path, seed_id=seed_id, admission_only=admission_only,
         preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
         correlation=correlation,
+        environment=environment,
+        environment_known=environment_known,
     ) if prepare_native else None
     if native is not None:
         return native
@@ -86,17 +90,22 @@ def deferred_command(
 def native_setup_index(command: list[str]) -> int | None:
     """Recognize the typed native setup envelope, not arbitrary Copilot argv."""
     index = _script_index(command)
-    if index is not None and Path(command[index]).name == "launch-command.ps1":
+    if index is not None and Path(command[index]).name in {"launch-command.ps1", "launch-command.sh"}:
         delimiter = _wrapper_delimiter(command, index)
         if delimiter is not None:
             inner = native_setup_index(command[delimiter + 1:])
             return delimiter + 1 + inner if inner is not None else None
-    if (
-        index is not None and Path(command[index]).name == "default-setup.ps1"
-        and "-LaunchSeedPreparation" in command[index + 1:]
-        and "-LaunchSeedNativeRoot" in command[index + 1:]
-    ):
-        return index
+    if index is not None:
+        name = Path(command[index]).name
+        flags = command[index + 1:]
+        if (
+            name == "default-setup.ps1"
+            and "-LaunchSeedPreparation" in flags and "-LaunchSeedNativeRoot" in flags
+        ) or (
+            name == "default-setup.sh"
+            and "--launch-seed-preparation" in flags and "--launch-seed-native-root" in flags
+        ):
+            return index
     return None
 
 
@@ -120,13 +129,19 @@ def _native_setup_command(
     admission_only: bool, preserve_seed_id: str | None, native_resume_session: str | None,
     correlation: launch_execution.Correlation | None,
     copy_only: bool = False,
+    environment: dict[str, str] | None = None,
+    environment_known: bool = True,
 ) -> list[str] | None:
-    if os.name != "nt" or not command or PureWindowsPath(command[0]).stem.casefold() != "pwsh":
+    if not command:
+        return None
+    posix = os.name == "posix" and Path(command[0]).name == "bash"
+    if not posix and (os.name != "nt" or PureWindowsPath(command[0]).stem.casefold() != "pwsh"):
         return None
     from .process_launcher import _normalized_setup_index
 
     outer = _script_index(command)
-    wrapper = installer.install_dir() / "scripts" / "launch-command.ps1"
+    suffix = ".sh" if posix else ".ps1"
+    wrapper = installer.install_dir() / "scripts" / ("launch-command" + suffix)
     if outer is not None and Path(command[outer]).resolve() == wrapper.resolve():
         delimiter = _wrapper_delimiter(command, outer)
         if delimiter is None:
@@ -135,16 +150,18 @@ def _native_setup_command(
             command[delimiter + 1:], record_path, seed_id=seed_id, admission_only=admission_only,
             preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
             correlation=correlation, copy_only=copy_only,
+            environment=environment,
+            environment_known=environment_known,
         )
         if inner is None:
             return None
         copied_setup = Path(inner[_script_index(inner)])
         return [
-            *command[:outer], str(copied_setup.with_name("launch-command.ps1")),
+            *command[:outer], str(copied_setup.with_name("launch-command" + suffix)),
             *command[outer + 1:delimiter + 1], *inner,
         ]
     index = _normalized_setup_index(command)
-    if index is None or Path(command[index]).name != "default-setup.ps1":
+    if index is None or Path(command[index]).name != "default-setup" + suffix:
         return None
     script = Path(command[index])
     if not script.is_file() or NATIVE_SETUP_MARKER not in script.read_text(
@@ -154,7 +171,32 @@ def _native_setup_command(
     from . import session_shell
     from .manager_launch_cli import _worktree_manager_root
 
-    if not copy_only:
+    if posix and not copy_only:
+        from .launch_seed_contract import supports_posix_setup
+
+        # Opaque shell renderers may change even an explicit empty override.
+        if not environment_known:
+            return None
+        if (environment or {}).get("BASH_ENV", os.environ.get("BASH_ENV")):
+            return None
+        try:
+            for value in (str(record_path), *command):
+                value.encode("utf-8")
+        except UnicodeError:
+            return None
+        # Arbitrary sourced shell exits/traps retain the legacy setup owner.
+        option = index + 1
+        while option < len(command) and command[option] != "--":
+            if command[option] == "--env-script":
+                return None
+            takes_value = command[option] in (
+                VALUE_OPTIONS | SETUP_VALUE_OPTIONS | {"-C", "--execution-directory"}
+            )
+            option += 2 if takes_value else 1
+        # Finite native setup cannot retain the admission-only owner's fence.
+        if admission_only or not supports_posix_setup(installer.install_dir()):
+            return None
+    elif not copy_only:
         from .manager_launch_cli import _usable_worktree_manager_launcher_dir
 
         launch_dir = _usable_worktree_manager_launcher_dir()
@@ -190,6 +232,19 @@ def _native_setup_command(
         ):
             if value is not None:
                 flags += ["-" + name, value]
+    if posix:
+        names = {
+            "-LaunchSeedPreparation": "--launch-seed-preparation",
+            "-LaunchSeedNativeRoot": "--launch-seed-native-root",
+            "-LaunchSeedRecord": "--launch-seed-record",
+            "-LaunchSeedId": "--launch-seed-id",
+            "-LaunchSeedPreserveId": "--launch-seed-preserve-id",
+            "-LaunchNativeResumeSession": "--launch-native-resume-session",
+            "-LaunchAttemptId": "--launch-attempt-id",
+            "-LaunchResolutionId": "--launch-resolution-id",
+            "-LaunchParentId": "--launch-parent-id",
+        }
+        flags = [names.get(value, value) if i % 2 == 0 else value for i, value in enumerate(flags)]
     return [*command[:index], str(prepared.wrapper), *flags, *command[index + 1:]]
 
 
