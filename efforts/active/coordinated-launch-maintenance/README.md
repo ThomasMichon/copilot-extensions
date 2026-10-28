@@ -242,6 +242,15 @@ repository history.
   `-I -S` source-only subprocess now exercises the cold boundary, while the
   warm consumed-provider and credential-exclusion controls remain passing.
   Three focused Manager controls passed; fresh native construction is required.
+- Run 40770648028 constructed Manager successfully, but the actual live loader
+  still failed to obtain a current resident roster. Capture the bounded owned
+  resident log tail on that failure to diagnose the native startup boundary;
+  neither increase production timeouts nor substitute cached/advisory rows.
+  Final cleanup also exposed that Manager's supported uninstaller removed
+  runtime files without retiring its adopted broker Task. Remove that component
+  under existing quiescent Manager custody before exclusive generation removal,
+  retaining the action through native confirmation and refusing pending
+  publication. Four focused ownership/order/preservation controls passed.
 
 ### 2026-10-28 - Integrate the merged finite cleanup owner before release
 

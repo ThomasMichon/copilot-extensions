@@ -31,6 +31,16 @@ try:
                 str(loader.error(source.machine,source.env)))
         time.sleep(0.05)
     rows=loader.records()
+except Exception:
+    for path in (Path(sys.argv[2])/'logs/status-monitor.log',
+                 Path(sys.argv[2])/'picker-status-monitor.log',
+                 Path(sys.argv[2]).parent/'.agent-worktrees-status-monitor.log'):
+        if path.is_file():
+            with path.open('rb') as stream:
+                stream.seek(max(0,path.stat().st_size-8192))
+                print('Owned resident diagnostic '+path.name+':\\n'+
+                    stream.read().decode('utf-8',errors='replace'),file=sys.stderr)
+    raise
 finally:
     loader.cancel()
 from zdd import routing

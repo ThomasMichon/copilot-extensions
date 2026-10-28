@@ -1571,6 +1571,11 @@ Settle any running Manager infrastructure through its existing lifecycle owner
 first: removal never stops Copilot, its mux, another installation or a service.
 Settled routing history is preserved under the daemon's existing spawn lease,
 not mistaken for a running daemon or deleted to make removal succeed.
+Under that quiescent custody, an owned finite Windows launch-broker registration
+is removed through the canonical broker owner before runtime files. Its action
+generation stays retained until external Task removal is confirmed. Pending
+publication requires installer recovery; unknown removal retains the runtime
+and ownership evidence rather than deleting the action beneath a live Task.
 Present installations also require a reliable process census (Windows or
 Linux `/proc`); other platforms refuse rather than assuming no process is live.
 

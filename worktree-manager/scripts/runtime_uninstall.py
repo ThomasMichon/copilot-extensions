@@ -322,10 +322,36 @@ def _plan(root: Path, *, daemon_held: bool = False) -> dict:
             "integration_states": {path: publication.state_path(path) for path in integrations}}
 
 
+def _remove_broker(root: Path, removed: list[str]) -> None:
+    config = root / "windows-launch-broker.json"
+    if os.path.lexists(config.with_suffix(".pending.json")):
+        raise ValueError("Manager broker publication requires its installer recovery before removal")
+    if not os.path.lexists(config):
+        return
+    if os.name != "nt":
+        raise ValueError("Manager broker removal requires its native Windows owner")
+    from runtime_install import _execution_driver
+
+    _execution_driver(SCRIPTS.parent)
+    from agent_procutil.windows_broker_installation import load
+    from agent_procutil.windows_broker_retention import runtime_component
+    from agent_procutil.windows_task_broker import uninstall as remove_component
+
+    adopted = load(root)
+    retained = runtime_component(adopted, "versioned_runtime")
+    generation = Path(adopted.entrypoint).relative_to(root).parts[1]
+    with retained.retention_lease(root, generation):
+        remove_component(adopted)
+    removed.append(str(config))
+
+
 def _remove(root: Path, plan: dict, removed: list[str]) -> None:
     publication = runtime._runtime_component("versioned_runtime_publication")
     leases = runtime._runtime_component("versioned_runtime_leases")
     with _daemon_custody(root, create=True):
+        if _plan(root, daemon_held=True) != plan:
+            raise ValueError("Manager selection or artifacts changed before broker removal")
+        _remove_broker(root, removed)
         with leases.batch_removal_custody(root, plan["versions"]):
             with publication.target_leases(root, plan["integrations"]):
                 _remove_locked(root, plan, removed, publication)
