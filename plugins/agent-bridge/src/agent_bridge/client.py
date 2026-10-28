@@ -601,7 +601,7 @@ class BridgeClient(PromptClientMixin, AnswerClientMixin, SessionStartClientMixin
         return self._daemon_proto
 
     def daemon_supports(self, min_version: int, *, refresh: bool = False) -> bool:
-        """Whether the live daemon speaks at least HTTP protocol ``min_version``.
+        """Whether a shared HTTP contract supports ``min_version``.
 
         The capability gate for a client **newer** than the daemon it calls:
         check this before using a feature introduced at protocol ``min_version``
@@ -610,40 +610,32 @@ class BridgeClient(PromptClientMixin, AnswerClientMixin, SessionStartClientMixin
         unreachable or unversioned daemon reports version ``0`` → ``False``.
         ``refresh`` rechecks a possibly replaced daemon before rejecting a feature.
         """
-        version, _min_supported = (
+        from .client_protocol_floor import negotiate_http_protocol
+
+        version, min_supported = (
             self.daemon_protocol(refresh=True) if refresh else self.daemon_protocol()
         )
-        return version >= min_version
+        return negotiate_http_protocol(
+            version, min_supported, required=min_version,
+        ) is not None
 
     def assert_client_supported(self) -> None:
-        """Fail fast when THIS client is older than the daemon's support floor.
+        """Require overlapping advertised ranges, preserving the legacy baseline."""
+        from .protocol import (
+            HTTP_PROTOCOL_MIN_SUPPORTED, HTTP_PROTOCOL_VERSION, UNVERSIONED,
+        )
+        from .client_protocol_floor import negotiate_http_protocol
 
-        The counterpart to :meth:`daemon_supports` (which gates a *newer* client
-        against an *older* daemon): here we detect a client whose HTTP contract
-        version is **below** the daemon's advertised ``min_protocol_version`` — a
-        genuine past-the-support-window incompatibility where the tolerant-reader
-        contract can no longer carry correctness — and raise a clear, actionable
-        :class:`BridgeClientError` (426 Upgrade Required) instead of blind-sending
-        requests the daemon has stopped serving (dotfiles #632).
-
-        Symmetric, self-gating design consistent with the version-skew-tolerant
-        stance: each side checks the peer's advertised bounds; the daemon still
-        only *advertises* its floor (it does not refuse to operate). Degrade-safe:
-        an unreachable or unversioned daemon advertises ``min == UNVERSIONED (0)``,
-        so this never raises against it. Latent while
-        ``HTTP_PROTOCOL_MIN_SUPPORTED`` stays at its current value; it activates
-        automatically the day the floor is raised past this client's version.
-        """
-        from .protocol import HTTP_PROTOCOL_VERSION
-
-        _version, min_supported = self.daemon_protocol()
-        if HTTP_PROTOCOL_VERSION < min_supported:
+        version, min_supported = self.daemon_protocol()
+        if (version, min_supported) == (UNVERSIONED, UNVERSIONED):
+            return
+        if negotiate_http_protocol(version, min_supported) is None:
             raise BridgeClientError(
                 426,
-                f"agent-bridge client HTTP protocol v{HTTP_PROTOCOL_VERSION} is "
-                f"older than this daemon's minimum supported v{min_supported}. "
-                f"Update the agent-bridge plugin + runtime on this machine — the "
-                f"daemon has moved past this client's contract.",
+                "no compatible agent-bridge HTTP contract range "
+                f"(client {HTTP_PROTOCOL_MIN_SUPPORTED}-{HTTP_PROTOCOL_VERSION}, "
+                f"daemon {min_supported}-{version}); "
+                "select peers with overlapping supported ranges",
             )
 
     def list_agents(self) -> list[dict[str, Any]]:

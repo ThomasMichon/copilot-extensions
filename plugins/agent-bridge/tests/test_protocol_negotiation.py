@@ -190,6 +190,43 @@ def test_daemon_supports_gates_on_version():
     assert c.daemon_supports(3) is False  # newer client feature, older daemon
 
 
+@pytest.mark.parametrize("version,minimum,supported", [
+    (REMOTE_OPERATIONS_PROTOCOL_VERSION, 1, True),
+    (HTTP_PROTOCOL_VERSION - 1, 1, True),
+    (HTTP_PROTOCOL_VERSION + 2, 1, True),
+    (HTTP_PROTOCOL_VERSION + 2, HTTP_PROTOCOL_VERSION, True),
+    (HTTP_PROTOCOL_VERSION + 2, HTTP_PROTOCOL_VERSION + 1, False),
+    (HTTP_PROTOCOL_VERSION - 1, HTTP_PROTOCOL_VERSION, False),
+    (HTTP_PROTOCOL_VERSION, -1, False),
+])
+def test_daemon_supports_requires_overlapping_ranges(version, minimum, supported):
+    client = _client({"protocol_version": version, "min_protocol_version": minimum})
+    assert client.daemon_supports(REMOTE_OPERATIONS_PROTOCOL_VERSION) is supported
+
+
+def test_daemon_supports_refresh_rechecks_the_peer_minimum():
+    health = {"protocol_version": HTTP_PROTOCOL_VERSION + 2, "min_protocol_version": 1}
+    client = _client(health)
+    assert client.daemon_supports(REMOTE_OPERATIONS_PROTOCOL_VERSION)
+    health["min_protocol_version"] = HTTP_PROTOCOL_VERSION + 1
+    assert not client.daemon_supports(REMOTE_OPERATIONS_PROTOCOL_VERSION, refresh=True)
+
+
+def test_client_support_rejects_an_invalid_advertised_range():
+    client = _client({"protocol_version": 2, "min_protocol_version": 3})
+    with pytest.raises(BridgeClientError) as error:
+        client.assert_client_supported()
+    assert error.value.status == 426
+
+
+def test_client_support_honors_its_own_minimum(monkeypatch):
+    monkeypatch.setattr("agent_bridge.protocol.HTTP_PROTOCOL_MIN_SUPPORTED", 3)
+    client = _client({"protocol_version": 2, "min_protocol_version": 1})
+    with pytest.raises(BridgeClientError) as error:
+        client.assert_client_supported()
+    assert error.value.status == 426
+
+
 def test_conditional_idle_end_refuses_daemon_before_capability_version():
     c = _client({
         "protocol_version": CONDITIONAL_IDLE_END_PROTOCOL_VERSION - 1,
