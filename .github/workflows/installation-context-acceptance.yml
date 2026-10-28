@@ -24,7 +24,7 @@ on:
         type: boolean
         default: false
       native_launch:
-        description: Qualify copied Windows setup, cross-entrypoint mux admission and the POSIX seed reply reader
+        description: Qualify copied native setup, POSIX terminal ownership and cross-entrypoint mux admission
         type: boolean
         default: false
       watch_owner:
@@ -144,7 +144,7 @@ jobs:
     if: ${{ inputs.native_launch }}
     name: Native seed reply reader (Linux)
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
     env:
       UV_PYTHON: "3.12"
     steps:
@@ -173,16 +173,18 @@ jobs:
             --test-file tests/test_native_seed_reply_shell.py \
             --test-file tests/test_native_seed_phase_shell.py \
             --test-file tests/test_launch_seed_native.py \
+            --test-file tests/test_launch_seed_contract.py \
             --test-file tests/test_session_shell.py \
             --test-file tests/native/test_native_seed_exec_posix.py \
+            --test-file tests/native/test_native_seed_setup_posix.py \
             --allow-explicit-tiers \
-            --timeout 180 --plugin-timeout 240 --test-timeout 30
+            --timeout 360 --plugin-timeout 480 --test-timeout 30
 
   native-seed-reply-macos:
     if: ${{ inputs.native_launch }}
     name: Native seed reply reader (macOS)
     runs-on: macos-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
     env:
       UV_PYTHON: "3.12"
     steps:
@@ -212,10 +214,12 @@ jobs:
             --test-file tests/test_native_seed_reply_shell.py \
             --test-file tests/test_native_seed_phase_shell.py \
             --test-file tests/test_launch_seed_native.py \
+            --test-file tests/test_launch_seed_contract.py \
             --test-file tests/test_session_shell.py \
             --test-file tests/native/test_native_seed_exec_posix.py \
+            --test-file tests/native/test_native_seed_setup_posix.py \
             --allow-explicit-tiers \
-            --timeout 180 --plugin-timeout 240 --test-timeout 30
+            --timeout 360 --plugin-timeout 480 --test-timeout 30
 
   derived-diagnostics-posix:
     if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal }}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 from pathlib import Path
 import select
@@ -11,6 +12,53 @@ import time
 
 from . import launch_seed_native as native, locks
 from .launch_execution import Correlation
+
+
+def _close_inherited_descriptors(keep: int) -> None:
+    directory = "/proc/self/fd" if Path("/proc/self/fd").is_dir() else "/dev/fd"
+    for name in os.listdir(directory):
+        if name.isdecimal() and int(name) > 2 and int(name) != keep:
+            try:
+                os.close(int(name))
+            except OSError as error:
+                if error.errno != errno.EBADF:
+                    raise
+
+
+def _backend_environment(descriptor: int) -> dict[str, str]:
+    if type(descriptor) is not int or descriptor < 3:
+        raise ValueError("Backend environment requires a separate inherited pipe")
+    data = b""
+    deadline = time.monotonic() + 10
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not select.select([descriptor], [], [], remaining)[0]:
+                raise TimeoutError("Backend environment timed out")
+            chunk = os.read(descriptor, 65536)
+            if not chunk:
+                break
+            data += chunk
+            if len(data) > 16 * 1024 * 1024:
+                raise ValueError("Backend environment exceeds its finite byte budget")
+    finally:
+        os.close(descriptor)
+    fields = data.split(b"\0")
+    if (
+        len(fields) != 11 or fields[0] != b"agent-worktrees.backend-environment.v1"
+        or fields[-2:] != [b"complete", b""]
+    ):
+        raise ValueError("Invalid literal backend environment")
+    environment = os.environ.copy()
+    for index, name in enumerate(("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "__PYVENV_LAUNCHER__")):
+        present, value = fields[1 + index * 2:3 + index * 2]
+        if present == b"x":
+            environment[name] = os.fsdecode(value)
+        elif present == b"" and value == b"":
+            environment.pop(name, None)
+        else:
+            raise ValueError("Invalid backend environment presence")
+    return environment
 
 
 def _completion_file(record: Path, path: Path) -> int:
@@ -96,7 +144,7 @@ def _observe(
 
 def execute(
     record: Path, correlation: Correlation, operation_id: str,
-    command: list[str], completion_file: Path,
+    command: list[str], completion_file: Path, *, backend_environment_fd: int | None = None,
 ) -> int:
     """Keep the caller's direct child PID; never wait for the backend in Python.
 
@@ -108,6 +156,7 @@ def execute(
         isinstance(argument, str) and "\0" not in argument for argument in command
     ):
         raise ValueError("POSIX exec requires a literal backend command")
+    environment = _backend_environment(backend_environment_fd) if backend_environment_fd is not None else os.environ
     _execution, saved = native._load(record, correlation, operation_id)
     if any(event["phase"] == "process-spawned" for event in saved["events"]):
         raise ValueError("Backend spawn was already observed; do not replay it")
@@ -185,7 +234,8 @@ def execute(
                     signal.signal(signum, signal.SIG_DFL)
             if interrupt_pending:
                 raise KeyboardInterrupt
-            os.execvpe(command[0], command, os.environ)
+            _close_inherited_descriptors(writer)
+            os.execvpe(command[0], command, environment)
         except OSError:
             cleaning = True
             outcome = b"F"

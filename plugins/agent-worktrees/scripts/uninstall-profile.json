@@ -34,6 +34,7 @@
     "native-seed-boundary.ps1",
     "native-seed-reply.sh",
     "native-seed-boundary.sh",
+    "native-seed-setup.sh",
     "reconcile-machine-settings.ps1", "reconcile-machine-settings.sh",
     "versioned_runtime.py", "versioned_runtime_leases.py",
     "versioned_runtime_construction.py", "versioned_runtime_source.py",

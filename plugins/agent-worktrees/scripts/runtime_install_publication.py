@@ -26,6 +26,7 @@ SETUP = (
     "native-seed-boundary.ps1",
     "native-seed-reply.sh",
     "native-seed-boundary.sh",
+    "native-seed-setup.sh",
     "reconcile-machine-settings.ps1", "reconcile-machine-settings.sh",
 )
 TOOLS = (

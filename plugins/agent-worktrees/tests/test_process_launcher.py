@@ -34,4 +34,5 @@ def test_copilot_cli_publishes_nonsecret_result_before_attach(tmp_path, monkeypa
     monkeypatch.setattr(handoff_cli, "cmd_embody", embody)
     monkeypatch.setattr(copilot_cli.sessions, "_mux_bin", lambda _: "tmux")
     monkeypatch.setattr(copilot_cli.os, "execvp", attach)
+    monkeypatch.setattr(copilot_cli.subprocess, "Popen", lambda argv: attach(argv[0], argv))
     assert copilot_cli.cmd_copilot(args) == 1

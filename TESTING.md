@@ -150,8 +150,8 @@ and held-seed/unknown handling for an unrepresentable reply. Empty-executable
 controls refuse preparation before seed claims or process queries. A real Bash reader
 control decodes the NUL fields without evaluating injected shell text. Git Bash
 execution is a framing control, not native Linux/macOS, terminal or production
-POSIX launch qualification; production POSIX consumer activation remains open.
-`test_native_seed_reply_shell.py` executes the shipped dormant Bash reader,
+POSIX launch qualification.
+`test_native_seed_reply_shell.py` executes the shipped Bash reader,
 checking literal arrays without environment mutation or command evaluation,
 inherited versus empty replacement environment, malformed/truncated/trailing
 frames, stale-output clearing and prompt-free failures. The malformed cases
@@ -196,8 +196,34 @@ Reader controls reject noncanonical deadline arithmetic and
 require all fields and EOF to share one deadline.
 Synthetic shell providers do not qualify real bootstrap
 startup performance, capability discovery or native backend ownership.
+`test_launch_seed_contract.py` checks exact selected-slot descriptor discovery
+and legacy selection for missing, old, malformed, failed, changed or
+custody-unknown providers.
+The POSIX cases in `test_session_shell.py` check conditional native selection
+and copy-only relocation without taking over cold prompt/admission custody.
+Admission-only/native-resume plans retain the legacy exclusion owner.
+Shell controls also bind discovery/preparation to one selected generation,
+reject cross-slot descriptor caching during an A-to-B-to-A selector race,
+chain or clear repository EXIT traps without losing the setup return callback,
+and warn on observer status 3 without another mutation or a changed backend code.
+`tests/native/test_native_seed_setup_posix.py` constructs one real disposable
+runtime and invokes the actual copied normalized setup, including its wrapped
+entry. No-seed controls retain the legacy owner; new-seed and resume-seed
+controls check literal argv/environment, stdin/stdout/stderr, direct Bash
+parentage, one-time seed completion and nested actual return codes.
+Real priming controls preserve exported Python overrides (including macOS
+Python's consumed launcher variable), empty/unset/unexported states, the new
+backend's execution hint and repository trap status, while intercepting any
+environment value passed to `env` argv. Losing the selected runtime before setup must leave the seed
+unclaimed with no execution or fallback replay.
+The real PTY control retains all three terminal descriptors and foreground
+process-group ownership, keeps the backend alive beyond the finite-provider
+deadline, then sends terminal input and Ctrl+C. Bash must retain its original
+PID and finish both return observations with the backend's actual interrupt
+code. These controls do not establish real Copilot/mux survival, supported
+uninstall, installed rollout or the parent effort's completion.
 The existing optional installation-context acceptance workflow's `native_launch`
-input also selects this focused reader/phase/copy packet on Linux and macOS, using
+input also selects this focused reader/phase/copy/consumer packet on Linux and macOS, using
 `/bin/bash` and explicitly requiring stock macOS Bash 3.2. It stays outside
 required PR CI; the Windows terminal packet selected by that input is unchanged.
 That packet also explicitly selects `test_launch_seed_native.py` so the

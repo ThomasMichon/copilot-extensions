@@ -13,9 +13,32 @@ from agent_procutil.owned_process import run_caller_owned
 from agent_worktrees import config as cfg, launch_execution as audit
 from agent_worktrees import launch_seed_exec as legacy, launch_seed_native as native
 from agent_worktrees import launch_seed_state as seeds, tracking
+from agent_worktrees import launch_seed_posix
 from agent_worktrees.sessions import LiveVerdict
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="Native POSIX fork/exec contract")
+
+
+@pytest.mark.parametrize("fault", ["truncated", "invalid-presence"])
+def test_backend_environment_pipe_refuses_invalid_frames_and_closes_its_descriptor(fault):
+    fields = [
+        b"agent-worktrees.backend-environment.v1",
+        b"x", b"literal ' \n", b"", b"", b"x", b"", b"x", b"mac launcher",
+        b"complete", b"",
+    ]
+    if fault == "truncated":
+        fields.pop()
+    else:
+        fields[3] = b"unexpected"
+    reader, writer = os.pipe()
+    try:
+        os.write(writer, b"\0".join(fields))
+    finally:
+        os.close(writer)
+    with pytest.raises(ValueError):
+        launch_seed_posix._backend_environment(reader)
+    with pytest.raises(OSError):
+        os.fstat(reader)
 
 
 @pytest.mark.parametrize("name", [
@@ -117,10 +140,19 @@ r = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 Path(r["assets"], "before.json").write_text(json.dumps({
     "pid": os.getpid(), "birth": locks.process_start_time(os.getpid()),
 }))
+inherited = []
+if r["fault"] == "inherited-fd":
+    import fcntl, resource
+    descriptor = os.open(os.devnull, os.O_RDONLY)
+    inherited = [fcntl.fcntl(descriptor, fcntl.F_DUPFD, 200)]
+    os.set_inheritable(inherited[0], True)
+    os.close(descriptor)
+    _soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (64, hard))
 original_pipe = launch_seed_posix.os.pipe
 def observed_pipe():
     descriptors = original_pipe()
-    Path(r["assets"], "pipe.json").write_text(json.dumps(descriptors))
+    Path(r["assets"], "pipe.json").write_text(json.dumps([*descriptors, *inherited]))
     return descriptors
 launch_seed_posix.os.pipe = observed_pipe
 original_signals = {
@@ -183,9 +215,11 @@ raise SystemExit(code)
     return seed, prepared, correlation, assets, result
 
 
-@pytest.mark.parametrize("exit_code", [0, 7, -signal.SIGTERM])
+@pytest.mark.parametrize("exit_code, fault", [
+    (0, None), (7, None), (-signal.SIGTERM, None), (7, "inherited-fd"),
+])
 def test_foreground_exec_keeps_pid_birth_streams_and_actual_exit(
-    record, tmp_path, native_bash, exit_code,
+    record, tmp_path, native_bash, exit_code, fault,
 ):
     # The backend finds its launch-owned completion file without receiving
     # shell source or having a Python lifetime waiter above it.
@@ -198,7 +232,7 @@ def test_foreground_exec_keeps_pid_birth_streams_and_actual_exit(
         ),
         str(assets_parent), str(exit_code), "", "two words", "literal;$()",
     ]
-    seed, prepared, correlation, assets, result = _run(record, tmp_path, native_bash, command)
+    seed, prepared, correlation, assets, result = _run(record, tmp_path, native_bash, command, fault=fault)
     assert result.returncode == (128 - exit_code if exit_code < 0 else exit_code), result.stderr
     assert (assets / ".native-seed-exec.complete").read_text() == "0\n"
     before = json.loads((assets / "before.json").read_text())
@@ -207,7 +241,7 @@ def test_foreground_exec_keeps_pid_birth_streams_and_actual_exit(
     assert backend["stdin"] == "retained stdin\n"
     assert backend["argv"] == ["", "two words", "literal;$()", "--interactive", seed.text]
     assert backend["children"] == ""
-    assert backend["closed_pipe"] == [True, True]
+    assert backend["closed_pipe"] == ([True, True, True] if fault == "inherited-fd" else [True, True])
     assert result.stdout == "backend stdout\n"
     assert "backend stderr\n" in result.stderr
     assert seeds.peek(record) is None

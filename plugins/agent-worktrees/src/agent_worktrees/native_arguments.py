@@ -24,6 +24,8 @@ SETUP_VALUE_OPTIONS = {
     "--launch-seed-record", "--launch-seed-id", "--launch-seed-runtime-python",
     "-launchseedpreparation", "-launchseednativeroot", "-launchseedpreserveid",
     "-launchnativeresumesession", "-launchattemptid", "-launchresolutionid", "-launchparentid",
+    "--launch-seed-preparation", "--launch-seed-native-root", "--launch-seed-preserve-id",
+    "--launch-native-resume-session", "--launch-attempt-id", "--launch-resolution-id", "--launch-parent-id",
 }
 
 

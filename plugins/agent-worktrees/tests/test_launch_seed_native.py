@@ -614,7 +614,12 @@ def test_cli_preparation_output_formats_keep_actual_seed_custody(
     assert seed.text not in json.dumps(saved)
 
 
-def test_nul_callback_request_is_rejected_before_runtime_or_receipt_mutation(record, monkeypatch, capsys):
+@pytest.mark.parametrize("option", [
+    ["--output-format", "nul"], ["--environment-reply", "execution-hint"],
+])
+def test_nul_callback_request_is_rejected_before_runtime_or_receipt_mutation(
+    record, monkeypatch, capsys, option,
+):
     def forbidden(*args, **kwargs):
         pytest.fail("A callback output-format error must precede runtime selection and mutation")
     monkeypatch.setattr(native, "require_current_runtime", forbidden)
@@ -622,11 +627,52 @@ def test_nul_callback_request_is_rejected_before_runtime_or_receipt_mutation(rec
     monkeypatch.setattr(sys, "argv", [
         "launch_seed_native", "--contract-version", "1",
         "--root", str(cfg.install_dir()), "--record", str(record),
-        "--phase", "returned", "--output-format", "nul", "--exit-code", "0",
+        "--phase", "returned", *option, "--exit-code", "0",
     ])
     assert native.main() == 3
     captured = capsys.readouterr()
     assert not captured.out and "do not automatically retry" in captured.err
+    assert not list((record.parent / "launch-attempts").glob("*/*.execution.json"))
+
+
+def test_hint_reply_does_not_encode_unused_non_utf8_environment(record, monkeypatch, capsysbinary):
+    seed = seeds.stage(record, kind="new", text="literal prompt")
+    monkeypatch.setenv("FIXTURE_NON_UTF8", "value\udcff")
+    monkeypatch.setattr(native, "require_current_runtime", lambda root: None)
+    monkeypatch.setattr(sys, "argv", [
+        "launch_seed_native", "--contract-version", "1",
+        "--root", str(cfg.install_dir()), "--record", str(record),
+        "--phase", "prepare", "--output-format", "nul",
+        "--environment-reply", "execution-hint", "--seed-id", seed.seed_id, "--", "copilot",
+    ])
+    assert native.main() == 0
+    captured = capsysbinary.readouterr()
+    fields = captured.out.decode("utf-8").split("\0")
+    assert fields[6:8] == ["1", audit.NATIVE_HINT_ENV]
+    assert os.environ["FIXTURE_NON_UTF8"] == "value\udcff"
+    assert not captured.err
+    held = seeds.peek(record)
+    assert held.seed_id == seed.seed_id and held.handoff_id
+
+
+def test_non_utf8_nul_command_refuses_before_runtime_or_seed_claim(record, monkeypatch, capsys):
+    seed = seeds.stage(record, kind="new", text="must remain staged")
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Unrepresentable argv must refuse before runtime selection or seed effects")
+
+    monkeypatch.setattr(native, "require_current_runtime", forbidden)
+    monkeypatch.setattr(sys, "argv", [
+        "launch_seed_native", "--contract-version", "1",
+        "--root", str(cfg.install_dir()), "--record", str(record),
+        "--phase", "prepare", "--output-format", "nul",
+        "--environment-reply", "execution-hint", "--seed-id", seed.seed_id,
+        "--", "copilot", "--add-dir", "path\udcff",
+    ])
+    assert native.main() == 3
+    captured = capsys.readouterr()
+    assert not captured.out and "do not automatically retry" in captured.err
+    assert seeds.peek(record) == seed
     assert not list((record.parent / "launch-attempts").glob("*/*.execution.json"))
 
 
@@ -705,9 +751,10 @@ def test_selected_runtime_describes_literal_output_support_without_preparation()
     assert json.loads(result.stdout) == {
         "contract": "agent-worktrees.native-seed", "version": 1,
         "preparation_output_formats": ["json", "nul"],
+        "preparation_environment_modes": ["full", "execution-hint"],
         "nul_reply_schema": "agent-worktrees.native-seed-reply.v1",
         "setup_process_start_time_sources": ["caller", "provider"],
-        "backend_execution_modes": ["posix-exec-v1"] if os.name == "posix" else [],
+        "backend_execution_modes": ["posix-exec-v1", "posix-exec-env-v1"] if os.name == "posix" else [],
     }
     assert not result.stderr
 
@@ -760,7 +807,10 @@ def test_exec_cli_refuses_incomplete_or_mixed_outcome_before_exec(
     assert seeds.peek(record) == seed
 
 
-def test_completion_file_is_not_accepted_by_existing_preparation(record, monkeypatch, capsys):
+@pytest.mark.parametrize("option", [
+    ["--completion-file", "not-a-preparation-option"], ["--backend-environment-fd", "3"],
+])
+def test_exec_only_inputs_are_not_accepted_by_existing_preparation(record, monkeypatch, capsys, option):
     monkeypatch.setattr(
         native, "require_current_runtime",
         lambda root: pytest.fail("Invalid completion use must refuse before runtime selection"),
@@ -768,7 +818,7 @@ def test_completion_file_is_not_accepted_by_existing_preparation(record, monkeyp
     monkeypatch.setattr(sys, "argv", [
         "launch_seed_native", "--contract-version", "1",
         "--root", str(cfg.install_dir()), "--record", str(record), "--phase", "prepare",
-        "--completion-file", "not-a-preparation-option", "--", "copilot",
+        *option, "--", "copilot",
     ])
     assert native.main() == 3
     assert "unconfirmed" in capsys.readouterr().err
