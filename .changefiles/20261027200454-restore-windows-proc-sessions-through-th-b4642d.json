@@ -1,0 +1,9 @@
+{
+  "comment": "Restore Windows PROC sessions through the registered bound owner, confirmed native retirement, and a fresh clear-state check before ordinary Resume.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

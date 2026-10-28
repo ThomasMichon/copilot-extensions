@@ -124,7 +124,7 @@ class TestWindowsRestore:
             "reclaim_one",
             lambda wt, **kwargs: (
                 calls.append((wt, kwargs))
-                or {"ok": True, "targets": 1, "reaped": [{"pid": 42}]}
+                or {"ok": True, "state_clear": True, "targets": 1, "reaped": [{"pid": 42}]}
             ),
         )
         result = cli._perform_remux(
@@ -136,7 +136,71 @@ class TestWindowsRestore:
         )
         assert result["ok"] is True
         assert result["action"] == "reclaimed"
-        assert calls == [("wtA", {"bare_only": True, "target_pids": {42}})]
+        assert calls == [("wtA", {
+            "bare_only": True, "target_pids": {42}, "target_start_times": {42: "start-42"},
+        })]
+
+    def test_restore_targets_registered_owner_not_latest_resumable_session(self, monkeypatch):
+        from agent_worktrees import restore_launch
+
+        self._base(monkeypatch)
+        record = types.SimpleNamespace(
+            worktree_id="wtA", worktree_path=r"C:\worktrees\wtA",
+            sessions=[types.SimpleNamespace(session_id=sid) for sid in ("old-owner", "latest")],
+        )
+        monkeypatch.setattr(restore_launch.worktree_trust, "ensure_record_trusted", lambda *a: None)
+        monkeypatch.setattr(
+            cli.sessions, "find_latest_session_id_fast",
+            lambda *a: (_ for _ in ()).throw(AssertionError("resumable head is not live custody")),
+        )
+
+        def resolve(**kwargs):
+            assert kwargs["session_id"] is None
+            assert kwargs["worktree_path"] is None
+            assert kwargs["session_ids"] == ["old-owner", "latest"]
+            return [_bound(42, sid="old-owner", cwd=r"C:\elsewhere")]
+
+        monkeypatch.setattr(cli.reclaim, "resolve_bound_copilots", resolve)
+        calls = []
+        monkeypatch.setattr(cli, "reclaim_one", lambda wt, **kw: calls.append(kw) or {
+            "ok": True, "state_clear": True, "targets": 1,
+        })
+        result = restore_launch.restore_for_launch(record, perform_remux=cli._perform_remux)
+        assert result["ok"] and result["requires_resume"]
+        assert calls == [{
+            "bare_only": True, "target_pids": {42}, "session_ids": ["old-owner", "latest"],
+            "target_start_times": {42: "start-42"},
+        }]
+
+    def test_restore_does_not_resume_before_process_state_is_clear(self, monkeypatch):
+        self._base(monkeypatch)
+        monkeypatch.setattr(cli, "reclaim_one", lambda *a, **k: {
+            "ok": False, "state_clear": False, "targets": 1,
+            "reason": "process retirement unconfirmed",
+        })
+        result = cli._perform_remux(
+            worktree_id="wtA", session_id=None, worktree_path=None,
+            force_sudo=None, apply_windows=True,
+        )
+        assert not result["ok"] and not result["requires_resume"]
+        assert result["reason"] == "process retirement unconfirmed"
+
+    def test_stale_proc_restore_resumes_only_after_fresh_clear_observation(self, monkeypatch):
+        self._base(monkeypatch)
+        monkeypatch.setattr(cli.reclaim, "resolve_bound_copilots", lambda **k: [])
+        calls = []
+        monkeypatch.setattr(cli, "reclaim_one", lambda wt, **kw: calls.append(kw) or {
+            "ok": True, "state_clear": True, "targets": 0,
+        })
+        result = cli._perform_remux(
+            worktree_id="wtA", session_id=None, session_ids=["old-owner"],
+            worktree_path=None, force_sudo=None, apply_windows=True,
+        )
+        assert result["ok"] and result["requires_resume"]
+        assert result["action"] == "already-clear"
+        assert calls == [{
+            "bare_only": True, "target_pids": set(), "session_ids": ["old-owner"],
+        }]
 
     def test_existing_mux_is_refused(self, monkeypatch):
         self._base(monkeypatch)
@@ -154,7 +218,7 @@ class TestWindowsRestore:
 
 def _bound(pid, homing="bare", wt="wtA", cwd="/w/wtA", sid="sessA"):
     return {"session_id": sid, "pid": pid, "cwd": cwd,
-            "worktree_id": wt, "homing": homing}
+            "worktree_id": wt, "homing": homing, "start_time": f"start-{pid}"}
 
 
 # ── orchestration ───────────────────────────────────────────────────────────
