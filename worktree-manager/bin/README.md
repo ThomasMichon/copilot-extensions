@@ -41,13 +41,26 @@ of the `worktree-manager-control-plane` effort.
   Relaunching requires a fresh producer command, not replaying a consumed
   one-shot handoff. Timed-out programmatic mux calls retain their manifest
   because the pane may still be starting; its consumer owns successful cleanup.
-  Both producers register handoffs in the runtime's dedicated `pane-args/` directory.
+  Prepared copied shells use a `pane-args/` directory beside their launch-owned
+  wrapper, outside removable installations. Legacy commands retain the runtime's
+  dedicated `pane-args/` directory.
   Unconsumed files expire after 24 hours on the next resident-monitor sweep or
   Python pane-command generation, preserving delayed startup within that grace period.
-  Cleanup is limited to transport-named files directly in that directory and
+  Cleanup is limited to transport-named files in those admitted directories and
   refuses symlink/junction traversal.
   A cleanup sharing violation logs a warning and retains the file for expiry
   rather than replacing the original launch failure or interrupting retries.
+- `pane-args.ps1` — Picker's file-handoff helpers. After final launch and seed
+  planning, marker-qualified copied PowerShell setup commands serialize startup
+  argv into a second one-shot file beside their copied command reader, under the
+  launch plan's tracking root. Each
+  creation retry gets fresh outer and startup files; known failure, unused join
+  and rejected receipt clean up both, while publication uncertainty retains
+  them for the consumer or existing 24-hour expiry. The startup transport leaves
+  direct setup's normal/recovery reconciliation policy unchanged. Unsupported
+  commands and older copied readers retain their original invocation. These
+  helpers ship beside both Manager's launcher and the engine's packaged fallback;
+  they do not change creation leases, seed/console custody or uninstall admission.
 - `session-options.ps1` / `session-options.sh` — per-session status bar +
   behaviors that `launch-session.ps1`/`.sh` stamp onto each mux session.
   `launch-session.ps1` dot-sources `session-options.ps1` via a

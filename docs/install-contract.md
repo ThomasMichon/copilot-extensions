@@ -3714,6 +3714,30 @@ network call, new receipt, resolver, approval or live activation. Existing
 release/profile/feed admission and actual distribution obligations remain the
 installation owner's responsibility; a selected ZIP is not their substitute.
 
+`tools/runtime_profile_bundle.py` provides the matching repeatable producer:
+
+```text
+python tools/runtime_profile_bundle.py --profile profile.json --wheel-dir wheels --output core.zip
+```
+
+It freezes the exact profile, retains and inspects every selected wheel through
+the existing owners, then emits sorted `wheels/<filename>` members with fixed
+timestamps and no recompression. It reads the completed candidate through
+`retain_wheel_bundle` before atomically creating the output, without replacing
+an existing path. The destination directory must already exist and support
+same-filesystem hard links. Input filenames, archive/metadata/expanded sizes,
+wheel count, aggregate temporary storage and the common deadline remain bounded.
+The CLI reports the existing profile lock ID, transport SHA-256 and byte length;
+the profile is not modified or promoted to an approval record.
+
+The producer does not acquire dependencies, select a feed, approve a profile,
+install a runtime, publish an asset or change a channel. It does not replace
+source-material/notices packaging: the enclosing distribution owner must retain
+those materials and its publication authority. In particular, producing a
+third-party-inclusive transport does not authorize uploading it through the
+public first-party publisher. This command supplies a reproducible candidate
+for an existing build/publication pipeline, not automatic pipeline activation.
+
 On Windows, original and retained wheel handles allow shared reads but deny
 writers and deletion for their held lifetime, including extended-length paths.
 NTFS read-access updates can advance handle change time, so that timestamp is
