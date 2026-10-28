@@ -97,8 +97,11 @@ restart, discarded obligation or replay of an uncertain external effect.
 
 ## 4. Detour deliberately; otherwise park the discovery
 
-Before calling a child effort, establish that it is needed for the assigned
-goal, is within authority and fits the lane's depth/detour budget. Save the
+Before calling a child effort/task, establish that it is a necessary
+prerequisite or an explicitly assigned priority interruption, is within
+authority and fits the lane's depth/detour budget. Do not invent a dependency
+for an unrelated assignment; normally queue it unless priority actually changes.
+Save the
 parent frame **before** changing focus: agenda/node, return node, relevant
 evidence and the exact action that should resume.
 
@@ -151,15 +154,35 @@ actual owner and priority; the cursor never overrides operator steering or
 safety. Optional projections can show this same position without introducing
 another owner of claims or completion.
 
+## Optional read-only helper
+
+The payload's [scripts/agenda.py](scripts/agenda.py) runs through an existing
+Python 3 interpreter; it needs no dependencies, installer or daemon.
+Invoke that resolved script with `next --state-home <journal-home>` to print the
+recorded root, stack, next action, exit criteria and declared outcomes.
+`check --state-home <journal-home>` performs the same structural inspection.
+Add `--json` for structured output, `--expected-revision <n>` to reject a changed
+snapshot, or `--worktree <identity>` to reject the wrong lane.
+JSON output is an inspection report, not replacement cursor state; never
+redirect it over `cursor.json`.
+
+The state home is explicit: use the directory already chosen beside the
+worktree journal. The helper does not discover private tracking paths, create
+state, execute graph data, mutate a cursor, pop a frame or verify external
+completion. Code 0 means the inspected active/next snapshot is structurally
+consistent, **not** that exit criteria or source completion passed. Code 2 is a
+diagnostic requiring correction/reconciliation; source files remain unchanged.
+
 Manual JSON editing is cooperative and single-writer: it does not provide
 atomic updates, crash transactions or stale-write enforcement. Read the latest
 cursor before editing, preserve a pending return until reconciled, and do not
 let parallel writers share it. This procedure does not prevent arbitrary
-off-agenda tool use or originate agent turns. Optional helpers may make cursor
-operations more objective; they must preserve these same authority boundaries.
+off-agenda tool use or originate agent turns. The helper checks a snapshot, not
+the safety of a later write or the authority of its caller.
 
 ## References
 
 - [Format, movement and worked nested return](references/agenda-format.md)
 - [Agenda example](assets/agenda.example.json)
 - [Lane cursor example](assets/cursor.example.json)
+- [Optional read-only next/check helper](scripts/agenda.py)

@@ -9,7 +9,7 @@
   "frames": [
     {
       "agenda": "agenda.json",
-      "agenda_revision": "replace-with-reviewed-definition-identity",
+      "agenda_revision": 1,
       "node": "implement",
       "visits": {"implement": 1},
       "evidence": [],

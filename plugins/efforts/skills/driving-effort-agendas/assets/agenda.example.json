@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "revision": 1,
   "source": {"kind": "effort", "ref": "efforts/active/example/README.md"},
   "entry": "implement",
   "nodes": {
