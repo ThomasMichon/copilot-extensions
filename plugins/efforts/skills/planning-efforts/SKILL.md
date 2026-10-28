@@ -44,6 +44,11 @@ original-owner supervision, use [driving-backlog-burndown](../driving-backlog-bu
 after establishing this canonical effort. It adds a charter and operating
 loop without replacing this skill's placement or completion lifecycle.
 
+For an explicitly adopted agenda, use
+[driving-effort-agendas](../driving-effort-agendas/SKILL.md) to answer "what next?",
+follow exit criteria and preserve a bounded parent/child work stack. This is
+optional; the effort README remains the canonical plan and completion gate.
+
 ## First: resolve the effort home, then read its addendum
 
 Efforts are standalone. If no external state-root binding is in play, the
