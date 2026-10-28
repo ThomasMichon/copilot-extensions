@@ -1,0 +1,9 @@
+{
+  "comment": "Copy declared instructions on every launch and session start without prepared-generation or content-fingerprint gates.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

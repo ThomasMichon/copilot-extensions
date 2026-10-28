@@ -11,7 +11,7 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Dispatch Reversible Action Controls](active/dispatch-reversible-action-controls/README.md) | Draft; action-level inhibition with live restoration, review before implementation | #9334; preserves #6820/#7694 maintenance ownership and existing lifecycle controls; no rollout |
-| [Direct Instruction Propagation](active/direct-instruction-propagation/README.md) | Draft; copy-only replacement contract before implementation | #9329; coordinates #9097; no runtime content-hash/fingerprint admission, no rollout |
+| [Direct Instruction Propagation](active/direct-instruction-propagation/README.md) | Active; proposal reviewed in #9331, direct-copy source implementation in progress | #9329; coordinates #9097; no runtime content-hash/fingerprint admission, no rollout |
 | [Cached Source Wheel Assembly](active/cached-source-wheel-assembly/README.md) | Active; proposal reviewed in #9291, content-bound reuse and native qualification remain | #9290; preserves #8873/#8949 verification, #5851 staging and #6937/#6941 release-lock owners |
 | [Consolidated Core Runtime Bundle](active/runtime-bundle/README.md) | Draft; reviewed composition contract before isolated artifact/CLI proof | Core composition only; reuses #6937/#4876/#6234/#6707 owners, no new authority or rollout |
 | [Leased Daemon Instances](active/leased-daemon-instances/README.md) | Active; original custody source delivered, compiler-free Python amendment reviewed in #9120; replacement open | #8403; preserves identity, leases, descendant settlement and installer owners; no rollout |

@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Proposal and implementation PRs against `dev`
 - **Created:** 2026-10-27
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Harness guidance](../../../visions/harness-guidance/README.md):
   `simple-local-static-delivery`, `authoritative-ownership`, `resume-stable-context`
 - **Umbrella issue:** #9329
@@ -62,7 +62,7 @@ The operator confirmed the slug `direct-instruction-propagation`.
 
 - [x] Claim #9329, identify the #9097 overlap, and capture the operator request.
 - [x] Notify #9097 of the replacement contract and preserve its separate owner.
-- [ ] Land this proposal and the owning vision clarification through review
+- [x] Land this proposal and the owning vision clarification through review
   before implementation.
 
 ### Phase 2 - Implement copy-only propagation
@@ -140,3 +140,31 @@ promotion flow; rollout requires its normal authorization.
   overwrite/no-hash decisions. The retained filesystem/configuration controls
   and their refusal tests are explicitly agent-recommended.
 - Implementation remains gated on the proposal's reviewed merge.
+
+### 2026-10-27 - Proposal merged; implementation admitted
+
+- #9331 merged after current-head Copilot approval and required green checks.
+  The older fallback/provenance clause was aligned with the same direct-copy
+  contract rather than leaving contradictory standing intent.
+- Re-read the complete effort after merge. Phase 2 now owns runtime copying,
+  source selection, model-facing guidance and their focused regression controls.
+  No installed payload or running session was changed.
+
+### 2026-10-27 - Direct-copy publisher source slice
+
+- Removed prepared-generation reuse, instruction input/output fingerprint
+  matching and output-byte comparisons from Worktrees publication. Each
+  preparation replaces every selected file; SessionStart always queues its
+  existing bounded backup rather than probing readiness.
+- Retained pairing/composition order, serialized source resolution,
+  tracked-file/ignore/path checks, partial-provider destination ownership
+  by source name only, and restart notifications. There is no instruction
+  content hash or provenance receipt in this publication path.
+- Focused native Windows publisher, isolated-consumer and lifecycle controls
+  passed: 198 tests, with 10 platform-specific skips. Synthetic 32-file
+  repeated-copy controls retain timing properties without adding a CI matrix.
+  Initial test-launch setup issues were corrected in the private runner, not
+  worked around in production code.
+- The source resolver, model-facing selectors/catch-all and independent
+  compatibility renderer still need their copy-only changes. This publisher
+  slice does not close #9329 or claim installed propagation is fixed.
