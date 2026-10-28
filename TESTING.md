@@ -230,6 +230,9 @@ loss and the shared deadline while payload hashing is blocked and while a real
 nested installer owns a descendant. A transport case returns non-ASCII stdout
 and stderr despite a legacy Python output environment. These are not added to
 the opt-in 44-case SDK desktop roster and do not replace its qualification.
+The cell hash's actual bytecode-cache and `.git`-named synthetic-file controls
+remain in the on-demand packet, not promotion units: the latter's existing
+bytecode-attribution and Git-storage effect refusals stay intact.
 The fixture's identity report is admitted only after a separate marker confirms
 the producer completed its closed-file publication. A failed admitted read stays
 an error; the fixture does not suppress permissions failures or retry them as a pass.
