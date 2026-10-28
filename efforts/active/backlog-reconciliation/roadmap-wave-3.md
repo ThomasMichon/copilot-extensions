@@ -157,9 +157,9 @@ need not wait for an entire fleet, handoff, installer or maintenance programme.
 Reciprocal query/credential interfaces are separate slices, not a circular
 whole-issue completion requirement.
 
-- [ ] Publish this exact third-wave proposal, appendices, scoped register and
-  cross-wave integration through normal review.
-- [ ] Re-read and reconcile the parent Plan/Validation and journal after the
+- [x] Publish this exact third-wave proposal, appendices, scoped register and
+  cross-wave integration through normal review in #9396.
+- [x] Re-read and reconcile the parent Plan/Validation and journal after the
   actual merge; continue remaining eligible supply and provisional decisions.
 
 No issue was closed, requirement transferred, owner reassigned, fix implemented
