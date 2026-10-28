@@ -2888,3 +2888,127 @@ the Picker moved to `worktree-manager/`.
 > and the bundled `plugins/agent-worktrees/src/agent_worktrees/picker_tui/`
 > package was deleted after parity landed. agent-worktrees now owns only the
 > engine boundary and the non-UI support primitives.
+
+### Native Windows pre-tool entry
+
+`hooks.json` dispatches through `scripts/pre-tool-hook.ps1` (or its installed
+`bin` copy). A partial installation without that file retains the previous
+standalone Python entry. Existing sessions that cached the old command keep
+using `hook_client.py`; a payload refresh is not proof their command changed.
+
+For the default installation, `view`, `rg` and `glob` can return without Python,
+IPC, repository discovery or runtime selection. `hook-read-policy.json` binds
+that exemption to the exact normalized sources of all four guards. Missing,
+changed, linked or unrecognized guard/contract files retain Python policy;
+installation-context admission is never skipped. Regenerate the contract with
+`python tools/render-hook-read-policy.py` after guard changes. The deployment
+contract tests also exercise each real guard's read decision, not just hashes.
+A hot active pre-tool stop can return natively; invalid/unsupported flag state
+keeps the normal guard path and its diagnostic.
+
+The native read contract currently hashes four bounded source files per read
+(at most 128 KiB each); it is not a daemon-published worktree-policy cache and
+does not claim zero filesystem cost. Exact fingerprints deliberately prevent a
+partial helper upgrade from reusing a stale exemption. A future lifecycle- or
+daemon-published generation may replace this repeated check after its own
+freshness/admission contract is qualified; no parallel runtime selector is added.
+
+Other input retains the existing selected-runtime resolver in read-only mode
+for default installations, with the old ambient Python compatibility path when
+no slot is available. Explicit installation contexts retain the existing Python
+validator, not a legacy-root substitute. Python receives UTF-8 input explicitly
+without a CLI/binstub or self-provisioning invocation. Required policy failure
+is reported as a deny, never silently presented as a successful no-op. The
+service-unavailable Python guard fallbacks are unchanged in this slice.
+
+Native JSON readers reject non-object roots before PowerShell can enumerate
+a singleton array. Non-exempt native fallback uses the strict entry and checks
+a bounded, typed object response before forwarding diagnostics. Empty,
+malformed and down-level unknown-entry responses deny. Child UTF-8 settings
+override inherited standard-I/O encodings, including during native fallback.
+Strict hot-stop responses explicitly acknowledge `{}` without loading guards;
+legacy command-hook stop/no-op responses retain their empty-output behavior.
+Stop overrides must be fully qualified drive/UNC paths, and contract identifiers
+must be strings; relative overrides or array-valued identifiers retain policy.
+
+Native fallback uses the same existing caller-owned SDK worker as the resident
+adapter. The event-local wrapper keeps its stdin lifetime channel open, reads
+both outputs asynchronously, and bounds input transfer, process completion and
+output completion within one 28-second deadline. Its optional base64 frame
+preserves raw multiline JSON bytes. Closing the channel on caller death or
+failure cancels the real worker behind a virtual-environment launcher; the SDK
+owns the policy's descendants under its 25-second budget. The shared installer
+native runner is unchanged; no generic installer lifetime behavior is widened.
+
+Explicit installation cells are validated through the existing native
+installation-context helper before the read-only runtime resolver selects the
+owning slot. A missing/invalid cell or unavailable owning interpreter denies
+without falling back to an ambient Python lacking the owned-process SDK.
+
+### Opt-in resident pre-tool pilot
+
+The existing extension can register an SDK `onPreToolUse` callback when
+`AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON` explicitly names an absolute,
+existing policy interpreter. The normal extension does not request hook
+capability approval or register callbacks without this opt-in. The interpreter
+must come from the owning installation's already-resolved runtime; this is not
+a second selector or a self-provisioning path.
+
+The callback retains its verified read-policy generation in memory and checks
+source metadata before reuse. Partial upgrades, malformed policy and changed
+generations retain policy evaluation. Bounded reads retry once for metadata
+that settles during first access. The shared pre-tool stop remains a hot read,
+not a startup-cached boolean. Explicit installation contexts never use the
+default-installation read exemption.
+
+Non-exempt operations enter `hook_policy_process.py`, which uses the existing
+owning runtime's `agent_procutil.owned_process.run_caller_owned` API to run only
+the standalone `hook_client.py`. SDK `workingDirectory` is passed as
+command-policy `cwd`. The pilot uses
+`preToolUseStrict` (the internal `--require-policy` entry): missing or failing
+fallback guards deny instead of silently
+allowing. This mode evaluates the current standalone policy directly, without
+reusing an older daemon's decision or its legacy fail-open response handling.
+Process, decoding and response failures likewise produce an explicit
+deny with a deduplicated diagnostic. Existing command-hook callers retain their
+compatibility behavior. An older client does not recognize this distinct entry
+and emits no decision, which the resident adapter rejects instead of silently
+falling back to the older client's non-strict behavior.
+
+A successful strict policy evaluation always serializes its JSON object,
+including an empty no-op decision. Legacy command-hook no-ops remain silent.
+The adapter never interprets unexplained silence as approval. Its bounded,
+deduplicated error categories distinguish empty or malformed responses and
+process failures without reflecting arbitrary exception or response text.
+
+The resident adapter keeps its stdin lifetime writer open until completion or
+cancellation. EOF terminates the actual worker behind a Windows venv launcher;
+the existing SDK retires the policy's owned child scope on timeout, normal
+completion and caller death. This is finite child-process custody, not a new
+daemon, runtime selector or host command-hook handback. An unavailable owning
+SDK denies explicitly without installation or provisioning. The policy budget
+remains 25 seconds within the existing 28-second resident boundary.
+
+Each strict guard must return either no objection or a well-formed supported
+decision; malformed lists, statuses, field types and unknown responses deny
+before merging. Raw stderr is forwarded only after successful, valid policy
+responses, preserving successful warnings without repeating failing tracebacks.
+
+Guard-chain evaluation lives in the standalone `hook_pre_policy.py` helper.
+Every installer declares it in the helper closure. A missing helper returns
+an explicit denial from either standalone entry, never a silent no-op.
+
+Installation-owned shim currency includes the client, both policy helpers,
+native entry, read contract and native runner. An already-current runtime must
+therefore repair missing or changed bin companions rather than skipping them.
+
+SDK hooks are awaited decisions, not passive event listeners. Registration
+requires the host's capability approval and does **not** disable a command hook.
+With both registered, both run; registration alone is not a throughput win.
+Any bounded foreground read-only cutover must verify the live callback first
+and restore the exact command hook before unload, rollback or further work.
+A callback's disappearance does not restore a separately disabled command
+hook. Unattended replacement therefore remains gated on a host-owned,
+lifetime-safe handback contract; this opt-in is a pilot, not automatic fleet
+migration. It closes the staged-convergence seam in
+`visions/native-convergence/README.md` without weakening existing policy.

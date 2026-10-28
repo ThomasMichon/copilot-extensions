@@ -6,6 +6,16 @@ determinism, source independence, aggregate storage and refusal/cleanup paths.
 Run it with `tools/test_installer_wheel_snapshot.py`; these producer integration
 controls are not enrolled automatically in required unit-only CI.
 
+Agent-worktrees' `test_hook_policy_lifetime.py` is an explicit contained
+Windows lane (`AGENT_WORKTREES_NATIVE_RECOVERY=1`). It exercises the real
+resident policy adapter through a venv launcher, pins the descendant's kernel
+handle and birth identity, and verifies termination after both the fixed
+policy timeout and Node caller death before fixture cleanup. Native controls
+stay outside the required pure-unit packet. They do not prove unattended
+command-hook handback, full installation or live fleet activation. The
+PowerShell 5/7 entry fixtures separately cover singleton-array rejection,
+inherited non-UTF-8 settings and strict/legacy response compatibility.
+
 `tools/promotion_unit_tests/test_artifact_license_notices.py` checks that the
 existing source-bound wheel verifier refuses omitted or changed source notices,
 accepts modern and legacy license locations, and preserves historical source

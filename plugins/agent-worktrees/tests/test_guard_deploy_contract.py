@@ -60,8 +60,11 @@ def test_python_hook_runners_recover_from_invalid_windows_cwd():
         hooks = data["hooks"][event]
         assert len(hooks) == 1
         command = hooks[0]["powershell"]
+        if event == "preToolUse":
+            assert "pre-tool-hook.ps1" in command
+            command += (_SCRIPTS / "pre-tool-hook.ps1").read_text("utf-8")
         assert "Set-Location -LiteralPath $env:USERPROFILE" in command
-        assert "[IO.Path]::GetPathRoot((Get-Location).Path)" in command
+        assert "[IO.Path]::GetPathRoot(" in command
         assert "[IO.Directory]::SetCurrentDirectory((Get-Location).Path)" in command
 
 
@@ -76,11 +79,14 @@ def test_all_installers_deploy_every_py_hook():
         "bind_nudge.py",
         "hook_runtime.py",
         "hook_process_identity.py",
-        "hook_pre_relevance.py",
+        "hook_pre_relevance.py", "hook_pre_policy.py", "hook_policy_process.py",
         "hook_lifecycle_runtime.py",
         "native_source_context.py",
         "terminal_probe.py",
         "pretool_killswitch.py",
+        "pre-tool-hook.ps1",
+        "versioned_runtime_native.ps1",
+        "hook-read-policy.json",
     }
     installers = {
         "install.ps1": _INSTALL_PS1.read_text("utf-8"),
@@ -122,27 +128,18 @@ def test_wrappers_deploy_before_monitor_activation():
 
 
 def test_legacy_python_installer_uses_manager_wrapper_manifest():
-    installers = {
-        "installer.py": _INSTALLER_PY.read_text("utf-8"),
-    }
     manifest = json.loads((_PLUGIN / "launch-wrapper-assets.json").read_text("utf-8"))
     from agent_worktrees import launch_wrapper_assets
 
     assert tuple(manifest["files"]) == launch_wrapper_assets.WRAPPER_FILES
-    required = {
-        "installer.py": ("load_manifest(", "resolve_source_dir("),
-    }
-    missing: list[str] = []
-    for name, expected in required.items():
-        for wrapper in (
-            (expected,) if isinstance(expected, str) else expected
-        ):
-            if wrapper not in installers[name]:
-                missing.append(f"{name} does not deploy {wrapper}")
+    python_installer = _INSTALLER_PY.read_text("utf-8")
+    assert "load_manifest(" in python_installer
+    assert "resolve_source_dir(" in python_installer
+    assets = launch_wrapper_assets.load_manifest(_PLUGIN)
+    source = launch_wrapper_assets.resolve_source_dir(_PLUGIN.parents[1], assets)
     for wrapper in ("pane-args.ps1", "pane-launch.ps1", "pane-wrapper.ps1", "pane-wrapper.sh"):
-        if wrapper not in manifest["files"]:
-            missing.append(f"launch-wrapper-assets.json does not list {wrapper}")
-    assert not missing, "\n".join(missing)
+        assert wrapper in manifest["files"]
+        assert (source / wrapper).is_file()
 
 
 @pytest.mark.guard
@@ -174,3 +171,29 @@ def test_bootstrap_state_guards_are_deployed_before_every_bootstrap_caller():
             lines = [line for line in source.splitlines() if guard in line and caller in line]
             assert len(lines) == 1, name
             assert lines[0].index(guard) < lines[0].index(caller), name
+
+
+def test_native_read_contract_matches_actual_guard_semantics(tmp_path, monkeypatch):
+    import hashlib
+    import importlib.util
+
+    policy = json.loads((_SCRIPTS / "hook-read-policy.json").read_text("utf-8"))
+    expected = {"statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py", "pr_supersede_guard.py"}
+    assert set(policy["guards"]) == expected
+    spec = importlib.util.spec_from_file_location("native_contract_client", _SCRIPTS / "hook_client.py")
+    client = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(client)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.syspath_prepend(str(_SCRIPTS))
+    for name in expected:
+        text = (_SCRIPTS / name).read_text(encoding="utf-8-sig")
+        assert hashlib.sha256(text.encode("utf-8")).hexdigest() == policy["guards"][name], "Run tools/render-hook-read-policy.py after guard changes"
+        guard = client._load_sibling(name)
+        assert guard is not None
+        def forbidden(*args, **kwargs):
+            pytest.fail("native read exemption would skip meaningful guard work")
+        for helper in ("find_repo_root", "load_guarded_roots", "load_worktree_anchors", "_current_login"):
+            if hasattr(guard, helper):
+                monkeypatch.setattr(guard, helper, forbidden)
+        for tool in ("view", "rg", "glob"):
+            assert guard.decide({"toolName": tool, "cwd": str(tmp_path), "toolArgs": {"path": "test"}}, env={}, home=tmp_path) is None
