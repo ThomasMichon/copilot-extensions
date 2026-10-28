@@ -389,6 +389,53 @@ class TestCmdEmbody:
         assert out["seed_reason"] == "native-startup-pending"
         assert out["seeded"] is False and out["seed_submitted"] is False
 
+    @pytest.mark.parametrize("copy_fails", [False, True])
+    def test_cold_launch_copies_setup_before_mux_without_taking_seed_ownership(
+        self, monkeypatch, capfd, tmp_path, copy_fails,
+    ):
+        from agent_worktrees import launch_seed_exec
+
+        _stub_config(monkeypatch)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda r: "wtCopy")
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+        (tmp_path / "wtCopy.yaml").write_text("x")
+        monkeypatch.setattr(
+            m.tracking, "load_record",
+            lambda p: type("Rec", (), {"worktree_path": "/w/wtCopy"})(),
+        )
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
+        events = []
+
+        def copy(command, record):
+            events.append(("copy", command, record))
+            if copy_fails:
+                raise OSError("copy refused")
+            return ["copied-setup", *command]
+
+        def spawn(wt, wd, command, env, **kwargs):
+            events.append(("spawn", command))
+            return {"ok": True, "session": "wt-wtCopy", "new_pane": "%5", "error": None}
+
+        def seed(pane, text, **kwargs):
+            events.append(("seed", text))
+            return {"ok": True, "pane": pane, "ready": True, "sent": True,
+                    "submitted": True, "reason": None}
+
+        monkeypatch.setattr(launch_seed_exec, "copied_setup_command", copy)
+        monkeypatch.setattr(sessions, "mux_new_session", spawn)
+        monkeypatch.setattr(sessions, "mux_seed_pane", seed)
+        rc = m.cmd_embody(_ns(worktree_id="wtCopy", seed="separate prompt"))
+        out = json.loads(capfd.readouterr().out)
+        assert events[0] == ("copy", ["copilot"], tmp_path / "wtCopy.yaml")
+        if copy_fails:
+            assert rc == 3 and "error" in out
+            assert "launch-owned setup" in out["error"]
+            assert len(events) == 1
+        else:
+            assert rc == 0
+            assert events[1:] == [("spawn", ["copied-setup", "copilot"]), ("seed", "separate prompt")]
+            assert out["seeded"] is True
+
     def test_pending_seed_is_delivered_and_cleared_on_confirmed_submit(
         self, monkeypatch, capfd, tmp_path,
     ):

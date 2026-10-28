@@ -62,6 +62,18 @@ installed service or retained conversation is changed. This is native CLI
 startup qualification, not real-mux, physical keyboard, installed rollout or
 whole managed-launch acceptance; platform lanes are qualified independently.
 
+Agent-worktrees' `test_session_shell.py` checks canonical Windows setup copying
+for cold `embody`, without taking over its separate seed/admission owner.
+Its native PowerShell control invokes the actual copied wrapper/setup with
+literal arguments and removes only disposable source fixture files from inside
+the synthetic backend before returning its real nonzero exit. `test_embody.py`
+checks copy-before-spawn and failure-before-spawn ordering with seed delivery
+still owned by the existing completion path. This is consumer/asset lifetime
+evidence, not supported product uninstall, real Copilot/TTY or host rollout.
+The setup-copy/actual-pane-construction control counts the underlying Manager
+probe on both healthy and timeout paths: copying adds none and construction
+performs its existing single probe.
+
 Agent-worktrees' `test_launch_seed_native.py` covers the finite backend and setup
 provider: retained one-time seed claims, literal argv, existing prompt-free
 execution observations, PID/birth and incarnation refusals, definite-spawn

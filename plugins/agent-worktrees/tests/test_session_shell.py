@@ -293,6 +293,161 @@ def test_native_pane_copies_engine_owned_console_helper_with_canonical_wrapper(l
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows setup plan")
+@pytest.mark.parametrize("wrapped", [False, True])
+@pytest.mark.parametrize("recovery", [False, True])
+def test_mux_setup_copy_preserves_separate_admission_and_literal_native_arguments(
+    launch, monkeypatch, wrapped, recovery,
+):
+    record, runtime, assets = launch
+    scripts = runtime / "scripts"
+    scripts.mkdir()
+    canonical = Path(__file__).resolve().parents[1] / "scripts"
+    names = ("default-setup.ps1", "launch-command.ps1", "native-seed-boundary.ps1",
+             "reconcile-machine-settings.ps1")
+    for name in names:
+        shutil.copy2(canonical / name, scripts / name)
+    monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: runtime)
+    monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: runtime.with_name("manager"))
+    monkeypatch.setattr(manager_launch_cli, "_usable_worktree_manager_launcher_dir", lambda: assets)
+    (assets / "pane-wrapper.ps1").write_text(session_shell.NATIVE_CONSOLE_MARKER + "\n", encoding="utf-8")
+    native = json.dumps({"args": ["", "two words", "2026-01-01", "--resume=original", "--", "'literal'"]})
+    command = [
+        "pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(scripts / "default-setup.ps1"),
+        "-NativeArgumentsJson", native,
+    ]
+    if wrapped:
+        command = [
+            "pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(scripts / "launch-command.ps1"),
+            *(["--recovery"] if recovery else []), "--", *command,
+        ]
+    original = list(command)
+    prepared = launch_seed_exec.copied_setup_command(command, record)
+    index = (11 if recovery else 10) if wrapped else 4
+    copied = Path(prepared[index])
+    assert copied.is_relative_to(record.parent / "launch-attempts")
+    assert prepared[index + 1:] == command[index + 1:]
+    assert prepared[-1] == native
+    assert command == original
+    assert "-LaunchSeedPreparation" not in prepared
+    assert "-LaunchSeedRecord" not in prepared
+    assert "agent_worktrees.launch_seed_exec" not in prepared
+    if wrapped:
+        assert Path(prepared[4]) == copied.with_name("launch-command.ps1")
+        assert prepared[5:index - 4] == command[5:index - 4]
+    expected = {name: (scripts / name).read_bytes() for name in names}
+    shutil.rmtree(runtime)
+    assert {path.name: path.read_bytes() for path in copied.parent.iterdir()} == expected
+
+
+def test_mux_setup_copy_leaves_custom_commands_unchanged(launch):
+    record, _runtime, _assets = launch
+    command = ["copilot", "--resume=original", "--", "literal"]
+    assert launch_seed_exec.copied_setup_command(command, record) == command
+    assert not (record.parent / "launch-attempts").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows setup plan")
+@pytest.mark.parametrize("healthy", [False, True])
+def test_copy_then_actual_pane_construction_probes_manager_only_once(launch, monkeypatch, healthy):
+    import subprocess
+    from types import SimpleNamespace
+
+    record, runtime, _assets = launch
+    scripts = runtime / "scripts"
+    scripts.mkdir()
+    canonical = Path(__file__).resolve().parents[1] / "scripts"
+    for name in ("default-setup.ps1", "launch-command.ps1", "native-seed-boundary.ps1",
+                 "reconcile-machine-settings.ps1"):
+        shutil.copy2(canonical / name, scripts / name)
+    (runtime / "current-version").write_text("A", encoding="utf-8")
+    slot = runtime / "versions" / "A"
+    bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
+    bootstrap.parent.mkdir()
+    bootstrap.touch()
+    python = slot / "Scripts" / "python.exe"
+    python.parent.mkdir()
+    python.touch()
+    monkeypatch.setattr(manager_launch_cli, "_core", lambda: SimpleNamespace())
+    monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: runtime)
+    monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: runtime)
+    monkeypatch.setattr(config, "install_dir", lambda: runtime)
+    monkeypatch.setattr(config, "tracking_dir", lambda: record.parent)
+    monkeypatch.setattr(config, "project_name", lambda: "example")
+    monkeypatch.setattr(sessions, "_LEGACY_BIN_DIR", str(runtime / "missing-legacy-bin"))
+    probes = []
+
+    def probe(command):
+        probes.append(command)
+        return (
+            ((0, 6, 44, 1), subprocess.CompletedProcess(command, 0, "worktree-manager 0.6.44-dev1"))
+            if healthy else (None, None)
+        )
+
+    monkeypatch.setattr(manager_launch_cli, "_probe_worktree_manager_version", probe)
+    command = [
+        "pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(scripts / "launch-command.ps1"), "--",
+        "pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(scripts / "default-setup.ps1"),
+        "-NativeArgumentsJson", '{"args":[]}',
+    ]
+    copied = launch_seed_exec.copied_setup_command(command, record)
+    assert probes == []
+    assert Path(copied[4]).is_relative_to(record.parent / "launch-attempts")
+    sessions._mux_pane_cmd("test-worktree", copied, is_tmux=False, mux_bin="psmux.exe")
+    assert len(probes) == 1
+    assert probes[0][0] == str(python)
+
+
+@pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Native PowerShell required")
+def test_copied_mux_setup_runs_and_returns_after_disposable_source_removal(launch, monkeypatch):
+    from agent_procutil.owned_process import run_caller_owned
+
+    record, runtime, assets = launch
+    scripts = runtime / "scripts"
+    scripts.mkdir()
+    canonical = Path(__file__).resolve().parents[1] / "scripts"
+    for name in ("default-setup.ps1", "launch-command.ps1", "native-seed-boundary.ps1",
+                 "reconcile-machine-settings.ps1"):
+        shutil.copy2(canonical / name, scripts / name)
+    monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: runtime)
+    monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: runtime.with_name("manager"))
+    monkeypatch.setattr(manager_launch_cli, "_usable_worktree_manager_launcher_dir", lambda: assets)
+    (assets / "pane-wrapper.ps1").write_text(session_shell.NATIVE_CONSOLE_MARKER + "\n", encoding="utf-8")
+    backend = runtime.with_name("backend.ps1")
+    backend.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        f"Remove-Item -LiteralPath '{str(runtime).replace(chr(39), chr(39) * 2)}' -Recurse -Force\n"
+        "[Console]::WriteLine((ConvertTo-Json -InputObject @($args) -Compress))\n"
+        "exit 7\n",
+        encoding="utf-8",
+    )
+    literal = ["two words", "2026-01-01", "single ' quote", 'double " quote', "; $literal", "--", "--allow-all"]
+    pwsh = shutil.which("pwsh")
+    command = [
+        pwsh, "-NoProfile", "-NoLogo", "-File", str(scripts / "launch-command.ps1"), "--",
+        pwsh, "-NoProfile", "-NoLogo", "-File", str(scripts / "default-setup.ps1"),
+        "-CopilotPath", str(backend), "-RuntimePython", str(runtime / "missing-python.exe"),
+        "-NativeArgumentsJson", json.dumps({"args": literal}),
+    ]
+    copied = launch_seed_exec.copied_setup_command(command, record)
+    environment = dict(os.environ)
+    environment.update(
+        PATH=str(Path(pwsh).parent),
+        USERPROFILE=str(runtime.with_name("isolated-home")),
+        AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT=str(runtime),
+        AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED="1",
+    )
+    result = run_caller_owned(
+        copied, cwd=record.parent, env=environment, timeout=30,
+        max_stdout_bytes=1024 * 1024, max_stderr_bytes=1024 * 1024,
+    )
+    assert result.returncode == 7, result.stderr
+    assert json.loads(result.stdout.splitlines()[-1]) == literal
+    assert not result.stderr
+    assert not runtime.exists()
+    assert Path(copied[4]).is_file()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows setup plan")
 def test_old_normalized_setup_keeps_legacy_provider_instead_of_silent_native_activation(launch, monkeypatch):
     record, runtime, _assets = launch
     scripts = runtime / "scripts"

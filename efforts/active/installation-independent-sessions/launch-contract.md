@@ -103,6 +103,16 @@ still retain their legacy path. Current-root finite calls refuse unsupported
 providers rather than provisioning, falling through to a foreign installation
 or starting an uncorrelated backend. This bounded normalized consumer
 integration is not full launch-path parity or concurrent mux admission proof.
+Cold `embody` separately copies the canonical Windows setup assets before its
+actual seed-free or terminal-fallback mux spawn, using the same canonical setup
+marker without activating the finite seed provider. It does not duplicate
+Manager health probes: the existing pane-construction owner still selects that
+provider. Qualified startup prompts
+retain their existing deferred preparation. Existing launch and prompt owners
+retain admission and seed custody. Previews and existing live-mux joins do
+not copy assets. Retained setup-time runtime arguments and consumed one-shot
+manifest references still require proper uninstall consumer classification;
+copying assets is not permission to waive that conservative guard.
 Copied assets are retained, not reclaimed on age or inferred liveness. Their
 terminal reclamation, missed-boundary recovery, actual installed consumer
 parity and the literal clean-middle round trip remain this effort's obligations.
