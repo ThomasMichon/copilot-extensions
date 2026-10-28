@@ -38,6 +38,16 @@ def _run(tmp_path: Path, shell: str, script: str, *args: str) -> subprocess.Comp
     executable = _BASH if shell == "sh" else _PWSH
     if not executable:
         pytest.skip(f"{shell} is unavailable")
+    if shell == "sh":
+        policy = tmp_path / "action-controls.json"
+        if not policy.exists():
+            policy.write_text("{}", encoding="utf-8")
+        script = "\n".join([
+            f"SCRIPT_DIR={shlex.quote((_ROOT / 'scripts').as_posix())}",
+            f"_bootstrap_python() {{ printf '%s\\n' {shlex.quote(Path(sys.executable).as_posix())}; }}",
+            '_fail() { printf \'%s\\n\' "$*" >&2; }',
+            script,
+        ])
     path = tmp_path / f"exercise.{shell if shell == 'sh' else 'ps1'}"
     path.write_text(script, encoding="utf-8")
     prefix = [] if shell == "sh" else ["-NoProfile", "-NonInteractive", "-File"]
@@ -77,7 +87,7 @@ def _update_script(tmp_path: Path, shell: str, strict: bool, outcome: str) -> st
     if shell == "sh":
         return "\n".join([
             "set -euo pipefail",
-            f'INSTALL_DIR={shlex.quote(str(tmp_path))}',
+            f'INSTALL_DIR={shlex.quote(tmp_path.as_posix())}',
             "NO_SERVICE=0",
             f"REQUIRE_GRACEFUL_CUTOVER={int(strict)}",
             'SUPERVISOR_UNIT=test; SUPERVISOR_ENV_FILE=test',
@@ -151,6 +161,28 @@ def test_update_never_falls_back_or_reconciles_after_required_cutover_failure(
         _assert_cutover_lock_released(tmp_path)
 
 
+def test_shell_harness_rechecks_real_policy_before_maintenance(tmp_path: Path) -> None:
+    script = _update_script(tmp_path, "sh", strict=False, outcome="success")
+    allowed = _run(tmp_path, "sh", script)
+    assert allowed.returncode == 0, allowed.stdout + allowed.stderr
+    assert "selected" in allowed.stdout.splitlines()
+    policy = tmp_path / "action-controls.json"
+    assert json.loads(policy.read_text(encoding="utf-8")) == {}
+    policy.write_text(json.dumps({
+        "runtime-activation": {"disabled": True},
+    }), encoding="utf-8")
+    denied = _run(tmp_path, "sh", script)
+    assert denied.returncode == 3, denied.stdout + denied.stderr
+    assert "runtime-activation" in denied.stdout + denied.stderr
+    assert not any(line in {"selected", "supervisor"} or line.startswith("service:")
+                   for line in denied.stdout.splitlines())
+    policy.write_text("{}", encoding="utf-8")
+    cleared = _run(tmp_path, "sh", script)
+    assert cleared.returncode == 0, cleared.stdout + cleared.stderr
+    assert "selected" in cleared.stdout.splitlines()
+    assert "supervisor" in cleared.stdout.splitlines()
+
+
 def _fake_python(tmp_path: Path, output: str, rc: int, routed: bool) -> Path:
     implementation = tmp_path / "fake_python.py"
     implementation.write_text(
@@ -197,9 +229,9 @@ def test_required_cutover_requires_explicit_boolean_success_and_zero_exit(
     if shell == "sh":
         script = "\n".join([
             "set -euo pipefail",
-            f"INSTALL_DIR={shlex.quote(str(tmp_path))}",
+            f"INSTALL_DIR={shlex.quote(tmp_path.as_posix())}",
             "NO_SERVICE=0; REQUIRE_GRACEFUL_CUTOVER=1",
-            f'VENV_PYTHON={shlex.quote(str(python))}; LINK_PYTHON="$VENV_PYTHON"',
+            f'VENV_PYTHON={shlex.quote(python.as_posix())}; LINK_PYTHON="$VENV_PYTHON"',
             '_step() { :; }; _ok() { :; }; _warn() { echo "$1" >&2; }',
             # Only the availability check is stubbed, never a real systemd call.
             'systemctl() { return 0; }',
@@ -228,9 +260,9 @@ def test_posix_required_cutover_rejects_missing_route_without_start(tmp_path: Pa
     python = _fake_python(tmp_path, json.dumps({"ok": True}), 0, routed=False)
     script = "\n".join([
         "set -euo pipefail",
-        f"INSTALL_DIR={shlex.quote(str(tmp_path))}",
+        f"INSTALL_DIR={shlex.quote(tmp_path.as_posix())}",
         "NO_SERVICE=0; REQUIRE_GRACEFUL_CUTOVER=1",
-        f'VENV_PYTHON={shlex.quote(str(python))}; LINK_PYTHON="$VENV_PYTHON"',
+        f'VENV_PYTHON={shlex.quote(python.as_posix())}; LINK_PYTHON="$VENV_PYTHON"',
         'systemctl() { return 0; }',
         sh_function("_coordinator_cutover"),
         "if _coordinator_cutover; then exit 99; fi",

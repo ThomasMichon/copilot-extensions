@@ -520,3 +520,18 @@ Initial tests must prove the current gap before adding the guards.
   required unit-only PR gate and unavailable full Windows rotation unchanged.
 - Native execution and actual test outcomes remain pending; declaring the
   workflow or copying fixtures does not establish qualification or adoption.
+- The first immutable native Windows run at `137b6b0403` passed the policy packet
+  (147 tests, two explicit skips) and the worker packet (20 tests, including all
+  nine previously Windows-only lifecycle cases). The installer packet exposed
+  11 Git Bash harness failures before original assertions: the real guard needed
+  bootstrap-Python/error-helper prerequisites absent from extracted fixtures.
+  Its 63 passes and 16 skips do not make that packet successful.
+- Report skip reasons in all three packets. The remaining fixture corrections
+  and a fresh exact-head native run are required before qualification.
+- The affected SH fixtures now supply the real reader/interpreter and error
+  prerequisites separately from the fake cutover/health responder, using native
+  Git Bash-compatible paths. Valid explicit policy forces the reader path on
+  Linux too; a real denial/clear control preserves maintenance checks rather
+  than bypassing them. Forced-reader execution first reproduced nine local
+  failures; independent full affected-file validation now passes all 64 cases.
+  The fresh native Windows run remains pending.

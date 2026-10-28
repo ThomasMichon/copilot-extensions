@@ -205,6 +205,7 @@ def test_dispatch_maintenance_native_acceptance_is_manual_bounded_and_source_pin
             "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'dispatch-maintenance'"
         )
         assert job["runs-on"] == "windows-latest" and job["timeout-minutes"] == 15
+        assert job["env"]["PYTEST_ADDOPTS"] == "-ra"
         assert job["steps"][0]["with"] == {
             "ref": "${{ github.sha }}", "persist-credentials": False,
         }
