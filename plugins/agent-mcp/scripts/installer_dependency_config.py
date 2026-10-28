@@ -16,7 +16,7 @@ import tempfile
 import time as clock
 from contextlib import contextmanager
 from datetime import date, datetime, time, timedelta, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 _WINDOWS = os.name == "nt"
 
@@ -199,6 +199,14 @@ def native_retained_path(path):
     return "\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value
 
 
+def file_uri(path):
+    """Keep extended Windows filesystem spelling out of file URI authorities."""
+    if isinstance(path, PureWindowsPath) and str(path).startswith("\\\\?\\"):
+        value = str(path)
+        path = PureWindowsPath("\\\\" + value[8:] if value[:8].lower() == "\\\\?\\unc\\" else value[4:])
+    return path.as_uri()
+
+
 @contextmanager
 def retain_closed_wheels(
     uv, snapshot, *, python, env, captured_environment, select_uv,
@@ -233,7 +241,7 @@ def retain_closed_wheels(
         requirements = root / "wheels.txt"
         requirements.write_text("".join(
             f"{name.split('-', 1)[0]} @ "
-            f"{path.as_uri()}#sha256={snapshot.digests[name].removeprefix('sha256:')} "
+            f"{file_uri(path)}#sha256={snapshot.digests[name].removeprefix('sha256:')} "
             f"--hash={snapshot.digests[name]}\n"
             for name, path in sorted(snapshot.paths.items())
         ), encoding="utf-8")
@@ -289,8 +297,9 @@ def retain_local_exclusions(retain, uv, arguments, *, excluded_local_packages, e
         constraint.write_text(
             "".join(f"{name}<0,>=0\n" for name in sorted(names)), encoding="utf-8",
         )
+        option = "--constraints" if options.get("_operation") in ("compile", "source-compile") else "--constraint"
         with retain(
-            uv, [*arguments, "--constraint", str(constraint)],
+            uv, [*arguments, option, str(constraint)],
             _generated_constraints=(constraint,), **options,
         ) as transaction:
             yield transaction

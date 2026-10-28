@@ -1350,6 +1350,14 @@ def _execute_launch(req) -> int:
     )
 
 def _cmd_self_install(rest: list[str]) -> int:
+    if "--apply" in rest and os.name == "nt":
+        from .update_driver_cli import self_install_request
+
+        return self_install_request(lambda: _render_self_install(rest))
+    return _render_self_install(rest)
+
+
+def _render_self_install(rest: list[str]) -> int:
     do_apply = "--apply" in rest
     st = self_status()
     res = self_install(dry_run=not do_apply)

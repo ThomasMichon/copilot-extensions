@@ -276,7 +276,8 @@ def _ownership(payload: Path, plugin: str, root: Path) -> tuple[Any, Any, Any, d
     primitive = binding._load_primitive(payload)  # noqa: SLF001 - payload-owned binding API
     authority = _authority_payload(payload)
     arguments = dict(payload_root=authority, plugin_id=plugin, legacy_root=root,
-                     project_root=Path.cwd(), environment={**os.environ, "COPILOT_PLUGIN_ROOT": str(authority)})
+                     project_root=Path(os.environ.get("COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT") or Path.cwd()),
+                     environment={**os.environ, "COPILOT_PLUGIN_ROOT": str(authority)})
     decision = primitive.probe_legacy_entrypoint(**{
         key: arguments[key] for key in ("payload_root", "plugin_id", "legacy_root", "project_root")
     })
@@ -638,65 +639,16 @@ def _transaction_helper(row: dict[str, Any], payload: Path, root: Path,
 
 def _lifecycle_controllers(rows: list[dict[str, Any]], payload: Path, root: Path,
                            plugin: str) -> tuple[list[Path], set[int]]:
-    """Admit only the live teardown owner and its exact native/staging callers."""
-    origins, admitted = [payload], set()
-    if not os.environ.get("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE"):
-        return origins, admitted
-    binding = _load(payload / "scripts" / "command_binding.py")
-    authority = _authority_payload(payload)
-    lease = binding._load_lifecycle().borrowed_lease(  # noqa: SLF001
-        binding._rules(), binding._load_primitive(payload), operation="teardown",  # noqa: SLF001
-        payload_root=authority, plugin_id=plugin, legacy_root=root, project_root=Path.cwd(),
-        environment={**os.environ, "COPILOT_PLUGIN_ROOT": str(authority)},
+    helper = _load(_dependency(payload, "installer_engine_uninstall_controllers.py"))
+    return helper.lifecycle_controllers(
+        rows, payload, root, plugin, load=_load, authority_payload=_authority_payload,
+        arguments=_arguments, parent=_parent, dependency=_dependency,
     )
-    if lease is None:
-        return origins, admitted
-    if authority != payload and not authority.is_relative_to(root):
-        origins.append(authority)
-    owner = next((row for row in rows if row["pid"] == lease.ticket["pid"]), None)
-    if owner is None or Path(owner["image"]).is_relative_to(root):
-        return origins, admitted
-    argv = _arguments(owner)
-    helpers = [index for index, value in enumerate(argv)
-               if Path(value) in {origin / "scripts" / "command_binding.py" for origin in origins}]
-    if len(helpers) != 1 or "--" not in argv or not re.fullmatch(
-        r"(?:python|pythonw|pypy)[0-9.]*", Path(owner["image"]).stem.lower(),
-    ):
-        return origins, admitted
-    index, separator = helpers[0], argv.index("--")
-    flags, native = argv[index + 1:separator], argv[separator + 1:]
-    if (any(value not in {"-I", "-S", "-B", "-X", "utf8"} for value in argv[1:index])
-            or "--teardown" not in flags or "--run-lifecycle" not in flags or not native
-            or any(flags.count(key) != 1 or flags.index(key) + 1 >= len(flags)
-                   or convert(flags[flags.index(key) + 1]) != value for key, convert, value in (
-                       ("--legacy-root", Path, root), ("--plugin-id", str, plugin),
-                   ))
-            or not any(_parent(owner["pid"], native[0], "", origin, root, plugin,
-                               owner["pid"], arguments=native) for origin in origins)):
-        return origins, admitted
-    admitted.add(owner["pid"])
-    admitted.update(row["pid"] for row in rows if row["pid"] == owner["ppid"] and any(
-        _parent(row["pid"], row["image"], row["command"], origin, root, plugin, row["pid"],
-                arguments=row.get("argv"))
-        for origin in origins
-    ))
-    if payload.parent.parent == Path.home() / ("." + plugin) / ".install-stage":
-        commands = _load(_dependency(payload, "installer_engine_commands.py"))
-        body = commands._sh(commands._read(payload / "scripts/install.sh"), "INSTALL_WATCHDOG").rstrip("\n")
-        # Bash 3.2 joins backslash-newlines in this quoted heredoc substitution.
-        bodies = {body, body.replace("\\\n", "")}
-        for _ in range(2):
-            for row in rows:
-                args = _arguments(row)
-                if (row["ppid"] in admitted and Path(row["image"]).stem.lower() in {"bash", "sh"}
-                        and len(args) > 8 and args[1] == "-c" and args[2] in bodies and args[3] == "bash"
-                        and Path(args[4]) == payload / "scripts/install.sh" and args[5] == plugin
-                        and Path(args[6]) == payload.parent
-                        and re.fullmatch(r"-?[0-9]+", args[7])
-                        and _parent(row["pid"], args[0], "", payload, root, plugin, row["pid"],
-                                    arguments=[args[0], args[4], *args[8:]])):
-                    admitted.add(row["pid"])
-    return origins, admitted
+
+
+def _controller_proofs(payload: Path):
+    helper = _load(_dependency(payload, "installer_engine_uninstall_controllers.py"))
+    return helper.bind(plain=_plain, run=_run, error=UninstallRefused)
 
 
 def _controllers(rows: list[dict[str, Any]], payload: Path, root: Path,
@@ -738,7 +690,8 @@ def _controllers(rows: list[dict[str, Any]], payload: Path, root: Path,
     return verified, redirectors
 
 
-def refuse_consumers(payload: Path, plugin: str, root: Path, shell: str, profile: Profile) -> None:
+def refuse_consumers(payload: Path, plugin: str, root: Path, shell: str, profile: Profile, *,
+                     controller_custody: Any = None, lifecycle_lease: Any = None) -> None:
     """Require inspectable current-user processes; never signal any process."""
     prefix = str(root).replace("\\", "/").casefold()
     if os.name == "nt":
@@ -812,6 +765,12 @@ ConvertTo-Json -InputObject $rows -Compress
         identities.append("agent_index_engine")
     module = re.compile(r"\b(?:" + "|".join(re.escape(value) for value in identities) + r")\b")
     controllers, redirectors = _controllers(rows, payload, root, plugin)
+    if controller_custody is not None:
+        if plugin != "agent-worktrees":
+            raise UninstallRefused("Driver controller qualification is Worktrees-only")
+        controllers.update(_controller_proofs(payload).worktrees_controllers(
+            rows, payload, root, shell, controller_custody, lifecycle_lease,
+        ))
     gates: set[int] = set()
     for _ in range(2):
         gates.update(row["pid"] for row in rows
@@ -882,15 +841,16 @@ def _proof(path: Path, content: bytes) -> None:
 
 @contextmanager
 def _custody(payload: Path, plugin: str, root: Path, owner: tuple[Any, ...],
-             targets: tuple[Target, ...], runtime: Any) -> Iterator[None]:
+             targets: tuple[Target, ...], runtime: Any) -> Iterator[Any]:
     binding, primitive = owner[:2]
     authority = _authority_payload(payload)
     arguments = dict(payload_root=authority, plugin_id=plugin, legacy_root=root,
-                     project_root=Path.cwd(), environment={**os.environ, "COPILOT_PLUGIN_ROOT": str(authority)})
+                     project_root=Path(os.environ.get("COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT") or Path.cwd()),
+                     environment={**os.environ, "COPILOT_PLUGIN_ROOT": str(authority)})
     lifecycle = binding._load_lifecycle()  # noqa: SLF001 - exact payload lifecycle
     leases = runtime._leases  # noqa: SLF001 - co-located canonical runtime custody
     with ExitStack() as held:
-        held.enter_context(lifecycle.legacy_lifecycle(
+        lease = held.enter_context(lifecycle.legacy_lifecycle(
             binding._rules(), primitive, reserve=False, teardown=True, lock_timeout=5, **arguments,  # noqa: SLF001
         ))
         for target in targets:
@@ -905,12 +865,13 @@ def _custody(payload: Path, plugin: str, root: Path, owner: tuple[Any, ...],
             held.enter_context(leases._kernel_lease(  # noqa: SLF001
                 target.root, "redirects", kind="publication", shared=False, timeout=0,
             ))
-        yield
+        yield lease
 
 
 def cleanup(payload_root: Path, plugin_id: str, root: Path, shell: str, *,
             profile: Path | None = None, remove_runtime: bool = False,
             check_consumers: bool = False,
+            controller_custody: Any = None,
             remover: Callable[[Path, str, Path, tuple[str, ...]], None] | None = None) -> dict[str, Any]:
     """Validate or remove a profile under its native whole-install transaction.
 
@@ -944,7 +905,7 @@ def cleanup(payload_root: Path, plugin_id: str, root: Path, shell: str, *,
     if owner[2] is not None:
         record["commandBinding"] = owner[2]
     proof = existing if existing is not None else json.dumps(record, sort_keys=True).encode() + b"\n"
-    with _custody(payload, plugin_id, root, owner, targets, runtime):
+    with _custody(payload, plugin_id, root, owner, targets, runtime) as lifecycle_lease:
         _root(payload, root)
         if _targets(payload, plugin_id, root, selected, runtime) != targets:
             raise UninstallRefused("Runtime inventory changed during custody admission")
@@ -954,11 +915,19 @@ def cleanup(payload_root: Path, plugin_id: str, root: Path, shell: str, *,
         operations = _plan(payload, root, selected, targets)
         _consumer_closure(host, operations)
         _guard(payload, plugin_id, root, selected)
-        refuse_consumers(payload, plugin_id, root, host, selected)
+        if controller_custody is None:
+            refuse_consumers(payload, plugin_id, root, host, selected)
+        else:
+            refuse_consumers(payload, plugin_id, root, host, selected,
+                             controller_custody=controller_custody, lifecycle_lease=lifecycle_lease)
         if selected.nested_engine and len(targets) > 1:
             refuse_consumers(payload, plugin_id, targets[1].root, host, selected)
         if not remove_runtime:
             return {"status": "ready", "root": str(root)}
+        if any(os.path.lexists(root / name) for name in (
+            "windows-launch-broker.json", "windows-launch-broker.pending.json",
+        )):
+            raise UninstallRefused("Owning installer must remove its Windows broker before runtime removal")
         _proof(manifest, proof)
         try:
             _guard(payload, plugin_id, root, selected)

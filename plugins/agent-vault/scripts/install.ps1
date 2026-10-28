@@ -78,6 +78,27 @@ function Copy-InstallerStageDirectory {
     }
 }
 # === end install-contract:v4 payload-copy ===
+. (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+
+if ($env:OS -eq 'Windows_NT' -and
+    $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1' -and
+    $Action -in @('install', 'update', 'provision', 'uninstall') -and
+    -not ($Action -eq 'uninstall' -and $DryRun)) {
+    $driverPayload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    $driverRoot = if ($InstallDir) { [IO.Path]::GetFullPath($InstallDir) }
+        else { Join-Path $env:USERPROFILE '.agent-vault' }
+    $driverOptions = @()
+    foreach ($name in @('NoService', 'Purge', 'Force', 'DryRun')) {
+        if ($PSBoundParameters.ContainsKey($name) -and [bool]$PSBoundParameters[$name]) {
+            $driverOptions += $name
+        }
+    }
+    $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
+        -Plugin 'agent-vault' -Action $Action -Options $driverOptions
+    if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
+    $driverPython = $driverEntry.Python
+    $driverArguments = $driverEntry.Arguments
+}
 
 # === install-contract:test-persistent-environment -- keep byte-identical across installers ===
 function Get-CopilotPersistentEnvironmentVariable {
@@ -594,8 +615,25 @@ function Invoke-VersionedMarkComplete {
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
     }
-    Complete-RuntimeConstruction -PayloadHash $actualHash
+    Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers
     return $true
+}
+
+function Invoke-RuntimeBrokerAdoption {
+    if ($NoService -or $env:OS -ne 'Windows_NT' -or
+        $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1') { return }
+    if (-not $script:RuntimeConstructionSession -or -not $script:RuntimeConstructionSession.Complete -or
+        $script:RuntimeConstructionSession.Process.HasExited) {
+        throw 'Broker adoption requires attached complete-slot retention'
+    }
+    $diagnostic = ''
+    $result = Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', '-m', 'update_driver.windows_broker',
+        '--runtime-root', $InstallDir, '--slot', $VenvDir,
+        '--execution-root', (Join-Path $env:USERPROFILE '.copilot-extensions\update-driver')) `
+        -ErrorOutput ([ref]$diagnostic)
+    if ($LASTEXITCODE -ne 0) { throw "Runtime broker adoption failed: $diagnostic" }
+    $receipt = $result | ConvertFrom-Json
+    if (-not $receipt -or $receipt.adopted -ne $true) { throw 'Runtime broker adoption returned no receipt' }
 }
 # === end install-contract:v4 marker/toss helpers ===
 
@@ -842,6 +880,8 @@ function Install-Runtime {
 
     [void](Invoke-VersionedSlotClean)
     if ($script:RuntimeConstructionReuse) {
+        if (-not (Invoke-VersionedMarkComplete)) { throw 'Retained runtime completion failed' }
+        Invoke-RuntimeBrokerAdoption
         if ($script:SourceRuntimeIdentity) {
             if (-not (Test-RuntimeHealthy)) { throw 'Retained runtime slot failed its health gate; not activating' }
             Assert-SourceRuntime
@@ -938,6 +978,7 @@ function Install-Runtime {
     Assert-SourceRuntime
     if ($VersionedRuntime) {
         if (-not (Invoke-VersionedMarkComplete)) { exit 1 }
+        Invoke-RuntimeBrokerAdoption
         if (-not (Invoke-VersionedActivate)) { exit 1 }
     }
     # Binstub + manifest resolve through the stable `.venv` link ($LinkPython /
@@ -1310,6 +1351,11 @@ function Invoke-Uninstall {
                 }
             }
         }
+    }
+    if (-not $DryRun -and $env:OS -eq 'Windows_NT' -and
+        $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1') {
+        & $driverPython @driverArguments --remove-broker
+        if ($LASTEXITCODE -ne 0) { throw 'Owned broker removal failed; runtimes preserved' }
     }
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         if ($DryRun) {

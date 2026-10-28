@@ -44,6 +44,31 @@ def test_driver_governance_uses_current_scripts(driver):
     assert governance.SCRIPTS == scripts
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows installation ownership")
+@pytest.mark.parametrize("entry", ["install", "settle_candidate"])
+def test_direct_installation_refuses_before_governance_or_construction(
+    driver, tmp_path, monkeypatch, entry,
+):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    monkeypatch.delenv("UPDATE_DRIVER_WITNESS", raising=False)
+    monkeypatch.setattr(driver.install_driver, "bootstrap", lambda payload: None)
+    monkeypatch.setattr(
+        driver, "Governance", lambda *args: pytest.fail("installation entered without driver custody"),
+    )
+    root = tmp_path / "absent"
+    arguments = (
+        ((root, driver.SCRIPTS.parent), {
+            "payload": driver.SCRIPTS.parent, "uv": tmp_path / "uv", "base_python": Path(sys.executable),
+        }) if entry == "install" else
+        ((root, "1.2.3"), {
+            "payload": driver.SCRIPTS.parent, "payload_hash": "a" * 64, "expected_governance": {},
+        })
+    )
+    with pytest.raises(RuntimeError, match="live driver custody"):
+        getattr(driver, entry)(*arguments[0], **arguments[1])
+    assert not root.exists()
+
+
 @pytest.mark.parametrize(("section", "field"), [
     ("state", key) for key in (
         "actualMode", "desiredMode", "status", "reason", "runtimeRoot",
@@ -356,6 +381,16 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
     monkeypatch.setattr(driver.engine, "_prepare_installed", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(driver.engine, "_verify_installed", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(driver, "_load_installed", lambda _slot: None)
+    adopted = []
+
+    def adopt(requested, slot):
+        assert authority == ["enter", "leave"]
+        assert driver.runtime.current_version(root) == "1.0.0"
+        assert requested == root and slot.name == "2.0.0"
+        assert driver.runtime.gc(root) == []
+        adopted.append(slot)
+
+    monkeypatch.setattr(driver.install_driver, "adopt_broker", adopt)
     monkeypatch.setattr(driver, "_monitor_identity", lambda _root: None)
     monkeypatch.setattr(driver, "_candidate_serving", lambda *_args: False)
     monkeypatch.setattr(cfg, "install_dir", lambda: root)
@@ -374,6 +409,7 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
         assert result["runtime_version"] == "2.0.0"
         assert driver.runtime.current_version(root) == "2.0.0"
     assert previous.is_dir()
+    assert len(adopted) == 1
     assert authority == ["enter", "leave", "enter", "cutover-released", "leave"]
     for version in ("1.0.0", "2.0.0"):
         with driver.runtime._kernel_lease(root, version, kind="retention", shared=False, timeout=0):

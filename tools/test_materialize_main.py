@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -1361,6 +1362,43 @@ def _canonical_lib_with_dependency(
         encoding="utf-8",
     )
     return d
+
+
+@pytest.mark.parametrize("cycle", [False, True])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_materialize_complete_nested_closure_without_editable_edges(tmp_path: Path, cycle, reverse):
+    root = tmp_path / "repo"
+    _canonical_lib_with_dependency(root, "first", dep_lib="middle", dep_raw_path="../middle")
+    _canonical_lib_with_dependency(root, "second", dep_lib="middle", dep_raw_path="../middle")
+    _canonical_lib_with_dependency(root, "middle", dep_lib="last", dep_raw_path="../last")
+    if cycle:
+        _canonical_lib_with_dependency(root, "last", dep_lib="first", dep_raw_path="../first")
+    else:
+        _canonical_lib(root, "last", version="0.1.0-dev1", content="value = 1\n")
+    consumer = root / "plugins" / "consumer"
+    consumer.mkdir(parents=True)
+    names = ["first", "second", "last"]
+    if reverse:
+        names.reverse()
+    (consumer / "pyproject.toml").write_text(
+        '[project]\nname="consumer"\nversion="1.0.0"\n[tool.uv.sources]\n'
+        + "".join(f'{name} = {{ path="../../libs/{name}", editable=true }}\n' for name in names),
+        encoding="utf-8",
+    )
+    before = {name: (root / "libs" / name / "pyproject.toml").read_bytes()
+              for name in ("first", "second", "middle", "last")}
+    log = mm.materialize_uv_editable_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+    assert not any(line.startswith("SKIP") for line in log), log
+    assert {path.name for path in (consumer / "libs").iterdir()} == set(before)
+    for manifest in consumer.rglob("pyproject.toml"):
+        data = tomllib.loads(manifest.read_text(encoding="utf-8"))
+        for entry in data.get("tool", {}).get("uv", {}).get("sources", {}).values():
+            assert "editable" not in entry
+            target = (manifest.parent / entry["path"]).resolve()
+            assert target.is_relative_to(consumer) and (target / "pyproject.toml").is_file()
+    assert {name: (root / "libs" / name / "pyproject.toml").read_bytes() for name in before} == before
 
 
 def test_materialize_uv_editable_refs_fixes_up_a_nested_canonical_dependency(tmp_path: Path):

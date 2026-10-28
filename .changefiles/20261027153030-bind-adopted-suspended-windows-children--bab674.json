@@ -1,0 +1,13 @@
+{
+  "comment": "Bind adopted suspended Windows children to daemon instance receipts before admission; retain refusal and ambiguous-start evidence. Align broker-capable native Windows install and uninstall on an external Python 3.11+ bootstrap, and admit owned broker removal under existing installation custody before runtime deletion.",
+  "changes": [
+    {
+      "plugin": "libs/agent-procutil",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/update-driver",
+      "type": "patch"
+    }
+  ]
+}

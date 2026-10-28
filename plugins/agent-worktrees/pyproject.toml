@@ -61,7 +61,7 @@ agent-dropin-registry = { path = "../../libs/dropin-registry", editable = true }
 agent-plugin-activation = { path = "../../libs/plugin-activation", editable = true }
 # zero-downtime cutover primitives -- the routing table + cutover orchestrator
 # (module ``zdd``), vendored byte-identically per consumer.
-agent-zdd = { path = "libs/zdd" }
+agent-zdd = { path = "../../libs/zdd", editable = true }
 # Single-instance lease (module ``single_instance_lease``). Guards "one active
 # classify pass per project per host" (plugin-process-hygiene Phase 4c,
 # #2315): a losing caller waits for the winner's pass to finish, then reads

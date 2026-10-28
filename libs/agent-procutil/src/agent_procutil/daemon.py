@@ -9,7 +9,31 @@ import time
 from pathlib import Path
 from collections.abc import Mapping, Sequence
 
-from .daemon_broker import WindowsDaemonProcess, spawn_brokered_daemon
+from .daemon_broker import WindowsDaemonProcess
+
+
+def spawn_brokered_daemon(
+    command: list[str], *, cwd: str, env: dict[str, str], creationflags: int,
+    log_path: str, stderr_log_path: str | None,
+    instance_receipt=None,
+) -> WindowsDaemonProcess:
+    """Read the installed consumer's adoption; never install or fall back to WMI."""
+    import agent_procutil as pu
+
+    try:
+        from .windows_task_broker import spawn
+    except ModuleNotFoundError as error:
+        if error.name != "zdd":
+            raise
+        raise pu.DaemonSpawnError(
+            "Windows launch broker: owning installation requires windows-broker support",
+            process_created=False, admission_sent=False,
+        ) from error
+    return spawn(
+        command, cwd=cwd, env=env, creationflags=creationflags,
+        log_path=log_path, stderr_log_path=stderr_log_path,
+        instance_receipt=instance_receipt,
+    )
 
 
 def _validated_daemon_argv(argv: object) -> list[str]:
@@ -85,8 +109,8 @@ def spawn_daemon(
     header. ``env_overrides`` layers over ``env`` (the current environment by
     default). Extra creation flags may add only priority/error-mode policy.
 
-    On Windows, a caller already in a Job or breakaway denial triggers a bounded WMI bootstrap outside the
-    caller's Job; the returned handle controls the actual daemon. If that also
+    On Windows, a caller already in a Job or breakaway denial uses its installed
+    consumer's adopted finite broker; the returned handle controls the actual daemon. If that
     fails, raise ``DaemonSpawnError`` unless ``contained_fallback`` explicitly
     accepts the caller's shorter lifetime. ``breakaway=False`` and contained
     test mode never invoke the broker. POSIX uses a new session.

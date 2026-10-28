@@ -71,6 +71,22 @@ installation-cell launches retain same-cell provenance validation. This does
 not change runtime selection, provision a missing owner, or adopt another
 marketplace's runtime.
 
+The Windows native install/update/provision entry joins the existing execution
+owner before self-staging; an explicit cold caller uses that same finite driver,
+not a second installation queue. Its source bootstrap requires Python 3.11+.
+Completion retains the canonical runtime helpers and launcher inside the
+immutable slot. Broker adoption then runs from the installed interpreter under
+complete-slot retention, before selection, serving reconciliation or launch
+callbacks. Reuse verifies the helper bytes without repairing a completed slot;
+an adoption failure remains inside update rollback. The independent broker
+retains its own generation references. Native uninstall removes the owned
+registration under that same driver before deleting runtime files; pending
+publication recovery refuses deletion, and dry-run never enters the driver.
+Ordinary daemon launch still uses its
+existing default, and never installs a broker as a spawn fallback. This source
+integration does not establish full cold-construction, desktop or rollout
+qualification.
+
 Internal owner-driven deployment and service restart accept optional
 `conditional`/`routing_dir` keyword arguments using the shared
 [conditional cutover contract](../../libs/zdd/README.md#conditional-owner-operation-partial-lifecycle-support).

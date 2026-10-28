@@ -88,16 +88,25 @@ home, never the caller's cwd or a plugin payload) and appends the daemon's
 output to a `log_path` (stderr optionally to its own `stderr_log_path`) instead
 of discarding it.
 Do not remove the caller's Job or make every child break away to repair one
-daemon. A caller already in a Job uses the shared, bounded WMI lifetime broker
+daemon. A caller already in a Job uses the installed consumer's adopted finite broker
 before launching: Windows can accept breakaway while retaining an ancestor Job
 under a venv redirector. A caller Job query failure refuses the launch. A
-direct launch's breakaway denial uses the same broker. Its windowless, stdlib-only
-bootstrap uses the actual base interpreter with WMI's supported detached-process
-flag, so a venv redirector cannot change the identity being adopted. It receives
-launch data through an authenticated one-use channel,
+direct launch's breakaway denial uses the same broker. Its fixed immutable action
+uses the actual base interpreter, so a venv redirector cannot change the identity
+being adopted. It receives launch data through an authenticated native pipe,
 stages the actual child suspended, and transfers a pinned native process
-handle before resume. Shell interpolation, credential-bearing command lines,
+handle and binds the daemon instance receipt to that suspended child's birth
+identity before granting resume. A failed receipt commit retires the child
+without sending admission; ambiguous acknowledgement retains creation,
+admission and native-identity evidence instead of permitting replay.
+Shell interpolation, credential-bearing command lines,
 temporary launch files and wrapper PIDs are not part of this contract.
+The suspended resident must be outside every Job, not merely absent from the
+caller's immediate Job. Scheduler provenance and native process identity bind the
+finite broker independently of the caller; another immediate Job under a shared
+outer cleanup Job is not escape proof. Missing adoption, optional native support
+or completed installer recovery refuses explicitly. Ordinary launch never
+registers, repairs or updates the component, and never falls back to WMI.
 The caller receives the actual daemon's PID and exit/control methods.
 An uncommitted failed launch is reaped before retry; both direct and broker
 failure produce `DaemonSpawnError`, never an apparently successful contained
@@ -121,6 +130,13 @@ breakaway permission, with two complete launch/stop cycles, exact argv and
 environment delivery, split logs and foreground/window observation. The
 broker-only handle-control case proves timeout, termination and actual exit
 status rather than polling an unrelated wrapper.
+
+**Windows qualification hold:** the source routes broker-required Python daemon
+launches through the consumer's explicitly adopted finite Task Scheduler
+implementation below, not the legacy WMI fallback. Direct ordinary launch and
+contained behavior remain unchanged. Complete consumer, maintenance, desktop,
+promotion and installed-rollout qualification remain separate gates; this source
+integration does not authorize an installed change.
 
 PowerShell `Start-Process` and .NET `CreateNoWindow` provide no Job-escape
 promise. A one-shot installer should call the service's common user-mode ensure

@@ -2094,6 +2094,58 @@ CI/promotion enforcement remain open in the
 The full 35-target synthetic matrix and its reduction/Pi-hardware/ABI controls
 are in-process data tests, not 35 native executions.
 
+## Explicit Windows broker experiment
+
+`installation-context-acceptance.yml` has a manual `windows_broker_probe` input.
+It selects only the credential-free probe on a disposable hosted Windows
+runner, with no package installation, persistent trigger, elevated principal
+or shared-host change. The PowerShell entrypoint refuses without explicit
+ephemeral-CI consent. Its newly created S4U task has a one-minute execution
+limit, a unique owned name and no saved password; cleanup stops only its own
+instances and deletes only that registration.
+
+Two activations compare the scheduler instance's engine PID with the native
+named-pipe creator and birth-pinned broker process. Each attempts suspended
+child breakaway, refuses any remaining Job membership and checks actual child
+execution/control after finite broker exit. `result.json` records unsupported
+outcomes and positive cleanup separately; a skipped or unavailable mechanism
+is not a pass.
+
+This is an API/capability experiment, not a production broker, authenticated
+IPC, nested caller-Job survival, interactive-desktop visibility or installed
+lifecycle qualification. The private synthetic pipe carries no credentials.
+The reviewed broker contract still owns those separate acceptance gates.
+
+After that capability probe, the same explicitly selected disposable job runs
+`windows_broker_protocol_acceptance.py`. It copies the canonical broker and
+transport sources into an owned immutable fixture directory without installing
+packages. The fixture uses the production registration, native pipe protocol
+and native handle transfer twice, closes two nested caller cleanup Jobs after
+adoption, and checks the actual resident's argv, environment, cwd, split logs,
+own-console visibility, continued execution and native retirement.
+The installed caller uses public `spawn_daemon`, not a direct-only transport
+shortcut. A separate shared execution-driver control calls actual `ensure_worker`
+and `drain`: startup must acknowledge before a synthetic installer gate opens,
+the worker must survive closure of both submitting Jobs, equivalent pending
+and active requests must coalesce, and distinct project contexts and unsets
+must complete sequentially before the finite worker exits. These are synthetic
+products, not a real Manager update, maintenance rollout or controller activation.
+An incomplete worker phase cannot report confirmed overall cleanup.
+It also terminates a separate publishing interpreter without Python cleanup
+after Task replacement and after configuration publication. Each control must
+leave durable intent, refuse ordinary launch admission, and restore the prior
+Task/configuration through explicit installer recovery before continuing.
+The action generations use canonical runtime retention helpers. Between each
+interruption and recovery, real GC must remove an unrelated control slot while
+preserving both recovery generations after the publishing process has died.
+After recovery, the old action directory is collected before the second
+activation; the independent fixture controller remains available. Uninstall
+must release the settled registration's durable references.
+`protocol-result.json` reports this result and cleanup independently of the
+earlier capability probe; either failure rejects the job. Ordinary contained
+units never register a task. This lane is still synthetic source qualification,
+not permission to adopt or update a broker on a shared host.
+
 ## Native file-link prerequisites
 
 `tools/test_dependency_uv_executable_native.py` qualifies both absolute and

@@ -9,7 +9,10 @@ description = "Durable, execution-owned installation transaction queue"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
-dependencies = ["agent-procutil", "agent-single-instance-lease"]
+dependencies = [
+    "agent-procutil", "agent-single-instance-lease",
+    "agent-zdd; sys_platform == 'win32'",
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
@@ -20,6 +23,7 @@ exclude-newer = "7 days"
 [tool.uv.sources]
 agent-procutil = { path = "../agent-procutil", editable = true }
 agent-single-instance-lease = { path = "../single-instance-lease", editable = true }
+agent-zdd = { path = "../zdd", editable = true }
 
 [tool.setuptools.packages.find]
 where = ["src"]

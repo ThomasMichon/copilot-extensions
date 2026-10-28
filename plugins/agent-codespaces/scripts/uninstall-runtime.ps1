@@ -3,7 +3,7 @@ function Get-UninstallPython {
     $probe = @'
 import sys
 from pathlib import Path
-assert sys.version_info >= (3, 10)
+assert sys.version_info >= (3, 11)
 root = Path(sys.argv[1]).absolute()
 assert ".." not in root.parts
 roots = (root, root.resolve())
@@ -50,7 +50,7 @@ print(Path(sys.executable).resolve(strict=True))
 function Invoke-StatePreservingUninstall {
     param([switch]$Preview, [switch]$AdmissionOnly)
     $python = Get-UninstallPython
-    if (-not $python) { throw 'Uninstall requires an existing external Python outside runtime and prefix closure; nothing removed' }
+    if (-not $python) { throw 'Native install and uninstall require an existing external Python 3.11+ outside runtime and prefix closure; nothing removed' }
     if (Get-ScheduledTask -ErrorAction Stop | Where-Object { $_.TaskName -eq $OwnerTaskName }) {
         throw 'Uninstall refuses Connection Owner service custody; runtime and transports left intact'
     }

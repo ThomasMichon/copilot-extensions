@@ -48,9 +48,12 @@ agent-zdd = { path = "../../libs/zdd", editable = true }
 # manually in sync -- only a real `main`-branch release
 # (tools/materialize_main.py) ever gets a real local copy.
 agent-procutil = { path = "../../libs/agent-procutil", editable = true }
+agent-update-driver = { path = "../../libs/update-driver", editable = true }
+agent-single-instance-lease = { path = "../../libs/single-instance-lease", editable = true }
 agent-dropin-registry = { path = "libs/dropin-registry" }
 
 [project.optional-dependencies]
+native-installer = ["agent-update-driver"]
 fleet = ["fleet-manager[auth]>=0.1.0.dev1"]
 store = [
     # The indexing + vector-store stack: reads/writes the LanceDB store and chunks

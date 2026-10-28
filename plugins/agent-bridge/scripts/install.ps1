@@ -101,6 +101,26 @@ function Copy-InstallerStageDirectory {
 
 . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 
+if ($env:OS -eq 'Windows_NT' -and
+    $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1' -and
+    $Action -in @('install', 'update', 'provision', 'uninstall') -and
+    -not ($Action -eq 'uninstall' -and $DryRun)) {
+    $driverPayload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    $driverRoot = if ($InstallDir) { [IO.Path]::GetFullPath($InstallDir) }
+        else { Join-Path $env:USERPROFILE '.agent-bridge' }
+    $driverOptions = @()
+    foreach ($name in @('RequireGracefulCutover', 'NonInteractive', 'ZeroDowntime', 'Purge', 'DryRun')) {
+        if ($PSBoundParameters.ContainsKey($name) -and [bool]$PSBoundParameters[$name]) {
+            $driverOptions += $name
+        }
+    }
+    $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
+        -Plugin 'agent-bridge' -Action $Action -Options $driverOptions
+    if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
+    $driverPython = $driverEntry.Python
+    $driverArguments = $driverEntry.Arguments
+}
+
 # === install-contract:test-persistent-environment -- keep byte-identical across installers ===
 function Get-CopilotPersistentEnvironmentVariable {
     param(
@@ -514,6 +534,33 @@ function Invoke-VersionedActivate {
     return $true
 }
 
+function Invoke-RuntimeBrokerAdoption {
+    if ($env:OS -ne 'Windows_NT' -or $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1') { return }
+    if (-not $script:RuntimeConstructionSession -or -not $script:RuntimeConstructionSession.Complete -or
+        $script:RuntimeConstructionSession.Process.HasExited) {
+        throw 'Broker adoption requires attached complete-slot retention'
+    }
+    $diagnostic = ''
+    $result = Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', '-m', 'update_driver.windows_broker',
+        '--runtime-root', $InstallDir, '--slot', $VenvDir,
+        '--execution-root', (Join-Path $env:USERPROFILE '.copilot-extensions\update-driver')) `
+        -ErrorOutput ([ref]$diagnostic)
+    if ($LASTEXITCODE -ne 0) { throw "Runtime broker adoption failed: $diagnostic" }
+    $receipt = $result | ConvertFrom-Json
+    if (-not $receipt -or $receipt.adopted -ne $true) { throw 'Runtime broker adoption returned no receipt' }
+}
+
+function Ensure-RuntimeBrokerAdoption {
+    param([string]$PayloadHash)
+    if ($env:OS -ne 'Windows_NT' -or $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1') { return }
+    [void](Invoke-VersionedSlotClean -PayloadHash $PayloadHash)
+    if (-not $script:RuntimeConstructionReuse) {
+        throw 'Existing-runtime broker adoption requires a complete reusable slot'
+    }
+    if (-not (Invoke-VersionedMarkComplete -PayloadHash $PayloadHash)) { throw 'Versioned completion publication failed' }
+    Invoke-RuntimeBrokerAdoption
+}
+
 function Get-BootstrapPython {
     <# A python to run the stdlib-only versioned_runtime.py helper BEFORE the
        slot venv exists (e.g. the pre-build toss). Prefers a signed base python,
@@ -919,7 +966,7 @@ function Invoke-VersionedMarkComplete {
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
     }
-    Complete-RuntimeConstruction -PayloadHash $actualHash
+    Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers
     return $true
 }
 
@@ -2568,7 +2615,7 @@ function Invoke-InstallSlotBuild {
     # else. uv's local-path build cache is keyed by source path, not source
     # content -- see the matching install.sh comment / #2863 for the
     # confirmed incident this class of gap caused.
-    $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, "$PluginDir", '--reinstall-package', 'agent-bridge', '--refresh-package', 'agent-bridge', '--reinstall-package', 'agent-procutil', '--refresh-package', 'agent-procutil', '--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve', '--reinstall-package', 'agent-dropin-registry', '--refresh-package', 'agent-dropin-registry', '--reinstall-package', 'agent-plugin-activation', '--refresh-package', 'agent-plugin-activation', '--reinstall-package', 'agent-remote-login-shell', '--refresh-package', 'agent-remote-login-shell', '--reinstall-package', 'agent-machine-transport', '--refresh-package', 'agent-machine-transport', '--reinstall-package', 'agent-worktree-identity', '--refresh-package', 'agent-worktree-identity', '--reinstall-package', 'agent-process-telemetry', '--refresh-package', 'agent-process-telemetry', '--quiet')
+    $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, "$PluginDir", '--reinstall-package', 'agent-bridge', '--refresh-package', 'agent-bridge', '--reinstall-package', 'agent-procutil', '--refresh-package', 'agent-procutil', '--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve', '--reinstall-package', 'agent-dropin-registry', '--refresh-package', 'agent-dropin-registry', '--reinstall-package', 'agent-plugin-activation', '--refresh-package', 'agent-plugin-activation', '--reinstall-package', 'agent-remote-login-shell', '--refresh-package', 'agent-remote-login-shell', '--reinstall-package', 'agent-machine-transport', '--refresh-package', 'agent-machine-transport', '--reinstall-package', 'agent-worktree-identity', '--refresh-package', 'agent-worktree-identity', '--reinstall-package', 'agent-process-telemetry', '--refresh-package', 'agent-process-telemetry', '--reinstall-package', 'agent-update-driver', '--refresh-package', 'agent-update-driver', '--quiet')
     $bridgeOut = $bridgeResult.Output
     $installResult = $bridgeResult.ExitCode
     $ErrorActionPreference = $prevEAP
@@ -2604,6 +2651,7 @@ function Invoke-Install {
     $preLockHash = Get-PayloadHash
     if (-not (Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue) -and
         (Test-SlotContentCurrent -PayloadHash $preLockHash)) {
+        Ensure-RuntimeBrokerAdoption -PayloadHash $preLockHash
         Write-Ok "agent-bridge $SrcVersion already installed and healthy (content match) -- no-op (no venv rebuild, no restart)."
         Write-DeployManifest -PayloadHash $preLockHash   # re-assert the manifest so version drift clears and this never re-triggers every session
         return
@@ -2625,6 +2673,7 @@ function Invoke-Install {
     # Re-check after acquiring: the install we waited on may have JUST landed this
     # exact content, so our rebuild would be redundant (and a live-slot stomp).
     if (Test-SlotContentCurrent -PayloadHash $payloadHash) {
+        Ensure-RuntimeBrokerAdoption -PayloadHash $payloadHash
         Write-Ok "agent-bridge $SrcVersion already installed and healthy after lock wait -- no-op."
         Write-DeployManifest -PayloadHash $payloadHash
         Exit-InstallLock
@@ -2681,6 +2730,7 @@ function Invoke-Install {
         }
         [void](Test-PayloadUnchangedSinceAdmission -SourceIdentityOnly)
         if (-not (Invoke-VersionedMarkComplete -PayloadHash $payloadHash)) { throw 'Versioned completion publication failed' }
+        Invoke-RuntimeBrokerAdoption
         if (-not (Invoke-VersionedActivate)) { throw 'Versioned activate failed' }
     }
 
@@ -2749,6 +2799,8 @@ function Invoke-Provision {
         Invoke-Install
         return
     }
+
+    Ensure-RuntimeBrokerAdoption -PayloadHash (Get-PayloadHash)
 
     # A never-ran S4U task cannot be flipped to the default interactive
     # principal from a normal shell. Route that exact recovery through the
@@ -2890,6 +2942,12 @@ function Invoke-Uninstall {
                 }
             }
         }
+    }
+
+    if (-not $DryRun -and $env:OS -eq 'Windows_NT' -and
+        $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1') {
+        & $driverPython @driverArguments --remove-broker
+        if ($LASTEXITCODE -ne 0) { throw 'Owned broker removal failed; runtimes preserved' }
     }
 
     # Scheduled task
@@ -3386,7 +3444,7 @@ function Invoke-UpdateSlotBuild {
     }
     # --refresh-package agent-procutil: see the matching comment in the
     # initial-install path above.
-    $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-bridge', '--refresh-package', 'agent-bridge', '--reinstall-package', 'agent-procutil', '--refresh-package', 'agent-procutil', '--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve', '--reinstall-package', 'agent-dropin-registry', '--refresh-package', 'agent-dropin-registry', '--reinstall-package', 'agent-plugin-activation', '--refresh-package', 'agent-plugin-activation', '--reinstall-package', 'agent-remote-login-shell', '--refresh-package', 'agent-remote-login-shell', '--reinstall-package', 'agent-machine-transport', '--refresh-package', 'agent-machine-transport', '--reinstall-package', 'agent-worktree-identity', '--refresh-package', 'agent-worktree-identity', '--reinstall-package', 'agent-process-telemetry', '--refresh-package', 'agent-process-telemetry', "$PluginDir", '--quiet')
+    $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-bridge', '--refresh-package', 'agent-bridge', '--reinstall-package', 'agent-procutil', '--refresh-package', 'agent-procutil', '--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve', '--reinstall-package', 'agent-dropin-registry', '--refresh-package', 'agent-dropin-registry', '--reinstall-package', 'agent-plugin-activation', '--refresh-package', 'agent-plugin-activation', '--reinstall-package', 'agent-remote-login-shell', '--refresh-package', 'agent-remote-login-shell', '--reinstall-package', 'agent-machine-transport', '--refresh-package', 'agent-machine-transport', '--reinstall-package', 'agent-worktree-identity', '--refresh-package', 'agent-worktree-identity', '--reinstall-package', 'agent-process-telemetry', '--refresh-package', 'agent-process-telemetry', '--reinstall-package', 'agent-update-driver', '--refresh-package', 'agent-update-driver', "$PluginDir", '--quiet')
     $bridgeOut = $bridgeResult.Output
     $updateResult = $bridgeResult.ExitCode
     $ErrorActionPreference = $prevEAP
@@ -3472,6 +3530,7 @@ function Invoke-Update {
     $payloadHash = Get-PayloadHash
     if (Test-SlotContentCurrent -PayloadHash $payloadHash) {
         try {
+            Ensure-RuntimeBrokerAdoption -PayloadHash $payloadHash
             # Slot/import health proves reusable bytes, not the serving version.
             # This guarded seam never rebuilds, cold-starts or falls back to stop.
             Invoke-ServingRuntimeReconcile
@@ -3614,6 +3673,7 @@ function Invoke-Update {
         if ($VersionedRuntime) {
             [void](Test-PayloadUnchangedSinceAdmission -SourceIdentityOnly)
             if (-not (Invoke-VersionedMarkComplete -PayloadHash $payloadHash)) { throw 'Versioned completion publication failed' }
+            Invoke-RuntimeBrokerAdoption
         }
     }
     catch {

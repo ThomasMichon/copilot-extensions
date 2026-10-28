@@ -10,7 +10,7 @@ import shutil
 import signal
 import subprocess
 import sys
-from datetime import datetime, timezone
+from contextlib import ExitStack
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -25,8 +25,12 @@ METADATA = {
     "slot-completion-validate": "validate_runtime_slot_completion",
 }
 LIBRARIES = (
-    "agent-procutil", "single-instance-lease", "work-coalescing-singleton", "zdd",
+    "agent-procutil", "single-instance-lease", "work-coalescing-singleton", "zdd", "update-driver",
 )
+MUTATIONS = {
+    "install", "update", "provision", "broker-remove",
+    "snapshot-prepare", "snapshot-stamp", "slot-provision", "slot-complete",
+}
 
 
 def foundation():
@@ -92,8 +96,7 @@ def run(command, *, environment=None, cwd=None):
     return output
 
 
-def build(slot: Path, snapshot: Path, payload_version: str):
-    """Build a disposable copy, never run a backend against immutable snapshot bytes."""
+def validate_build_snapshot(snapshot: Path):
     for library in LIBRARIES:
         if not (snapshot / "libs" / library / "pyproject.toml").is_file():
             raise ValueError(
@@ -107,6 +110,12 @@ def build(slot: Path, snapshot: Path, payload_version: str):
         raise ValueError("Snapshot lacks its materialized installer-engine helper")
     if not (snapshot / "pyproject.toml").is_file():
         raise ValueError("Snapshot lacks pyproject.toml")
+    return engine
+
+
+def build(slot: Path, snapshot: Path, payload_version: str):
+    """Build a disposable copy, never run a backend against immutable snapshot bytes."""
+    engine = validate_build_snapshot(snapshot)
 
     # Atomic mkdir is the build claim. Failed/partial builds remain attributable and
     # blocked, never deleted or rebuilt by a second invocation or a force flag.
@@ -175,7 +184,7 @@ uv="$(ensure_uv "$APR_CELL_SLOT" tool 0)" ||
     { _fail 'Cell provisioning requires an existing working uv'; exit 1; }
 new_signed_venv "$uv" "$APR_CELL_SLOT" 3.10
 packages=()
-for name in agent-procutil single-instance-lease work-coalescing-singleton zdd; do
+for name in agent-procutil single-instance-lease work-coalescing-singleton zdd update-driver; do
     packages+=("$APR_CELL_SOURCE/libs/$name")
 done
 invoke_uv_pip_install_resilient "$uv" --python "$APR_CELL_SLOT/bin/python" \
@@ -223,7 +232,7 @@ def activate(command):
 def parse(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=(
-        *METADATA, "snapshot-prepare", "install", "update", "provision", "status",
+        *METADATA, "snapshot-prepare", "install", "update", "provision", "status", "broker-remove",
     ))
     parser.add_argument("--context", required=True)
     parser.add_argument("--expected-marketplace-id", required=True)
@@ -259,6 +268,83 @@ def management_version():
     return version
 
 
+def bind_admission(args, api):
+    validated = api.validate_context_receipt(
+        args.context, args.durable_home or Path(args.context).parents[4],
+        expected_marketplace_id=args.expected_marketplace_id, expected_plugin_id=PLUGIN,
+        expected_payload_root=PAYLOAD, environment={},
+    )
+    for argument, field in (
+        ("expected_namespace_generation", "namespaceGeneration"),
+        ("expected_install_generation", "generation"),
+    ):
+        expected = getattr(args, argument)
+        if expected is None:
+            setattr(args, argument, validated[field])
+        elif expected != validated[field]:
+            raise ValueError("Cell installation receipt generation changed after admission")
+    return validated
+
+
+def driver_entry(args, api):
+    """Join the existing execution owner before any cell mutation/publication."""
+    validated = bind_admission(args, api)
+    path = PAYLOAD / "scripts" / "installer_driver.py"
+    spec = importlib.util.spec_from_file_location("apr_cell_driver", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Owning cell execution driver is unavailable")
+    driver = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(driver)
+    shell = shutil.which("powershell.exe")
+    if shell is None:
+        raise RuntimeError("Windows cell installation requires its native PowerShell host")
+    arguments = [
+        "--payload", str(PAYLOAD), "--root", validated["pluginRoot"],
+        "--shell", shell, "--plugin", PLUGIN, "--action", args.action,
+        "--cell-context", args.context, "--cell-marketplace", args.expected_marketplace_id,
+        "--cell-durable-home", str(args.durable_home or Path(args.context).parents[4]),
+        "--cell-namespace-generation", str(args.expected_namespace_generation),
+        "--cell-install-generation", str(args.expected_install_generation),
+    ]
+    for value, flag in (
+        (args.snapshot_id, "--cell-snapshot"), (args.runtime_version, "--cell-version"),
+    ):
+        if value is not None:
+            arguments.extend([flag, value])
+    participant = os.environ.get(driver.NATIVE_ENV) == PLUGIN
+    if participant:
+        arguments.append("--check-native")
+    code = driver.main(arguments)
+    return participant, code
+
+
+def runtime_helpers(snapshot):
+    validate_build_snapshot(snapshot)
+    path = snapshot / "scripts" / "versioned_runtime.py"
+    spec = importlib.util.spec_from_file_location("apr_cell_runtime", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Snapshot runtime retention helpers are unavailable")
+    runtime = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = runtime
+    spec.loader.exec_module(runtime)
+    if not callable(getattr(runtime, "retain_runtime_helpers", None)):
+        raise RuntimeError("Snapshot lacks its qualified runtime-retention API")
+    return runtime
+
+
+def broker_operation(args, installation_root, slot=None):
+    if os.name != "nt" or os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1":
+        if args.action == "broker-remove":
+            raise ValueError("Native cell broker removal is unavailable")
+        return
+    from update_driver.windows_broker import adopt, remove
+
+    if args.action == "broker-remove":
+        remove(installation_root)
+    else:
+        adopt(installation_root, slot)
+
+
 def execute(args, api):
     version = management_version()
     common = {
@@ -287,6 +373,12 @@ def execute(args, api):
             keywords["runtime_version"] = args.runtime_version
         return getattr(api, METADATA[args.action])(**keywords)
 
+    admitted = bind_admission(args, api)
+    if args.action == "broker-remove":
+        broker_operation(args, Path(admitted["pluginRoot"]))
+        bind_admission(args, api)
+        return {"status": "ready", "action": "broker-remove", "removed": True}
+
     status = api.resolve_installation_mode(
         **common, payload_root=str(PAYLOAD), expected_payload_root=str(PAYLOAD),
         legacy_root=Path.home() / ".agent-pull-requests",
@@ -312,44 +404,71 @@ def execute(args, api):
     slot_args = {**bound, "runtime_version": args.runtime_version}
     ownership = api.provision_runtime_slot(**slot_args)
     slot = Path(ownership["slotRoot"])
-    if os.path.lexists(slot / ".runtime-slot-completion.json"):
-        completed = api.validate_runtime_slot_completion(**slot_args)
-    else:
-        if not ownership["slotEmpty"]:
-            raise ValueError(
-                "Incomplete non-empty cell slot requires explicit repair; never overwrite"
-            )
-        snapshot = api.validate_snapshot_provenance(**bound)
-        root = Path(snapshot["snapshotRoot"])
-        digest = api._snapshot_content_sha256(root)
-        build(slot, root, version)
-        api.validate_runtime_slot_ownership(**slot_args)
-        if api._snapshot_content_sha256(root) != digest:
-            raise ValueError("Snapshot changed during package construction; completion refused")
-        with (slot / ".install-complete.json").open("x", encoding="utf-8") as stream:
-            json.dump({
-                "version": args.runtime_version,
-                "completed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "pid": os.getpid(), "payload_hash": digest,
-            }, stream)
-        completed = api.complete_runtime_slot(**slot_args)
-    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    if not python.is_file():
-        raise ValueError("Completed cell slot has no target Python; explicit repair required")
-    if args.action == "provision":
-        return completed
-    return activate([
-        str(python), "-I", "-m", "agent_pull_requests.watch_install",
-        "--context", args.context, "--payload-root", str(PAYLOAD),
-        "--snapshot-id", args.snapshot_id, "--runtime-version", args.runtime_version,
-    ])
+    if not os.path.lexists(slot / ".runtime-slot-completion.json") and not ownership["slotEmpty"]:
+        raise ValueError("Incomplete non-empty cell slot requires explicit repair; never overwrite")
+    snapshot = api.validate_snapshot_provenance(**bound)
+    snapshot_root = Path(snapshot["snapshotRoot"])
+    runtime = runtime_helpers(snapshot_root)
+    installation_root = Path(admitted["pluginRoot"])
+    with ExitStack() as retained:
+        with runtime.construction_lease(installation_root, args.runtime_version):
+            ownership = api.provision_runtime_slot(**slot_args)
+            slot = Path(ownership["slotRoot"])
+            digest = api._snapshot_content_sha256(snapshot_root)
+            if os.path.lexists(slot / ".runtime-slot-completion.json"):
+                completed = api.validate_runtime_slot_completion(**slot_args)
+                runtime.retain_runtime_helpers(
+                    slot, complete=True,
+                    context_source=snapshot_root / "src" / "agent_pull_requests" / "_installation_context.py",
+                )
+            else:
+                if not ownership["slotEmpty"]:
+                    raise ValueError(
+                        "Incomplete non-empty cell slot requires explicit repair; never overwrite"
+                    )
+                build(slot, snapshot_root, version)
+                api.validate_runtime_slot_ownership(**slot_args)
+                if api._snapshot_content_sha256(snapshot_root) != digest:
+                    raise ValueError("Snapshot changed during package construction; completion refused")
+                runtime.retain_runtime_helpers(
+                    slot, complete=False,
+                    context_source=snapshot_root / "src" / "agent_pull_requests" / "_installation_context.py",
+                )
+                runtime.mark_complete(installation_root, args.runtime_version, payload_hash=digest)
+                completed = api.complete_runtime_slot(**slot_args)
+            retained.enter_context(runtime.retention_lease(
+                installation_root, args.runtime_version, payload_hash=digest,
+            ))
+        bind_admission(args, api)
+        python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        if not python.is_file():
+            raise ValueError("Completed cell slot has no target Python; explicit repair required")
+        broker_operation(args, installation_root, slot)
+        bind_admission(args, api)
+        if args.action == "provision":
+            return completed
+        return activate([
+            str(python), "-I", "-m", "agent_pull_requests.watch_install",
+            "--context", args.context, "--payload-root", str(PAYLOAD),
+            "--snapshot-id", args.snapshot_id, "--runtime-version", args.runtime_version,
+            "--expected-namespace-generation", str(args.expected_namespace_generation),
+            "--expected-install-generation", str(args.expected_install_generation),
+        ])
 
 
 def main(argv=None):
     args = parse(argv)
     os.chdir(Path.home())
     try:
-        result = execute(args, foundation())
+        api = foundation()
+        if (
+            os.name == "nt" and os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1"
+            and args.action in MUTATIONS
+        ):
+            participant, code = driver_entry(args, api)
+            if not participant or code:
+                return code
+        result = execute(args, api)
     except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
         print(f"Cell installer refused: {error}", file=sys.stderr)
         return 1

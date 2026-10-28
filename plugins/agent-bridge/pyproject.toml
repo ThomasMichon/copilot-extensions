@@ -40,6 +40,7 @@ dependencies = [
     "agent-ssh-manager",
     "agent-credential-relay",
     "agent-zdd",
+    "agent-update-driver",
     "agent-single-instance-lease",
     "agent-config-migrate",
     "agent-plugin-resolve",
@@ -52,7 +53,6 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-agent-update-driver = { path = "../../libs/update-driver", editable = true }
 agent-repository-policy = { path = "../../libs/repository-policy", editable = true }
 agent-process-telemetry = { path = "../../libs/process-telemetry", editable = true }
 agent-worktree-identity = { path = "../../libs/worktree-identity", editable = true }
@@ -76,6 +76,7 @@ agent-credential-relay = { path = "../../libs/credential-relay", editable = true
 # zero-downtime cutover primitives -- the routing table + cutover orchestrator
 # (module ``zdd``), extracted from this plugin so other services reuse them.
 agent-zdd = { path = "../../libs/zdd", editable = true }
+agent-update-driver = { path = "../../libs/update-driver", editable = true }
 # single-instance lease + supersession self-retire + reconcile-set reaper
 # (module ``single_instance_lease``), extracted from this plugin's singleton /
 # self_retire so other services inherit one correct "one active per host" impl.

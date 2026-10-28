@@ -24,6 +24,7 @@ import installer_engine as engine
 import versioned_runtime as runtime
 import versioned_runtime_source as runtime_source
 import runtime_install_publication as helper_publication
+import runtime_install_driver as install_driver
 from runtime_install_governance import Governance, InstallationRefused
 
 
@@ -479,6 +480,7 @@ def _installed_identity(slot: Path) -> dict:
     return json.loads(result.stdout)
 
 
+@install_driver.owned
 def install(
     root: Path, plugin: Path, *, payload: Path, uv: Path, base_python: Path,
     wait_timeout: float = 180, child_timeout: float = 180,
@@ -567,7 +569,7 @@ def install(
                 argv.extend(["--previous-version", previous])
             if recover_adopted_manager:
                 argv.append("--recover-adopted-manager")
-            environment = dict(os.environ)
+            environment = install_driver.child_environment()
             for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
                 environment.pop(name, None)
             environment["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -596,6 +598,7 @@ def install(
             return result
 
 
+@install_driver.owned
 def settle_candidate(
     root: Path, version: str, *, payload: Path, payload_hash: str,
     expected_governance: dict, previous: str | None = None, wait_timeout: float = 180,
@@ -620,6 +623,8 @@ def settle_candidate(
             custody.enter_context(runtime.retention_lease(root, previous))
         print(f"Runtime {version}: verifying publication under its own interpreter", flush=True)
         _load_installed(lifecycle_slot if lifecycle_slot is not None else candidate_slot)
+        if version != runtime.DEV_VERSION:
+            install_driver.adopt_broker(root, candidate_slot)
         if recover_adopted_manager:
             from agent_worktrees.manager_recovery import recover
 

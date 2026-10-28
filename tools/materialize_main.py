@@ -321,6 +321,7 @@ def materialize_uv_editable_ref_into(
             # the exact same sibling location a top-level entry would.
             nested_log, nested_materialized = nuer.materialize_nested_uv_editable_refs(
                 dest_lib_dir, canonical_root=canonical_root_r, dest_root=dest_root_r,
+                _verified={dest_consumer_dir / "libs" / name for name in materialized_libs},
             )
             log.extend(nested_log)
             materialized_libs.update(nested_materialized)

@@ -582,20 +582,7 @@ def _slot(root: Path, version: str, *, clean_incomplete: bool = False,
 # --------------------------------------------------------------------------
 
 def _running_pids(root: Path) -> set[int]:
-    """PIDs recorded as live in ``<root>/running-version.json`` (single object or
-    a list), filtered to those still alive."""
-    path = root / RUNNING_VERSION_FILE
-    pids: set[int] = set()
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return pids
-    entries = data if isinstance(data, list) else [data]
-    for e in entries:
-        if isinstance(e, dict) and isinstance(e.get("pid"), int):
-            if _pid_alive(e["pid"]):
-                pids.add(e["pid"])
-    return pids
+    return _leases.running_pids(root, filename=RUNNING_VERSION_FILE, alive=_pid_alive)
 
 
 def _pid_alive(pid: int) -> bool:
@@ -1018,37 +1005,12 @@ def gc(root: Path, keep: list[str] | None = None,
 
 
 def _gc_protected_versions(root: Path, keep, protect_pids: bool, link_name: str) -> set[str]:
-    protected = set(keep or [])
-    # Missing selectors permit legacy-link fallback; unreadable selectors must
-    # not become permission to delete their unknown target.
-    for name in (CURRENT_VERSION_FILE, LAST_KNOWN_GOOD_FILE):
-        try:
-            selected = (root / name).read_text(encoding="utf-8").strip()
-        except FileNotFoundError:
-            continue
-        if selected:
-            protected.add(selected)
-    cur = current_version(root, link_name)
-    if cur:
-        protected.add(cur)
-    claim = read_dev_claim(root, strict=True)
-    if claim is not None:
-        protected.add(DEV_VERSION)
-        selected = claim.get("selected_generation")
-        if selected:
-            protected.add(selected)
-        previous = claim.get("previous_version")
-        if isinstance(previous, str) and previous:
-            protected.add(previous)
-    if protect_pids:
-        in_use = _versions_with_live_process(root)
-        if in_use:
-            protected |= in_use
-        elif _running_pids(root):
-            non_current = [v for v in list_versions(root) if v != cur]
-            if non_current:
-                protected.add(non_current[-1])
-    return {version.lower() for version in protected}
+    return _leases.gc_protected_versions(
+        root, keep, protect_pids, link_name,
+        selectors=(CURRENT_VERSION_FILE, LAST_KNOWN_GOOD_FILE), current_version=current_version,
+        dev_claim=read_dev_claim, dev_version=DEV_VERSION,
+        live_versions=_versions_with_live_process, running=_running_pids, versions=list_versions,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -1327,6 +1289,17 @@ def is_complete(root: Path, version: str, *, expect_hash: str | None = None) -> 
     return True
 
 
+class RuntimeEnvironmentError(RuntimeError):
+    """Installed Python content is not an isolated, non-editable deployment."""
+
+
+def require_immutable_environment(slot: Path) -> None:
+    """Inspect installed content using the canonical construction guard."""
+    _runtime_component("versioned_runtime_construction").require_immutable_environment(
+        slot, error_type=RuntimeEnvironmentError, read_json=_load_unique_json,
+    )
+
+
 def mark_complete(root: Path, version: str, *, payload_hash: str | None = None,
                   pid: int | None = None, dev_owner: str | None = None) -> Path:
     """Publish numbered completion once, preserving exact reuse byte-for-byte.
@@ -1377,6 +1350,7 @@ def mark_complete(root: Path, version: str, *, payload_hash: str | None = None,
                         "use a new version/distinct repair generation or claimed dev slot"
                     )
             vdir.mkdir(parents=True, exist_ok=True)
+            require_immutable_environment(vdir)
             fd, name = tempfile.mkstemp(prefix=dest.name + ".tmp-", dir=vdir)
             tmp = Path(name)
             try:
@@ -1468,6 +1442,13 @@ def retention_custody(root: Path, version: str, *, payload_hash: str | None = No
             if decision != ADMIT_REUSE:
                 raise RuntimeError(f"runtime retention admission refused: {version}: {decision}")
         yield vdir, descriptor
+
+
+def retain_runtime_helpers(slot: Path, *, complete: bool, context_source: Path | None = None) -> None:
+    """Retain or verify the canonical immutable bootstrap without restamping it."""
+    _runtime_component("versioned_runtime_construction").retain_helpers(
+        slot, complete=complete, context_source=context_source,
+    )
 
 
 def construction_session(root: Path, version: str, *, payload_hash: str,
@@ -1755,6 +1736,10 @@ def check_admission(root: Path, version: str, *, payload_hash: str | None) -> st
         # The marker is a plain file read through a verified, no-follow
         # handle, but its content failed schema validation -- ambiguous
         # evidence, never treated as "never built".
+        return ADMIT_HEALTH_REPAIR_REQUIRED
+    try:
+        require_immutable_environment(vdir)
+    except RuntimeEnvironmentError:
         return ADMIT_HEALTH_REPAIR_REQUIRED
     if marker.get("payload_hash") == payload_hash:
         return ADMIT_REUSE

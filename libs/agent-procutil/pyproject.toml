@@ -5,6 +5,9 @@ build-backend = "setuptools.build_meta"
 [tool.uv]
 exclude-newer = "7 days"
 
+[tool.uv.sources]
+agent-zdd = { path = "../zdd", editable = true }
+
 [project]
 # Distribution name is namespaced (agent-procutil, not the squattable
 # "procutil") to prevent dependency-confusion; the import module is
@@ -25,7 +28,11 @@ dependencies = []
 where = ["src"]
 
 [tool.setuptools.package-data]
-agent_procutil = ["native_daemon.ps1", "native_owned.ps1", "native_owned.sh", "native_daemon.sh", "daemon_instances.ps1", "daemon_instances.sh", "daemon_instance_runtime.pyz"]
+agent_procutil = [
+    "native_daemon.ps1", "native_owned.ps1", "native_owned.sh", "native_daemon.sh",
+    "daemon_instances.ps1", "daemon_instances.sh", "daemon_instance_runtime.pyz",
+    "windows_broker_task.ps1",
+]
 
 [tool.ruff]
 target-version = "py310"
@@ -33,7 +40,11 @@ line-length = 99
 
 [project.optional-dependencies]
 metrics = ["psutil>=7.0"]
+# Explicitly adopted Windows brokers reuse the canonical private native pipe.
+# No sibling plugin or transport is required by ordinary process operations.
+windows-broker = ["agent-zdd>=0.1.0.dev7; sys_platform == 'win32'"]
 dev = [
+    "agent-zdd>=0.1.0.dev7",
     "pytest>=9.1.1",
     "psutil>=7.0",
     "setuptools>=83.0.0",

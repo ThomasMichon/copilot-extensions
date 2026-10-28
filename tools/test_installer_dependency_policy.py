@@ -1404,7 +1404,7 @@ def test_relative_certificate_directory_list_retains_original_cwd(tmp_path, monk
     assert len(calls) == 3
 
 
-def source_project(path, name="fixture-source", sources="", dependencies=""):
+def source_project(path, name="fixture-source", sources="", dependencies="", module_code=None):
     import ast
 
     path.mkdir(parents=True, exist_ok=True)
@@ -1417,6 +1417,9 @@ def source_project(path, name="fixture-source", sources="", dependencies=""):
     metadata = f"Metadata-Version: 2.1\nName: {name}\nVersion: 1.0\n" + "".join(
         f"Requires-Dist: {requirement}\n" for requirement in ast.literal_eval(f"[{dependencies}]")
     )
+    module_name = name.replace("-", "_") + ".py"
+    if module_code is not None:
+        (path / module_name).write_text(module_code, encoding="utf-8")
     (path / "fixture_backend.py").write_text(
         "import pathlib, zipfile\n"
         "def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):\n"
@@ -1426,7 +1429,9 @@ def source_project(path, name="fixture-source", sources="", dependencies=""):
         f"        wheel.writestr(prefix + 'METADATA', {metadata!r})\n"
         "        wheel.writestr(prefix + 'WHEEL', 'Wheel-Version: 1.0\\nRoot-Is-Purelib: true\\nTag: py3-none-any\\n')\n"
         "        wheel.writestr(prefix + 'RECORD', '')\n"
-        "    return name\n",
+        + (f"        wheel.writestr({module_name!r}, pathlib.Path(__file__).with_name({module_name!r}).read_bytes())\n"
+           if module_code is not None else "")
+        + "    return name\n",
         encoding="utf-8",
     )
     return path
@@ -1821,25 +1826,31 @@ def test_explicit_project_context_does_not_trust_an_escaping_source_graph(tmp_pa
         )
 
 
-@pytest.mark.parametrize("anchor", ["canonical", "canonical-vendored", "canonical-materialized", "payload"])
+@pytest.mark.parametrize("anchor", [
+    "canonical", "canonical-vendored", "canonical-editable", "canonical-materialized", "payload",
+])
 def test_native_cli_uses_its_own_roster_or_payload_anchor_not_cwd(tmp_path, anchor):
     import json
 
     repository = tmp_path / "repository"
     canonical_libraries = anchor.startswith("canonical")
-    editable = ", editable=true" if anchor == "canonical-materialized" else ""
+    editable = ", editable=true" if anchor in {"canonical-editable", "canonical-materialized"} else ""
     payload = source_project(
         repository / "plugins" / "fixture-plugin", "fixture-plugin",
         sources=f'fixture-lib={{path="../../libs/fixture-lib"{editable}}}' if canonical_libraries
         else 'fixture-lib={path="libs/fixture-lib"}',
         dependencies='"fixture-lib>=1"',
+        module_code="VALUE = 'frozen-plugin'\n",
     )
     lib = source_project(
         repository / "libs" / "fixture-lib" if canonical_libraries else payload / "libs" / "fixture-lib",
         "fixture-lib", sources=f'fixture-leaf={{path="../fixture-leaf"{editable}}}',
         dependencies='"fixture-leaf>=1"',
+        module_code="VALUE = 'frozen-lib'\n",
     )
-    leaf = source_project(lib.parent / "fixture-leaf", "fixture-leaf")
+    leaf = source_project(
+        lib.parent / "fixture-leaf", "fixture-leaf", module_code="VALUE = 'frozen-leaf'\n",
+    )
     manifest = {
         "name": "fixture-plugin", "version": "1.0",
         "repository": "https://github.com/ThomasMichon/copilot-extensions",
@@ -1880,7 +1891,12 @@ def test_native_cli_uses_its_own_roster_or_payload_anchor_not_cwd(tmp_path, anch
     uv = shutil.which("uv")
     assert uv
     environment = offline_environment(tmp_path)
-    target = tmp_path / "venv"
+    runtime_source = PATH.parents[1] / "versioned-runtime" / "versioned_runtime.py"
+    runtime_spec = importlib.util.spec_from_file_location("installed_graph_runtime", runtime_source)
+    runtime = importlib.util.module_from_spec(runtime_spec)
+    runtime_spec.loader.exec_module(runtime)
+    runtime_root = tmp_path / "runtime"
+    target = runtime.version_dir(runtime_root, "1.0")
     created = subprocess.run(
         [uv, "venv", "--offline", "--python", sys.executable, str(target)],
         capture_output=True, text=True, env=environment, timeout=30, creationflags=policy._HEADLESS,
@@ -1896,9 +1912,19 @@ def test_native_cli_uses_its_own_roster_or_payload_anchor_not_cwd(tmp_path, anch
         timeout=30, creationflags=policy._HEADLESS,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    for project, module in ((payload, "fixture_plugin"), (lib, "fixture_lib"), (leaf, "fixture_leaf")):
+        (project / (module + ".py")).write_text("VALUE = 'changed-checkout'\n", encoding="utf-8")
     installed = subprocess.run(
         [str(python), "-I", "-c",
-         "import importlib.metadata as m, json; "
+         "import importlib.metadata as m, json, sys; from pathlib import Path; "
+         "import fixture_plugin, fixture_lib, fixture_leaf; "
+         "assert [module.VALUE for module in (fixture_plugin, fixture_lib, fixture_leaf)] "
+         "== ['frozen-plugin','frozen-lib','frozen-leaf']; "
+         "assert all(Path(module.__file__).is_relative_to(sys.prefix) "
+         "for module in (fixture_plugin, fixture_lib, fixture_leaf)); "
+         "assert all(json.loads(m.distribution(name).read_text('direct_url.json'))"
+         ".get('dir_info',{}).get('editable') is not True "
+         "for name in ('fixture-plugin','fixture-lib','fixture-leaf')); "
          "print(json.dumps({name: m.version(name) for name in "
          "('fixture-plugin', 'fixture-lib', 'fixture-leaf')}))"],
         cwd=tmp_path, env=environment, capture_output=True, text=True,
@@ -1908,6 +1934,11 @@ def test_native_cli_uses_its_own_roster_or_payload_anchor_not_cwd(tmp_path, anch
     assert json.loads(installed.stdout) == {
         "fixture-plugin": "1.0", "fixture-lib": "1.0", "fixture-leaf": "1.0",
     }
+    marker = runtime.mark_complete(runtime_root, "1.0", payload_hash="frozen")
+    before = marker.read_bytes()
+    assert runtime.check_admission(runtime_root, "1.0", payload_hash="frozen") == runtime.ADMIT_REUSE
+    assert runtime.mark_complete(runtime_root, "1.0", payload_hash="frozen") == marker
+    assert marker.read_bytes() == before
     unowned = source_project(repository / "unowned", "agent-lookalike")
     rejected = subprocess.run(
         [sys.executable, "-I", str(helper), "--uv", uv, "--", str(unowned)],
@@ -2124,7 +2155,7 @@ def test_registry_only_cli_does_not_discover_product_roots(monkeypatch):
     ]
     assert policy.main(["--uv", "selected-uv", "--registry-only", "--", *arguments]) == 0
     assert len(calls) == 1
-    assert calls[0][:2] == ("selected-uv", arguments)
+    assert calls[0][:2] == ("selected-uv", [*arguments, "--no-editable", "--link-mode", "copy"])
     assert calls[0][2]["trusted_source_roots"] == ()
 
 
@@ -2141,6 +2172,20 @@ def test_default_cli_retains_product_attribution(monkeypatch, tmp_path):
     )
     assert policy.main(["--uv", "selected-uv", "--", "fixture-package"]) == 0
     assert discovered == [True] and calls == [(tmp_path,)]
+
+
+@pytest.mark.parametrize("arguments", [
+    ["--editable", "."], ["-e", "."], ["--editable=."],
+    ["--link-mode", "symlink"], ["--link-mode=hardlink"],
+])
+def test_deployment_cli_refuses_live_or_shared_code_before_resolver(monkeypatch, capsys, arguments):
+    def forbidden(*args, **kwargs):
+        pytest.fail("mutable deployment reached the resolver")
+
+    monkeypatch.setattr(policy, "run_uv_install", forbidden)
+    monkeypatch.setattr(policy, "_anchor_roots", forbidden)
+    assert policy.main(["--uv", "uv", "--", *arguments]) == 1
+    assert "deployed runtimes require" in capsys.readouterr().err
 
 
 def test_registry_only_cannot_grant_explicit_source_roots(tmp_path, capsys):

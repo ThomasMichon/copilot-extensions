@@ -2,7 +2,7 @@ function Get-FiniteUninstallPython {
     param([Parameter(Mandatory)][string]$InstallRoot)
     $probe = @'
 import sys
-assert sys.version_info >= (3, 10)
+assert sys.version_info >= (3, 11)
 from pathlib import Path
 root = Path(sys.argv[1]).absolute()
 assert ".." not in root.parts
@@ -53,7 +53,7 @@ function Invoke-FiniteRuntimeUninstall {
         $helper = Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer_engine_uninstall.py'
     }
     $python = Get-FiniteUninstallPython -InstallRoot $InstallRoot
-    if (-not $python) { throw 'Runtime uninstall requires an existing external Python 3.10+ outside runtime and prefix closure' }
+    if (-not $python) { throw 'Native install and uninstall require an existing external Python 3.11+ outside runtime and prefix closure' }
     $mode = if ($Check) { '--check' } else { '--remove-runtime' }
     $output = Invoke-Hidden -FilePath $python -ArgList @(
         '-I', '-B', $helper, '--payload-root', (Split-Path -Parent $PSScriptRoot),

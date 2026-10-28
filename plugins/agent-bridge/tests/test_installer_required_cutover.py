@@ -174,6 +174,10 @@ def _update_script(tmp_path: Path, shell: str, strict: bool, outcome: str) -> st
         f"function Get-VersionedCurrent {{ return '{2 if outcome == 'same-slot' else 1}' }}",
         "function Test-RuntimeHealthy { return $true }; function Backup-Venv { return $true }",
         "function Invoke-UpdateSlotBuild { Write-Host built }; function Invoke-VersionedMarkComplete { return $true }",
+        "function Ensure-RuntimeBrokerAdoption { Write-Host broker-reused }",
+        "function Invoke-RuntimeBrokerAdoption { Write-Host broker;",
+        "throw 'Broker adoption refused'" if outcome == "broker-failed" else "return",
+        "}",
         "function Invoke-VersionedActivate { Write-Host selected; return $true }; function Remove-VenvBackup {}",
         "function Write-Binstubs {}; function Write-DeployManifest { Write-Host manifest }; function Ensure-ScheduledTask {}",
         "function FakePython {",
@@ -211,3 +215,14 @@ def test_update_preserves_required_cutover_and_legacy_fallback(tmp_path, shell, 
         assert "UNSAFE-STOP" in output and "UNSAFE-START" in output, output
     if "marked" in result.stdout.splitlines():
         assert "cleared" in output, output
+
+
+@pytest.mark.parametrize("strict", [False, True])
+def test_windows_broker_adoption_failure_preserves_update_rollback(tmp_path, strict):
+    result = _run(tmp_path, "ps1", _update_script(tmp_path, "ps1", strict, "broker-failed"))
+    output = result.stdout + result.stderr
+    assert result.returncode != 0, output
+    assert "built" in output and "Broker adoption refused" in output, output
+    assert "kept the previous runtime" in output and "cleared" in output and "unlocked" in output, output
+    for forbidden in ("selected", "manifest", "gc", "UNSAFE-"):
+        assert forbidden not in output, output

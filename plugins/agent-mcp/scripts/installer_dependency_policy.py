@@ -574,6 +574,7 @@ exec(compile(_configuration_path.read_bytes(), str(_configuration_path), "exec")
 RetainedInputCleanupError = _configuration.RetainedInputCleanupError
 _report_cleanup_error = _configuration.report_cleanup_error
 _native_retained_path = _configuration.native_retained_path
+_file_uri = _configuration.file_uri
 _temporary_inputs = _configuration.temporary_inputs
 tempfile = _configuration.tempfile
 _write_toml = partial(_configuration.write_toml, error_type=DependencyPolicyError)
@@ -976,6 +977,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     arguments = args.arguments[1:] if args.arguments[:1] == ["--"] else args.arguments
     try:
+        pairs = list(_argument_pairs(arguments))
+        if any(option in ("-e", "--editable") for option, _ in pairs):
+            raise DependencyPolicyError("deployed runtimes require non-editable immutable versioned slots")
+        if any(option == "--link-mode" and value != "copy" for option, value in pairs):
+            raise DependencyPolicyError("deployed runtimes require copied installation artifacts")
+        arguments = [*arguments, "--no-editable", "--link-mode", "copy"]
         roots = () if args.registry_only else (tuple(args.trusted_source_root) or _anchor_roots())
         return run_uv_install(
             args.uv, arguments, trusted_source_roots=roots,
