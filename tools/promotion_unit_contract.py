@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 PROFILE = "copilot-extensions.promotion-units/v1"
 CANDIDATE_PROFILE = "copilot-extensions.promotion-candidate-units/v1"
 MAX_PACKET_FILE_BYTES = 128 * 1024 * 1024
+MAX_UNIT_EVIDENCE_FILE_BYTES = 192 * 1024 * 1024
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _SHA = re.compile(r"[0-9a-f]{40}")
 _PACKET = "tools/promotion_unit_tests/"

@@ -12,8 +12,10 @@ import pytest
 
 import candidate_qualification_receipt as receipt_contract
 import promotion_artifact_readiness as readiness
+import promotion_complete_source as source
 import promotion_release_evidence as evidence
 import promotion_unit_packet as packet
+import ci_pr_unit_reuse as reuse
 import publish_python_artifacts as publisher
 
 DEV, CANDIDATE = "a" * 40, "b" * 40
@@ -128,9 +130,12 @@ def test_readiness_keeps_the_exact_code_inventory_with_only_defined_auxiliary_ev
             readiness._assets(*arguments)
 
 
-def test_actual_file_boundary_is_shared_by_local_reads_and_hosted_archive_admission(tmp_path):
-    limit = 128 * 1024 * 1024
-    assert packet.MAX_PACKET_FILE_BYTES == receipt_contract.MAX_PACKET_FILE_BYTES == limit
+def test_actual_file_boundary_is_shared_by_local_reads_and_hosted_archive_admission(tmp_path, monkeypatch):
+    limit = 192 * 1024 * 1024
+    assert (
+        packet.MAX_UNIT_EVIDENCE_FILE_BYTES == receipt_contract.MAX_UNIT_EVIDENCE_FILE_BYTES
+        == evidence.MAX_UNIT_EVIDENCE_FILE_BYTES == reuse.MAX_UNIT_EVIDENCE_FILE_BYTES == limit
+    )
     prefix, suffix = b'{"padding":"', b'"}'
     raw = prefix + b"x" * (limit - len(prefix) - len(suffix)) + suffix
     path = tmp_path / "coverage.json"
@@ -138,23 +143,62 @@ def test_actual_file_boundary_is_shared_by_local_reads_and_hosted_archive_admiss
     observed, value = packet._read_file(tmp_path, "coverage.json")
     assert observed == raw and len(value["padding"]) == limit - len(prefix) - len(suffix)
     del observed, value
-    assert receipt_contract.regular_bytes(tmp_path, "coverage.json") == raw
+    assert receipt_contract.regular_bytes(tmp_path, "coverage.json", max_bytes=limit) == raw
+    with pytest.raises(ValueError, match="bound"):
+        receipt_contract.regular_bytes(tmp_path, "coverage.json")
     files = {name: raw if name == "coverage.json" else b"{}" for name in receipt_contract.PACKET_FILES}
     archive = io.BytesIO()
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=1) as output:
         for name, content in files.items():
             output.writestr(name, content)
     archive_raw = archive.getvalue()
+    hashes = {name: hashlib.sha256(content).hexdigest() for name, content in files.items()}
     receipt_contract.verify_archive(
         archive_raw, expected_digest="sha256:" + hashlib.sha256(archive_raw).hexdigest(),
         expected_size=len(archive_raw),
-        packet_files={name: hashlib.sha256(content).hexdigest() for name, content in files.items()},
+        packet_files=hashes,
     )
+    _, receipt, _, _ = archive_case()
+    receipt["packet_files"] = hashes
+    receipt["packet_digest"] = receipt_contract.canonical_digest({
+        "manifest_file_sha256": hashes["unit-manifest.json"],
+        "proof_sha256": hashes["unit-proof.json"], "coverage_sha256": hashes["coverage.json"],
+    })
+    receipt_raw = (json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    release_raw = evidence.evidence_archive(
+        files, receipt, dev_sha=DEV, candidate_sha=CANDIDATE,
+        qualification_digest=hashlib.sha256(receipt_raw).hexdigest(),
+    )
+    with zipfile.ZipFile(io.BytesIO(release_raw)) as retained:
+        assert retained.read("coverage.json") == raw
+    del release_raw
+    observed_files = {}
+
+    def binding(directory, **kwargs):
+        observed_files.update({name: (directory / name).read_bytes() for name in files})
+        return {"verified": True}
+
+    # Archive admission and bounded extraction stay real; packet semantics have their own controls.
+    with monkeypatch.context() as patch:
+        patch.setattr(reuse, "packet_binding", binding)
+        assert reuse.verify_download(
+            archive_raw,
+            {"digest": "sha256:" + hashlib.sha256(archive_raw).hexdigest(), "size_in_bytes": len(archive_raw)},
+            {"source_sha": DEV}, {}, tmp_path,
+        ) == {"verified": True}
+    assert observed_files == files
+    observed_files.clear()
     path.write_bytes(raw + b"x")
     with pytest.raises(ValueError, match="bounded"):
         packet._read_file(tmp_path, "coverage.json")
     with pytest.raises(ValueError, match="bound"):
-        receipt_contract.regular_bytes(tmp_path, "coverage.json")
+        receipt_contract.regular_bytes(tmp_path, "coverage.json", max_bytes=limit)
+    with pytest.raises(ValueError, match="bounded unit packet"):
+        evidence.evidence_archive(
+            {**files, "coverage.json": raw + b"x"}, receipt,
+            dev_sha=DEV, candidate_sha=CANDIDATE,
+            qualification_digest=hashlib.sha256(receipt_raw).hexdigest(),
+        )
     oversized = io.BytesIO()
     with zipfile.ZipFile(oversized, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=1) as output:
         for name, content in files.items():
@@ -164,8 +208,34 @@ def test_actual_file_boundary_is_shared_by_local_reads_and_hosted_archive_admiss
         receipt_contract.verify_archive(
             oversized_raw, expected_digest="sha256:" + hashlib.sha256(oversized_raw).hexdigest(),
             expected_size=len(oversized_raw),
-            packet_files={name: hashlib.sha256(content).hexdigest() for name, content in files.items()},
+            packet_files=hashes,
         )
+    with pytest.raises(reuse.ReuseUnavailable, match="oversized-unit-packet-file"):
+        reuse.verify_download(oversized_raw, {}, {}, {}, tmp_path)
+
+
+def test_unit_file_allowance_does_not_increase_source_or_aggregate_budgets():
+    assert receipt_contract.MAX_PACKET_FILE_BYTES == source.MAX_PACKET_FILE_BYTES == 128 << 20
+    assert evidence.MAX_PACKET_FILE_BYTES == 128 << 20
+    assert receipt_contract.MAX_PACKET_BYTES == 384 << 20
+    assert receipt_contract.MAX_ARCHIVE_BYTES == (384 << 20) + (64 << 10)
+    assert evidence.MAX_EVIDENCE_BYTES == (512 << 20) + (64 << 10)
+    assert source.MAX_SOURCE_BYTES == 512 << 20
+    assert source.MAX_SOURCE_FILES == 100_000
+    assert evidence.MAX_EVIDENCE_ASSETS == 64
+    for kind, extension, limit in (
+        ("unit-evidence", "zip", (512 << 20) + (64 << 10)),
+        ("complete-source", "zip", 512 << 20),
+        ("source-manifest", "json", 128 << 20),
+    ):
+        asset = {
+            **metadata(),
+            "name": f"promotion-{kind}-{DEV}-{CANDIDATE}-sha256-{'c' * 64}.{extension}",
+            "size": limit,
+        }
+        assert evidence.supplementary_evidence_asset(asset, DEV)
+        asset["size"] += 1
+        assert not evidence.supplementary_evidence_asset(asset, DEV)
 
 
 @pytest.mark.parametrize("count,existing", [(63, False), (64, False), (63, True), (64, True)])
