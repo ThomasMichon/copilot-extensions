@@ -358,8 +358,8 @@ def _find_symlinked_ancestor(path: Path, root: Path) -> Path | None:
     accept that case instead of rejecting the symlink outright, the same
     real-directory invariant ``convert_to_uv_editable()`` already enforces
     on the dev-time conversion side."""
-    root_r = root.resolve()
-    current = path
+    root_r = root.absolute()
+    current = path.absolute()
     while True:
         if current.is_symlink():
             return current

@@ -135,13 +135,23 @@ def test_materialize_refuses_linked_source_content(tmp_path, native_file_symlink
 
 
 def test_materialized_closure_allows_an_aliased_parent(tmp_path, native_file_symlink):
-    root = tmp_path / "real"
+    root = tmp_path / "real" / "repository"
     consumer = root / "plugins" / "example"
     consumer.mkdir(parents=True)
     (consumer / "pyproject.toml").write_text('[project]\nname = "example"\nversion = "1"\n')
     alias = tmp_path / "alias"
-    native_file_symlink(alias, root, target_is_directory=True)
-    assert uer.materialized_local_source_problems(alias / "plugins" / "example") == []
+    native_file_symlink(alias, root.parent, target_is_directory=True)
+    aliased_repo = alias / "repository"
+    assert uer.materialized_local_source_problems(aliased_repo / "plugins" / "example") == []
+    _canonical_lib(root, "shared", version="1.0.0", content="value = 1\n")
+    source_consumer = root / "plugins" / "source"
+    source_consumer.mkdir()
+    (source_consumer / "pyproject.toml").write_text(
+        '[tool.uv.sources]\nshared = {path = "../../libs/shared", editable = true}\n',
+    )
+    assert uer.uv_editable_problems(
+        "source", aliased_repo / "plugins" / "source", repo=aliased_repo,
+    ) == []
 
 
 @pytest.mark.parametrize("nested", [False, True])

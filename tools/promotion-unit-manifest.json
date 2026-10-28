@@ -2889,7 +2889,7 @@
         "tools/standalone_python_artifacts.py": "1ddc9a9bb673782222bc47710915047991f8168871e2f9db5381cd531de4ac78",
         "tools/tag_promotion.py": "06ffc590cf6a32a4e20ff226b76d49e88b7bf7b33e4eeeb3e08a269b20d96ae9",
         "tools/test_check_docs_consistency.py": "18746b96d0ddd72d1750fffb1149921cd002434bde1781cbaa8791646903626b",
-        "tools/uv_editable_ref.py": "41ef1e6d26d5df4d654e6c1ed0dae4a652d28c699160cb8408f5e8bafd424bdb",
+        "tools/uv_editable_ref.py": "3bf0ef79e332d0c19d4debb19319f5990f23e92cb42153ab3f551bf9bde67d1b",
         "tools/validate_materialized_candidate.py": "336e69c6c8233845469eec10e80e74769919a651a8eeed37e9394b89233c5da8",
         "tools/vendored_lib_inventory.py": "3a63eb67c0747f1375822e59837e6740b481cb6ae2ba8d49720356cef23a2f98",
         "tools/verify_promotion_workflows.py": "ca25386904c1337d781fd9b6524701e2278cb6f15be229da8b3252a0faba1990",
