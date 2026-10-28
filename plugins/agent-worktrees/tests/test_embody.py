@@ -173,7 +173,7 @@ class TestCmdEmbody:
 
         # This packet retains the supported legacy terminal fallback. Native
         # startup custody is exercised separately against the real seed writer.
-        monkeypatch.setattr(launch_seed_exec, "supports_seed_command", lambda *a: False)
+        monkeypatch.setattr(launch_seed_exec, "supports_seed_command", lambda *a, **k: False)
 
         def claim(path):
             seed = pending_seed.claim_pending_seed(path)
@@ -354,7 +354,7 @@ class TestCmdEmbody:
         monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
         monkeypatch.setattr(embody_resume, "resume_target", lambda *a, **k: resume_target)
         monkeypatch.setattr(embody_resume, "live_head_refusal", lambda *a: None)
-        monkeypatch.setattr(launch_seed_exec, "supports_seed_command", lambda *a: True)
+        monkeypatch.setattr(launch_seed_exec, "supports_seed_command", lambda *a, **k: True)
         monkeypatch.setattr(launch_seed_state, "pending", lambda *a: None)
         staged = {}
 

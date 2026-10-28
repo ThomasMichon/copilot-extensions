@@ -481,6 +481,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
         try:
             launch_cmd, native_seed_id = embody_completion.prepare_startup_seed(
                 launch_cmd, cfg.tracking_dir() / f"{wt_id}.yaml", seed, explicit=explicit_seed,
+                environment=env,
             )
         except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
             return output._json_error(f"Could not prepare native startup prompt: {exc}", exit_code=3)

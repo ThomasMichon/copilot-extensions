@@ -194,6 +194,12 @@ instead of weakening those guarantees.
   now preserve intermediary exclusion recursively rather than selecting a
   startup path that will refuse `gh copilot`. The changed packet passed 266
   tests after both corrections.
+- The next compatibility review exposed gh-only normalized setup and UTF-16
+  custom setup. Selection now checks the existing explicit backend/session PATH
+  against the actual launch environment, retaining terminal fallback when only
+  an intermediary is available. Unsupported marker encoding is classified and
+  logged before staging rather than aborting a valid custom launcher. The
+  corresponding PowerShell/Bash and encoding packet passed 276 tests.
 
 ### 2026-10-28 - Proposal reviewed
 

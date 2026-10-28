@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import argparse
 import dataclasses
 import json
+import os
 import threading
 from pathlib import Path
 
@@ -202,6 +203,60 @@ def test_wrapped_intermediary_keeps_terminal_fallback(tmp_path, monkeypatch, she
     )
     assert state.peek(path) == original
     assert launch_seed_exec._setup_command(path, original.seed_id, command) is not None
+
+
+@pytest.mark.parametrize("shell", ["bash", "pwsh"])
+@pytest.mark.parametrize("selection", ["gh-only", "session-path", "explicit-gh", "explicit-cli"])
+def test_default_setup_requires_available_nonintermediary_backend(tmp_path, shell, selection):
+    from agent_worktrees import embody_completion
+
+    path = _record(tmp_path)
+    script = tmp_path / ("default-setup.sh" if shell == "bash" else "default-setup.ps1")
+    script.write_text(launch_seed_exec.BOUNDARY_MARKER + "\n", encoding="utf-8")
+    bin_dir, cli_dir = tmp_path / "bin", tmp_path / "selected"
+    bin_dir.mkdir()
+    cli_dir.mkdir()
+    suffix = ".exe" if os.name == "nt" else ""
+    gh = bin_dir / ("gh" + suffix)
+    cli = cli_dir / ("copilot" + suffix)
+    for executable in (gh, cli):
+        executable.write_text("", encoding="utf-8")
+        executable.chmod(0o700)
+    command = [shell, *([] if shell == "bash" else ["-File"]), str(script)]
+    if selection == "session-path":
+        command += ["--session-path" if shell == "bash" else "-SessionPath", str(cli_dir)]
+    elif selection.startswith("explicit"):
+        command += ["--copilot-path" if shell == "bash" else "-CopilotPath",
+                    str(gh if selection == "explicit-gh" else cli)]
+    seed = state.stage(path, kind="new", text="retain")
+    prepared, seed_id = embody_completion.prepare_startup_seed(
+        command, path, seed.text, explicit=False, environment={"PATH": str(bin_dir)},
+    )
+    if selection in {"gh-only", "explicit-gh"}:
+        assert (prepared, seed_id) == (command, None)
+    else:
+        assert seed_id == seed.seed_id and prepared != command
+    assert state.peek(path) == seed
+
+
+@pytest.mark.parametrize("marked", [False, True])
+def test_utf16_setup_preserves_terminal_fallback_without_staging(tmp_path, caplog, marked):
+    from agent_worktrees import embody_completion
+
+    path = _record(tmp_path)
+    script = tmp_path / "custom-setup.ps1"
+    script.write_text(
+        (launch_seed_exec.BOUNDARY_MARKER if marked else "# custom PowerShell setup") + "\n",
+        encoding="utf-16",
+    )
+    command = ["pwsh", "-File", str(script)]
+    seed = state.stage(path, kind="new", text="retain")
+    with caplog.at_level("INFO"):
+        assert embody_completion.prepare_startup_seed(
+            command, path, "replacement", explicit=True,
+        ) == (command, None)
+    assert state.peek(path) == seed
+    assert "retaining terminal fallback" in caplog.text
 
 
 def _settled_pair_receipt(path):

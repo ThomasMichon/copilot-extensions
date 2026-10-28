@@ -488,6 +488,11 @@ Platform command-length failures retain the staged intent through the existing
 definite-spawn-failure restoration path rather than truncating it.
 
 Unrecognized/custom setup commands and `gh copilot` retain terminal fallback;
+this exclusion follows recognized wrappers recursively. Normalized setup must
+have an available standalone backend in its selected launch/session PATH or
+an explicit non-intermediary `copilot_path`; gh-only setup keeps fallback.
+Non-UTF-8 custom PowerShell setup is unsupported for marker qualification and
+logs that selection without preventing its existing terminal launch.
 `--seed-ready-timeout` applies only there. No post-launch terminal fallback is
 attempted after selecting native startup. Already-live sessions, anchor launches,
 handoff cutover and Bridge-owned deferred acquisition retain their existing

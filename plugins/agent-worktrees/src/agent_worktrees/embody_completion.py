@@ -10,9 +10,12 @@ from . import launch_seed_exec, launch_seed_state
 
 def prepare_startup_seed(
     command: list[str], record_path: Path, seed: str | None, *, explicit: bool,
+    environment: dict[str, str] | None = None,
 ) -> tuple[list[str], str | None]:
     """Use the existing final-invocation owner on qualified cold-launch paths."""
-    if not seed or not launch_seed_exec.supports_seed_command(command, record_path):
+    if not seed or not launch_seed_exec.supports_seed_command(
+        command, record_path, environment=environment,
+    ):
         return command, None
     if "\0" in seed:
         raise ValueError("Startup prompt cannot contain a NUL character")
