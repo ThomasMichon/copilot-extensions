@@ -384,7 +384,7 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
                  "anchor_write_guard.py", "pr_supersede_guard.py", "registry_root.py",
                  "nudge_status.py", "bind_nudge.py", "hook_runtime.py", "hook_process_identity.py", "hook_pre_relevance.py", "hook_lifecycle_runtime.py",
                  "native_source_context.py", "pretool_killswitch.py", "hook_client.py",
-                 "post-tool-hook.ps1", "terminal_probe.py"):
+                 "hook-read-policy.json", "versioned_runtime_native.ps1", "pre-tool-hook.ps1", "post-tool-hook.ps1", "terminal_probe.py"):
         src = scripts / name
         if name == "native_source_context.py":
             src = plugin_dir / "src" / "agent_worktrees" / name

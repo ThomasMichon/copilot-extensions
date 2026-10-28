@@ -827,7 +827,7 @@ def _merge_pre_decisions(current: dict, new: dict) -> dict:
     return result
 
 
-def _fallback_pre(payload: dict, home: Path) -> dict:
+def _fallback_pre(payload: dict, home: Path, *, require_policy: bool = False) -> dict:
     contextual = bool(os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip())
     if contextual:
         helper = _load_sibling("registry_root.py")
@@ -860,6 +860,11 @@ def _fallback_pre(payload: dict, home: Path) -> dict:
         "pr_supersede_guard.py",
     ):
         module = _load_sibling(name)
+        if require_policy and not callable(getattr(module, "decide", None)):
+            return {
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "Required agent-worktrees pre-tool policy is unavailable",
+            }
         if module is None:
             continue
         try:
@@ -869,6 +874,11 @@ def _fallback_pre(payload: dict, home: Path) -> dict:
             )
             decision = module.decide(payload, home=home, **kwargs)
         except Exception:
+            if require_policy:
+                return {
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": "Required agent-worktrees pre-tool policy evaluation failed",
+                }
             if contextual:
                 return {
                     "permissionDecision": "deny",
@@ -909,9 +919,13 @@ def _fallback_post(payload: dict, home: Path) -> dict:
     )
 
 
-def decide(kind: str, payload: dict, *, home: Path | None = None) -> dict:
+def decide(
+    kind: str, payload: dict, *, home: Path | None = None, require_policy: bool = False,
+) -> dict:
     home = home or Path.home()
     contextual = bool(os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip())
+    if kind == "preToolUse" and require_policy:
+        return _fallback_pre(payload, home, require_policy=True)
     if (
         kind == "sessionStart"
         and not isinstance(payload.get("_agentWorktrees"), dict)
@@ -943,8 +957,12 @@ def decide(kind: str, payload: dict, *, home: Path | None = None) -> dict:
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     kind = argv[0] if argv else ""
+    if kind == "preToolUseStrict":
+        kind = "preToolUse"
+        argv.append("--require-policy")
     if kind not in {"preToolUse", "postToolUse", "sessionStart", "sessionEnd"}:
         return 0
+    strict_policy = kind == "preToolUse" and "--require-policy" in argv[1:]
     if kind == "preToolUse":
         switch = _load_sibling("pretool_killswitch.py")
         if switch is None:
@@ -964,6 +982,8 @@ def main(argv: list[str] | None = None) -> int:
             payload = _enrich_session_end_payload(payload)
         if kind == "postToolUse" and "--local-fallback" in argv[1:]:
             result = _fallback_post(payload, Path.home())
+        elif strict_policy:
+            result = decide(kind, payload, require_policy=True)
         else:
             result = decide(kind, payload)
         diagnostic = result.pop("_stderr", None)
@@ -980,7 +1000,7 @@ def main(argv: list[str] | None = None) -> int:
                     else ""
                 ),
             )
-        elif result and kind != "sessionEnd":
+        elif kind != "sessionEnd" and (result or strict_policy):
             sys.stdout.write(json.dumps(result, separators=(",", ":")))
     except Exception:
         pass
