@@ -191,7 +191,7 @@ def admit_broker_removal(args) -> None:
     profile = args.payload / "scripts" / "uninstall-profile.json"
     cleanup(
         args.payload, args.plugin, args.root, str(args.shell),
-        profile=profile if profile.is_file() else None, admit_removal=True,
+        profile=profile if profile.is_file() else None, check_consumers=True,
     )
 
 

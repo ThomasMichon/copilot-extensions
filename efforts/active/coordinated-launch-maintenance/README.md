@@ -231,6 +231,15 @@ repository history.
 - No installed payload, runtime, Scheduled Task or shared-host service was
   changed. The temporary resident and inherited feed/recovery obligations remain
   held; the parent effort is Active.
+- Joined-source run 40755951967 passed the native/portable POSIX lane. Both
+  Windows lanes failed visibly: source assembly retained a newly upstreamed
+  license-only nested ZDD shadow, and generic broker teardown still called the
+  superseded `admit_removal` keyword. Remove the remaining shadow file while
+  retaining canonical library licensing, and use upstream's `check_consumers`
+  API in the canonical driver and synchronized consumers. Actual tracked-source
+  materialization passed for Worktrees and SSH; five shared-driver admission
+  controls and the native missing-task refusal passed. Fresh Windows
+  qualification remains required, without a guard waiver or timeout increase.
 
 ### 2026-10-28 - Qualify real broker consumers and canonical removal
 

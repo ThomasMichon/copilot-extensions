@@ -303,6 +303,22 @@ def test_reentry_marker_is_not_installation_authority(adapter, tmp_path, monkeyp
     assert not core.default_root().exists()
 
 
+def test_broker_removal_uses_the_canonical_consumer_admission_api(adapter, tmp_path, monkeypatch):
+    import installer_engine_uninstall as finite
+
+    calls = []
+
+    def cleanup(payload_root, plugin_id, root, shell, *, profile, check_consumers):
+        assert check_consumers is True
+        calls.append((payload_root, plugin_id, root, shell, profile))
+        return {"status": "ready"}
+
+    monkeypatch.setattr(finite, "cleanup", cleanup)
+    args = arguments(tmp_path, action="uninstall")
+    adapter.admit_broker_removal(args)
+    assert calls == [(args.payload, args.plugin, args.root, str(args.shell), None)]
+
+
 @pytest.mark.parametrize("plugin,action", [
     ("agent-bridge", "uninstall"), ("agent-mcp", "broker-remove"),
 ])
