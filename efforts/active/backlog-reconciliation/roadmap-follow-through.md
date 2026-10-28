@@ -11,6 +11,11 @@ Planning evidence: [fourth-wave proposal](roadmap-wave-4.md) and
 or an implementation/rollout charter. Only independently supported finite
 dispositions receive closure credit.
 
+**Reviewed follow-through:** #9404 merged on 2026-10-28 at 13:23:03 UTC
+(06:23:03 PDT) as `1485994f0e7062c24118cce22ae1ef0ac560b146`, after
+current-head Copilot approval with no findings and required green checks.
+This publishes the following finite outcomes and census, not parent completion.
+
 ## 2026-10-28 - One finite completion and one exact claim obligation
 
 The existing Transport researcher assessed only #8733 and #8796. Independent
@@ -148,16 +153,48 @@ The two completed outcomes in this register are #8733 and #7650, not the
 remains 729, **203 issues away**. Historical four-wave assignment and priority
 counts remain unchanged; current eligible supply is 680 at this observation.
 
-## Next bounded evidence
+## 2026-10-28 - Two further finite source completions
 
-The same four researchers nominate up to five still-open tracker-disposition
-candidates and three consequential first slices per thematic role, using only
-already admitted primary evidence and this fresh metadata-only inventory.
-Those are provisional nominations, not fresh completion claims, receiving
-acceptance or permission to read new bodies. Coordinator selection and a
-finite eligibility/contract/source check precede any consequential disposition.
-The four scopes remain disjoint; no new native operation, implementation,
-claim transfer or source ownership is assigned.
+The [next-decision matrix](roadmap-next-slices.md) records independent admission
+of #8802's complete read-only PR/cell census contract and #9072's exact bounded
+demand-episode mechanism. Six raw responses, four whole current texts,
+seventeen pinned source files, 22 literal contract rows, 88 source quotations
+and actual #8855/#9077 merge/file metadata support those finite outcomes.
+
+**#8802 closed as completed at 13:47:37 UTC (06:47:37 PDT)** and **#9072 at
+13:48:04 UTC (06:48:04 PDT)**. Their respective
+[census-command explanation](https://github.com/ThomasMichon/copilot-extensions/issues/8802#issuecomment-6470718495)
+and [coalescer explanation](https://github.com/ThomasMichon/copilot-extensions/issues/9072#issuecomment-6470729073)
+were read back and privacy/disclosure/public anchors checked. Fresh full
+whole-record/actor/roster guards confirmed only the new explanations before
+completed closures; provider readback verified both final states.
+
+These are complete original source deliverables, not fleet adoption,
+successful observation of every cell, deployed UI timing or release/installed
+qualification. #9072's actual same-claim source-complete marker fulfills its
+literal marker promise; its 2.031-second UI miss remains a miss. No outside
+reservation, lease or source/resource custody is released or transferred.
+
+## Latest census and next research
+
+The complete metadata-only inventory at **2026-10-28 13:50:18 UTC
+(06:50:18 PDT)** contains **930 whole open issues**: 678 creator-eligible,
+252 excluded, 717 original-cohort issues and 213 open inflow. All twelve raw
+responses, pagination, unique issue IDs and the stable full roster were
+independently verified. Only #8802/#9072 disappeared since the actual
+932-issue census; no arrivals were observed. This slice earns two closure
+credits. The fixed 729 checkpoint is **201 issues away**.
+
+The register now records four completed finite outcomes: #8733, #7650, #8802
+and #9072. The 741 original-cohort issues no longer open are not all campaign
+credit. Historical roadmap counts remain unchanged.
+
+The next-decision matrix separately retains #8682's specific promised finite
+consumer qualification while crediting its row/wall source, and records
+#1803/#9323 current source-supported residuals without implementation. Its
+twelve first slices distinguish actual existing owners, home gaps, delivered
+foundations and bounded exits. No broad new body sweep, native operation,
+ownership transfer or source work is authorized by the matrix.
 
 The parent remains Active for residual decisions, later inflow, lossless
 consolidation, reviewed documentation and the fixed whole-queue checkpoint.

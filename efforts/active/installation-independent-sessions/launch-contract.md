@@ -110,9 +110,15 @@ Manager health probes: the existing pane-construction owner still selects that
 provider. Qualified startup prompts
 retain their existing deferred preparation. Existing launch and prompt owners
 retain admission and seed custody. Previews and existing live-mux joins do
-not copy assets. Retained setup-time runtime arguments and consumed one-shot
-manifest references still require proper uninstall consumer classification;
-copying assets is not permission to waive that conservative guard.
+not copy assets. At the engine's final Windows mux boundary, copied canonical setup
+now moves startup arguments into a launch-owned single-use manifest consumed
+before setup. Earlier seed/correlation inspection and the copied command
+wrapper's same-host optimization remain intact. Legacy/custom commands retain
+their prior invocation. Neither copying assets nor consuming the startup
+handoff permits waiving conservative uninstall consumer classification;
+installed-removal acceptance still needs direct proof.
+Manager's separate retrying Windows producer still needs startup-handoff
+integration with a fresh single-use file per attempt.
 Copied assets are retained, not reclaimed on age or inferred liveness. Their
 terminal reclamation, missed-boundary recovery, actual installed consumer
 parity and the literal clean-middle round trip remain this effort's obligations.

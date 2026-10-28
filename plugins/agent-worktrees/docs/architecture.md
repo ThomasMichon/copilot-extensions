@@ -794,6 +794,25 @@ the generic uninstaller's conservative rooted-argument refusal or live removal
 qualification. Setup-time runtime arguments remain attributable startup data,
 not evidence that uninstall admission has accepted a running session.
 
+At the engine's final Windows mux command boundary, copied canonical PowerShell 7
+setup commands with the fixed `-NoProfile -NoLogo` host options move their
+startup argv into a second one-shot manifest beside their copied command
+wrapper. Seed selection and resolution correlation still inspect the typed
+command before serialization. The child process command line contains only
+the copied wrapper and manifest paths, not setup's runtime-Python/root values.
+The wrapper validates the version, its own identity and string argv, deletes
+the opened manifest before setup, and preserves pane-appended prompt arguments.
+Its same-host setup optimization, native console handling and outer Job owner
+are unchanged. When adding a wrapper around direct setup, its own
+reconciliation is bypassed so setup retains both normal and recovery policy.
+Rejected outer publication/launch removes the matching nested
+handoff; abandoned startup handoffs share the existing 24-hour expiry.
+Uncopied/custom commands, older copied wrappers and other host options retain
+their previous invocation. This transport does not exempt any process from
+uninstall consumer checks or establish real installed-removal survival.
+Manager's separate Picker/retry producer has not yet adopted startup
+serialization; each retry needs its own fresh startup handoff.
+
 The Windows `scripts/native-seed-boundary.ps1` adapter is dot-sourced
 into that existing setup owner. It retains the actual child handle and wait, selecting
 the current completed runtime from the original root for each finite callback.

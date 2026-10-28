@@ -192,6 +192,13 @@ Investigation only; no repository or deployment changes were made.
 
 The operator subsequently confirmed the slug `effort-agenda-companion`.
 
+## Operator direction on a paired spike
+
+> Great. We should figure out how to do a spike test, once we have some initial guidance. We can create a worktree, add in this extra guidance layer, and drive an agent to do a task, in parallel with driving an agent in a worktree without the guidance framework to attempt the same task.
+
+The [paired-spike protocol](paired-spike.md) is agent-recommended experimental
+design derived from this request, not additional verbatim operator requirements.
+
 ## See Also
 
 - [Canonical effort and current proposal](README.md)
