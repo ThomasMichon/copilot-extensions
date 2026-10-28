@@ -137,6 +137,17 @@ elif r["fault"] == "observer-timeout":
     def stalled_receipt(*args, **kwargs):
         time.sleep(30)
     launch_seed_posix.native.spawned = stalled_receipt
+elif r["fault"] == "restore-interrupt":
+    original_signal = signal.signal
+    interrupted_restore = False
+    def interrupt_restore(signum, handler):
+        global interrupted_restore
+        result = original_signal(signum, handler)
+        if signum == signal.SIGPIPE and handler == signal.SIG_IGN and not interrupted_restore:
+            interrupted_restore = True
+            signal.raise_signal(signal.SIGINT)
+        return result
+    signal.signal = interrupt_restore
 try:
     code = launch_seed_posix.execute(
         Path(r["record"]), Correlation(r["attempt"], r["resolution"], r["parent"]),
@@ -278,3 +289,19 @@ def test_observer_timeout_is_finite_unknown_not_a_lifetime_waiter(record, tmp_pa
     assert events[-1]["phase"] == "unknown"
     retained = seeds.peek(record)
     assert retained.seed_id == seed.seed_id and retained.handoff_id
+
+
+def test_sigint_during_failed_exec_cleanup_cannot_finish_seed(record, tmp_path, native_bash):
+    seed, prepared, _correlation, assets, result = _run(
+        record, tmp_path, native_bash, [str(tmp_path / "absent-backend")],
+        fault="restore-interrupt",
+    )
+    assert result.returncode == 3, result.stderr
+    assert (assets / ".native-seed-exec.complete").read_text() == "3\n"
+    assert (assets / "signals-restored").read_text() == "True"
+    restored = seeds.peek(record)
+    assert restored.seed_id == seed.seed_id and restored.handoff_id is None
+    events = audit.read(record.parent, prepared["attempt_id"], prepared["operation_id"])["events"]
+    assert [event["phase"] for event in events] == [
+        "execution-requested", "seed-claimed", "execution-returned",
+    ]
