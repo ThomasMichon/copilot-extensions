@@ -59,14 +59,25 @@ _aw_native_seed_prepare_phase() {
     printf '%s\0' "$_aw_native_seed_completion"
 }
 
+_aw_native_seed_collect_reply() {
+    local status=0 discarded
+    aw_native_seed_read_reply "$1" 2>/dev/null || status=3
+    if [[ "$status" != 0 ]]; then
+        # Keep the private pipe open until its finite supervisor has settled.
+        while IFS= builtin read -r -d '' -n 4096 discarded; do :; done
+    fi
+    return "$status"
+}
+
 aw_native_seed_prepare() {
     local tracing=0 status=0
     case $- in *x*) tracing=1; set +x ;; esac
+    _aw_native_seed_clear_reply
     # Bash 3.2 cannot wait for process substitutions. Only the finite phase
     # owner emits this per-call trailer, after its real provider wait/cleanup.
     local _aw_native_seed_completion="agent-worktrees.native-phase-complete.v1:$$:$RANDOM:$RANDOM:$RANDOM:$RANDOM"
     export -n _aw_native_seed_completion
-    aw_native_seed_read_reply "$_aw_native_seed_completion" \
+    _aw_native_seed_collect_reply "$_aw_native_seed_completion" \
         < <(_aw_native_seed_prepare_phase "$_aw_native_seed_completion" "$@") 2>/dev/null || status=3
     if [[ "$status" != 0 ]]; then
         printf 'Native preparation is unconfirmed; no backend started.\n' >&2

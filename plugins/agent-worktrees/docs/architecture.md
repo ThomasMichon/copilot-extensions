@@ -694,7 +694,10 @@ completion field must match before EOF; ordinary reader calls still require
 the unchanged provider frame followed immediately by EOF. The completion value
 stays out of provider arguments/environment, including with caller `allexport`.
 Missing, mismatched or trailing completion data clears all reply fields,
-including a complete frame followed by a failed producer. The transport does
+including a complete frame followed by a failed producer. Rejected frames are
+drained in bounded chunks through supervisor EOF before failure returns, so a
+malformed header or completion cannot leave its provider working after refusal.
+The transport does
 not apply the reply environment or execute backend arguments.
 Caller stdin, descriptors and tracing settings remain owned by the caller.
 

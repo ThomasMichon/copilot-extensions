@@ -519,6 +519,14 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   three native-POSIX skips; the exact-code no-actor packet passed 2,565 with
   12 deselected in 99.781 seconds, coverage recorded once. This final journal
   update changes no qualified runtime code.
+- Review then found early malformed input could return refusal before the
+  finite producer settled. Actual malformed-header and malformed-completion
+  regressions both reproduced a still-live provider at return. The collector
+  now retains and drains its private pipe through supervisor EOF before
+  returning failure. Both regressions and the focused Windows/Git Bash packet
+  pass: 69 controls with three native-POSIX skips. The corrected drain still
+  requires fresh native qualification; neither watchdog nor test deadline
+  was increased.
 - Capability/rollback selection, canonical process-birth capture, backend
   custody and foreground terminal/signal behavior remain the next integration
   gates. Neither POSIX runtime waiter is removed, and no host installation,

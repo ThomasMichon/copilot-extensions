@@ -116,7 +116,10 @@ actual nonzero producer exit after a complete frame, and current-slot
 reselection without fallback. Completion-field controls refuse a provider's
 forged trailer and keep the supervisor's per-call field out of the provider
 environment even with caller `allexport`; the standalone reader's default frame
-is unchanged. Native POSIX controls additionally check the
+is unchanged. Malformed-header and malformed-completion controls keep the
+provider hung after its invalid output and require it to be gone before the
+caller receives refusal, not merely after the outer test owner cleans up.
+Native POSIX controls additionally check the
 ten-second deadline, settled provider groups and descendants holding
 the reply pipe. Synthetic shell providers do not qualify real bootstrap
 startup performance, capability discovery or native backend ownership.

@@ -27,7 +27,9 @@ def _bash() -> str:
     pytest.skip("Bash is unavailable")
 
 
-def _slot(root: Path, version: str, *, exit_code: int = 0, tail: str = "") -> bytes:
+def _slot(
+    root: Path, version: str, *, exit_code: int = 0, tail: str = "", malformed: bool = False,
+) -> bytes:
     slot = root / "versions" / version
     (slot / "bin").mkdir(parents=True)
     (slot / ".runtime-bootstrap").mkdir()
@@ -39,6 +41,8 @@ def _slot(root: Path, version: str, *, exit_code: int = 0, tail: str = "") -> by
         "environment": {"PRIVATE": "private value\n\n", "EMPTY": "", "ODD-NAME": "v=1"},
         "argv": [version, "", "single ' double \" ; $literal", "\u03a9\n\n"],
     }).decode("utf-8").split("\0")[:-1]
+    if malformed:
+        fields[0] = "malformed"
     python = slot / "bin" / "python"
     python.write_text(
         "#!/usr/bin/env bash\nset -euo pipefail\n"
@@ -46,6 +50,7 @@ def _slot(root: Path, version: str, *, exit_code: int = 0, tail: str = "") -> by
         '[[ -z "${PYTHONPATH+x}${PYTHONHOME+x}${VIRTUAL_ENV+x}${__PYVENV_LAUNCHER__+x}" ]]\n'
         '[[ "$(cat)" == "" ]]\n'
         'printf "%s\\0" "$PWD" "$@" > "${0%/versions/*}/observed"\n'
+        'printf "%s\\n" "$$" > "${0%/versions/*}/provider-pid"\n'
         "printf '%s\\0' " + " ".join(map(shlex.quote, fields)) + "\n"
         + tail + f"\nexit {exit_code}\n",
         encoding="utf-8", newline="\n",
@@ -263,6 +268,35 @@ if aw_native_seed_prepare "$2" --phase prepare --output-format nul; then exit 90
     assert not result.stdout
     assert result.stderr == "Native preparation is unconfirmed; no backend started.\n"
     assert (root / "provider-status").read_text() == "0"
+
+
+@pytest.mark.parametrize("malformed", ["header", "completion"])
+def test_rejected_hung_provider_is_settled_before_return(
+    tmp_path: Path, malformed: str,
+) -> None:
+    root = tmp_path / "runtime"
+    _slot(
+        root, "A", malformed=malformed == "header",
+        tail=(
+            "printf '%s\\0' malformed-completion\n" if malformed == "completion" else ""
+        ) + "trap '' TERM\nwhile :; do sleep 1; done",
+    )
+    (root / "current-version").write_text("A", encoding="utf-8")
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+code=0
+aw_native_seed_prepare "$2" --phase prepare --output-format nul || code=$?
+[[ "$code" == 3 && -z "$AW_NATIVE_SEED_OPERATION" && -z "${AW_NATIVE_SEED_ARGV[0]+x}" ]]
+IFS= read -r provider < "$2/provider-pid"
+if kill -0 "$provider" 2>/dev/null; then
+    printf 'Provider is still alive after refusal.\n' >&2
+    exit 90
+fi
+''', [root])
+    assert result.returncode == 0, result.stderr
+    assert not result.stdout
+    assert result.stderr == "Native preparation is unconfirmed; no backend started.\n"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Native POSIX job-group and timeout qualification")
