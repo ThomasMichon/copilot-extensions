@@ -1,6 +1,8 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
+        "tools/promotion_unit_tests/test_core_artifacts.py::test_core_cli_refuses_unsupported_build_python_before_execution[reentry]",
+        "tools/promotion_unit_tests/test_core_artifacts.py::test_core_cli_refuses_unsupported_build_python_before_execution[already-locked]",
         "tools/promotion_unit_tests/test_core_artifacts.py::test_local_wheel_exception_stays_with_its_existing_owner[refused]",
         "tools/promotion_unit_tests/test_core_artifacts.py::test_local_wheel_exception_stays_with_its_existing_owner[admitted]",
         "tools/promotion_unit_tests/test_core_artifacts.py::test_missing_canonical_local_dependency_cannot_be_treated_as_external[direct]",
@@ -2597,7 +2599,7 @@
     "sources": {
         "tools/core_python_artifacts.py": "cfeae35bfee4537022e1026ffae498b61b23508426a676d9dc09ca8ab8d4b4a0",
         "tools/python_project_inventory.py": "6981a4cf50106c205847e5f946c23c09c5a0959cc5e2caf30920264c91c0b538",
-        "tools/promotion_unit_tests/test_core_artifacts.py": "5ee3e0cc1d5e14bb232bc924a35290c62c71a373ea442ade0f6117c56c568e35",
+        "tools/promotion_unit_tests/test_core_artifacts.py": "e8542733bfeb46480b68c50301f48874eb7c9f618ad336ee5e315e9bc0058e59",
         "tools/promotion_unit_tests/test_bundle_snapshot.py": "4122e4030eb49d3748acc70ae4360c597f273a224a2d257c8e7fd2825b3c48da",
         "tools/promotion_unit_tests/test_wheel_acquisition_budget.py": "3b84b0f4dde389f1a31c1b8d684576a29fb62e53b9696064749cf20c37ca0cf6",
         "tools/promotion_unit_tests/test_artifact_license_notices.py": "65956a73f5582f8c82876a7cf7b833d9f70f70789e72b78fb1de3476c830f76e",
@@ -2736,7 +2738,7 @@
         "services/chat/src/agent_chat_service/collaboration.py": "5996687f5309db15edf5fe129c8339b6f5067591872a2617bf1da37efb5142eb",
         "services/chat/src/agent_chat_service/store.py": "df3b352718213f0d606c5d96658993268266009398dcc0f7bff7db5df0c559d0",
         "tools/accumulate_bumps.py": "64055cbc51a33c70882ea3e6ed863ec8b34c8bdb8b3b77c297d44e6cd08eecf0",
-        "tools/artifact_builder_cli.py": "ea55040ab85418f0aff6c0e04d6c2291a8721cb1a5d33e4bbc2193f058032c81",
+        "tools/artifact_builder_cli.py": "876bab23db79c4bd7f0fb0a1feb02b573f9549d156d9d783eed9daa9c819a909",
         "tools/artifact_source_build.py": "c76882f1cb31708c496b246ba43c2ce59e64499139d574f33a186cef6315d40e",
         "tools/build_python_artifacts.py": "b5e8ae982a7d02526cc7df2b0da68e1a1b14961c970a1a789495c552a3653ba3",
         "tools/build_toolchain_lock.py": "11efa6396593d97e3ff27e64649113e73b9c52914316d33fea7cd4f205a37e44",

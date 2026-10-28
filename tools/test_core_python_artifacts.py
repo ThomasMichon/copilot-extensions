@@ -269,7 +269,10 @@ def test_core_cli_reuses_existing_policy_and_toolchain_arguments(tmp_path, monke
     import artifact_builder_cli
 
     calls = []
-    lock = SimpleNamespace(venv_python=Path(sys.prefix) / "bin" / "python")
+    lock = SimpleNamespace(
+        venv_python=Path(sys.prefix) / "bin" / "python",
+        marker_environment={"python_version": "3.11"},
+    )
     monkeypatch.setattr(artifact_builder_cli, "resolve_toolchain_lock", lambda *args, **kwargs: lock)
     monkeypatch.setattr(sys, "argv", ["builder", "core", "--core", "--out-dir", str(tmp_path)])
     def build(**kwargs):

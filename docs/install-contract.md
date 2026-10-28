@@ -4900,6 +4900,11 @@ python tools/build_python_artifacts.py core --core --out-dir <outside-source-dir
 Its existing toolchain-source, seasoning and shared-toolchain options are
 unchanged. Core selection executes inside the resolved build-toolchain
 environment; the calling interpreter needs no ambient `packaging` installation.
+Core construction requires a Python 3.11+ locked build interpreter, whose
+standard library supplies the TOML parser; an older selected interpreter is
+refused before core selection or child execution. This is the new core
+construction tool's floor, not a change to emitted wheel `Requires-Python`,
+installer target qualification or the shared toolchain's package set.
 Legacy plugin/standalone help and invocation keep their existing requirements.
 This artifact contains no third-party wheels and performs no runtime
 dependency resolution. It does not publish the separate complete delivery

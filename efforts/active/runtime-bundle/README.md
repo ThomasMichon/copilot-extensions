@@ -438,3 +438,11 @@ choose the wheel path, not a reason to relax source identity.
   closure selection again produces the same 42 canonical projects and payload
   identity, including on the Windows host where the dependency's Linux marker
   is false.
+- Review's final portability assessment identifies an undefined Python 3.10
+  child path: the locked toolchain intentionally does not carry a TOML
+  backport. The new core construction command now explicitly requires a
+  Python 3.11+ locked build interpreter, checking that interpreter's marker
+  environment before selection or re-entry. Two failing-first controls cover
+  caller re-entry and already-locked invocation. This does not change legacy
+  builders, emitted wheel Python ranges, installer target qualification or
+  the shared toolchain's package set; broader native acceptance remains open.

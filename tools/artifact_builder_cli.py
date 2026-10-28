@@ -81,6 +81,8 @@ def main(builder, description: str, *, standalone_builder=None, core_builder=Non
                 venv, python=args.python, source_policy=args.toolchain_source,
                 min_age_days=args.toolchain_min_age_days,
             )
+            if args.core and tuple(map(int, toolchain.marker_environment["python_version"].split("."))) < (3, 11):
+                raise ArtifactBuildError("core construction requires Python 3.11 or newer")
             # Compare venv roots, not executable targets: POSIX venv Python may be a symlink.
             if args.core and Path(sys.prefix).resolve() != toolchain.venv_python.parent.parent.resolve():
                 manifest = _core_in_toolchain(args, toolchain, venv)

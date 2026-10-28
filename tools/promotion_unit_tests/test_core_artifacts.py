@@ -253,6 +253,7 @@ def test_core_cli_selects_only_inside_the_resolved_toolchain(
     lock = SimpleNamespace(
         venv_python=tmp_path / "toolchain" / "bin" / "python",
         record={"locked": True, "provenance": {"python": "/uv-default/python"}},
+        marker_environment={"python_version": "3.11"},
     )
     monkeypatch.setattr(cli, "resolve_toolchain_lock", lambda *args, **kwargs: lock)
     arguments = [
@@ -298,6 +299,50 @@ def test_core_cli_selects_only_inside_the_resolved_toolchain(
     assert argv[argv.index("--python") + 1] == (selector or "/uv-default/python")
     assert argv[argv.index("--toolchain-venv") + 1] == str(tmp_path / "toolchain")
     assert options["capture_output"] and options["check"] is False
+
+
+@pytest.mark.parametrize(
+    "already_locked", [False, True], ids=["reentry", "already-locked"]
+)
+def test_core_cli_refuses_unsupported_build_python_before_execution(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    already_locked,
+):
+    import sys
+
+    import artifact_builder_cli as cli
+
+    venv = tmp_path / "toolchain"
+    lock = SimpleNamespace(
+        venv_python=venv / "bin" / "python",
+        marker_environment={"python_version": "3.10"},
+    )
+    monkeypatch.setattr(cli, "resolve_toolchain_lock", lambda *args, **kwargs: lock)
+    monkeypatch.setattr(
+        sys, "prefix", str(venv if already_locked else tmp_path / "caller")
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "builder",
+            "core",
+            "--core",
+            "--out-dir",
+            str(tmp_path / "out"),
+            "--toolchain-venv",
+            str(venv),
+        ],
+    )
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("an unsupported core build interpreter must not execute")
+
+    monkeypatch.setattr(cli, "_core_in_toolchain", forbidden)
+    assert cli.main(None, "", core_builder=forbidden) == 1
+    assert "core construction requires Python 3.11 or newer" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("conditional", [False, True], ids=["direct", "conditional"])
