@@ -61,6 +61,9 @@ a claim to constrain every action an agent can take.
   planning and continuity without a runtime service. Existing
   [effort-driven session loops](../../2026/08/28%20effort-driven-session-loops/README.md)
   establish durable effort ownership, not graph or child-return semantics.
+- Current worktree orientation uses a manually declared binding slice.
+  Checklist-derived slice selection is intended by the vision and remains
+  adjacent work under #3581; this effort must not assume it has shipped.
 - Pattern fit: [architecture principles](../../../docs/patterns/README.md),
   especially independent installation, graceful optional composition,
   right-sized surfaces, cross-platform parity and proportionate safeguards.
@@ -87,7 +90,7 @@ specific mechanisms below are **agent-recommended**, pending reviewed design;
 illustrative filenames or operations are not existing commands.
 
 ### Phase 0 - Inception and reviewed scope
-- [ ] Land the canonical effort, inception exchange, active index and matching
+- [x] Land the canonical effort, inception exchange, active index and matching
       efforts vision extension through normal review.
 - [ ] Record the reviewed proposal and explicitly admit the next implementation
       slice on #9377 before starting implementation.
@@ -95,12 +98,17 @@ illustrative filenames or operations are not existing commands.
 ### Phase 1 - Companion contract and manual process aide
 - [ ] Define a small optional companion format for coarse nodes, stable
       Plan/Validation references, exit criteria, named outcomes and permitted
-      transitions; do not copy the plan or maintain a second completion checklist.
+      transitions, including loop bounds and explicit exhaustion behavior;
+      do not copy the plan or maintain a second completion checklist.
 - [ ] Separate the reviewed agenda from participant-local mutable execution
       position, attempts, evidence references and saved continuations. Define
       cursor discovery/resumption without requiring a managed worktree.
 - [ ] Specify nested call/return, blocked-child handling and return-time
       revalidation; distinguish a blocking child detour from parallel delegation.
+- [ ] Define guidance reconciliation so an adopted position or child detour is
+      not redirected by default checklist/binding reminders, including when a
+      bound worktree has no agenda projection. Preserve existing reminder
+      ownership and standalone operation.
 - [ ] Ship efforts-owned authoring and usage guidance with a synthetic worked
       example. Ordinary efforts and manual agenda use stay first-class.
 
@@ -138,7 +146,9 @@ already run or a requirement to publish execution artifacts.
       Evidence distinguishes measured results from attributed agent judgment.
 - [ ] Manual instructions explicitly reject unsupported advancement; any helper
       rejects missing exit evidence and undeclared branch/reset operations.
-      Repeated failure reaches an explicit replan/steering decision, not drift.
+      Failed, successful and no-progress cycles all honor declared bounds;
+      exhaustion reaches an explicit stop/replan/steering outcome, not drift or
+      silent completion.
 - [ ] A synthetic A -> B -> C -> B -> A scenario preserves the root objective
       and correct return points. A failed or blocked child remains visible; its
       PR/task/worktree ending does not satisfy its or its parent's effort gate.
@@ -157,6 +167,10 @@ already run or a requirement to publish execution artifacts.
 - [ ] Any optional worktree projection reuses existing focus/claims owners and
       preserves the root completion gate; absence of that integration is safe.
       No dispatch integration is introduced as a prerequisite or deliverable.
+- [ ] Default checklist/binding guidance does not redirect an adopted position
+      or child detour, including in an already-bound worktree without an agenda
+      projection. Qualify guidance reconciliation without replacing the reminder
+      owner or requiring sibling plugins for standalone use.
 - [ ] Guidance and any helpers are qualified on Windows and Linux/WSL. Helper
       tests use the repository's bounded test path; required CI remains scoped
       to the actual change and native qualification is reported honestly.
@@ -173,7 +187,9 @@ limits, with the following explicit corrections:
   and agent-worktrees; no background execution engine is part of this effort.
 - CLI implementation is a considered option, not a pre-decided requirement.
 - The cursor is an execution position, never a competing completion ledger.
-  The existing default checklist-derived slice remains unchanged without opt-in.
+  Non-opted-in slice behavior remains unchanged: the current worktree binding
+  has a manually declared slice; automatic checklist derivation is separate,
+  planned work, not an already-shipped prerequisite.
 - Schema, helper grammar and storage location remain design decisions with
   named validation obligations, not an already-shipped runtime contract.
 
@@ -187,3 +203,15 @@ limits, with the following explicit corrections:
   worktree-owned runtime suggestion is retained only as historical inception.
 - Opened #9377 for public coordination and the planning slice. Implementation
   remains unstarted; the plan and acceptance obligations are proposed.
+
+### 2026-10-28 - Reviewed inception landed
+- Merged [#9380](https://github.com/ThomasMichon/copilot-extensions/pull/9380)
+  after Copilot's non-blocking owner review and green required CI. The effort,
+  inception, index and matching vision extension are now reviewed source.
+- Incorporated the three Low-severity review recommendations into this planning
+  record: distinguish current declared slices from planned derivation, qualify
+  bounds for successful/no-progress cycles, and qualify guidance reconciliation
+  when the adopted position differs from default reminders.
+- The inception delivery item is resolved. The next step is explicit admission
+  of a bounded Phase 1 contract/manual-aide slice on #9377; no implementation,
+  optional-helper decision or rollout is reported complete.
