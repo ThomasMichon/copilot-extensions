@@ -99,9 +99,11 @@ def validate_scope(prcfg, target) -> None:
 
 
 def refresh(config, record, target) -> dict | None:
+    from .providers.base import ProviderError
+
     try:
         result = _refresh(config, record, target)
-    except (OSError, ValueError, TypeError) as exc:
+    except (ProviderError, OSError, ValueError, TypeError) as exc:
         result = {"ok": False, "repo": target.repo if target else "",
                   "number": target.number if target else None, "error": str(exc),
                   "publication_retained": True, "repair": "pr-publication-labels"}
@@ -112,7 +114,7 @@ def refresh(config, record, target) -> dict | None:
 
 def _refresh(config, record, target) -> dict | None:
     """Attach selected scope after publication, retaining identity on metadata failure."""
-    from . import pr_publish, providers, tracking
+    from . import claims_find_cli, pr_config, pr_publish, pr_sweep, providers, tracking
     from .pr_publication_state import authority, copy_pr
 
     if target is None:
@@ -126,10 +128,19 @@ def _refresh(config, record, target) -> dict | None:
     origin = frozen or desired
     if origin is None:
         return None
-    prcfg = config.default_repo.pr
+    resolution = pr_config.resolve_repo_config_for_slug(config, target.repo)
+    if not resolution.resolved:
+        raise ValueError(resolution.error or "Tracked PR has no owning repository binding")
+    prcfg = resolution.repo_config.pr
     if target.provider and target.provider != prcfg.provider:
         raise ValueError("Tracked PR provider differs from the current binding; resolve its owning binding before repair")
     validate_policy(prcfg, origin)
+    provider = providers.get_provider(target.provider or prcfg.provider)
+    if target.number is not None:
+        endpoint = claims_find_cli.canonical_authority(provider.authority_endpoint(prcfg.api_base))
+        identity = pr_sweep.pr_identity(target.url)
+        if not endpoint or identity != (endpoint, target.repo.lower(), target.number):
+            raise ValueError("Tracked PR identity differs from its owning binding endpoint; repair its binding before labeling")
     if record is not None:
         with pr_publish.metadata_lock(record.worktree_id, project=config.repo_name), tracking._RecordLock(
                 record.yaml_path, require_sidecar=True):
@@ -147,7 +158,6 @@ def _refresh(config, record, target) -> dict | None:
     if target.number is None:
         return None
     try:
-        provider = providers.get_provider(target.provider or prcfg.provider)
         token = providers.account_token_for_slug(target.repo, prcfg)
         result = reconcile(provider, target.repo, target.number, origin,
                            api_base=prcfg.api_base, token=token)

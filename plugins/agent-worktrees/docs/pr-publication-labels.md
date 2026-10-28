@@ -53,8 +53,12 @@ association or authorize source publication. Supply the origin again when
 repairing an explicitly selected foreign PR.
 
 Metadata repair also accepts a tracked closed or merged PR, provided its recorded
-authority has not changed. Its provider must match the current repository
-binding; resolve the owning binding before repairing a different provider.
+authority has not changed. Reconciliation resolves the PR's owning repository
+binding and checks its provider, endpoint, repository and number against the
+recorded PR URL before resolving credentials or attaching origin. Missing or
+mismatched identity returns a repairable metadata error; repair the recorded
+identity or owning binding rather than inheriting the caller's endpoint.
+The owning binding also determines reserved consent/hold labels.
 These metadata-only operations never reopen a PR or authorize another push.
 
 Reconciliation reads existing labels, adds only missing labels and verifies the

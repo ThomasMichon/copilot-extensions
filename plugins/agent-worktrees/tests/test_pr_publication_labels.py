@@ -9,7 +9,7 @@ import textwrap
 
 import pytest
 
-from agent_worktrees import config as cfg, pr_ops, pr_publish, providers, tracking
+from agent_worktrees import config as cfg, pr_config, pr_ops, pr_publish, providers, tracking
 from agent_worktrees import pr_publication_labels as labels
 from agent_worktrees.providers.base import ProviderError
 from agent_worktrees.providers.github import GitHubProvider
@@ -20,6 +20,9 @@ ORIGIN = {"id": "control-plane", "labels": ["source:control-plane"]}
 
 
 class Backend:
+    def authority_endpoint(self, api_base=""):
+        return api_base or "github.com"
+
     def __init__(self):
         self.labels = ["unrelated"]
         self.additions = []
@@ -41,7 +44,7 @@ def config():
         srcroot=".", machine="fixture", platform="windows", repo_name="fixture",
         repos={"fixture": cfg.RepoConfig(
             anchor=".", worktree_root=".",
-            pr=cfg.PRConfig(enabled=True, provider="github",
+            pr=cfg.PRConfig(enabled=True, provider="github", repository="base/project",
                             publication_origin=labels.parse_origin(ORIGIN)),
         )},
     )
@@ -131,7 +134,10 @@ def test_frozen_scope_survives_label_failure_and_repair_without_republication(tm
                                "fixture", "fixture", "windows", directory)
     path = directory / "fixture.yaml"
     record = tracking.load_record(path)
-    record.prs.append(tracking.PRRecord(repo="base/project", number=7, state=state, branch="topic"))
+    record.prs.append(tracking.PRRecord(
+        repo="base/project", number=7, state=state, branch="topic",
+        url="https://github.com/base/project/pull/7",
+    ))
     tracking.save_record(record)
     backend = Backend()
     backend.fail = True
@@ -162,11 +168,75 @@ def test_provider_mismatch_refuses_before_credentials_or_scope_attachment(monkey
     assert not target.publication_origin
 
 
+@pytest.mark.parametrize(("provider", "endpoint", "url"), [
+    ("github", "https://forge.invalid", "https://other.invalid/base/project/pull/7"),
+    ("azure-devops", "https://dev.azure.com/current",
+     "https://dev.azure.com/previous/base/_git/project/pullrequest/7"),
+    ("github", "", ""),
+    ("github", "", "https://github.com/base/other/pull/7"),
+    ("github", "", "https://github.com/base/project/pull/8"),
+])
+def test_tracked_identity_mismatch_refuses_before_credentials_or_scope_attachment(
+        monkeypatch, provider, endpoint, url):
+    conf = labels.activate(config(), "control-plane")
+    conf.repos["fixture"] = replace(conf.default_repo, pr=replace(
+        conf.default_repo.pr, provider=provider, api_base=endpoint))
+    target = tracking.PRRecord(repo="base/project", number=7, provider=provider, url=url)
+    backend = Backend()
+    monkeypatch.setattr(providers, "get_provider", lambda _: backend)
+    monkeypatch.setattr(providers, "account_token_for_slug",
+                        lambda *_: pytest.fail("Mismatched identity must not resolve credentials"))
+    result = labels.refresh(conf, None, target)
+    assert not result["ok"] and result["publication_retained"]
+    assert "owning binding endpoint" in result["error"]
+    assert not target.publication_origin and not backend.additions
+
+
+@pytest.mark.parametrize("reserved", [False, True])
+def test_foreign_target_uses_owning_policy_endpoint_and_credentials(monkeypatch, reserved):
+    conf = labels.activate(config(), "control-plane")
+    owner = replace(conf.default_repo, pr=replace(
+        conf.default_repo.pr, api_base="https://forge.invalid",
+        automerge_label="source:control-plane" if reserved else "consent"))
+    monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug",
+                        lambda *_: pr_config.ForeignRepoResolution(owner, "owning-project"))
+    target = tracking.PRRecord(
+        repo="base/project", number=7, provider="github",
+        url="https://forge.invalid/base/project/pull/7",
+    )
+    backend = Backend()
+    monkeypatch.setattr(providers, "get_provider", lambda _: backend)
+    bindings = []
+    monkeypatch.setattr(providers, "account_token_for_slug",
+                        lambda repo, prcfg: bindings.append((repo, prcfg)))
+    result = labels.refresh(conf, None, target)
+    assert result["ok"] is not reserved
+    if reserved:
+        assert "merge-consent" in result["error"]
+        assert not bindings and not target.publication_origin and not backend.additions
+    else:
+        assert bindings == [("base/project", owner.pr)]
+        assert backend.additions == [("source:control-plane",)]
+
+
+def test_unresolved_owner_does_not_inherit_active_binding(monkeypatch):
+    conf = labels.activate(config(), "control-plane")
+    target = tracking.PRRecord(repo="base/project", number=7)
+    monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug",
+                        lambda *_: pr_config.ForeignRepoResolution(None))
+    monkeypatch.setattr(providers, "get_provider",
+                        lambda *_: pytest.fail("Unresolved owner must not select a backend"))
+    result = labels.refresh(conf, None, target)
+    assert not result["ok"] and "owning repository binding" in result["error"]
+    assert not target.publication_origin
+
+
 def test_successful_push_attaches_origin_to_preexisting_pr(monkeypatch):
     backend = Backend()
     conf = config()
     conf = labels.activate(conf, "control-plane")
-    target = tracking.PRRecord(repo="base/project", number=7, head_repo="fork/project")
+    target = tracking.PRRecord(repo="base/project", number=7, head_repo="fork/project",
+                               url="https://github.com/base/project/pull/7")
     order = []
     monkeypatch.setattr(pr_publish, "_persist_head", lambda *a, **k: order.append("pushed"))
     monkeypatch.setattr(pr_ops, "refresh_head_observation", lambda *a: "")
@@ -186,7 +256,7 @@ def test_reused_local_pr_labels_without_another_create(monkeypatch):
     conf = labels.activate(conf, "control-plane")
     monkeypatch.setattr(providers, "get_provider", lambda _: backend)
     monkeypatch.setattr(providers, "account_token_for_slug", lambda repo, _: None)
-    target = tracking.PRRecord(repo="base/project", number=7)
+    target = tracking.PRRecord(repo="base/project", number=7, url="https://github.com/base/project/pull/7")
     result = {"success": True}
     pr_ops._finish_auto_open(
         result, conf, None, target, title="fixture", body="", worktree_id="fixture",
