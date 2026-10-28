@@ -68,7 +68,7 @@ def test_reader_distinguishes_inherit_from_empty_replacement(environment, count)
 set -euo pipefail
 . "$1"
 aw_native_seed_read_reply
-[[ ${#AW_NATIVE_SEED_ENV[@]} == 0 ]]
+[[ -z "${AW_NATIVE_SEED_ENV[0]+x}" ]]
 printf '%s' "$AW_NATIVE_SEED_ENV_COUNT"
 ''', payload=nul_reply(_reply(environment)).decode("utf-8"))
     assert result.returncode == 0, result.stderr
@@ -104,7 +104,7 @@ for frame in "$@"; do
     AW_NATIVE_SEED_OPERATION=previous
     if aw_native_seed_read_reply < "$frame"; then exit 90; else code=$?; fi
     [[ $code == 3 && -z "$AW_NATIVE_SEED_OPERATION" && \
-        ${#AW_NATIVE_SEED_ARGV[@]} == 0 && ${#AW_NATIVE_SEED_ENV[@]} == 0 ]]
+        -z "${AW_NATIVE_SEED_ARGV[0]+x}" && -z "${AW_NATIVE_SEED_ENV[0]+x}" ]]
 done
 ''', paths)
     assert result.returncode == 0, result.stdout + result.stderr
