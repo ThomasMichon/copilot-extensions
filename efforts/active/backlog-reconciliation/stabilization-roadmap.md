@@ -1,7 +1,8 @@
 # Vision-Linked Stabilization Roadmap
 
-**Status:** Research method with a [first-200-issue planning
-proposal](roadmap-wave-1.md); later eligible coverage and full execution
+**Status:** Research method with the reviewed [first-200-issue planning
+proposal](roadmap-wave-1.md) and a [second disjoint 200-issue
+proposal](roadmap-wave-2.md); later eligible coverage and full execution
 sequencing remain open.
 
 Parent: [Backlog Reconciliation](README.md), Phase 2b.
@@ -59,6 +60,15 @@ Sixteen selected current-source traces distinguish twelve source-supported
 defects, two qualification-only cases, one already-fixed predicate and one
 evidence/design gap. The proposal corrects #870 to P2, credits delivered
 foundations and retains source, release, installed and native evidence limits.
+
+The [second-wave proposal](roadmap-wave-2.md) adds 168 researched assessments
+and 32 explicit provisional outcomes, with four further exact-50 appendices.
+Its [dependency register](roadmap-wave-2-dependencies.md) records 32 directed
+slice proposals and two interface edges. These 200 assessments include no
+new product-code audit; important possible fixes start with actual consumer
+characterization, separately from existing-owner integration and qualification.
+The cumulative 400 planning records do not rank the remaining eligible supply
+or count the excluded-author issues as researched.
 
 ## Per-issue decision record
 
