@@ -713,7 +713,11 @@ def test_codespaces_library_install_order_retry_and_errors(
         script += "".join(f"{var}='{path}'\n" for var, path in zip(VARIABLES, sources))
         script += f"_install_package_into '{python}'\n"
     else:
-        script = _prelude(ext, engine) + _function(ext, "Install-PackageInto")
+        script = (
+            "Set-StrictMode -Version Latest\n"
+            + _prelude(ext, engine) + _function(ext, "Install-PackageInto")
+            + "$script:SourceRuntimeIdentity = $null\n"
+        )
         script += (
             f"\n$UvCommand='{uv}'\nfunction Remove-ConsoleTrampolines {{ param($VenvDir) }}\n"
         )
@@ -726,10 +730,8 @@ def test_codespaces_library_install_order_retry_and_errors(
     calls = [json.loads(line) for line in log.read_text().splitlines()]
     assert bool(result.returncode) == (mode == "fatal"), result.stdout + result.stderr
     expected = ["pip", "install", "--python", str(python)]
-    if not editable:
-        expected.append("--no-editable")
     for package, source in zip(PACKAGES, sources):
-        expected.extend((["--editable"] if editable else ["--reinstall-package", package]) + [str(source)])
+        expected.extend(["--reinstall-package", package, str(source)])
     expected.append("--quiet")
     assert [_without_policy_arguments(args) for args in calls] == (
         [expected] * (1 if mode == "fatal" else 3)

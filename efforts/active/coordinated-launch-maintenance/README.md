@@ -205,6 +205,39 @@ repository history.
 
 ## Journal
 
+### 2026-10-28 - Address fresh review and preserve required unit admission
+
+Fresh review 5690887170 on `1c6b66442b` accepted the five earlier corrections
+and identified three additional High findings. The fixed foundation validator
+now permits only the known optional `agent-zdd` sibling source for
+`agent-procutil`, without widening its mandatory dependency recipe. Its
+real-manifest regression and refusal controls pass with the complete 18-test
+foundation input packet. Both Codespaces shell implementations now use the
+copied/non-editable package recipe unconditionally, removing unbound legacy
+`mode`/`Editable` references. Four native strict-PowerShell retry/fatal controls
+pass; four POSIX controls are explicitly skipped locally and are added to the
+existing bounded Linux integration lane.
+
+Windows Manager apply-removal now joins the existing execution driver before
+any daemon/removal custody and retains its participant through broker and
+runtime deletion. Ordinary callers enqueue the fixed supported uninstall
+invocation; executing participants remove directly under asserted custody.
+Unsupported legacy declarations retain their structured refusal before loading
+the driver. All 100 broker/removal controls pass with three platform skips.
+Initial fixture failures were corrected by reproducing production source
+initialization and retaining the existing policy-argument normalization.
+Fresh hosted qualification remains required for these corrections.
+
+Required CI 40784553719 also found a missing Fleet Manager shared-consumer
+changefile and stale unit-source admission. The changefile is added. Refreshing
+the eight changed source digests does not waive the unit packet's static or
+runtime effect admission: the strict preflight now identifies two installed
+broker runtime file-load boundaries as unsupported release-helper edges.
+The existing checker has an exact-AST external-runtime seam for the canonical
+installer actor, not a general exemption. The broker cell/retention boundary
+must be modeled and qualified without weakening that rule before required CI
+can pass. No merge, promotion or installed rollout is claimed.
+
 ### 2026-10-28 - Qualify the actual cold Manager pivot on reconciled source
 
 Run 40783189911 at `c1800f38cc503bcc0bbd178feb0bfad745656cf5`

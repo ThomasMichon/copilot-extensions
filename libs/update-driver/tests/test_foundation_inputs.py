@@ -52,6 +52,20 @@ def test_fixed_closure_is_location_independent_and_ignores_generated_cruft(sourc
     assert inspect(source).digest != first.digest
 
 
+def test_current_real_package_manifests_admit_the_optional_broker_source(source):
+    repository = Path(__file__).resolve().parents[3]
+    for directory in PACKAGES:
+        shutil.copyfile(
+            repository / "libs" / directory / "pyproject.toml",
+            source.parent / directory / "pyproject.toml",
+        )
+    assert len(inspect(source).packages) == len(PACKAGES)
+    manifest = source.parent / "agent-procutil" / "pyproject.toml"
+    manifest.write_text(manifest.read_text().replace('path = "../zdd"', 'path = "../foreign"'))
+    with pytest.raises(FoundationInputError, match="fixed sibling"):
+        inspect(source)
+
+
 @pytest.mark.parametrize("directory", list(PACKAGES))
 def test_no_additional_runtime_dependency_can_enter_the_recipe(source, directory):
     path = source.parent / directory / "pyproject.toml"

@@ -798,11 +798,9 @@ function Install-PackageInto {
         'agent-update-driver' = $UpdateDriverDir
         'agent-codespaces' = $PluginDir
     }
-    $installArguments = @('--python', $Python)
-    if (-not $Editable) { $installArguments += '--no-editable' }
+    $installArguments = @('--python', $Python, '--no-editable')
     foreach ($entry in $sources.GetEnumerator()) {
-        if ($Editable) { $installArguments += @('--editable', $entry.Value) }
-        else { $installArguments += @('--reinstall-package', $entry.Key, $entry.Value) }
+        $installArguments += @('--reinstall-package', $entry.Key, $entry.Value)
     }
     $result = Invoke-UvPipInstallResilient -UvCommand $UvCommand `
         -Arguments ($installArguments + @('--quiet'))

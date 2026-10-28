@@ -389,12 +389,35 @@ def _remove_locked(root: Path, plan: dict, removed: list[str], publication) -> N
         raise ValueError("Concurrent runtime construction remains; removal is incomplete")
 
 
+def _result(root: Path) -> dict:
+    return {"schema": "worktree-manager.uninstall-result", "version": 1,
+            "contract": "worktree-manager.uninstall", "generation": 1,
+            "root": str(root.absolute()), "removed": []}
+
+
+def _report(result: dict, *, as_json: bool) -> int:
+    if as_json:
+        print(json.dumps(result))
+    else:
+        print(f"Manager uninstall: {result['status']}" + (
+            f": {result['reason']}" if "reason" in result else ""
+        ))
+    return 1 if result["status"] in ("refused", "incomplete") else 0
+
+
+def validate_frontdoor(root: Path, *, as_json: bool) -> int:
+    """Refuse an unsupported declaration before importing execution machinery."""
+    try:
+        _contract(SCRIPTS.parent / "references" / "uninstall-contract.json")
+    except (OSError, ValueError, RuntimeError, KeyError, TypeError) as error:
+        return _report(dict(_result(root), status="refused", reason=str(error)), as_json=as_json)
+    return 0
+
+
 def uninstall(root: Path, *, apply: bool, as_json: bool) -> int:
-    removed: list[str] = []
     root = root.absolute()
-    result = {"schema": "worktree-manager.uninstall-result", "version": 1,
-              "contract": "worktree-manager.uninstall", "generation": 1,
-              "root": str(root), "removed": removed}
+    result = _result(root)
+    removed = result["removed"]
     try:
         root = _plain(root).resolve()
         result["root"] = str(root)
@@ -423,10 +446,4 @@ def uninstall(root: Path, *, apply: bool, as_json: bool) -> int:
             result["status"] = "removed"
     except (OSError, ValueError, RuntimeError, KeyError, TypeError) as error:
         result.update(status="incomplete" if removed else "refused", reason=str(error))
-    if as_json:
-        print(json.dumps(result))
-    else:
-        print(f"Manager uninstall: {result['status']}" + (
-            f": {result['reason']}" if "reason" in result else ""
-        ))
-    return 1 if result["status"] in ("refused", "incomplete") else 0
+    return _report(result, as_json=as_json)

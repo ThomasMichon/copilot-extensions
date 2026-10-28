@@ -548,16 +548,9 @@ _install_package_into() {
     local sources=("$SSH_MGR_DIR" "$CRED_RELAY_DIR" "$CFG_MIGRATE_DIR"
         "$ZDD_DIR" "$VENUE_COPILOT_DIR" "$SESSION_LIVENESS_PROBE_DIR"
         "$SINGLE_INSTANCE_LEASE_DIR" "$REMOTE_LOGIN_SHELL_DIR" "$UPDATE_DRIVER_DIR" "$PLUGIN_DIR")
-    local i output install_args=(--python "$py")
-    if [[ "$mode" != "--editable" ]]; then
-        install_args+=(--no-editable)
-    fi
+    local i output install_args=(--python "$py" --no-editable)
     for i in "${!packages[@]}"; do
-        if [[ "$mode" == "--editable" ]]; then
-            install_args+=(--editable "${sources[$i]}")
-        else
-            install_args+=(--reinstall-package "${packages[$i]}" "${sources[$i]}")
-        fi
+        install_args+=(--reinstall-package "${packages[$i]}" "${sources[$i]}")
     done
     if ! output="$(invoke_uv_pip_install_resilient "$UV_CMD" "${install_args[@]}" --quiet 2>&1)"; then
         _fail "agent-codespaces closure install failed: $output"

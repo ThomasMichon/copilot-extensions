@@ -230,6 +230,78 @@ def test_foreground_bootstrap_queues_only_its_fixed_installation_not_application
     driver.wait.assert_called_once_with("request", output=sys.stdout)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows removal execution ownership")
+@pytest.mark.parametrize("as_json", [False, True])
+def test_apply_removal_enters_the_driver_before_any_removal_custody(
+    installation, monkeypatch, as_json,
+):
+    import runtime_uninstall
+
+    state = installation
+    monkeypatch.setattr(state.adapter, "_source_digest", lambda payload: "a" * 64)
+    monkeypatch.setattr(state.adapter, "_execution_driver", lambda payload: core)
+    calls = []
+
+    def remove(root, *, apply, as_json):
+        assert root == state.root and apply
+        from update_driver import participant_environment
+
+        assert participant_environment()
+        calls.append(as_json)
+        return 0
+
+    monkeypatch.setattr(runtime_uninstall, "uninstall", remove)
+    request = core.enqueue(
+        core.RequestSpec("manager-removal-fixture"),
+        runner=core.TrustedRunner((sys.executable, "-c", "pass"), str(state.root)),
+    )
+
+    def execute(transaction):
+        monkeypatch.setenv(ENVIRONMENT_KEY, transaction.participant_env()[ENVIRONMENT_KEY])
+        return state.adapter.main([
+            "--root", str(state.root), "--uninstall", "--apply",
+            *(["--json"] if as_json else []),
+        ])
+
+    assert core.drain(executor=execute) == 0
+    assert core.status(request.id).state == "completed"
+    assert calls == [as_json]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows removal execution ownership")
+def test_unowned_apply_removal_queues_only_the_fixed_uninstall_command(
+    installation, monkeypatch,
+):
+    import runtime_uninstall
+
+    state = installation
+    direct = Mock(side_effect=AssertionError("removal before installation execution ownership"))
+    monkeypatch.setattr(runtime_uninstall, "uninstall", direct)
+    monkeypatch.setattr(state.adapter, "_source_digest", lambda payload: "a" * 64)
+    queued = []
+    driver = SimpleNamespace(
+        RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        enqueue=lambda spec, **kwargs: queued.append((spec, kwargs["runner"])) or SimpleNamespace(id="request"),
+        drain=Mock(), wait=Mock(return_value=SimpleNamespace(state="completed", exit_code=7)),
+    )
+    monkeypatch.setattr(state.adapter, "_execution_driver", lambda payload: driver)
+    assert state.adapter.main([
+        "--root", str(state.root), "--uninstall", "--apply", "--json",
+    ]) == 7
+    direct.assert_not_called()
+    spec, runner = queued[0]
+    assert spec.backend == "manager-uninstall"
+    assert spec.argv == ("--apply", "--json")
+    assert runner.argv == (
+        sys.executable, "-I", "-S", "-B", "-X", "utf8",
+        str(state.adapter.SCRIPTS / "runtime_install.py"),
+        "--root", str(state.root), "--uninstall", "--apply", "--json",
+    )
+    assert dict(spec.context)["WORKTREE_MANAGER_ROOT"] == str(state.root)
+    driver.drain.assert_called_once_with()
+    driver.wait.assert_called_once_with("request", output=sys.stdout)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows bootstrap admission")
 def test_internal_installer_requires_a_live_owner_before_construction(installation):
     state = installation
