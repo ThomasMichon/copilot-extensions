@@ -180,6 +180,7 @@ LAUNCH_SEED_RECORD=record
 LAUNCH_ATTEMPT_ID=attempt
 LAUNCH_RESOLUTION_ID=resolution
 LAUNCH_PARENT_ID=parent
+mktemp() { command mktemp "$LAUNCH_SEED_NATIVE_ROOT/.native-seed-exec.XXXXXXXX"; }
 _aw_native_setup_require_contract() { AW_NATIVE_SEED_RUNTIME=(_fixture_exec); }
 _aw_native_setup_prepare() {
     AW_NATIVE_SEED_ATTEMPT=attempt

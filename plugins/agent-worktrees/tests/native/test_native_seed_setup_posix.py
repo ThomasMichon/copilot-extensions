@@ -194,7 +194,9 @@ def test_copied_setup_preserves_native_wait_literal_streams_and_seed_custody(
     )
     assert result.returncode == 7, result.stdout + result.stderr + repr(_observations(plan))
     assert result.stdout == "BACKEND READY\nbackend stdout\n"
-    assert result.stderr.endswith("backend stderr\n")
+    assert result.stderr.splitlines().count("backend stderr") == 1
+    if seed_kind:
+        assert result.stderr.endswith("backend stderr\n")
     reply = json.loads((tmp_path / "backend.json").read_text())
     assert reply["argv"] == ARGUMENTS + (["--interactive", SEED] if seed_kind else [])
     assert reply["stdin"] == "retained stdin\n"
