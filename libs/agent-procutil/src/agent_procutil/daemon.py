@@ -250,8 +250,23 @@ def spawn_daemon(
                 return commit(process)
         flags &= ~pu._CREATE_BREAKAWAY_FROM_JOB
         write_logs(f"{stamp} {note}; trying Windows lifetime broker\n".encode())
-        receipt = reserve_instance(instance, environment=child_env)
-        child_env.update(instance_environment(receipt))
+        def log_failure(phase, error):
+            codes = {
+                name: value if type(value := getattr(error, name, None)) is int else None
+                for name in ("errno", "winerror")
+            }
+            write_logs(
+                f"{stamp} spawn_daemon: {phase}; type={type(error).__name__}; "
+                f"errno={codes['errno']}; winerror={codes['winerror']}\n".encode()
+            )
+
+        try:
+            receipt = reserve_instance(instance, environment=child_env)
+            child_env.update(instance_environment(receipt))
+        except Exception as error:
+            log_failure("instance-reservation-failed", error)
+            raise
+        write_logs(f"{stamp} spawn_daemon: instance-reserved; broker-admission-starting\n".encode())
         try:
             process = spawn_brokered_daemon(
                 command, cwd=cwd_path, env=child_env, creationflags=flags,
@@ -295,6 +310,9 @@ def spawn_daemon(
                 )
                 failure.instance_receipt = receipt
                 raise failure from broker_error
+        except Exception as error:
+            log_failure("broker-admission-failed", error)
+            raise
         note += "; broker failed; starting the daemon inside it (contained_fallback)"
         pu.log.warning("%s (%s)", note, command[0])
         write_logs(f"{stamp} {note}\n".encode())

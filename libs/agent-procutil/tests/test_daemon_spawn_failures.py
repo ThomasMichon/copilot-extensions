@@ -64,6 +64,25 @@ def test_positive_broker_refusal_removes_record(launch, monkeypatch, real_adapte
         activate.assert_not_called()
 
 
+def test_broker_reservation_failure_is_visible_without_exception_payload(launch, monkeypatch):
+    from agent_procutil import daemon_instances
+
+    start, spec = launch
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setattr(daemon_broker, "caller_in_job", lambda: True)
+    failure = OSError(5, "synthetic-private-exception-payload")
+    monkeypatch.setattr(daemon_instances, "reserve_instance", Mock(side_effect=failure))
+    broker = Mock(side_effect=AssertionError("unreserved broker launch"))
+    monkeypatch.setattr(daemon, "spawn_brokered_daemon", broker)
+    with pytest.raises(OSError) as caught:
+        start()
+    assert caught.value is failure
+    text = (spec.runtime_root / "log").read_text()
+    assert "instance-reservation-failed" in text and "errno=5" in text
+    assert "synthetic-private-exception-payload" not in text
+    broker.assert_not_called()
+
+
 def test_refused_contained_fallback_also_removes_its_new_reservation(launch, monkeypatch):
     start, spec = launch
     monkeypatch.setattr(pu, "_is_windows", lambda: True)

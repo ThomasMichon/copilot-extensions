@@ -251,6 +251,14 @@ repository history.
   under existing quiescent Manager custody before exclusive generation removal,
   retaining the action through native confirmation and refusing pending
   publication. Four focused ownership/order/preservation controls passed.
+- Run 40773264612 confirmed canonical Manager Task cleanup, but the roster
+  recovery still failed. The owned monitor log reached the caller-Job broker
+  branch without a completed admission or the existing broker-refusal message.
+  Add fixed phase/type/numeric-error diagnostics around reservation and
+  unexpected admission failures, preserving the original exception and unknown
+  custody. Do not log exception payloads, argv, IPC witnesses or credentials.
+  Fifteen failure/settlement controls passed, including a no-payload-disclosure
+  regression. This is diagnostic progress, not successful resident recovery.
 
 ### 2026-10-28 - Integrate the merged finite cleanup owner before release
 
