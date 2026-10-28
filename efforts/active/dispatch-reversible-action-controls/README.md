@@ -495,3 +495,16 @@ Initial tests must prove the current gap before adding the guards.
   suffix classes and a braced control without changing Windows matching.
 - The integrated contained selection passed all 111 cases. The native
   installer and previously executed PowerShell lifecycle portfolio are unchanged.
+
+### 2026-10-28 - Unmatched Windows reference boundaries
+
+- Extended the native-parity assessment to compound reference syntax rather
+  than checking only isolated tokens. The deterministic oracle reproduced a
+  Windows unmatched percent reference incorrectly allowing later dollar
+  expansion; the concurrent review independently requested this assessment.
+- Preserve the remaining literal tail after an unmatched Windows percent or
+  braced-dollar opener, matching `ntpath.expandvars`. POSIX keeps its distinct
+  native behavior.
+- Explicit unmatched-token controls and 1,000 deterministic compound comparisons
+  per backend now pass. The integrated contained selection passed all 121 tests;
+  native installer/lifecycle code is unchanged.

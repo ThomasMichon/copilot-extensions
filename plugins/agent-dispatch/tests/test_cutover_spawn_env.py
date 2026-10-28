@@ -112,6 +112,8 @@ def test_service_env_expands_queue_path_from_its_captured_mapping(
     "$FIXTURE_ROOT/${FIXTURE_ROOT}", "$FIXTURE_ROOT$", "${FIXTURE_ROOT", "%FIXTURE_ROOT",
     "$FIXTURE_ROOT\u00e9/tasks.db", "$FIXTURE_ROOT\u4e00/tasks.db",
     "${FIXTURE_ROOT}\u00e9/tasks.db",
+    "${FIXTURE_UNKNOWN/$FIXTURE_ROOT", "%FIXTURE_UNKNOWN/$FIXTURE_ROOT",
+    "prefix${FIXTURE_UNKNOWN/%FIXTURE_ROOT%", "prefix%FIXTURE_UNKNOWN/${FIXTURE_ROOT}",
 ])
 def test_captured_environment_expansion_preserves_native_syntax(
     monkeypatch, windows_keys, value,
@@ -142,6 +144,29 @@ def test_windows_expansion_uses_case_insensitive_snapshot_names(tmp_path, monkey
     env = {}
     install_paths.apply_service_env_overlay(env, tmp_path)
     assert env["AGENT_DISPATCH_DB"] == "captured/captured/captured/tasks.db"
+
+
+@pytest.mark.parametrize("windows_keys", [False, True])
+def test_snapshot_expansion_matches_native_compound_reference_boundaries(monkeypatch, windows_keys):
+    import ntpath
+    import posixpath
+    import random
+
+    from agent_dispatch import install_paths
+
+    monkeypatch.setenv("A", "captured-root")
+    monkeypatch.setenv("B", "$A/%A%")
+    env = dict(os.environ)
+    monkeypatch.setattr(install_paths, "os", SimpleNamespace(
+        **{**vars(os), "name": "nt" if windows_keys else "posix"},
+    ))
+    native = ntpath if windows_keys else posixpath
+    generator = random.Random(17)
+    chunks = ["$A", "${A}", "%A%", "$B", "${B}", "%B%", "$", "%", "{", "}", "'", '"',
+              "\u00e9", " ", "/", "A", "B"]
+    for _ in range(1000):
+        value = "".join(generator.choices(chunks, k=generator.randrange(1, 25)))
+        assert install_paths._expand_service_env_value(value, env) == native.expandvars(value), value
 
 
 def test_cutover_spawn_passive_applies_service_env_overlay(tmp_path, monkeypatch, daemon_calls):

@@ -14,6 +14,7 @@ SCOPED_SERVICE_HASH_LENGTH = 12
 _POSIX_ENV_REFERENCE = re.compile(r"\$(\w+|\{[^}]*\})", re.ASCII)
 _WINDOWS_ENV_REFERENCE = re.compile(
     r"'[^']*(?:'|$)|\$\$|%%|\$\{([^}]*)\}|\$([A-Za-z0-9_-]+)|%([^%]*)%"
+    r"|(?P<unclosed>\$\{[^}]*$|%[^%]*$)"
 )
 
 
@@ -24,7 +25,7 @@ def _expand_service_env_value(value: str, env: dict[str, str]) -> str:
     def replace(match: re.Match[str]) -> str:
         token = match.group(0)
         if windows:
-            if token.startswith("'"):
+            if token.startswith("'") or match.group("unclosed") is not None:
                 return token
             if token in ("$$", "%%"):
                 return token[0]
