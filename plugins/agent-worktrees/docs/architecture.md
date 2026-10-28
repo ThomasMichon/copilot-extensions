@@ -701,6 +701,14 @@ handlers remain quiet and do not change the result. Native terminal/Ctrl+C,
 actual installation-removal, mixed-generation and POSIX acceptance remain
 separate gates; copying assets or passing fixture tests does not close them.
 
+Ordinary cold `embody` now composes with that same staged final-invocation
+boundary for direct Copilot and recognized setup, rather than launching a blank
+client and scraping its input rails. The outer mux response is explicitly
+native-startup-pending, not prompt consumption; only the existing invocation
+owner claims/settles the seed. Custom/unrecognized launch shapes keep their
+terminal fallback, selected before effects. Deferred Bridge acquisition and
+already-live delivery retain their existing owners.
+
 ### Current session, conclusion, and succession (the head pointer)
 
 A worktree is a *series of sessions*, not a single one. Its record carries an

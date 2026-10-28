@@ -463,6 +463,52 @@ continue to work unchanged.
 | `handoff-cutover` | Internal live-handoff primitive: spawn a seeded successor window, safely refocus an already-live successor with `--retry`, or retire an old pane |
 | `embody` | Agent-facing primitive to create/resume a detached mux+Copilot session in a worktree. `--codename <name>` selects the target by its assigned codename (effort `pr-attribution-codenames`), same local-then-cross-machine resolution as `resolve`; a match on a different machine fails closed (reports the machine, does not attempt a remote launch). Optional `--copilot-process-launcher <absolute-executable>` binds a one-launch native wrapper without putting inference credentials in the manager/mux environment. It supports direct `copilot` templates or normalized setup; incompatible templates, missing executables and configured `copilot_path` overrides refuse. The attended `copilot` counterpart can also write a nonsecret create-or-resume receipt with `--launch-result-file <launcher-directory>/result.json` before attaching. Rejoining a running session does not use a new launcher or refresh its authentication. |
 
+### Cold embodiment startup prompts
+
+Ordinary cold `embody --seed` launches prefer the existing native startup
+boundary for direct Copilot and marked normalized setup commands. The prompt
+is staged privately; the final invocation owner claims it and supplies
+`--interactive <prompt>`, composing with `--resume=<id>` when `--resume-head`
+selects existing history. Option-leading prompts use the equivalent
+`--interactive=<prompt>` form so the CLI cannot parse their contents as options.
+A staged New prompt uses the same path. Typed Resume
+staging on other launch surfaces retains its existing owner.
+
+The immediate JSON response reports `seed_delivery: "native-startup"`,
+`seed_deferred: true`, its `seed_id` and `seed_reason: "native-startup-pending"`.
+It does **not** set `seeded`, `seed_ready` or `seed_submitted` merely because
+the mux accepted the command. Observe the existing seed/execution receipts or
+native conversation for the eventual outcome; this response is not a consumed
+prompt receipt or permission to replay. Superseded or uncertain handoffs refuse
+instead of delivering twice. Explicit replacement compares the sampled seed,
+revision and unclaimed New custody inside the existing record writer's lock;
+concurrent Resume, replacement or claimed handoff remains intact.
+Invalid NUL input refuses before staging/claim.
+Platform command-length failures retain the staged intent through the existing
+definite-spawn-failure restoration path rather than truncating it.
+
+Unrecognized/custom setup commands and `gh copilot` retain terminal fallback;
+this exclusion follows recognized wrappers recursively. Normalized setup must
+have an available standalone backend in its selected launch/session PATH or
+an explicit non-intermediary `copilot_path`; gh-only setup keeps fallback.
+An environment-priming script can change backend discovery after preparation;
+that opaque setup retains fallback rather than running the script as a probe.
+Non-UTF-8 custom PowerShell setup is unsupported for marker qualification and
+logs that selection without preventing its existing terminal launch.
+`--seed-ready-timeout` applies only there. No post-launch terminal fallback is
+attempted after selecting native startup. Already-live sessions, anchor launches,
+handoff cutover and Bridge-owned deferred acquisition retain their existing
+delivery paths. Subsequent Bridge messages still use the SDK inbox and its
+receipts; startup transport does not change their authority.
+
+The existing `launch_seed_stage` writer advertises version 8 for guarded
+creation replacement. Only calls carrying `creation_snapshot` require that
+version; ordinary legacy staging still uses its existing version-7 baseline.
+A guarded caller never sends the new conditional operation to a version-7
+resident. The established dispatch path may use its current canonical writer
+fallback, retaining the same record/admission checks; this is not a second
+mutation owner or an effectful new-form/old-form retry.
+
 ### Parent worktree PR visibility
 
 Worktree claim summaries include active PR claims reached through active local

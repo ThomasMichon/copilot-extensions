@@ -169,7 +169,11 @@ class TestCmdEmbody:
     @pytest.fixture(autouse=True)
     def _creation_seed_authority_boundary(self, monkeypatch):
         """Control-flow tests model the writer separately from the real daemon suite."""
-        from agent_worktrees import launch_seed_state, pending_seed
+        from agent_worktrees import launch_seed_exec, launch_seed_state, pending_seed
+
+        # This packet retains the supported legacy terminal fallback. Native
+        # startup custody is exercised separately against the real seed writer.
+        monkeypatch.setattr(launch_seed_exec, "supports_seed_command", lambda *a, **k: False)
 
         def claim(path):
             seed = pending_seed.claim_pending_seed(path)
@@ -334,6 +338,56 @@ class TestCmdEmbody:
         assert seeded == {
             "pane": "%5", "seed": "do the thing", "ready_timeout": 180.0,
         }
+
+    @pytest.mark.parametrize("resume_target", [None, "original-history"])
+    def test_native_cold_seed_uses_final_invocation_not_terminal(
+        self, monkeypatch, capfd, tmp_path, resume_target,
+    ):
+        from agent_worktrees import launch_seed_exec, launch_seed_state
+
+        _stub_config(monkeypatch)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda r: "wtN")
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+        (tmp_path / "wtN.yaml").write_text("x")
+        record = type("Rec", (), {"worktree_path": "/w/wtN"})()
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: record)
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
+        monkeypatch.setattr(embody_resume, "resume_target", lambda *a, **k: resume_target)
+        monkeypatch.setattr(embody_resume, "live_head_refusal", lambda *a: None)
+        monkeypatch.setattr(launch_seed_exec, "supports_seed_command", lambda *a, **k: True)
+        monkeypatch.setattr(launch_seed_state, "pending", lambda *a: None)
+        staged = {}
+
+        def stage(path, *, kind, text, creation_snapshot):
+            staged.update(path=path, kind=kind, text=text)
+            assert creation_snapshot == {"seed": None}
+            return launch_seed_state.LaunchSeed("native-seed", kind, text, 1)
+
+        monkeypatch.setattr(launch_seed_state, "stage", stage)
+        monkeypatch.setattr(
+            launch_seed_state, "claim_creation", lambda *a: pytest.fail("no post-launch claim"),
+        )
+        monkeypatch.setattr(
+            sessions, "mux_seed_pane", lambda *a, **k: pytest.fail("no native TTY scraping"),
+        )
+        spawned = []
+        monkeypatch.setattr(
+            sessions, "mux_new_session",
+            lambda wt, wd, command, env: spawned.append(command) or {
+                "ok": True, "session": "wt-wtN", "new_pane": "%5",
+            },
+        )
+        assert m.cmd_embody(_ns(worktree_id="wtN", seed="native prompt")) == 0
+        out = json.loads(capfd.readouterr().out)
+        command = spawned[0]
+        assert command[command.index("--seed-id") + 1] == "native-seed"
+        assert command[command.index("--") + 1:] == [
+            "copilot", *([f"--resume={resume_target}"] if resume_target else []),
+        ]
+        assert staged == {"path": tmp_path / "wtN.yaml", "kind": "new", "text": "native prompt"}
+        assert out["seed_delivery"] == "native-startup" and out["seed_deferred"] is True
+        assert out["seed_reason"] == "native-startup-pending"
+        assert out["seeded"] is False and out["seed_submitted"] is False
 
     def test_pending_seed_is_delivered_and_cleared_on_confirmed_submit(
         self, monkeypatch, capfd, tmp_path,
