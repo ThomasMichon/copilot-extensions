@@ -556,6 +556,19 @@ Windows copies its one-shot file launcher too; child argv and native interactive
 prompt receipts retain their existing transport. Creating these assets does
 not admit a launch, claim a seed or prove that Copilot started.
 
+For prepared Windows panes, both builders place the one-shot argv manifest and
+its optional consumption receipt in the copied shell's `pane-args` directory,
+not either removable runtime. The launcher consumes and deletes the manifest
+before invoking the wrapper. Rejected-launch cleanup is scoped to the matching
+launcher. Producers expire only their own directory; the machine-wide monitor
+uses the existing registered-project inventory and explicit tracking roots to
+find every registered project's UUID-scoped shell directories, without changing
+or relying on an ambient active project. An unavailable project does not prevent
+expiry in other projects; inventory failure still permits legacy expiry.
+Expiry removes only
+unconsumed manifests older than 24 hours, never the copied scripts or their
+execution state. Legacy peers retain their runtime-local transport and expiry.
+
 The copied shell passes bounded start/end requests to the then-current completed
 Manager generation in the originally selected root. It captures native mux
 session and pane identity before executing the child. The Manager's synchronous

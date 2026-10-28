@@ -85,6 +85,18 @@ The setup-copy/actual-pane-construction control counts the underlying Manager
 probe on both healthy and timeout paths: copying adds none and construction
 performs its existing single probe.
 
+The same packet checks launch-owned Windows pane manifests outside removable
+runtimes, retained literal argv after disposable runtime removal, exact 24-hour
+startup grace, matching-launcher cleanup and foreign-path refusal. Manager's
+`test_pane_args_file.py` executes both legacy and launch-owned producers through
+the shipped PowerShell consumer, including consumed receipts and fresh retries.
+These controls do not establish supported uninstall or same-process interactive
+survival; setup startup arguments remain a separate dependency boundary.
+`test_pane_args_projects.py` exercises the monitor's actual sweep entry point
+with explicit registered-project roots, unset and unrelated ambient context,
+two projects, an unregistered negative control and independent project or
+inventory failures. It does not start a resident monitor.
+
 Agent-worktrees' `test_launch_seed_native.py` covers the finite backend and setup
 provider: retained one-time seed claims, literal argv, existing prompt-free
 execution observations, PID/birth and incarnation refusals, definite-spawn

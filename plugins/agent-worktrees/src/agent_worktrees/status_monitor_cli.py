@@ -9,7 +9,7 @@ import os
 import sys
 
 from . import config as cfg
-from .sessions_pane_args import sweep_mux_pane_args
+from .sessions_pane_args import sweep_registered_mux_pane_args as sweep_mux_pane_args
 
 _DEFAULT_SWEEP_INTERVAL_S = 30
 
