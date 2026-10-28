@@ -10,6 +10,15 @@
 
 ## Guiding Intent
 
+Diagnostic run 40775390267 at `6690ace740` confirmed both actual Manager
+readers reach instance reservation and enter broker admission, but neither
+publishes a current roster within the existing 30-second budget. No admission
+exception reaches the owned monitor log before reader exit. The next
+credential-free hosted probe adds bounded installed-package thread locations
+(basename, line and function only, no source lines or frame locals) at failure
+to identify the blocked handoff without extending the startup deadline.
+Shared-host installation and restart remain unauthorized.
+
 An already-healthy session must not wait for unrelated runtime installation.
 Keep adopted automatic maintenance available, coordinated and observable rather
 than disabling updates or starting an independent updater for every launch.
