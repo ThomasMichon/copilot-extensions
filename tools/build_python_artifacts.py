@@ -779,14 +779,7 @@ def read_project_version(project_dir: Path) -> str:
 def _assert_version_corresponds(
     *, raw_version: str, wheel_version: str, label: str
 ) -> None:
-    """A light sanity check that the wheel's PEP 440-normalized version
-    still corresponds to the raw, declared one -- this repo's one actual
-    convention is a hyphen before a pre/dev/post segment (e.g.
-    `"0.4.1-dev3"` -> `"0.4.1.dev3"`); anything that doesn't match even
-    that simple substitution indicates the two have genuinely diverged
-    (not just a normalization spelling difference), which must fail closed
-    rather than silently ship a manifest whose `version` field doesn't
-    actually correspond to what was built."""
+    """Accept the repository's hyphen-to-dot PEP 440 spelling convention only."""
     if raw_version.replace("-", ".") != wheel_version:
         raise ArtifactBuildError(
             f"{label}: declared version {raw_version!r} does not correspond "
@@ -854,13 +847,28 @@ def build_source_artifacts(
 ) -> dict:
     """Shared locked wheel construction; callers own source discovery and admission."""
     standalone = "component" in identity
-    label = f"standalone-{identity['component']}" if standalone else identity["plugin"]
-    # Computed BEFORE any build runs: a build backend can leave residue
-    # inside the source tree itself (e.g. setuptools' build_meta creating a
-    # *.egg-info directory alongside the sources even for an isolated
-    # wheel build), and hashing after the fact would fold build output into
-    # the identity of the very input that produced it.
-    all_dirs = [source_dir, *(d for _name, d in dependencies), *resources]
+    return build_project_artifacts(
+        identity=identity,
+        projects=[("standalone" if standalone else "plugin", source_dir), *(
+            ("vendored-lib", directory) for _name, directory in dependencies
+        )],
+        raw_version=read_project_version(source_dir),
+        schema_version=4 if standalone else MANIFEST_SCHEMA_VERSION,
+        resources=resources, out_dir=out_dir, python=python, toolchain=toolchain,
+    )
+
+
+def build_project_artifacts(
+    *, identity: dict, projects: list[tuple[str, Path]], raw_version: str,
+    schema_version: int, resources: tuple[Path, ...], out_dir: Path,
+    python: str | None, toolchain: ToolchainLock | None,
+    selection: dict | None = None, payload_hash: str | None = None,
+) -> dict:
+    """One locked construction path for plugin, standalone and core wheel sets."""
+    from standalone_python_artifacts import artifact_label
+    label = artifact_label(identity)
+    # Hash before the backend can leave build/egg-info residue in its inputs.
+    all_dirs = [*(directory for _role, directory in projects), *resources]
 
     out_dir_r = out_dir.resolve()
     for d in all_dirs:
@@ -873,7 +881,8 @@ def build_source_artifacts(
                 "Choose an output directory outside every hashed source tree."
             )
 
-    payload_hash = compute_payload_hash(all_dirs)
+    if payload_hash is None:
+        payload_hash = compute_payload_hash(all_dirs)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     entries: list[dict] = []
@@ -882,13 +891,8 @@ def build_source_artifacts(
 
     with contextlib.ExitStack() as stack:
         if toolchain is None:
-            # `TemporaryDirectory()` creates its own directory immediately,
-            # but `resolve_toolchain_lock` publishes via renaming a staging
-            # directory ONTO the path it's given -- POSIX may replace an
-            # empty directory, but Windows `Path.rename()` always fails
-            # when the destination already exists, even empty. Pass a
-            # non-existent child of the cleanup root instead, so the venv
-            # path itself never pre-exists.
+            # Windows rename cannot publish onto an existing directory.
+            # Resolve into a nonexistent child of the temporary cleanup root.
             toolchain_root = Path(
                 stack.enter_context(
                     tempfile.TemporaryDirectory(prefix="build-python-artifacts-toolchain-")
@@ -912,33 +916,17 @@ def build_source_artifacts(
                 )
             return wheel, info, generator
 
-        plugin_wheel, plugin_info, plugin_generator = _build_and_verify(source_dir)
-        raw_version = read_project_version(source_dir)
-        _assert_version_corresponds(
-            raw_version=raw_version, wheel_version=plugin_info["version"], label=source_dir
-        )
-        wheel_infos.append(plugin_info)
-        entries.append(
-            {
-                "role": "standalone" if standalone else "plugin",
-                "name": plugin_info["name"],
-                "source": source_dir.resolve().relative_to(REPO.resolve()).as_posix(),
-                "filename": plugin_wheel.name,
-                "sha256": sha256_file(plugin_wheel),
-                "generator": plugin_generator,
-                "python_tag": plugin_info["python_tag"],
-                "abi_tag": plugin_info["abi_tag"],
-                "platform_tag": plugin_info["platform_tag"],
-            }
-        )
-
-        for lib_name, lib_dir in dependencies:
+        for role, lib_dir in projects:
             lib_wheel, lib_info, lib_generator = _build_and_verify(lib_dir)
+            _assert_version_corresponds(
+                raw_version=read_project_version(lib_dir), wheel_version=lib_info["version"],
+                label=lib_dir,
+            )
             wheel_infos.append(lib_info)
             rel_source = lib_dir.resolve().relative_to(REPO).as_posix()
             entries.append(
                 {
-                    "role": "vendored-lib",
+                    "role": role,
                     "name": lib_info["name"],
                     "source": rel_source,
                     "filename": lib_wheel.name,
@@ -967,7 +955,7 @@ def build_source_artifacts(
 
         manifest = {
             "schema": MANIFEST_SCHEMA,
-            "schema_version": 4 if standalone else MANIFEST_SCHEMA_VERSION,
+            "schema_version": schema_version,
             **identity,
             "version": raw_version,
             "python_tag": identity_tags["python_tag"],
@@ -978,10 +966,12 @@ def build_source_artifacts(
             "artifact_id": artifact_id,
             "wheels": entries,
         }
-        if standalone:
+        if "component" in identity or "composition" in identity:
             manifest["build_resources"] = [
                 path.resolve().relative_to(REPO.resolve()).as_posix() for path in resources
             ]
+        if selection is not None:
+            manifest["selection"] = selection
         manifest_path = out_dir / f"{label}-{raw_version}-manifest.json"
         manifest_path.write_text(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -992,7 +982,13 @@ def build_source_artifacts(
 def main() -> int:
     from artifact_builder_cli import main as run
     from standalone_python_artifacts import build_standalone_artifacts
-    return run(build_plugin_artifacts, __doc__ or "", standalone_builder=build_standalone_artifacts)
+    def build_core_artifacts(**kwargs):
+        from core_python_artifacts import build_core_artifacts as build
+        return build(**kwargs)
+    return run(
+        build_plugin_artifacts, __doc__ or "", standalone_builder=build_standalone_artifacts,
+        core_builder=build_core_artifacts,
+    )
 
 
 if __name__ == "__main__":
