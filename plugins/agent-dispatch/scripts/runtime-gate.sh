@@ -91,6 +91,8 @@ else
     fail_context "$RESOLUTION"
 fi
 [[ "$RUNTIME_ROOT" == /* ]] || fail_context 'canonical runtime root is missing'
+ACTION_POLICY_ROOT="$RUNTIME_ROOT"
+if [[ -z "$CONTEXT" ]]; then ACTION_POLICY_ROOT="$LEGACY_ROOT"; fi
 
 resolve_runtime() {
     AGENT_RT_PY=""
@@ -135,8 +137,17 @@ require_automatic_reconcile() {
         printf '[agent-dispatch] cold runtime prerequisite unavailable: no Python for action policy; use explicit installation management.\n' >&2
         exit 126
     }
-    "$python" -I -B "$PAYLOAD_ROOT/scripts/action_controls.py" \
-        --root "$RUNTIME_ROOT" --action automatic-runtime-reconcile --automatic >/dev/null || exit $?
+    local root
+    local -a roots=("$ACTION_POLICY_ROOT")
+    [[ "$ACTION_POLICY_ROOT" == "$RUNTIME_ROOT" ]] || roots+=("$RUNTIME_ROOT")
+    for root in "${roots[@]}"; do
+        [[ "$root" == /* ]] || {
+            printf '[agent-dispatch] selected installation root must be absolute; use explicit installation management.\n' >&2
+            exit 126
+        }
+        "$python" -I -B "$PAYLOAD_ROOT/scripts/action_controls.py" \
+            --root "$root" --action automatic-runtime-reconcile --automatic >/dev/null || exit $?
+    done
 }
 assert_publication() {
     [[ "$AUTO_ACTION_CHECK_REQUIRED" == 0 ]] || require_automatic_reconcile
@@ -226,6 +237,7 @@ AUTO_ACTION_CHECK_REQUIRED=1
 require_automatic_reconcile
 mkdir -p "$RUNTIME_ROOT"
 STATUS_PATH="$RUNTIME_ROOT/.provision-status"
+STATUS_ACTIVE=0
 LOCK_LINK=""
 REAP_OWNED=0
 BOOT_FILE=""
@@ -242,9 +254,30 @@ unlock() {
         exec 9>&-
     fi
 }
+write_provision_status() {
+    if ! printf '%s %s\n' "$1" "$(date -u +%FT%TZ)" > "$STATUS_PATH"; then
+        printf '[agent-dispatch] Could not write provisioning status: %s\n' "$STATUS_PATH" >&2
+        return 1
+    fi
+}
 cleanup() {
-    [[ -z "$BOOT_FILE" ]] || rm -f -- "$BOOT_FILE"
-    unlock
+    local result=$?
+    trap - EXIT INT TERM
+    if [[ "$STATUS_ACTIVE" == 1 ]]; then
+        if ! write_provision_status "failed rc=$result"; then
+            printf '[agent-dispatch] Original failure rc=%s retained despite status write failure.\n' "$result" >&2
+        fi
+        printf '[agent-dispatch] Provisioning attempt ended before completion (rc=%s).\n' "$result" >&2
+    fi
+    if [[ -n "$BOOT_FILE" ]] && ! rm -f -- "$BOOT_FILE"; then
+        printf '[agent-dispatch] Could not remove the owned provisioning download: %s\n' "$BOOT_FILE" >&2
+        [[ "$result" != 0 ]] || result=1
+    fi
+    if ! unlock; then
+        printf '[agent-dispatch] Could not release the owned provisioning lock.\n' >&2
+        [[ "$result" != 0 ]] || result=1
+    fi
+    exit "$result"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -297,7 +330,8 @@ assert_publication
 select_provision_source
 printf '[agent-dispatch] runtime not provisioned -- provisioning on first use (may take ~30-120s). Do not kill; extend your timeout.\n' >&2
 printf '::agent-provisioning:: plugin=agent-dispatch eta_seconds=120 reason=first-use status=%s\n' "$STATUS_PATH" >&2
-printf 'provisioning %s\n' "$(date -u +%FT%TZ)" > "$STATUS_PATH"
+write_provision_status provisioning
+STATUS_ACTIVE=1
 export AGENT_DISPATCH_INSTALL_DIR="$RUNTIME_ROOT"
 rc=1
 if [[ "$GLOBAL" == 1 && "$SOURCE_PINNED" == 0 && -z "${AGENT_DISPATCH_PROVISION_OFFLINE:-}" ]]; then
@@ -329,11 +363,15 @@ if [[ "$rc" != 0 && "$rc" != 3 ]]; then
 fi
 resolve_runtime
 if [[ "$rc" == 0 && -n "$AGENT_RT_PY" ]]; then
-    printf 'ready %s\n' "$(date -u +%FT%TZ)" > "$STATUS_PATH"
+    write_provision_status ready
+    STATUS_ACTIVE=0
     unlock; trap - EXIT INT TERM
     run_runtime "$@"
 fi
 [[ "$rc" != 0 ]] || rc=1
-printf 'failed rc=%s %s\n' "$rc" "$(date -u +%FT%TZ)" > "$STATUS_PATH"
+if ! write_provision_status "failed rc=$rc"; then
+    printf '[agent-dispatch] Original failure rc=%s retained despite status write failure.\n' "$rc" >&2
+fi
+STATUS_ACTIVE=0
 printf '[agent-dispatch] provisioning did not yield a runtime (rc=%s); see the installer diagnostics above.\n' "$rc" >&2
 exit "$rc"

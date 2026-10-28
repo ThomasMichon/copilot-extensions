@@ -146,6 +146,20 @@ qualified runtime is executed before these cold checks, so ordinary service
 startup does not depend on admitting update work. These are action attempts,
 not cancellation of an already admitted background installer.
 
+Cold legacy admission checks both the selected root's original lexical spelling
+and governance's canonical effect root. Namespace governance remains authoritative
+and does not consult an unselected legacy root. Normalization must not erase a
+linked ancestor before policy sees it. Automatic maintenance requires a fully
+qualified selected root; relative and Windows drive/root-relative spellings
+fail explicitly without changing the warm-runtime startup path.
+
+Late refusal must not leave a successful or indefinitely provisioning diagnostic.
+The POSIX cold caller settles its owned provisioning status before releasing its
+lock. PowerShell background workers attach refusal diagnostics to their existing
+attempt-fenced status and log; a superseded worker cannot overwrite replacement
+evidence. Diagnostic-write failures are explicit and retain the original refusal
+classification rather than admitting fallback or reporting success.
+
 No prepare-only or supervisor-preserving adoption option is introduced here.
 Construction and adoption remain coupled in the existing installer. Use the
 existing preparation/retention owner's accepted interface when available;

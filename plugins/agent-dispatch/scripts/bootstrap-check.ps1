@@ -52,9 +52,21 @@ function Exit-SessionStart {
 }
 $PluginDir = Split-Path -Parent $PSScriptRoot
 function Get-BootstrapActionAdmission {
-    param([string]$Root, [string]$ScriptsRoot)
+    param([string]$Root, [string]$ScriptsRoot, [ref]$DiagnosticOutput)
     $ErrorActionPreference = 'Stop'
+    if ($DiagnosticOutput) { $DiagnosticOutput.Value = '' }
+    $report = {
+        param([string]$Message)
+        [Console]::Error.Write($Message)
+        if ($DiagnosticOutput) { $DiagnosticOutput.Value += $Message }
+    }
     try {
+        $pathRoot = [IO.Path]::GetPathRoot($Root)
+        $unixRoot = [IO.Path]::DirectorySeparatorChar -eq '/' -and $pathRoot -ceq '/'
+        if (-not $pathRoot -or (-not $unixRoot -and
+            ($pathRoot.Length -le 1 -or $pathRoot.EndsWith(':')))) {
+            throw 'selected installation root must be absolute'
+        }
         $actionHelper = Join-Path $ScriptsRoot 'action_controls.py'
         $nativeHelper = Join-Path $ScriptsRoot 'versioned_runtime_native.ps1'
         foreach ($support in @($actionHelper, $nativeHelper)) {
@@ -79,13 +91,13 @@ function Get-BootstrapActionAdmission {
         if (-not $python) { throw 'absolute Python interpreter is unavailable' }
         $diagnostic = ''
         $response = Invoke-Hidden -FilePath $python -ArgList @(
-            '-I', '-B', $actionHelper, '--root', ([IO.Path]::GetFullPath($Root)),
+            '-I', '-B', $actionHelper, '--root', $Root,
             '--action', 'automatic-runtime-reconcile', '--automatic'
         ) -ErrorOutput ([ref]$diagnostic)
         $code = $LASTEXITCODE
-        if ($diagnostic) { [Console]::Error.Write($diagnostic) }
+        if ($diagnostic) { & $report $diagnostic }
         if ($code -ne 0) {
-            [Console]::Error.WriteLine("[agent-dispatch] automatic-runtime-reconcile bootstrap refused (exit $code): $response")
+            & $report "[agent-dispatch] automatic-runtime-reconcile bootstrap refused (exit $code): $response`n"
             if ($code -eq 3) { return 3 }
             return 126
         }
@@ -95,7 +107,7 @@ function Get-BootstrapActionAdmission {
         }
         return 0
     } catch {
-        [Console]::Error.WriteLine("[agent-dispatch] automatic-runtime-reconcile bootstrap prerequisite failed: $($_.Exception.Message)")
+        & $report "[agent-dispatch] automatic-runtime-reconcile bootstrap prerequisite failed: $($_.Exception.Message)`n"
         return 126
     }
 }
@@ -282,7 +294,7 @@ $ErrorActionPreference = 'Continue'
 function Get-BootstrapActionAdmission {
 __ACTION_READER__
 }
-function Update-ReconcileAttempt([bool]$Completed, [int]$Code) {
+function Update-ReconcileAttempt([bool]$Completed, [int]$Code, [string]$Diagnostic = '') {
     $mutex = New-Object Threading.Mutex($false, '__MUTEX__')
     $held = $false
     try {
@@ -295,6 +307,16 @@ function Update-ReconcileAttempt([bool]$Completed, [int]$Code) {
         $status.launched_pid = $PID
         $status.worker_started_at = (Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o')
         if ($Completed) {
+            # Refusal evidence belongs to the same fenced attempt as its completion status.
+            if ($Diagnostic) {
+                try {
+                    Add-Content -LiteralPath '__RECONCILELOG__' -Value $Diagnostic -Encoding UTF8 -ErrorAction Stop
+                } catch {
+                    $Diagnostic += "; reconcile log unavailable: $($_.Exception.Message)"
+                    [Console]::Error.WriteLine($Diagnostic)
+                }
+                $status | Add-Member -NotePropertyName diagnostic -NotePropertyValue $Diagnostic -Force
+            }
             $status | Add-Member -NotePropertyName completed_at -NotePropertyValue ((Get-Date).ToUniversalTime().ToString('o'))
             $status | Add-Member -NotePropertyName exit_code -NotePropertyValue $Code
             $status | Add-Member -NotePropertyName success -NotePropertyValue ($Code -eq 0)
@@ -308,24 +330,30 @@ function Update-ReconcileAttempt([bool]$Completed, [int]$Code) {
         $mutex.Dispose()
     }
 }
+$failureDiagnostic = ''
 try {
     if (-not (Update-ReconcileAttempt $false 0)) { exit 125 }
     # The new worker must own its staging and watchdog, not inherit another install's.
     $env:COPILOT_PLUGIN_INSTALL_STAGED = $null
     $env:COPILOT_PLUGIN_STAGED_FROM = $null
-    $admission = Get-BootstrapActionAdmission -Root '__INSTALL_ROOT__' -ScriptsRoot '__SCRIPTS_ROOT__'
+    $admissionDiagnostic = ''
+    $admission = Get-BootstrapActionAdmission -Root '__INSTALL_ROOT__' -ScriptsRoot '__SCRIPTS_ROOT__' -DiagnosticOutput ([ref]$admissionDiagnostic)
     if ($admission -ne 0) {
         $code = $admission
+        $failureDiagnostic = "attempt=__ATTEMPT__ automatic-runtime-reconcile refused before installer (exit $code): $admissionDiagnostic"
     } else {
         $LASTEXITCODE = 0
         & { __INSTALLER__ } *> '__RECONCILELOG__'
         $ok = $?
         $nativeCode = $LASTEXITCODE
         $code = if ($nativeCode -eq 3) { 3 } elseif ($ok) { $nativeCode } else { 1 }
+        if ($code -eq 3) {
+            $failureDiagnostic = 'attempt=__ATTEMPT__ installer refused action policy (exit 3); see this attempt''s reconcile log.'
+        }
     }
 } catch {
     $failure = "attempt=__ATTEMPT__ background reconcile failed: $($_.Exception.Message)"
-    Add-Content -LiteralPath '__RECONCILELOG__' -Value $failure
+    $failureDiagnostic = $failure
     [Console]::Error.WriteLine($failure)
     $code = 1
     $cause = $_.Exception
@@ -335,11 +363,11 @@ try {
         $cause = $cause.InnerException
     }
 }
-try { [void](Update-ReconcileAttempt $true $code) }
+try { [void](Update-ReconcileAttempt $true $code $failureDiagnostic) }
 catch {
     $failure = "attempt=__ATTEMPT__ reconcile completion could not be recorded: $($_.Exception.Message)"
-    Add-Content -LiteralPath '__RECONCILELOG__' -Value $failure
     [Console]::Error.WriteLine($failure)
+    if ($code -eq 0) { $code = 1 }
 }
 exit $code
 '@

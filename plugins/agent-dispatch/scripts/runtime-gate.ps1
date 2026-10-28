@@ -7,6 +7,7 @@ $forwardArgs = @($args)
 $globalSurface = (Split-Path -Leaf $PSScriptRoot) -ceq 'bin'
 $module = 'agent_dispatch'
 if ($globalSurface) {
+    $legacyPolicyRoot = Join-Path $PSScriptRoot '..'
     $legacyRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
     $pointer = Join-Path $legacyRoot 'payload-dir'
     $payloadRoot = if ([IO.File]::Exists($pointer)) { [IO.File]::ReadAllText($pointer).Trim() } else { '' }
@@ -32,6 +33,7 @@ if ($globalSurface) {
     $legacyRoot = if ($env:AGENT_DISPATCH_INSTALL_DIR) { $env:AGENT_DISPATCH_INSTALL_DIR } else {
         Join-Path $env:USERPROFILE '.agent-dispatch' # marketplace-isolation: allow legacy compatibility root
     }
+    $legacyPolicyRoot = $legacyRoot
 }
 $helper = Join-Path $PSScriptRoot 'installation-context\installation-context.ps1'
 $resolver = Join-Path $PSScriptRoot 'resolve-runtime.ps1'
@@ -157,20 +159,35 @@ function Assert-AutomaticRuntimeReconcile {
     }
     $diagnostic = ''
     try {
-        $response = Invoke-Hidden -FilePath $policyPython -ArgList @(
-            '-I', '-B', $actionHelper, '--root', $runtimeRoot,
-            '--action', 'automatic-runtime-reconcile', '--automatic'
-        ) -ErrorOutput ([ref]$diagnostic)
-        $code = $LASTEXITCODE
-        if ($diagnostic) { [Console]::Error.Write($diagnostic) }
-        if ($code -ne 0) {
-            [Console]::Error.WriteLine("[agent-dispatch] automatic-runtime-reconcile refused (exit $code): $response")
-            if ($code -eq 3) { exit 3 }
-            exit 126
+        $policyRoots = @($runtimeRoot)
+        $legacySelection = Get-Variable -Name legacyPolicyRoot -ValueOnly -ErrorAction SilentlyContinue
+        $selectedContext = Get-Variable -Name context -ValueOnly -ErrorAction SilentlyContinue
+        # Keep governance's root authoritative, without erasing the selected spelling's ancestry.
+        if ($legacySelection -and -not $selectedContext -and $legacySelection -cne $runtimeRoot) {
+            $policyRoots = @([string]$legacySelection, $runtimeRoot)
         }
-        $decision = $response | ConvertFrom-Json -ErrorAction Stop
-        if ($decision.ok -isnot [bool] -or -not $decision.ok) {
-            throw "policy did not admit the action: $response"
+        foreach ($policyRoot in $policyRoots) {
+            $pathRoot = [IO.Path]::GetPathRoot($policyRoot)
+            $unixRoot = [IO.Path]::DirectorySeparatorChar -eq '/' -and $pathRoot -ceq '/'
+            if (-not $pathRoot -or (-not $unixRoot -and
+                ($pathRoot.Length -le 1 -or $pathRoot.EndsWith(':')))) {
+                throw 'selected installation root must be absolute'
+            }
+            $response = Invoke-Hidden -FilePath $policyPython -ArgList @(
+                '-I', '-B', $actionHelper, '--root', $policyRoot,
+                '--action', 'automatic-runtime-reconcile', '--automatic'
+            ) -ErrorOutput ([ref]$diagnostic)
+            $code = $LASTEXITCODE
+            if ($diagnostic) { [Console]::Error.Write($diagnostic) }
+            if ($code -ne 0) {
+                [Console]::Error.WriteLine("[agent-dispatch] automatic-runtime-reconcile refused (exit $code): $response")
+                if ($code -eq 3) { exit 3 }
+                exit 126
+            }
+            $decision = $response | ConvertFrom-Json -ErrorAction Stop
+            if ($decision.ok -isnot [bool] -or -not $decision.ok) {
+                throw "policy did not admit the action: $response"
+            }
         }
     } catch {
         [Console]::Error.WriteLine("[agent-dispatch] automatic-runtime-reconcile policy check failed: $($_.Exception.Message)")

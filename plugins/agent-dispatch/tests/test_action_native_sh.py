@@ -133,6 +133,108 @@ def test_warm_runtime_start_ignores_action_inhibition(tmp_path: Path) -> None:
     assert not (root / ".provision.lock").exists()
 
 
+def _linked_selection(
+    tmp_path: Path, root: Path, env: dict[str, str], spelling: str,
+) -> dict[str, str]:
+    nested = root.parent / "nested"
+    nested.mkdir()
+    link = tmp_path / "home-link"
+    link.symlink_to(root.parent if spelling == "direct" else nested, target_is_directory=True)
+    home = str(link) if spelling == "direct" else f"{link}/.."
+    return env | {
+        "HOME": home, "USERPROFILE": home, "AGENT_DISPATCH_INSTALL_DIR": f"{home}/.agent-dispatch",
+    }
+
+
+@pytest.mark.parametrize("entry", ["runtime-gate.sh", "bootstrap-check.sh"])
+@pytest.mark.parametrize("spelling", ["direct", "parent-traversal"])
+def test_cold_callers_preserve_selected_ancestry(
+    tmp_path: Path, entry: str, spelling: str,
+) -> None:
+    gate, root, started, provisioned, env = _gate_fixture(tmp_path)
+    env = _linked_selection(tmp_path, root, env, spelling)
+    result = subprocess.run(
+        [BASH, str(gate.with_name(entry)), "serve"], env=env,
+        capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "automatic-runtime-reconcile" in result.stderr
+    assert not started.exists() and not provisioned.exists()
+    assert not (root / ".provision-status").exists()
+
+
+def test_linked_selection_does_not_block_a_qualified_runtime(tmp_path: Path) -> None:
+    gate, root, started, provisioned, env = _gate_fixture(tmp_path)
+    env = _linked_selection(tmp_path, root, env, "parent-traversal")
+    env["TEST_READY"] = "1"
+    result = subprocess.run(
+        [BASH, str(gate), "serve"], env=env, capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    assert started.exists() and not provisioned.exists()
+
+
+def test_cold_runtime_refuses_an_unqualified_selected_root(tmp_path: Path) -> None:
+    gate, root, started, provisioned, env = _gate_fixture(tmp_path)
+    env["AGENT_DISPATCH_INSTALL_DIR"] = "relative-selected-root"
+    result = subprocess.run(
+        [BASH, str(gate), "serve"], env=env, capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 126, result.stdout + result.stderr
+    assert "selected installation root must be absolute" in result.stderr
+    assert not started.exists() and not provisioned.exists()
+    assert not (root / ".provision-status").exists()
+
+
+@pytest.mark.parametrize("status_unwritable", [False, True])
+def test_late_policy_refusal_updates_owned_provision_status(
+    tmp_path: Path, status_unwritable: bool,
+) -> None:
+    if status_unwritable and os.geteuid() == 0:
+        pytest.skip("contained POSIX write-denial fixture requires an unprivileged user")
+    gate, root, started, provisioned, env = _gate_fixture(tmp_path)
+    helper = gate.parent / "installation-context" / "installation-context.sh"
+    original = helper.read_text()
+    count = tmp_path / "publication-count"
+    policy = root / "action-controls.json"
+    helper.write_text(
+        "#!/bin/bash\n"
+        'if [[ "$1" == probe-plugin-publication ]]; then\n'
+        f"  count=$(cat {str(count)!r} 2>/dev/null || echo 0)\n"
+        f"  count=$((count + 1)); printf '%s' \"$count\" > {str(count)!r}\n"
+        f"  if [[ \"$count\" == 2 ]]; then printf '%s' "
+        f"""'{{"automatic-runtime-reconcile":{{"disabled":true}}}}' > {str(policy)!r}; fi\n"""
+        "fi\n" + original.split("\n", 1)[1],
+    )
+    status = root / ".provision-status"
+    if status_unwritable:
+        tools = tmp_path / "reader-bin"
+        tools.mkdir()
+        python = tools / "python3"
+        python.write_text(
+            "#!/bin/bash\n"
+            f"if [[ -f {str(status)!r} ]]; then chmod 400 {str(status)!r}; fi\n"
+            f'exec {sys.executable!r} "$@"\n',
+        )
+        python.chmod(0o755)
+        env["PATH"] = str(tools) + os.pathsep + env["PATH"]
+    try:
+        result = subprocess.run(
+            [BASH, str(gate), "serve"], env=env, capture_output=True, text=True, timeout=15,
+        )
+        assert result.returncode == 3, result.stdout + result.stderr
+        assert "automatic-runtime-reconcile" in result.stderr
+        assert not started.exists() and not provisioned.exists()
+        if status_unwritable:
+            assert "Could not write provisioning status" in result.stderr
+        else:
+            assert status.read_text().startswith("failed rc=3 ")
+        assert "Provisioning attempt ended before completion (rc=3)" in result.stderr
+    finally:
+        if status.exists():
+            status.chmod(0o600)
+
+
 def test_missing_cold_policy_reader_is_a_named_prerequisite_failure(tmp_path: Path) -> None:
     gate, root, started, provisioned, env = _gate_fixture(tmp_path)
     gate.with_name("action_controls.py").rename(gate.with_name("reader-not-installed.py"))
@@ -188,6 +290,44 @@ def test_session_bootstrap_rechecks_before_automatic_stamp(tmp_path: Path) -> No
             effects += 1
         assert (provisioned.read_text().count("effect") if provisioned.exists() else 0) == effects
     assert not started.exists()
+
+
+@pytest.mark.parametrize("existing_log", [False, True])
+def test_shell_background_worker_keeps_fresh_late_refusal_diagnostics(
+    tmp_path: Path, existing_log: bool,
+) -> None:
+    gate, root, _, provisioned, env = _gate_fixture(tmp_path)
+    source = gate.with_name("bootstrap-check.sh").read_text()
+    worker = source.split("nohup bash -c '", 1)[1].split("\n' agent-dispatch-reconcile", 1)[0]
+    assert '>"$InstallDir/reconcile.log" 2>&1' in source
+    reader = gate.with_name("action_controls.py")
+    admission = [
+        sys.executable, "-I", "-B", str(reader), "--root", str(root),
+        "--action", "automatic-runtime-reconcile", "--automatic",
+    ]
+    before = subprocess.run(admission, env=env, capture_output=True, text=True, timeout=10)
+    assert before.returncode == 0, before.stderr
+    policy = root / "action-controls.json"
+    policy.write_text(
+        '{"automatic-runtime-reconcile":{"disabled":true,"reason":"late worker pause"}}',
+    )
+    log = root / "reconcile.log"
+    if existing_log:
+        log.write_text("previous successful attempt\n")
+    argv = [
+        BASH, "-c", worker, "agent-dispatch-reconcile", sys.executable, str(reader), str(root),
+        str(gate.with_name("install.sh")), "install",
+    ]
+    with log.open("w") as output:
+        denied = subprocess.run(argv, env=env, stdout=output, stderr=subprocess.STDOUT, timeout=15)
+    assert denied.returncode == 3 and not provisioned.exists()
+    diagnostic = log.read_text()
+    assert "automatic-runtime-reconcile" in diagnostic and "late worker pause" in diagnostic
+    assert "previous successful attempt" not in diagnostic
+    policy.write_text("{}")
+    with log.open("w") as output:
+        cleared = subprocess.run(argv, env=env, stdout=output, stderr=subprocess.STDOUT, timeout=15)
+    assert cleared.returncode == 0 and provisioned.exists(), log.read_text()
 
 
 def test_late_cutover_denial_never_falls_back_when_policy_clears(tmp_path: Path) -> None:

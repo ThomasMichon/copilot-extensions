@@ -659,6 +659,124 @@ if ($allowed -ne 0) {{ throw "cleared fixture policy remained unavailable: $allo
     assert "automatic-runtime-reconcile" in result.stderr
 
 
+@pytest.mark.parametrize("frontend", ["bootstrap", "runtime-gate"])
+@pytest.mark.parametrize("linked", [False, True])
+def test_automatic_admission_preserves_lexical_selected_root(
+    tmp_path: Path, frontend: str, linked: bool,
+) -> None:
+    ordinary = tmp_path / "ordinary"
+    ordinary.mkdir()
+    alias = tmp_path / "alias"
+    if linked:
+        try:
+            alias.symlink_to(ordinary, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"native symbolic-link support is unavailable: {exc}")
+    else:
+        alias.mkdir()
+    lexical = str(alias) + "/../ordinary"
+    if frontend == "bootstrap":
+        body = function(BOOTSTRAP, "Get-BootstrapActionAdmission") + f"""
+$code = Get-BootstrapActionAdmission -Root {quote(lexical)} -ScriptsRoot {quote(SCRIPTS)}
+exit $code
+"""
+    else:
+        body = (
+            f"$payloadRoot = {quote(SCRIPTS.parent)}\n"
+            f"$runtimeRoot = {quote(ordinary)}\n$context = ''\n"
+            f"$legacyPolicyRoot = {quote(lexical)}\n"
+            + function(GATE, "Assert-AutomaticRuntimeReconcile")
+            + "\nAssert-AutomaticRuntimeReconcile\n"
+        )
+    result = run_ps(tmp_path, body)
+    assert result.returncode == (3 if linked else 0), result.stdout + result.stderr
+    if linked:
+        assert "linked" in result.stderr
+        assert "automatic-runtime-reconcile" in result.stderr
+    if frontend == "runtime-gate":
+        source = GATE.read_text(encoding="utf-8")
+        assert source.index("$legacyPolicyRoot = $legacyRoot") < source.index("$resolution = Read-Decision")
+        assert source.index("$legacyPolicyRoot = Join-Path") < source.index("$legacyRoot = (Resolve-Path")
+    assert not (ordinary / ".provision.lock").exists()
+    assert not (ordinary / ".provision-status").exists()
+
+
+@pytest.mark.parametrize("frontend", ["bootstrap", "runtime-gate"])
+@pytest.mark.parametrize("root", [
+    "", "relative", "C:relative", "C:", r"\relative",
+    pytest.param(
+        "/relative",
+        marks=pytest.mark.skipif(os.name != "nt", reason="native Windows root-relative syntax"),
+    ),
+])
+def test_automatic_admission_rejects_partially_qualified_roots(
+    tmp_path: Path, frontend: str, root: str,
+) -> None:
+    if frontend == "bootstrap":
+        body = function(BOOTSTRAP, "Get-BootstrapActionAdmission") + f"""
+$code = Get-BootstrapActionAdmission -Root {quote(root)} -ScriptsRoot {quote(SCRIPTS)}
+exit $code
+"""
+    else:
+        body = (
+            f"$payloadRoot = {quote(SCRIPTS.parent)}\n$runtimeRoot = {quote(root)}\n$context = ''\n"
+            + function(GATE, "Assert-AutomaticRuntimeReconcile")
+            + "\nAssert-AutomaticRuntimeReconcile\n"
+        )
+    result = run_ps(tmp_path, body)
+    assert result.returncode == 126, result.stdout + result.stderr
+    assert "selected installation root must be absolute" in result.stderr
+    assert "automatic-runtime-reconcile" in result.stderr
+
+
+@pytest.mark.parametrize("linked", [False, True])
+def test_actual_bootstrap_hook_checks_lexical_home_before_stamp(tmp_path: Path, linked: bool) -> None:
+    from .test_windows_bootstrap_reconcile_lifecycle import stage_action_policy_payload
+
+    ordinary = tmp_path / "ordinary"
+    ordinary.mkdir()
+    alias = tmp_path / "alias"
+    if linked:
+        try:
+            alias.symlink_to(ordinary, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"native symbolic-link support is unavailable: {exc}")
+    else:
+        alias.mkdir()
+    payload = tmp_path / "payload"
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    stage_action_policy_payload(payload)
+    hook = scripts / BOOTSTRAP.name
+    hook.write_bytes(BOOTSTRAP.read_bytes())
+    (payload / "plugin.json").write_text('{"name":"agent-dispatch"}', encoding="utf-8")
+    marker = tmp_path / "stamp-called"
+    (scripts / "install.ps1").write_text(
+        f"# 'stamp'\n[IO.File]::WriteAllText({quote(marker)}, 'stamp')\nexit 0\n", encoding="utf-8",
+    )
+    body = f"$env:USERPROFILE = {quote(str(alias) + '/..' + '/ordinary')}\n& {quote(hook)}\nexit $LASTEXITCODE\n"
+    result = run_ps(tmp_path, body)
+    assert result.returncode == (3 if linked else 0), result.stdout + result.stderr
+    assert result.stdout == "{}"
+    assert marker.exists() is not linked
+    if linked:
+        assert "linked" in result.stderr
+    assert not (ordinary / ".agent-dispatch" / "reconcile-status.json").exists()
+
+
+def test_namespaced_admission_does_not_consult_an_unselected_legacy_root(tmp_path: Path) -> None:
+    root = tmp_path / "selected"
+    root.mkdir()
+    body = (
+        f"$payloadRoot = {quote(SCRIPTS.parent)}\n$runtimeRoot = {quote(root)}\n"
+        "$context = 'selected-context'\n$legacyPolicyRoot = 'not-an-absolute-selected-root'\n"
+        + function(GATE, "Assert-AutomaticRuntimeReconcile")
+        + "\nAssert-AutomaticRuntimeReconcile\n"
+    )
+    result = run_ps(tmp_path, body)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def bootstrap_worker(tmp_path: Path, root: Path, installer: str) -> tuple[str, Path]:
     status = root / "reconcile-status.json"
     status.write_text(json.dumps({
@@ -684,16 +802,27 @@ def bootstrap_worker(tmp_path: Path, root: Path, installer: str) -> tuple[str, P
     return body, status
 
 
-def test_background_bootstrap_attempt_records_denial_without_installer(tmp_path: Path) -> None:
+@pytest.mark.parametrize("existing_log", [False, True])
+def test_background_bootstrap_attempt_records_denial_without_installer(
+    tmp_path: Path, existing_log: bool,
+) -> None:
     root = tmp_path / "runtime"
     root.mkdir()
-    (root / "action-controls.json").write_text(json.dumps({
-        "automatic-runtime-reconcile": {"disabled": True},
-    }), encoding="utf-8")
+    policy = root / "action-controls.json"
+    policy.write_text("{}", encoding="utf-8")
+    log = root / "reconcile.log"
+    if existing_log:
+        log.write_text("attempt=previous completed successfully\n", encoding="utf-8")
     marker = tmp_path / "installer-called"
     body, status = bootstrap_worker(
         tmp_path, root, f"[IO.File]::WriteAllText({quote(marker)}, 'called')",
     )
+    body = function(BOOTSTRAP, "Get-BootstrapActionAdmission") + f"""
+$before = Get-BootstrapActionAdmission -Root {quote(root)} -ScriptsRoot {quote(SCRIPTS)}
+if ($before -ne 0) {{ throw 'hook preflight was not admitted' }}
+[IO.File]::WriteAllText({quote(policy)},
+    '{{"automatic-runtime-reconcile":{{"disabled":true,"reason":"late pause"}}}}')
+""" + body
     result = run_ps(tmp_path, body)
     assert result.returncode == 3, result.stdout + result.stderr
     assert "automatic-runtime-reconcile" in result.stderr
@@ -702,6 +831,49 @@ def test_background_bootstrap_attempt_records_denial_without_installer(tmp_path:
     assert recorded["attempt_id"] == "contained-attempt"
     assert recorded["exit_code"] == 3
     assert recorded["success"] is False
+    assert "automatic-runtime-reconcile" in recorded["diagnostic"]
+    assert "late pause" in recorded["diagnostic"]
+    assert "attempt=contained-attempt" in log.read_text(encoding="utf-8-sig")
+    assert "late pause" in log.read_text(encoding="utf-8-sig")
+
+
+@pytest.mark.parametrize("condition", ["unwritable-log", "replaced-attempt"])
+def test_late_worker_refusal_keeps_diagnostics_and_attempt_fences(
+    tmp_path: Path, condition: str,
+) -> None:
+    root = tmp_path / "runtime"
+    root.mkdir()
+    (root / "action-controls.json").write_text(
+        '{"automatic-runtime-reconcile":{"disabled":true,"reason":"late refusal"}}', encoding="utf-8",
+    )
+    marker = tmp_path / "installer-called"
+    body, status = bootstrap_worker(
+        tmp_path, root, f"[IO.File]::WriteAllText({quote(marker)}, 'called')",
+    )
+    log = root / "reconcile.log"
+    replacement = '{"attempt_id":"replacement","launched_pid":0}'
+    if condition == "unwritable-log":
+        log.mkdir()
+    else:
+        log.write_text("replacement attempt log\n", encoding="utf-8")
+        completion = "try { [void](Update-ReconcileAttempt $true $code $failureDiagnostic) }"
+        assert completion in body
+        body = body.replace(
+            completion,
+            f"[IO.File]::WriteAllText({quote(status)}, {quote(replacement)})\n" + completion,
+        )
+    result = run_ps(tmp_path, body)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert not marker.exists()
+    if condition == "unwritable-log":
+        recorded = json.loads(status.read_text(encoding="utf-8"))
+        assert recorded["attempt_id"] == "contained-attempt"
+        assert recorded["exit_code"] == 3 and recorded["success"] is False
+        assert "late refusal" in recorded["diagnostic"]
+        assert "reconcile log unavailable" in recorded["diagnostic"]
+    else:
+        assert status.read_text(encoding="utf-8") == replacement
+        assert log.read_text(encoding="utf-8") == "replacement attempt log\n"
 
 
 @pytest.mark.parametrize("boundary", ["native-installer", "callable-refusal", "unmarked-failure"])

@@ -552,3 +552,29 @@ Initial tests must prove the current gap before adding the guards.
   literal LF for shell scripts and retain the original real JSON predicate and
   all positive/negative assertions. The affected local selection passes 64 cases;
   final native execution remains pending.
+
+### 2026-10-28 - Bootstrap root spelling and late-refusal diagnostics
+
+- The next assessment identified canonicalization hiding linked ancestry before
+  automatic bootstrap admission, and late refusals leaving missing or stale
+  diagnostics. Four actual POSIX cases and four actual PowerShell cases
+  reproduced the source gaps; ordinary-root, namespace and warm-runtime controls
+  remained available.
+- Preserve the selected lexical root alongside governance's canonical effect
+  root for cold legacy checks; do not normalize it before the reader or consult
+  an unselected legacy root in namespace mode. Relative/Windows drive-relative
+  and root-relative inputs fail explicitly using compatible native APIs.
+- Settle owned POSIX provisioning status on late exit while its lock is held.
+  Persist attempt-tagged PowerShell worker refusal diagnostics inside the
+  existing status fence, including missing/stale logs, failed log writes and
+  superseded-attempt controls. Retain refusal classification on diagnostic
+  failures; no installer fallback, extra attempt or service stop is introduced.
+- Current local correction evidence and fresh native Windows qualification
+  remain separate gates; the earlier `2d32e03562` native run is a baseline,
+  not validation of these new frontend changes.
+- Independent host PowerShell passed 75 cases with nine native-Windows
+  lifecycle cases and two Windows-root-relative controls explicitly skipped
+  on WSL. Contained frontend/source-publication compatibility passed 86 cases
+  with 19 platform skips and exposed one stale exact-manifest expectation;
+  include the already-declared `installerLifecycle: true` field, then that
+  targeted declaration control passes too. No manifest behavior was changed.
