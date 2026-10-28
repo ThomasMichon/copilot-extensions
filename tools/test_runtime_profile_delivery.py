@@ -259,3 +259,24 @@ def test_no_material_selection_is_explicit_not_a_clearance_claim(tmp_path, selec
     result = produce(selected, output)
     with retain(selected, output, result["sha256"]) as retained:
         assert not retained.materials and len(retained.wheels.archives) == 2
+
+
+@pytest.mark.parametrize("changes", [
+    {"max_bytes": 4096}, {"max_snapshot_bytes": 4096},
+])
+def test_compressed_manifest_is_bounded_before_decoding(tmp_path, selected, monkeypatch, changes):
+    output = tmp_path / "oversized-manifest.zip"
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("delivery.json", b"{}" + b" " * 8192)
+    assert output.stat().st_size < 4096
+    loads = delivery.json.loads
+
+    def bounded(data, *args, **kwargs):
+        assert len(data) <= 4096, "oversized delivery manifest reached the JSON decoder"
+        return loads(data, *args, **kwargs)
+
+    monkeypatch.setattr(delivery.json, "loads", bounded)
+    with pytest.raises(WheelError, match="(manifest|total|snapshot).*budget"), retain(
+        selected, output, digest(output), **changes,
+    ):
+        pytest.fail("over-budget manifest admitted")

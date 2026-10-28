@@ -176,21 +176,22 @@ def retain_profile_delivery(
             with zipfile.ZipFile(stream) as archive:
                 members = archive.infolist()
                 names = [item.filename for item in members]
+                manifest_limit = min(max_bytes, _MANIFEST_BYTES)
                 if (
                     len(names) != len(set(names)) or "delivery.json" not in names
-                    or archive.getinfo("delivery.json").file_size > _MANIFEST_BYTES
+                    or archive.getinfo("delivery.json").file_size > manifest_limit
                 ):
-                    raise WheelError("duplicate delivery member or missing/oversized manifest")
+                    raise WheelError("duplicate delivery member or manifest missing/over byte budget")
+                total = sum(item.file_size for item in members)
+                if total > max_bytes or total >= max_snapshot_bytes:
+                    raise WheelError("delivery total or snapshot byte budget exceeded")
                 manifest = json.loads(b"".join(_member_chunks(
                     stream, archive, archive.getinfo("delivery.json"),
-                    limit=_MANIFEST_BYTES, deadline=deadline,
+                    limit=manifest_limit, deadline=deadline,
                 )), object_pairs_hook=_unique)
                 files = _manifest(profile, manifest, max_files, max_bytes, deadline)
                 if set(names) != {*files, "delivery.json"}:
                     raise WheelError("unexpected or omitted delivery members")
-                total = sum(item.file_size for item in members)
-                if total > max_bytes or total >= max_snapshot_bytes:
-                    raise WheelError("delivery total or snapshot byte budget exceeded")
                 paths = {}
                 for position, member in enumerate(members):
                     _check_deadline(deadline)
