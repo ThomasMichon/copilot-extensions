@@ -1,9 +1,11 @@
 """The production transport producer composes the existing retained-byte owners."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 import json
 import os
+from pathlib import Path
 import subprocess
 import sys
 import time
@@ -13,7 +15,7 @@ from packaging.markers import default_environment
 import pytest
 
 import runtime_profile_bundle as producer
-from installer_wheel_inputs import WheelError, WheelLimits
+from installer_wheel_inputs import WheelError, WheelLimits, _check_deadline
 from installer_wheel_snapshot import retain_wheel_bundle
 from runtime_profile import ProfileError, SCHEMA, validate_profile
 from runtime_profile_wheels import verify_profile_wheels
@@ -199,6 +201,69 @@ def test_publication_race_preserves_the_other_output(tmp_path, inputs, monkeypat
     with pytest.raises(FileExistsError):
         build(*inputs, output)
     assert output.read_bytes() == b"other producer's complete artifact"
+
+
+@pytest.mark.parametrize("budget", ["transport", "storage"])
+@pytest.mark.parametrize("boundary", ["header", "closing-directory"])
+def test_peak_storage_never_exceeds_budget_during_zip_bookkeeping(
+    tmp_path, inputs, monkeypatch, budget, boundary,
+):
+    record, paths = inputs
+    reference = build(record, paths, tmp_path / "reference.zip")
+    total = sum(path.stat().st_size for path in paths.values())
+    available = 1 if boundary == "header" else reference["size"] - 1
+    original_open = Path.open
+    peak = 0
+
+    class ObservedOutput:
+        def __init__(self, path, stream):
+            self.path, self.stream = path, stream
+
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return self.stream.__exit__(*args)
+
+        def write(self, data):
+            nonlocal peak
+            result = self.stream.write(data)
+            self.stream.flush()
+            peak = max(peak, self.path.stat().st_size)
+            return result
+
+    def observe(path, mode="r", *args, **kwargs):
+        stream = original_open(path, mode, *args, **kwargs)
+        return ObservedOutput(path, stream) if path.name == "wheels.zip" and mode == "xb" else stream
+
+    monkeypatch.setattr(Path, "open", observe)
+    options = (
+        {"max_bundle_bytes": available} if budget == "transport"
+        else {"max_snapshot_bytes": total + available}
+    )
+    with pytest.raises(WheelError):
+        build(record, paths, tmp_path / "refused.zip", **options)
+    assert peak <= available
+    assert not (tmp_path / "refused.zip").exists()
+
+
+def test_retained_input_exit_deadline_precedes_output_visibility(tmp_path, inputs, monkeypatch):
+    retain = producer.retain_wheel_inputs
+
+    @contextmanager
+    def expire_on_exit(*args, **kwargs):
+        with retain(*args, **kwargs) as snapshot:
+            yield snapshot
+            _check_deadline(0)
+
+    monkeypatch.setattr(producer, "retain_wheel_inputs", expire_on_exit)
+    output = tmp_path / "result.zip"
+    with pytest.raises(WheelError, match="deadline"):
+        build(*inputs, output)
+    assert not output.exists()
 
 
 def test_actual_command_emits_candidate_without_original_installation(tmp_path, inputs):

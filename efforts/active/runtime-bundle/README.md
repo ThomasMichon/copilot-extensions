@@ -277,7 +277,7 @@ choose the wheel path, not a reason to relax source identity.
   inspection, deterministic stored ZIP members, canonical consumer readback and
   atomic non-replacing output. There is no resolver, download, admission receipt,
   runtime installation, publisher or channel update.
-- Focused producer and existing snapshot controls pass 53 cases on native
+- Focused producer and existing snapshot controls pass 58 cases on native
   Windows, including actual CLI invocation, output races, corrupt candidates,
   source independence, inclusive aggregate storage and failure cleanup. A
   coupled long-path fixture now creates its input using native spelling rather
@@ -288,3 +288,9 @@ choose the wheel path, not a reason to relax source identity.
   qualifies the producer/consumer byte seam, not a new installed run or complete
   distribution envelope. Native Linux/macOS and pipeline activation remain
   unqualified. The parent stays Active.
+- The first review exposed two real transaction defects. Five failing-first
+  controls measure header/closing-directory storage overshoot and output left
+  visible after retained-input exit verification fails. All ZIP writes are now
+  pre-bounded, and publication follows successful retained-input exit plus a
+  final private-candidate check. The real selected profile and CLI still produce
+  the identical transport bytes after these corrections.

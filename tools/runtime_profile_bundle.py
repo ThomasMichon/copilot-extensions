@@ -18,23 +18,36 @@ from installer_wheel_snapshot import (
 )
 
 
+class _BoundedOutput:
+    def __init__(self, stream, limit: int, deadline: float):
+        self.stream, self.limit, self.deadline = stream, limit, deadline
+
+    def __getattr__(self, name):
+        return getattr(self.stream, name)
+
+    def write(self, data):
+        _check_deadline(self.deadline)
+        if self.stream.tell() + len(data) > self.limit:
+            raise WheelError("wheel transport byte budget exceeded")
+        return self.stream.write(data)
+
+
 def _write_bundle(snapshot, path: Path, *, max_bytes: int, deadline: float) -> None:
-    with path.open("xb") as output, zipfile.ZipFile(
-        output, "w", compression=zipfile.ZIP_STORED,
-    ) as archive:
-        for name, stream in sorted(snapshot.archives.items()):
-            _check_deadline(deadline)
-            member = zipfile.ZipInfo("wheels/" + name, date_time=(1980, 1, 1, 0, 0, 0))
-            member.create_system = 3
-            member.external_attr = (stat.S_IFREG | 0o644) << 16
-            member.file_size = os.fstat(stream.fileno()).st_size
-            stream.seek(0)
-            with archive.open(member, "w") as target:
-                while chunk := stream.read(1 << 20):
-                    _check_deadline(deadline)
-                    target.write(chunk)
-                    if output.tell() > max_bytes:
-                        raise WheelError("wheel transport byte budget exceeded")
+    with path.open("xb") as output:
+        with zipfile.ZipFile(
+            _BoundedOutput(output, max_bytes, deadline), "w", compression=zipfile.ZIP_STORED,
+        ) as archive:
+            for name, stream in sorted(snapshot.archives.items()):
+                _check_deadline(deadline)
+                member = zipfile.ZipInfo("wheels/" + name, date_time=(1980, 1, 1, 0, 0, 0))
+                member.create_system = 3
+                member.external_attr = (stat.S_IFREG | 0o644) << 16
+                member.file_size = os.fstat(stream.fileno()).st_size
+                stream.seek(0)
+                with archive.open(member, "w") as target:
+                    while chunk := stream.read(1 << 20):
+                        _check_deadline(deadline)
+                        target.write(chunk)
 
 
 def build_profile_bundle(
@@ -60,20 +73,20 @@ def build_profile_bundle(
     destination = Path(os.path.abspath(destination))
     if os.path.lexists(destination):
         raise FileExistsError("wheel transport output already exists")
-    with retain_wheel_inputs(
-        archives, expected, max_wheels=max_wheels,
-        max_archive_bytes=limits.max_archive_bytes, max_total_bytes=max_total_bytes,
-        max_snapshot_bytes=max_snapshot_bytes, deadline=deadline,
-    ) as snapshot:
-        verify_profile_wheels(
-            profile, snapshot.archives, max_archive_bytes=max_total_bytes,
-            max_unpacked_bytes=max_unpacked_bytes, max_metadata_bytes=limits.max_metadata_bytes,
-            limits=limits, deadline=deadline,
-        )
-        snapshot_bytes = sum(os.fstat(stream.fileno()).st_size for stream in snapshot.archives.values())
-        with _temporary_inputs(destination.parent) as temporary:
-            root = _private_retained_root(Path(temporary)).resolve()
-            candidate = root / "wheels.zip"
+    with _temporary_inputs(destination.parent) as temporary:
+        root = _private_retained_root(Path(temporary)).resolve()
+        candidate = root / "wheels.zip"
+        with retain_wheel_inputs(
+            archives, expected, max_wheels=max_wheels,
+            max_archive_bytes=limits.max_archive_bytes, max_total_bytes=max_total_bytes,
+            max_snapshot_bytes=max_snapshot_bytes, deadline=deadline,
+        ) as snapshot:
+            verify_profile_wheels(
+                profile, snapshot.archives, max_archive_bytes=max_total_bytes,
+                max_unpacked_bytes=max_unpacked_bytes, max_metadata_bytes=limits.max_metadata_bytes,
+                limits=limits, deadline=deadline,
+            )
+            snapshot_bytes = sum(os.fstat(stream.fileno()).st_size for stream in snapshot.archives.values())
             _write_bundle(
                 snapshot, candidate,
                 max_bytes=min(max_bundle_bytes, max_snapshot_bytes - snapshot_bytes),
@@ -93,10 +106,16 @@ def build_profile_bundle(
                 ) as readback:
                     readback.verify()
                 _unchanged(candidate, before, retained, opened=opened)
-                _check_deadline(deadline)
-                # The private candidate shares the destination filesystem. Link
-                # publication is atomic and refuses an existing output.
-                os.link(candidate, destination)
+        before = _ordinary(candidate)
+        with _open(candidate) as retained:
+            opened = _unchanged(candidate, before, retained)
+            if _digest(retained, max_bundle_bytes, deadline) != (digest, size):
+                raise WheelError("wheel transport changed after input verification")
+            _unchanged(candidate, before, retained, opened=opened)
+            _check_deadline(deadline)
+            # Retained-input exit verification has succeeded. Link publication
+            # is atomic on the shared filesystem and refuses an existing output.
+            os.link(candidate, destination)
     return {"profile_sha256": profile.lock_id, "sha256": digest, "size": size}
 
 
