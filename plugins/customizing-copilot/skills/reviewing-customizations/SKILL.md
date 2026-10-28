@@ -243,17 +243,21 @@ callback run once before the pass (never retried mid-pass).
 
 ### Worktree-scoped local cache -- the consent-free, permissionless read path
 
-Source declarations now choose inline decision kernels or local-first selectors.
-Selectors own reviewed full bodies outside automatic instruction discovery;
-full caches/bodies carry per-source completeness receipts, never loaded-state.
-The catch-all remains inline to recover bodies written after discovery.
-Read `docs/patterns/worktree-scoped-dynamic-guidance.md` for authority,
-compatibility, inline exceptions and the model-admission evidence boundary.
+Enabled plugins' declared instructions are copied verbatim into
+`.github/instructions/agent-worktrees-generated/<marketplace>/...`.
+Prefer the applicable current managed copy without comparing instruction hashes,
+fingerprints, versions, provenance markers or receipts. Read the full body unless
+it is already directly visible in this context. Files may be replaced during a
+live session; restart or begin a fresh context to load corrected instructions.
+Copying does not prove model admission. The catch-all covers late copies.
+The owning pattern is `docs/patterns/worktree-scoped-dynamic-guidance.md`.
 The manager's read-only `resolve-source <repo-root> <destination> --json`
-operation supplies exact ownership/version/hash/scope selection; add
-`--from-settings` to authenticate paired or unpaired locals against enabled
-canonical payloads. Without that proof, paired resolution retains reviewed
-fallback authority.
+operation uses enabled declarations and safe paths to find the managed copy.
+Add `--from-settings` for effective user, repository and local activation.
+It does not authenticate instruction content. An available declared copy is
+selected before checked-in selector, fallback or lock validation; a stale or
+damaged reviewed artifact cannot block that copy. Without an available copy,
+the existing offline reviewed fallback remains usable.
 `resolve-source` is not an executable: invoke the script at this loaded skill's
 returned base with an absolute Python interpreter, using argv
 `["<python>","<skill-base>/scripts/manage-instruction-projections.py","resolve-source","<repository>","<destination>","--from-settings","--json"]`.
@@ -261,23 +265,18 @@ This skill-loading path is the existing payload-only discovery mechanism; it
 does not add a global command, runtime or PATH entry. Preserve the owning base
 and pass the catalog `--agent-worktrees-path` when repository settings require it.
 
-`sync`/`scan`/`run_sync_pass()` above mutate the checked-in projection and
-its lock -- privileged, PR-gated, consent-gated by design (see Phase 5).
+`sync`/`run_sync_pass()` above mutate the checked-in projection and its lock;
+`scan` audits them. Their authoring checks remain separate from runtime reading.
 `instruction_projections.render_local_cache(repo_root, discover_sources)` is
-a deliberately **un**privileged sibling: it renders each enabled source's
-*current* full body into gitignored
-`.github/instructions/<plugin>/<sourceId>.local.instructions.md`,
-available for automatic instruction discovery (nested paths preserved).
-`local_sibling_destination()` computes the sibling path. Checked-in selectors
-remain pointers; reviewed fallback bodies stay outside automatic discovery.
-Legacy local reads remain canonically authenticated; after new publication only
-verified canonical untracked legacy files are retired. Edited/foreign/tracked
-files remain with visible findings. There is no consent check and no
-mutation of any checked-in file, lock, or git history. It *does* hold its
-own dedicated lock (`_local_cache_lock`, separate from `sync`'s own) so
-concurrent callers for the same repository can't interleave their
-render/write/cleanup passes -- distinct from the checked-in sync's lock in
-purpose and lifetime. A caller must handle contention: a locked-out call
+a deliberately **un**privileged compatibility publisher. It copies each enabled
+source's current template bytes into the same managed namespace as startup,
+preserving nested paths and copying even `skipLocalCache` sources. Every call
+replaces the selected files, including edited or identical copies, without
+rendering envelopes, comparing instruction content or consulting reviewed locks.
+There is no consent check or mutation of checked-in files or git history.
+Its `_local_cache_lock` uses the startup publisher's workspace lease, separate
+from checked-in `sync`'s lock, so the two publication paths cannot interleave.
+A caller must handle contention: a locked-out call
 returns a blocking `projection-local-cache-lock` finding and refreshes
 nothing at all, rather than assuming every call updates the cache: report
 the degraded outcome and retry at a later lifecycle boundary.
@@ -285,15 +284,18 @@ the degraded outcome and retry at a later lifecycle boundary.
 the lock is acquired -- never a precomputed list -- so no call can act on a
 source set a more recent call has already superseded. See
 `docs/patterns/worktree-scoped-dynamic-guidance.md`: any session, regardless
-of push rights or scheduled-worker opt-in, can always see a fresh render of
+of push rights or scheduled-worker opt-in, can always see a fresh copy of
 what's currently installed without a privileged sync. Call it
 only as the compatibility renderer when no managed startup publisher owns the
 boundary. Managed worktree create/resume and local Bridge preparation publish
-the final complete static set before discovery and reuse a verified unchanged
-generation. SessionStart is a bounded backup, not another unconditional render;
-ordinary same-generation reads do not regenerate files. A failure on one source
+the final complete static set before discovery on every preparation. SessionStart
+always requests its existing bounded backup when the hook budget permits.
+A failure on one source
 must remain visible without withholding independently safe guidance, and no
 compatibility operation mutates checked-in files or git history.
+Failed refreshes retain earlier files with explicit failure findings. Incomplete
+discovery does not authorize stale cleanup. Files outside the reserved namespace
+are retained and reported for explicit migration, not authenticated or deleted.
 
 Local delivery never withholds safe guidance because of a context-budget excess.
 Template, per-file and aggregate excess, and invalid budget configuration, are

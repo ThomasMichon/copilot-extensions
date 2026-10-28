@@ -134,6 +134,36 @@ def test_standalone_module_copies_without_projection_engine(standalone_workspace
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
+def test_compatibility_publisher_uses_the_managed_publication_lease(standalone_workspace):
+    from agent_worktrees import static_instructions
+
+    standalone, _, repo, _, env = standalone_workspace
+    scripts = (
+        Path(__file__).resolve().parents[3] / "plugins/customizing-copilot"
+        / "skills/reviewing-customizations/scripts"
+    )
+    code = (
+        "import pathlib,sys; sys.path.insert(0,sys.argv[1]); "
+        "import instruction_projections as p; "
+        "root=pathlib.Path(sys.argv[2]); "
+        "def_discover=lambda: (_ for _ in ()).throw(AssertionError('discovery before lease')); "
+        "r=p.render_local_cache(root,def_discover); "
+        "assert r.blocking == 1, r.findings; "
+        "assert r.findings[0].check == 'projection-local-cache-lock', r.findings; "
+        "assert not r.changed"
+    )
+    with static_instructions.publication_lock(repo):
+        child = subprocess.run(
+            [sys.executable, "-B", "-c", code, str(scripts), str(repo)],
+            cwd=standalone, env=env, capture_output=True, text=True, timeout=20,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    assert child.returncode == 0, child.stderr
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
 def test_separate_launch_processes_always_copy_current_plugin(standalone_workspace):
     standalone, _, repo, _, env = standalone_workspace
     code = (
