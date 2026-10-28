@@ -37,7 +37,7 @@ def _run(prefix, environment, cwd, *arguments):
     return result.stdout
 
 
-def _plan(tmp_path, installed, bash, seed_kind, *, interactive=False):
+def _plan(tmp_path, installed, bash, seed_kind, *, interactive=False, env_script=None):
     root, plugin, prefix, environment = installed
     scripts = root / "scripts"
     scripts.mkdir(exist_ok=True)
@@ -75,6 +75,8 @@ reply = {
         ["/bin/ps", "-p", str(os.getppid()), "-o", "comm="], text=True,
     ).strip(),
     "literal_env": os.environ["FIXTURE_LITERAL"],
+    "execution_hint": json.loads(os.environ["AGENT_WORKTREES_LAUNCH_EXECUTION"])
+        if "AGENT_WORKTREES_LAUNCH_EXECUTION" in os.environ else None,
     "inherited_sigint": str(signal.getsignal(signal.SIGINT)),
     "signal_mask": sorted(map(int, signal.pthread_sigmask(signal.SIG_BLOCK, []))),
 }
@@ -95,7 +97,11 @@ raise SystemExit(7)
 ''', encoding="utf-8")
     backend = tmp_path / "backend"
     backend.write_text(
-        "#!/bin/sh\nexec " + shlex.join([prefix[0], "-I", "-B", str(backend_source)]) + ' "$@"\n',
+        '#!/bin/sh\nprintf "%s\\0" "${PYTHONPATH+x}" "${PYTHONPATH-}" '
+        '"${PYTHONHOME+x}" "${PYTHONHOME-}" "${VIRTUAL_ENV+x}" "${VIRTUAL_ENV-}" '
+        '"${__PYVENV_LAUNCHER__+x}" "${__PYVENV_LAUNCHER__-}" > "$FIXTURE_CASE/backend-python-env"\n'
+        'unset PYTHONPATH PYTHONHOME VIRTUAL_ENV __PYVENV_LAUNCHER__\nexec '
+        + shlex.join([prefix[0], "-I", "-B", str(backend_source)]) + ' "$@"\n',
         encoding="utf-8",
     )
     backend.chmod(0o700)
@@ -122,8 +128,11 @@ seed = launch_seed_state.stage(
 correlation = launch_execution.Correlation(uuid4().hex, uuid4().hex)
 command = [
     bash, str(root / "scripts/default-setup.sh"), "--recovery",
-    "--runtime-python", sys.executable, "--copilot-path", str(backend), *json.loads(sys.argv[7]),
+    "--runtime-python", sys.executable, "--copilot-path", str(backend),
 ]
+if sys.argv[8]:
+    command += ["--env-script", sys.argv[8]]
+command += json.loads(sys.argv[7])
 if seed_kind == "new":
     command = [bash, str(root / "scripts/launch-command.sh"), "--recovery", "--", *command]
 prepared = launch_seed_exec.deferred_command(
@@ -131,15 +140,17 @@ prepared = launch_seed_exec.deferred_command(
     admission_only=seed is None, correlation=correlation,
 )
 index = launch_seed_exec.native_setup_index(prepared)
-assert index is not None, prepared
+assert (index is not None) == bool(seed_kind), prepared
 print(json.dumps({
-    "record": str(created.yaml_path), "command": prepared, "copied": prepared[index],
+    "record": str(created.yaml_path), "command": prepared,
+    "copied": prepared[index] if index is not None else str(root / "scripts/default-setup.sh"),
     "seed_id": seed.seed_id if seed else None,
 }))
 '''
     plan = json.loads(_run(
         prefix, environment, checkout, "-c", initialize,
         str(checkout), str(root), str(backend), bash, seed_kind or "", SEED, json.dumps(ARGUMENTS),
+        str(env_script) if env_script is not None else "",
     ))
     env = {
         **environment, "FIXTURE_CASE": str(tmp_path), "FIXTURE_RECORD": plan["record"],
@@ -188,7 +199,7 @@ def test_copied_setup_preserves_native_wait_literal_streams_and_seed_custody(
     assert reply["argv"] == ARGUMENTS + (["--interactive", SEED] if seed_kind else [])
     assert reply["stdin"] == "retained stdin\n"
     assert reply["literal_env"] == environment["FIXTURE_LITERAL"]
-    assert "bash" in reply["parent_command"]
+    assert ("bash" if seed_kind else "python") in reply["parent_command"]
     assert reply["terminal"] == [False, False, False]
     _assert_return(plan, 7, bool(seed_kind))
     if seed_kind:
@@ -200,6 +211,62 @@ def test_copied_setup_preserves_native_wait_literal_streams_and_seed_custody(
             plan["record"],
         )
     assert not list(Path(plan["copied"]).parent.glob(".native-seed-*"))
+
+
+@pytest.mark.parametrize("repo_trap", ["replace", "clear"])
+def test_primed_environment_and_repo_exit_trap_survive_without_values_in_argv(
+    tmp_path, installed_native_runtime, native_bash, repo_trap,
+):
+    env_script = tmp_path / "prime.sh"
+    values = ["literal python path ' \u03a9\n\n", "literal python home", "", "literal mac launcher"]
+    env_script.write_text(
+        '[[ -z "${AGENT_WORKTREES_LAUNCH_EXECUTION+x}" ]] || exit 91\n'
+        + "\n".join(
+            "export " + name + "=" + shlex.quote(value)
+            for name, value in zip(
+                ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "__PYVENV_LAUNCHER__"), values,
+            )
+        )
+        + r'''
+env() {
+    local argument
+    for argument; do
+        if [[ "$argument" == *"$FIXTURE_LITERAL"* ]]; then
+            printf 'yes' > "$FIXTURE_CASE/argv-exposed"
+        fi
+    done
+    command env "$@"
+}
+'''
+        + ('trap \'printf "%s" "$?" > "$FIXTURE_CASE/repo-exit"\' EXIT\n'
+           if repo_trap == "replace" else "unset PYTHONHOME\nexport -n VIRTUAL_ENV\ntrap - EXIT\n"),
+        encoding="utf-8",
+    )
+    plan, environment, checkout = _plan(
+        tmp_path, installed_native_runtime, native_bash, "new", env_script=env_script,
+    )
+    environment["AGENT_WORKTREES_LAUNCH_EXECUTION"] = json.dumps({
+        "attempt_id": "f" * 32, "resolution_id": "e" * 32, "operation_id": "d" * 32,
+    })
+    result = run_caller_owned(
+        plan["command"], env=environment, cwd=checkout, input_text="retained stdin\n",
+        timeout=60, max_stdout_bytes=65536, max_stderr_bytes=65536,
+    )
+    assert result.returncode == 7, result.stdout + result.stderr + repr(_observations(plan))
+    assert not (tmp_path / "argv-exposed").exists()
+    fields = (tmp_path / "backend-python-env").read_bytes().decode("utf-8").split("\0")
+    expected = [field for value in values for field in ("x", value)] + [""]
+    if repo_trap == "clear":
+        expected[2:6] = ["", "", "", ""]
+    assert fields == expected
+    reply = json.loads((tmp_path / "backend.json").read_text())
+    backend, = [saved for saved in _observations(plan) if saved["parent_id"]]
+    assert reply["execution_hint"] == {
+        key: backend[key] for key in ("attempt_id", "resolution_id", "operation_id")
+    }
+    if repo_trap == "replace":
+        assert (tmp_path / "repo-exit").read_text() == "7"
+    _assert_return(plan, 7, True)
 
 
 def test_selected_runtime_disappearing_before_setup_never_claims_or_replays_the_seed(

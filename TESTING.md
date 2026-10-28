@@ -188,14 +188,24 @@ require all fields and EOF to share one deadline.
 Synthetic shell providers do not qualify real bootstrap
 startup performance, capability discovery or native backend ownership.
 `test_launch_seed_contract.py` checks exact selected-slot descriptor discovery
-and legacy selection for missing, old, malformed, failed or changed providers.
+and legacy selection for missing, old, malformed, failed, changed or
+custody-unknown providers.
 The POSIX cases in `test_session_shell.py` check conditional native selection
 and copy-only relocation without taking over cold prompt/admission custody.
+Admission-only/native-resume plans retain the legacy exclusion owner.
+Shell controls also bind discovery/preparation to one selected generation,
+reject cross-slot descriptor caching during an A-to-B-to-A selector race,
+chain or clear repository EXIT traps without losing the setup return callback,
+and warn on observer status 3 without another mutation or a changed backend code.
 `tests/native/test_native_seed_setup_posix.py` constructs one real disposable
 runtime and invokes the actual copied normalized setup, including its wrapped
-entry. No-seed, new-seed and resume-seed controls check literal argv/environment,
-stdin/stdout/stderr, Bash parentage, one-time seed completion and nested actual
-return codes. Losing the selected runtime before setup must leave the seed
+entry. No-seed controls retain the legacy owner; new-seed and resume-seed
+controls check literal argv/environment, stdin/stdout/stderr, direct Bash
+parentage, one-time seed completion and nested actual return codes.
+Real priming controls preserve exported Python overrides (including macOS
+Python's consumed launcher variable), empty/unset/unexported states, the new
+backend's execution hint and repository trap status, while intercepting any
+environment value passed to `env` argv. Losing the selected runtime before setup must leave the seed
 unclaimed with no execution or fallback replay.
 The real PTY control retains all three terminal descriptors and foreground
 process-group ownership, keeps the backend alive beyond the finite-provider

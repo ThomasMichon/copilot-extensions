@@ -5,13 +5,26 @@
 . "${BASH_SOURCE[0]%/*}/native-seed-boundary.sh"
 
 _aw_native_setup_require_contract() {
-    _aw_native_seed_runtime "$LAUNCH_SEED_NATIVE_ROOT" || return 3
-    local selected="${AW_NATIVE_SEED_RUNTIME[0]}"
-    [[ "${AW_NATIVE_SETUP_CAPABLE_RUNTIME:-}" != "$selected" ]] || return 0
-    aw_native_seed_supports_posix_setup "$LAUNCH_SEED_NATIVE_ROOT" || return 3
-    _aw_native_seed_runtime "$LAUNCH_SEED_NATIVE_ROOT" || return 3
-    [[ "${AW_NATIVE_SEED_RUNTIME[0]}" == "$selected" ]] || return 3
-    AW_NATIVE_SETUP_CAPABLE_RUNTIME="$selected"
+    aw_native_seed_supports_posix_setup "$LAUNCH_SEED_NATIVE_ROOT"
+}
+
+_aw_native_setup_prepare() {
+    local -a AW_NATIVE_SEED_PHASE_RUNTIME=("${AW_NATIVE_SEED_RUNTIME[@]}")
+    aw_native_seed_prepare "$@"
+}
+
+aw_native_setup_preserve_exit() {
+    local declaration
+    declaration="$(trap -p EXIT)"
+    AW_NATIVE_SETUP_REPO_EXIT=""
+    if [[ -n "$declaration" && "$declaration" != "trap -- '_aw_native_setup_finish' EXIT" ]]; then
+        # Decode only Bash's own rendering of the sourced repository trap,
+        # never a provider reply or environment value.
+        declaration="${declaration#trap -- }"
+        declaration="${declaration% EXIT}"
+        builtin eval "AW_NATIVE_SETUP_REPO_EXIT=$declaration"
+    fi
+    trap _aw_native_setup_finish EXIT
 }
 
 _aw_native_setup_finish() {
@@ -20,11 +33,18 @@ _aw_native_setup_finish() {
     aw_native_seed_phase "$LAUNCH_SEED_NATIVE_ROOT" --phase returned --exit-code "$code" \
         "${AW_NATIVE_SETUP_CALLBACK[@]}" >/dev/null || \
         printf 'Native setup return is unconfirmed; inspect the retained launch.\n' >&2
+    if [[ -n "${AW_NATIVE_SETUP_REPO_EXIT:-}" ]]; then
+        if (exit "$code"); then
+            builtin eval -- "$AW_NATIVE_SETUP_REPO_EXIT"
+        else
+            builtin eval -- "$AW_NATIVE_SETUP_REPO_EXIT"
+        fi
+    fi
     exit "$code"
 }
 
 aw_native_setup_begin() {
-    [[ "$LAUNCH_SEED_PREPARATION" == seed || "$LAUNCH_SEED_PREPARATION" == admission ]] || return 3
+    [[ "$LAUNCH_SEED_PREPARATION" == seed ]] || return 3
     [[ -n "$LAUNCH_SEED_RECORD" && "$LAUNCH_SEED_NATIVE_ROOT" == /* ]] || return 3
     if [[ -n "$LAUNCH_ATTEMPT_ID$LAUNCH_RESOLUTION_ID$LAUNCH_PARENT_ID" ]]; then
         [[ -n "$LAUNCH_ATTEMPT_ID" && -n "$LAUNCH_RESOLUTION_ID" ]] || return 3
@@ -35,14 +55,14 @@ aw_native_setup_begin() {
         return 3
     }
     local -a arguments=(--phase setup --output-format nul --record "$LAUNCH_SEED_RECORD" --pid "$$")
-    [[ "$LAUNCH_SEED_PREPARATION" != admission ]] || arguments+=(--admission-only)
     [[ -z "$LAUNCH_SEED_ID" ]] || arguments+=(--seed-id "$LAUNCH_SEED_ID")
     [[ -z "$LAUNCH_SEED_PRESERVE_ID" ]] || arguments+=(--preserve-seed-id "$LAUNCH_SEED_PRESERVE_ID")
     [[ -z "$LAUNCH_NATIVE_RESUME_SESSION" ]] || arguments+=(--native-resume-session "$LAUNCH_NATIVE_RESUME_SESSION")
     [[ -z "$LAUNCH_ATTEMPT_ID" ]] || arguments+=(--launch-attempt-id "$LAUNCH_ATTEMPT_ID")
     [[ -z "$LAUNCH_RESOLUTION_ID" ]] || arguments+=(--launch-resolution-id "$LAUNCH_RESOLUTION_ID")
     [[ -z "$LAUNCH_PARENT_ID" ]] || arguments+=(--launch-parent-id "$LAUNCH_PARENT_ID")
-    aw_native_seed_prepare "$LAUNCH_SEED_NATIVE_ROOT" "${arguments[@]}" -- "$@" || return 3
+    _aw_native_setup_prepare "$LAUNCH_SEED_NATIVE_ROOT" "${arguments[@]}" -- "$@" || return 3
+    unset AGENT_WORKTREES_LAUNCH_EXECUTION
     AW_NATIVE_SETUP_CALLBACK=(
         --record "$LAUNCH_SEED_RECORD"
         --launch-attempt-id "$AW_NATIVE_SEED_ATTEMPT" --launch-resolution-id "$AW_NATIVE_SEED_RESOLUTION"
@@ -56,8 +76,24 @@ aw_native_setup_begin() {
     trap _aw_native_setup_finish EXIT
 }
 
+_aw_native_setup_backend_environment() {
+    local name declaration attributes
+    builtin printf '%s\0' agent-worktrees.backend-environment.v1
+    for name in PYTHONPATH PYTHONHOME VIRTUAL_ENV __PYVENV_LAUNCHER__; do
+        declaration="$(declare -p "$name" 2>/dev/null)" || declaration=""
+        attributes="${declaration#declare -}"
+        attributes="${attributes%% *}"
+        if [[ "$attributes" == *x* && "$attributes" != *a* && "$attributes" != *A* && "$declaration" == *=* ]]; then
+            builtin printf '%s\0' x "${!name}"
+        else
+            builtin printf '\0\0'
+        fi
+    done
+    builtin printf '%s\0' complete
+}
+
 aw_native_setup_backend() {
-    local code=0 completion="" status="" index
+    local code=0 completion="" status="" index entry hint=""
     # Bash waits in the foreground with the original terminal. Only its direct
     # child exec-replaces Python; the finite provider timeout must never own it.
     trap : INT
@@ -72,7 +108,7 @@ aw_native_setup_backend() {
         --launch-attempt-id "$LAUNCH_ATTEMPT_ID" --launch-resolution-id "$LAUNCH_RESOLUTION_ID"
         --launch-parent-id "$LAUNCH_PARENT_ID"
     )
-    if ! aw_native_seed_prepare "$LAUNCH_SEED_NATIVE_ROOT" "${preparation[@]}" -- "$@"; then
+    if ! _aw_native_setup_prepare "$LAUNCH_SEED_NATIVE_ROOT" "${preparation[@]}" -- "$@"; then
         rm -f -- "$completion"
         return 3
     fi
@@ -81,17 +117,22 @@ aw_native_setup_backend() {
         --launch-attempt-id "$AW_NATIVE_SEED_ATTEMPT" --launch-resolution-id "$AW_NATIVE_SEED_RESOLUTION"
         --operation-id "$AW_NATIVE_SEED_OPERATION" --launch-parent-id "$AW_NATIVE_SEED_PARENT"
     )
-    if _aw_native_seed_runtime "$LAUNCH_SEED_NATIVE_ROOT"; then
+    for entry in ${AW_NATIVE_SEED_ENV[@]+"${AW_NATIVE_SEED_ENV[@]}"}; do
+        case "$entry" in
+            AGENT_WORKTREES_LAUNCH_EXECUTION=*) hint="${entry#*=}" ;;
+        esac
+    done
+    if [[ -n "$hint" ]]; then
+        local AGENT_WORKTREES_LAUNCH_EXECUTION="$hint"
+        export AGENT_WORKTREES_LAUNCH_EXECUTION
         local -a command=(
             "${AW_NATIVE_SEED_RUNTIME[@]}" -m agent_worktrees.launch_seed_native
             --contract-version 1 --root "$LAUNCH_SEED_NATIVE_ROOT" --phase exec
-            --completion-file "$completion" "${callback[@]}" -- "${AW_NATIVE_SEED_ARGV[@]}"
+            --completion-file "$completion" --backend-environment-fd 3
+            "${callback[@]}" -- "${AW_NATIVE_SEED_ARGV[@]}"
         )
-        if [[ "$AW_NATIVE_SEED_ENV_COUNT" == -1 ]]; then
-            "${command[@]}" || code=$?
-        else
-            env -i ${AW_NATIVE_SEED_ENV[@]+"${AW_NATIVE_SEED_ENV[@]}"} "${command[@]}" || code=$?
-        fi
+        env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV -u __PYVENV_LAUNCHER__ \
+            "${command[@]}" 3< <(_aw_native_setup_backend_environment) || code=$?
         for ((index=0; index<220; index++)); do
             [[ ! -s "$completion" ]] || break
             sleep 0.05
@@ -104,9 +145,11 @@ aw_native_setup_backend() {
         aw_native_seed_phase "$LAUNCH_SEED_NATIVE_ROOT" --phase returned --exit-code "$code" \
             "${callback[@]}" >/dev/null || \
             printf 'Native backend return is unconfirmed; inspect the retained handoff.\n' >&2
-    elif [[ "$status" != 3 ]]; then
-        aw_native_seed_phase "$LAUNCH_SEED_NATIVE_ROOT" --phase interrupted \
-            "${callback[@]}" >/dev/null || true
+    else
+        if [[ "$status" != 3 ]]; then
+            aw_native_seed_phase "$LAUNCH_SEED_NATIVE_ROOT" --phase interrupted \
+                "${callback[@]}" >/dev/null || true
+        fi
         printf 'Native backend exec is unconfirmed; inspect the retained handoff.\n' >&2
     fi
     rm -f -- "$completion"

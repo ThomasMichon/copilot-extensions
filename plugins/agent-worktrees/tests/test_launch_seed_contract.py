@@ -9,7 +9,7 @@ import pytest
 from agent_worktrees import launch_seed_contract as contract
 
 
-@pytest.mark.parametrize("fault", [None, "old", "malformed", "failed", "selector-changed"])
+@pytest.mark.parametrize("fault", [None, "old", "malformed", "failed", "selector-changed", "custody-unknown"])
 def test_discovery_queries_only_the_selected_completed_runtime_without_admission(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str | None,
 ) -> None:
@@ -29,7 +29,7 @@ def test_discovery_queries_only_the_selected_completed_runtime_without_admission
         "preparation_output_formats": ["json", "nul"],
         "nul_reply_schema": "agent-worktrees.native-seed-reply.v1",
         "setup_process_start_time_sources": ["caller", "provider"],
-        "backend_execution_modes": [] if fault == "old" else ["posix-exec-v1"],
+        "backend_execution_modes": ["posix-exec-v1"] if fault == "old" else ["posix-exec-env-v1"],
     }
     queries = []
 
@@ -41,6 +41,8 @@ def test_discovery_queries_only_the_selected_completed_runtime_without_admission
         ]
         assert kwargs["timeout"] == 10
         assert "PYTHONPATH" not in kwargs["env"]
+        if fault == "custody-unknown":
+            raise RuntimeError("The caller cannot establish child custody")
         if fault == "selector-changed":
             selector.write_text("replacement", encoding="utf-8")
         return subprocess.CompletedProcess(

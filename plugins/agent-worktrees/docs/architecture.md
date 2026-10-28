@@ -658,8 +658,9 @@ exec/terminal/signal qualification. No Bash-specific process ABI, separate
 identity command, subprocess preflight or lifetime helper is introduced.
 
 The POSIX `exec` phase is a separate, optional backend execution mode,
-advertised as `backend_execution_modes: ["posix-exec-v1"]` by that same selected
-POSIX runtime (the Windows list is empty). It takes the original prepared
+advertised in `backend_execution_modes` as `posix-exec-v1` and the additive
+`posix-exec-env-v1` by that same selected POSIX runtime (the Windows list is
+empty). It takes the original prepared
 correlation/operation, literal backend command and an empty
 `.native-seed-exec.*` status file in the launch-owned
 `.shell` directory. It does not prepare or claim a second prompt. The helper
@@ -672,6 +673,21 @@ observer child or zombie. The observer remains in caller containment, ignores
 only terminal interrupt/quit, and is bounded to ten seconds plus a one-second
 hard termination grace. It writes only `0` or `3`, never prompt/argv/environment
 bytes, to the private completion file.
+
+`posix-exec-env-v1` additionally accepts an inherited
+`--backend-environment-fd` greater than 2. Copied setup requires this capability:
+it preserves its primed environment, applies only the new backend execution hint
+from the preparation reply, and never puts environment values in external argv.
+The exec interpreter starts with Python overrides removed. A finite, private
+NUL pipe carries the original export-presence/value pairs for `PYTHONPATH`,
+`PYTHONHOME`, `VIRTUAL_ENV` and `__PYVENV_LAUNCHER__`, including empty or unset
+values. The last variable can be consumed by macOS Python before application
+code runs. The provider reads a versioned frame with a ten-second/16-MiB bound,
+closes the descriptor before observer creation, and restores those four entries
+only in the environment passed to the actual backend exec. It does not evaluate
+shell text, import the finite provider's sanitized environment, or add a resident
+environment helper. Existing exec callers without the descriptor are unchanged;
+other phases reject it before runtime selection or receipt effects.
 
 The exec pipe is not backend readiness or application acknowledgement. A fast
 exit before the live PID/birth check, observer loss, or incomplete observation
@@ -700,21 +716,31 @@ exit code; the backend's direct child exec-replaces Python instead of retaining
 a Python lifetime waiter. Bash catches its own terminal interrupt while the
 backend receives and handles the original signal. After the child returns,
 Bash settles the bounded status-only observer receipt and resolves the return
-handler afresh. Exec never runs through the finite provider timeout.
+handler afresh. Every unconfirmed observer result, including status 3, warns
+without changing the actual backend exit code; an already settled status 3
+does not trigger a second mutation. Exec never runs through the finite provider timeout.
 Ordinary provider syntax/default replies and Windows child-handle ownership
 are unchanged. Real Copilot/mux and supported installation-removal acceptance
 remain separate from the copied native consumer controls.
 
 The planner queries the descriptor through the exact current completed
 runtime's retention bootstrap before selecting native setup. The copied
-consumer checks again at entry and caches the result only for that selected
-interpreter path; a changed slot triggers fresh discovery before backend
-preparation. Descriptor validation uses the selected interpreter's stdlib,
+consumer checks again at entry and before backend preparation, without a
+capability cache. Each query, its preparation and its exec use the same selected
+interpreter array; a selector change cannot substitute another provider between
+discovery and seed effects. Descriptor validation uses that interpreter's stdlib,
 not shell evaluation or a second identity RPC. Effect-side current-runtime
-validation remains authoritative across a selector race. Copy-only relocation
+validation remains authoritative across a selector race. Admission-only launches,
+including native resume, retain the legacy owner and its launch fence: finite
+copied setup does not supply equivalent exclusion through child startup.
+Copy-only relocation
 does not query capabilities or add admission flags: cold `embody` retains its
 existing prompt owner. Custom setup and unsupported runtimes keep their
 legacy path; no effectful invocation is retried in another mode.
+After setup admission, the copied shell clears an inherited backend execution
+hint. The actual seeded backend receives only its own new hint. Repository
+`env_script` EXIT traps are retained and chained after the outer setup return
+callback; clearing that trap during priming does not remove the callback.
 
 The NUL reply is one fully encoded UTF-8 byte sequence, with a NUL after every
 field, in this order:

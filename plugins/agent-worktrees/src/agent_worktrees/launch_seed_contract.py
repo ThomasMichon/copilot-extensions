@@ -42,10 +42,10 @@ def supports_posix_setup(root: Path) -> bool:
                 for key, value in (
                     ("preparation_output_formats", "nul"),
                     ("setup_process_start_time_sources", "provider"),
-                    ("backend_execution_modes", "posix-exec-v1"),
+                    ("backend_execution_modes", "posix-exec-env-v1"),
                 )
             )
             and (root / "current-version").read_text(encoding="utf-8").strip() == version
         )
-    except (OSError, ValueError, subprocess.SubprocessError):
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
         return False

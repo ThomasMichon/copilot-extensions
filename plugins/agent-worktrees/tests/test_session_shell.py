@@ -460,7 +460,7 @@ def test_posix_native_selection_requires_the_selected_runtime_contract(
     command = ["/bin/bash", str(scripts / "default-setup.sh"), "--model", "literal", "--", ""]
     if wrapped:
         command = ["/bin/bash", str(scripts / "launch-command.sh"), "--recovery", "--", *command]
-    prepared = launch_seed_exec.deferred_command(command, record, admission_only=True, preserve_seed_id="staged")
+    prepared = launch_seed_exec.deferred_command(command, record, seed_id="staged")
     assert queries == [runtime]
     if not supported:
         assert prepared[1:3] == ["-m", "agent_worktrees.launch_seed_exec"]
@@ -470,11 +470,34 @@ def test_posix_native_selection_requires_the_selected_runtime_contract(
     index = launch_seed_exec.native_setup_index(prepared)
     assert index == (5 if wrapped else 1)
     assert Path(prepared[index]).is_relative_to(record.parent / "launch-attempts")
-    assert prepared[index + 1:index + 3] == ["--launch-seed-preparation", "admission"]
-    assert "--launch-seed-preserve-id" in prepared
+    assert prepared[index + 1:index + 3] == ["--launch-seed-preparation", "seed"]
+    assert prepared[prepared.index("--launch-seed-id") + 1] == "staged"
     assert prepared[-4:] == command[-4:]
     if wrapped:
         assert Path(prepared[1]) == Path(prepared[index]).with_name("launch-command.sh")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Native POSIX setup plan")
+@pytest.mark.parametrize("native_resume", [None, "native-original"])
+def test_posix_admission_retains_the_existing_owner_fence(launch, monkeypatch, native_resume):
+    from agent_worktrees import launch_seed_contract
+
+    record, runtime, _assets = launch
+    scripts = runtime / "scripts"
+    shutil.copytree(Path(__file__).resolve().parents[1] / "scripts", scripts)
+    monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: runtime)
+    monkeypatch.setattr(
+        launch_seed_contract, "supports_posix_setup",
+        lambda *_: pytest.fail("Admission-only must retain the existing owner"),
+    )
+    command = ["/bin/bash", str(scripts / "default-setup.sh"), "--stdio"]
+    prepared = launch_seed_exec.deferred_command(
+        command, record, admission_only=True, native_resume_session=native_resume,
+    )
+    assert prepared[1:3] == ["-m", "agent_worktrees.launch_seed_exec"]
+    assert "--admission-only" in prepared
+    assert prepared[-len(command):] == command
+    assert not (record.parent / "launch-attempts").exists()
 
 
 @pytest.mark.skipif(os.name != "posix", reason="Native POSIX setup plan")

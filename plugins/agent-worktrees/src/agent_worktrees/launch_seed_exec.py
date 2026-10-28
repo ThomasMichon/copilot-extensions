@@ -166,7 +166,8 @@ def _native_setup_command(
     if posix and not copy_only:
         from .launch_seed_contract import supports_posix_setup
 
-        if not supports_posix_setup(installer.install_dir()):
+        # Finite native setup cannot retain the admission-only owner's fence.
+        if admission_only or not supports_posix_setup(installer.install_dir()):
             return None
     elif not copy_only:
         from .manager_launch_cli import _usable_worktree_manager_launcher_dir

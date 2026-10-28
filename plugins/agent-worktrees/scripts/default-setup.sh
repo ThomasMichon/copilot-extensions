@@ -165,6 +165,10 @@ if [[ -n "$ENV_SCRIPT" ]]; then
     fi
 fi
 
+if [[ -n "$LAUNCH_SEED_PREPARATION" ]]; then
+    aw_native_setup_preserve_exit
+fi
+
 # -- Environment ----------------------------------------------------------
 # Resolve the project from CWD (git-like); fall back to the directory name if
 # the CLI is unavailable (e.g. recovery mode).

@@ -483,6 +483,30 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   R9 records the remaining native installed-batch acceptance; these component
   results do not close the parent effort or establish the sole timeout cause.
 
+### 2026-10-28 - Copied POSIX consumer review corrections
+
+- The previous exact-head native packet `40754070011` passed 173 Linux and
+  173 stock macOS Bash 3.2 controls, plus the selected Windows packet.
+  Copilot review `5688607493` on `d976a95b8dce0dfc60a43b3d15d5516bef24aeec`
+  nevertheless found eight correctness gaps; that verdict blocks merge.
+- Retain the legacy owner for admission-only/native-resume plans rather than
+  replace its exclusion with a finite check or introduce a lifetime lease.
+  The seeded copied path now binds descriptor discovery, preparation and exec
+  to one interpreter array without a cross-generation capability cache.
+- Keep environment values out of external argv. Require the additive,
+  selected-provider `posix-exec-env-v1` capability before using a private
+  literal environment pipe; preserve primed Python variables without letting
+  them redirect the exec interpreter. Clear the inherited setup hint, apply
+  only the actual backend's new hint, chain repository EXIT traps after the
+  setup return callback, warn on observer status 3 without another mutation,
+  and treat discovery custody uncertainty as unsupported/legacy selection.
+- Focused local validation passed 167 controls with 32 explicit
+  native-platform skips in 52.06 seconds; bounded cleanup was verified.
+  Earlier shell validation caught and corrected a delimiter error in this
+  repair. Fresh native qualification, required checks and a current-head
+  review remain pending. No rollout or real removal acceptance has run;
+  admission-only native replacement and the parent live gates remain open.
+
 ### 2026-10-28 - Conditional copied POSIX consumer candidate
 
 - Continue the already qualified provider prerequisites with canonical Bash

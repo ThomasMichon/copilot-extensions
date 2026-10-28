@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 import shlex
 import shutil
@@ -71,7 +72,7 @@ def _run(
 ) -> subprocess.CompletedProcess[str]:
     with tempfile.TemporaryDirectory(prefix="native-seed-launch-") as directory:
         if script_path == SCRIPT:
-            for name in ("native-seed-boundary.sh", "native-seed-reply.sh"):
+            for name in ("native-seed-boundary.sh", "native-seed-reply.sh", "native-seed-setup.sh"):
                 shutil.copy2(SCRIPT.with_name(name), Path(directory) / name)
             script_path = Path(directory) / SCRIPT.name
         result = run_caller_owned(
@@ -92,6 +93,146 @@ def test_finite_phase_streams_exact_reply_and_returns_provider_status(tmp_path: 
     assert result.returncode == 0, result.stderr
     assert result.stdout.encode("utf-8") == expected
     assert not result.stderr
+
+
+def _contract_slot(root: Path, version: str, *, supported=True, discovery_tail="") -> None:
+    _slot(root, version)
+    python = root / "versions" / version / "bin" / "python"
+    preparation = python.read_text(encoding="utf-8")
+    descriptor = json.dumps({
+        "contract": "agent-worktrees.native-seed", "version": 1,
+        "preparation_output_formats": ["nul"],
+        "nul_reply_schema": "agent-worktrees.native-seed-reply.v1",
+        "setup_process_start_time_sources": ["provider"],
+        "backend_execution_modes": ["posix-exec-env-v1"] if supported else ["posix-exec-v1"],
+    })
+    python.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        'root="${0%/versions/*}"\n'
+        'for argument; do\n'
+        ' if [[ "$argument" == --describe-contract ]]; then\n'
+        f'  printf "%s\\n" {shlex.quote(version)} >> "$root/described"\n'
+        f"  {discovery_tail or ':'}\n"
+        f"  printf '%s\\n' {shlex.quote(descriptor)}\n"
+        '  exit 0\n fi\n'
+        ' if [[ "$argument" == -c ]]; then\n'
+        f"  exec {shlex.quote(_shell_path(Path(sys.executable)))} \"$@\"\n"
+        ' fi\ndone\n'
+        f'[[ "$(cat "$root/current-version")" == {shlex.quote(version)} ]] || exit 3\n'
+        f'printf "%s\\n" {shlex.quote(version)} >> "$root/effects"\n'
+        + preparation,
+        encoding="utf-8", newline="\n",
+    )
+
+
+def test_setup_preparation_keeps_the_capability_checked_generation(tmp_path: Path) -> None:
+    root = tmp_path / "runtime"
+    _contract_slot(root, "A", discovery_tail='printf "B\\n" > "$root/current-version"')
+    _contract_slot(root, "B", supported=False)
+    (root / "current-version").write_text("A", encoding="utf-8")
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+. "${1%/*}/native-seed-setup.sh"
+LAUNCH_SEED_NATIVE_ROOT="$2"
+_aw_native_setup_require_contract
+[[ "${AW_NATIVE_SEED_RUNTIME[0]}" == "$2/versions/A/bin/python" ]]
+if _aw_native_setup_prepare "$2" --phase prepare --output-format nul; then exit 90; fi
+''', [root])
+    assert result.returncode == 0, result.stderr
+    assert (root / "described").read_text().splitlines() == ["A"]
+    assert not (root / "effects").exists()
+
+
+def test_setup_discovery_cannot_cache_another_slots_descriptor_during_aba(tmp_path: Path) -> None:
+    root = tmp_path / "runtime"
+    _contract_slot(root, "A", supported=False)
+    _contract_slot(root, "B", discovery_tail='printf "A\\n" > "$root/current-version"')
+    (root / "current-version").write_text("A", encoding="utf-8")
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+. "${1%/*}/native-seed-setup.sh"
+LAUNCH_SEED_NATIVE_ROOT="$2"
+_aw_native_seed_runtime() {
+    local slot="$1/versions/$(cat "$1/current-version")"
+    AW_NATIVE_SEED_RUNTIME=("$slot/bin/python" -I -S -B -X utf8 "$slot/.runtime-bootstrap/runtime_launcher.py")
+    printf 'B\n' > "$LAUNCH_SEED_NATIVE_ROOT/current-version"
+}
+if _aw_native_setup_require_contract; then exit 90; fi
+''', [root])
+    assert result.returncode == 0, result.stderr
+    assert (root / "described").read_text().splitlines() == ["A"]
+    assert not (root / "effects").exists()
+
+
+@pytest.mark.parametrize("backend_code", [0, 7])
+def test_uncertain_observer_warns_without_a_second_mutation_or_changed_exit(
+    tmp_path: Path, backend_code: int,
+) -> None:
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+. "${1%/*}/native-seed-setup.sh"
+LAUNCH_SEED_ID=seed
+LAUNCH_SEED_NATIVE_ROOT="$2"
+LAUNCH_SEED_RECORD=record
+LAUNCH_ATTEMPT_ID=attempt
+LAUNCH_RESOLUTION_ID=resolution
+LAUNCH_PARENT_ID=parent
+_aw_native_setup_require_contract() { AW_NATIVE_SEED_RUNTIME=(_fixture_exec); }
+_aw_native_setup_prepare() {
+    AW_NATIVE_SEED_ATTEMPT=attempt
+    AW_NATIVE_SEED_RESOLUTION=resolution
+    AW_NATIVE_SEED_OPERATION=operation
+    AW_NATIVE_SEED_PARENT=parent
+    AW_NATIVE_SEED_ENV=('AGENT_WORKTREES_LAUNCH_EXECUTION=fixture')
+    AW_NATIVE_SEED_ARGV=(backend)
+}
+_fixture_exec() {
+    while [[ "$1" != --completion-file ]]; do shift; done
+    printf '3\n' > "$2"
+    return "$FIXTURE_CODE"
+}
+env() {
+    while [[ "$1" == -u ]]; do shift 2; done
+    "$@"
+}
+aw_native_seed_phase() { printf 'UNEXPECTED MUTATION\n'; return 3; }
+code=0
+aw_native_setup_backend backend || code=$?
+[[ "$code" == "$FIXTURE_CODE" ]]
+'''.replace("set -euo pipefail", f"set -euo pipefail\nFIXTURE_CODE={backend_code}"), [tmp_path])
+    assert result.returncode == 0, result.stderr
+    assert not result.stdout
+    assert result.stderr == "Native backend exec is unconfirmed; inspect the retained handoff.\n"
+
+
+@pytest.mark.parametrize("repo_trap", ["replace", "clear"])
+def test_setup_return_callback_chains_the_repository_exit_trap(tmp_path: Path, repo_trap: str) -> None:
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+. "${1%/*}/native-seed-setup.sh"
+LAUNCH_SEED_NATIVE_ROOT="$2"
+AW_NATIVE_SETUP_CALLBACK=(--record fixture)
+aw_native_seed_phase() { printf '%s\n' "$@" > "$LAUNCH_SEED_NATIVE_ROOT/callback"; }
+trap _aw_native_setup_finish EXIT
+REPO_TRAP
+aw_native_setup_preserve_exit
+exit 7
+'''.replace(
+        "REPO_TRAP",
+        'trap \'printf "%s" "$?" > "$LAUNCH_SEED_NATIVE_ROOT/repo-exit"\' EXIT'
+        if repo_trap == "replace" else "trap - EXIT",
+    ), [tmp_path])
+    assert result.returncode == 7, result.stderr
+    assert not result.stdout and not result.stderr
+    assert (tmp_path / "callback").read_text().splitlines()[-4:] == [
+        "--exit-code", "7", "--record", "fixture",
+    ]
+    if repo_trap == "replace":
+        assert (tmp_path / "repo-exit").read_text() == "7"
 
 
 def test_finite_phase_preserves_pipe_fields_cwd_stdin_and_caller_descriptors(tmp_path: Path) -> None:

@@ -13,9 +13,32 @@ from agent_procutil.owned_process import run_caller_owned
 from agent_worktrees import config as cfg, launch_execution as audit
 from agent_worktrees import launch_seed_exec as legacy, launch_seed_native as native
 from agent_worktrees import launch_seed_state as seeds, tracking
+from agent_worktrees import launch_seed_posix
 from agent_worktrees.sessions import LiveVerdict
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="Native POSIX fork/exec contract")
+
+
+@pytest.mark.parametrize("fault", ["truncated", "invalid-presence"])
+def test_backend_environment_pipe_refuses_invalid_frames_and_closes_its_descriptor(fault):
+    fields = [
+        b"agent-worktrees.backend-environment.v1",
+        b"x", b"literal ' \n", b"", b"", b"x", b"", b"x", b"mac launcher",
+        b"complete", b"",
+    ]
+    if fault == "truncated":
+        fields.pop()
+    else:
+        fields[3] = b"unexpected"
+    reader, writer = os.pipe()
+    try:
+        os.write(writer, b"\0".join(fields))
+    finally:
+        os.close(writer)
+    with pytest.raises(ValueError):
+        launch_seed_posix._backend_environment(reader)
+    with pytest.raises(OSError):
+        os.fstat(reader)
 
 
 @pytest.mark.parametrize("name", [

@@ -707,7 +707,7 @@ def test_selected_runtime_describes_literal_output_support_without_preparation()
         "preparation_output_formats": ["json", "nul"],
         "nul_reply_schema": "agent-worktrees.native-seed-reply.v1",
         "setup_process_start_time_sources": ["caller", "provider"],
-        "backend_execution_modes": ["posix-exec-v1"] if os.name == "posix" else [],
+        "backend_execution_modes": ["posix-exec-v1", "posix-exec-env-v1"] if os.name == "posix" else [],
     }
     assert not result.stderr
 
@@ -760,7 +760,10 @@ def test_exec_cli_refuses_incomplete_or_mixed_outcome_before_exec(
     assert seeds.peek(record) == seed
 
 
-def test_completion_file_is_not_accepted_by_existing_preparation(record, monkeypatch, capsys):
+@pytest.mark.parametrize("option", [
+    ["--completion-file", "not-a-preparation-option"], ["--backend-environment-fd", "3"],
+])
+def test_exec_only_inputs_are_not_accepted_by_existing_preparation(record, monkeypatch, capsys, option):
     monkeypatch.setattr(
         native, "require_current_runtime",
         lambda root: pytest.fail("Invalid completion use must refuse before runtime selection"),
@@ -768,7 +771,7 @@ def test_completion_file_is_not_accepted_by_existing_preparation(record, monkeyp
     monkeypatch.setattr(sys, "argv", [
         "launch_seed_native", "--contract-version", "1",
         "--root", str(cfg.install_dir()), "--record", str(record), "--phase", "prepare",
-        "--completion-file", "not-a-preparation-option", "--", "copilot",
+        *option, "--", "copilot",
     ])
     assert native.main() == 3
     assert "unconfirmed" in capsys.readouterr().err

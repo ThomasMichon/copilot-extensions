@@ -52,7 +52,11 @@ aw_native_seed_phase() (
     set +a
     [[ $# -ge 2 ]] || return 3
     local root="$1"
-    _aw_native_seed_runtime "$root" || return 3
+    if [[ -n "${AW_NATIVE_SEED_PHASE_RUNTIME[0]:-}" ]]; then
+        AW_NATIVE_SEED_RUNTIME=("${AW_NATIVE_SEED_PHASE_RUNTIME[@]}")
+    else
+        _aw_native_seed_runtime "$root" || return 3
+    fi
     shift
     _aw_native_seed_run_phase "${_aw_native_seed_deadline:-$((SECONDS + 10))}" env \
         -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV -u __PYVENV_LAUNCHER__ \
@@ -60,11 +64,12 @@ aw_native_seed_phase() (
         -m agent_worktrees.launch_seed_native --contract-version 1 --root "$root" "$@"
 )
 
-aw_native_seed_supports_posix_setup() (
+aw_native_seed_supports_posix_setup() {
     case $- in *x*) set +x ;; esac
     set +a
     local descriptor root="$1"
     _aw_native_seed_runtime "$root" || return 3
+    local -a AW_NATIVE_SEED_PHASE_RUNTIME=("${AW_NATIVE_SEED_RUNTIME[@]}")
     descriptor="$(aw_native_seed_phase "$root" --describe-contract)" || return 3
     _aw_native_seed_run_phase "$((SECONDS + 10))" env \
         -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV -u __PYVENV_LAUNCHER__ \
@@ -80,14 +85,14 @@ try:
         and all(isinstance(value.get(key), list) and item in value[key] for key, item in (
             ("preparation_output_formats", "nul"),
             ("setup_process_start_time_sources", "provider"),
-            ("backend_execution_modes", "posix-exec-v1"),
+            ("backend_execution_modes", "posix-exec-env-v1"),
         ))
     )
 except (ValueError, TypeError):
     supported = False
 raise SystemExit(0 if supported else 3)
 ' "$descriptor" 2>/dev/null
-)
+}
 
 _aw_native_seed_prepare_phase() {
     local _aw_native_seed_completion="$1"
