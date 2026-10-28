@@ -252,6 +252,9 @@ def materialized_local_source_problems(consumer_dir: Path) -> list[str]:
         for name, declaration in sources.items():
             entries = declaration if isinstance(declaration, list) else [declaration]
             for entry in entries:
+                if isinstance(entry, dict) and "workspace" in entry:
+                    problems.append(f"local source {manifest}:{name}: workspace mapping remains")
+                    continue
                 if not isinstance(entry, dict) or "path" not in entry:
                     continue
                 label = f"local source {manifest}:{name}"
@@ -275,6 +278,9 @@ def materialized_local_source_problems(consumer_dir: Path) -> list[str]:
                 route = current
                 for component in Path(raw_path).parts:
                     route /= component
+                    if escapes_root(route, root):
+                        problems.append(f"{label}: {raw_path!r} leaves its owning payload")
+                        break
                     if not route.exists():
                         problems.append(f"{label}: {raw_path!r} has a missing path component")
                         break
