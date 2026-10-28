@@ -199,6 +199,18 @@ evidence is no longer needed.
 
 ## Journal
 
+### 2026-10-28 - Keep shared build identities compatible
+
+The latest review summary correctly identified that valid hardlinked
+executables cannot pass the cache's stricter snapshot hashing. Eligibility now
+retains the original isolated-source transaction before tooling/cache effects
+when the selected UV, interpreter or helper identity has multiple links. This
+preserves ordinary installation compatibility without changing the existing
+bounded-reader ownership or weakening wheel/source input checks. Four native
+filesystem controls pass, covering all three shared identity cases and normal
+canonical-setup fresh/reuse behavior. Runtime-wheel hardlinks remain enabled.
+All nine helper mirrors and their admitted source hash are synchronized.
+
 ### 2026-10-28 - Keep backend-reported requirements on the isolated path
 
 The latest review summary identified older Setuptools contracts whose

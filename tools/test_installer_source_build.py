@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -355,6 +356,37 @@ def test_unsupported_source_or_build_graph_preserves_the_held_transaction(
             assert admitted.source_wheels is None
     assert not root.exists() and not counter.exists()
     assert reason in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("shared_executable", ["uv", "python", "helper"])
+def test_shared_executables_keep_the_original_transaction_before_cache_effects(
+    engine, ordinary, tmp_path, shared_executable, capsys, monkeypatch,
+):
+    plugin, uv, counter, _state = ordinary
+    executable = tmp_path / "shared-executable"
+    executable.write_bytes(b"fixture-executable")
+    os.link(executable, tmp_path / "other-executable-link")
+    if shared_executable == "helper":
+        monkeypatch.setattr(builds, "__file__", str(executable))
+    packages = engine._package_roots(plugin)
+    inputs = engine.FrozenInputs(
+        plugin, packages, engine._construction_hash(engine._source_files(packages), ()),
+    )
+    root = tmp_path / "installation"
+    with engine._retained_inputs(inputs, uv, tmp_path / "absent-python", refresh=False) as retained:
+        if shared_executable == "uv":
+            retained = replace(retained, transaction=retained.transaction._replace(
+                argv=(str(executable), *retained.transaction.argv[1:]),
+            ))
+        with builds.retained_source_wheels(
+            retained, root, uv,
+            executable if shared_executable == "python" else Path(sys.executable),
+            run=lambda *_args, **_kwargs: pytest.fail("shared executable entered cache construction"),
+            timeout=30,
+        ) as admitted:
+            assert admitted is retained
+    assert not root.exists() and not counter.exists()
+    assert "shared-build-identity" in capsys.readouterr().err
 
 
 def test_changed_retained_archive_refuses_before_complete_stamp(engine, ordinary, tmp_path, monkeypatch):

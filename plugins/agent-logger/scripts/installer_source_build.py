@@ -327,6 +327,14 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
     transaction = inputs.transaction
     uv = Path(transaction.argv[0]).resolve(strict=True)
     base_python = base_python.resolve(strict=True)
+    builder = Path(__file__).resolve(strict=True)
+    if any(path.stat().st_nlink != 1 for path in (uv, base_python, builder)):
+        print(
+            "Source wheel cache miss: shared-build-identity; retaining isolated source builds",
+            file=sys.stderr, flush=True,
+        )
+        yield inputs
+        return
     cache_arguments = [
         argument for option, value in _argument_pairs(transaction.argv[3:])
         if option == "--cache-dir" for argument in (option, value)
@@ -384,7 +392,7 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
             "target": target, "tools": tool_content,
             "python": _digest_file(base_python.resolve(strict=True), 256 << 20, deadline),
             "uv": _digest_file(uv, 256 << 20, deadline),
-            "builder": _digest_file(Path(__file__), 1 << 20, deadline),
+            "builder": _digest_file(builder, 1 << 20, deadline),
             "environment": hashlib.sha256(_canonical(environment)).hexdigest(),
         }
         tools_seconds = time.monotonic() - started

@@ -4196,6 +4196,10 @@ An open build requirement or a backend version alone is not a cache identity.
 The base interpreter is resolved in the caller's context before changing child
 directories. Native `uv cache dir` selects the retained transaction's cache;
 offline builds keep that exact location even after feed configuration is removed.
+Hardlinked build executables or helper files retain the original isolated-source
+transaction before cache effects: strict snapshot hashing is not relaxed to
+admit a shared build identity. This does not disable immutable runtime-wheel
+hardlinks.
 
 Each compact project binds its own content and modes, excluding separately
 declared nested vendored projects. A library-only edit therefore need not rebuild
