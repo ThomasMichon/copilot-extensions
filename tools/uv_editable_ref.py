@@ -252,6 +252,13 @@ def materialized_local_source_problems(consumer_dir: Path) -> list[str]:
         for name, declaration in sources.items():
             entries = declaration if isinstance(declaration, list) else [declaration]
             for entry in entries:
+                if isinstance(entry, dict) and any(
+                    isinstance(entry.get(key), str)
+                    and re.match(r"(?i)(?:git\+)?file:", entry[key].strip())
+                    for key in ("git", "url")
+                ):
+                    problems.append(f"local source {manifest}:{name}: file URI mapping remains")
+                    continue
                 if isinstance(entry, dict) and "workspace" in entry:
                     problems.append(f"local source {manifest}:{name}: workspace mapping remains")
                     continue

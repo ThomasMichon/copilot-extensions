@@ -1456,7 +1456,7 @@ linked paths and references back to the monorepo or another payload refuse
 promotion before publication; installer-specific library lists are not the
 release dependency inventory.
 Existing standalone consumers must retain their root manifest. Retained
-workspace mappings and path routes that leave and re-enter the owning payload
+workspace/file-URI mappings and path routes that leave and re-enter the owning payload
 are refused as well.
 Direct local requirements in project/build dependencies, dependency groups, or UV requirement
 settings (including overrides, constraints and extra build dependencies) are

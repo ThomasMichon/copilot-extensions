@@ -68,6 +68,26 @@ def test_materialized_closure_refuses_retained_workspace_sources(tmp_path, neste
     )
 
 
+@pytest.mark.parametrize("kind", ["git", "url"])
+def test_materialized_closure_refuses_file_uri_sources(tmp_path, kind):
+    for nested in (False, True):
+        consumer = tmp_path / str(nested) / "plugins" / "example"
+        package = consumer / "libs" / "nested" if nested else consumer
+        if nested:
+            _write(
+                consumer / "pyproject.toml",
+                '[tool.uv.sources]\nnested = {path = "libs/nested"}\n',
+            )
+        _write(
+            package / "pyproject.toml",
+            f'[tool.uv.sources]\nshared = {{{kind} = "file:///unavailable/package"}}\n',
+        )
+        assert any(
+            "file URI mapping" in problem
+            for problem in editable.materialized_local_source_problems(consumer)
+        )
+
+
 def test_materializer_refuses_missing_standalone_manifest(tmp_path):
     (tmp_path / "worktree-manager").mkdir()
     (tmp_path / "plugins" / "skill-only").mkdir(parents=True)
@@ -124,7 +144,9 @@ def test_materialized_closure_accepts_siblings_archives_and_registry_requirement
         consumer / "pyproject.toml",
         '[project]\ndependencies = ["remote @ https://example.invalid/package.whl"]\n'
         '[tool.uv.sources]\nfirst = {path = "libs/first"}\n'
-        'archive = {path = "vendor/fixture.whl"}\n',
+        'archive = {path = "vendor/fixture.whl"}\n'
+        'remote-git = {git = "https://example.invalid/repository.git"}\n'
+        'remote-url = {url = "https://example.invalid/package.whl"}\n',
     )
     for name, dependency in (("first", "second"), ("second", "first")):
         _write(
