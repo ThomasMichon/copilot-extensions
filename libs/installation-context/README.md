@@ -66,6 +66,9 @@ its whole working set rolled back.
   ordinary Python callers retain literal path semantics. For `resolve` and
   the four mode actions, `PayloadRoot` is raw when an explicit or inherited
   context pointer is present, and shell-normalized otherwise.
+  The isolated worker also expands an inherited `COPILOT_PLUGIN_ROOT` only
+  when the shell did not already normalize it; non-absolute raw values remain
+  untouched for strict SDK refusal.
   A required missing path retains the PowerShell `Path does not exist`
   diagnostic. Ordinary Python, optional-path and permission/other resolution
   diagnostics remain unchanged.

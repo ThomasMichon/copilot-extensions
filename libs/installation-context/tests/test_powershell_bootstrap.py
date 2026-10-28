@@ -100,6 +100,66 @@ if ($LASTEXITCODE -ne 0) { throw 'Literal environment tokens were expanded again
 
 
 @pytest.mark.parametrize("host", HOSTS or [None])
+@pytest.mark.parametrize("action,pointer", [
+    ("resolve", "explicit"), ("resolve", "inherited"), ("resolve", "absent"),
+    ("validate", "explicit"), ("validate", "inherited"),
+])
+def test_sdk_context_accepts_once_expanded_inherited_plugin_root(tmp_path, host, action, pointer):
+    if host is None:
+        pytest.skip("PowerShell is unavailable")
+    harness = tmp_path / "inherited-root.ps1"
+    harness.write_text(
+        r"""
+param([string]$Source, [string]$Root, [string]$Action, [string]$Pointer)
+$ErrorActionPreference = 'Stop'
+$env:COPILOT_EXTENSIONS_CONTEXT = $null
+$env:COPILOT_PLUGIN_ROOT = $null
+$env:SDK_OUTER = '%SDK_INNER%'
+$env:SDK_INNER = 'wrong-directory'
+$raw = Join-Path $Root '%SDK_OUTER%'
+$literal = Join-Path $Root '%SDK_INNER%'
+[void][IO.Directory]::CreateDirectory($literal)
+$common = @{
+    PayloadRoot = $raw
+    PluginId = 'agent-example'
+    SourceJson = '{"source":"github","repo":"example/marketplace"}'
+    CopilotHome = Join-Path $Root 'copilot'
+    DurableHome = Join-Path $Root 'durable'
+}
+$stamp = & $Source -Action stamp @common -PayloadVersion '1.0.0' -PayloadOrigin explicit `
+    -ExpectedNamespaceGeneration 0 -ExpectedInstallGeneration 0 | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) { throw 'Fixture receipt could not be stamped' }
+$env:COPILOT_PLUGIN_ROOT = $raw
+$parameters = @{
+    Action = $Action
+    DurableHome = $common.DurableHome
+    ExpectedPluginId = 'agent-example'
+    ExpectedPayloadRoot = $raw
+}
+if ($Pointer -ceq 'explicit') { $parameters.Context = $stamp.installReceipt }
+elseif ($Pointer -ceq 'inherited') { $env:COPILOT_EXTENSIONS_CONTEXT = $stamp.installReceipt }
+else {
+    foreach ($name in $common.Keys) { $parameters[$name] = $common[$name] }
+}
+$result = & $Source @parameters | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) { throw 'Matching inherited plugin root was rejected' }
+@{ result = $result; literal = $literal } | ConvertTo-Json -Depth 20 -Compress
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-File", str(harness),
+         "-Source", str(SCRIPT), "-Root", str(tmp_path), "-Action", action, "-Pointer", pointer],
+        capture_output=True, text=True, encoding="utf-8", timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    value = json.loads(result.stdout)
+    assert value["result"]["payloadRoot"] == value["literal"]
+    assert not (tmp_path / "wrong-directory").exists()
+
+
+@pytest.mark.parametrize("host", HOSTS or [None])
 def test_sdk_physical_paths_and_missing_suffix_are_not_cached(tmp_path, host):
     if host is None:
         pytest.skip("PowerShell is unavailable")

@@ -359,6 +359,23 @@ transfer without acceptance by a named tracked objective.
 
 ## Journal
 
+### 2026-10-28 - Keep inherited payload expectations consistent
+
+- The full #9354 reassessment accepted the packaging-selector repair, then
+  found one remaining adapter-intake mismatch: an inherited
+  `COPILOT_PLUGIN_ROOT` stayed raw while an explicit expected root expanded.
+- The private worker now expands that inherited path once only when the shell
+  did not supply an already-normalized value. It preserves relative-value
+  refusal and ordinary Python SDK/canonical-path semantics. All 13 script SDK
+  worker copies are synchronized; the worker remains outside Python validator
+  packages.
+- The focused 36-case actor-free regression reproduced 12 raw-root failures
+  before the fix. All 86 adapter cases now pass. Twelve actual Linux
+  PowerShell controls cover matching stamped receipts through explicit,
+  inherited and absent pointers, validation, chained literal tokens and the
+  pre-existing no-context path behavior. No Windows producer or visible
+  qualification was replayed; PR review and aggregate completion remain open.
+
 ### 2026-10-27 - Preserve caller custody across SDK startup failures
 
 - The next #9354 review identified three additional defects. Pointer-based

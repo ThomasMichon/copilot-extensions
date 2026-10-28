@@ -19,6 +19,13 @@ def main(request: dict) -> int:
         os.chdir(request["processDirectory"])
         os.environ.update(request["environment"])
         sdk = runpy.run_path(request["sdk"], run_name="_installation_context_sdk")
+        inherited_payload = os.environ.get("COPILOT_PLUGIN_ROOT")
+        if (
+            inherited_payload
+            and "COPILOT_PLUGIN_ROOT" not in request["environment"]
+            and sdk["_path_is_fully_qualified"](inherited_payload)
+        ):
+            os.environ["COPILOT_PLUGIN_ROOT"] = sdk["_powershell_path_text"](inherited_payload)
         return sdk["_powershell_main"](
             request["action"], request["parameters"], request["supplied"],
         )

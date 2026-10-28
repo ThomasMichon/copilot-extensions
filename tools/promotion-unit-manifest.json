@@ -2908,7 +2908,43 @@
         "tools/promotion_unit_tests/test_shell_caller_owned.py::test_real_pipe_transfer_core_retains_one_original_owner[True-pipe]",
         "tools/promotion_unit_tests/test_shell_caller_owned.py::test_real_pipe_transfer_core_retains_one_original_owner[True-duplicate]",
         "tools/promotion_unit_tests/test_shell_caller_owned.py::test_real_pipe_transfer_core_retains_one_original_owner[True-assign]",
-        "tools/promotion_unit_tests/test_shell_caller_owned.py::test_real_pipe_transfer_core_retains_one_original_owner[True-close-local]"
+        "tools/promotion_unit_tests/test_shell_caller_owned.py::test_real_pipe_transfer_core_retains_one_original_owner[True-close-local]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[raw-explicit-resolve]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[raw-explicit-validate]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[raw-explicit-status]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[raw-explicit-deployment-status]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[raw-explicit-probe-plugin-publication]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[raw-explicit-probe-legacy]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[raw-inherited-resolve]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[raw-inherited-validate]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[raw-inherited-status]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[raw-inherited-deployment-status]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[raw-inherited-probe-plugin-publication]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[raw-inherited-probe-legacy]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[normalized-explicit-resolve]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[normalized-explicit-validate]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[normalized-explicit-status]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[normalized-explicit-deployment-status]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[normalized-explicit-probe-plugin-publication]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[normalized-explicit-probe-legacy]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[normalized-inherited-resolve]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[normalized-inherited-validate]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[normalized-inherited-status]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[normalized-inherited-deployment-status]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[normalized-inherited-probe-plugin-publication]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[normalized-inherited-probe-legacy]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[relative-explicit-resolve]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[relative-explicit-validate]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[relative-explicit-status]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[relative-explicit-deployment-status]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[relative-explicit-probe-plugin-publication]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[relative-explicit-probe-legacy]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[relative-inherited-resolve]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[relative-inherited-validate]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[relative-inherited-status]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[relative-inherited-deployment-status]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[relative-inherited-probe-plugin-publication]",
+        "tools/promotion_unit_tests/test_powershell_adapter.py::test_worker_expands_only_unprocessed_inherited_plugin_root[relative-inherited-probe-legacy]"
     ],
     "sources": {
         "tools/core_python_artifacts.py": "cfeae35bfee4537022e1026ffae498b61b23508426a676d9dc09ca8ab8d4b4a0",
@@ -3248,7 +3284,7 @@
         "plugins/agent-bridge/src/agent_bridge/local_launch_arguments.py": "3fa171dbef64d0f71b2b3ad584f000ca2b99a9c38c9169d319ea2c4aa65e5d8e",
         "tools/promotion_unit_tests/test_local_launch_boundary.py": "0095d29f3b8dacbac3265b32130ca6019a13b020a68851715a0c84d69bfa7076",
         "libs/installation-context/_installation_context_powershell.py": "842bde65e848e3833abe4cb4df14baba160c6a62271dca7df358d294868338b8",
-        "tools/promotion_unit_tests/test_powershell_adapter.py": "054dc12f7b0493e444af92843509d40357fc546745bd239b9de57130336e802d",
+        "tools/promotion_unit_tests/test_powershell_adapter.py": "580a5604da7d623923faf8ad3f363bfe5a65a687af51c72a58fd96c13ca225d4",
         "libs/agent-procutil/src/agent_procutil/_shell_caller_owned.py": "b8a93883bac3abcf1c521cfb193d7ca11fca71d967a1e03e1de161cb42e25482",
         "libs/agent-procutil/src/agent_procutil/_windows_parent_job.py": "5d4f9ce182a3972de278ecf998c058b905606a1c144b4bff579577d74d743ef1",
         "tools/promotion_unit_tests/test_shell_caller_owned.py": "6568563c7bc6909cfb49be9671c28551651d2505182e055b253502537964785e",
@@ -3256,7 +3292,8 @@
         "libs/agent-procutil/tests/sdk_visibility.py": "9ca9ec4eab7726d35cfe04bee71308c3d1b58a416b858abf20723b797bb0419c",
         "tools/promotion_unit_tests/test_sdk_desktop_observer.py": "b842bea09615ba89a36c8d1c2c1c9b7502574124306d28fc7cdfb18c5de45fd1",
         "libs/agent-procutil/tests/sdk_visibility_sources.py": "202d284dd0d3e5e592c8a449ffd23b7b413a58083d657d5e6643f6d60a2c33aa",
-        "libs/agent-procutil/tests/sdk_visibility_cases.py": "0ebd2abb3077b8e62f3ad302748afb4ffd61fcfa6325e82ed596604886a4fbed"
+        "libs/agent-procutil/tests/sdk_visibility_cases.py": "0ebd2abb3077b8e62f3ad302748afb4ffd61fcfa6325e82ed596604886a4fbed",
+        "libs/installation-context/_installation_context_worker.py": "6c10396cb0555736155b25bf3f52d507c9e36b189eb06a175d0a27fc778f6c8d"
     },
     "coverage_targets": [
         "tools/core_runtime_profile.py",
@@ -3411,7 +3448,8 @@
         "libs/agent-procutil/tests/sdk_desktop_observer.py",
         "libs/agent-procutil/tests/sdk_visibility.py",
         "libs/agent-procutil/tests/sdk_visibility_sources.py",
-        "libs/agent-procutil/tests/sdk_visibility_cases.py"
+        "libs/agent-procutil/tests/sdk_visibility_cases.py",
+        "libs/installation-context/_installation_context_worker.py"
     ],
     "max_seconds": 300
 }

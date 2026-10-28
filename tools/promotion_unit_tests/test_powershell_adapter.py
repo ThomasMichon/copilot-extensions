@@ -6,7 +6,7 @@ import json
 import sys
 from argparse import Namespace
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -163,6 +163,63 @@ def test_payload_root_expands_once_only_when_not_normalized_by_shell(
         monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "install.json"))
     arguments = sdk._powershell_arguments(action, _parameters(**values), list(values))
     assert f"--payload-root={expanded}" in arguments
+
+
+@pytest.mark.parametrize("action", [
+    "resolve", "validate", "status", "deployment-status", "probe-plugin-publication", "probe-legacy",
+])
+@pytest.mark.parametrize("pointer", ["explicit", "inherited"])
+@pytest.mark.parametrize("root_state", ["raw", "normalized", "relative"])
+def test_worker_expands_only_unprocessed_inherited_plugin_root(
+    sdk: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    action: str, pointer: str, root_state: str,
+) -> None:
+    monkeypatch.setenv("SDK_OUTER", "%SDK_INNER%")
+    monkeypatch.setenv("SDK_INNER", "wrong-directory")
+    monkeypatch.setenv("SDK_ABSOLUTE", str(tmp_path / "not-admitted"))
+    expanded = str(tmp_path / "%SDK_INNER%")
+    raw = str(tmp_path / "%SDK_OUTER%")
+    inherited = "%SDK_ABSOLUTE%" if root_state == "relative" else raw
+    expected = inherited if root_state == "relative" else expanded
+    processed = {"COPILOT_PLUGIN_ROOT": expanded} if root_state == "normalized" else {}
+    environment = {"COPILOT_PLUGIN_ROOT": inherited}
+    context = str(tmp_path / "install.json")
+    parameters = {"Context": context} if pointer == "explicit" else {}
+    if pointer == "inherited":
+        environment["COPILOT_EXTENSIONS_CONTEXT"] = context
+    spec = importlib.util.spec_from_file_location(
+        "unit_powershell_worker", ENTRY.with_name("_installation_context_worker.py"),
+    )
+    assert spec and spec.loader
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    monkeypatch.setattr(worker, "os", SimpleNamespace(
+        environ=environment, chdir=lambda directory: None,
+    ))
+    monkeypatch.setattr(worker.sys, "path", list(sys.path))
+    monkeypatch.setitem(sys.modules, "agent_procutil", ModuleType("agent_procutil"))
+    monkeypatch.setitem(sys.modules, "agent_procutil._shell_caller_owned", SimpleNamespace(
+        serve=lambda callback, **lifetime: callback(),
+    ))
+
+    def invoke(
+        received_action: str, received_parameters: dict[str, object], supplied: list[str],
+    ) -> int:
+        assert received_action == action and received_parameters == parameters
+        assert environment["COPILOT_PLUGIN_ROOT"] == expected
+        assert sdk.canonical_path(str(tmp_path / "%SDK_INNER%")) == tmp_path / "%SDK_INNER%"
+        return 7
+
+    monkeypatch.setattr(worker.runpy, "run_path", lambda path, **kwargs: {
+        "_powershell_main": invoke,
+        "_path_is_fully_qualified": sdk._path_is_fully_qualified,
+        "_powershell_path_text": sdk._powershell_path_text,
+    })
+    assert worker.main({
+        "sdk": str(ENTRY), "action": action, "parameters": parameters,
+        "supplied": list(parameters), "environment": processed,
+        "processDirectory": str(tmp_path), "lifetime": {},
+    }) == 7
 
 
 @pytest.mark.parametrize("from_file", [False, True])
