@@ -546,11 +546,14 @@ def reclaim_one(
     # Native exit is confirmed before cleanup. Never force by numeric PID:
     # a new owner may already have reused it.
     killed_pids = {r["pid"] for r in reaped if r.get("killed")}
+    cleanup_sessions = None if session_ids is None else sorted(
+        set(session_ids) | {item["session_id"] for item in targets if item.get("session_id")}
+    )
     cleared = reclaim.clear_lock_residue(
         worktree_id=worktree_id,
         force_pids=set(),
         table=table,
-        **({"session_ids": session_ids} if session_ids is not None else {}),
+        **({"session_ids": cleanup_sessions} if cleanup_sessions is not None else {}),
     )
     # A bridge Copilot reaped out from under agent-bridge can't run the bridge's
     # on-exit lock cleanup, so unlink the now-dead bridge.lock too -- otherwise

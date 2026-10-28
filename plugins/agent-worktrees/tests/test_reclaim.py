@@ -552,6 +552,7 @@ class TestReapBoundCopilots:
 
 @pytest.mark.parametrize("outcome", [
     "clear", "timeout", "new-owner", "probe-error", "reused-pid", "protected-owner", "lost-lock",
+    "unregistered-orphan",
 ])
 def test_reclaim_one_requires_fresh_clear_binding_before_success(monkeypatch, tmp_path, outcome):
     from agent_worktrees import reclaim_cli
@@ -559,7 +560,9 @@ def test_reclaim_one_requires_fresh_clear_binding_before_success(monkeypatch, tm
 
     monkeypatch.setattr(reclaim_cli.cfg, "tracking_dir", lambda: tmp_path)
     (tmp_path / "wtA.yaml").write_text("fixture")
-    monkeypatch.setattr(reclaim_cli.tracking, "load_record", lambda *a: SimpleNamespace(sessions=[]))
+    monkeypatch.setattr(reclaim_cli.tracking, "load_record", lambda *a: SimpleNamespace(
+        sessions=[SimpleNamespace(session_id="registered")] if outcome == "unregistered-orphan" else [],
+    ))
     monkeypatch.setattr(reclaim_cli, "_confirm_clear_publication", lambda *a, **k: {"confirmed": True})
     original = {"session_id": "original", "pid": 77777, "start_time": "100", "homing": "bare"}
     if outcome == "reused-pid":
@@ -578,6 +581,9 @@ def test_reclaim_one_requires_fresh_clear_binding_before_success(monkeypatch, tm
     )
 
     def resolve(**kwargs):
+        if outcome == "unregistered-orphan" and kwargs.get("session_ids") is not None:
+            assert kwargs["session_ids"] == ["registered"]
+            return []
         assert kwargs.get("session_ids") is None, "empty registry must not skip orphan discovery"
         if outcome == "probe-error" and not live:
             raise OSError("fixture observation failed")
@@ -602,8 +608,8 @@ def test_reclaim_one_requires_fresh_clear_binding_before_success(monkeypatch, tm
     monkeypatch.setattr(reclaim_cli.tracking, "stamp_bound_live", lambda *a, **k: None)
     monkeypatch.setattr(reclaim_cli.tracking, "stamp_mux_live", lambda *a, **k: None)
     result = reclaim_cli.reclaim_one("wtA", target_start_times={77777: "100"})
-    assert result["ok"] is (outcome in {"clear", "protected-owner"})
-    assert result["state_clear"] is (outcome == "clear")
+    assert result["ok"] is (outcome in {"clear", "protected-owner", "unregistered-orphan"})
+    assert result["state_clear"] is (outcome in {"clear", "unregistered-orphan"})
     assert all(call["force_pids"] == set() for call in cleanup_calls)
     if outcome == "new-owner":
         assert result["remaining_pids"] == [replacement["pid"]]
@@ -618,6 +624,8 @@ def test_reclaim_one_requires_fresh_clear_binding_before_success(monkeypatch, tm
     elif outcome == "lost-lock":
         assert result["targets"] == 0
         assert result["reason"] == "process retirement unconfirmed"
+    elif outcome == "unregistered-orphan":
+        assert cleanup_calls[0]["session_ids"] == ["original", "registered"]
 
 
 @pytest.mark.parametrize("live", [False, True])
