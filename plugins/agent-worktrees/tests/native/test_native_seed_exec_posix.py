@@ -125,7 +125,7 @@ def observed_pipe():
 launch_seed_posix.os.pipe = observed_pipe
 original_signals = {
     name: signal.getsignal(getattr(signal, name))
-    for name in ("SIGPIPE", "SIGXFZ", "SIGXFSZ") if hasattr(signal, name)
+    for name in ("SIGINT", "SIGPIPE", "SIGXFZ", "SIGXFSZ") if hasattr(signal, name)
 }
 if r["fault"] in ("interrupt", "encoding"):
     def failed_exec(*args):

@@ -568,6 +568,16 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   Windows remained green. Restore these dispositions before exec, and the
   helper's original handlers on unwind. Final green proof and review remain
   pending, with production consumers and rollout untouched.
+- The next exact-head review identified a failed-exec cleanup interrupt
+  window. Rebased through the normal source-owned flow, preserving both
+  concurrent effort journals, then run `40739120817` on
+  `c183afa3d8cd3f6eb741a680f60165ddba3fd43a` reproduced actual SIGINT
+  stopping signal-handler restoration on Linux and stock macOS Bash 3.2.
+  Each platform passed the other 154 controls with 17 Windows-only skips;
+  Windows remained green. Defer caught SIGINT through exec-failure publication,
+  pipe closure and handler restoration, then propagate it. Successful exec
+  resets the caught handler in the kernel; an already ignored interrupt stays
+  ignored. This is a cleanup fix, not production consumer activation.
 
 ### 2026-10-28 - Provider-owned setup birth prerequisite
 

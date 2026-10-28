@@ -205,6 +205,9 @@ Non-Python `/bin/sh` controls send each available interpreter-ignored signal
 to the actual exec-replaced process and require signal termination rather
 than a following exit. Failure/interruption controls also require restoration
 of the helper's original signal handlers on unwind.
+A separate actual SIGINT during failed-exec handler restoration requires
+non-success publication, closed pipe ownership and retained definite-failure
+seed restoration, not a false spawned receipt.
 It uses the real seed
 and execution owners in disposable state, not a production launcher or host
 installation. These provider controls do not establish copied POSIX consumer

@@ -147,6 +147,15 @@ def execute(
     os.close(completion)
     outcome = b"U"
     previous_signals = {}
+    interrupt_pending = False
+
+    def defer_interrupt(_signal, _frame):
+        nonlocal interrupt_pending
+        interrupt_pending = True
+
+    interrupt_handler = signal.getsignal(signal.SIGINT)
+    if interrupt_handler != signal.SIG_IGN:
+        signal.signal(signal.SIGINT, defer_interrupt)
     try:
         # Reap only the immediate fork intermediary, not the backend. Its child
         # is reparented and cannot become an unowned zombie under Copilot.
@@ -159,6 +168,8 @@ def execute(
         if status != 0:
             native.spawn_failed(record, correlation, operation_id)
             return 3
+        if interrupt_pending:
+            raise KeyboardInterrupt
         os.write(writer, b"R")
         try:
             # Match Popen(restore_signals=True), not CPython's ignored defaults.
@@ -167,16 +178,25 @@ def execute(
                 if signum is not None:
                     previous_signals[signum] = signal.getsignal(signum)
                     signal.signal(signum, signal.SIG_DFL)
+            if interrupt_pending:
+                raise KeyboardInterrupt
             os.execvpe(command[0], command, os.environ)
         except OSError:
             outcome = b"F"
             return 3
     finally:
-        for signum, handler in previous_signals.items():
-            signal.signal(signum, handler)
-        # A catchable interrupt/encoding failure is not successful exec EOF.
-        # Successful exec closes the descriptor without running this finally.
+        # Exec resets the caught SIGINT handler in the kernel. On unwind,
+        # defer it until non-success is published and all descriptors settle.
         try:
-            os.write(writer, outcome)
+            try:
+                os.write(writer, outcome)
+            finally:
+                os.close(writer)
         finally:
-            os.close(writer)
+            try:
+                for signum, handler in previous_signals.items():
+                    signal.signal(signum, handler)
+            finally:
+                signal.signal(signal.SIGINT, interrupt_handler)
+        if interrupt_pending:
+            raise KeyboardInterrupt
