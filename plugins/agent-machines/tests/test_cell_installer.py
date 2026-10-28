@@ -213,7 +213,7 @@ def test_worker_binds_original_caller_before_payload_identity(helper, payload, m
     assert events == ["admitted", "hashed"]
 
 
-def test_snapshot_control_launches_disable_bytecode_writes():
+def test_snapshot_control_launches_disable_bytecode_writes(monkeypatch):
     sh = (SCRIPTS / "init.sh").read_text(encoding="utf-8")
     ps = (SCRIPTS / "init.ps1").read_text(encoding="utf-8")
     for source in (sh, ps):
@@ -228,11 +228,16 @@ def test_snapshot_control_launches_disable_bytecode_writes():
     assert "$python.Source -I -B (Join-Path $PSScriptRoot 'cell_lifecycle.py')" in ps
     assert sh.count('"$VENV_PYTHON" -B -c \'import agent_machines\'') == 2
     assert ps.count("$VenvPython -B -c 'import agent_machines'") == 2
-    construction = (SCRIPTS.parents[2] / "libs/versioned-runtime/versioned_runtime_construction.py").read_text(
-        encoding="utf-8",
+    spec = importlib.util.spec_from_file_location(
+        "cell_snapshot_constructor_guards",
+        SCRIPTS.parents[2] / "libs/versioned-runtime/versioned_runtime_construction.py",
     )
-    assert 'set -- "$base" -I -B "$helper"' in construction
-    assert "$argv = @('-I', '-B', $Helper," in construction
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    assert 'set -- "$base" -I -B "$helper"' in module.construction_shell_helpers("sh")
+    assert "$argv = @('-I', '-B', $Helper," in module.construction_shell_helpers("ps1")
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux exact-birth process-group qualification")

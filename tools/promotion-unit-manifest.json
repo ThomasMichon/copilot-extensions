@@ -3359,7 +3359,7 @@
         "libs/installation-context/_installation_context_worker.py": "6c10396cb0555736155b25bf3f52d507c9e36b189eb06a175d0a27fc778f6c8d",
         "libs/agent-procutil/tests/test_shell_caller_owned_native.py": "205d3f1ffdff20bd77a4957821e0786857b4f559e8a1b0fe93c275eb10d4b765",
         "tools/promotion_unit_tests/test_cell_installer.py": "56b67d4a86aefa4ccfeb2662205b46c0dec27cecc6e4ce530a19a5b5c55b1af1",
-        "plugins/agent-machines/tests/test_cell_installer.py": "187a3cb9a57cd2f9973cb8ff5918c456a6df8386874988ef2bdaf6bff4c6fb8b",
+        "plugins/agent-machines/tests/test_cell_installer.py": "de004be5b70e1d4bed4945e766f393c167db0682979853eba4fa40814e01bf14",
         "plugins/agent-machines/scripts/cell_installer.py": "041a28230551d926c65ff00866213f5944ff5d1e0596c75e37ffa8cd0af64795",
         "libs/versioned-runtime/versioned_runtime_construction.py": "8573fcd6ff886aff00e2520957e2abe229362df70f49a34690429e10d78bada0"
     },
@@ -3367,6 +3367,7 @@
         "tools/core_runtime_profile.py",
         "tools/core_python_artifacts.py",
         "tools/python_project_inventory.py",
+        "libs/versioned-runtime/versioned_runtime_construction.py",
         "libs/installer-engine/installer_wheel_snapshot.py",
         "libs/installer-engine/installer_wheel_acquisition.py",
         "libs/installer-engine/installer_native_feed.py",
