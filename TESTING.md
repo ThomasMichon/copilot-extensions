@@ -92,6 +92,8 @@ while retaining a live writer, requiring refusal rather than accepting EAGAIN
 as EOF. The fixture executes Bash in place under the finite process owner.
 `test_session_shell.py` checks complete copied POSIX
 setup assets and refusal before partial publication when the reader is absent.
+The real-process reader controls are not marked as fast structural guards;
+the explicit native acceptance jobs select the file directly.
 The existing callback inventory/publication controls cover its installer-owned
 copy scope. These are framing/copy controls, not finite callback execution,
 foreground terminal, PID/birth or native installation-survival qualification.

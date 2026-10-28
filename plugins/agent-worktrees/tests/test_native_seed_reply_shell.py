@@ -12,7 +12,6 @@ from agent_procutil.owned_process import run_caller_owned
 
 from agent_worktrees.launch_seed_native import nul_reply
 
-pytestmark = pytest.mark.guard
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "native-seed-reply.sh"
 
 
