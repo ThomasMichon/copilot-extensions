@@ -17,8 +17,11 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -258,6 +261,45 @@ def test_sh_reconciles_even_with_stale_opt_in_key_present(tmp_path):
     )
     assert "SKIPPED" not in result.stderr, result.stderr
     assert "reconciling in background" in result.stderr, result.stderr
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash not available")
+def test_relative_path_python_remains_available_to_home_check_and_worker(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    plugin = _make_fake_plugin(tmp_path, _PLUGIN_NAME)
+    install = _make_fake_install(home, _PLUGIN_NAME)
+    scripts = plugin / "scripts"
+    binary = scripts / ".venv" / "bin"
+    binary.mkdir(parents=True)
+    calls = tmp_path / "interpreter-calls"
+    marker = tmp_path / "installer-called"
+    (binary / "python3").write_text(
+        "#!/usr/bin/env bash\n"
+        f"printf '%s|%s\\n' \"$0\" \"$PWD\" >> {shlex.quote(_bash_env_path(calls))}\n"
+        f'exec {shlex.quote(_bash_env_path(Path(sys.executable)))} "$@"\n',
+        encoding="utf-8", newline="\n",
+    )
+    (binary / "python3").chmod(0o755)
+    (scripts / "install.sh").write_text(
+        f"#!/usr/bin/env bash\nprintf 'called' > {shlex.quote(_bash_env_path(marker))}\n",
+        encoding="utf-8", newline="\n",
+    )
+    env = _clean_env({"HOME": _bash_env_path(home), "USERPROFILE": str(home)})
+    env["PATH"] = ".venv/bin" + os.pathsep + env["PATH"]
+    result = subprocess.run(
+        [_BASH, "bootstrap-check.sh"], cwd=scripts, env=env,
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0 and result.stdout == "{}", result.stdout + result.stderr
+    deadline = time.monotonic() + 10
+    while not marker.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    log = install / "reconcile.log"
+    assert marker.exists(), log.read_text(encoding="utf-8-sig") if log.exists() else result.stderr
+    recorded = [line.split("|", 1) for line in calls.read_text().splitlines()]
+    assert all(path.startswith("/") for path, _cwd in recorded), recorded
+    assert sum(cwd == _bash_env_path(home) for _path, cwd in recorded) >= 2, recorded
 
 
 if __name__ == "__main__":

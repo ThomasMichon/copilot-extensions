@@ -169,6 +169,11 @@ attempt-fenced status and log; a superseded worker cannot overwrite replacement
 evidence. Diagnostic-write failures are explicit and retain the original refusal
 classification rather than admitting fallback or reporting success.
 
+The POSIX session hook anchors a relative `PATH` interpreter to its original
+working directory before changing to home. Both its fresh pre-launch admission
+check and the worker reuse that same absolute path; the selected interpreter
+leaf and virtual-environment context are not replaced by a later PATH lookup.
+
 No prepare-only or supervisor-preserving adoption option is introduced here.
 Construction and adoption remain coupled in the existing installer. Use the
 existing preparation/retention owner's accepted interface when available;

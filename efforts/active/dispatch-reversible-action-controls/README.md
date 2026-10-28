@@ -604,3 +604,17 @@ Initial tests must prove the current gap before adding the guards.
   with 19 platform skips; actual host PowerShell passed 84 with 11 explicitly
   native-Windows-only skips on WSL. Fresh exact-head native qualification and
   independent source review remain required.
+
+### 2026-10-28 - Relative bootstrap interpreter selection
+
+- Independent review identified a relative `PATH` interpreter working during
+  initial hook admission but disappearing after the hook changed to home.
+  The actual drift fixture reproduced exit 126 before reconciliation.
+- Anchor the selected path to the original working directory before that
+  change, preserving existing absolute forms and the selected interpreter leaf.
+  Reuse it for both the fresh admission check and worker; no later PATH lookup
+  or interpreter substitution is introduced.
+- A portable real-interpreter fixture records absolute calls from the original
+  directory and at least two from home, then verifies the worker's installer
+  effect. The combined contained hook/native selection passed all 57 cases.
+  Fresh exact-head native qualification and review remain required.
