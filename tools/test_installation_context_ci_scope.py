@@ -185,6 +185,42 @@ def test_native_seed_reader_acceptance_uses_stock_posix_shells_only_when_selecte
     assert not any(step.get("continue-on-error", False) for step in job["steps"])
 
 
+def test_dispatch_maintenance_native_acceptance_is_manual_bounded_and_source_pinned() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert "dispatch-maintenance" in trigger["workflow_dispatch"]["inputs"]["portfolio"]["options"]
+    packets = {
+        "policy": {"test_action_native_ps1.py", "test_action_native_policy.py",
+                   "test_cutover_spawn_env.py", "test_conditional_deploy.py"},
+        "installer": {"test_install_lifecycle_emit.py", "test_installer_required_cutover.py",
+                      "test_retained_runtime.py"},
+        "worker": {"test_windows_bootstrap_reconcile_lifecycle.py",
+                   "test_bootstrap_check_reconcile_always_on.py"},
+    }
+    for packet, expected in packets.items():
+        job = workflow["jobs"][f"dispatch-maintenance-{packet}-windows"]
+        assert job["if"] == (
+            "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'dispatch-maintenance'"
+        )
+        assert job["runs-on"] == "windows-latest" and job["timeout-minutes"] == 15
+        assert job["env"]["PYTEST_ADDOPTS"] == "-ra"
+        assert job["steps"][0]["with"] == {
+            "ref": "${{ github.sha }}", "persist-credentials": False,
+        }
+        preflight = job["steps"][-2]
+        assert "if (-not $IsWindows)" in preflight["run"]
+        assert "$actual -cne $env:GITHUB_SHA" in preflight["run"]
+        words = shlex.split(job["steps"][-1]["run"])
+        assert words[:3] == ["python", "tools/run-plugin-tests.py", "agent-dispatch"]
+        selected = {Path(words[i + 1]).name for i, word in enumerate(words) if word == "--test-file"}
+        assert selected == expected
+        assert "--timeout 300 --plugin-timeout 360" in job["steps"][-1]["run"]
+        assert "--allow-host-state" not in words
+        assert not any(step.get("continue-on-error", False) for step in job["steps"])
+
+
 def test_displaced_native_sources_and_unavailable_portfolio_remain_explicit() -> None:
     root = HERE.parent
     for source in (

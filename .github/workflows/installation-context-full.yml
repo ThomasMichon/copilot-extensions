@@ -30,6 +30,7 @@ on:
           - bridge-contracts
           - bridge-binding
           - dispatch-binding
+          - dispatch-maintenance
           - promotion-controls
           - pane-argv
           - manager-uninstall
@@ -589,6 +590,97 @@ jobs:
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_dispatch_scoped_publication.py
           --allow-explicit-tiers --test-timeout 60 --timeout 540
+
+  dispatch-maintenance-policy-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'dispatch-maintenance'
+    name: Dispatch maintenance policy (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      UV_PYTHON: "3.12"
+      PYTEST_ADDOPTS: "-ra"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - &dispatch-maintenance-preflight
+        name: Verify native Windows and immutable qualification source
+        shell: pwsh
+        run: |
+          if (-not $IsWindows) { throw 'Native Windows qualification requires Windows' }
+          if (-not (Get-Command pwsh -ErrorAction SilentlyContinue)) { throw 'PowerShell is required' }
+          $actual = git rev-parse HEAD
+          if ($actual -cne $env:GITHUB_SHA) { throw 'Qualification source differs from dispatch SHA' }
+      - name: Qualify real policy refusal and captured cutover environment
+        run: >-
+          python tools/run-plugin-tests.py agent-dispatch
+          --test-file tests/test_action_native_ps1.py
+          --test-file tests/test_action_native_policy.py
+          --test-file tests/test_cutover_spawn_env.py
+          --test-file tests/test_conditional_deploy.py
+          --timeout 300 --plugin-timeout 360 --test-timeout 45
+
+  dispatch-maintenance-installer-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'dispatch-maintenance'
+    name: Dispatch installer cleanup and retained runtime (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      UV_PYTHON: "3.12"
+      PYTEST_ADDOPTS: "-ra"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - *dispatch-maintenance-preflight
+      - name: Qualify actual cleanup, refusal propagation and retained-runtime assertions
+        run: >-
+          python tools/run-plugin-tests.py agent-dispatch
+          --test-file tests/test_install_lifecycle_emit.py
+          --test-file tests/test_installer_required_cutover.py
+          --test-file tests/test_retained_runtime.py
+          --timeout 300 --plugin-timeout 360 --test-timeout 45
+
+  dispatch-maintenance-worker-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'dispatch-maintenance'
+    name: Dispatch native bootstrap worker lifecycle (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      UV_PYTHON: "3.12"
+      PYTEST_ADDOPTS: "-ra"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - *dispatch-maintenance-preflight
+      - name: Qualify native background-worker identity, completion and owned cleanup
+        run: >-
+          python tools/run-plugin-tests.py agent-dispatch
+          --test-file tests/test_windows_bootstrap_reconcile_lifecycle.py
+          --test-file tests/test_bootstrap_check_reconcile_always_on.py
+          --timeout 300 --plugin-timeout 360 --test-timeout 60
 
   pane-argv-windows:
     if: github.event_name == 'workflow_dispatch' && (inputs.portfolio == 'pane-argv' || inputs.portfolio == 'mux-companion')

@@ -54,10 +54,22 @@ emit_session_start_json() {
 trap 'emit_session_start_json' EXIT
 if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then exit 0; fi
 py="$(command -v python3 || command -v python || true)"; [ -n "$py" ] || exit 0
+case "$py" in
+  /*|[A-Za-z]:/*|[A-Za-z]:\\*|\\\\*) ;;
+  *) py="$PWD/$py" ;;
+esac
 name="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1])).get("name",""))' "$PluginDir/plugin.json" 2>/dev/null)"
 [ -n "$name" ] || exit 0
 InstallDir="$HOME/.$name"
 assert_bootstrap_publication() {
+  local action_rc=0
+  "$py" -I -B "$ScriptDir/action_controls.py" \
+      --root "$InstallDir" --action automatic-runtime-reconcile --automatic >/dev/null || action_rc=$?
+  if [[ "$action_rc" != 0 ]]; then
+    printf '[%s] Automatic runtime reconciliation skipped; retry on a later session start after resolving the reported action policy.\n' "$name" >&2
+    [[ "$action_rc" != 3 ]] || exit 3
+    exit 126
+  fi
   local helper="$ScriptDir/installation-context/plugin-publication-probe.sh"
   if [[ -f "$helper" ]]; then
     bash "$helper" "$PluginDir" "$name" "$InstallDir" && return 0
@@ -82,7 +94,12 @@ if [ ! -f "$Manifest" ]; then
   done
   if [ -n "$installer" ]; then
     assert_bootstrap_publication
-    bash "$installer" stamp >/dev/null 2>&1 || true
+    stamp_rc=0
+    bash "$installer" stamp >/dev/null || stamp_rc=$?
+    if [[ "$stamp_rc" != 0 ]]; then
+      printf '[%s] Automatic stamp did not complete (exit %s); no background retry attempted.\n' "$name" "$stamp_rc" >&2
+      exit "$stamp_rc"
+    fi
   fi
   exit 0
 fi
@@ -181,12 +198,19 @@ if [ -f "$lockFile" ]; then
     if [ "$lockMtime" -gt 0 ] && [ $((nowSecs - lockMtime)) -lt "$staleSeconds" ]; then
       exit 0
     fi
+    assert_bootstrap_publication
     kill "$lockPid" 2>/dev/null || true
   fi
 fi
 
 echo "[$name] runtime $deployed -> $current; reconciling in background..." >&2
 cd "$HOME" || { echo "reconcile launch failed: HOME is unavailable" >&2; exit 1; }
-nohup bash "${target[@]}" >/dev/null 2>&1 &
+assert_bootstrap_publication
+nohup bash -c '
+  "$1" -I -B "$2" --root "$3" --action automatic-runtime-reconcile --automatic >/dev/null || exit $?
+  shift 3
+  exec bash "$@"
+' agent-dispatch-reconcile "$py" "$ScriptDir/action_controls.py" "$InstallDir" \
+    "${target[@]}" >"$InstallDir/reconcile.log" 2>&1 &
 echo $! > "$lockFile" 2>/dev/null || true
 exit 0

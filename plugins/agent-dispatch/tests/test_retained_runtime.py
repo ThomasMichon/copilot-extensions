@@ -152,8 +152,8 @@ def test_retained_runtime_reuses_slot_without_construction_completion_or_gc(
         python.chmod(0o755)
         script = "\n".join([
             "set -euo pipefail",
-            f"INSTALL_DIR={shlex.quote(str(tmp_path))}; LOCAL_BIN=$INSTALL_DIR/bin",
-            f"VENV_PYTHON={shlex.quote(str(python))}; LINK_PYTHON=$VENV_PYTHON",
+            f"INSTALL_DIR={shlex.quote(tmp_path.as_posix())}; LOCAL_BIN=$INSTALL_DIR/bin",
+            f"VENV_PYTHON={shlex.quote(python.as_posix())}; LINK_PYTHON=$VENV_PYTHON",
             "SRC_VERSION=1.0.0; VERSIONED_RUNTIME=1; FORCE=1; RETAINED_RUNTIME=record",
             "_step() { :; }; _ok() { :; }; _skip() { :; }; _fail() { echo \"$1\"; }",
             "_versioned_current() { echo 2.0.0; }",

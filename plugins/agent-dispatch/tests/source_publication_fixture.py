@@ -70,6 +70,7 @@ def function(ext: str, name: str) -> str:
 def script(ext: str) -> str:
     if ext == "ps1":
         names = (
+            "Assert-DispatchActions",
             "Install-Runtime", "Get-PayloadHash", "Get-BootstrapPython",
             "Invoke-VersionedSlotClean", "Invoke-VersionedMarkComplete",
             "New-PluginBuildSnapshot", "Enter-PluginSnapshotLock", "Publish-FileAtomically",
@@ -292,6 +293,7 @@ def stage(tmp_path: Path, *, broken_b: bool = False):
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
         )
         for relative in (
+            "action_controls.py",
             "source-runtime.sh", "source-runtime.ps1", "base-python.ps1", "versioned_runtime_native.ps1",
             "versioned_runtime.py", "versioned_runtime_leases.py",
             "versioned_runtime_construction.py", "versioned_runtime_source.py",
@@ -313,6 +315,8 @@ def stage(tmp_path: Path, *, broken_b: bool = False):
         package = payload / "src" / "agent_dispatch"
         package.mkdir(parents=True)
         (package / "__init__.py").write_text("", encoding="utf-8")
+        for module in ("action_policy.py", "action_controls.py", "install_paths.py"):
+            shutil.copy2(PLUGIN / "src" / "agent_dispatch" / module, package / module)
         (package / "embody.py").write_text("", encoding="utf-8")
         (package / "__main__.py").write_text(
             'import sys\nfrom pathlib import Path\nif __name__ == "__main__":\n'

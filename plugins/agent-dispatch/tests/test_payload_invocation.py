@@ -28,6 +28,7 @@ def test_payload_manifest_describes_agent_dispatch_runtime() -> None:
         "noSelfProvisionEnv": "AGENT_DISPATCH_NO_SELFPROVISION",
         "purpose": "Coordinate queued agent work and task lifecycles",
         "installer": "install",
+        "installerLifecycle": True,
         "windowsCatalogShim": "cmd",
         "provisionMode": "direct",
         "payloadRootEnv": "AGENT_DISPATCH_PAYLOAD_ROOT",

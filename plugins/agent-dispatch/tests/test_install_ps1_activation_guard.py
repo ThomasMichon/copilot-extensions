@@ -56,7 +56,11 @@ def _extract_function_block(name: str) -> str:
             depth -= 1
             if depth == 0:
                 source = _PLUGIN_ROOT / "scripts" / "source-runtime.ps1"
-                return f". '{source}'\n" + text[func_start : i + 1]
+                admission = (
+                    _extract_function_block("Assert-DispatchActions")
+                    if name == "Invoke-VersionedActivate" else ""
+                )
+                return admission + f". '{source}'\n" + text[func_start : i + 1]
         i += 1
     raise AssertionError(f"unbalanced braces extracting function {name!r}")
 

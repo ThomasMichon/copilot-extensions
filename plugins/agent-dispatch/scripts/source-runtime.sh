@@ -1,3 +1,47 @@
+_require_actions() {
+    # Stamping remains Python-free when ordinary explicit state is absent.
+    # Prove searchable, unlinked ancestry rather than treating EACCES as absence.
+    local probe="$INSTALL_DIR"
+    while [[ "$probe" != / && "$probe" == */ ]]; do probe="${probe%/}"; done
+    if [[ ! -e "$INSTALL_DIR/action-controls.json" && ! -L "$INSTALL_DIR/action-controls.json" ]]; then
+        while [[ ! -L "$probe" ]]; do
+            if [[ -e "$probe" && ( ! -d "$probe" || ! -x "$probe" ) ]]; then break; fi
+            [[ "$probe" != / ]] || return 0
+            local parent
+            parent="$(dirname -- "$probe")"
+            [[ "$parent" != "$probe" ]] || break
+            probe="$parent"
+        done
+    fi
+    local py
+    py="$(_bootstrap_python)" || {
+        _fail 'Action policy prerequisite unavailable: no bootstrap Python'
+        return 3
+    }
+    [[ -f "$SCRIPT_DIR/action_controls.py" ]] || {
+        _fail 'Action policy prerequisite unavailable: payload reader is missing'
+        return 3
+    }
+    local -a arguments=(--root "$INSTALL_DIR")
+    local action
+    for action in "$@"; do arguments+=(--action "$action"); done
+    local result=0
+    "$py" -I -B "$SCRIPT_DIR/action_controls.py" "${arguments[@]}" >/dev/null || result=$?
+    if [[ "$result" != 0 ]]; then
+        _fail "Action policy did not admit requested maintenance (reader exit $result)"
+        return 3
+    fi
+}
+
+_maintenance_preflight() {
+    case "${1:-${ACTION:-install}}" in
+        install|update|provision)
+            _require_actions runtime-activation coordinator-replacement supervisor-reconcile ;;
+        stamp) _require_actions runtime-activation ;;
+        *) return 0 ;;
+    esac
+}
+
 _initialize_source_runtime() {
     PACKAGE_VERSION="$SRC_VERSION"
     SOURCE_RUNTIME_IDENTITY=""

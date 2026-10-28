@@ -10,6 +10,17 @@ approval engine is added by the pure notice controls. copilot-extensions
 How to run the plugin test suites, explicit development checks, and the
 **opt-in end-to-end smoke tests** that require real infrastructure.
 
+Dispatch's reversible-maintenance Windows packet uses the existing
+`installation-context-full.yml` manual workflow with
+`portfolio=dispatch-maintenance`. Dispatch the reviewed source branch; each
+job checks out and verifies the immutable dispatch SHA. Three bounded packets
+exercise actual policy/overlay behavior, installer cleanup/retained-runtime
+assertions and the native background-worker lifecycle under the canonical
+runner's disposable roots and process containment. Read the actual outcomes
+and skips: WSL PowerShell and a skipped Windows-only case are not native Windows
+evidence. This focused opt-in lane neither expands required unit-only CI nor
+reenrolls the unavailable full Windows rotation.
+
 Fleet-manager's `test_komodo_*` packet exercises strict declaration/current
 grant checks, real caller-owned synthetic Docker protocol processes, physical
 bridge and exact-container custody, preserving adoption versus managed fixed
