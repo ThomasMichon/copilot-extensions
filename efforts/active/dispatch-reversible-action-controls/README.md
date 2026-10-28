@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent reviewed source slices targeting `dev`
 - **Created:** 2026-10-27
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [agent-dispatch](../../../visions/plugins/agent-dispatch/README.md#reversible-action-inhibition)
 - **Umbrella issue:** #9334
 
@@ -73,20 +73,20 @@ worker termination or cross-plugin rollout.
 
 ### Phase 1 - Review the action contract
 
-- [ ] Land this proposal through independent review before implementation.
-- [ ] Distinguish shared bootstrap state, installation-scoped action inhibition,
+- [x] Land this proposal through independent review before implementation.
+- [x] Distinguish shared bootstrap state, installation-scoped action inhibition,
       static self-update configuration and existing lane-stop overrides.
       New controls must not silently reinterpret the latter two.
-- [ ] Define effective-state reporting through existing CLI/status/logging
+- [x] Define effective-state reporting through existing CLI/status/logging
       surfaces. Report the affected action, scope, reason and state source
       without exposing private task content or credentials.
 
 ### Phase 2 - Implement the recurring action boundaries
 
-- [ ] Reuse existing installation ownership and atomic operator-state mutation
+- [x] Reuse existing installation ownership and atomic operator-state mutation
       primitives, not a second control service. Keep namespaced installations
       independent of the legacy global bootstrap file.
-- [ ] Re-read effective state before coordinator and supervisor automatic
+- [x] Re-read effective state before coordinator and supervisor automatic
       replacement. Keep their polls alive while inhibited; clear must resume
       normal eligibility checks without a manual restart. Existing static
       configuration remains an independent veto.
@@ -173,3 +173,36 @@ Initial tests must prove the current gap before adding the guards.
 - Traced process-initialized self-update settings, the lane desired-set override
   and the update's unconditional supervisor-reconciliation call.
 - Proposal only: no runtime implementation or installed control change yet.
+
+### 2026-10-27 - Proposal reviewed
+
+- #9337 merged as `e61e81219c` after the current-head Copilot review and required
+  checks passed. Its sole Low finding requested the PR's documentation-impact
+  assessment; that metadata was corrected and the thread resolved.
+- Re-read the complete Plan and Validation Plan. Only proposal review is
+  complete; action readers, consumers, maintenance controls and running
+  qualification remain open.
+- Begin with a behavioral regression against the actual supervisor decision:
+  active shared state must leave it and its lane alive, then clearing state
+  must let that same consumer admit automatic replacement.
+
+### 2026-10-27 - Resident self-update implementation
+
+- The initial two actual-supervisor regression cases failed at the unguarded
+  replacement boundary before implementation, then passed with live checks.
+- Added a dependency-free bounded policy reader, an installation-aware runtime
+  adapter, and local `actions contract|status|inhibit|clear` commands. They reuse
+  the existing serialized atomic mutation primitive but never reinterpret the
+  lane-stop override file.
+- Current command support advertises only the two actual resident consumers:
+  coordinator replacement and supervisor self-update. Native maintenance and
+  worker-admission actions must be added by subsequent reviewed slices, not
+  advertised prematurely. The [owning guide](../../../plugins/agent-dispatch/docs/action-controls.md)
+  documents this limit and running-consumer qualification.
+- The actual coordinator lifespan loop remains ready through inhibited polls
+  and admits replacement after state is cleared; supervisor tests also cover
+  retaining its lane and lease. Static startup settings remain independent.
+- Source implementation and contained tests are not release, installed adoption
+  or completion of this effort. Next: review this bounded resident slice, then
+  implement the remaining admission and native maintenance boundaries before
+  controlled running qualification.

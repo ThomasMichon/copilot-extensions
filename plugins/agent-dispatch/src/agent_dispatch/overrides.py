@@ -112,6 +112,7 @@ def mutate_overrides(
     mutator: Callable[[dict[str, dict]], T],
     *,
     timeout: float = 5.0,
+    loader: Callable[[Path], dict[str, dict]] = load_overrides,
 ) -> T:
     """Serialize one complete override read-modify-write transaction."""
     from .single_instance import SingleInstance
@@ -125,7 +126,7 @@ def mutate_overrides(
                 raise TimeoutError(f"timed out acquiring override lock for {target}")
             time.sleep(0.05)
         try:
-            overrides = load_overrides(target)
+            overrides = loader(target)
             result = mutator(overrides)
             save_overrides(target, overrides)
             return result
