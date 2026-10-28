@@ -21,7 +21,7 @@ look for "is there ambient guidance for X."
 | Multi-agent rules of engagement | [`multi-agent-rules-of-engagement`](instructions/multi-agent-rules-of-engagement.instructions.md) | [`using-multi-agent-rules-of-engagement`](skills/using-multi-agent-rules-of-engagement/SKILL.md) | In-scope same-operator peer authority without redundant approval, scope attenuation, real custody and gates, collective decisions/handoff, authoritative countermand, external ingress and minimal provenance |
 | Process-spawn hygiene | [`process-hygiene-fallback`](instructions/process-hygiene-fallback.instructions.md) | [`spawning-headless-processes`](skills/spawning-headless-processes/SKILL.md) | Spawn every ad hoc CMD/PowerShell/Python/Node/etc. child process headlessly — especially on Windows, where a naive spawn allocates a visible, focus-stealing console window per invocation |
 | Coordinator-first delegation | [`delegation-fallback`](instructions/delegation-fallback.instructions.md) | [`delegating-work`](skills/delegating-work/SKILL.md) | Route broad separable research, comparisons, evaluations, domain-tool calls, and disjoint bulk edits into bounded sub-agent contexts while the coordinator retains synthesis, integration, cohesive implementation, and completion |
-| Scratch-space hygiene | [`scratch-space-fallback`](instructions/scratch-space-fallback.instructions.md) | [`using-scratch-space`](skills/using-scratch-space/SKILL.md) | Resolve a portable scratch root and a timestamped per-task subfolder before writing an ad hoc working file (a draft PR body, a log, a one-off dump) outside a repository, instead of littering a drive root with undated loose files |
+| Scratch-space hygiene | [`scratch-space-fallback`](instructions/scratch-space-fallback.instructions.md) | [`using-scratch-space`](skills/using-scratch-space/SKILL.md) | Resolve a portable scratch root and a dated, worktree-stamped task folder with an ownership breadcrumb; keep ad hoc outputs attributable without treating names, age or receipts as deletion permission |
 | Secret-pattern masking avoidance | [`secret-masking-fallback`](instructions/secret-masking-fallback.instructions.md) | [`avoiding-secret-pattern-masking`](skills/avoiding-secret-pattern-masking/SKILL.md) | Never construct an auth header as one scheme-plus-secret literal or f-string (e.g. a bearer-scheme word concatenated or interpolated directly with a token variable) -- Copilot's own content pipeline can silently rewrite that shape into a masked placeholder, with no error and no diff marker; split the scheme word across its own concatenation instead, and verify with a non-rendering byte/boolean check, never a plain read-back |
 
 New modules declare their instruction projection in
@@ -51,7 +51,7 @@ patches or weakened update gates.
 | [`using-multi-agent-rules-of-engagement`](skills/using-multi-agent-rules-of-engagement/SKILL.md) skill | peer work directives, repeated-approval questions, conflicting directives, leadership handoff or external-domain instructions | Resolves the existing domain/scope/custody evidence and applies bounded authority rules without adding an authorization service |
 | [`spawning-headless-processes`](skills/spawning-headless-processes/SKILL.md) skill | "run this in the background", authoring a script/service that shells out, "why does a window keep flashing", any CMD/PowerShell/Python/Node child-process spawn | Selects the correct windowless/headless mechanism for the target language and OS before the spawn happens |
 | [`delegating-work`](skills/delegating-work/SKILL.md) skill | "delegate this research", "use agents to compare", "parallelize the investigation", "split these bulk edits" | Chooses direct versus delegated work, defines bounded contracts, and preserves coordinator ownership |
-| [`using-scratch-space`](skills/using-scratch-space/SKILL.md) skill | writing a draft PR/issue body, a captured log, a one-off JSON dump, or any other ad hoc file outside a repository checkout | Resolves a portable scratch root (never hardcoded) and a timestamped per-task subfolder convention |
+| [`using-scratch-space`](skills/using-scratch-space/SKILL.md) skill | writing a draft PR/issue body, a captured log, a one-off JSON dump, or any other ad hoc file outside a repository checkout | Resolves a portable scratch root, owner-stamped dated task folders, ownership breadcrumbs and scoped temporary-output placement |
 | [`avoiding-secret-pattern-masking`](skills/avoiding-secret-pattern-masking/SKILL.md) skill | writing or reviewing an `Authorization` header, or any auth-scheme-plus-secret string construction; an auth header that still fails despite a reviewed, seemingly-correct diff | Confirms whether a credential-shaped string got silently masked, and applies the split-literal construction that avoids the rewrite |
 
 Enable it in Copilot settings:
@@ -94,9 +94,10 @@ implementation and completion decision, per the delegation skill. Or:
 The agent should resolve a scratch root (an `AGENT_SCRATCH_ROOT` override, an
 operator-configured default, or the operating system's own preferred
 temporary-folder system as the final fallback) and write the draft into a
-fresh, timestamped per-task subfolder there -- never as a loose file at a
-drive root, and never inside a session-managed state folder -- per the
-scratch-space skill. Or:
+fresh, timestamped, worktree-stamped task folder with an ownership breadcrumb
+there -- never as a loose file at a drive root, and never inside a
+session-managed state folder -- per the scratch-space skill. That breadcrumb
+helps find the existing owner; it does not authorize deletion. Or:
 
 > Add an Authorization header carrying our bearer token to this HTTP client.
 
@@ -237,8 +238,8 @@ the budget owner, not reconstructed from billing fields in this plugin.
   ordinary, fallback, explicit-trial, and no-route decisions;
 - (scratch-space module) a portable scratch-root resolution order (explicit
   override, operator-configured default, falling back to the operating
-  system's own preferred temporary-folder system), a timestamped per-task
-  subfolder naming convention, a boundary against using session-managed
+  system's own preferred temporary-folder system), owner-stamped dated task
+  folders and discovery-only ownership breadcrumbs, a boundary against using session-managed
   state folders as a checkout/build/sensitive-data scratch root, and
   reuse/cleanup/durable-filing guidance — with no hardcoded path for any
   operator or machine.
@@ -300,7 +301,7 @@ agent, MCP, bridge, or dispatch plugins separately when a task needs them.
 | [`instructions/multi-agent-rules-of-engagement.instructions.md`](instructions/multi-agent-rules-of-engagement.instructions.md) | Static ambient authority/custody boundaries between task-time skill invocations |
 | [`skills/spawning-headless-processes/SKILL.md`](skills/spawning-headless-processes/SKILL.md) | Per-language/per-OS headless-spawn route table and verification checklist (process-hygiene module) |
 | [`skills/delegating-work/SKILL.md`](skills/delegating-work/SKILL.md) | Detailed direct-versus-delegated routing procedure (delegation module) |
-| [`skills/using-scratch-space/SKILL.md`](skills/using-scratch-space/SKILL.md) | Scratch-root resolution order and timestamped per-task subfolder convention (scratch-space module) |
+| [`skills/using-scratch-space/SKILL.md`](skills/using-scratch-space/SKILL.md) | Scratch-root resolution, owner-stamped dated task folders, discovery breadcrumbs and cleanup boundaries (scratch-space module) |
 | [`instruction-projections.json`](instruction-projections.json) | Declares every module's checked-in ambient fallback |
 | [`instructions/process-hygiene-fallback.instructions.md`](instructions/process-hygiene-fallback.instructions.md) | The projected fallback content for the process-hygiene module |
 | [`instructions/delegation-fallback.instructions.md`](instructions/delegation-fallback.instructions.md) | The projected fallback content for the delegation module |
