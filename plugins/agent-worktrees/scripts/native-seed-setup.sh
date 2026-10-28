@@ -25,6 +25,7 @@ _aw_native_setup_finish() {
 aw_native_setup_begin() {
     [[ "$LAUNCH_SEED_PREPARATION" == seed ]] || return 3
     [[ -n "$LAUNCH_SEED_RECORD" && "$LAUNCH_SEED_NATIVE_ROOT" == /* ]] || return 3
+    [[ -z "$(builtin trap -p EXIT)" ]] || return 3
     if [[ -n "$LAUNCH_ATTEMPT_ID$LAUNCH_RESOLUTION_ID$LAUNCH_PARENT_ID" ]]; then
         [[ -n "$LAUNCH_ATTEMPT_ID" && -n "$LAUNCH_RESOLUTION_ID" ]] || return 3
     fi

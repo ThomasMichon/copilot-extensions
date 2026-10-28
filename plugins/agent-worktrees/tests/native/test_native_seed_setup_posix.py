@@ -39,7 +39,7 @@ def _run(prefix, environment, cwd, *arguments):
 
 def _plan(
     tmp_path, installed, bash, seed_kind, *, interactive=False, env_script=None,
-    arguments=None, expect_native=True,
+    arguments=None, expect_native=True, bash_env=None,
 ):
     root, plugin, prefix, environment = installed
     scripts = root / "scripts"
@@ -141,6 +141,7 @@ if seed_kind == "new":
 prepared = launch_seed_exec.deferred_command(
     command, created.yaml_path, seed_id=seed.seed_id if seed else None,
     admission_only=seed is None, correlation=correlation,
+    environment={"BASH_ENV": sys.argv[10]} if sys.argv[10] else None,
 )
 index = launch_seed_exec.native_setup_index(prepared)
 assert (index is not None) == (bool(seed_kind) and not sys.argv[8] and sys.argv[9] == "1"), prepared
@@ -156,6 +157,7 @@ print(json.dumps({
         json.dumps(ARGUMENTS if arguments is None else arguments),
         str(env_script) if env_script is not None else "",
         "1" if expect_native else "",
+        str(bash_env) if bash_env is not None else "",
     ))
     env = {
         **environment, "FIXTURE_CASE": str(tmp_path), "FIXTURE_RECORD": plan["record"],
@@ -163,6 +165,8 @@ print(json.dumps({
         "FIXTURE_LITERAL": "literal environment ' \u03a9\n\n",
         "AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED": "1",
     }
+    if bash_env is not None:
+        env["BASH_ENV"] = str(bash_env)
     return plan, env, checkout
 
 
@@ -360,6 +364,32 @@ def test_legacy_env_script_early_exit_retains_the_actual_setup_return_and_seed(
     assert result.returncode == code, result.stdout + result.stderr + repr(_observations(plan))
     assert not (tmp_path / "backend-python-env").exists()
     _assert_return(plan, code, False)
+    _root, _plugin, prefix, env = installed_native_runtime
+    _run(
+        prefix, env, checkout, "-c",
+        "from pathlib import Path;from agent_worktrees import launch_seed_state;import sys;"
+        "seed=launch_seed_state.peek(Path(sys.argv[1]),read_only=True);"
+        "assert seed.seed_id==sys.argv[2] and seed.handoff_id is None",
+        plan["record"], plan["seed_id"],
+    )
+
+
+def test_selected_bash_env_early_exit_keeps_the_legacy_owner_and_final_status(
+    tmp_path, installed_native_runtime, native_bash,
+):
+    primer = tmp_path / "bash-env.sh"
+    primer.write_text("trap 'exit 1' EXIT\nexit 5\n", encoding="utf-8")
+    plan, environment, checkout = _plan(
+        tmp_path, installed_native_runtime, native_bash, "new",
+        bash_env=primer, expect_native=False,
+    )
+    result = run_caller_owned(
+        plan["command"], env=environment, cwd=checkout, timeout=60,
+        max_stdout_bytes=65536, max_stderr_bytes=65536,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr + repr(_observations(plan))
+    assert not (tmp_path / "backend-python-env").exists()
+    _assert_return(plan, 1, False)
     _root, _plugin, prefix, env = installed_native_runtime
     _run(
         prefix, env, checkout, "-c",

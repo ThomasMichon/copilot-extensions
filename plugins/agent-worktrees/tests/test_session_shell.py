@@ -512,6 +512,44 @@ def test_posix_unsupported_inputs_keep_legacy_owner_without_matching_literal_val
 
 
 @pytest.mark.skipif(os.name != "posix", reason="Native POSIX setup plan")
+@pytest.mark.parametrize("ambient, environment, legacy", [
+    (None, {"BASH_ENV": "selected-primer.sh"}, True),
+    ("ambient-primer.sh", None, True),
+    ("ambient-primer.sh", {"BASH_ENV": ""}, False),
+])
+def test_posix_bash_env_selection_uses_the_effective_launch_environment(
+    launch, monkeypatch, ambient, environment, legacy,
+):
+    from agent_worktrees import launch_seed_contract
+
+    record, runtime, _assets = launch
+    scripts = runtime / "scripts"
+    shutil.copytree(Path(__file__).resolve().parents[1] / "scripts", scripts)
+    monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: runtime)
+    monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: runtime.with_name("manager"))
+    if ambient is None:
+        monkeypatch.delenv("BASH_ENV", raising=False)
+    else:
+        monkeypatch.setenv("BASH_ENV", ambient)
+
+    def support(_root):
+        assert not legacy, "BASH_ENV must keep the outer owner before discovery or copying"
+        return True
+
+    monkeypatch.setattr(launch_seed_contract, "supports_posix_setup", support)
+    command = ["/bin/bash", str(scripts / "default-setup.sh"), "--stdio"]
+    prepared = launch_seed_exec.deferred_command(
+        command, record, seed_id="staged", environment=environment,
+    )
+    if legacy:
+        assert prepared[1:3] == ["-m", "agent_worktrees.launch_seed_exec"]
+        assert prepared[-len(command):] == command
+        assert not (record.parent / "launch-attempts").exists()
+    else:
+        assert launch_seed_exec.native_setup_index(prepared) == 1
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Native POSIX setup plan")
 @pytest.mark.parametrize("native_resume", [None, "native-original"])
 def test_posix_admission_retains_the_existing_owner_fence(launch, monkeypatch, native_resume):
     from agent_worktrees import launch_seed_contract

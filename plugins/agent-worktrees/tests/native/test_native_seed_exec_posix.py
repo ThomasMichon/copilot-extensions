@@ -140,10 +140,19 @@ r = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 Path(r["assets"], "before.json").write_text(json.dumps({
     "pid": os.getpid(), "birth": locks.process_start_time(os.getpid()),
 }))
+inherited = []
+if r["fault"] == "inherited-fd":
+    import fcntl, resource
+    descriptor = os.open(os.devnull, os.O_RDONLY)
+    inherited = [fcntl.fcntl(descriptor, fcntl.F_DUPFD, 200)]
+    os.set_inheritable(inherited[0], True)
+    os.close(descriptor)
+    _soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (64, hard))
 original_pipe = launch_seed_posix.os.pipe
 def observed_pipe():
     descriptors = original_pipe()
-    Path(r["assets"], "pipe.json").write_text(json.dumps(descriptors))
+    Path(r["assets"], "pipe.json").write_text(json.dumps([*descriptors, *inherited]))
     return descriptors
 launch_seed_posix.os.pipe = observed_pipe
 original_signals = {
@@ -206,9 +215,11 @@ raise SystemExit(code)
     return seed, prepared, correlation, assets, result
 
 
-@pytest.mark.parametrize("exit_code", [0, 7, -signal.SIGTERM])
+@pytest.mark.parametrize("exit_code, fault", [
+    (0, None), (7, None), (-signal.SIGTERM, None), (7, "inherited-fd"),
+])
 def test_foreground_exec_keeps_pid_birth_streams_and_actual_exit(
-    record, tmp_path, native_bash, exit_code,
+    record, tmp_path, native_bash, exit_code, fault,
 ):
     # The backend finds its launch-owned completion file without receiving
     # shell source or having a Python lifetime waiter above it.
@@ -221,7 +232,7 @@ def test_foreground_exec_keeps_pid_birth_streams_and_actual_exit(
         ),
         str(assets_parent), str(exit_code), "", "two words", "literal;$()",
     ]
-    seed, prepared, correlation, assets, result = _run(record, tmp_path, native_bash, command)
+    seed, prepared, correlation, assets, result = _run(record, tmp_path, native_bash, command, fault=fault)
     assert result.returncode == (128 - exit_code if exit_code < 0 else exit_code), result.stderr
     assert (assets / ".native-seed-exec.complete").read_text() == "0\n"
     before = json.loads((assets / "before.json").read_text())
@@ -230,7 +241,7 @@ def test_foreground_exec_keeps_pid_birth_streams_and_actual_exit(
     assert backend["stdin"] == "retained stdin\n"
     assert backend["argv"] == ["", "two words", "literal;$()", "--interactive", seed.text]
     assert backend["children"] == ""
-    assert backend["closed_pipe"] == [True, True]
+    assert backend["closed_pipe"] == ([True, True, True] if fault == "inherited-fd" else [True, True])
     assert result.stdout == "backend stdout\n"
     assert "backend stderr\n" in result.stderr
     assert seeds.peek(record) is None

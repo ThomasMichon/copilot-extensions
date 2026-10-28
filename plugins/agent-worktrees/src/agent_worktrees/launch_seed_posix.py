@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 from pathlib import Path
 import select
@@ -11,6 +12,17 @@ import time
 
 from . import launch_seed_native as native, locks
 from .launch_execution import Correlation
+
+
+def _close_inherited_descriptors(keep: int) -> None:
+    directory = "/proc/self/fd" if Path("/proc/self/fd").is_dir() else "/dev/fd"
+    for name in os.listdir(directory):
+        if name.isdecimal() and int(name) > 2 and int(name) != keep:
+            try:
+                os.close(int(name))
+            except OSError as error:
+                if error.errno != errno.EBADF:
+                    raise
 
 
 def _backend_environment(descriptor: int) -> dict[str, str]:
@@ -222,6 +234,7 @@ def execute(
                     signal.signal(signum, signal.SIG_DFL)
             if interrupt_pending:
                 raise KeyboardInterrupt
+            _close_inherited_descriptors(writer)
             os.execvpe(command[0], command, environment)
         except OSError:
             cleaning = True

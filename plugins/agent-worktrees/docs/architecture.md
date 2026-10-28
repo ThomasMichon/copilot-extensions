@@ -679,6 +679,12 @@ observer child or zombie. The observer remains in caller containment, ignores
 only terminal interrupt/quit, and is bounded to ten seconds plus a one-second
 hard termination grace. It writes only `0` or `3`, never prompt/argv/environment
 bytes, to the private completion file.
+Immediately before exec, the child closes unrelated descriptors discovered
+through the native descriptor directory, retaining only stdio and its
+close-on-exec observer writer. This matches the legacy `Popen(close_fds=True)`
+backend boundary, including inherited descriptors above a subsequently lowered
+file-descriptor limit. The environment pipe has already been consumed and
+closed; the finite observer keeps its own protocol and runtime custody.
 
 `posix-exec-env-v1` additionally accepts an inherited
 `--backend-environment-fd` greater than 2. Copied setup requires this capability:
@@ -729,7 +735,9 @@ Return callbacks first discover the then-current version-1 handler read-only.
 Missing or incompatible handlers close quietly without claiming receipt
 delivery. A compatible callback failure warns unless a fresh read-only probe
 confirms removal or incompatibility; a timeout, producer or validator error
-remains indeterminate and warns. No effectful callback is replayed.
+remains indeterminate and warns. An existing but non-executable interpreter
+also remains indeterminate, rather than being classified as absent.
+No effectful callback is replayed.
 Ordinary provider syntax/default replies and Windows child-handle ownership
 are unchanged. Real Copilot/mux and supported installation-removal acceptance
 remain separate from the copied native consumer controls.
@@ -758,9 +766,12 @@ existing prompt owner. Custom setup and unsupported runtimes keep their
 legacy path; no effectful invocation is retried in another mode.
 After setup admission, the copied shell clears an inherited backend execution
 hint. The actual seeded backend receives only its own new hint. POSIX
-`env_script` launches retain the legacy owner before capability discovery or
+`env_script` launches and a nonempty effective `BASH_ENV` retain the legacy owner before capability discovery or
 asset copying: arbitrary sourced early exits and replacement EXIT traps cannot
 share the native setup's sole EXIT callback without changing shell semantics.
+The planner uses the selected session/profile environment over inherited
+values, including an explicit empty override. Direct/stale native setup also
+refuses a pre-existing EXIT trap before admission instead of replacing it.
 Plans containing non-UTF-8 POSIX command or record-path bytes also retain that
 owner before discovery or copying; the literal reply remains strict UTF-8.
 Direct NUL preparation with such arguments refuses before runtime selection or

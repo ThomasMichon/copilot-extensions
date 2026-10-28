@@ -103,6 +103,10 @@ if [[ -n "$LAUNCH_SEED_PREPARATION" ]]; then
         printf 'Native POSIX setup cannot own env_script; no backend started.\n' >&2
         exit 3
     fi
+    if [[ -n "${BASH_ENV:-}" ]]; then
+        printf 'Native POSIX setup cannot own BASH_ENV; no backend started.\n' >&2
+        exit 3
+    fi
     . "${BASH_SOURCE[0]%/*}/native-seed-setup.sh"
     aw_native_setup_begin "$BASH" "${BASH_SOURCE[0]}" || exit 3
 fi

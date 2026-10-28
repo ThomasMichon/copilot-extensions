@@ -57,7 +57,8 @@ _aw_native_seed_runtime() {
     slot="$root/versions/$version"
     python="$slot/bin/python"
     bootstrap="$slot/.runtime-bootstrap/runtime_launcher.py"
-    [[ -x "$python" && -f "$bootstrap" && -f "$slot/.install-complete.json" ]] || return 4
+    [[ -f "$python" && -f "$bootstrap" && -f "$slot/.install-complete.json" ]] || return 4
+    [[ -x "$python" ]] || return 3
     AW_NATIVE_SEED_RUNTIME=("$python" -I -S -B -X utf8 "$bootstrap")
 }
 

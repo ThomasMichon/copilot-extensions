@@ -203,6 +203,8 @@ def test_descriptor_refuses_oversized_output_or_valid_json_from_a_failed_provide
 
 @pytest.mark.parametrize("state", [
     "absent", "incompatible", "compatible-failure", "removed", "transient", "initial-transient",
+    pytest.param("non-executable", marks=pytest.mark.skipif(os.name == "nt", reason="Native POSIX permissions")),
+    pytest.param("lost-execute", marks=pytest.mark.skipif(os.name == "nt", reason="Native POSIX permissions")),
 ])
 def test_return_handler_closes_quietly_only_when_delivery_is_unavailable(
     tmp_path: Path, state: str,
@@ -211,6 +213,8 @@ def test_return_handler_closes_quietly_only_when_delivery_is_unavailable(
     _contract_slot(root, "A", contract_version=2 if state == "incompatible" else 1)
     if state != "absent":
         (root / "current-version").write_text("A", encoding="utf-8")
+    if state == "non-executable":
+        (root / "versions" / "A" / "bin" / "python").chmod(0o600)
     result = _run(r'''
 set -euo pipefail
 . "$1"
@@ -225,6 +229,7 @@ aw_native_seed_phase() {
     else
         printf 'attempted\n' >> "$1/callbacks"
         [[ "$state" != removed ]] || printf 'missing\n' > "$1/current-version"
+        [[ "$state" != lost-execute ]] || builtin command -p chmod 600 "$1/versions/A/bin/python"
         return 7
     fi
 }
@@ -233,11 +238,13 @@ aw_native_seed_return "$2" 'Return unconfirmed.' --phase returned --exit-code 7
     assert result.returncode == 0, result.stderr
     assert not result.stdout
     assert result.stderr == (
-        "Return unconfirmed.\n" if state in {"compatible-failure", "transient", "initial-transient"} else ""
+        "Return unconfirmed.\n"
+        if state in {"compatible-failure", "transient", "initial-transient", "non-executable", "lost-execute"}
+        else ""
     )
     callbacks = root / "callbacks"
     assert (callbacks.read_text() if callbacks.exists() else "") == (
-        "attempted\n" if state in {"compatible-failure", "removed", "transient"} else ""
+        "attempted\n" if state in {"compatible-failure", "removed", "transient", "lost-execute"} else ""
     )
 
 
@@ -321,6 +328,26 @@ def test_stale_native_env_script_envelope_refuses_before_sourcing(tmp_path: Path
     )
     assert result.returncode == 3, result.stderr
     assert result.stderr == "Native POSIX setup cannot own env_script; no backend started.\n"
+
+
+def test_setup_does_not_replace_a_preexisting_exit_trap_before_admission(tmp_path: Path) -> None:
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+. "${1%/*}/native-seed-setup.sh"
+LAUNCH_SEED_PREPARATION=seed
+LAUNCH_SEED_RECORD=record
+LAUNCH_SEED_NATIVE_ROOT="$2"
+LAUNCH_ATTEMPT_ID=""
+LAUNCH_RESOLUTION_ID=""
+LAUNCH_PARENT_ID=""
+_aw_native_setup_require_contract() { printf 'UNEXPECTED PROVIDER\n'; return 3; }
+trap 'exit 1' EXIT
+if aw_native_setup_begin backend; then exit 90; fi
+exit 5
+''', [tmp_path])
+    assert result.returncode == 1, result.stderr
+    assert not result.stdout and not result.stderr
 
 
 def test_finite_phase_preserves_pipe_fields_cwd_stdin_and_caller_descriptors(tmp_path: Path) -> None:
