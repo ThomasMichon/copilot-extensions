@@ -10,6 +10,11 @@ This disjoint wave adds **82 assignments: 61 researched proposals and 21
 explicit provisional outcomes**, with 39 P1, 41 P2 and two P3 assessments.
 None is a newly demonstrated product defect merely because it was researched.
 
+**Reviewed publication:** #9399 merged on 2026-10-28 at 12:41 UTC as
+`2ee78eb7ff2a1b30ee500ffde4b778c3d30df08a`, after a current-head approving
+Copilot review with no findings and required green checks. This closes the
+finite publication slice, not the parent effort or its numerical checkpoint.
+
 ## Coverage and evidence
 
 | Area | Assignments | Researched | Provisional | P1 | P2 | P3 |
@@ -118,12 +123,15 @@ explicit home gaps remain visible; this proposal assigns no new participant.
 
 ## Provisional decisions and scoped sequencing
 
-The 21 provisional records remain open: #7243, #7251, #7313, #7433, #7643,
+At the frozen snapshot, 21 provisional records remained open: #7243, #7251, #7313, #7433, #7643,
 #7650, #7978, #8384, #8521, #8552, #8778, #8924, #8951, #8972, #9025, #9095,
 #9238, #9277, #9325, #9348 and #9358. Resolve the specific causal, policy,
 compatibility, provider-status or accepted-home uncertainty only when selected
 work needs it. A provisional P1 can justify characterization, not invented
 implementation readiness; unrelated ready leaves can proceed independently.
+Later finite dispositions, including #7650's completed Darwin outcome, are
+recorded in the [follow-through register](roadmap-follow-through.md), not
+retroactively substituted into these historical counts.
 
 The [dependency register](roadmap-wave-4-dependencies.md) adds **36 scoped
 relationships**, including three explicit within-issue gates and several
@@ -140,6 +148,7 @@ native execution, ownership transfer or destructive-action authority.
 
 ## See also
 
+- [Post-publication tracker dispositions and current census](roadmap-follow-through.md)
 - [Bridge coverage](roadmap-wave-4-bridge.md)
 - [Lifecycle coverage](roadmap-wave-4-lifecycle.md)
 - [Transport coverage](roadmap-wave-4-transport.md)
