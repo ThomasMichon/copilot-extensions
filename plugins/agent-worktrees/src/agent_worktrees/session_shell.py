@@ -6,13 +6,14 @@ import argparse
 from dataclasses import dataclass
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import stat
 from uuid import uuid4
 
 from . import launch_attempt, tracking
 
 NATIVE_CONSOLE_MARKER = "# worktree-manager:native-console-owner-v1"
+STARTUP_MANIFEST_MARKER = "# agent-worktrees:startup-manifest-v1"
 
 
 @dataclass(frozen=True)
@@ -158,6 +159,42 @@ def prepare_for_mux(
         return str(prepared.wrapper), controls
     except (OSError, ValueError) as error:
         raise RuntimeError("Could not prepare launch-owned pane assets") from error
+
+
+def startup_command(command: list[str]) -> list[str]:
+    """Serialize copied setup only after launch and seed planning are complete."""
+    from .sessions_pane_args import _launch_args_root, _write_manifest
+
+    if (
+        len(command) < 5 or PureWindowsPath(command[0]).stem.casefold() != "pwsh"
+        or {arg.casefold() for arg in command[1:3]} != {"-noprofile", "-nologo"}
+        or command[3].casefold() != "-file"
+    ):
+        return command
+    script = Path(command[4])
+    if (
+        script.name not in {"launch-command.ps1", "default-setup.ps1"}
+        or not _launch_args_root(script.parent / "pane-args")
+    ):
+        return command
+    wrapper = script.with_name("launch-command.ps1")
+    _plain(script)
+    _plain(wrapper)
+    if STARTUP_MANIFEST_MARKER not in wrapper.read_text(encoding="utf-8-sig").splitlines():
+        return command
+    if script.name == "default-setup.ps1":
+        from .launch_seed_exec import NATIVE_SETUP_MARKER
+
+        if NATIVE_SETUP_MARKER not in script.read_text(encoding="utf-8-sig").splitlines():
+            return command
+        # This added transport wrapper must leave reconciliation policy to setup.
+        arguments = ["--recovery", "--", *command]
+    else:
+        arguments = command[5:]
+        if not arguments:
+            return command
+    manifest = _write_manifest(str(wrapper), arguments)
+    return [*command[:4], str(wrapper), "--startup-manifest", str(manifest)]
 
 
 def main() -> int:

@@ -115,10 +115,7 @@ def sweep_registered_mux_pane_args() -> None:
     sweep_mux_pane_args(roots)
 
 
-def file_mux_pane_cmd(wrapper: str, wrapper_args: list[str]) -> list[str]:
-    launcher = Path(wrapper).with_name("pane-launch.ps1")
-    if not launcher.is_file():
-        raise RuntimeError("file-based pane launcher is missing; update Worktree Manager")
+def _write_manifest(wrapper: str, wrapper_args: list[str]) -> Path:
     root = Path(wrapper).parent / "pane-args"
     if not _launch_args_root(root):
         root = config.install_dir() / "pane-args"
@@ -136,11 +133,50 @@ def file_mux_pane_cmd(wrapper: str, wrapper_args: list[str]) -> list[str]:
             handoff.close()
             Path(handoff.name).unlink(missing_ok=True)
             raise
+    return Path(handoff.name)
+
+
+def file_mux_pane_cmd(
+    wrapper: str, wrapper_args: list[str], *, cmd: list[str] | None = None,
+) -> list[str]:
+    launcher = Path(wrapper).with_name("pane-launch.ps1")
+    if not launcher.is_file():
+        raise RuntimeError("file-based pane launcher is missing; update Worktree Manager")
+    if cmd is not None:
+        from .session_shell import startup_command
+
+        cmd = startup_command(cmd)
+        wrapper_args = [*wrapper_args, *cmd]
+    try:
+        handoff = _write_manifest(wrapper, wrapper_args)
+    except BaseException:
+        if cmd is not None:
+            _cleanup_startup_command(cmd)
+        raise
     return [
         "pwsh.exe", "-NoProfile", "-NoLogo", "-File",
         "'" + str(launcher).replace("'", "''") + "'", "-Manifest",
-        "'" + handoff.name.replace("'", "''") + "'",
+        "'" + str(handoff).replace("'", "''") + "'",
     ]
+
+
+def _cleanup_startup_command(argv: list[str]) -> None:
+    if (
+        len(argv) < 7 or argv[-2] != "--startup-manifest"
+        or argv[-4].casefold() != "-file"
+        or Path(argv[-3]).name != "launch-command.ps1"
+    ):
+        return
+    path, wrapper = Path(argv[-1]), Path(argv[-3])
+    if (
+        _launch_args_root(path.parent) and path.parent.parent.absolute() == wrapper.parent.absolute()
+        and path.name.startswith("aw-pane-") and path.suffix == ".json"
+        and not _indirect(path) and path.is_file()
+    ):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            output.warn(f"Could not remove startup handoff; retained for expiry: {exc}")
 
 
 def cleanup_mux_pane_args(argv: list[str]) -> None:
@@ -164,6 +200,13 @@ def cleanup_mux_pane_args(argv: list[str]) -> None:
             and not _is_link_or_junction(path)
         ):
             try:
+                try:
+                    document = json.loads(path.read_text(encoding="utf-8"))
+                    arguments = document.get("argv") if isinstance(document, dict) else None
+                    if isinstance(arguments, list) and all(isinstance(arg, str) for arg in arguments):
+                        _cleanup_startup_command(arguments)
+                except (OSError, ValueError):
+                    pass
                 path.unlink(missing_ok=True)
             except OSError as exc:
                 output.warn(f"Could not remove pane argument handoff; retained for expiry: {exc}")

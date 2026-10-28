@@ -91,11 +91,25 @@ startup grace, matching-launcher cleanup and foreign-path refusal. Manager's
 `test_pane_args_file.py` executes both legacy and launch-owned producers through
 the shipped PowerShell consumer, including consumed receipts and fresh retries.
 These controls do not establish supported uninstall or same-process interactive
-survival; setup startup arguments remain a separate dependency boundary.
+survival.
 `test_pane_args_projects.py` exercises the monitor's actual sweep entry point
 with explicit registered-project roots, unset and unrelated ambient context,
 two projects, an unregistered negative control and independent project or
 inventory failures. It does not start a resident monitor.
+
+`test_startup_manifest.py` covers final-only serialization of copied canonical
+Windows setup, unchanged custom/older-host commands, nested failed-launch
+cleanup and reuse of the existing expiry. The explicit native packet
+`tests/native/test_startup_manifest_native.py` runs the copied command/setup
+after disposable source removal, checking literal arguments, consumed files
+and process argv without setup-time installation roots. Its same-host control
+also checks pane-appended interactive arguments. Malformed manifests are
+consumed with sanitized refusal before a backend. With the reconciliation
+marker unset, direct and serialized setup are compared in normal and recovery
+mode against a failing synthetic restore, preventing extra wrapper effects.
+Run both with the contained
+runner and `--allow-explicit-tiers`. These are native consumer controls, not
+real mux/Copilot interaction, supported uninstall or installed rollout evidence.
 
 Agent-worktrees' `test_launch_seed_native.py` covers the finite backend and setup
 provider: retained one-time seed claims, literal argv, existing prompt-free
