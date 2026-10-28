@@ -18,6 +18,17 @@ from agent_worktrees.sessions import LiveVerdict
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="Native POSIX fork/exec contract")
 
 
+@pytest.mark.parametrize("name", [
+    name for name in ("SIGPIPE", "SIGXFZ", "SIGXFSZ") if hasattr(signal, name)
+])
+def test_non_python_backend_receives_default_spawn_signals(record, tmp_path, native_bash, name):
+    signum = getattr(signal, name)
+    _seed, _prepared, _correlation, _assets, result = _run(
+        record, tmp_path, native_bash, ["/bin/sh", "-c", f"kill -{name[3:]} $$; exit 42"],
+    )
+    assert result.returncode == 128 + signum, result.stderr
+
+
 @pytest.fixture
 def record(tmp_path, monkeypatch):
     project = cfg.project_dir("demo")
