@@ -309,3 +309,21 @@ Initial tests must prove the current gap before adding the guards.
 - Independent review, release and installed-consumer qualification remain
   pending. The #6820 preparation/retention interface is still unanswered; this
   slice does not introduce preparation or claim supervisor-preserving adoption.
+
+### 2026-10-27 - Native refusal propagation review
+
+- #9359's independent review found both native frontends losing the distinct
+  refusal status at installer/process boundaries. Clearing policy before an
+  automatic fallback could then admit maintenance within an already-denied
+  attempt; a fixture that directly exited 3 did not prove the real boundary.
+- Three actual POSIX regressions reproduced status 3 becoming 1 in installer
+  callers and publication recovery. Preserve the original status through
+  cleanup and callers, and retain refusal when a later native step fails.
+- PowerShell guards retain terminating-error semantics with structured refusal
+  metadata. The real installer maps only that refusal to exit 3 after cleanup,
+  including restore-parent preflight, while unrelated failures retain their
+  original classification. Background workers preserve native exit 3 even when
+  PowerShell's invocation-success flag is false.
+- Added real-installer and late-publication cases, rather than relying only on
+  a fixture's hardcoded status. No installed adoption or preparation interface
+  is established by these source corrections.

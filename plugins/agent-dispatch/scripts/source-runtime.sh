@@ -24,7 +24,12 @@ _require_actions() {
     local -a arguments=(--root "$INSTALL_DIR")
     local action
     for action in "$@"; do arguments+=(--action "$action"); done
-    "$py" -I -B "$SCRIPT_DIR/action_controls.py" "${arguments[@]}" >/dev/null
+    local result=0
+    "$py" -I -B "$SCRIPT_DIR/action_controls.py" "${arguments[@]}" >/dev/null || result=$?
+    if [[ "$result" != 0 ]]; then
+        _fail "Action policy did not admit requested maintenance (reader exit $result)"
+        return 3
+    fi
 }
 
 _maintenance_preflight() {

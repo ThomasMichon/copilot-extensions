@@ -787,6 +787,7 @@ function Get-BootstrapPython {
 
 function Assert-DispatchActions {
     param([Parameter(Mandatory)][string[]]$Actions)
+    try {
     $names = $Actions -join ', '
     # Preserve Python-free stamping only after proving explicit policy absence.
     $policy = Join-Path $InstallDir 'action-controls.json'
@@ -832,6 +833,11 @@ function Assert-DispatchActions {
     catch { throw "[agent-dispatch] Invalid action policy response for ${names}: $($_.Exception.Message)" }
     if ($decision.ok -isnot [bool] -or -not $decision.ok) {
         throw "[agent-dispatch] Action policy did not admit ${names}: $output"
+    }
+    } catch {
+        # Callable guards still throw; only the installer boundary maps this to exit 3.
+        $_.Exception.Data['AgentDispatch.ActionPolicyRefusal'] = $true
+        throw
     }
 }
 
@@ -4125,7 +4131,10 @@ function Invoke-CoordinatorCutover {
     $rc = $LASTEXITCODE
     $ErrorActionPreference = $prevEAP
     if ($rc -eq 3) {
-        throw "[agent-dispatch] coordinator-replacement inhibited during cutover; runtime selection may already have changed. No restart fallback attempted. $($out.Trim())"
+        $refusal = [InvalidOperationException]::new(
+            "[agent-dispatch] coordinator-replacement inhibited during cutover; runtime selection may already have changed. No restart fallback attempted. $($out.Trim())")
+        $refusal.Data['AgentDispatch.ActionPolicyRefusal'] = $true
+        throw $refusal
     }
     $ok = $false
     try {
@@ -4542,12 +4551,17 @@ function Invoke-Uninstall {
     if ($DryRun) { Write-Host 'agent-dispatch uninstall dry run complete -- nothing was changed' -ForegroundColor Yellow }
 }
 
+$script:InstallerLifecycleAction = ''
+$script:InstallerLifecycleOutcome = 'fail'
+$installerActionRefusal = $null
+try {
 $ScriptDir = $PSScriptRoot
 . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 . (Join-Path $PSScriptRoot 'source-runtime.ps1')
 $PackageVersion = $SrcVersion
 $script:SourceRuntimeIdentity = $null
 if ($Action -eq 'restore') {
+    Assert-InstallActions
     $restorePython = Get-BootstrapPython
     if (-not $restorePython) { throw 'Retained restoration requires a bootstrap Python interpreter' }
     # Recursion control only; the parent helper owns the real retention lease.
@@ -4620,7 +4634,6 @@ $script:InstallerLifecycleAction = if ($Action -in @('install', 'provision')) { 
     elseif ($Action -in @('update', 'start', 'stop')) { $Action } else { '' }
 $script:InstallerLifecycleOutcome = 'fail'
 if ($script:InstallerLifecycleAction) { Write-InstallerLifecycle begin }
-try {
 Assert-InstallActions
 if ($Action -in @('install', 'update', 'provision', 'stamp')) {
     Initialize-SourceRuntime
@@ -4643,6 +4656,19 @@ switch ($Action) {
 $script:InstallerLifecycleOutcome = 'ok'
 exit 0
 
+} catch {
+    $failure = $_
+    $cause = $failure.Exception
+    while ($cause) {
+        $marker = $cause.Data['AgentDispatch.ActionPolicyRefusal']
+        if ($marker -is [bool] -and $marker) {
+            $installerActionRefusal = $failure
+            break
+        }
+        $cause = $cause.InnerException
+    }
+    if (-not $installerActionRefusal) { throw }
+    [Console]::Error.WriteLine($installerActionRefusal.ToString())
 } finally {
     try {
         if (Test-Path -LiteralPath 'Function:\Stop-RuntimeConstruction') {
@@ -4650,10 +4676,12 @@ exit 0
         }
     } catch {
         $script:InstallerLifecycleOutcome = 'fail'
-        throw
+        if (-not $installerActionRefusal) { throw }
+        [Console]::Error.WriteLine("[agent-dispatch] Action policy refusal cleanup also failed: $($_.Exception.Message)")
     } finally {
         if ($script:InstallerLifecycleAction) {
             Write-InstallerLifecycle $script:InstallerLifecycleOutcome
         }
     }
+    if ($installerActionRefusal) { exit 3 }
 }

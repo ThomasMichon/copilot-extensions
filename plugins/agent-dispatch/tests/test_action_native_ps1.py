@@ -315,6 +315,100 @@ def test_permission_denial_is_not_policy_absence(tmp_path: Path, unreadable: str
     assert "throw 'access denial bypassed'" not in result.stderr
 
 
+@pytest.mark.parametrize("failure", [
+    "inhibited", "invalid-policy", "missing-helper", "missing-python",
+    "invalid-response", "process-start",
+])
+def test_callable_policy_failures_keep_a_structured_terminating_refusal(
+    tmp_path: Path, failure: str,
+) -> None:
+    root = tmp_path / "runtime"
+    root.mkdir()
+    policy = root / "action-controls.json"
+    policy.write_text(
+        "{" if failure == "invalid-policy" else json.dumps({
+            "runtime-activation": {"disabled": failure == "inhibited"},
+        }), encoding="utf-8",
+    )
+    body = installer_policy(tmp_path)
+    if failure == "missing-helper":
+        body += f"\n$script:ActionControlsHelper = {quote(tmp_path / 'missing.py')}\n"
+    elif failure == "missing-python":
+        body += "\nfunction Get-BootstrapPython { return $null }\n"
+    elif failure == "invalid-response":
+        helper = tmp_path / "invalid-response.py"
+        helper.write_text("print('not a policy decision')\n", encoding="utf-8")
+        body += f"\n$script:ActionControlsHelper = {quote(helper)}\n"
+    elif failure == "process-start":
+        executable = tmp_path / "not-python.exe"
+        executable.write_text("not an executable", encoding="utf-8")
+        body += f"\nfunction Get-BootstrapPython {{ return {quote(executable)} }}\n"
+    body += """
+try {
+    Assert-DispatchActions @('runtime-activation')
+    throw 'policy failure was admitted'
+} catch {
+    $marker = $_.Exception.Data['AgentDispatch.ActionPolicyRefusal']
+    if ($marker -isnot [bool] -or -not $marker) { throw }
+    Write-Output 'caught structured policy refusal'
+}
+"""
+    result = run_ps(tmp_path, body)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "caught structured policy refusal" in result.stdout
+
+
+@pytest.mark.parametrize(("action", "cleanup_failure"), [
+    ("provision", False), ("provision", True), ("stamp", False), ("restore", False),
+])
+def test_real_installer_maps_only_policy_refusal_after_cleanup(
+    tmp_path: Path, action: str, cleanup_failure: bool,
+) -> None:
+    root = tmp_path / "runtime"
+    root.mkdir()
+    (root / "action-controls.json").write_text(json.dumps({
+        "runtime-activation": {"disabled": True},
+    }), encoding="utf-8")
+    cleaned = tmp_path / "cleaned"
+    body = f"""
+$env:COPILOT_EXTENSIONS_HUMAN_UTF8 = $null
+function Stop-RuntimeConstruction {{
+    [IO.File]::WriteAllText({quote(cleaned)}, 'cleaned')
+    {"throw 'contained cleanup failure'" if cleanup_failure else ""}
+}}
+& {quote(INSTALLER)} -Action {quote(action)} -InstallDir {quote(root)} {
+    f"-RetainedRuntime {quote(tmp_path / 'not-inspected.json')}" if action == "restore" else ""
+}
+exit $LASTEXITCODE
+"""
+    result = run_ps(tmp_path, body)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "runtime-activation" in result.stderr
+    assert cleaned.read_text(encoding="utf-8") == "cleaned"
+    if cleanup_failure:
+        assert "contained cleanup failure" in result.stderr
+    for name in ("current-version", "stamped-version", "deploy-manifest.json"):
+        assert not (root / name).exists()
+
+
+def test_outer_installer_does_not_classify_unmarked_errors_by_message(tmp_path: Path) -> None:
+    source = INSTALLER.read_text(encoding="utf-8")
+    boundary = source[source.index("$script:InstallerLifecycleAction = if"):]
+    cleaned = tmp_path / "cleaned"
+    body = f"""
+$Action = 'status'
+$installerActionRefusal = $null
+function Assert-InstallActions {{}}
+function Invoke-Status {{ throw '[agent-dispatch] Action policy did not admit an unrelated operation' }}
+function Stop-RuntimeConstruction {{ [IO.File]::WriteAllText({quote(cleaned)}, 'cleaned') }}
+try {{
+""" + boundary
+    result = run_ps(tmp_path, body)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "unrelated operation" in result.stderr
+    assert cleaned.read_text(encoding="utf-8") == "cleaned"
+
+
 @pytest.mark.parametrize("graceful_required", [False, True])
 def test_cutover_denial_is_terminal_even_when_policy_clears_before_return(
     tmp_path: Path, graceful_required: bool,
@@ -381,6 +475,7 @@ try {{ Invoke-Update; throw 'update incorrectly returned success' }}
 catch {{
     if ($_.Exception.Message -notmatch 'coordinator-replacement inhibited during cutover' -or
         $_.Exception.Message -notmatch 'runtime selection may already have changed') {{ throw }}
+    if ($_.Exception.Data['AgentDispatch.ActionPolicyRefusal'] -ne $true) {{ throw }}
     [Console]::Error.WriteLine($_.Exception.Message)
 }}
 if ($script:fallback) {{ throw 'cutover denial reached restart/reconcile fallback' }}
@@ -397,20 +492,23 @@ def test_upstream_provision_denial_cannot_fall_back_after_policy_clears(tmp_path
     root = tmp_path / "runtime"
     root.mkdir()
     upstream = tmp_path / "upstream.ps1"
+    cleaned = tmp_path / "installer-cleaned"
     upstream.write_text(
         "$ErrorActionPreference = 'Stop'\n"
-        f". {quote(SCRIPTS / 'versioned_runtime_native.ps1')}\n"
+        "$env:COPILOT_EXTENSIONS_HUMAN_UTF8 = $null\n"
         f"$policy = {quote(root / 'action-controls.json')}\n"
         "[IO.File]::WriteAllText($policy, "
-        """'{"automatic-runtime-reconcile":{"disabled":true}}')\n"""
-        "$diagnostic = ''\n"
-        f"$null = Invoke-Hidden -FilePath {quote(sys.executable)} -ArgList @("
-        f"'-I', '-B', {quote(SCRIPTS / 'action_controls.py')}, '--root', {quote(root)}, "
-        "'--action', 'automatic-runtime-reconcile', '--automatic') "
-        "-ErrorOutput ([ref]$diagnostic)\n"
-        "$code = $LASTEXITCODE\n"
-        "[IO.File]::WriteAllText($policy, '{}')\n"
-        "[Console]::Error.Write($diagnostic)\n"
+        """'{"runtime-activation":{"disabled":true}}')\n"""
+        "function Stop-RuntimeConstruction {\n"
+        f" [IO.File]::WriteAllText({quote(cleaned)}, 'cleaned')\n"
+        "}\n"
+        "try {\n"
+        f" & {quote(INSTALLER)} provision -InstallDir {quote(root)}\n"
+        " $code = $LASTEXITCODE\n"
+        "} catch {\n"
+        " [Console]::Error.WriteLine($_.ToString())\n"
+        " $code = 1\n"
+        "} finally { [IO.File]::WriteAllText($policy, '{}') }\n"
         "exit $code\n",
         encoding="utf-8",
     )
@@ -444,12 +542,16 @@ def test_upstream_provision_denial_cannot_fall_back_after_policy_clears(tmp_path
     result = run_ps(tmp_path, body)
     assert result.returncode == 3, result.stdout + result.stderr
     assert "no local snapshot fallback attempted" in result.stderr
+    assert "runtime-activation" in result.stderr
     assert not marker.exists()
+    assert cleaned.read_text(encoding="utf-8") == "cleaned"
+    for name in ("current-version", "stamped-version", "deploy-manifest.json"):
+        assert not (root / name).exists()
     assert (root / ".provision-status").read_text(encoding="utf-8") == "failed rc=3"
     assert json.loads((root / "action-controls.json").read_text(encoding="utf-8")) == {}
 
 
-@pytest.mark.parametrize("phase", ["stamp", "drift", "ready", "prerequisite"])
+@pytest.mark.parametrize("phase", ["stamp", "drift", "ready", "prerequisite", "installer-refusal"])
 def test_actual_bootstrap_denial_is_output_free_and_ready_is_ungated(
     tmp_path: Path, phase: str,
 ) -> None:
@@ -470,14 +572,21 @@ def test_actual_bootstrap_denial_is_output_free_and_ready_is_ungated(
     root.mkdir()
     if phase != "prerequisite":
         (root / "action-controls.json").write_text(json.dumps({
+            "runtime-activation" if phase == "installer-refusal" else
             "automatic-runtime-reconcile": {"disabled": True},
         }), encoding="utf-8")
+    if phase == "installer-refusal":
+        (scripts / "install.ps1").write_text(
+            "# 'stamp'\n$env:COPILOT_EXTENSIONS_HUMAN_UTF8 = $null\n"
+            f"& {quote(INSTALLER)} stamp -InstallDir {quote(root)}\nexit $LASTEXITCODE\n",
+            encoding="utf-8",
+        )
     if phase in ("drift", "ready"):
         (root / ".venv").mkdir()
         (root / "deploy-manifest.json").write_text(json.dumps({
             "source": {"version": "9.0.0" if phase == "ready" else "8.0.0"},
         }), encoding="utf-8")
-    if phase in ("stamp", "drift"):
+    if phase in ("stamp", "drift", "installer-refusal"):
         for name in ("action_controls.py", "versioned_runtime_native.ps1"):
             (scripts / name).write_bytes((SCRIPTS / name).read_bytes())
         package = payload / "src" / "agent_dispatch"
@@ -490,22 +599,19 @@ def test_actual_bootstrap_denial_is_output_free_and_ready_is_ungated(
     assert result.stdout == "{}"
     if phase != "ready":
         assert "automatic-runtime-reconcile" in result.stderr
+    if phase == "installer-refusal":
+        assert "runtime-activation" in result.stderr
+        assert "stamp did not complete (exit 3)" in result.stderr
     assert not marker.exists()
     assert not (root / "reconcile.lock").exists()
     assert not (root / "reconcile-status.json").exists()
 
 
-def test_background_bootstrap_attempt_records_denial_without_installer(tmp_path: Path) -> None:
-    root = tmp_path / "runtime"
-    root.mkdir()
-    (root / "action-controls.json").write_text(json.dumps({
-        "automatic-runtime-reconcile": {"disabled": True},
-    }), encoding="utf-8")
+def bootstrap_worker(tmp_path: Path, root: Path, installer: str) -> tuple[str, Path]:
     status = root / "reconcile-status.json"
     status.write_text(json.dumps({
         "attempt_id": "contained-attempt", "launched_pid": 0, "worker_started_at": None,
     }), encoding="utf-8")
-    marker = tmp_path / "installer-called"
     source = BOOTSTRAP.read_text(encoding="utf-8")
     worker = re.search(r"(?s)\$worker = @'\n(.*?)\n'@", source)
     assert worker
@@ -519,10 +625,23 @@ def test_background_bootstrap_attempt_records_denial_without_installer(tmp_path:
         "__STATUSFILE__": str(status),
         "__LOCKFILE__": str(root / "reconcile.lock"),
         "__RECONCILELOG__": str(root / "reconcile.log"),
-        "__INSTALLER__": f"[IO.File]::WriteAllText({quote(marker)}, 'called')",
+        "__INSTALLER__": installer,
     }
     for key, value in replacements.items():
         body = body.replace(key, value if key == "__INSTALLER__" else value.replace("'", "''"))
+    return body, status
+
+
+def test_background_bootstrap_attempt_records_denial_without_installer(tmp_path: Path) -> None:
+    root = tmp_path / "runtime"
+    root.mkdir()
+    (root / "action-controls.json").write_text(json.dumps({
+        "automatic-runtime-reconcile": {"disabled": True},
+    }), encoding="utf-8")
+    marker = tmp_path / "installer-called"
+    body, status = bootstrap_worker(
+        tmp_path, root, f"[IO.File]::WriteAllText({quote(marker)}, 'called')",
+    )
     result = run_ps(tmp_path, body)
     assert result.returncode == 3, result.stdout + result.stderr
     assert "automatic-runtime-reconcile" in result.stderr
@@ -530,6 +649,34 @@ def test_background_bootstrap_attempt_records_denial_without_installer(tmp_path:
     recorded = json.loads(status.read_text(encoding="utf-8"))
     assert recorded["attempt_id"] == "contained-attempt"
     assert recorded["exit_code"] == 3
+    assert recorded["success"] is False
+
+
+@pytest.mark.parametrize("boundary", ["native-installer", "callable-refusal", "unmarked-failure"])
+def test_bootstrap_worker_preserves_policy_classification_and_exit_code(
+    tmp_path: Path, boundary: str,
+) -> None:
+    root = tmp_path / "runtime"
+    root.mkdir()
+    (root / "action-controls.json").write_text(json.dumps({
+        "runtime-activation": {"disabled": True},
+    }), encoding="utf-8")
+    invocation = {
+        "native-installer": f"& {quote(INSTALLER)} provision -InstallDir {quote(root)}",
+        "callable-refusal": "Assert-DispatchActions @('runtime-activation')",
+        "unmarked-failure": "throw '[agent-dispatch] Action policy did not admit an unrelated operation'",
+    }[boundary]
+    body, status = bootstrap_worker(tmp_path, root, invocation)
+    body = (
+        installer_policy(tmp_path)
+        + "\n$env:COPILOT_EXTENSIONS_HUMAN_UTF8 = $null\n"
+        + body
+    )
+    result = run_ps(tmp_path, body)
+    expected = 1 if boundary == "unmarked-failure" else 3
+    assert result.returncode == expected, result.stdout + result.stderr
+    recorded = json.loads(status.read_text(encoding="utf-8"))
+    assert recorded["exit_code"] == expected
     assert recorded["success"] is False
 
 

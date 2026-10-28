@@ -74,6 +74,12 @@ effect.
 An inhibition of a required effect is not a successful full update. Early
 denial leaves active publication untouched. A later denial after an earlier
 effect committed remains a partial operation, not an atomic rollback guarantee.
+Policy refusal retains exit 3 through installer callers, owned publication
+cleanup and bootstrap workers, even if policy clears before a fallback check.
+Callable PowerShell guards still throw; the real installer maps their tagged
+refusals to that distinct process result after cleanup. Unrelated errors keep
+their normal classification. Neither a generic failure status nor a successful
+cleanup may erase the refusal and admit another installer in the same attempt.
 Existing activation locks, source receipts, conditional publication recovery,
 ownership fences and drain semantics remain authoritative.
 

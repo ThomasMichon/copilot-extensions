@@ -252,3 +252,108 @@ def test_python_free_explicit_absence_is_proven_not_assumed(
     assert result.returncode == (0 if state == "absent" else 3), result.stderr
     if state != "absent":
         assert "no bootstrap Python" in result.stderr
+
+
+@pytest.mark.parametrize("caller", ["do_install", "do_update"])
+def test_late_policy_refusal_survives_installer_caller_after_clear(
+    tmp_path: Path, caller: str,
+) -> None:
+    root = tmp_path / "install"
+    root.mkdir()
+    policy = root / "action-controls.json"
+    policy.write_text("{}")
+    forbidden = tmp_path / "forbidden"
+    script = "\n".join([
+        "set -eu",
+        f"INSTALL_DIR={str(root)!r}; SCRIPT_DIR={str(SCRIPTS)!r}",
+        '_fail() { echo "$*" >&2; }; _step() { :; }; _ok() { :; }',
+        '_write_update_marker() { :; }; _clear_update_marker() { :; }',
+        '_lifecycle_finish() { :; }; _downgrade_guard() { :; }',
+        f"_bootstrap_python() {{ echo {sys.executable!r}; }}",
+        f". {str(SCRIPTS / 'source-runtime.sh')!r}",
+        "_ensure_runtime() { local result=0; printf '%s' "
+        f"""'{{"runtime-activation":{{"disabled":true}}}}' > {str(policy)!r}; """
+        "_require_actions runtime-activation || result=$?; "
+        f"printf '{{}}' > {str(policy)!r}; return \"$result\"; }}",
+        f"_install_service() {{ touch {str(forbidden)!r}; }}",
+        f"_install_supervisor_service() {{ touch {str(forbidden)!r}; }}",
+        _function(caller),
+        caller,
+    ])
+    result = subprocess.run(
+        [BASH, "-c", script], capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 3, result.stderr
+    assert policy.read_text() == "{}"
+    assert not forbidden.exists()
+
+
+@pytest.mark.parametrize("boundary", ["activation", "launcher-publication"])
+def test_late_policy_refusal_survives_real_publication_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str,
+) -> None:
+    from tests import source_publication_fixture as fixture
+
+    original = fixture.script
+
+    def render(ext: str) -> str:
+        text = original(ext)
+        if ext == "sh":
+            injection = (
+                'if [[ "${FIXTURE_LATE_POLICY:-}" == 1 ]]; then\n'
+                """printf '%s' '{"runtime-activation":{"disabled":true}}' > "$INSTALL_DIR/action-controls.json"\n"""
+                "fi\n"
+            )
+            if boundary == "activation":
+                needle = "_versioned_activate() {\n"
+                replacement = needle + injection
+            else:
+                needle = "        local publication_rc=0\n"
+                replacement = injection + needle
+            assert needle in text
+            text = text.replace(needle, replacement, 1)
+        return text
+
+    monkeypatch.setattr(fixture, "script", render)
+    env, root, sources = fixture.stage(tmp_path)
+    (first, _), (second, _) = sources
+    initial = fixture.run("sh", first / "scripts/install.sh", ["install"], env)
+    assert initial.returncode == 0, initial.stdout + initial.stderr
+    paths = ["current-version", "last-known-good", "deploy-manifest.json", "payload-dir"]
+    before = {name: (root / name).read_bytes() for name in paths}
+    env["FIXTURE_LATE_POLICY"] = "1"
+    result = fixture.run("sh", second / "scripts/install.sh", ["update"], env)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "runtime-activation" in result.stderr
+    (root / "action-controls.json").write_text("{}")
+    assert {name: (root / name).read_bytes() for name in paths} == before
+
+
+@pytest.mark.parametrize("failure", ["python", "reader", "reader-runtime"])
+def test_native_policy_prerequisite_failure_keeps_terminal_refusal_status(
+    tmp_path: Path, failure: str,
+) -> None:
+    root = tmp_path / "install"
+    root.mkdir()
+    (root / "action-controls.json").write_text("{}")
+    scripts = tmp_path if failure == "reader" else SCRIPTS
+    python = sys.executable
+    if failure == "reader-runtime":
+        fake = tmp_path / "failed-python"
+        fake.write_text("#!/bin/sh\nexit 1\n")
+        fake.chmod(0o755)
+        python = str(fake)
+    bootstrap = "return 1" if failure == "python" else f"echo {python!r}"
+    script = "\n".join([
+        "set -eu",
+        f"INSTALL_DIR={str(root)!r}; SCRIPT_DIR={str(scripts)!r}",
+        '_fail() { echo "$*" >&2; }',
+        f"_bootstrap_python() {{ {bootstrap}; }}",
+        f". {str(SCRIPTS / 'source-runtime.sh')!r}",
+        "_require_actions runtime-activation",
+    ])
+    result = subprocess.run(
+        [BASH, "-c", script], capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 3, result.stderr
+    assert "Action policy" in result.stderr

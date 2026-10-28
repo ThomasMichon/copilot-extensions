@@ -610,16 +610,20 @@ _versioned_activate() {
         _unlock_activate
         return 0
     fi
+    _require_actions runtime-activation || { _unlock_activate; return 3; }
     local receipt_file
     local receipt_args=()
     if [[ -n "${_RUNTIME_PUBLICATION_EVIDENCE:-}" ]]; then
         _runtime_publication_native_begin receipt_file || { _unlock_activate; return 1; }
         receipt_args=(--ownership-receipt "$receipt_file")
     fi
-    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link "${receipt_args[@]}"; then
+    if "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link "${receipt_args[@]}"; then
+        :
+    else
+        local activation_rc=$?
         _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"
         _unlock_activate
-        return 1
+        return "$activation_rc"
     fi
     _unlock_activate
     _ok "Runtime version $SRC_VERSION active (marker-only; versions/$SRC_VERSION)"
@@ -1299,10 +1303,13 @@ _ensure_runtime() {
         local __dispatch_publication_root="$INSTALL_DIR"
         _maintenance_preflight || { _unlock_publish; return 3; }
         _runtime_publication_begin_install || { _unlock_publish; return 1; }
-        if ! _runtime_publication_activate _versioned_activate; then
+        if _runtime_publication_activate _versioned_activate; then
+            :
+        else
+            local activation_rc=$?
             _runtime_publication_restore || _fail 'Activation publication rollback failed'
             _unlock_publish
-            return 1
+            return "$activation_rc"
         fi
         if _activation_superseded_now; then
             # This invocation's own build lost the cross-version activation
@@ -1348,10 +1355,12 @@ _ensure_runtime() {
             _unlock_publish
             return 0
         fi
-        if ! _require_actions runtime-activation || ! deploy_binstub || ! _write_manifest; then
+        local publication_rc=0
+        _require_actions runtime-activation && deploy_binstub && _write_manifest || publication_rc=$?
+        if [[ "$publication_rc" != 0 ]]; then
             _runtime_publication_restore || _fail 'Runtime publication rollback failed'
             _unlock_publish
-            return 1
+            return "$publication_rc"
         fi
         _runtime_publication_discard || { _unlock_publish; return 1; }
         # The Picker materializes templates only from its verified active
@@ -2296,7 +2305,7 @@ do_stamp() {
 do_install() {
     _maintenance_preflight install || return $?
     _step 'agent-dispatch install'
-    _ensure_runtime || return 1
+    _ensure_runtime || return $?
     if _activation_superseded_now; then
         # A concurrent, newer install already activated -- either caught at
         # _ensure_runtime's own return, or only now via the LIVE re-check
@@ -2309,8 +2318,8 @@ do_install() {
         _skip 'agent-dispatch install (superseded by a newer concurrent build)'
         return 0
     fi
-    _install_service
-    _install_supervisor_service
+    _install_service || return $?
+    _install_supervisor_service || return $?
     _supervisor_audit installer-reconcile invocation-returned "" "" ok
     _ok 'agent-dispatch install'
     echo '  Coordinator: systemctl --user status agent-dispatch'
@@ -2327,7 +2336,7 @@ do_update() {
     _write_update_marker
     trap '_lifecycle_finish "$?"; _clear_update_marker' EXIT
     _downgrade_guard
-    _ensure_runtime || return 1
+    _ensure_runtime || return $?
     if _activation_superseded_now; then
         # This invocation's own build lost the cross-version activation race
         # -- either caught immediately inside _ensure_runtime, or only
@@ -2440,9 +2449,10 @@ do_update() {
     # lock) cannot even start publishing until this invocation's ENTIRE
     # cutover/fallback action -- cutover attempt AND the unit reconciliation
     # that completes it -- has fully finished and released it.
+    local native_reconcile_rc=0
     if _coordinator_cutover; then
         _supervisor_audit coordinator-cutover coordinator-cutover-returned "$SUPERVISOR_UNIT" "$SUPERVISOR_ENV_FILE" ok
-        _install_service --no-restart
+        _install_service --no-restart || native_reconcile_rc=$?
     else
         local cutover_rc=$?
         if [[ "$cutover_rc" -eq 3 ]]; then
@@ -2455,10 +2465,16 @@ do_update() {
             _unlock_cutover
             return 1
         fi
-        _install_service
+        _install_service || native_reconcile_rc=$?
     fi
-    _install_supervisor_service
+    if [[ "$native_reconcile_rc" == 0 ]]; then
+        _install_supervisor_service || native_reconcile_rc=$?
+    fi
     _unlock_cutover
+    if [[ "$native_reconcile_rc" != 0 ]]; then
+        _fail 'Native reconciliation did not complete; runtime or coordinator effects may already have committed. No further maintenance attempted.'
+        return "$native_reconcile_rc"
+    fi
     _supervisor_audit installer-reconcile invocation-returned "" "" ok
     _ok 'agent-dispatch update'
 }

@@ -152,9 +152,10 @@ try {
             $pw = Get-Command pwsh -ErrorAction SilentlyContinue
             $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
             Assert-BootstrapAction
-            & $exe -NoProfile -ExecutionPolicy Bypass -File $stampInst stamp *> $null
-            if ($LASTEXITCODE -ne 0) {
-                $stampCode = $LASTEXITCODE
+            $stampOutput = & $exe -NoProfile -ExecutionPolicy Bypass -File $stampInst stamp *>&1 | Out-String
+            $stampCode = $LASTEXITCODE
+            if ($stampCode -ne 0) {
+                if ($stampOutput) { [Console]::Error.Write($stampOutput) }
                 [Console]::Error.WriteLine("[agent-dispatch] automatic-runtime-reconcile stamp did not complete (exit $stampCode); no background retry attempted.")
                 Write-SessionStartJson
                 exit $stampCode
@@ -319,13 +320,20 @@ try {
         $LASTEXITCODE = 0
         & { __INSTALLER__ } *> '__RECONCILELOG__'
         $ok = $?
-        $code = if ($ok) { $LASTEXITCODE } else { 1 }
+        $nativeCode = $LASTEXITCODE
+        $code = if ($nativeCode -eq 3) { 3 } elseif ($ok) { $nativeCode } else { 1 }
     }
 } catch {
     $failure = "attempt=__ATTEMPT__ background reconcile failed: $($_.Exception.Message)"
     Add-Content -LiteralPath '__RECONCILELOG__' -Value $failure
     [Console]::Error.WriteLine($failure)
     $code = 1
+    $cause = $_.Exception
+    while ($cause) {
+        $marker = $cause.Data['AgentDispatch.ActionPolicyRefusal']
+        if ($marker -is [bool] -and $marker) { $code = 3; break }
+        $cause = $cause.InnerException
+    }
 }
 try { [void](Update-ReconcileAttempt $true $code) }
 catch {
