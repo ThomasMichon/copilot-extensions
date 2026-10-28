@@ -51,6 +51,10 @@ on:
         description: Exercise retained lock export and existing install seasoning with real UV
         type: boolean
         default: false
+      source_cache:
+        description: Qualify only source-wheel cache reuse and hardlinks with the pinned real backend
+        type: boolean
+        default: false
       candidate_profiles:
         description: Exercise role-selectable candidate construction and immutable reuse with real UV
         type: boolean
@@ -137,7 +141,7 @@ jobs:
           --timeout 120 --plugin-timeout 600 --test-timeout 60
 
   derived-diagnostics-posix:
-    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal }}
+    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal }}
     name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: ubuntu-latest
     timeout-minutes: 4
@@ -158,7 +162,7 @@ jobs:
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
 
   derived-diagnostics-windows:
-    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal }}
+    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal }}
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: windows-latest
     timeout-minutes: 4
@@ -1163,7 +1167,8 @@ jobs:
           tools/test_runtime_source_build.py
           tools/test_runtime_source_wheel_cache.py
           -k "${{ matrix.expression }}"
-      - name: Acquire the pinned real backend fixture before isolated feed tests
+      - &source-wheel-backend-step
+        name: Acquire the pinned real backend fixture before isolated feed tests
         if: ${{ matrix.suite == 'normal' }}
         shell: python
         run: |
@@ -1181,7 +1186,8 @@ jobs:
           wheel.write_bytes(content)
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
               output.write("TEST_SOURCE_WHEEL_REAL_BACKEND=" + str(wheel) + "\n")
-      - name: Ordinary constructors, real backend, per-project hits and failed-input controls
+      - &source-wheel-test-step
+        name: Ordinary constructors, real backend, per-project hits and failed-input controls
         if: ${{ matrix.suite == 'normal' }}
         run: python -m pytest -q tools/test_installer_source_build.py
       - name: Persisted Manager admission and fresh-process offline reuse
@@ -1193,6 +1199,29 @@ jobs:
           tools/test_runtime_source_reuse.py
           worktree-manager/tests/test_manager_update_check.py
           libs/versioned-runtime/tests/test_runtime_source_identity.py::test_source_and_repair_slots_preserve_the_declared_package_version
+
+  source-cache:
+    if: ${{ inputs.source_cache }}
+    name: Source wheel cache and hardlinks (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        suite: [normal]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Validator tooling only
+        run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest pyyaml packaging
+      - *source-wheel-backend-step
+      - *source-wheel-test-step
 
   packaging-seed-linux:
     if: ${{ inputs.dependency_compile }}
