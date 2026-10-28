@@ -150,7 +150,9 @@ activation/cutover coordination. A repair's outer cutover guard remains required
 
 Shell installers use `construction-shell --shell ps1|sh` to obtain the canonical
 attached-pipe adapter. Its finite `construction-session` supervisor holds kernel
-ownership while the caller installs dependencies. Completion rechecks the
+ownership while the caller installs dependencies. Both rendered shell adapters
+explicitly launch Python controls with `-B`, preventing bytecode writes into the
+selected payload. Completion rechecks the
 payload fingerprint and transfers to retention before releasing construction;
 the caller settles that retention after selection/reconciliation. Failure or
 pipe EOF reclaims only the owned unfinished candidate. Cleanup refusals remain

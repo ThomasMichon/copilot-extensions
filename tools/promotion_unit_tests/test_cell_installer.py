@@ -67,6 +67,7 @@ for _name in (
     "test_release_hash_rejects_linked_payload_inputs",
     "test_release_hash_propagates_incomplete_inventory",
     "test_worker_binds_original_caller_before_payload_identity",
+    "test_snapshot_control_launches_disable_bytecode_writes",
     "test_watchdog_uses_whole_tree_owner_and_preserves_output",
     "test_watchdog_refuses_an_inherited_changed_payload",
     "test_watchdog_timeout_is_failure_after_owned_retirement",

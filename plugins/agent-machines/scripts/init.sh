@@ -441,7 +441,7 @@ if [[ "$ACTION" == cell-repair || "$ACTION" == cell-uninstall || "$ACTION" == ce
     for lifecycle_python in python3 python; do
         if command -v "$lifecycle_python" >/dev/null 2>&1; then
             cd "$HOME"
-            exec "$lifecycle_python" -I "$SCRIPT_DIR/cell_lifecycle.py" "${ORIGINAL_ARGS[@]}"
+            exec "$lifecycle_python" -I -B "$SCRIPT_DIR/cell_lifecycle.py" "${ORIGINAL_ARGS[@]}"
         fi
     done
     _fail 'Cell lifecycle management requires an existing Python 3.10+ interpreter'
@@ -1586,7 +1586,7 @@ _versioned_slot_clean() {
     fi
     [[ -n "$py" ]] || return 1
     if ! declare -F _runtime_construction_begin >/dev/null; then
-        helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
+        helpers="$("$py" -I -B "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
         eval "$helpers"
     fi
     _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
@@ -1980,11 +1980,11 @@ for _lib_entry in \
     if [[ -f "$_lib_path/pyproject.toml" ]]; then
         if [[ "$HAVE_UV" -eq 1 ]]; then
             _lib_install_rc=0
-            "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package "$_lib_pkg_name" \
+            "$VENV_PYTHON" -I -B "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package "$_lib_pkg_name" \
                 "$_lib_path" --quiet || _lib_install_rc=$?
         else
             _lib_install_rc=0
-            "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --quiet "$_lib_path" || _lib_install_rc=$?
+            "$VENV_PYTHON" -I -B "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --quiet "$_lib_path" || _lib_install_rc=$?
         fi
         if [[ "$_lib_install_rc" -ne 0 ]]; then
             _fail "$_lib_dir_name library install failed"
@@ -1997,13 +1997,13 @@ done
 # -- 3. Install the package into the venv ------------------------------
 if [[ "$HAVE_UV" -eq 1 ]]; then
     if [[ "$CELL_MODE" == 1 ]]; then
-        if "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet; then
+        if "$VENV_PYTHON" -I -B "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet; then
             PACKAGE_INSTALL_STATUS=0
         else
             PACKAGE_INSTALL_STATUS=$?
         fi
     else
-        if "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null; then
+        if "$VENV_PYTHON" -I -B "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null; then
             PACKAGE_INSTALL_STATUS=0
         else
             PACKAGE_INSTALL_STATUS=$?
@@ -2015,13 +2015,13 @@ if [[ "$HAVE_UV" -eq 1 ]]; then
     fi
 else
     if [[ "$CELL_MODE" == 1 ]]; then
-        if "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --quiet "$PLUGIN_DIR"; then
+        if "$VENV_PYTHON" -I -B "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --quiet "$PLUGIN_DIR"; then
             PACKAGE_INSTALL_STATUS=0
         else
             PACKAGE_INSTALL_STATUS=$?
         fi
     else
-        if "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --quiet "$PLUGIN_DIR" 2>/dev/null; then
+        if "$VENV_PYTHON" -I -B "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --quiet "$PLUGIN_DIR" 2>/dev/null; then
             PACKAGE_INSTALL_STATUS=0
         else
             PACKAGE_INSTALL_STATUS=$?
@@ -2041,7 +2041,7 @@ if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
     VR_SCRIPT="$SCRIPT_DIR/versioned_runtime.py"
     # Health-gate: never swap the stable .venv link onto a slot whose package
     # does not import -- a broken build must not become the live runtime.
-    if ! "$VENV_PYTHON" -c 'import agent_machines' 2>/dev/null; then
+    if ! "$VENV_PYTHON" -B -c 'import agent_machines' 2>/dev/null; then
         _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
         exit 1
     fi
@@ -2184,7 +2184,7 @@ fi
 
 # -- 6. Verify ---------------------------------------------------------
 echo ''
-if "$VENV_PYTHON" -c 'import agent_machines' 2>/dev/null; then
+if "$VENV_PYTHON" -B -c 'import agent_machines' 2>/dev/null; then
     _ok 'Verification: module imports successfully'
 else
     _fail 'Verification: module import failed'

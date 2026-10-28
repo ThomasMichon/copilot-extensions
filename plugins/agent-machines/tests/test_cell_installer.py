@@ -213,6 +213,28 @@ def test_worker_binds_original_caller_before_payload_identity(helper, payload, m
     assert events == ["admitted", "hashed"]
 
 
+def test_snapshot_control_launches_disable_bytecode_writes():
+    sh = (SCRIPTS / "init.sh").read_text(encoding="utf-8")
+    ps = (SCRIPTS / "init.ps1").read_text(encoding="utf-8")
+    for source in (sh, ps):
+        dependency_commands = [
+            line for line in source.splitlines() if "installer_dependency_policy.py" in line
+        ]
+        assert len(dependency_commands) == 6
+        assert all(" -I -B " in line for line in dependency_commands)
+    assert '"$py" -I -B "$vr"' in sh
+    assert "@('-I', '-B', $vr," in ps
+    assert '"$lifecycle_python" -I -B "$SCRIPT_DIR/cell_lifecycle.py"' in sh
+    assert "$python.Source -I -B (Join-Path $PSScriptRoot 'cell_lifecycle.py')" in ps
+    assert sh.count('"$VENV_PYTHON" -B -c \'import agent_machines\'') == 2
+    assert ps.count("$VenvPython -B -c 'import agent_machines'") == 2
+    construction = (SCRIPTS.parents[2] / "libs/versioned-runtime/versioned_runtime_construction.py").read_text(
+        encoding="utf-8",
+    )
+    assert 'set -- "$base" -I -B "$helper"' in construction
+    assert "$argv = @('-I', '-B', $Helper," in construction
+
+
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux exact-birth process-group qualification")
 def test_watchdog_retires_actual_build_descendant(helper, payload, tmp_path, monkeypatch, capsys):
     monkeypatch.delenv(helper.HASH_ENV, raising=False)

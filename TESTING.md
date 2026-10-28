@@ -233,6 +233,13 @@ the opt-in 44-case SDK desktop roster and do not replace its qualification.
 The cell hash's actual bytecode-cache and `.git`-named synthetic-file controls
 remain in the on-demand packet, not promotion units: the latter's existing
 bytecode-attribution and Git-storage effect refusals stay intact.
+`plugins/agent-machines/tests/test_cell_construction_inputs.py` separately runs
+the actual attached construction protocol against a copied SDK snapshot with
+real namespace/snapshot/slot receipts, then checks every selected byte. Its
+offline UV build runs the real shipped dependency-policy CLI and a backend that
+writes build/egg-info artifacts, proving those writes stay in the canonical
+retained-input copy and its cleanup settles. These are native process tests,
+not admitted promotion units or Windows desktop qualification.
 The fixture's identity report is admitted only after a separate marker confirms
 the producer completed its closed-file publication. A failed admitted read stays
 an error; the fixture does not suppress permissions failures or retry them as a pass.

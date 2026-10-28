@@ -38,6 +38,11 @@ without `runtime-source.json`. Generated/build directories and bytecode caches
 are included, not silently excluded by source-assembly filtering. Linked,
 reparse, nonregular or incompletely scanned inputs are refused; only the two
 root publication sidecars retain separate ownership/provenance checks.
+Construction, dependency-policy, lifecycle and import-health Python controls
+explicitly disable bytecode writes; isolated Python does not honor the
+environment-only equivalent. Existing cached bytes stay part of the selection.
+Package builds use the dependency installer's existing retained-input copy, so
+backend build/egg-info output does not mutate the verified snapshot.
 
 ## Legacy runtime removal
 

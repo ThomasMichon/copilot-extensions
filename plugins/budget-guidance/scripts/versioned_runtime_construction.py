@@ -509,7 +509,7 @@ _runtime_construction_begin() {
         return 0
     fi
     local base
-    base="$("$python" -I -c 'import sys; print(sys._base_executable)')" || return 1
+    base="$("$python" -I -B -c 'import sys; print(sys._base_executable)')" || return 1
     # Bash 3.2 cannot reliably wait on a process-substitution PID.
     # Probe before reserving numeric descriptors; caller-owned descriptors survive.
     local fd read_fd="" write_fd="" bootstrap_fd=""
@@ -565,7 +565,7 @@ _runtime_construction_begin() {
         eval "exec $write_fd>&- $read_fd<&- $bootstrap_fd>&-"
         rm -f -- "$_RUNTIME_CONSTRUCTION_CHANNEL/commands" "$_RUNTIME_CONSTRUCTION_CHANNEL/replies" &&
             rmdir -- "$_RUNTIME_CONSTRUCTION_CHANNEL" || exit 1
-        set -- "$base" -I "$helper" --root "$root" --link-name "$link" construction-session "$version" --payload-hash "$hash"
+        set -- "$base" -I -B "$helper" --root "$root" --link-name "$link" construction-session "$version" --payload-hash "$hash"
         [[ -z "$owner" ]] || set -- "$@" --dev-owner "$owner"
         [[ -z "$footprint" ]] || set -- "$@" --footprint "$footprint" --plugin "$plugin"
         exec "$@"
@@ -676,7 +676,7 @@ function script:Start-RuntimeConstruction {
     }
     $query = New-Object System.Diagnostics.ProcessStartInfo
     $query.FileName = $Python
-    $query.Arguments = '-I -c "import sys; print(sys._base_executable)"'
+    $query.Arguments = '-I -B -c "import sys; print(sys._base_executable)"'
     $query.UseShellExecute = $false
     $query.CreateNoWindow = $true
     $query.RedirectStandardOutput = $true
@@ -694,7 +694,7 @@ function script:Start-RuntimeConstruction {
     }
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $base
-    $argv = @('-I', $Helper, '--root', $Root, '--link-name', $LinkName,
+    $argv = @('-I', '-B', $Helper, '--root', $Root, '--link-name', $LinkName,
               'construction-session', $Version, '--payload-hash', $PayloadHash)
     if ($DevOwner) { $argv += @('--dev-owner', $DevOwner) }
     if ($Footprint) { $argv += @('--footprint', $Footprint, '--plugin', $Plugin) }

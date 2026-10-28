@@ -102,7 +102,7 @@ if ($Action -in @('cell-repair', 'cell-uninstall', 'cell-attribute-legacy', 'cel
     if (-not $python) { throw 'Cell lifecycle management requires an existing Python 3.10+ interpreter' }
     Set-Location -LiteralPath $env:USERPROFILE
     [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
-    & $python.Source -I (Join-Path $PSScriptRoot 'cell_lifecycle.py') @lifecycleArgs
+    & $python.Source -I -B (Join-Path $PSScriptRoot 'cell_lifecycle.py') @lifecycleArgs
     exit $LASTEXITCODE
 }
 
@@ -1942,7 +1942,7 @@ function Invoke-VersionedSlotClean {
     if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
         $nativeError = ''
         $helpers = (Invoke-Hidden -FilePath $py `
-            -ArgList @('-I', $vr, '--root', $InstallDir, 'construction-shell', '--shell', 'ps1') `
+            -ArgList @('-I', '-B', $vr, '--root', $InstallDir, 'construction-shell', '--shell', 'ps1') `
             -ErrorOutput ([ref]$nativeError) | Out-String)
         if ($nativeError) { [Console]::Error.Write($nativeError) }
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
@@ -2515,9 +2515,9 @@ foreach ($lib in @(
     }
     if (Test-Path (Join-Path $libDir 'pyproject.toml')) {
         if ($haveUv) {
-            & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --reinstall-package $lib.Pkg "$libDir" --quiet 2>&1 | Out-Null
+            & $VenvPython -I -B (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --reinstall-package $lib.Pkg "$libDir" --quiet 2>&1 | Out-Null
         } else {
-            & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --quiet "$libDir" 2>&1 | Out-Null
+            & $VenvPython -I -B (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --quiet "$libDir" 2>&1 | Out-Null
         }
         if ($LASTEXITCODE -ne 0) {
             Write-Fail "$($lib.Dir) library install failed"
@@ -2535,17 +2535,17 @@ $ErrorActionPreference = 'Continue'
 Remove-ConsoleTrampolines -VenvDir $VenvDir
 if (Get-Command uv -ErrorAction SilentlyContinue) {
     if ($CellMode) {
-        & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython "$PluginDir" --quiet 2>&1 |
+        & $VenvPython -I -B (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython "$PluginDir" --quiet 2>&1 |
             ForEach-Object { Write-Host $_ }
     } else {
-        & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython "$PluginDir" --quiet 2>&1 | Out-Null
+        & $VenvPython -I -B (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython "$PluginDir" --quiet 2>&1 | Out-Null
     }
 } else {
     if ($CellMode) {
-        & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --quiet "$PluginDir" 2>&1 |
+        & $VenvPython -I -B (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --quiet "$PluginDir" 2>&1 |
             ForEach-Object { Write-Host $_ }
     } else {
-        & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --quiet "$PluginDir" 2>&1 | Out-Null
+        & $VenvPython -I -B (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --quiet "$PluginDir" 2>&1 | Out-Null
     }
 }
 $pkgResult = $LASTEXITCODE
@@ -2570,7 +2570,7 @@ if ($VersionedRuntime) {
     $VrScript = Join-Path $PSScriptRoot 'versioned_runtime.py'
     # Health-gate: never swap the stable `.venv` link onto a slot whose package
     # does not import -- a broken build must not become the live runtime.
-    & $VenvPython -c 'import agent_machines' 2>$null
+    & $VenvPython -B -c 'import agent_machines' 2>$null
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
         exit 1
@@ -2737,7 +2737,7 @@ $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 $importOk = $false
 for ($i = 0; $i -lt 3; $i++) {
-    & $VenvPython -c 'import agent_machines' 2>$null
+    & $VenvPython -B -c 'import agent_machines' 2>$null
     if ($LASTEXITCODE -eq 0) { $importOk = $true; break }
     Start-Sleep -Seconds 1
 }
