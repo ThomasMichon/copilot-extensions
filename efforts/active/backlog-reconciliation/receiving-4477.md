@@ -6,12 +6,21 @@ Parent campaign: [Backlog Reconciliation](README.md).
 Canonical continuing objective:
 [#4477](https://github.com/ThomasMichon/copilot-extensions/issues/4477).
 
-**Publication boundary:** This is the complete proposed direct contribution
-for the existing keeper, not a new implementation effort or an already-live
-intake receipt. Normal review/merge precedes publication of the complete
-acceptance into #4477 and whole-current-keeper readback. The original body,
-transfer markers and all refinements remain unchanged; a bare link or summary
-is insufficient. This campaign does not become the Bridge implementation owner.
+**Reviewed file delivery:** #9446 merged as
+`ba2e841a805ff97db4a638968ad2414105e91fe9` on 2026-10-28 at
+21:37:35 UTC (14:37:35 PDT). The complete direct contribution was
+published in the actual open #4477 body at 22:06:05 UTC (15:06:05 PDT)
+and read back at 22:06:17 UTC. Its 24 reviewed rows are present; the
+entire incumbent body, 32 checklist entries, 26 inherited rows, original
+markers and all comments are unchanged.
+
+**Publication boundary:** This records the complete reviewed receiving text
+for the existing keeper, not a new implementation effort. Actual publication
+and full keeper readback now satisfy the direct-intake gate. Separate fresh
+source judgments administratively consolidated #5225/#5750/#5754/#7170;
+their unfinished outcomes and custodians remain here. A bare link or summary
+was not used as acceptance. This campaign does not become the Bridge
+implementation owner, and #4477 remains open for its complete outcome.
 
 ## Canonical continuity
 
@@ -206,13 +215,17 @@ is insufficient. This campaign does not become the Bridge implementation owner.
   Do not infer #8063 intake, transfer retirement/source authority, import its
   whole acknowledgment/adoption matrix or grant a live session/service action.
 
-## Actual receiving delivery and later disposition
+## Actual receiving delivery and separate disposition
 
-The proposed incoming trackers stay open from this document alone. After
-normal review and merge, the coordinating author must publish the complete
-direct keeper acceptance, preserve the original body/markers/refinements and
-read back the full eligible current keeper and continuing custody. Only then
-may a separate current-state assessment support an administrative supersession
-under the campaign's existing authority. No code-completed verdict, source/
-resource release, new Active effort, universal acknowledgment, every-host
-native proof, whole-parent or impossible no-outage gate is introduced.
+The actual keeper body contains all 24 reviewed rows above and four direct
+transfer markers. Whole-current-keeper/discussion readback preserved the
+complete original/refined/inherited scope and continuing custody. Separate
+fresh full actor/roster and source guards, live explanation audits and
+provider state readbacks supported the four administrative supersessions;
+their [dated disposition record](<journal/2026/10.28 cross-wave-intake-selection.md#complete-current-readback-direct-keeper-intake-and-twelve-administrative-folds>)
+distinguishes tracking from technical work.
+
+No code-completed verdict, source/resource release, new Active effort,
+universal acknowledgment, every-host native proof, whole-parent or impossible
+no-outage gate follows. The unchecked substantive acceptance remains with
+the same canonical keeper and existing implementation owners.

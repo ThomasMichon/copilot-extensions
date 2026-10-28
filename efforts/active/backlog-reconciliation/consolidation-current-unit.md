@@ -7,10 +7,18 @@ Planning integration: [cross-wave sequencing](roadmap-sequencing.md).
 Latest dispositions and census: [follow-through register](roadmap-follow-through.md).
 
 **Status:** All four fresh reports, covering nineteen own identities, are
-independently admitted. Complete receiving amendments are authored but not
-yet reviewed, delivered or accepted. Five existing receiving ROOTs retain
-their actual status and roles; #4477 remains the canonical issue keeper for
-its proposed direct contribution. No source disposition follows from this page.
+independently admitted and #9446 completed reviewed file delivery. All five
+complete current receiving ROOTs and their annexes are now read back;
+the complete direct #4477 contribution is published and verified. Twelve
+separately guarded source wrappers are administratively consolidated,
+not fixed or abandoned. Five ROOTs retain their status/roles; #4477/#6007/
+#7028 remain open keepers, and #5972/#5974/#7937/#7946 remain open at their
+specific restrictions. No source/resource custody is released or reassigned.
+
+**Actual publication:** #9446 merged on 2026-10-28 at 21:37:35 UTC
+(14:37:35 PDT) as `ba2e841a805ff97db4a638968ad2414105e91fe9`,
+after corrected-head approval and required green checks. The complete parent
+Status, Plan and Validation Plan were re-read; the campaign remains Active.
 This is lossless tracker consolidation, not another completed-code nomination
 pass, an implementation charter or a closure quota.
 
@@ -34,11 +42,11 @@ Within equally ready choices, retain creation-oldest-first coverage.
 
 | Own issue scope | Existing proposed receiver | Exact fit and unresolved receiving duty |
 |---|---|---|
-| #4477 keeper; #5225/#5750/#5754/#7170 | Existing open #4477 | Generation transition, failure/recovery and candidate admission share a concrete authority boundary. Current verification preserves all 32 checklist entries/26 inherited rows and confirms the issue itself is the continuing paper-coordination pointer; new direct donor acceptance still needs delivery. Related restoration is not a silent new owner. |
+| #4477 keeper; #5225/#5750/#5754/#7170 | Existing open #4477 | Generation transition, failure/recovery and candidate admission share a concrete authority boundary. Actual direct acceptance/readback preserves all 32 incumbent checklist entries/26 inherited rows and adds all 24 reviewed rows. Four redundant wrappers are administratively consolidated; related restoration is not a silent new owner. |
 | #5738/#5972/#5973/#5974/#6039 | [Machine Transport Convergence](../machine-transport-convergence/README.md) | The existing Plan directly names five distinct consumers. Preserve matching/locality/provider/packaging/native and owner-specific duties, delivered designs/shared source, and the freshly confirmed #5972/#5974 active issue/claim limits; an issue-link list is not complete intake. |
 | #6007 keeper; #6286/#7188 | [Durable PR Watch Delegation](../durable-pr-watch-delegation/README.md) | The existing umbrella explicitly owns the selected installation prerequisite and accepted fleet expansion. Keep separate per-origin adoption and fleet exits, delivered source/release credit and the latest caller-registration intent. Superseded source-owner signature requirements do not return as a new gate. |
 | #7028 keeper; #7029 | [Source-Managed Runtime Installs](../source-managed-runtime-installs/README.md) | #7029 explicitly declares a finite source-selection slice of #7028. Preserve independent exact selection, immutable construction and original installed evidence while retaining the keeper's broader freshness, diagnostics, maintenance/setup and Logger duties. No whole-parent prerequisite or source appointment is added. |
-| #7937/#7946 | [Source-Qualified Publication](../source-qualified-publication/README.md) | Current ROOT/validation reads directly retain complementary publication/receipt phases, actual Blocked status, accepted F1 source/hold release, complete compatibility/hunk boundaries and unmet nominal/F2-F5/native/installed duties. The explicit no-close-on-plan-only condition remains; new direct intake still needs delivery. |
+| #7937/#7946 | [Source-Qualified Publication](../source-qualified-publication/README.md) | Complete current ROOT/validation/annex readback retains complementary publication/receipt phases, actual Blocked status, accepted F1 source/hold release, complete compatibility/hunk boundaries and unmet nominal/F2-F5/native/installed duties. Reviewed direct intake does not waive the explicit no-close-on-plan-only condition; both trackers remain open. |
 | #8778/#8779 | [Dispatch Fleet Reliability and Recovery](../dispatch-fleet-reliability-recovery/README.md) | Typed registry uncertainty and a bounded deferral episode share the same registry-to-reservation boundary. Direct Plan **and** Validation retention is required; complementary inputs are not duplicate outcomes or a whole-issue cycle. |
 
 These are direct declared containment or finite pipeline relationships, not
@@ -112,7 +120,7 @@ selected destination inside the forwarded SSH child; it is not permission
 to kill a process. Public prose abstracts downstream client identity without
 changing its custody boundary.
 
-Current receiving delivery/readback remains open. #5972's future marker and
+Current receiving delivery and complete readback are verified. #5972's future marker and
 the receiving ROOT's active issue/claim continuation, and #5974's explicit
 active issue-and-claim condition, remain specific retained source-token
 limits. Both leaves stay open here; neither blocks independent source intake.
@@ -136,7 +144,7 @@ no product code or running installation was qualified.
 | Source-Managed Runtime Installs | [Complete keeper and selector acceptance](../source-managed-runtime-installs/retained-source-selector.md) | #7028 stays open with #184/#403, maintenance/setup holders and the exact remaining Logger role/six-command duty; no all-parent gate for #7029. |
 | Source-Qualified Publication | [Per-origin publication outcomes](../source-qualified-publication/retained-publication-outcomes.md) | Actual Blocked status and existing full compatibility matrix remain. F1 source hold release is credited, but the explicit no-close-on-plan-only condition keeps #7937/#7946 open. |
 | Durable PR Watch Delegation | [Complete PR-service/adoption/fleet outcomes](../durable-pr-watch-delegation/retained-pr-service-outcomes.md) | #6007 stays open. Distinct #6286 installed and #7188 fleet/registration exits, source credit and all actual holders remain; old signature gates do not return. |
-| Open #4477 issue | [Complete reviewed-publication text](receiving-4477.md) | The actual keeper is still unedited. Normal review, publication of the full direct contribution and whole-current-keeper readback remain; this campaign is not a new implementation owner. |
+| Open #4477 issue | [Complete reviewed-publication text](receiving-4477.md) | The complete direct contribution is live in the actual body and the entire current keeper/discussion is read back. Four separate administrative source judgments preserve every unfinished outcome and custodian; this campaign is not a new implementation owner. |
 
 The Source-Qualified Publication study confirmed its complete original
 compatibility/rollback/restart/native matrix already exists; no duplicate
@@ -153,9 +161,9 @@ automatically an additional signature/standalone-token rule. Real specific
 conditions and source/resource custody still govern later disposition.
 
 Four source tokens, #5972/#5974/#7937/#7946, remain specifically retained
-open in these amendments. The other selection candidates are not a closure
-quota: complete reviewed receiving delivery, actual whole readback and fresh
-eligible source guards must precede any supported administrative supersession.
+open in these amendments. Complete reviewed receiving delivery, actual whole
+readback and fresh eligible source guards now support twelve independent
+administrative supersessions, recorded below. They were not a closure quota.
 No technical completion, source assignment or claim/resource release is inferred.
 
 The additions do not commandeer the existing execution queues: each
@@ -273,3 +281,36 @@ No product code, test, build, native fixture, runtime, service, process, claim,
 resource or credential is operated by this research. Other issue/PR bodies,
 new source assignments and implementation/rollout are outside the grants.
 The [parent Plan and Validation Plan](README.md#plan) remain open.
+
+## Completed receiving unit and continuing supply
+
+The [dated readback and disposition record](<journal/2026/10.28 cross-wave-intake-selection.md#complete-current-readback-direct-keeper-intake-and-twelve-administrative-folds>)
+verifies all five full ROOTs, five annexes and the complete original
+publication-validation document: eleven files, 115 direct Plan/Validation
+pairs, unchanged incumbent execution slices and all 54 checked PR-service
+source baselines. The actual #4477 body preserves all incumbent text and
+discussion while adding its complete reviewed direct acceptance.
+
+Twelve live explanations and provider terminal states verify administrative
+supersession of #5225/#5738/#5750/#5754/#5973/#6039/#6286/#7029/#7170/
+#7188/#8778/#8779. Each original source body remains unchanged. The retained
+work remains planned under the existing canonical objectives; GitHub's
+not-planned reason applies only to the duplicate tracking wrapper.
+
+The complete **22:15:42 UTC (15:15:42 PDT)** census is **926 whole open**,
+197 above the fixed checkpoint. It records twelve campaign administrative
+closures and three eligible metadata-only arrivals, #9443/#9444/#9448,
+with no external departures. See the [follow-through register](roadmap-follow-through.md#complete-receiving-unit-twelve-administrative-consolidations).
+
+Already-admitted evidence supplies conditional next research for #7940's
+finite source closeout, #7944/#7945's paired passive-observation receiver,
+#4121/#5862 and #6240/#6241 under the existing Fleet V2 contract, and
+#8860/#9332's substrate/profile boundary. The fourth selection adds #4304's
+finite installed/skipped reporting question and #5868/#7408's coupled
+preparation/selector-routing contracts, not duplicate-issue or current-defect
+verdicts. Seven conditional families contain twelve nominated origins.
+These are fresh-research candidates, not accepted intakes or completion
+findings. Bridge's narrower selection found no supported new unit among its
+ten detailed candidates; this is not exhaustion of its entire repertoire.
+The three new arrivals remain additional explicit research supply, not
+implementation assignments.
