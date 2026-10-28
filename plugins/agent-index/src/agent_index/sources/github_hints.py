@@ -94,7 +94,7 @@ def acquire_item(
     if cancel_check:
         cancel_check()
     path = f"/repos/{connector.owner}/{connector.repo}/issues/{number}"
-    result = connector._http.get_json(path, etag=False)
+    result = connector._http.get_json(path, etag=False, purpose="item_body")
     if result.not_modified:
         raise ValueError("GitHub hinted acquisition requires a fresh item")
     item = result.data
@@ -110,6 +110,7 @@ def acquire_item(
             cancel_check()
         result = connector._http.get_json(
             path + "/comments", params={"per_page": 100, "page": page}, etag=False,
+            purpose="comment_page",
         )
         data = result.data
         if result.not_modified or not isinstance(data, list) or len(data) > 100:

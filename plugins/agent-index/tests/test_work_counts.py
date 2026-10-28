@@ -207,20 +207,100 @@ def test_shared_http_counts_retries_payloads_not_modified_and_json(monkeypatch) 
 
     @measure_reindex
     def run():
-        assert session.get_json("/items").data == {"ok": True}
-        assert session.get_json("/items").not_modified
+        assert session.get_json("/items", purpose="identity_page").data == {"ok": True}
+        assert session.get_json("/items", purpose="metadata").not_modified
         with pytest.raises(ValueError):
-            session.get_json("/invalid")
+            session.get_json("/invalid", purpose="comment_page")
         return {}
 
     try:
-        assert run()["work_counts"]["http"] == {
+        counts = run()["work_counts"]
+        assert counts["http"] == {
             "attempts": 5, "responses": 4, "retries": 2,
             "response_bytes": 5 + 11 + 8, "not_modified": 1, "json_results": 1,
+        }
+        assert counts["http_by_purpose"] == {
+            "identity_page": {
+                "attempts": 3, "responses": 2, "retries": 2, "response_bytes": 16,
+                "not_modified": 0, "json_results": 1,
+            },
+            "metadata": {
+                "attempts": 1, "responses": 1, "retries": 0, "response_bytes": 0,
+                "not_modified": 1, "json_results": 0,
+            },
+            "comment_page": {
+                "attempts": 1, "responses": 1, "retries": 0, "response_bytes": 8,
+                "not_modified": 0, "json_results": 0,
+            },
         }
     finally:
         session.client.close()
     assert current_counts() is None
+
+
+def test_http_purposes_preserve_unclassified_post_pagination_and_nested_scopes():
+    def handler(request):
+        assert "purpose" not in request.url.params
+        if request.method == "POST":
+            assert request.content == b'{"value":1}'
+        headers = (
+            {"x-ms-continuationtoken": "next"}
+            if request.url.path == "/pages" and "continuationToken" not in request.url.params else {}
+        )
+        return httpx.Response(200, json=[], headers=headers)
+
+    session = GoodCitizenSession(
+        base_url="https://example.test", transport=httpx.MockTransport(handler), min_interval_s=0,
+    )
+
+    @measure_reindex
+    def inner():
+        session.post_json("/item", json={"value": 1}, purpose="item_body")
+        return {}
+
+    @measure_reindex
+    def run():
+        session.get_json("/unclassified")
+        assert len(session.paginate_continuation("/pages", purpose="identity_page")) == 2
+        nested = inner()["work_counts"]
+        assert set(nested["http_by_purpose"]) == {"item_body"}
+        assert nested["http"]["attempts"] == 1
+        return {}
+
+    try:
+        counts = run()["work_counts"]
+        assert set(counts["http_by_purpose"]) == {"unclassified", "identity_page"}
+        assert counts["http_by_purpose"]["unclassified"]["attempts"] == 1
+        assert counts["http_by_purpose"]["identity_page"]["attempts"] == 2
+        for field in counts["http"]:
+            assert counts["http"][field] == sum(
+                purpose[field] for purpose in counts["http_by_purpose"].values()
+            )
+        assert current_counts() is None
+    finally:
+        session.client.close()
+
+
+@pytest.mark.parametrize("measured", [False, True])
+def test_invalid_http_purpose_refuses_before_request_without_recording_the_label(measured):
+    session = GoodCitizenSession(
+        base_url="https://example.test", min_interval_s=0,
+        transport=httpx.MockTransport(lambda _r: pytest.fail("invalid purpose sent a request")),
+    )
+
+    def request():
+        with pytest.raises(ValueError, match="Unsupported HTTP measurement purpose"):
+            session.get_json("/item", purpose="https://example.test/private-scope")
+        return {}
+
+    try:
+        if measured:
+            counts = measure_reindex(request)()["work_counts"]
+            assert counts["http"] is None and counts["http_by_purpose"] == {}
+        else:
+            request()
+    finally:
+        session.client.close()
 
 
 def test_one_source_result_covers_multiple_batches_without_locking_model_calls(tmp_path, monkeypatch):
