@@ -204,6 +204,22 @@ repository history.
 
 ## Journal
 
+### 2026-10-28 - Requalify joined source and exercise the stopped-resident reader
+
+- Exact joined source `f13e7b1008fb1623e56aff6e3d8bf892a9c4dc1d` passed
+  all three hosted lanes in run 40763408792: original Windows activation and
+  negative topology, native/portable POSIX, and actual Worktrees construction,
+  maintenance, manual-update exclusion and canonical SSH/Worktrees/Task cleanup.
+- The desktop-startup intake additionally requires the actual Manager
+  current-roster consumer, not just maintenance or a synthetic daemon.
+  Add two concurrent copied-Manager reads through the normal installed engine
+  with its resident stopped. Confirm one serving owner after both caller Jobs
+  close, then use authenticated canonical shutdown and native exit confirmation;
+  repeat from stopped state. This new consumer boundary remains unqualified
+  until its own hosted result passes. It is not a full interactive Picker run.
+- No shared-host installed change or retirement is authorized by these results.
+  Source review/CI, release and eventual installed cutover remain separate.
+
 ### 2026-10-28 - Integrate the merged finite cleanup owner before release
 
 - The operator authorized ordinary review, required CI, merge and promotion of

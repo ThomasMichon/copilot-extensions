@@ -1,0 +1,115 @@
+"""Actual Manager roster consumer under disposable caller cleanup Jobs."""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import time
+
+from windows_broker_fixture import admit
+
+
+READER = """
+import json,sys
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+from worktree_manager import engine_client
+rows=engine_client.list_worktree_rows(sys.argv[3])
+from zdd import routing
+endpoint=routing.read_active_endpoint(Path(sys.argv[2])/'status-monitor-routing')
+if endpoint is None:
+    raise RuntimeError('Manager current-roster read has no resident route')
+print(json.dumps({'rows':len(rows),'pid':endpoint.pid,'generation':endpoint.generation}))
+"""
+
+CONTROL = """
+import json,sys
+from pathlib import Path
+from zdd import routing
+from agent_worktrees.status_monitor_cutover import ControlClient
+root=Path(sys.argv[1])
+endpoint=routing.read_active_endpoint(root/'status-monitor-routing')
+if endpoint is None:
+    raise RuntimeError('Expected owned resident route is absent')
+client=ControlClient('http://'+endpoint.client_host+':'+str(endpoint.port),
+    token=(root/'status-monitor-control.token').read_text().strip(),config_dir=root)
+print(json.dumps(client.shutdown() if sys.argv[2]=='shutdown' else client.health()))
+"""
+
+
+def qualify(root: Path, runtime: Path, command: list[str], projects: list[Path], *,
+            environment: dict[str, str], run, procutil) -> dict:
+    admit(root, True)
+    from agent_procutil.daemon_broker import WindowsDaemonProcess
+    from zdd import routing
+
+    reader = root / "manager-reader"
+    source = Path(__file__).resolve().parents[1] / "worktree-manager" / "src" / "worktree_manager"
+    shutil.copytree(source, reader / "worktree_manager",
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    env = {**environment, "WORKTREE_MANAGER_ENGINE_ARGV": json.dumps(command)}
+    cycles = []
+    for cycle in range(2):
+        endpoint = routing.read_active_endpoint(runtime / "status-monitor-routing")
+        if endpoint is not None:
+            raise RuntimeError("Cold Manager acceptance requires a stopped resident")
+        callers = []
+        resident = None
+        try:
+            for index in range(2):
+                process, job = procutil.spawn_sync_in_kill_on_close_job(
+                    [command[0], "-I", "-B", "-c", READER, str(reader), str(runtime),
+                     f"broker-fixture-{index}"],
+                    cwd=projects[index], env=env, require_job=True, allow_breakaway=False,
+                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    text=True, encoding="utf-8", **procutil.no_window_kwargs(),
+                )
+                callers.append((process, job))
+                if job is None:
+                    raise RuntimeError("Manager reader caller Job is unavailable")
+            replies = []
+            for process, _job in callers:
+                stdout, stderr = process.communicate(timeout=45)
+                if process.returncode:
+                    raise RuntimeError("Actual Manager current-roster read failed: " + stdout + stderr)
+                replies.append(json.loads(stdout))
+            endpoint = routing.read_active_endpoint(runtime / "status-monitor-routing")
+            if endpoint is None or any(
+                (reply["pid"], reply["generation"]) != (endpoint.pid, endpoint.generation)
+                for reply in replies
+            ):
+                raise RuntimeError("Concurrent Manager reads did not retain one serving owner")
+            resident = WindowsDaemonProcess(endpoint.pid, ["owned-fixture-status-monitor"])
+        finally:
+            for process, job in callers:
+                if job is not None:
+                    job.terminate_and_wait(5)
+                    job.close()
+                process.wait(timeout=5)
+            endpoint = routing.read_active_endpoint(runtime / "status-monitor-routing")
+            if resident is None and endpoint is not None:
+                resident = WindowsDaemonProcess(endpoint.pid, ["owned-fixture-status-monitor"])
+            if resident is not None:
+                try:
+                    if sys.exc_info()[0] is None:
+                        for _sample in range(2):
+                            health = json.loads(run([command[0], "-I", "-B", "-c", CONTROL,
+                                                     str(runtime), "health"], timeout=15))
+                            if health.get("status") != "ready" or resident.poll() is not None:
+                                raise RuntimeError("Resident did not survive every Manager caller Job")
+                            time.sleep(1)
+                        cycles.append({"cycle": cycle + 1, "concurrent_current_reads": True,
+                                       "all_caller_jobs_closed": True, "resident_survived": True})
+                finally:
+                    try:
+                        result = json.loads(run([command[0], "-I", "-B", "-c", CONTROL,
+                                                 str(runtime), "shutdown"], timeout=15))
+                        if result != {"shutdown": True}:
+                            raise RuntimeError("Owned resident did not accept canonical shutdown")
+                        resident.wait(timeout=30)
+                    finally:
+                        resident.close()
+    return {"actual_copied_manager_reader": True, "cycles": cycles,
+            "resident_cleanup_confirmed": True, "full_interactive_picker": False}

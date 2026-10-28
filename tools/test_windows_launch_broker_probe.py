@@ -18,6 +18,7 @@ import windows_launch_broker_probe as probe
 from windows_broker_desktop import DesktopWitness
 from windows_broker_cell_acceptance import qualify as qualify_cell
 import windows_broker_consumer_acceptance as consumer_probe
+import windows_broker_picker_acceptance as picker_probe
 
 
 @pytest.mark.parametrize("plugin", sorted(protocol_probe.NATIVE_PLUGINS))
@@ -116,6 +117,13 @@ def test_real_consumer_fixture_refuses_shared_host_before_loading_or_mutating(mo
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     with pytest.raises(RuntimeError, match="ephemeral Windows CI consent"):
         consumer_probe.qualify(tmp_path)
+
+
+def test_actual_picker_fixture_refuses_shared_host_before_copy_or_spawn(monkeypatch, tmp_path):
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    with pytest.raises(RuntimeError, match="ephemeral Windows CI consent"):
+        picker_probe.qualify(tmp_path, tmp_path, [], [], environment={}, run=Mock(), procutil=Mock())
+    assert not (tmp_path / "manager-reader").exists()
 
 
 def test_real_consumer_entry_refuses_before_creating_a_profile(monkeypatch):

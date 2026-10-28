@@ -246,6 +246,11 @@ def qualify(root: Path) -> dict:
             raise RuntimeError("automatic maintenance did not publish the real peer runtime")
         if any(after.started_at < before.finished_at for before, after in zip(requests, requests[1:])):
             raise RuntimeError("a later request began before the prior mutation settled")
+        from windows_broker_picker_acceptance import qualify as qualify_picker
+
+        picker = qualify_picker(
+            root, runtime, command, projects, environment=environment, run=run, procutil=pu,
+        )
         outcome = {
             "cold_actual_worktrees_construction": True,
             "cold_installer_broker_adoption": True,
@@ -256,6 +261,7 @@ def qualify(root: Path) -> dict:
             "actual_private_project_adoption": True,
             "manual_update_serialized": True, "all_submitter_jobs_closed_before_release": True,
             "credential_free_private_profile": True,
+            "picker_recovery": picker,
         }
     finally:
         # Canonical removal must prove finite scopes have settled; never force-clear their journal.
