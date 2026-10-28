@@ -239,9 +239,14 @@ evidence is no longer needed.
   provisioned, policy-admitted tool environment. It never unions requirements.
   Exact installed tool bytes, target, interpreter, UV, builder and source still
   bind the existing cache key, with all tool environments rechecked.
-  The two contained native controls for distinct lower bounds and conflicting
-  pins pass, including fresh-slot reuse without rebuilding source wheels.
-  Full regression and real-backend/platform qualification remain in progress.
+  The contained Windows packet passes27 controls with one POSIX-only skip,
+  including distinct lower bounds, conflicting pins and fresh-slot reuse
+  without rebuilding source wheels. The pinned real-backend lane also passes:
+  Linux26 controls/two synthetic-only skips, Windows25/three skips, in
+  run40666514713 at `d7b2277e381e25990c5fe7d5770a1f272ba731f3`.
+  The first required CI run refused the changed helper's old unit-admission
+  digest; that single source digest is updated without changing unit selection,
+  effects policy or coverage. Required CI and review remain delivery gates.
 - Source work resumes here from the completed native-startup source slice.
   That effort's remaining POSIX/full-mux and installed gates remain under
   #9364, with no rollout or retained-session restart.
