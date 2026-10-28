@@ -93,6 +93,7 @@ $VenvDir = Join-Path $InstallDir '.venv'
 $LinkDir = $VenvDir
 $VersionedRuntime = $true
 $Force = $false
+$PreserveSupervisors = $env:FIXTURE_PRESERVE_SUPERVISORS -eq '1'
 $script:ActivationSuperseded = $false
 $script:GlobalActivationLockTimeoutSeconds = 5
 $script:InstallerDependencyPolicy = Join-Path $ScriptDir 'installer_dependency_policy.py'
@@ -146,6 +147,7 @@ BOARD_STUB="$LOCAL_BIN/agent-dispatch-board"
 VERSIONED_RUNTIME=1
 ACTIVATION_SUPERSEDED=0
 FORCE=0
+PRESERVE_SUPERVISORS="${{FIXTURE_PRESERVE_SUPERVISORS:-0}}"
 AGENT_DISPATCH_SUPERVISE_MACHINE=fixture
 _ok() {{ :; }}; _skip() {{ :; }}; _warn() {{ :; }}; _step() {{ :; }}
 _fail() {{ printf '%s\\n' "$*" >&2; }}

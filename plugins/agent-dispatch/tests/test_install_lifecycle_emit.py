@@ -32,7 +32,8 @@ def _ps_function(text: str, name: str) -> str:
 
 
 def _run(tmp_path: Path, action: str, failure: str = "", *, blocked: bool = False,
-         powershell: bool = False, discovery: str = "") -> tuple[subprocess.CompletedProcess[str], list[dict]]:
+         powershell: bool = False, discovery: str = "",
+         preserve: bool = False) -> tuple[subprocess.CompletedProcess[str], list[dict]]:
     shell = shutil.which("pwsh" if powershell else "bash")
     if not shell or (not powershell and os.name == "nt"):
         pytest.skip("native shell unavailable")
@@ -54,7 +55,8 @@ def _run(tmp_path: Path, action: str, failure: str = "", *, blocked: bool = Fals
             + text[text.index("$script:InstallerLifecycleAction = if"):]
         )
         (tmp_path / "installer-instance-reconcile.ps1").write_text(
-            "function Invoke-InstallerInstanceReconcile { param($HelperRoot) }\n",
+            "function Invoke-InstallerInstanceReconcile { param($HelperRoot)\n"
+            "[IO.File]::AppendAllText($env:TEST_RECONCILE_LOG, \"reconcile`n\")\n}\n",
             encoding="utf-8",
         )
         mocks = "\n".join(
@@ -74,7 +76,7 @@ def _run(tmp_path: Path, action: str, failure: str = "", *, blocked: bool = Fals
             "$PluginDir = $env:TEST_PLUGIN\n$InstallDir = $env:TEST_INSTALL_ROOT\n"
             "$VenvDir = $env:TEST_RUNTIME\n$LinkDir = $env:TEST_RUNTIME\n"
             "$SrcVersion = '1.2.3'\n$Action = $env:TEST_ACTION\n"
-            "$PreserveSupervisors = $false\n"
+            "$PreserveSupervisors = $env:TEST_PRESERVE_SUPERVISORS -eq '1'\n"
             "$global:LASTEXITCODE = 47\n"
             "$installerActionRefusal = $null\n"
             "$script:ActionControlsHelper = Join-Path $PluginDir 'scripts/action_controls.py'\n"
@@ -100,7 +102,10 @@ def _run(tmp_path: Path, action: str, failure: str = "", *, blocked: bool = Fals
             '. "$TEST_RECONCILE_SH"',
         )
         reconcile = tmp_path / "installer-instance-reconcile.sh"
-        reconcile.write_text("reconcile_installer_instances() { :; }\n", encoding="utf-8")
+        reconcile.write_text(
+            'reconcile_installer_instances() { printf "reconcile\\n" >> "$TEST_RECONCILE_LOG"; }\n',
+            encoding="utf-8",
+        )
         support = (PLUGIN / "scripts" / "source-runtime.sh").read_text(encoding="utf-8")
         mocks = "\n".join(
             f"{name}() {{ " + ("exit 23" if failure == name else ":") + "; }"
@@ -114,7 +119,7 @@ def _run(tmp_path: Path, action: str, failure: str = "", *, blocked: bool = Fals
             "set -euo pipefail\nPLUGIN_DIR=\"$TEST_PLUGIN\"\nINSTALL_DIR=\"$TEST_INSTALL_ROOT\"\n"
             "SCRIPT_DIR=\"$PLUGIN_DIR/scripts\"\n"
             "SRC_VERSION=1.2.3\nACTION=\"$TEST_ACTION\"\nLINK_DIR=\"$TEST_RUNTIME\"\n"
-            "PRESERVE_SUPERVISORS=0\n"
+            "PRESERVE_SUPERVISORS=\"$TEST_PRESERVE_SUPERVISORS\"\n"
             "_warn() { printf '%s\\n' \"$*\" >&2; }\n"
             "_fail() { printf '%s\\n' \"$*\" >&2; }\n"
             + _function(support, "_require_actions") + "\n"
@@ -134,6 +139,8 @@ def _run(tmp_path: Path, action: str, failure: str = "", *, blocked: bool = Fals
         "TEST_RECONCILE_SH": str(tmp_path / "installer-instance-reconcile.sh"),
         "TEST_RUNTIME": str(runtime), "TEST_PYTHON": sys.executable,
         "TEST_LAUNCHER_USED": str(tmp_path / "launcher-used"),
+        "TEST_RECONCILE_LOG": str(tmp_path / "instance-reconcile.log"),
+        "TEST_PRESERVE_SUPERVISORS": str(int(preserve)),
     }
     if not powershell and discovery in {"runtime", "missing"}:
         minimal_path = tmp_path / "minimal-path"

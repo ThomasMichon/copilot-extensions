@@ -11,6 +11,7 @@ import pytest
 
 from tests import source_publication_fixture as fixture
 from tests.test_action_native_ps1 import installer_policy, run_ps
+from tests.test_install_lifecycle_emit import _run as run_lifecycle_boundary
 from tests.test_installer_required_cutover import _run, _update_script
 
 
@@ -227,3 +228,59 @@ def test_preservation_rejects_legacy_runtime_dependency_before_construction(
     assert "without a legacy .venv path" in result.stdout + result.stderr
     assert (tmp_path / ".venv").is_dir()
     assert not (tmp_path / "versions").exists()
+
+
+@pytest.mark.parametrize("ext", ["sh", "ps1"])
+@pytest.mark.parametrize("preserve", [False, True])
+def test_real_runtime_boundary_omits_collection_only_when_preserving(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ext: str, preserve: bool,
+) -> None:
+    if ext == "sh" and os.name == "nt":
+        pytest.skip("native POSIX collection boundary; Windows uses PowerShell")
+    original = fixture.script
+
+    def render(shell: str) -> str:
+        text = original(shell)
+        if shell == "sh":
+            before = "_versioned_gc() { :; }"
+            after = '_versioned_gc() { printf "gc\\n" >> "$FIXTURE_COLLECTION_LOG"; }'
+        else:
+            before = "function Invoke-VersionedGc { param($KeepPrev) }"
+            after = (
+                "function Invoke-VersionedGc { param($KeepPrev)\n"
+                '[IO.File]::AppendAllText($env:FIXTURE_COLLECTION_LOG, "gc`n")\n}'
+            )
+        assert text.count(before) == 1
+        return text.replace(before, after)
+
+    monkeypatch.setattr(fixture, "script", render)
+    env, root, sources = fixture.stage(tmp_path)
+    fixture.activate(env, root, sources[0][1].runtime_version)
+    log = tmp_path / "collection.log"
+    env["FIXTURE_COLLECTION_LOG"] = str(log)
+    env["FIXTURE_PRESERVE_SUPERVISORS"] = str(int(preserve))
+    payload, target = sources[1]
+    result = fixture.run(ext, payload / "scripts" / f"install.{ext}", ["update"], env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "current-version").read_text().strip() == target.runtime_version
+    if preserve:
+        assert not log.exists()
+    else:
+        assert log.read_text().splitlines() == ["gc"]
+
+
+@pytest.mark.parametrize("ext", ["sh", "ps1"])
+@pytest.mark.parametrize("preserve", [False, True])
+def test_real_top_level_boundary_omits_instance_reconcile_only_when_preserving(
+    tmp_path: Path, ext: str, preserve: bool,
+) -> None:
+    result, events = run_lifecycle_boundary(
+        tmp_path, "update", powershell=ext == "ps1", preserve=preserve,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert [event["outcome"] for event in events] == ["begin", "ok"]
+    log = tmp_path / "instance-reconcile.log"
+    if preserve:
+        assert not log.exists()
+    else:
+        assert log.read_text().splitlines() == ["reconcile"]
