@@ -203,6 +203,13 @@ activation. Missing bootstrap Python, an unavailable input fingerprint, or a
 publication refusal stops before selector, last-known-good, monitor, and GC
 changes. A successful health probe alone does not authorize activation.
 
+The retained legacy activation wrappers also fail the installer when the
+status-monitor transition fails, is refused or remains busy. They retain the
+completed slot and installed selectors for recovery; those selectors do not
+certify serving convergence. Disabled or absent monitors remain valid no-ops.
+This reporting correction does not change the cutover algorithm, add readiness
+or predecessor-retirement proof, or replace the current Python lifecycle owner.
+
 Agent Worktrees has three shipped pieces:
 
 - **Plugin payload** (skills, hooks, live-pulse extension) -- loaded by Copilot

@@ -765,33 +765,34 @@ def activate_after_update(
 
 
 def installer_after_update() -> int:
-    """Non-fatal installer wrapper that prints a short cutover summary."""
+    """Report the existing transition outcome without masking an incomplete update."""
     summary = activate_after_update(
         monitor_was_live=os.environ.get("AGENT_WORKTREES_MONITOR_WAS_LIVE") == "1",
     )
     action = str(summary.get("action") or "noop")
-    if not summary.get("enabled"):
+    if summary.get("enabled") is False:
         print("status-monitor disabled; skipped")
         return 0
     if action == "noop":
         print(f"status-monitor {summary.get('reason', 'noop')}; left as-is")
-        return 0
+        return 0 if summary.get("reason") == "no-live-monitor" else 1
     if action == "restart":
         restart = summary.get("restart")
         if isinstance(restart, dict):
-            if restart.get("already_current"):
+            if restart.get("already_current") is True:
                 print("no routed live monitor; current monitor already owns the host")
-            elif restart.get("spawned"):
+                return 0
+            if restart.get("spawned") is True:
                 print("no routed live monitor; restarted the current monitor")
-            else:
-                print("no routed live monitor; restart attempt did not spawn a monitor")
-        return 0
+                return 0
+        print("no routed live monitor; restart attempt did not spawn a monitor")
+        return 1
     result = summary.get("result") if isinstance(summary.get("result"), dict) else {}
-    if result.get("ok"):
+    if action == "cutover" and result.get("ok") is True:
         print(f"cut over live monitor to port {result.get('new_port')}")
-    else:
-        print(f"cutover failed; rollback kept serving state ({result.get('error')})")
-    return 0
+        return 0
+    print(f"status-monitor transition incomplete ({result.get('error') or summary.get('reason')})")
+    return 1
 
 
 def _acquire_cutover_lock(
