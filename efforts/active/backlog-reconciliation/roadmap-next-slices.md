@@ -64,7 +64,7 @@ The existing Phase 1 #5512 reviewed-merge prerequisite applies to Phase 2
 
 | Issue | Existing home or retained ownership | First bounded decision and finite exit |
 |---|---|---|
-| #1803 | Standalone agent-mcp call/forward/attach framing owner; whole-scope effort home remains a gap. | Recheck coherent TCP/Unix client/server framing for a valid result **strictly greater than 65,536 bytes**, deliberate oversize refusal, cleanup and healthy subsequent calls. Preserve no ambiguous replay. Configurable maximum is preferred, not mandatory; do not make graceful cutover a prerequisite. |
+| #1803 | Standalone agent-mcp call/forward/attach framing owner; whole-scope effort home remains a gap. | Recheck coherent TCP/Unix client/server framing for a valid serialized JSON result **strictly greater than 65,536 bytes before the terminating LF**, deliberate oversize refusal, cleanup and healthy subsequent calls. Preserve no ambiguous replay. Configurable maximum is preferred, not mandatory; do not make graceful cutover a prerequisite. |
 | #3002 | Dispatch Task Lifecycle and Conversations, Phase 7; existing binding/receipt/outbox owners. | Recheck a STARTED task with no owner session, then rightful late binding, while retaining the distinct cold-SUSPENDED path. Choose the original routable binding **OR** alternate exact-owner route **OR** explicit not-ready/undeliverable alternative. Historical keyed acceptance stays immutable; later delivery/consumption is separate and exactly once. |
 | #4220 | Index Standalone Service and actual source/data owners; later incremental work is credited, not substituted for exclusion. | Recheck two canonical-family aliases through A/B/C where C reverts a B-only change. Select a shared completed-family watermark **OR** explicit stale-alias repair/refusal, composing existing source exclusion, acquisition/cursor and GC authority. Old writers retain supported participation/drain/isolation limits; no retrofit kill or new lock service. |
 
@@ -117,7 +117,7 @@ implemented fixes, a new observed outage or qualified installed behavior.
 
 | Issue | Actual selected-source result | First contribution, without new authority |
 |---|---|---|
-| #1803 | Async TCP/Unix constructors and data listeners still omit a larger explicit reader limit; call/attach use line reads. Seven relevant production/test blobs match the earlier audit. Existing one-op cleanup and synchronous multi-chunk forwarding are credited; a 65,536-byte receive chunk is not an aggregate synchronous frame cap. | Through the existing framing owner, first specify one small request whose **actual serialized response** exceeds 65,536 bytes, including JSON envelope/newline. Test the production call/attach/forward seams, deliberate over-limit outcome and subsequent-call health; do not hide the production reader policy with a larger test-only reader. Keep pre-connect fallback separate from lost replies after admission so a size-error fix cannot replay an uncertain tool operation. |
+| #1803 | Async TCP/Unix constructors and data listeners still omit a larger explicit reader limit; call/attach use line reads. Seven relevant production/test blobs match the earlier audit. Existing one-op cleanup and synchronous multi-chunk forwarding are credited; a 65,536-byte receive chunk is not an aggregate synchronous frame cap. | Through the existing framing owner, first specify one small request whose **serialized UTF-8 JSON response, including its envelope but excluding the terminating LF, exceeds 65,536 bytes**: at least 65,537 JSON bytes and 65,538 wire bytes with LF. Test the production call/attach/forward seams, deliberate over-limit outcome and subsequent-call health; do not hide the production reader policy with a larger test-only reader. Keep pre-connect fallback separate from lost replies after admission so a size-error fix cannot replay an uncertain tool operation. |
 | #9323 | Generated ordinary commands still include the blanket permission option; the final resolver reaches command-file persistence without the requested option refusal. Ordinary Bridge clients still default to automatic approval, and absent-upstream forwarding synthesizes `allow_always`. Twenty consulted files match the prior pin. Existing hosting checks and correlated explicit answer/refusal paths remain real foundations. | Through the original explicit claimant, specify composed bare/cross-repository default and changed-configuration cases at actual persistence/transport boundaries. Include the constructed no-callback client, an absent upstream and a genuine connected reject answer. Preserve request/session/tool/option correlation, legitimate scoped grants and response shape; removing only a generated flag is incomplete. |
 
 Independent admission checked five raw provider responses, ten selected
@@ -125,6 +125,11 @@ source captures and 48 source quotations for #1803; #9323 retained three raw
 provider responses and forty old/current source captures, with 29 source
 quotations. Raw bytes, exact immutable blobs, text identity and all quoted
 lines were verified. The tests were read as text only.
+
+The reader limit excludes the line separator. A 65,536-byte JSON response plus
+LF is therefore not the over-limit regression, even though its wire length is
+65,537 bytes. Count the serialized JSON before LF for both the original-limit
+witness and the chosen supported maximum.
 
 The focused validation designs were **not executed**. No actual large-response
 call, permission request, generated launch, native experiment, installed peer
