@@ -251,6 +251,7 @@ def signal_readback(lines, *, signal, expected_logs=None, expected_metrics=()) -
     import json
     import base64
     import math
+    import uuid
     from collections import Counter
 
     resources = {"service.name": "worktree-manager-source", "service.namespace": "copilot-extensions"}
@@ -306,6 +307,17 @@ def signal_readback(lines, *, signal, expected_logs=None, expected_metrics=()) -
             int(point["start_time_ns"]), int(point["time_ns"]),
         )
 
+    def resource_matches(resource):
+        values = attrs(resource.get("resource", {}).get("attributes", []))
+        if "service.instance.id" in values:
+            instance = values.pop("service.instance.id")
+            if type(instance) is not str:
+                return False
+            parsed = uuid.UUID(instance)
+            if str(parsed) != instance or parsed.version != 4:
+                return False
+        return values == resources
+
     if signal == "logs":
         expected = {}
         for (trace, span), wanted in (expected_logs or {}).items():
@@ -338,7 +350,7 @@ def signal_readback(lines, *, signal, expected_logs=None, expected_metrics=()) -
                     def common():
                         scope_data = scope.get("scope", {})
                         return (
-                            attrs(resource.get("resource", {}).get("attributes", [])) == resources
+                            resource_matches(resource)
                             and scope_data.get("name") == "copilot-extensions.process-telemetry"
                             and scope_data.get("version") == "1" and not scope_data.get("attributes")
                         )
