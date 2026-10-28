@@ -31,6 +31,9 @@ test_pr_owner_roster_and_state_rebinding = (
 test_other_peers_never_inherit_pr_owner_state = (
     _original.test_other_peers_never_inherit_pr_owner_state
 )
+test_machines_peer_rebinds_its_owner_without_foreign_runtime_overrides = (
+    _original.test_machines_peer_rebinds_its_owner_without_foreign_runtime_overrides
+)
 test_agent_dispatch_retains_authority_and_separate_shared_control = (
     _original.test_agent_dispatch_retains_authority_and_separate_shared_control
 )
