@@ -5,8 +5,8 @@ proposal](roadmap-wave-1.md) and the reviewed [second disjoint 200-issue
 proposal](roadmap-wave-2.md), plus the reviewed [third-wave
 proposal](roadmap-wave-3.md) in #9396. The [fourth-wave
 proposal](roadmap-wave-4.md) adds the remaining 82 identities in the frozen
-eligible census; its publication review, provisional decisions, later inflow
-and full execution sequencing remain open.
+eligible census and was reviewed and merged in #9399. Provisional decisions,
+later inflow and full execution sequencing remain open.
 
 Parent: [Backlog Reconciliation](README.md), Phase 2b.
 
