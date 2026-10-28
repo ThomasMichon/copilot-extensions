@@ -66,6 +66,7 @@ deploy_wrappers
     expected = content / "src" / "agent_worktrees" / "native_source_context.py"
     assert any(item.source == expected for item in parsed)
     assert any(item.source == content / "scripts" / "native-seed-reply.sh" for item in parsed)
+    assert any(item.source == content / "scripts" / "native-seed-boundary.sh" for item in parsed)
     assert not any(item.source.name.startswith(("pane-wrapper.", "pane-launch.")) for item in parsed)
     assert all(not Path(item["target"]).exists() for item in bindings)
 

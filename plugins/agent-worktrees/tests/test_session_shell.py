@@ -68,7 +68,7 @@ def test_posix_setup_assets_include_literal_reader_and_survive_installation_remo
     scripts.mkdir()
     canonical = Path(__file__).resolve().parents[1] / "scripts"
     names = (
-        "default-setup.sh", "launch-command.sh", "native-seed-reply.sh",
+        "default-setup.sh", "launch-command.sh", "native-seed-reply.sh", "native-seed-boundary.sh",
         "reconcile-machine-settings.sh",
     )
     for name in names:
@@ -83,11 +83,15 @@ def test_posix_setup_assets_include_literal_reader_and_survive_installation_remo
     assert all(not path.is_symlink() for path in prepared.directory.iterdir())
 
 
-def test_missing_posix_reader_does_not_publish_partial_setup_assets(launch):
+@pytest.mark.parametrize("missing", ["native-seed-reply.sh", "native-seed-boundary.sh"])
+def test_missing_posix_helper_does_not_publish_partial_setup_assets(launch, missing):
     record, runtime, _assets = launch
     scripts = runtime / "scripts"
     scripts.mkdir()
-    for name in ("default-setup.sh", "launch-command.sh", "reconcile-machine-settings.sh"):
+    for name in (
+        "default-setup.sh", "launch-command.sh", "reconcile-machine-settings.sh",
+        *({"native-seed-reply.sh", "native-seed-boundary.sh"} - {missing}),
+    ):
         (scripts / name).write_text("# fixture\n", encoding="utf-8")
     with pytest.raises(FileNotFoundError):
         session_shell.prepare(record, scripts / "default-setup.sh", installation_roots=(runtime,))

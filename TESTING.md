@@ -120,8 +120,33 @@ the explicit native acceptance jobs select the file directly.
 The existing callback inventory/publication controls cover its installer-owned
 copy scope. These are framing/copy controls, not finite callback execution,
 foreground terminal, PID/birth or native installation-survival qualification.
+`test_native_seed_phase_shell.py` executes the copied finite transport against
+synthetic selected-runtime providers. It checks exact pipe fields and argv,
+closed provider stdin, retained caller stdin/descriptors/cwd/environment,
+actual nonzero producer exit after a complete frame, and current-slot
+reselection without fallback. Completion-field controls refuse a provider's
+forged trailer and keep the supervisor's per-call field out of the provider
+environment even with caller `allexport`; the standalone reader's default frame
+is unchanged. Malformed-header and malformed-completion controls keep the
+provider hung after its invalid output and require it to be gone before the
+caller receives refusal, not merely after the outer test owner cleans up.
+Native POSIX controls additionally check the
+ten-second deadline, settled provider groups and descendants holding
+the reply pipe. An escaped-session writer arms a hard 12-second lifetime before
+escaping, publishes readiness only afterward, and retains stdout until expiry.
+Both valid and malformed frames must refuse within the original work deadline
+plus settlement grace; the fixture separately observes the writer retired
+before ending. This is bounded I/O qualification, not cross-group custody.
+The copied test helper's private status-only control file must be removed after
+every returned call, and a missing writable control path refuses before the
+provider starts. Caller `noclobber` must survive a successful call; an actual
+control-write error must refuse within the bound without exposing its path.
+Reader controls reject noncanonical deadline arithmetic and
+require all fields and EOF to share one deadline.
+Synthetic shell providers do not qualify real bootstrap
+startup performance, capability discovery or native backend ownership.
 The existing optional installation-context acceptance workflow's `native_launch`
-input also selects this focused reader/copy packet on Linux and macOS, using
+input also selects this focused reader/phase/copy packet on Linux and macOS, using
 `/bin/bash` and explicitly requiring stock macOS Bash 3.2. It stays outside
 required PR CI; the Windows terminal packet selected by that input is unchanged.
 The real PowerShell

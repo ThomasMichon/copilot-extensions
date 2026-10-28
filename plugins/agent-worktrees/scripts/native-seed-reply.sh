@@ -2,12 +2,27 @@
 # agent-worktrees:native-seed-reply-v1
 # Dot-source only. A Bash subshell probes EOF; reply environment is never applied.
 
+_aw_native_seed_read_field() {
+    local remaining
+    if [[ -n "${2:-}" ]]; then
+        remaining=$(($2 - SECONDS))
+        (( remaining > 0 )) || return 3
+        IFS= read -r -d '' -t "$remaining" "$1" || return $?
+        (( SECONDS < $2 )) || return 3
+    else
+        IFS= read -r -d '' "$1"
+    fi
+}
+
 _aw_native_seed_read_reply() {
     local LC_ALL=C
+    local expected_completion="${1:-}"
+    local deadline="${2:-}"
     local field count index name value eof_diagnostics
     local -a header=() environment=() argv=()
+    [[ -z "$deadline" || "$deadline" =~ ^[1-9][0-9]{0,8}$ ]] || return 3
     for ((index=0; index<7; index++)); do
-        IFS= read -r -d '' field || return 3
+        _aw_native_seed_read_field field "$deadline" || return 3
         header[index]="$field"
     done
     [[ "${header[0]}" == agent-worktrees.native-seed-reply.v1 ]] || return 3
@@ -19,30 +34,35 @@ _aw_native_seed_read_reply() {
     # Canonical decimal only: never put provider text into shell arithmetic.
     [[ "$count" == -1 || "$count" =~ ^(0|[1-9][0-9]{0,8})$ ]] || return 3
     for ((index=0; index<count; index++)); do
-        IFS= read -r -d '' name || return 3
-        IFS= read -r -d '' value || return 3
+        _aw_native_seed_read_field name "$deadline" || return 3
+        _aw_native_seed_read_field value "$deadline" || return 3
         [[ -n "$name" && "$name" != *=* ]] || return 3
         environment+=("$name=$value")
     done
-    IFS= read -r -d '' count || return 3
+    _aw_native_seed_read_field count "$deadline" || return 3
     [[ "$count" =~ ^[1-9][0-9]{0,8}$ ]] || return 3
     for ((index=0; index<count; index++)); do
-        IFS= read -r -d '' value || return 3
+        _aw_native_seed_read_field value "$deadline" || return 3
         argv+=("$value")
     done
     [[ -n "${argv[0]}" ]] || return 3
-    IFS= read -r -d '' field || return 3
+    _aw_native_seed_read_field field "$deadline" || return 3
     [[ "$field" == complete ]] || return 3
+    if [[ -n "$expected_completion" ]]; then
+        _aw_native_seed_read_field field "$deadline" || return 3
+        [[ "$field" == "$expected_completion" ]] || return 3
+    fi
     # Refuse closed stdin before command substitution can reuse fd 0 for its pipe.
     : 2>/dev/null 3<&0 || return 3
     # Bash also returns 1 for EAGAIN/EBADF. Capture only the probe's diagnostics.
     eof_diagnostics="$(
         extra=
         eof_status=0
-        { IFS= read -r -d '' extra || eof_status=$?; } 2>&1
+        { _aw_native_seed_read_field extra "$deadline" || eof_status=$?; } 2>&1
         [[ "$eof_status" == 1 && -z "$extra" ]]
     )" || return 3
     [[ -z "$eof_diagnostics" ]] || return 3
+    [[ -z "$deadline" ]] || (( SECONDS < deadline )) || return 3
     AW_NATIVE_SEED_ATTEMPT="${header[1]}"
     AW_NATIVE_SEED_RESOLUTION="${header[2]}"
     AW_NATIVE_SEED_OPERATION="${header[3]}"
@@ -53,9 +73,7 @@ _aw_native_seed_read_reply() {
     AW_NATIVE_SEED_ARGV=("${argv[@]}")
 }
 
-aw_native_seed_read_reply() {
-    local nocasematch=0 tracing=0 status=0
-    case $- in *x*) tracing=1; set +x ;; esac
+_aw_native_seed_clear_reply() {
     AW_NATIVE_SEED_ATTEMPT=""
     AW_NATIVE_SEED_RESOLUTION=""
     AW_NATIVE_SEED_OPERATION=""
@@ -64,11 +82,17 @@ aw_native_seed_read_reply() {
     AW_NATIVE_SEED_ENV_COUNT=""
     AW_NATIVE_SEED_ENV=()
     AW_NATIVE_SEED_ARGV=()
+}
+
+aw_native_seed_read_reply() {
+    local nocasematch=0 tracing=0 status=0
+    case $- in *x*) tracing=1; set +x ;; esac
+    _aw_native_seed_clear_reply
     if shopt -q nocasematch; then
         nocasematch=1
         shopt -u nocasematch
     fi
-    _aw_native_seed_read_reply 2>/dev/null || status=3
+    _aw_native_seed_read_reply "$@" 2>/dev/null || status=3
     if [[ "$nocasematch" == 1 ]]; then shopt -s nocasematch; fi
     if [[ "$tracing" == 1 ]]; then set -x; fi
     if [[ "$status" != 0 ]]; then

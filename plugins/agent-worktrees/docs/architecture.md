@@ -675,10 +675,50 @@ the original tracing setting afterward; it never traces reply data itself.
 The existing installers, publication inventory and uninstall profile own this
 asset; `session_shell.prepare` can copy it with the POSIX normalized setup,
 launch-command and reconciliation scripts outside the removable roots.
-No production POSIX caller selects that setup path yet. A future caller must
-also verify successful, bounded producer exit before using these arrays;
-the reader alone does not establish a successful callback, child custody,
-terminal ownership or removal of either runtime-Python waiter.
+The copied, dormant `scripts/native-seed-boundary.sh` adds a finite transport.
+`aw_native_seed_phase <root> <provider-arguments...>` reselects that root's
+current completed numbered runtime on every call, invoking its retention
+bootstrap and version-1 backend provider with closed stdin. It neither searches
+PATH for an engine nor falls through to another installation. An absent,
+incomplete or incompatible provider returns 3. Python-specific environment
+overrides are removed only in the finite child.
+The copied shell owns a separate provider job group, one ten-second deadline and
+group cleanup; its 50-millisecond sleep children exist only during the call.
+It streams stdout without prompt-bearing temporary files. Nonzero provider
+exit, timeout or inherited-group descendants retaining the pipe are unconfirmed, not successful
+preparation. `aw_native_seed_prepare` takes the same arguments and consumes the
+NUL frame with the sibling reader. Bash 3.2 cannot wait for process substitutions,
+so the finite supervisor appends a per-call completion field only after its
+actual provider wait and group cleanup succeed. The reader's optional expected
+completion field must match before EOF; ordinary reader calls still require
+the unchanged provider frame followed immediately by EOF. The completion value
+stays out of provider arguments/environment, including with caller `allexport`.
+Missing, mismatched or trailing completion data clears all reply fields,
+including a complete frame followed by a failed producer. Every field and EOF
+read shares the original deadline; a late EOF cannot authorize dispatch.
+At invocation, `mktemp` creates a private status-only file beside the copied
+helper in the existing launch-owned directory. The supervisor writes only
+`0` or `3` after its provider wait/group cleanup; the collector waits for that
+receipt, not arbitrary stdout EOF, after malformed input. Settlement has at
+most one second of additional grace. The call removes that exact control file;
+its write uses `>|` only on this invocation-owned file so caller `noclobber`
+remains unchanged. Control-path failures use the generic refusal diagnostic.
+If the caller is lost, the existing launch-directory owner retains custody.
+No reply, argument or environment data is written there. Creating/removing the
+receipt adds two short-lived utility invocations; dot-sourcing creates nothing.
+As with the existing POSIX process owner, descendants must retain their inherited
+group. A deliberate session/group escape is outside that custody contract:
+retained stdout still causes bounded, unconfirmed refusal, not late success or
+a claim that the escaped process was retired.
+The transport does
+not apply the reply environment or execute backend arguments.
+Caller stdin, descriptors and tracing settings remain owned by the caller.
+
+No production POSIX caller selects that setup path yet. Capability discovery
+and upgrade/rollback selection, canonical process-birth capture, backend
+custody, foreground terminal/signal behavior and removal of both runtime-Python
+waiters remain separate integration gates. This finite transport does not
+authorize replay of an uncertain preparation or qualify installation survival.
 
 On Windows, a current engine recognizes its canonical normalized setup's
 `native-setup-owner-v1` marker, a PowerShell 7 host and the selected canonical
