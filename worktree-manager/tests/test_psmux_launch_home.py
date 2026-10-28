@@ -25,6 +25,16 @@ def _creation_source():
         first = source.index(marker)
         last = source.index("\n}\n", first) + 3
         helper = source[first:last]
+    first = source.index("function Enter-AwMuxCreation {")
+    last = source.index("\n}\n", first) + 3
+    helper += "\n" + source[first:last]
+    helper += "\nfunction Test-AwMuxCreationSession { return $false }\n"
+    helper += "\nfunction Stop-AwOwnedPsmuxSession {}\n"
+    helper += (
+        "\nfunction Invoke-AwPsmuxCreation { param($CommandArgs,$Lease)\n"
+        "& $script:AwPsmuxBin @CommandArgs\n"
+        "Set-Variable -Name LASTEXITCODE -Value $LASTEXITCODE -Scope 1\n}\n"
+    )
     return helper, source[start + len("                try {\n"):end]
 
 
@@ -99,6 +109,55 @@ def test_manager_creation_uses_the_home_scoped_boundary():
     assert "finally" in helper and "Pop-Location" in helper
     assert "Invoke-AwPsmuxFromHome" in creation
     assert "$plan.work_dir" in creation
+
+
+@pytest.mark.skipif(not PWSH, reason="PowerShell is required")
+def test_published_creation_failure_preserves_handoffs_and_does_not_retry(tmp_path):
+    source = SOURCE.read_text("utf-8")
+    start = source.index("            $creationUncertain = $newSessionExit")
+    end = source.index("\n        }\n\n        if (-not $creationUncertain", start)
+    attempt_tail = source[start:end]
+    start = source.index("        if (-not $creationUncertain", end)
+    end = source.index("\n    }\n    $env:PSMUX_SESSION", start)
+    retry_tail = source[start:end]
+    start = source.index("    if ($newSessionExit -ne 0) {", end)
+    end = source.index("\n    } else {\n        if ($paneArgsFile)", start)
+    failure_tail = source[start:end] + "\n}\n"
+    manifest, receipt, token = [tmp_path / name for name in ("args.json", "receipt.json", "token")]
+    for path in (manifest, receipt, token):
+        path.write_text("retained", encoding="utf-8")
+    script = tmp_path / "failure.ps1"
+    script.write_text(
+        "$ErrorActionPreference='Stop'\n"
+        "$newSessionExit=17\n$newSessionError=''\n$muxPublished=$true\n"
+        "$maxCreateAttempts=3\n$totalCreateAttempts=0\n"
+        "$paneArgsFile=$args[0]\n$paneReceiptFile=$args[1]\n$ahpTokenFile=$args[2]\n"
+        "$sessName='wt-fixture'\n"
+        "$plan=[pscustomobject]@{worktree_id='fixture';work_dir=$args[3]}\n"
+        "function Remove-AwPaneArgsFile { throw 'Deleted an uncertain handoff' }\n"
+        "function Read-AwMuxRetryChoice { throw 'Retried an uncertain creation' }\n"
+        "function Write-SetupStatus { throw 'Retried an uncertain creation' }\n"
+        "function Write-SetupLog {}\n"
+        "function Write-AwMuxFailure {\n"
+        "param($Reason,$ExitCode,$Fields)\n"
+        "ConvertTo-Json -Compress @{attempts=$totalCreateAttempts;fields=$Fields}\n}\n"
+        "for($attempt=1;$attempt -le $maxCreateAttempts;$attempt++){\n"
+        "$totalCreateAttempts++\n" + attempt_tail + "\n}\n"
+        + retry_tail + "\n" + failure_tail,
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-File", str(script),
+         str(manifest), str(receipt), str(token), str(tmp_path)],
+        capture_output=True, text=True, timeout=15,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 17, result.stdout + result.stderr
+    assert all(path.read_text("utf-8") == "retained" for path in (manifest, receipt, token))
+    report = json.loads(result.stdout)
+    assert report["attempts"] == 1
+    assert "recoverable=false" in report["fields"]
+    assert "Inspect the existing session" in result.stderr
 
 
 @pytest.mark.skipif(os.name != "nt" or not PWSH, reason="Native Windows PowerShell")

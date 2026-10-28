@@ -3697,6 +3697,23 @@ health. This is not an approval token: the existing authority still owes
 authenticated release/profile/feed/target admission before invoking a consumer.
 No production installer selects this mode automatically.
 
+`installer_wheel_snapshot.retain_wheel_bundle` accepts a previously acquired,
+independently selected ZIP containing exactly `wheels/<filename>` for the
+caller's complete wheel/hash map. It verifies the aggregate SHA-256 before
+opening members, rejects duplicate/extra/unsafe members, and checks each wheel's
+size and digest before handing it to the same `WheelSnapshot` owner. The outer
+archive and original unpacked files may disappear once retention succeeds.
+The existing bounded ZIP reader preflights the actual central-directory extent
+and count before `ZipFile` builds an index, and validates each complete compressed
+stream rather than a prefix truncated to a forged member size. Malformed filename
+encoding produces `WheelError`, like other invalid transport bytes.
+`open_wheel_bundle_snapshot` exposes the same adapter for a caller-owned private
+root. Its inclusive storage budget counts both unpacked and retained wheel
+copies; all operations share the caller's absolute deadline. There is no
+network call, new receipt, resolver, approval or live activation. Existing
+release/profile/feed admission and actual distribution obligations remain the
+installation owner's responsibility; a selected ZIP is not their substitute.
+
 On Windows, original and retained wheel handles allow shared reads but deny
 writers and deletion for their held lifetime, including extended-length paths.
 NTFS read-access updates can advance handle change time, so that timestamp is

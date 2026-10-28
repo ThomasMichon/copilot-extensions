@@ -1099,14 +1099,17 @@ PY
     # Graceful status-monitor cutover: now that the new slot is active, ask the
     # newly-activated runtime to cut over a live resident monitor in-process
     # (or, for a pre-cutover daemon with no routed control endpoint yet, fall
-    # back once to the legacy restart path). Best-effort, never fatal.
+    # back once to the legacy restart path). Incomplete transitions fail the update.
     if ! $CONTEXTUAL_INSTALL; then
-        AGENT_WORKTREES_MONITOR_WAS_LIVE="$monitor_was_live" \
+        if ! AGENT_WORKTREES_MONITOR_WAS_LIVE="$monitor_was_live" \
             PYTHONPATH= \
-            "$VENV_PYTHON" - <<'PY' 2>&1 | sed 's/^/  → monitor: /' || true
+            "$VENV_PYTHON" - <<'PY' 2>&1 | sed 's/^/  → monitor: /'; then
 from agent_worktrees.status_monitor_cutover import installer_after_update
 raise SystemExit(installer_after_update())
 PY
+            err "Status-monitor transition incomplete; runtime slot retained"
+            return 1
+        fi
     fi
     # #742: record the just-activated version as `last-known-good` so a future
     # marker-absent resolution (resolve-runtime.sh tier 2) prefers it over a

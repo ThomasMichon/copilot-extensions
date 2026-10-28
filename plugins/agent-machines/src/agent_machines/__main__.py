@@ -418,6 +418,7 @@ def _cmd_restore(args: argparse.Namespace) -> int:
             maintenance_safe=args.maintenance_safe,
             accepted_machines=identity.accepted,
             git_config_plan_sha256=getattr(args, "git_config_plan_sha", None),
+            resource_types=getattr(args, "resource_types", None),
         )
     except (_reconcile.RestoreValidationError, SurfaceStateError) as exc:
         print(f"restore refused: {exc}", file=sys.stderr)

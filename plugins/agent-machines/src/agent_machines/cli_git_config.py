@@ -75,6 +75,18 @@ def register(subparsers) -> None:
         "git-config", help="Manage explicit Git configuration rollback."
     )
     commands = parser.add_subparsers(dest="git_config_command", required=True)
+    restore = commands.add_parser(
+        "restore", help="Preview or apply only the declared Git resource, never modules or surfaces."
+    )
+    restore.add_argument("--repo")
+    restore.add_argument("--machine")
+    restore.add_argument("--json", action="store_true")
+    restore.add_argument("--apply", action="store_true")
+    restore.add_argument("--git-config-plan-sha", type=plan_sha)
+    restore.set_defaults(
+        func=restore_declared, all_projects=False, only=None, maintenance_safe=False,
+        verbose=False, resource_types=frozenset({"git-config"}),
+    )
     undo = commands.add_parser(
         "rollback", help="Preview rollback of one recorded user-global transaction."
     )
@@ -83,3 +95,9 @@ def register(subparsers) -> None:
     undo.add_argument("--plan-sha", type=plan_sha)
     undo.add_argument("--json", action="store_true")
     undo.set_defaults(func=rollback)
+
+
+def restore_declared(args: argparse.Namespace) -> int:
+    from .__main__ import _cmd_restore
+
+    return _cmd_restore(args)

@@ -34,6 +34,19 @@ def start(proc: str = "engine") -> None:
         _run = _ut.Run.from_env_or_new(proc)
 
 
+def auth_cleanup_offer(offer: dict) -> None:
+    if _run is not None and _run.enabled:
+        try:
+            from update_telemetry.fold import retain_auth_cleanup_offer
+
+            retained = retain_auth_cleanup_offer(_run.events_path, offer)
+            _run.emit(
+                "auth_cleanup", "run", "info", action="offer", details={"cleanup_offer": retained},
+            )
+        except Exception:
+            pass
+
+
 def enter(phase: str) -> None:
     global _human_phase, _human_phase_failed
     from . import output

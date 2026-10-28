@@ -50,6 +50,7 @@ from typing import Any
 
 from plugin_activation import read_json_object, write_json_object_atomic
 
+from .action_controls import action_inhibited
 from .companion import (
     CompanionController,
     CompanionError,
@@ -1955,6 +1956,10 @@ class SupervisorDaemon(BoundedReconciliation):
             return False
         if target is None:
             return False
+        if action_inhibited(
+            "supervisor-self-update", logger=log, root=root, automatic=True,
+        ):
+            return False
         before_spawn = self._recheck_governance("pre-mutation:self-update")
         if before_spawn is not None and before_spawn.get("status") != "ready":
             log.warning(
@@ -1998,6 +2003,10 @@ class SupervisorDaemon(BoundedReconciliation):
                 "supervisor self-update deferred: prior status publication "
                 "still owns its generation; retaining singleton"
             )
+            return False
+        if action_inhibited(
+            "supervisor-self-update", logger=log, root=root, automatic=True,
+        ):
             return False
         daemon_audit(self, "handoff", "new-slot-selected")
         drained = self.shutdown()

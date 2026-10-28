@@ -1232,7 +1232,7 @@ function Invoke-VersionedActivateInner {
     # Graceful status-monitor cutover: now that the new slot is active, ask the
     # newly-activated runtime to cut over a live resident monitor in-process
     # (or, for a pre-cutover daemon with no routed control endpoint yet, fall
-    # back once to the legacy restart path). Best-effort, never fatal.
+    # back once to the legacy restart path). Incomplete transitions fail the update.
     if (-not $ContextualInstall) {
         try {
             $prevHelperPP = $env:PYTHONPATH
@@ -1240,7 +1240,14 @@ function Invoke-VersionedActivateInner {
             $env:AGENT_WORKTREES_MONITOR_WAS_LIVE = if ($monitorWasLive) { '1' } else { '0' }
             & $LinkPython -c 'from agent_worktrees.status_monitor_cutover import installer_after_update as _f; raise SystemExit(_f())' 2>&1 |
                 ForEach-Object { Write-ServiceChanged "monitor: $_" }
-        } catch {}
+            if ($LASTEXITCODE -ne 0) {
+                Write-ServiceErr "Status-monitor transition incomplete; runtime slot retained"
+                return $false
+            }
+        } catch {
+            Write-ServiceErr "Status-monitor transition failed: $($_.Exception.Message)"
+            return $false
+        }
         finally {
             $env:PYTHONPATH = $prevHelperPP
             Remove-Item Env:AGENT_WORKTREES_MONITOR_WAS_LIVE -ErrorAction SilentlyContinue

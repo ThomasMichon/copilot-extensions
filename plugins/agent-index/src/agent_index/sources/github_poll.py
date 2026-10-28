@@ -28,6 +28,7 @@ def _plan(connector: GitHubConnector, last_commit: str | None) -> dict:
     base = _checkpoint(last_commit)
     result = connector._http.get_json(
         f"/repos/{connector.owner}/{connector.repo}/issues", etag=False,
+        purpose="identity_page",
         params={
             "state": "all", "sort": "updated", "direction": "asc",
             "since": connector._since_marker(last_commit), "per_page": 100, "page": 1,

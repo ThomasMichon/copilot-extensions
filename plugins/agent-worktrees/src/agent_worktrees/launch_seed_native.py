@@ -15,6 +15,29 @@ from . import agent_policy, config as cfg, launch_execution, locks
 from . import tracking_write
 
 _ERRORS = (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome)
+NUL_REPLY_SCHEMA = "agent-worktrees.native-seed-reply.v1"
+
+
+def nul_reply(prepared: dict) -> bytes:
+    """Literal UTF-8 fields for a finite Bash reader, never shell source."""
+    environment = prepared["environment"]
+    fields = [
+        NUL_REPLY_SCHEMA,
+        prepared["attempt_id"], prepared["resolution_id"], prepared["operation_id"],
+        prepared["parent_id"] or "", prepared.get("setup_seed_id") or "",
+        str(len(environment)) if environment is not None else "-1",
+    ]
+    if environment is not None:
+        for key, value in environment.items():
+            if not isinstance(key, str) or not key or "=" in key:
+                raise ValueError("Invalid native backend environment name")
+            fields.extend((key, value))
+    fields.extend((str(len(prepared["argv"])), *prepared["argv"], "complete"))
+    if prepared["version"] != 1 or not prepared["argv"] or not all(
+        isinstance(field, str) and "\0" not in field for field in fields
+    ):
+        raise ValueError("Native backend reply cannot be represented as literal fields")
+    return b"\0".join(field.encode("utf-8") for field in fields) + b"\0"
 
 
 def require_current_runtime(root: Path) -> None:
@@ -41,7 +64,7 @@ def prepare(
     """Claim once before native spawn; only argv crosses the in-memory pipe."""
     from . import launch_admission, launch_seed_exec
 
-    if not command or not all(isinstance(arg, str) for arg in command):
+    if not command or not all(isinstance(arg, str) and "\0" not in arg for arg in command):
         raise ValueError("A literal backend command is required")
     if not setup and (admission_only or preserve_seed_id or native_resume_session or pid or process_start_time):
         raise ValueError("Backend preparation cannot include setup admission")
@@ -189,8 +212,15 @@ def interrupted(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--describe-contract", action="version", version=json.dumps({
+        "contract": "agent-worktrees.native-seed", "version": 1,
+        "preparation_output_formats": ["json", "nul"], "nul_reply_schema": NUL_REPLY_SCHEMA,
+    }))
     parser.add_argument("--contract-version", type=int, choices=[1], required=True)
+    parser.add_argument("--output-format", choices=["json", "nul"], default="json")
     parser.add_argument(
         "--phase", choices=["prepare", "setup", "spawned", "spawn-failed", "returned", "interrupted"],
         required=True,
@@ -213,6 +243,8 @@ def main() -> int:
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     try:
+        if args.output_format == "nul" and args.phase not in {"prepare", "setup"}:
+            raise ValueError("Literal field replies are only available for preparation")
         require_current_runtime(args.root)
         correlation = launch_execution.Correlation(
             args.launch_attempt_id, args.launch_resolution_id, args.launch_parent_id,
@@ -257,10 +289,22 @@ def main() -> int:
             else:
                 raise ValueError("Invalid backend outcome arguments")
             result = {"recorded": True}
+        if args.output_format == "nul":
+            try:
+                encoded = nul_reply(result)
+            except ValueError:
+                interrupted(args.record, launch_execution.Correlation(
+                    result["attempt_id"], result["resolution_id"], result["parent_id"],
+                ), result["operation_id"])
+                raise
     except (*_ERRORS, KeyboardInterrupt):
         print("Native backend handoff is unconfirmed; do not automatically retry.", file=sys.stderr)
         return 3
-    print(json.dumps(result, ensure_ascii=False))
+    if args.output_format == "nul":
+        sys.stdout.buffer.write(encoded)
+        sys.stdout.buffer.flush()
+    else:
+        print(json.dumps(result, ensure_ascii=False))
     return 0
 
 

@@ -12,7 +12,7 @@ import zipfile
 from candidate_qualification_receipt import (
     MAX_ARCHIVE_BYTES, PACKET_FILES, canonical_digest, regular_bytes,
 )
-from promotion_unit_contract import MAX_PACKET_FILE_BYTES
+from promotion_unit_contract import MAX_PACKET_FILE_BYTES, MAX_UNIT_EVIDENCE_FILE_BYTES
 
 _SHA = re.compile(r"[0-9a-f]{40}")
 MAX_EVIDENCE_BYTES = MAX_ARCHIVE_BYTES + MAX_PACKET_FILE_BYTES
@@ -56,7 +56,7 @@ def evidence_archive(
     evidence_name(dev_sha, candidate_sha, qualification_digest)
     if (
         not isinstance(files, dict) or set(files) != set(PACKET_FILES)
-        or any(not isinstance(raw, bytes) or not 0 < len(raw) <= MAX_PACKET_FILE_BYTES
+        or any(not isinstance(raw, bytes) or not 0 < len(raw) <= MAX_UNIT_EVIDENCE_FILE_BYTES
                for raw in files.values())
     ):
         raise ValueError("release evidence must retain exactly the bounded unit packet")
@@ -102,7 +102,10 @@ def publish_evidence(
     ):
         raise ValueError("release evidence has a different owner or packet inventory")
     raw = evidence_archive(
-        {name: regular_bytes(packet_directory, name) for name in PACKET_FILES},
+        {
+            name: regular_bytes(packet_directory, name, max_bytes=MAX_UNIT_EVIDENCE_FILE_BYTES)
+            for name in PACKET_FILES
+        },
         receipt, dev_sha=dev_sha, candidate_sha=candidate_sha,
         qualification_digest=qualification_digest,
     )

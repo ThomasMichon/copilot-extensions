@@ -324,7 +324,7 @@
     "caller-contained": {
       "r:plugins/agent-worktrees/scripts/native-seed-boundary.ps1::<script>::Process.Start": 2,
       "r:worktree-manager/bin/pane-wrapper.ps1::<script>::Process.Start": 2,
-      "r:worktree-manager/bin/launch-session.ps1::<script>::Process.Start": 1,
+      "r:worktree-manager/bin/launch-session.ps1::<script>::Process.Start": 3,
       "r:fleet-manager/src/fleet_manager/host_profile.py::_parser::Popen": 1,
       "fm:gateway_transport.py::_addresses::Popen": 1,
       "b:acquisition_authority.py::worktree_command::create_subprocess_exec": 1,
@@ -359,6 +359,7 @@
       "m:transports/stdio.py::StdioTransport.start::create_subprocess_exec": 1,
       "w:__main__.py::_start_project_session_hook::Popen": 1,
       "w:launch_seed_exec.py::_launch::Popen": 1,
+      "w:mux_creation.py::run_session::Popen": 1,
       "w:mux_link.py::InProcessRuntime.start::start_server": 1,
       "w:pr_patch_ids.py::_commit_patch_ids::Popen": 2,
       "w:worktree_status_daemon.py::InProcessRuntime.start::start_server": 1,

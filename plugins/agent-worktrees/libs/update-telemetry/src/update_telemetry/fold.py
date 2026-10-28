@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 from collections.abc import Iterable
+from pathlib import Path
 
 from . import outcomes as oc
 
@@ -10,6 +14,66 @@ STATUS_SCHEMA = "copilot-extensions.update-status"
 STATUS_VERSION = 1
 RUN_COMPONENT = "run"
 MAX_DETAIL = 300
+MAX_AUTH_PREVIEW_BYTES = 2 * 1024 * 1024
+
+
+def retain_auth_cleanup_offer(events_path: Path, offer: dict) -> dict:
+    """Keep large previews outside bounded event lines, under their run owner."""
+    from .run import _redact_obj, write_json_atomic
+
+    document = _redact_obj(offer)
+    raw = json.dumps(document, indent=2).encode("utf-8")
+    if len(raw) <= 2048:
+        return document
+    if len(raw) + raw.count(b"\n") + 2 > MAX_AUTH_PREVIEW_BYTES:
+        raise ValueError("authentication preview exceeds its retained bound")
+    name = "auth-cleanup-" + hashlib.sha256(raw).hexdigest() + ".json"
+    path = events_path.parent / name
+    write_json_atomic(path, document)
+    content = path.read_bytes()
+    return {
+        "status": document.get("status"), "owner": document.get("owner"),
+        "plan_sha256": (document.get("plan") or {}).get("plan_sha256"),
+        "preview_file": name, "preview_sha256": hashlib.sha256(content).hexdigest(),
+        "preview_bytes": len(content),
+    }
+
+
+def _resolve_auth_cleanup_offer(offer: dict, run: dict) -> dict:
+    if "preview_file" not in offer:
+        return offer
+    unavailable = {
+        **offer, "status": "unavailable", "reason": "retained_preview_unavailable",
+    }
+    name = offer.get("preview_file")
+    if (
+        not isinstance(name, str)
+        or not re.fullmatch(r"auth-cleanup-[a-f0-9]{64}\.json", name)
+        or not isinstance(run.get("events_path"), str)
+        or type(offer.get("preview_bytes")) is not int
+        or not 0 < offer["preview_bytes"] <= MAX_AUTH_PREVIEW_BYTES
+    ):
+        return unavailable
+    try:
+        path = Path(run["events_path"]).parent / name
+        if path.is_symlink() or path.stat().st_size != offer["preview_bytes"]:
+            return unavailable
+        with path.open("rb") as stream:
+            raw = stream.read(MAX_AUTH_PREVIEW_BYTES + 1)
+        if (
+            len(raw) != offer["preview_bytes"]
+            or hashlib.sha256(raw).hexdigest() != offer.get("preview_sha256")
+        ):
+            return unavailable
+        document = json.loads(raw)
+        if (
+            not isinstance(document, dict)
+            or (document.get("plan") or {}).get("plan_sha256") != offer.get("plan_sha256")
+        ):
+            return unavailable
+        return document
+    except (OSError, ValueError, TypeError):
+        return unavailable
 
 
 def _severity(outcome) -> int:
@@ -195,6 +259,13 @@ def fold(
                  and isinstance(event.get("details"), dict)
                  and isinstance(event["details"].get("auth"), dict)
                  and isinstance(event["details"]["auth"].get("id"), str)]
+    cleanup_offers = [
+        event["details"]["cleanup_offer"] for event in events
+        if event.get("phase") == "auth_cleanup" and event.get("action") == "offer"
+        and event.get("event") == "info"
+        and isinstance(event.get("details"), dict)
+        and isinstance(event["details"].get("cleanup_offer"), dict)
+    ]
     return {
         "schema": STATUS_SCHEMA,
         "version": STATUS_VERSION,
@@ -210,7 +281,9 @@ def fold(
             "report": [item["auth"] for item in auth],
             "fallback_used": sorted({item["auth"]["id"] for item in auth
                                      if item.get("fallback_applied")} | set(auth_uses)),
-            "cleanup_offer": None,
-        }} if auth or auth_uses else {}),
+            "cleanup_offer": (
+                _resolve_auth_cleanup_offer(cleanup_offers[-1], run) if cleanup_offers else None
+            ),
+        }} if auth or auth_uses or cleanup_offers else {}),
         "plugins": {name: t for name, t in sorted(targets.items()) if "@" in name},
     }

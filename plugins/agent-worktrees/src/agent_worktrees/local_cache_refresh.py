@@ -204,28 +204,11 @@ def sessionstart_diagnostic(cwd: str, *, deadline: float | None, session_id: str
         watch_started_at = time.time()
         if deadline is not None and deadline - time.time() < 1.5:
             return RefreshResult("skipped", detail="backup refresh deadline too short").diagnostic + "\n"
-        from .static_instructions import current
         from .local_cache_worker import watch_completion
         from .static_preparation import publication_revision
 
         root = _checkout_root(cwd).resolve()
         initial_revision = publication_revision(root)
-        remaining = max(0, deadline - time.time()) if deadline is not None else 1.0
-        try:
-            cached = current(
-                root, Path.home(),
-                deadline=time.monotonic() + min(remaining, 1.0),
-            )
-        except (TimeoutError, subprocess.TimeoutExpired):
-            cached = None
-        if cached is not None and cached.publication_revision == initial_revision:
-            watch_completion(root, session_id, prepared=True)
-            return RefreshResult(
-                "ready", unchanged=cached.unchanged, generation=cached.generation,
-                reused=True, detail="prepared generation reused; model admission unknown",
-            ).diagnostic + "\n"
-        if deadline is not None and deadline - time.time() < 1.5:
-            return RefreshResult("skipped", detail="backup refresh deadline too short after probe").diagnostic + "\n"
         watch_completion(
             root, session_id, initial_revision=initial_revision, started_at=watch_started_at,
         )

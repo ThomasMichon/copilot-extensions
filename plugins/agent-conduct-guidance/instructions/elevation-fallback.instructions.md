@@ -4,7 +4,7 @@ applyTo: "**"
 
 # Windows elevation fallback
 
-**Fallback policy `[owner: agent-conduct-guidance@0.1.13-dev1]`:** Before
+**Fallback policy `[owner: agent-conduct-guidance@0.1.14-dev1]`:** Before
 requesting Windows administrator rights or a UAC prompt, invoke
 `requesting-windows-elevation`. Bind approval to one named operation, reach the
 operator's interactive desktop through a temporary limited task when needed,

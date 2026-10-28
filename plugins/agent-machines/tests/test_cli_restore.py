@@ -88,6 +88,22 @@ def test_json_emits_structured_result_with_stdout(monkeypatch, capsys):
     assert data["scope"] == "repo:acme"
 
 
+def test_git_config_restore_reuses_restore_owner_with_strict_resource_scope(monkeypatch, capsys):
+    result = _fake_result("")
+    _patch(monkeypatch, result)
+    calls = []
+
+    def restore(*args, **kwargs):
+        calls.append(kwargs)
+        return result
+
+    monkeypatch.setattr(cli._reconcile, "restore", restore)
+    assert cli.main(["git-config", "restore", "--machine", "box", "--repo", "acme", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["ok"]
+    assert calls[0]["resource_types"] == frozenset({"git-config"})
+    assert calls[0]["dry_run"] is True
+
+
 def test_restore_prints_exact_plugin_removal(monkeypatch, capsys):
     result = _fake_result("")
     result.module_results = []

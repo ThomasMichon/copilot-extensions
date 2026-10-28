@@ -15,6 +15,16 @@ def complete_launch(
         agent_policy.require(work_dir)
     except AgentHostingError as exc:
         return output._json_error(str(exc), exit_code=3)
+    if result.get("created") is False:
+        if acquisition:
+            return output._json_error("a live mux holds the bridge acquisition target", exit_code=3)
+        output._json_output({
+            "ok": True, **deferred, "worktree_id": wt_id,
+            "session": result["session"], "work_dir": work_dir,
+            "created": False, "resumed": True, "new_pane": None,
+            "note": "a live mux session already embodies this worktree",
+        })
+        return 0
     new_pane = result.get("new_pane")
     # Reserve only New intent at delivery; failed typing retains it.
     claimed_seed: str | None = None

@@ -170,6 +170,10 @@ borrowed idle pool is not a reason to force-exit. Client-close or singleton-rele
 interruptions cannot bypass retirement, and the first interruption is preserved.
 Production receives no new expiry.
 
+[Reversible action controls](docs/action-controls.md) pause automatic resident
+self-update without stopping readiness or lane polling. The guide names the
+supported boundaries, legacy bootstrap interaction and running-adoption limits.
+
 `agent-dispatch` is a standalone runtime plugin. Enabling the plugin installs the
 payload; the session-start hook can **stamp** a binstub into `~/.local/bin` so
 the first `agent-dispatch` invocation self-provisions the runtime. Repos that use

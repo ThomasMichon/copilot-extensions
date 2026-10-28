@@ -75,8 +75,22 @@ reader fence.
 
 Preparation failure/cancellation leaves canonical content, vectors, file
 checkpoints and source state untouched. Search can continue against the clean
-committed store during model/network work. Existing source/account exclusion
-and mandatory replay still prevent a newer delta from bypassing retained work.
+committed store during model/network work. Chunker failures propagate in both
+layouts, including a later file failing after an earlier file's vectors were
+prepared. Retry reuses those exact cached pairs without treating preparation
+as a file checkpoint or successful source publication.
+
+A full acquisition still forces compatible existing files through chunking.
+If a later chunker fails, the old committed data/checkpoints remain usable and
+the retained manifest keeps its full-rebuild flag. Even an ordinary retry
+finishes that pinned full acquisition before discovering a newer delta.
+Direct batch application can reuse an earlier file only when its store and
+cleanup checkpoint completed; a later chunker failure cannot advance the
+whole-source marker.
+
+Pending-acquisition scope checks and mandatory replay prevent a newer delta
+from replacing retained work. These are not a cross-generation source lock or
+proof that different aliases' completed cursors describe the same stored family.
 
 Store writes are **not rollback transactions** across Lance and SQLite.
 An interrupted participating writer retains the existing dirty/effect latch;
@@ -104,7 +118,8 @@ vectors require additional durable disk space. This is not a bound on
 whole-source memory, physical I/O, writer duration or full-reconciliation time.
 The existing final GC, FTS and cluster owners remain outside this source writer.
 
-`tests/test_prepared_application.py`, `tests/test_prepared_journal.py` and
+`tests/test_delta_recovery.py`, `tests/test_prepared_application.py`,
+`tests/test_prepared_journal.py` and
 `tests/test_work_counts.py` exercise native layouts, retained preparation,
 publication failures, vector validation, scope/checkpoint changes and
 one-generation multi-batch application.

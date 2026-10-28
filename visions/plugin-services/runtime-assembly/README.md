@@ -5,7 +5,7 @@
   needs, from an approved artifact source, under one provenance identity.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-24
+- **Last revised:** 2026-10-27
 - **Reality docs:** [`docs/install-contract.md`](../../../docs/install-contract.md) ·
   [`docs/pipelines.md`](../../../docs/pipelines.md) ·
   [`docs/architecture.md`](../../../docs/architecture.md)
@@ -45,7 +45,7 @@ source.
   artifacts. Admission verifies against this identity rather than against a
   name or version string.
 - **Approved artifact source** — wherever an installation is permitted to
-  acquire artifacts: the public first-party release, a governed internal
+  acquire artifacts: a qualified public release, a governed internal
   feed, an adopter accelerant, or a pre-seeded local cache. Which sources
   are approved is adopter desired state, not suite configuration.
 - **Assembled generation** — an immutable runtime generation built only from
@@ -107,13 +107,16 @@ outcome is deferred or refused (see *deferred-not-degraded*). If an update
 leaves the dependency set unchanged, assembly reuses artifacts already
 admitted on the host and needs no access to a package index or feed.
 
-### first-party-only-public-distribution
+### license-compliant-distribution
 
-Public releases carry first-party code and the release lock only. Third-party
-dependencies are acquired by each installation from its approved sources
-according to the lock, never bundled into a public artifact. Any
-redistribution of third-party code happens only through a governed channel
-whose terms permit it.
+Runtime artifacts carry only content whose actual license and distribution
+terms permit the chosen channel. Required copyright/license notices, source
+access and replacement rights remain intact where applicable. First-party or
+third-party classification, and public availability alone, are neither a grant
+of rights nor a blanket prohibition. Qualification of a private source does not
+itself authorize public redistribution, and approved-source routing remains
+binding. Compliance follows the actual obligations without inventing a
+parallel approval framework or an artificial first-party-only restriction.
 
 ### governed-consumption-without-public-fallback
 
@@ -272,7 +275,8 @@ silently.
   ([plugin-services *one-authority-per-lifecycle-decision*](../README.md#one-authority-per-lifecycle-decision)).
   Admission realizes a selection. It never chooses one.
 - **No public runtime-index fallback** for an installation routed to a
-  governed source, and **no third-party code in public releases**.
+  governed source, and **no redistribution that violates the actual license
+  or distribution terms of its contents**.
 - **No adopter-specific feeds, organizations, mirrors, or credentials** in
   the generic suite.
 - **Not a format specification.** This vision does not pin lock, manifest,

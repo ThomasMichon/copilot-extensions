@@ -15,6 +15,31 @@ from zdd import breadcrumb, routing
 from agent_worktrees import status_monitor_cutover as smc
 
 
+@pytest.mark.parametrize(("summary", "expected"), [
+    ({"enabled": False, "action": "noop", "reason": "disabled"}, 0),
+    ({"enabled": True, "action": "noop", "reason": "no-live-monitor"}, 0),
+    ({"enabled": True, "action": "noop", "reason": "no-routed-monitor"}, 1),
+    ({"enabled": True, "action": "noop", "reason": "cutover-busy:123"}, 1),
+    ({"enabled": True, "action": "refused", "result": {"ok": False}}, 1),
+    ({"enabled": True, "action": "cutover", "result": {"ok": False, "rolled_back": True}}, 1),
+    ({"enabled": True, "action": "cutover", "result": {"ok": False}}, 1),
+    ({"enabled": True, "action": "cutover", "result": {"ok": True}}, 0),
+    ({"enabled": True, "action": "cutover", "result": {"ok": "true"}}, 1),
+    ({"enabled": True, "action": "restart", "restart": {"spawned": False}}, 1),
+    ({"enabled": True, "action": "restart"}, 1),
+    ({"enabled": True, "action": "restart", "restart": {"already_current": True}}, 0),
+    ({"enabled": True, "action": "restart", "restart": {"spawned": True}}, 0),
+    ({"enabled": True, "action": "unknown"}, 1),
+])
+def test_installer_wrapper_preserves_unsuccessful_monitor_outcomes(
+    monkeypatch, capsys, summary, expected,
+):
+    monkeypatch.setattr(smc, "activate_after_update", lambda **kwargs: summary)
+    assert smc.installer_after_update() == expected
+    output = capsys.readouterr().out
+    assert "rollback kept serving state" not in output
+
+
 class _Handle:
     def __init__(self, daemon):
         self.daemon = daemon

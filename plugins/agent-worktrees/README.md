@@ -85,6 +85,36 @@ Marketplace refresh, inventory browsing, plugin acquisition and their summary
 therefore do not extend the auth report's phase or human scope. These timing
 boundaries do not change authentication, acquisition or failure semantics.
 
+Authentication cleanup consumes the selected repository's existing
+agent-machines `git-config` policy; it supplies no helper, account or host
+defaults. Ordinary updates only offer a preview when authentication needs
+fallback or repair. No policy means `not_configured`, not an invented fix.
+
+```text
+agent-worktrees update --auth-report --auth-cleanup --json
+agent-worktrees update --auth-report --apply-auth-cleanup <preview-plan-sha> --json
+agent-worktrees update --auth-report --revert-auth-cleanup <backup-receipt> --json
+agent-worktrees update --auth-report --revert-auth-cleanup <backup-receipt> --apply-auth-cleanup <rollback-plan-sha> --json
+```
+
+Apply is a separate explicit operation, never forwarded into an update or a
+Manager environment export. The exact current preview digest is mandatory.
+Machines owns the strict resource-only transaction, backup and rollback;
+Worktrees rechecks source authentication and requests that same owner's rollback
+if directly working authentication or a previously available fallback is lost.
+Losing direct authentication is still a regression even if a fallback remains.
+Failed/unconfirmed mutation or
+rollback remains a failure with recovery evidence, not an unchanged result.
+Neither path switches accounts, signs in, stores tokens, or provisions a missing
+policy runtime. `CE_UPDATE_AUTH=off` or `report-only` blocks cleanup application.
+Cleanup selects an explicit `--auth-cwd` first, then the update's selected
+repository, then process CWD. Automatic offers and plain authentication reports
+show before/after hashes, never Git values that can contain inline helper
+credentials. Only the explicit `--auth-cleanup` preview displays the owner's
+value diff; that output can contain secrets and is not retained in telemetry.
+Large telemetry preview bodies use a bounded hash-checked reference beside the
+run's events, preserving the consent digest without enlarging event-line limits.
+
 ## How It Works
 
 The public `update` command submits to the shared durable execution driver
@@ -202,6 +232,13 @@ Both installer entrypoints require successful completion publication before
 activation. Missing bootstrap Python, an unavailable input fingerprint, or a
 publication refusal stops before selector, last-known-good, monitor, and GC
 changes. A successful health probe alone does not authorize activation.
+
+The retained legacy activation wrappers also fail the installer when the
+status-monitor transition fails, is refused or remains busy. They retain the
+completed slot and installed selectors for recovery; those selectors do not
+certify serving convergence. Disabled or absent monitors remain valid no-ops.
+This reporting correction does not change the cutover algorithm, add readiness
+or predecessor-retirement proof, or replace the current Python lifecycle owner.
 
 Agent Worktrees has three shipped pieces:
 
@@ -433,6 +470,16 @@ plan is not launch authority. Mux embodiment takes that same per-worktree guard
 before creating a new execution leg. Older owners reject the new flag rather
 than silently returning an unfenced launch. The caller-facing mode contract is
 owned by the [Bridge resume reference](../agent-bridge/skills/agent-bridge/references/cli-commands.md#session-management).
+
+Native mux embodiment additionally holds a per-worktree kernel lifecycle lease
+through its final check and mux invocation. Cleanup, managed removal and
+finalization take the same lease before their fresh retirement checks and hold
+it through removal, including forced removal. This is a provider-first expansion:
+launch still retains the repository finalization lock for older retirement
+owners, including already-running daemons. Removing that compatibility barrier
+requires separately qualified peer support; source publication alone does not
+activate different-worktree launch parallelism. The new lease is distinct from
+seed/native admission and the Windows mux check/create lease.
 
 ### Explicit restart Resume
 

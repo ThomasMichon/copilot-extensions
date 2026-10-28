@@ -107,6 +107,20 @@ agent-machines restore --only git-config --json
 agent-machines restore --only git-config --apply --git-config-plan-sha <preview-digest> --json
 ```
 
+Consumers that must execute **only this resource type**, not another resource
+or module coincidentally named `git-config`, use the same restore owner through
+its strict adapter:
+
+```text
+agent-machines git-config restore --json
+agent-machines git-config restore --apply --git-config-plan-sha <preview-digest> --json
+```
+
+`--repo` selects one declared repository; by default the existing adopted-CWD
+and required-supplemental-repositories discovery applies. This adapter excludes
+all surfaces, modules and other resource types before execution, while retaining
+the same union validation, file-conflict checks, transaction and receipts.
+
 The resource's `change_plan` has schema
 `agent-machines.git-config-plan/v1`: target, existence flags, before/after
 SHA-256 hashes, a declared-key value diff and `plan_sha256`. The diff shows only

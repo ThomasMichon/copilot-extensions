@@ -24,7 +24,7 @@ on:
         type: boolean
         default: false
       native_launch:
-        description: Qualify copied Windows setup interrupt handling against a real current runtime
+        description: Qualify copied Windows setup and cross-entrypoint mux creation admission
         type: boolean
         default: false
       watch_owner:
@@ -90,7 +90,7 @@ permissions:
 jobs:
   native-launch-windows:
     if: ${{ inputs.native_launch }}
-    name: Copied Windows setup terminal acceptance
+    name: Windows setup terminal and mux admission acceptance
     runs-on: windows-latest
     timeout-minutes: 30
     env:
@@ -110,19 +110,31 @@ jobs:
         shell: pwsh
         run: |
           Get-Command pwsh, uv, git -ErrorAction Stop | Out-Null
+          $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+          if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
+            throw 'Native mux admission acceptance requires the system C# compiler'
+          }
           $actual = git rev-parse HEAD
           if ($LASTEXITCODE -ne 0 -or $actual -cne $env:GITHUB_SHA) {
             throw 'Native launch acceptance source does not match the dispatch SHA'
           }
-      - name: Qualify full copied setup and same-host script waits
+      - name: Qualify copied setup, script waits and shared mux admission
         shell: pwsh
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
           --test-file tests/native/test_native_seed_console.py
           --test-file tests/test_native_seed_shell.py
+          --test-file tests/native/test_mux_creation_overlap_native.py
           --allow-explicit-tiers
-          -k "copied_setup_admission or real_copied_setup"
-          --timeout 1000 --plugin-timeout 1600 --test-timeout 30
+          -k "copied_setup_admission or real_copied_setup or same_target_joins_at_discovery"
+          --timeout 1000 --plugin-timeout 1600 --test-timeout 60
+      - name: Preserve uncertain Picker handoffs without retry
+        shell: pwsh
+        run: >-
+          python tools/run-plugin-tests.py worktree-manager
+          --test-file tests/test_psmux_launch_home.py
+          -k "published_creation_failure"
+          --timeout 120 --plugin-timeout 600 --test-timeout 60
 
   derived-diagnostics-posix:
     if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal }}

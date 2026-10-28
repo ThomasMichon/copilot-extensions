@@ -520,6 +520,29 @@ legacy setup scripts remain responsible for entering through
 
 ### Launch-owned pane assets and current boundary handlers
 
+Windows Picker and `sessions.mux_new_session` creators coordinate through
+`~/.psmux/launch-locks/<sha256-session-name>.lock`. The kernel lease uses the
+shared singleton library's sparse lock byte; it is not the seed-admission lock.
+Both paths recheck after acquisition and while contended. Discovery releases
+the lease even when the native creation client has not returned yet; neither
+pane argument receipts, attach nor the backend lifetime retain it. Different
+session names use different leases. Query failure/timeout refuses creation.
+Lock files remain in place; process death releases kernel ownership without
+PID-based stale-lock deletion. A failed discovery query or nonzero client exit
+after dispatch leaves the engine's pane argument handoffs intact as uncertain;
+it is not proof that no pane exists. If Picker's client fails after publication,
+it preserves argument, receipt and token handoffs and offers no automatic
+retry. Its failure result requires inspecting the existing session first.
+
+A late detached join reports `created: false` without creating pane arguments
+or claiming/typing a seed. Typed Bridge acquisition still refuses a live mux,
+and exact-restart receipts never credit another creator's session as their own.
+The Picker cleans only its unused handoff before following its existing join
+path and cold-seed refusal. This Windows primitive does not replace the
+engine's broader tracked-worktree lifecycle fence, the separate `pane_create`
+new-session fallback or POSIX parity;
+older installed creators do not participate in this gate.
+
 For a tracked worktree, a constructed Manager launch and the engine's
 new-session/new-window builders copy the selected canonical pane assets before
 creating the pane. The authoritative `record_path` comes from the launch plan.
@@ -589,6 +612,40 @@ owner must retain its actual child handle across the PID/birth observation.
 Only definite spawn failure restores a claim. Actual spawn finishes it, while
 terminal or unknown outcomes never authorize automatic replay. Return records
 the actual child code separately from uncertain bookkeeping.
+
+The provider's read-only `--describe-contract` reports
+`agent-worktrees.native-seed` version 1 and its supported preparation output
+formats from the executing runtime. JSON remains the default, with unchanged
+fields and effects. The additive `--output-format nul` is available only for
+`prepare` and `setup`; callback phases reject it before runtime selection or
+receipt mutation. It is provider-first groundwork, not an activated POSIX
+consumer. A future caller must discover support from the selected current
+runtime before sending new syntax, retain a supported legacy path for older
+providers or rollback, and never retry an uncertain preparation using another
+format. Existing JSON callers need no capability probe or migration.
+
+The NUL reply is one fully encoded UTF-8 byte sequence, with a NUL after every
+field, in this order:
+
+1. `agent-worktrees.native-seed-reply.v1`.
+2. Attempt, resolution and operation IDs, then parent ID and setup seed ID;
+   each absent optional ID is an empty field.
+3. Decimal environment-entry count, or `-1` for inherited environment. Zero
+   means an explicitly empty replacement environment. Each entry contributes
+   its literal name followed by its literal value, not shell assignment syntax.
+4. Positive decimal argument count, followed by that many literal arguments.
+5. `complete`, then EOF.
+
+Empty fields, quotes, metacharacters, Unicode and embedded/trailing newlines
+remain literal. Unrepresentable NUL/UTF-8 values are refused without partial
+output; a seed already claimed during preparation remains held and the
+execution becomes unknown, never automatically restored or replayed. A reader
+must validate the complete frame and successful finite producer exit before
+dispatch. It must not use command substitution (which drops NULs), `eval`,
+word splitting, or source the fields as shell code. The provider does not
+spawn a backend or retain a parser to wait for one; prompt-bearing reply bytes
+remain on the private preparation pipe, outside execution receipts and logs.
+
 On Windows, a current engine recognizes its canonical normalized setup's
 `native-setup-owner-v1` marker, a PowerShell 7 host and the selected canonical
 pane wrapper's `native-console-owner-v1` capability. It copies setup, the
