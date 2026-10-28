@@ -36,7 +36,7 @@ are not edges.
 | #4309 remote-listen versus host-destination contract | #2709 affected reverse-forward recovery | Preserve direct #2477 or safe same-turn alternative; other onboarding need not wait for whole #4309 |
 | #5772 dead writer/live ControlMaster distinction | #2709 affected transport recovery | Preserve active users, claims and unknown candidates; no destructive probe follows from this edge |
 | #5003 unresolved custody retained by read/heartbeat paths | #2709 recovery/stop/capture/lease postconditions | Agreement before affected release; ordinary advisory leases stay distinct |
-| #954 venue-parity ordered prerequisite slices | #4227 affected venue integration | [Venue-parity Plan](../venue-plugin-staging-parity/README.md), P0 -> P1 -> P2 -> P3/P4 -> P5; exact affected-P3 receiving acceptance is still unresolved |
+| #954 venue-parity ordered prerequisite slices | #4227 affected venue integration | [Venue-parity ordered execution](../venue-parity/README.md#ordered-remaining-execution-2026-08-25), P0 -> P1 -> P2 -> P3/P4 -> P5; exact affected-P3 receiving acceptance is still unresolved |
 | #3002 intended-worker delivery/receipt distinction | #2879 pending/delivered/consumed observation | A saved answer or transport receipt is not worker consumption |
 
 ## Qualification, custody and decision edges
