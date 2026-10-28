@@ -80,6 +80,11 @@
           "type": "string",
           "minLength": 1
         },
+        "current_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Byte-identical registered canonical source for an absent historical path; provenance and captured packets retain their original paths."
+        },
         "sha256": {
           "$ref": "#/$defs/sha256"
         },

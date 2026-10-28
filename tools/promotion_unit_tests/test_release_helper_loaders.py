@@ -576,3 +576,31 @@ def test_direct_native_compile_exec_remains_the_parent_registered_input_boundary
             "from builtins import exec\n" + source,
             "tools/native_daemon_artifacts.py",
         )
+
+
+@pytest.mark.parametrize("filename", ["windows_broker_cell.py", "windows_broker_retention.py"])
+def test_installed_slot_actors_have_exact_closed_runtime_boundaries(filename):
+    root = Path(__file__).resolve().parents[2]
+    relative = "libs/agent-procutil/src/agent_procutil/" + filename
+    source = (root / relative).read_text(encoding="utf-8")
+    assert _discover(source, relative) == set()
+    for changed in (
+        source.replace('".runtime-bootstrap"', '"other-runtime"'),
+        source.replace("source.read_bytes()", "other.read_bytes()"),
+        source.replace("spec)\n", "other)\n"),
+        source.replace("def validate(", "@decorate\ndef validate(")
+        if "cell" in filename else source.replace("def runtime_component(", "@decorate\ndef runtime_component("),
+        source + "\nimportlib = other\n",
+        source + "\nPath = other\n",
+    ):
+        assert changed != source
+        with pytest.raises(UnitEvidenceError):
+            _discover(changed, relative)
+    with pytest.raises(UnitEvidenceError):
+        _discover(source, "libs/other/" + filename)
+    chain = _CHAIN.replace("PATH", 'Path(__file__).with_name("new_helper.py")')
+    assert _discover(source + "\n" + chain, relative) == {
+        "libs/agent-procutil/src/agent_procutil/new_helper.py",
+    }
+    with pytest.raises(UnitEvidenceError):
+        _discover(source + '\nspec = importlib.util.spec_from_file_location("extra", unknown)\n', relative)

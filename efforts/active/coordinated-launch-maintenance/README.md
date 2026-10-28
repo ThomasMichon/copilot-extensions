@@ -205,6 +205,44 @@ repository history.
 
 ## Journal
 
+### 2026-10-28 - Preserve exact release admission and historical contract sources
+
+Hosted run 40787588118 passes all three selected lanes at
+`23e7fca3d73d002feb75f946397d0e4770a6661b`, including actual cold Manager
+construction, two concurrent stopped-resident roster readers, survival after
+all caller Jobs close, serialized maintenance and canonical removal. This
+qualifies the latest functional corrections, not a full interactive Picker
+session or an installed shared-host rollout.
+
+Required CI 40787575877 found two remaining metadata/admission boundaries.
+The release helper checker now admits only the two named installed-slot actor
+functions through complete signature/body AST fingerprints and unchanged
+canonical import bindings. Other loaders and scopes retain their normal
+source-edge checks. All 202 focused loader controls pass, including actual
+actor bytes, changed path/execution/import refusals and additional loader
+discovery. The exact manifest adds the 14 reachable source bodies and two
+new controls, without removing nodes or changing its 300-second budget.
+
+The retired Worktrees ZDD shadow remains absent. Its bridge contract source
+record instead retains its original historical path with an explicit
+byte-identical canonical relocation. The checker requires an independently
+registered target, unchanged digest, absent old path and no relocation chain;
+all historical fixture and provenance bytes remain untouched. The full actual
+registry validates all 814 fixtures. All 47 checker controls pass across the
+complete packet and the corrected two-case hook-fixture rerun. The latter
+fixture now includes the real canonical pre-push source it invokes, not a
+replacement stub.
+
+Local strict-packet execution reached 1,888 passing controls before a required
+directory-symlink capability was unavailable on this Windows host; 15
+platform-dependent skips also make that run non-qualifying. No privilege,
+effect-admission or skip policy is weakened. The required Linux CI packet
+remains the qualification gate. Unit preflight, targeted regression and real
+registry invocation supply the lightweight consumer checks; no clean-room or
+native deployment rerun is needed for these repository-only metadata tools.
+Review, required CI, merge and legitimate promotion remain open. No shared-host
+update, task adoption, restart, updater replay or rollout is authorized.
+
 ### 2026-10-28 - Address fresh review and preserve required unit admission
 
 Fresh review 5690887170 on `1c6b66442b` accepted the five earlier corrections

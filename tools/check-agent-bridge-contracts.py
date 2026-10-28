@@ -249,7 +249,7 @@ def _validate_schema(errors: list[str]) -> None:
     expected_definitions = {
         "sourcePath": (
             {"path", "sha256", "semantic", "non_semantic_reason"},
-            {"path", "sha256", "semantic", "non_semantic_reason"},
+            {"path", "sha256", "semantic", "non_semantic_reason", "current_path"},
         ),
         "fixture": (
             {"path", "sha256", "role", "generation"},
@@ -468,6 +468,7 @@ def _validate_contract(
                 {"path", "sha256", "semantic", "non_semantic_reason"},
                 errors,
                 source_label,
+                optional={"current_path"},
             ):
                 continue
             raw_path = source["path"]
@@ -476,7 +477,22 @@ def _validate_contract(
                     errors.append(f"{source_label}: duplicate source path {raw_path}")
                 local_sources.add(raw_path)
                 source_paths.add(raw_path)
-            path = _safe_file(raw_path, REPO, errors, source_label)
+            current_path = source.get("current_path", raw_path)
+            if "current_path" in source:
+                canonical = next((
+                    row for row in sources if isinstance(row, dict)
+                    and row.get("path") == current_path and "current_path" not in row
+                    and row.get("sha256") == source["sha256"]
+                ), None)
+                if (
+                    not isinstance(raw_path, str) or not raw_path
+                    or not (REPO / raw_path).resolve().is_relative_to(REPO.resolve())
+                    or (REPO / raw_path).exists() or canonical is None
+                ):
+                    errors.append(f"{source_label}: relocation requires an absent historical path and byte-identical registered canonical source")
+                if isinstance(current_path, str):
+                    source_paths.add(current_path)
+            path = _safe_file(current_path, REPO, errors, source_label)
             _validate_hash(path, source["sha256"], errors, source_label)
             semantic = source["semantic"]
             reason = source["non_semantic_reason"]
