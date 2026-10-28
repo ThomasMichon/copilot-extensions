@@ -17,6 +17,9 @@ ACTIONS = (
     "coordinator-replacement",
     "supervisor-self-update",
     "worker-admission",
+    "automatic-runtime-reconcile",
+    "runtime-activation",
+    "supervisor-reconcile",
 )
 STATE_NAME = "action-controls.json"
 

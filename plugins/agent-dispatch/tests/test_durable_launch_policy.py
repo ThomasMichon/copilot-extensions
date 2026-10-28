@@ -45,24 +45,26 @@ def test_durable_callers_request_escape_and_preserve_test_containment(
         return SimpleNamespace(pid=12345)
 
     monkeypatch.setattr(subprocess, "Popen", spawn)
-    if site == "supervisor":
+    if site in ("coordinator", "supervisor"):
         # The caller delegates flags, native selection and instance custody
         # together; those shared-owner internals have their own native controls.
         monkeypatch.setattr(agent_procutil, "spawn_daemon", spawn)
-        assert supervise_cli._spawn_supervisor_daemon_detached("fixture", "fixture")
+        if site == "coordinator":
+            main._spawn_coordinator_process()
+            log = tmp_path / "serve-service.log"
+        else:
+            assert supervise_cli._spawn_supervisor_daemon_detached("fixture", "fixture")
+            log = tmp_path / "logs" / "supervisor-daemon.log"
         assert len(calls) == 1
         options = calls[0][1]
         assert options["console_children"] is True
         assert options.get("breakaway", True) is True
         assert options["instance"].service == "agent-dispatch"
-        assert options["log_path"] == tmp_path / "logs" / "supervisor-daemon.log"
+        assert options["log_path"] == log
         assert requests == []
         return
-    if site == "coordinator":
-        main._spawn_coordinator_process()
-    else:
-        monkeypatch.setattr(execution_cli, "_DETACHED_CLI_ARGS", None)
-        execution_cli._spawn_detached_waiter(object())
+    monkeypatch.setattr(execution_cli, "_DETACHED_CLI_ARGS", None)
+    execution_cli._spawn_detached_waiter(object())
 
     assert requests == [True]
     assert len(calls) == 1
