@@ -21,7 +21,11 @@ PLUGIN = Path(__file__).resolve().parents[1]
     "real-malformed-guard", "real-throwing-guard",
     "python-empty", "report-failure", "bom", "python-legacy", "python-invalid-json",
     "real-allowed-shell", "real-allowed-tool",
-    "real-missing-policy",
+    "real-missing-policy", "real-strict-active",
+    "real-array-result", "real-invalid-decision", "real-invalid-context-result", "real-unknown-result",
+    "python-encoding", "python-warning", "python-invalid-shape",
+    "python-runtime-unavailable", "python-missing-worker", "real-invalid-decision-type",
+    "python-unknown-response",
 ])
 def test_resident_pre_tool_contract(case, tmp_path):
     node = shutil.which("node")
@@ -31,7 +35,7 @@ def test_resident_pre_tool_contract(case, tmp_path):
     for name in (
         "hook-read-policy.json", "statelessness_guard.py", "cross_repo_guard.py",
         "anchor_write_guard.py", "pr_supersede_guard.py",
-        "hook_runtime.py", "pretool_killswitch.py", "hook_pre_relevance.py", "hook_pre_policy.py",
+        "hook_runtime.py", "pretool_killswitch.py", "hook_pre_relevance.py", "hook_pre_policy.py", "hook_policy_process.py",
     ):
         shutil.copyfile(PLUGIN / "scripts" / name, scripts / name)
     home = tmp_path / "home"
@@ -144,6 +148,21 @@ if (name === "reads" || name === "bom") {
   const actual = make(createPythonPolicy({ scriptsRoot: root, python, environment: env }));
   assert.deepEqual(await actual(payload), {});
   assert.deepEqual(reports, []);
+} else if (name === "real-strict-active") {
+  writeFileSync(flag, JSON.stringify({ active: true }));
+  const observed = join(cwd, "stopped-guard-ran");
+  writeFileSync(join(root, "statelessness_guard.py"),
+    "from pathlib import Path\\nPath(" + JSON.stringify(observed) + ").write_text('ran')\\n");
+  for (const kind of ["preToolUseStrict", "preToolUse"]) {
+    const raw = spawnSync(python, ["-X", "utf8", "-B", join(root, "hook_client.py"), kind], {
+      windowsHide: true, cwd, env, encoding: "utf8", timeout: 28000,
+      input: JSON.stringify({ ...input, toolName: "edit", cwd }),
+    });
+    assert.equal(raw.error, undefined);
+    assert.equal(raw.status, 0, raw.stderr);
+    assert.equal(raw.stdout.trim(), kind === "preToolUseStrict" ? "{}" : "");
+  }
+  assert.throws(() => readFileSync(observed), { code: "ENOENT" });
 } else if (name === "real-missing-policy") {
   unlinkSync(join(root, "hook_pre_policy.py"));
   const payload = { ...input, toolName: "edit", cwd };
@@ -166,6 +185,14 @@ if (name === "reads" || name === "bom") {
   if (name === "real-malformed-guard") writeFileSync(join(root, "statelessness_guard.py"), "def invalid(:\\n");
   if (name === "real-throwing-guard") writeFileSync(join(root, "statelessness_guard.py"),
     "def decide(*args, **kwargs):\\n    raise RuntimeError('fixture policy failure')\\n");
+  const invalidGuardResults = {
+    "real-array-result": "[]", "real-invalid-decision": "{'permissionDecision':'invalid'}",
+    "real-invalid-decision-type": "{'permissionDecision':[]}",
+    "real-invalid-context-result": "{'additionalContext':[]}",
+    "real-unknown-result": "{'error':'unavailable'}",
+  };
+  if (name in invalidGuardResults) writeFileSync(join(root, "statelessness_guard.py"),
+    "def decide(*args, **kwargs):\\n    return " + invalidGuardResults[name] + "\\n");
   const actual = make(createPythonPolicy({ scriptsRoot: root, python, environment: env }));
   const result = await actual({
     ...input, toolName: "create", toolArgs: { path: join(cwd, "efforts", "active", "fixture.md") },
@@ -175,21 +202,36 @@ if (name === "reads" || name === "bom") {
   assert.match(result.permissionDecisionReason,
     name === "real-protected-write" ? /stateless|personal/i :
     name === "real-invalid-context" ? /context/i : /required.*policy/i);
-} else if (["python-policy", "python-error", "python-missing-guard", "python-empty", "python-legacy", "python-invalid-json"].includes(name)) {
-  if (name === "python-error") writeFileSync(join(root, "hook_client.py"), "raise SystemExit(3)\\n");
+} else if (["python-policy", "python-error", "python-missing-guard", "python-empty", "python-legacy", "python-invalid-json", "python-encoding", "python-warning", "python-invalid-shape", "python-runtime-unavailable", "python-missing-worker", "python-unknown-response"].includes(name)) {
+  if (name === "python-encoding") env.PYTHONIOENCODING = "cp1252";
+  if (name === "python-runtime-unavailable") writeFileSync(join(root, "agent_procutil.py"), "# no owned runtime API\\n");
+  if (name === "python-missing-worker") unlinkSync(join(root, "hook_policy_process.py"));
+  if (name === "python-unknown-response") writeFileSync(join(root, "hook_client.py"),
+    "import json,sys\\nprint('private policy diagnostic', file=sys.stderr)\\nprint(json.dumps({'unexpected':True}))\\n");
+  if (name === "python-warning") appendFileSync(join(root, "hook_client.py"),
+    "print('expected policy warning', file=sys.stderr)\\n");
+  if (name === "python-error") writeFileSync(join(root, "hook_client.py"),
+    "import sys\\nprint('private policy diagnostic', file=sys.stderr)\\nraise SystemExit(3)\\n");
   if (name === "python-missing-guard") unlinkSync(join(root, "anchor_write_guard.py"));
   if (name === "python-empty") writeFileSync(join(root, "hook_client.py"), "# no decision\\n");
-  if (name === "python-invalid-json") writeFileSync(join(root, "hook_client.py"), "print('private invalid output')\\n");
+  if (name === "python-invalid-json" || name === "python-invalid-shape") {
+    writeFileSync(join(root, "hook_client.py"),
+      "import sys\\nprint('private policy diagnostic', file=sys.stderr)\\n" +
+      (name === "python-invalid-shape" ? "print('[]')\\n" : "print('private invalid output')\\n"));
+  }
   if (name === "python-legacy") writeFileSync(join(root, "hook_client.py"),
     "import sys\\nif sys.argv[1] == 'preToolUse': print('{}')\\n");
   const actual = make(createPythonPolicy({ scriptsRoot: root, python, environment: env }));
   const result = await actual({ ...input, toolName: "edit" });
   assert.equal(result.permissionDecision, "deny");
-  assert.equal(result.permissionDecisionReason.includes("real Python policy"), name === "python-policy");
-  assert.equal(reports.length, name === "python-policy" ? 0 : 1);
+  assert.equal(result.permissionDecisionReason.includes("real Python policy"), ["python-policy", "python-encoding", "python-warning"].includes(name));
+  assert.equal(reports.length, ["python-policy", "python-encoding", "python-warning"].includes(name) ? 0 : 1);
   const diagnostic = {
     "python-empty": "policy-response-empty", "python-legacy": "policy-response-empty",
     "python-error": "policy-process-failed", "python-invalid-json": "policy-response-invalid",
+    "python-invalid-shape": "policy-response-invalid",
+    "python-runtime-unavailable": "policy-lifetime-unavailable",
+    "python-unknown-response": "policy-response-invalid",
   }[name];
   if (diagnostic) assert.deepEqual(reports, [diagnostic]);
 } else {
@@ -221,3 +263,7 @@ console.log(JSON.stringify({ case: name, calls, reports }));
         print(result.stderr)
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert json.loads(result.stdout)["case"] == case
+    if case == "python-warning":
+        assert "expected policy warning" in result.stderr
+    elif case in {"python-error", "python-invalid-json", "python-invalid-shape", "python-unknown-response"}:
+        assert "private policy diagnostic" not in result.stderr

@@ -70,6 +70,8 @@ function hotStop(environment) {
 
 function validResult(value) {
   return object(value) &&
+    Object.keys(value).every(name =>
+      ["permissionDecision", "permissionDecisionReason", "additionalContext"].includes(name)) &&
     (value.permissionDecision === undefined || ["allow", "ask", "deny"].includes(value.permissionDecision)) &&
     (value.permissionDecisionReason === undefined || typeof value.permissionDecisionReason === "string") &&
     (value.additionalContext === undefined || typeof value.additionalContext === "string");
@@ -80,25 +82,47 @@ export function createPythonPolicy({ scriptsRoot, python, environment = process.
     throw new Error("resident pre-tool policy requires an absolute existing interpreter");
   }
   return payload => new Promise((resolve, reject) => {
-    for (const name of [...GUARDS, "hook_client.py", "hook_runtime.py", "pretool_killswitch.py", "hook_pre_relevance.py", "hook_pre_policy.py"]) {
+    const frame = JSON.stringify(payload) + "\n";
+    for (const name of [...GUARDS, "hook_client.py", "hook_runtime.py", "pretool_killswitch.py",
+      "hook_pre_relevance.py", "hook_pre_policy.py", "hook_policy_process.py"]) {
       boundedFile(join(scriptsRoot, name), 131072);
     }
-    const child = execFile(python, ["-X", "utf8", "-B", join(scriptsRoot, "hook_client.py"), "preToolUseStrict"], {
-      windowsHide: true, cwd: homedir(), env: environment,
-      encoding: "utf8", timeout: 28000, maxBuffer: 65536,
+    let timer;
+    let timedOut = false;
+    let inputFailed = false;
+    const child = execFile(python, ["-X", "utf8", "-B", join(scriptsRoot, "hook_policy_process.py")], {
+      windowsHide: true, cwd: homedir(), env: { ...environment, PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" },
+      encoding: "utf8", maxBuffer: 65536,
     }, (error, stdout, stderr) => {
-      if (stderr) process.stderr.write(stderr);
-      if (error) return reject(new Error("policy-process-failed"));
+      clearTimeout(timer);
+      child.stdin?.destroy();
+      if (timedOut || error?.code === 4) return reject(new Error("policy-process-timeout"));
+      if (error?.code === 3) return reject(new Error("policy-lifetime-unavailable"));
+      if (error || inputFailed) return reject(new Error("policy-process-failed"));
       if (!stdout.trim() && hotStop(environment) !== true) {
         return reject(new Error("policy-response-empty"));
       }
       try {
-        resolve(stdout.trim() ? JSON.parse(stdout) : {});
+        const result = stdout.trim() ? JSON.parse(stdout) : {};
+        if (!validResult(result)) throw new Error("invalid-policy-response");
+        if (stderr) process.stderr.write(stderr);
+        resolve(result);
       }
       catch { reject(new Error("policy-response-invalid")); }
     });
-    child.stdin.on("error", () => { /* execFile reports child failure through its callback. */ });
-    child.stdin.end(JSON.stringify(payload), "utf8");
+    timer = setTimeout(() => {
+      timedOut = true;
+      // EOF reaches the actual worker behind a venv launcher, not just its shim.
+      child.stdin?.destroy();
+      child.kill();
+    }, 28000);
+    timer.unref();
+    child.stdin?.on("error", () => {
+      inputFailed = true;
+      child.stdin.destroy();
+      child.kill();
+    });
+    child.stdin?.write(frame, "utf8");
   });
 }
 
@@ -140,7 +164,7 @@ export function createResidentPreToolHook({
       return result;
     } catch (error) {
       const diagnostic = error?.message;
-      let reason = ["invalid-sdk-input", "policy-process-failed", "policy-response-empty",
+      let reason = ["invalid-sdk-input", "policy-process-failed", "policy-process-timeout", "policy-lifetime-unavailable", "policy-response-empty",
         "policy-response-invalid", "unsafe-policy-file", "policy-file-changed"].includes(diagnostic) ?
         diagnostic : "policy-unavailable";
       if (!reported.has(reason)) {

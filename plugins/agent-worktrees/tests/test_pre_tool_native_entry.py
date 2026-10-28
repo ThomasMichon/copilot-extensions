@@ -16,7 +16,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.mark.parametrize("case", ["read", "guard-drift", "missing-contract", "write", "context", "active", "invalid-flag", "future-flag-contract"])
+@pytest.mark.parametrize("case", ["read", "guard-drift", "missing-contract", "write", "context", "active", "invalid-flag", "future-flag-contract", "array-flag", "array-contract", "non-utf8-environment", "old-client", "empty-policy", "array-response", "invalid-decision-response", "invalid-context-response", "policy-error"])
 @pytest.mark.parametrize("native_shell", ["powershell.exe", "pwsh"])
 def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_path):
     shell = shutil.which(native_shell)
@@ -59,7 +59,34 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
         flag.write_text('{"active":"true"}', encoding="utf-8")
     elif case == "future-flag-contract":
         flag.write_text('{"active":true,"contract":{"id":"copilot-extensions.pretool-killswitch","version":2}}', encoding="utf-8")
-    payload = {"toolName": "edit" if case == "write" else "view", "toolArgs": {"path": "non-ascii-\u00e9.txt"}}
+    if case == "array-flag":
+        flag.write_text('[{"active":true}]', encoding="utf-8")
+    elif case == "array-contract":
+        contract = scripts / "hook-read-policy.json"
+        contract.write_text("[" + contract.read_text(encoding="utf-8") + "]", encoding="utf-8")
+    elif case == "non-utf8-environment":
+        env["PYTHONIOENCODING"] = "cp1252"
+    if case in {
+        "old-client", "empty-policy", "array-response", "invalid-decision-response",
+        "invalid-context-response", "policy-error",
+    }:
+        action = {
+            "old-client": "if sys.argv[1] == 'preToolUse': print('{}')\n",
+            "empty-policy": "",
+            "array-response": "import json\nprint(json.dumps([{'permissionDecision':'allow'}]))\n",
+            "invalid-decision-response": "import json\nprint(json.dumps({'permissionDecision':'invalid'}))\n",
+            "invalid-context-response": "import json\nprint(json.dumps({'additionalContext':[]}))\n",
+            "policy-error": "print('private native diagnostic',file=sys.stderr)\nraise SystemExit(3)\n",
+        }[case]
+        (scripts / "hook_client.py").write_text(
+            "import sys\nfrom pathlib import Path\n"
+            + "Path(" + repr(str(observed)) + ").write_text(sys.stdin.read())\n" + action,
+            encoding="utf-8",
+        )
+    payload = {"toolName": "view" if case in {
+        "read", "guard-drift", "missing-contract", "context", "active", "invalid-flag",
+        "future-flag-contract", "array-contract",
+    } else "edit", "toolArgs": {"path": "non-ascii-\u00e9.txt"}}
     original = json.dumps(payload, ensure_ascii=False)
     command = "& '" + str(scripts / "pre-tool-hook.ps1").replace("'", "''") + "'"
     result = subprocess.run(
@@ -68,6 +95,8 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
         cwd=home, timeout=20, creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert result.returncode == 0, result.stderr
+    if case == "policy-error":
+        assert "private native diagnostic" not in result.stderr
     python_required = case not in {"read", "active"}
     assert observed.exists() is python_required, (result.stdout, result.stderr)
     if python_required:

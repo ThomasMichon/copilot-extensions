@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 $utf8 = [Text.UTF8Encoding]::new($false, $true)
 
 function ConvertFrom-PreToolJson([string]$Text) {
+    if (-not $Text.TrimStart().StartsWith('{')) { throw 'Expected a JSON object' }
     if ($PSVersionTable.PSVersion.Major -ge 6) {
         return ConvertFrom-Json -InputObject $Text -AsHashtable -ErrorAction Stop
     }
@@ -113,11 +114,36 @@ try {
     }
     . $runner
     $diagnostic = ''
-    $result = Invoke-Hidden -FilePath $python -ArgList @('-X', 'utf8', '-B', $client, 'preToolUse') `
-        -InputText $raw -ErrorOutput ([ref]$diagnostic)
-    if ($diagnostic) { [Console]::Error.Write($diagnostic) }
+    $previousPythonEncoding = [Environment]::GetEnvironmentVariable('PYTHONIOENCODING', 'Process')
+    try {
+        [Environment]::SetEnvironmentVariable('PYTHONIOENCODING', 'utf-8', 'Process')
+        $result = Invoke-Hidden -FilePath $python -ArgList @('-X', 'utf8', '-B', $client, 'preToolUseStrict') `
+            -InputText $raw -ErrorOutput ([ref]$diagnostic)
+    } finally {
+        [Environment]::SetEnvironmentVariable('PYTHONIOENCODING', $previousPythonEncoding, 'Process')
+    }
     if ($LASTEXITCODE -ne 0) { throw "Pre-tool policy client exited $LASTEXITCODE" }
-    if ($result) { [Console]::Out.Write($result) }
+    if (-not $result -or -not $result.Trim() -or $utf8.GetByteCount($result) -gt 65536) {
+        throw 'Strict pre-tool policy returned no bounded response'
+    }
+    $response = ConvertFrom-PreToolJson $result
+    if ($response -isnot [Collections.IDictionary]) { throw 'Invalid pre-tool policy response' }
+    foreach ($name in $response.Keys) {
+        if ($name -cnotin @('permissionDecision', 'permissionDecisionReason', 'additionalContext')) {
+            throw 'Invalid pre-tool policy response'
+        }
+    }
+    if ($response.ContainsKey('permissionDecision') -and (
+        $response.permissionDecision -isnot [string] -or
+        $response.permissionDecision -cnotin @('allow', 'ask', 'deny')
+    )) { throw 'Invalid pre-tool policy decision' }
+    foreach ($name in @('permissionDecisionReason', 'additionalContext')) {
+        if ($response.ContainsKey($name) -and $response[$name] -isnot [string]) {
+            throw 'Invalid pre-tool policy response'
+        }
+    }
+    if ($diagnostic) { [Console]::Error.Write($diagnostic) }
+    [Console]::Out.Write($result)
 } catch {
     [Console]::Error.WriteLine('agent-worktrees preToolUse: ' + $_.Exception.Message)
     [Console]::Out.Write('{"permissionDecision":"deny","permissionDecisionReason":"agent-worktrees pre-tool policy is unavailable; repair its owning installation"}')

@@ -914,6 +914,8 @@ def main(argv: list[str] | None = None) -> int:
         if switch is None:
             print("[pretool-killswitch] helper unavailable; guards remain enabled", file=sys.stderr)
         elif switch.is_active():
+            if strict_policy:
+                sys.stdout.write("{}")
             return 0
     try:
         raw = sys.stdin.read()

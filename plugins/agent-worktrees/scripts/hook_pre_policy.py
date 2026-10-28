@@ -7,6 +7,26 @@ from pathlib import Path
 import time
 
 
+def valid_decision(value: object) -> bool:
+    if value is None:
+        return True
+    if not isinstance(value, dict) or set(value) - {
+        "permissionDecision",
+        "permissionDecisionReason",
+        "additionalContext",
+    }:
+        return False
+    if "permissionDecision" in value:
+        decision = value["permissionDecision"]
+        if not isinstance(decision, str) or decision not in {"allow", "ask", "deny"}:
+            return False
+    return all(
+        isinstance(value[name], str)
+        for name in ("permissionDecisionReason", "additionalContext")
+        if name in value
+    )
+
+
 def decide(
     payload: dict,
     *,
@@ -71,6 +91,11 @@ def decide(
                     ),
                 }
             continue
+        if require_policy and not valid_decision(decision):
+            return {
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "Required agent-worktrees pre-tool policy returned an invalid response",
+            }
         if isinstance(decision, dict) and decision:
             combined = merge_decisions(combined, decision)
             if combined.get("permissionDecision") == "deny":

@@ -2877,6 +2877,14 @@ without a CLI/binstub or self-provisioning invocation. Required policy failure
 is reported as a deny, never silently presented as a successful no-op. The
 service-unavailable Python guard fallbacks are unchanged in this slice.
 
+Native JSON readers reject non-object roots before PowerShell can enumerate
+a singleton array. Non-exempt native fallback uses the strict entry and checks
+a bounded, typed object response before forwarding diagnostics. Empty,
+malformed and down-level unknown-entry responses deny. Child UTF-8 settings
+override inherited standard-I/O encodings, including during native fallback.
+Strict hot-stop responses explicitly acknowledge `{}` without loading guards;
+legacy command-hook stop/no-op responses retain their empty-output behavior.
+
 ### Opt-in resident pre-tool pilot
 
 The existing extension can register an SDK `onPreToolUse` callback when
@@ -2893,8 +2901,10 @@ that settles during first access. The shared pre-tool stop remains a hot read,
 not a startup-cached boolean. Explicit installation contexts never use the
 default-installation read exemption.
 
-Non-exempt operations invoke only the standalone `hook_client.py`, passing
-SDK `workingDirectory` as command-policy `cwd`. The pilot uses
+Non-exempt operations enter `hook_policy_process.py`, which uses the existing
+owning runtime's `agent_procutil.owned_process.run_caller_owned` API to run only
+the standalone `hook_client.py`. SDK `workingDirectory` is passed as
+command-policy `cwd`. The pilot uses
 `preToolUseStrict` (the internal `--require-policy` entry): missing or failing
 fallback guards deny instead of silently
 allowing. This mode evaluates the current standalone policy directly, without
@@ -2911,9 +2921,26 @@ The adapter never interprets unexplained silence as approval. Its bounded,
 deduplicated error categories distinguish empty or malformed responses and
 process failures without reflecting arbitrary exception or response text.
 
+The resident adapter keeps its stdin lifetime writer open until completion or
+cancellation. EOF terminates the actual worker behind a Windows venv launcher;
+the existing SDK retires the policy's owned child scope on timeout, normal
+completion and caller death. This is finite child-process custody, not a new
+daemon, runtime selector or host command-hook handback. An unavailable owning
+SDK denies explicitly without installation or provisioning. The policy budget
+remains 25 seconds within the existing 28-second resident boundary.
+
+Each strict guard must return either no objection or a well-formed supported
+decision; malformed lists, statuses, field types and unknown responses deny
+before merging. Raw stderr is forwarded only after successful, valid policy
+responses, preserving successful warnings without repeating failing tracebacks.
+
 Guard-chain evaluation lives in the standalone `hook_pre_policy.py` helper.
 Every installer declares it in the helper closure. A missing helper returns
 an explicit denial from either standalone entry, never a silent no-op.
+
+Installation-owned shim currency includes the client, both policy helpers,
+native entry, read contract and native runner. An already-current runtime must
+therefore repair missing or changed bin companions rather than skipping them.
 
 SDK hooks are awaited decisions, not passive event listeners. Registration
 requires the host's capability approval and does **not** disable a command hook.
