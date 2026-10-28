@@ -123,6 +123,10 @@ def observed_pipe():
     Path(r["assets"], "pipe.json").write_text(json.dumps(descriptors))
     return descriptors
 launch_seed_posix.os.pipe = observed_pipe
+original_signals = {
+    name: signal.getsignal(getattr(signal, name))
+    for name in ("SIGPIPE", "SIGXFZ", "SIGXFSZ") if hasattr(signal, name)
+}
 if r["fault"] in ("interrupt", "encoding"):
     def failed_exec(*args):
         if r["fault"] == "interrupt":
@@ -143,6 +147,10 @@ except (KeyboardInterrupt, UnicodeError):
     while not Path(r["completion"]).read_text() and time.monotonic() < deadline:
         time.sleep(0.01)
     code = 3
+Path(r["assets"], "signals-restored").write_text(str(all(
+    signal.getsignal(getattr(signal, name)) == handler
+    for name, handler in original_signals.items()
+)))
 raise SystemExit(code)
 ''', encoding="utf-8")
     environment = dict(os.environ)
@@ -211,6 +219,7 @@ def test_definite_exec_failure_restores_without_backend_spawn(
     )
     assert result.returncode == 3, result.stderr
     assert (assets / ".native-seed-exec.complete").read_text() == "3\n"
+    assert (assets / "signals-restored").read_text() == "True"
     restored = seeds.peek(record)
     assert restored.seed_id == seed.seed_id and restored.handoff_id is None
     events = audit.read(record.parent, prepared["attempt_id"], prepared["operation_id"])["events"]
@@ -249,6 +258,7 @@ def test_catchable_pre_exec_loss_cannot_finish_or_restore(
     )
     assert result.returncode == 3, result.stderr
     assert (assets / ".native-seed-exec.complete").read_text() == "3\n"
+    assert (assets / "signals-restored").read_text() == "True"
     events = audit.read(record.parent, prepared["attempt_id"], prepared["operation_id"])["events"]
     assert [event["phase"] for event in events] == [
         "execution-requested", "seed-claimed", "unknown",

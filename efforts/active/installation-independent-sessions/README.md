@@ -559,6 +559,15 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   The fix emits an explicit unknown marker on every unwound pre-exec path,
   reserving failure restoration for literal exec errors. Green rerun and
   final review remain pending; ordinary consumers are still unchanged.
+- Copilot's exact-head review found that CPython's ignored signal dispositions
+  crossed the new exec boundary, unlike the prior `Popen` default. Native run
+  `40736639164` on `2e96028e6b746d61f65c6ea4de51efdcf7b122b5`
+  reproduced both non-Python `SIGPIPE` and `SIGXFSZ` cases on Linux and stock
+  macOS Bash 3.2: the shell reached exit 42 instead of signal termination.
+  Each platform passed the other 143 controls with 17 Windows-only skips;
+  Windows remained green. Restore these dispositions before exec, and the
+  helper's original handlers on unwind. Final green proof and review remain
+  pending, with production consumers and rollout untouched.
 
 ### 2026-10-28 - Provider-owned setup birth prerequisite
 

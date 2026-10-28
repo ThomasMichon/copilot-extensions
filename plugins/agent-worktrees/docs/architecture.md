@@ -681,6 +681,11 @@ closing the pipe, not success-shaped EOF. As with the POSIX subprocess
 error-pipe convention, uncatchable death at the exec boundary cannot be
 distinguished from exec followed immediately by death; PID/birth is identity
 evidence, not a separate kernel exec attestation.
+Before exec, the helper restores `SIGPIPE` and the available `SIGXFZ` /
+`SIGXFSZ` dispositions to default, matching the prior subprocess boundary.
+If exec unwinds, it restores the helper's original handlers before reporting
+failure or uncertainty; CPython's ignored dispositions do not reach a
+non-Python backend.
 Only the explicit exec-error path permits restoration. A future native
 consumer must discover this capability before invoking the new phase, retain
 the actual foreground wait and exit code, settle the finite status boundary,

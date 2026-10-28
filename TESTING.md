@@ -201,6 +201,10 @@ signal exit, closed exec-pipe descriptors, no observer child under the backend,
 definite exec-error restoration, fast-exit uncertainty and a bounded observer
 timeout without replay. Actual SIGINT and encoding-loss controls keep the
 pre-exec helper alive long enough to disprove success-shaped EOF.
+Non-Python `/bin/sh` controls send each available interpreter-ignored signal
+to the actual exec-replaced process and require signal termination rather
+than a following exit. Failure/interruption controls also require restoration
+of the helper's original signal handlers on unwind.
 It uses the real seed
 and execution owners in disposable state, not a production launcher or host
 installation. These provider controls do not establish copied POSIX consumer

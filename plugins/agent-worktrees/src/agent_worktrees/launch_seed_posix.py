@@ -146,6 +146,7 @@ def execute(
     os.close(reader)
     os.close(completion)
     outcome = b"U"
+    previous_signals = {}
     try:
         # Reap only the immediate fork intermediary, not the backend. Its child
         # is reparented and cannot become an unowned zombie under Copilot.
@@ -160,11 +161,19 @@ def execute(
             return 3
         os.write(writer, b"R")
         try:
+            # Match Popen(restore_signals=True), not CPython's ignored defaults.
+            for name in ("SIGPIPE", "SIGXFZ", "SIGXFSZ"):
+                signum = getattr(signal, name, None)
+                if signum is not None:
+                    previous_signals[signum] = signal.getsignal(signum)
+                    signal.signal(signum, signal.SIG_DFL)
             os.execvpe(command[0], command, os.environ)
         except OSError:
             outcome = b"F"
             return 3
     finally:
+        for signum, handler in previous_signals.items():
+            signal.signal(signum, handler)
         # A catchable interrupt/encoding failure is not successful exec EOF.
         # Successful exec closes the descriptor without running this finally.
         try:
