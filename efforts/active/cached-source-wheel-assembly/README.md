@@ -199,6 +199,21 @@ evidence is no longer needed.
 
 ## Journal
 
+### 2026-10-28 - Normalize source-wheel names and preserve script layouts
+
+The next review identified two further boundary cases. `script-files` projects
+now retain the original isolated-source transaction before any tools are
+provisioned, since the cache's supported wheel layout excludes `.data/scripts`.
+Source-wheel metadata and completed-generation dependency comparisons normalize
+distribution names; legacy directory-origin receipts retain the original
+spelling. Native fresh/reuse cases cover ordinary and `Example_App` names in
+both source-wheel and legacy directory modes. The full focused packet initially
+reported nineteen passes, one POSIX-only skip and a failing mixed-case
+wheel-metadata comparison; correcting that same normalization class made all
+twelve affected eligibility/reuse controls pass. Canonical and nine consumer
+copies are synchronized. Exact owned sandbox cleanup completed after transient
+Windows executable locks, without host-state changes.
+
 ### 2026-10-28 - Preserve artifact mappings and isolated build requirements
 
 Review of #9340 identified two unsupported graph shapes that must retain the

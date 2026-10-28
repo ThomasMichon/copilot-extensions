@@ -202,7 +202,7 @@ def _eligibility(inputs) -> tuple[list[dict], str | None]:
             or any(re.match(r"\s*(setuptools|wheel)(?:\s|[<>=!~;\[]|$)", value, re.I) is None
                    for value in build["requires"])
             or project.get("dynamic") or settings.get("dynamic") or settings.get("ext-modules")
-            or settings.get("data-files") or settings.get("cmdclass")
+            or settings.get("data-files") or settings.get("script-files") or settings.get("cmdclass")
             or (package / "MANIFEST.in").exists()
             or settings.get("package-dir") not in (None, {"": "src"})
             or (find and find.get("where", ["src"]) != ["src"])
@@ -273,7 +273,7 @@ def _wheel_record(path: Path, name: str, deadline: float) -> dict:
     with _open(path) as stream:
         facts = inspect_archive(stream, limits=_LIMITS, deadline=deadline)
     if (
-        facts.name != name or facts.tags != ("py3-none-any",)
+        re.sub(r"[-_.]+", "-", facts.name).lower() != name or facts.tags != ("py3-none-any",)
         or facts.wheel_metadata["Root-Is-Purelib"] != "true"
         or any(".data/" in member for member in facts.member_hashes)
     ):

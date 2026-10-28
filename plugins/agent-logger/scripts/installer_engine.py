@@ -497,7 +497,7 @@ def _verify_installed(
             wheel_receipt, sort_keys=True, separators=(",", ":"),
         ).encode("utf-8")).hexdigest()
     probe = """
-import hashlib, importlib, importlib.metadata, json, pathlib, sys
+import hashlib, importlib, importlib.metadata, json, pathlib, re, sys
 slot = pathlib.Path(sys.argv[1]).resolve()
 assert sys.version_info >= (3, 11), "installer runtime requires Python 3.11+"
 wheel_binding = sys.argv[9]
@@ -526,6 +526,10 @@ if proof.exists():
         assert not wheel_binding and isinstance(source_wheels, dict) and \
             source_wheels and set(source_wheels) == set(recorded_origins), \
             "source wheel evidence differs from its origins"
+        expected_origins = {
+            re.sub(r"[-_.]+", "-", name).lower(): origin
+            for name, origin in expected_origins.items()
+        }
     if wheel_binding:
         expected_wheels = receipt["wheel_inputs"]
         assert hashlib.sha256(json.dumps(expected_wheels, sort_keys=True, separators=(",", ":")).encode()).hexdigest() \

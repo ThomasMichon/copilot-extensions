@@ -193,7 +193,7 @@ def test_source_change_between_cache_key_and_build_refuses_publication(
 
 
 @pytest.mark.parametrize("change", [
-    "dynamic", "custom-backend", "setup-script", "setup-extra-code", "build-settings",
+    "dynamic", "custom-backend", "setup-script", "setup-extra-code", "build-settings", "script-files",
 ])
 def test_unsupported_contract_explicitly_retains_original_transaction(
     engine, ordinary, tmp_path, monkeypatch, change, capsys,
@@ -214,6 +214,8 @@ def test_unsupported_contract_explicitly_retains_original_transaction(
             content = content.replace('[project]\n', '[project]\ndynamic=["description"]\n')
         elif change == "custom-backend":
             content = content.replace('build-backend="setuptools.build_meta"', 'build-backend="another.backend"')
+        elif change == "script-files":
+            content += '\n[tool.setuptools]\nscript-files=["example-script"]\n'
         else:
             content += '\n[tool.uv.config-settings]\nexample="selected"\n'
         manifest.write_text(content)
@@ -380,12 +382,24 @@ def test_backend_mutation_cannot_publish_cache_or_completion_and_retry_is_clean(
     assert len(ordinary[2].read_text().splitlines()) == 4
 
 
+@pytest.mark.parametrize("project_name", ["example-app", "Example_App"])
+@pytest.mark.parametrize("script_files", [False, True])
 def test_completed_source_wheel_candidate_reuses_without_reentering_builder(
-    engine, ordinary, tmp_path, monkeypatch,
+    engine, ordinary, tmp_path, monkeypatch, project_name, script_files,
 ):
+    plugin = ordinary[0]
+    manifest = plugin / "pyproject.toml"
+    content = manifest.read_text().replace('name="example-app"', f'name="{project_name}"')
+    if script_files:
+        content += '\n[tool.setuptools]\nscript-files=["example-script"]\n'
+        (plugin / "example-script").write_text("print('example')\n")
+    manifest.write_text(content)
     root = tmp_path / "installation"
     with _candidate(engine, root, ordinary, "1.0.0") as built:
         assert not built.reused
+        receipt = json.loads((built.slot / ".runtime-input-origins.json").read_text())
+        assert ("source_wheels" in receipt) is not script_files
+        assert ("example-app" if not script_files else project_name) in receipt["packages"]
     marker = engine.runtime.marker_path(root, "1.0.0").read_bytes()
     monkeypatch.setattr(
         engine, "retained_source_wheels",
