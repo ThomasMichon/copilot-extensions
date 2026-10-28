@@ -20,6 +20,24 @@ from agent_worktrees.sessions import LiveVerdict
 pytestmark = pytest.mark.guard
 
 
+@pytest.mark.parametrize("setup", [False, True])
+def test_empty_executable_refuses_before_claim_or_process_query(record, monkeypatch, setup):
+    seed = seeds.stage(record, kind="new", text="must remain staged")
+    monkeypatch.setattr(
+        native, "_require_process",
+        lambda *args: pytest.fail("Invalid command must be rejected before process queries"),
+    )
+    with pytest.raises(ValueError, match="literal backend command"):
+        native.prepare(record, [""], seed_id=seed.seed_id, setup=setup)
+    assert seeds.peek(record) == seed
+    assert not (record.parent / "launch-attempts").exists()
+    with pytest.raises(ValueError, match="literal fields"):
+        native.nul_reply({
+            "version": 1, "attempt_id": "a" * 32, "resolution_id": "b" * 32,
+            "operation_id": "c" * 32, "parent_id": None, "environment": None, "argv": [""],
+        })
+
+
 def test_finite_callback_import_does_not_load_preparation_or_seed_daemon():
     result = run_caller_owned(
         [sys.executable, "-I", "-B", "-c",

@@ -62,6 +62,38 @@ def test_each_execution_gets_its_own_assets_even_with_one_attempt(launch):
     assert first.directory.parent.name == "a" * 32
 
 
+def test_posix_setup_assets_include_literal_reader_and_survive_installation_removal(launch):
+    record, runtime, _assets = launch
+    scripts = runtime / "scripts"
+    scripts.mkdir()
+    canonical = Path(__file__).resolve().parents[1] / "scripts"
+    names = (
+        "default-setup.sh", "launch-command.sh", "native-seed-reply.sh",
+        "reconcile-machine-settings.sh",
+    )
+    for name in names:
+        shutil.copy2(canonical / name, scripts / name)
+    prepared = session_shell.prepare(
+        record, scripts / "default-setup.sh", installation_roots=(runtime,),
+    )
+    expected = {name: (scripts / name).read_bytes() for name in names}
+    assert {path.name: path.read_bytes() for path in prepared.directory.iterdir()} == expected
+    shutil.rmtree(runtime)
+    assert {path.name: path.read_bytes() for path in prepared.directory.iterdir()} == expected
+    assert all(not path.is_symlink() for path in prepared.directory.iterdir())
+
+
+def test_missing_posix_reader_does_not_publish_partial_setup_assets(launch):
+    record, runtime, _assets = launch
+    scripts = runtime / "scripts"
+    scripts.mkdir()
+    for name in ("default-setup.sh", "launch-command.sh", "reconcile-machine-settings.sh"):
+        (scripts / name).write_text("# fixture\n", encoding="utf-8")
+    with pytest.raises(FileNotFoundError):
+        session_shell.prepare(record, scripts / "default-setup.sh", installation_roots=(runtime,))
+    assert not (record.parent / "launch-attempts").exists()
+
+
 def test_refuses_storage_in_any_removed_installation(launch):
     record, runtime, assets = launch
     with pytest.raises(ValueError, match="removable installation"):

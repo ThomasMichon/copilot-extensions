@@ -33,7 +33,7 @@ def nul_reply(prepared: dict) -> bytes:
                 raise ValueError("Invalid native backend environment name")
             fields.extend((key, value))
     fields.extend((str(len(prepared["argv"])), *prepared["argv"], "complete"))
-    if prepared["version"] != 1 or not prepared["argv"] or not all(
+    if prepared["version"] != 1 or not prepared["argv"] or not prepared["argv"][0] or not all(
         isinstance(field, str) and "\0" not in field for field in fields
     ):
         raise ValueError("Native backend reply cannot be represented as literal fields")
@@ -64,7 +64,7 @@ def prepare(
     """Claim once before native spawn; only argv crosses the in-memory pipe."""
     from . import launch_admission, launch_seed_exec
 
-    if not command or not all(isinstance(arg, str) and "\0" not in arg for arg in command):
+    if not command or not command[0] or not all(isinstance(arg, str) and "\0" not in arg for arg in command):
         raise ValueError("A literal backend command is required")
     if not setup and (admission_only or preserve_seed_id or native_resume_session or pid or process_start_time):
         raise ValueError("Backend preparation cannot include setup admission")

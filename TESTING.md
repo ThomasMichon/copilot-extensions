@@ -72,10 +72,35 @@ backend dispatch and release admission-only preparation before the child lifetim
 The same packet checks default JSON compatibility, the finite provider's
 read-only contract declaration, counted NUL preparation replies, literal
 argument/environment fidelity, invalid-format/callback refusal before effects
-and held-seed/unknown handling for an unrepresentable reply. A real Bash reader
+and held-seed/unknown handling for an unrepresentable reply. Empty-executable
+controls refuse preparation before seed claims or process queries. A real Bash reader
 control decodes the NUL fields without evaluating injected shell text. Git Bash
 execution is a framing control, not native Linux/macOS, terminal or production
 POSIX launch qualification; production POSIX consumer activation remains open.
+`test_native_seed_reply_shell.py` executes the shipped dormant Bash reader,
+checking literal arrays without environment mutation or command evaluation,
+inherited versus empty replacement environment, malformed/truncated/trailing
+frames, stale-output clearing and prompt-free failures. The malformed cases
+share one Bash process with `nocasematch` both on and off, reject uppercase
+identities/markers and preserve the caller's option and locale. A separate
+xtrace control checks private-field suppression and restoration after success
+and refusal. EOF-status fault injection covers interrupted and timeout reads;
+actual closed-descriptor controls exercise refusal with nounset on and off,
+and before the header or after actual header/environment reads.
+A native POSIX control prewrites the complete frame into a nonblocking pipe
+while retaining a live writer, requiring refusal rather than accepting EAGAIN
+as EOF. The fixture executes Bash in place under the finite process owner.
+`test_session_shell.py` checks complete copied POSIX
+setup assets and refusal before partial publication when the reader is absent.
+The real-process reader controls are not marked as fast structural guards;
+the explicit native acceptance jobs select the file directly.
+The existing callback inventory/publication controls cover its installer-owned
+copy scope. These are framing/copy controls, not finite callback execution,
+foreground terminal, PID/birth or native installation-survival qualification.
+The existing optional installation-context acceptance workflow's `native_launch`
+input also selects this focused reader/copy packet on Linux and macOS, using
+`/bin/bash` and explicitly requiring stock macOS Bash 3.2. It stays outside
+required PR CI; the Windows terminal packet selected by that input is unchanged.
 The real PowerShell
 seed-delivery consumer uses the existing finite process-tree owner so a timeout
 settles descendants rather than blocking on inherited capture pipes.

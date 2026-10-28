@@ -202,6 +202,10 @@ and [repair register](reconstruction-findings.md) retain the evidence and limits
 - [x] Activate and qualify the normalized Windows/PowerShell 7 copied consumer
   for executable and same-host-script backends (#9288), including interrupted
   waits and normal script return without an explicit exit.
+- [x] Land provider-first literal preparation transport and selected-runtime
+  contract discovery (#9318), without activating a POSIX lifetime owner.
+- [ ] Land the dormant Bash frame reader and copied POSIX setup assets;
+  keep bounded callback execution and native lifetime activation separate.
 - [ ] Remove both deferred-setup and final-backend runtime-Python waiters.
   Reuse finite seed preparation, existing seed custody and execution receipts;
   the native shell owns the actual child handle and wait. The normalized
@@ -448,8 +452,62 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   witness before counting any further removal/reconstruction as session
   survival evidence; retain the existing maintenance and implementation owners.
 
+### 2026-10-27 - Dormant copied POSIX reply reader
+
+- Added the source-owned Bash frame reader and its normal installer,
+  publication and uninstall inventory entries. The launch-owned asset copier
+  now supports the complete POSIX normalized setup set without activating it.
+  The [architecture contract](../../../plugins/agent-worktrees/docs/architecture.md)
+  owns the reader's outputs and refusal behavior; no environment is applied
+  and no backend is launched merely by reading a frame.
+- Real Bash controls exercise literal data, empty replacement versus inherited
+  environment, malformed frames, stale-output clearing and prompt-free
+  diagnostics. Copy controls preserve the complete asset set outside removable
+  roots and refuse missing-reader publication. Git Bash framing is not native
+  POSIX terminal or installation-survival evidence.
+- Continue with bounded current-runtime callback execution, exact process
+  birth and foreground terminal custody before activating setup/backend
+  lifetime ownership. Both production POSIX Python waiters, #5579 forwarding
+  ownership and the parent live acceptance remain open.
+
+### 2026-10-28 - Final-read error discrimination
+
+- An actual closed stdin after the complete marker reproduced two failures:
+  the reader accepted Bash's status-1 I/O error with nounset off, and aborted
+  on an unbound probe variable with nounset on. Both controls now require the
+  normal refusal and cleared outputs, not an injected return status.
+- The final probe uses one finite Bash subshell to capture only read
+  diagnostics, requiring status 1, empty trailing data and no diagnostics.
+  Reply fields never pass through command substitution; no external parser,
+  resident helper, environment application or backend execution is added.
+- The focused reader/provider/copied-setup packet passed 87 cases with one
+  native-POSIX skip on Windows. The separate native fixture prewrites a full
+  frame into a nonblocking pipe, keeps its writer alive and writes later data;
+  actual Linux and stock macOS Bash acceptance remain required before merging.
+  This still does not activate a production POSIX consumer or close callback,
+  exact-birth, terminal or installation-survival gates.
+- Native run 40665465954 passed the real nonblocking-pipe control on Linux and
+  stock macOS Bash, but both closed-stdin controls hit their unchanged
+  15-second deadline. Refuse closed stdin before command substitution can reuse
+  descriptor 0 for its capture pipe. The existing Windows terminal/mux packet
+  passed; the failed native reader packet is not complete qualification.
+- Actual early closed-descriptor controls also reproduced raw parser stderr
+  before the generic refusal at three frame positions. Suppress the internal
+  parser's stderr while retaining its refusal status and the final probe's own
+  diagnostic capture. Exact-source native qualification remains required.
+- Run 40666570855 still exposed the closed-stdin hang on both native POSIX
+  hosts: Bash can optimize a descriptor-0-to-itself redirection without
+  validating it. The precheck now duplicates stdin to a distinct temporary
+  descriptor for the single builtin, restoring any caller descriptor
+  afterward; a real retained-descriptor control covers that preservation.
+
 ### 2026-10-27 - Literal POSIX preparation transport prerequisite
 
+- #9318 merged as `b4d1c753b6f7645f225a3c57f0af8caae24c50b3` after
+  exact-head Copilot approval with no findings and required green CI.
+  The combined finite-provider/native-adapter packet passed 59 controls;
+  the required unit packet passed 2,521 with 12 deselected and coverage once.
+  This is merged source, not a released or installed capability claim.
 - Added a provider-first NUL-delimited preparation reply to the existing finite
   seed owner, with runtime-local read-only capability discovery and unchanged
   default JSON. The [architecture contract](../../../plugins/agent-worktrees/docs/architecture.md)
@@ -461,6 +519,11 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   POSIX setup or remove either production Python waiter. Native POSIX process,
   terminal, installer-removal and same-process acceptance remain open, as do
   #5579's separately owned forwarding and whole-chain process-count outcomes.
+- Re-read this effort's Plan and Validation Plan after merge. The next stretch
+  is the copied POSIX setup/native callback consumer, preserving real child
+  custody, foreground terminal signals, stdin, one-time seed effects and quiet
+  current-runtime return handling. No live removal is admitted by this source
+  prerequisite or by an expired maintenance grant; the effort remains Active.
 
 ### 2026-10-27 - Finite native prerequisite merged; live survival stays open
 
