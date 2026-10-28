@@ -453,7 +453,9 @@ optional genuine SDK/protobuf loopback fixtures, malformed/partial ACKs,
 slow-drip/deadline controls, missing SDK and legacy trace compatibility.
 Manager's existing source-observation tests exercise the same writer through
 actual SDK export and protobuf-derived JSONL readback. Test receivers own
-their port-zero socket/thread and close them; they never configure a shared
-collector. These are isolated API/wire controls, not a live native rollout.
+their port-zero socket/thread and close them. Manager readback accepts legacy
+service-only Resources or a canonical instance UUID, rejecting malformed instance
+IDs and unexpected Resource attributes. These controls never configure a shared
+collector and are isolated API/wire controls, not a live native rollout.
 Native source/installed/serving measurements and overhead qualification are
 separate acceptance, not asserted by these unit/integration tests.
