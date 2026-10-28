@@ -41,7 +41,7 @@ The helper's source-contract warning remained visible throughout.
 The complete relevant Windows efforts packet passed with platform-specific
 producer controls skipped as reported in the Journal. Focused helper cases
 are in
-[`plugins/efforts/tests/test_agenda.py`](../../../plugins/efforts/tests/test_agenda.py).
+[`plugins/efforts/tests/test_agenda.py`](../../../../plugins/efforts/tests/test_agenda.py).
 The bounded source runner can reproduce them:
 
 ```text
@@ -92,8 +92,24 @@ Source merge and marketplace release do not establish installed rollout.
 Record those stages separately; never claim an already-running session has
 received the new guidance merely because files exist.
 
+## Source closure and publication owner
+
+The initial guidance and helper were merged in #9421 and #9429 respectively,
+with current-head accepted reviews and green CI. The final relevant local packet
+passed **77 tests, 9 reported platform skips**, including 22 focused helper
+cases; post-merge Dev CI also passed.
+
+The observed pinned Main snapshot
+[`108c515`](https://github.com/ThomasMichon/copilot-extensions/tree/108c51551e0fd378940a5c8ca4635bf25b4490fa)
+has efforts `0.1.6-dev1` and does not contain the new helper. This is a
+merged/pending-release observation, not an installed-state claim. Normal
+qualified Main publication remains with the existing
+[#3336 promotion pipeline](https://github.com/ThomasMichon/copilot-extensions/issues/3336).
+This effort does not create another publisher, force a promotion or authorize
+an adopter's live update.
+
 ## See Also
 
 - [Canonical effort and remaining gates](README.md)
 - [Initial spike findings](spike-results.md)
-- [Driving effort agendas](../../../plugins/efforts/skills/driving-effort-agendas/SKILL.md)
+- [Driving effort agendas](../../../../plugins/efforts/skills/driving-effort-agendas/SKILL.md)

@@ -4,8 +4,8 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent, reviewed per-slice PRs against `dev`
 - **Created:** 2026-10-28
-- **Status:** Active
-- **Vision:** [efforts](../../../visions/plugins/efforts/README.md)
+- **Status:** Done
+- **Vision:** [efforts](../../../../visions/plugins/efforts/README.md)
   `optional-effort-agenda`, `nested-effort-continuations`,
   `cooperative-agenda-movement`; vision-extending
 - **Umbrella issue:** [#9377](https://github.com/ThomasMichon/copilot-extensions/issues/9377)
@@ -43,11 +43,10 @@ a claim to constrain every action an agent can take.
 - **Delegates:** none assigned; do not infer implementation ownership from this plan.
 - **Handoff:** update the Plan and Journal with results, remaining gates and the
   next claimed slice; keep the canonical effort here.
-- **Current assignment:** drive the admitted implementation through guidance,
-  the paired spike, the helper decision and qualification. Continue across
-  phase and PR boundaries without requiring another operator prompt; preserve
-  genuine permission, review and safety gates. Live rollout remains separate.
-- **Adjacent owners:** [Worktree/Effort Railroad Binding](../worktree-effort-railroad-binding/README.md)
+- **Completed assignment:** guidance, paired spike, the helper decision and
+  qualification are delivered as reviewed source. Normal `dev` -> `main`
+  promotion remains with #3336; no installed rollout was authorized or claimed.
+- **Adjacent owners:** [Worktree/Effort Railroad Binding](../../../active/worktree-effort-railroad-binding/README.md)
   and #3581/#3582/#3583 retain title, checklist-derived binding, and mid-session
   reminder work. No dispatch lifecycle, claims, or worktree-binding redesign is
   transferred into this effort.
@@ -63,14 +62,14 @@ a claim to constrain every action an agent can take.
   Its [composite state rollup](https://github.com/scgopi/GraphCode/blob/4088986d3e6d8ab4a938caae0d75f6b9f7e7d938/GraphcodeKit/Sources/GraphStore.swift#L1624-L1636)
   is not a saved parent continuation. Borrow principles, not its runtime or a
   dependency on it.
-- The [efforts plugin](../../../plugins/efforts/README.md) already supplies
+- The [efforts plugin](../../../../plugins/efforts/README.md) already supplies
   planning and continuity without a runtime service. Existing
-  [effort-driven session loops](../../2026/08/28%20effort-driven-session-loops/README.md)
+  [effort-driven session loops](../../08/28%20effort-driven-session-loops/README.md)
   establish durable effort ownership, not graph or child-return semantics.
 - Current worktree orientation uses a manually declared binding slice.
   Checklist-derived slice selection is intended by the vision and remains
   adjacent work under #3581; this effort must not assume it has shipped.
-- Pattern fit: [architecture principles](../../../docs/patterns/README.md),
+- Pattern fit: [architecture principles](../../../../docs/patterns/README.md),
   especially independent installation, graceful optional composition,
   right-sized surfaces, cross-platform parity and proportionate safeguards.
   No new daemon, broker, graph service or mandatory sibling dependency.
@@ -103,8 +102,9 @@ requirements from agent recommendations and records publication-only omissions.
 ## Plan
 
 The requested capability and ownership are fixed above. The decomposition and
-specific mechanisms below are **agent-recommended**, pending reviewed design;
-illustrative filenames or operations are not existing commands.
+specific mechanisms below originated as **agent-recommended** implementation
+work, admitted by the operator and delivered through reviewed source. Current
+usage belongs to the plugin's skill/docs; this effort records what landed.
 
 ### Phase 0 - Inception and reviewed scope
 - [x] Land the canonical effort, inception exchange, active index and matching
@@ -169,11 +169,15 @@ illustrative filenames or operations are not existing commands.
       Validation Plan; document unsupported guarantees explicitly.
       [Qualification and adoption boundary](qualification.md) records the
       measured cases and deliberately unclaimed guarantees.
-- [ ] Update affected plugin guidance and truthful documentation, add required
+- [x] Update affected plugin guidance and truthful documentation, add required
       changefiles for payload changes, and land implementation through review.
-- [ ] Record source/release qualification and provide opt-in adoption and recovery
-      instructions. Any live rollout is separately authorized and tracked.
-- [ ] Resolve or explicitly transfer every Plan/Validation item before marking
+- [x] Record source qualification and provide opt-in adoption and recovery
+      instructions. No live rollout was authorized or performed.
+- [x] Deferred to `#3336 (existing dev-to-main promotion pipeline)`: Main release
+      qualification/promotion. Source is merged and qualified; the observed
+      release snapshot does not contain the helper. Normal publication is the
+      pipeline's existing responsibility, not a new unowned agent task.
+- [x] Resolve or explicitly transfer every Plan/Validation item before marking
       this effort Done; an inception PR is not capability completion.
 
 ## Validation Plan
@@ -245,13 +249,16 @@ limits, with the following explicit corrections:
 - The efforts plugin owns the companion and any helper toolset.
 - The basic process and optional helpers work independently of agent-dispatch
   and agent-worktrees; no background execution engine is part of this effort.
-- CLI implementation is a considered option, not a pre-decided requirement.
+- The helper decision followed the actual spike: v1 adds read-only next/check
+  inspection only, while scaffolding and transitions remain copy/edit and manual
+  decisions. No writer or execution engine is implied.
 - The cursor is an execution position, never a competing completion ledger.
   Non-opted-in slice behavior remains unchanged: the current worktree binding
   has a manually declared slice; automatic checklist derivation is separate,
   planned work, not an already-shipped prerequisite.
-- Schema, helper grammar and storage location remain design decisions with
-  named validation obligations, not an already-shipped runtime contract.
+- The manual JSON convention, helper invocation and explicit journal/state-home
+  boundary are documented in the skill/reference. They are payload-only
+  capabilities, not a managed runtime or a private journal-provider API.
 
 ## Journal
 
@@ -362,3 +369,22 @@ limits, with the following explicit corrections:
 - The source-review gate remains open until the updated head is reviewed.
   Both offline fixture outcomes and journals have been retained outside
   cleanup-eligible worktrees, and their managed obligations are settled.
+
+### 2026-10-28 - Source delivery complete and effort closed
+- Merged [#9429](https://github.com/ThomasMichon/copilot-extensions/pull/9429)
+  after fresh approval resolving the diagnostic finding, no open review issues
+  and green required CI. The helper, 22 focused cases, actual spike findings
+  and qualification/adoption boundaries are reviewed source.
+- Post-merge [CI](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40755004362)
+  passed. The observed pinned
+  [Main snapshot](https://github.com/ThomasMichon/copilot-extensions/tree/108c51551e0fd378940a5c8ca4635bf25b4490fa)
+  reports efforts `0.1.6-dev1` but lacks the helper; no release or installed
+  rollout is inferred from the Dev merge.
+- Normal Main publication remains explicitly with #3336's existing pipeline.
+  The source campaign has no unresolved implementation or qualification item;
+  every Plan/Validation obligation is resolved or explicitly transferred.
+- Both offline fixture outcomes were preserved in their separate local origins
+  and raw journals retained in the machine-local results area. Their managed
+  worktrees were finalized without deleting active directories or evidence.
+- Archived as Done. The still-bound source worktree releases its effort focus
+  and finalizes only after this closing change clears the normal review gate.
