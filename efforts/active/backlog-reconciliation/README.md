@@ -119,6 +119,18 @@ the fixed checkpoint, author eligibility, ownership or requirement-preservation
 constraints. Concrete graph representation, typed relationships and retained
 small publication units below are agent-recommended execution choices.
 
+Operator direction change, 2026-10-27:
+
+> Great. Continue processing remaining issues in larger waves.
+> What we really need to do next is to come up with a triage, effort, and sequencing plan, researching each issue against vision, to determine the high-priority fixes and then what needs to happen in-order to produce a stable harness which progresses towards vision
+
+The next research deliverable is a vision-linked stabilization roadmap, not
+only a smaller issue count. The original numerical checkpoint and all
+author, requirement-preservation and custody constraints remain. This requests
+research and a plan for fixes; it does not authorize implementing those fixes.
+The [roadmap method](stabilization-roadmap.md) distinguishes operator-requested
+outcomes from agent-recommended research and prioritization mechanics.
+
 ## Plan
 
 ### Phase 1 - Baseline and reviewed charter
@@ -152,6 +164,23 @@ small publication units below are agent-recommended execution choices.
   continue graph-backed consolidation with creation-oldest-first coverage until
   at most 729 issues remain.
 
+### Phase 2b - Vision-linked stabilization roadmap
+
+- [ ] Research each eligible remaining issue against the relevant current
+  vision; retain excluded issues as counted, metadata-only coverage gaps.
+- [ ] Identify high-priority fixes and their actual existing efforts, retained
+  owners, unresolved acceptance and first bounded work slices.
+- [ ] Produce an evidence-backed prerequisite graph and sequencing plan for a
+  stable harness that progresses toward vision, distinguishing independent
+  parallel work from actual blockers.
+- [ ] _(Agent-recommended)_ Run larger, disjoint research waves, initially
+  four sets of 50 issues, reusing unchanged admitted evidence and refreshing
+  changed source/refinements rather than restarting the entire corpus.
+- [ ] _(Agent-recommended)_ Integrate the
+  [stabilization roadmap](stabilization-roadmap.md), including per-issue
+  coverage, provisional decisions, priority rationale and wave exit criteria,
+  through normal review before treating it as an execution plan.
+
 ### Phase 3 - Threshold guidance
 
 - [ ] Re-query the provider, reconcile new inflow and unrelated closures, and
@@ -179,6 +208,13 @@ small publication units below are agent-recommended execution choices.
   duplicate/subsumed outcomes, dependencies, incompatible alternatives and
   ownership constraints. Shared vocabulary or a graph path alone never
   authorizes closure; each proposed transfer has complete direct acceptance.
+- [ ] Every eligible remaining issue has a current vision/effort assessment
+  or an explicit unresolved research gap; excluded issues are not silently
+  omitted or ranked from their titles.
+- [ ] _(Agent-recommended)_ Each recommended priority and hard sequencing edge
+  has attributable evidence, an existing or explicitly proposed owning effort,
+  preserved custody and a bounded validation exit; unresolved cycles and
+  source-versus-installed uncertainty remain visible.
 - [ ] The operational ledger can reconstruct the next batch and live
   researchers, PRs, watches and schedule after native context rollover.
 - [ ] The final whole-queue open count is at most 729; numerical progress never
