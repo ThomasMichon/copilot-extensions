@@ -39,6 +39,18 @@ _BUILD_CONFIG = {
     "no-binary-package", "no-build-isolation", "no-build-isolation-package",
     "no-cache", "refresh", "refresh-package", "reinstall", "reinstall-package",
 }
+_BACKEND_REQUIREMENTS = """
+import contextlib, importlib, io, json
+with contextlib.redirect_stdout(io.StringIO()):
+    backend = importlib.import_module("setuptools.build_meta")
+    hook = getattr(backend, "get_requires_for_build_wheel", None)
+    requirements = hook({}) if hook is not None else []
+print(json.dumps(requirements))
+"""
+
+
+class _AdditionalBuildRequirements(RuntimeError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -398,6 +410,19 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
                 nonlocal built
                 if _compact(package, inputs.packages, compact, deadline) != source:
                     raise WheelError("source changed before its wheel build")
+                reported = run(
+                    [str(python), "-I", "-B", "-c", _BACKEND_REQUIREMENTS],
+                    environment=environment, cwd=compact,
+                ).stdout
+                if len(reported) > 65_536:
+                    raise WheelError("backend build requirements exceed their byte budget")
+                requirements = json.loads(reported)
+                if not isinstance(requirements, list) or any(
+                    not isinstance(value, str) or not value for value in requirements
+                ):
+                    raise WheelError("backend reported invalid build requirements")
+                if requirements:
+                    raise _AdditionalBuildRequirements
                 uv_output = workspace / ("build-" + str(index))
                 run(
                     [str(uv), "build", "--wheel", "--no-build-isolation", "--no-sources",
@@ -416,11 +441,19 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
                 _wheel_record(path, name, deadline)
                 verify_source()
 
-            archive = cached_source_wheel(
-                root, _canonical({**common, "source": source}), None,
-                build=build, validate=validate, max_archive_bytes=_LIMITS.max_archive_bytes,
-                deadline=deadline,
-            )
+            try:
+                archive = cached_source_wheel(
+                    root, _canonical({**common, "source": source}), None,
+                    build=build, validate=validate, max_archive_bytes=_LIMITS.max_archive_bytes,
+                    deadline=deadline,
+                )
+            except _AdditionalBuildRequirements:
+                print(
+                    "Source wheel cache miss: backend-additional-build-requirements; "
+                    "retaining isolated source builds", file=sys.stderr, flush=True,
+                )
+                yield inputs
+                return
             records[name] = _wheel_record(archive, name, deadline)
             archives[package] = archive
         if _tool_tree(tools_root, deadline) != tool_content:

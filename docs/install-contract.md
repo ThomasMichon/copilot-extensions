@@ -4205,6 +4205,11 @@ hits verify and select the stable, immutable archive without copying another
 source tree or changing its URL between generations. Keys read the retained
 project directly and bind normalized TOML content without remapped UV source paths;
 a miss copies and rechecks the project before running its build hook.
+Before a new non-isolated build, the admitted backend's
+`get_requires_for_build_wheel` hook must report no additional requirements.
+Otherwise the original isolated-source transaction is retained explicitly,
+including older Setuptools contracts that report `wheel` dynamically.
+An exact cache hit does not rerun this hook.
 Corrupt or incomplete entries fail explicitly instead of being
 silently rebuilt. Source or tool mutation during a build refuses publication.
 This storage is byte custody, not source, feed or installation authority.

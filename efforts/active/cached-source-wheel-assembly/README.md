@@ -199,6 +199,21 @@ evidence is no longer needed.
 
 ## Journal
 
+### 2026-10-28 - Keep backend-reported requirements on the isolated path
+
+The latest review summary identified older Setuptools contracts whose
+`get_requires_for_build_wheel` adds `wheel` beyond the declared bootstrap
+requirements. A cache miss now asks the admitted backend before its offline
+non-isolated build and explicitly retains the original held isolated-source
+transaction if any additional requirement is reported. It does not invent or
+resolve that dependency itself. Exact cache hits do not execute the hook again.
+Ten affected controls pass, including the actual synthetic backend reporting
+the legacy dependency, refusal before a wheel/complete-marker is published and
+fresh unchanged per-project reuse. That synthetic legacy control is explicitly
+not the hosted real-modern-Setuptools lane; it skips there rather than
+misrepresenting the modern backend's contract. All nine mirrors and the unit
+source binding are synchronized.
+
 ### 2026-10-28 - Preserve caller interpreter and native cache context
 
 The review's remaining summary concern was concrete even without an inline

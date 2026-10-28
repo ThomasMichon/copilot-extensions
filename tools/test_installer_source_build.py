@@ -269,6 +269,30 @@ def test_unsupported_contract_explicitly_retains_original_transaction(
     assert diagnostic.out == "" and "Source wheel cache miss:" in diagnostic.err
 
 
+def test_backend_reported_build_dependencies_retain_the_isolated_source_transaction(
+    engine, ordinary, tmp_path, monkeypatch, capsys,
+):
+    if os.environ.get("TEST_SOURCE_WHEEL_REAL_BACKEND"):
+        pytest.skip("Synthetic backend reports the older Setuptools wheel dependency")
+    monkeypatch.setenv("TEST_SOURCE_BACKEND_REQUIRES_WHEEL", "1")
+
+    def observe(inputs, *_args, **_kwargs):
+        assert inputs.source_wheels is None
+        assert str(inputs.plugin / "pyproject.toml") in inputs.transaction.argv
+        assert str(inputs.plugin) in inputs.transaction.argv
+        raise RuntimeError("isolated-source-fallback-observed")
+
+    monkeypatch.setattr(engine, "_construct", observe)
+    root = tmp_path / "installation"
+    with pytest.raises(RuntimeError, match="isolated-source-fallback-observed"):
+        with _candidate(engine, root, ordinary, "1.0.0"):
+            pytest.fail("unsupported backend requirements reached a completed candidate")
+    assert "backend-additional-build-requirements" in capsys.readouterr().err
+    assert not ordinary[2].exists()
+    assert not engine.runtime.marker_path(root, "1.0.0").exists()
+    assert not list((root / ".source-wheel-cache" / "inputs").glob("*/wheel.json"))
+
+
 def test_canonical_setuptools_setup_boilerplate_keeps_the_graph_cacheable(engine, ordinary, tmp_path):
     plugin, _uv, counter, _state = ordinary
     (plugin / "setup.py").write_text("from setuptools import setup\nsetup()\n")
