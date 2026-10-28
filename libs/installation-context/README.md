@@ -60,7 +60,10 @@ its whole working set rolled back.
   preserves quoting and large in-memory requests on Windows PowerShell 5.
   The existing PowerShell
   parameter, generation, default-home and rooted-path contracts are retained;
-  `%NAME%` expansion is scoped to this adapter, not ordinary Python callers.
+  `%NAME%` expansion happens once at raw adapter-input/declaration intake,
+  not during canonical path resolution. Already normalized paths, receipt
+  paths and literal tokens produced by an expansion are never expanded again;
+  ordinary Python callers retain literal path semantics.
   A required missing path retains the PowerShell `Path does not exist`
   diagnostic. Ordinary Python, optional-path and permission/other resolution
   diagnostics remain unchanged.
@@ -78,7 +81,11 @@ its whole working set rolled back.
   Original caller death or pipeline cancellation retires the callback scope;
   ordinary callback completion also retires remaining descendants before
   captured output is accepted. Missing completion or unconfirmed retirement is
-  an error, not a successful status. The 30-second startup bound does not add
+  an error, not a successful status. POSIX completion requires a separate
+  callback-return witness matching the reaped child's status; an abrupt
+  `os._exit(0)` cannot attest a successful callback. Each shipped adapter's
+  synchronous worker is counted as caller-contained in the lifecycle census,
+  not a separately leased resident daemon. The 30-second startup bound does not add
   an application deadline; existing action/lock deadlines remain unchanged.
   The original input stream is retained before closing its writer, because
   .NET Framework and Core differ on the disposed writer's `BaseStream`.

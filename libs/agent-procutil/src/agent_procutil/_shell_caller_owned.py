@@ -40,10 +40,14 @@ def _posix_callback(callback: Callable[[], int], descriptor: int, nonce: str) ->
     from agent_procutil._caller_owned import _retire
 
     reader, writer = os.pipe()
+    completed_reader = completed_writer = -1
     try:
+        completed_reader, completed_writer = os.pipe()
+        os.set_blocking(completed_reader, False)
         child = os.fork()
         if child == 0:
             os.close(writer)
+            os.close(completed_reader)
             code = 1
             try:
                 # The callback cannot run until the original lifetime reader
@@ -56,6 +60,8 @@ def _posix_callback(callback: Callable[[], int], descriptor: int, nonce: str) ->
                 code = _callback_code(callback)
                 sys.stdout.flush()
                 sys.stderr.flush()
+                if os.write(completed_writer, bytes((code,))) != 1:
+                    raise RuntimeError("shell callback completion could not be published")
             except BaseException:
                 traceback.print_exc()
             finally:
@@ -64,6 +70,8 @@ def _posix_callback(callback: Callable[[], int], descriptor: int, nonce: str) ->
 
         os.close(reader)
         reader = -1
+        os.close(completed_writer)
+        completed_writer = -1
 
         def watch() -> None:
             try:
@@ -81,15 +89,20 @@ def _posix_callback(callback: Callable[[], int], descriptor: int, nonce: str) ->
         if observed != child:
             raise RuntimeError("shell callback exit identity is unconfirmed")
         code = os.waitstatus_to_exitcode(status)
-        _completion(nonce, code if code >= 0 else 128 - code)
+        try:
+            returned = os.read(completed_reader, 2)
+        except BlockingIOError:
+            returned = b""
+        if code < 0 or returned != bytes((code,)):
+            raise RuntimeError("shell callback completion is unconfirmed")
+        _completion(nonce, code)
     except BaseException:
         traceback.print_exc()
     finally:
         try:
-            if reader != -1:
-                os.close(reader)
-            if writer != -1:
-                os.close(writer)
+            for endpoint in (reader, writer, completed_reader, completed_writer):
+                if endpoint != -1:
+                    os.close(endpoint)
         finally:
             # This still-live session/group leader pins the exact scope. The
             # same canonical retirement kills it and every remaining member.

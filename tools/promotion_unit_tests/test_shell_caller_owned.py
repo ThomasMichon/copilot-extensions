@@ -82,6 +82,52 @@ def test_callback_exception_is_reported_without_success(capsys):
     assert "controlled callback failure" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize(
+    "code,witness,completed",
+    [(0, b"\0", True), (7, b"\7", True), (0, b"", False),
+     (0, b"\7", False), (-9, b"\0", False), (0, None, False)],
+)
+def test_posix_parent_requires_return_witness_after_exact_child_exit(
+    monkeypatch, capsys, code, witness, completed,
+):
+    class Retired(Exception):
+        pass
+
+    def retire():
+        raise Retired
+
+    def read(descriptor, size):
+        assert descriptor == 30 and size == 2
+        if witness is None:
+            raise BlockingIOError("a descendant still holds the writer")
+        return witness
+
+    pipes = iter([(10, 20), (30, 40)])
+    closed = []
+    monkeypatch.setitem(
+        sys.modules, "agent_procutil._caller_owned", SimpleNamespace(_retire=retire),
+    )
+    monkeypatch.setattr(owner, "os", SimpleNamespace(
+        pipe=lambda: next(pipes), fork=lambda: 501, close=closed.append,
+        set_blocking=lambda fd, blocking: None, read=read,
+        write=lambda fd, value: len(value), waitpid=lambda pid, flags: (501, code),
+        waitstatus_to_exitcode=lambda status: status,
+    ))
+    monkeypatch.setattr(
+        owner.threading, "Thread", lambda **kwargs: SimpleNamespace(start=lambda: None),
+    )
+    with pytest.raises(Retired):
+        owner._posix_callback(lambda: pytest.fail("parent ran callback"), 55, NONCE)
+    captured = capsys.readouterr()
+    if completed:
+        assert captured.out == f"\n__COPILOT_CALLER_EXIT_{NONCE}={code}\n"
+        assert not captured.err
+    else:
+        assert not captured.out
+        assert "callback completion is unconfirmed" in captured.err
+    assert sorted(closed) == [10, 20, 30, 40]
+
+
 @pytest.fixture
 def windows(monkeypatch):
     calls = []

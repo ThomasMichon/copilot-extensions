@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from argparse import Namespace
 from pathlib import Path
@@ -91,7 +92,9 @@ def test_path_expansion_is_scoped_and_restored(
     seen: list[Path] = []
 
     def main(arguments: list[str]) -> int:
-        seen.append(sdk.canonical_path(raw))
+        value = next(arg.split("=", 1)[1] for arg in arguments if arg.startswith("--expected-payload-root="))
+        seen.append(sdk.canonical_path(value))
+        assert sdk.canonical_path(raw) == Path(raw)
         if failed:
             raise RuntimeError("controlled failure")
         return 0
@@ -100,12 +103,110 @@ def test_path_expansion_is_scoped_and_restored(
     assert sdk.canonical_path(raw) == Path(raw)
     if failed:
         with pytest.raises(RuntimeError, match="controlled failure"):
-            sdk._powershell_main("source-id", _parameters(SourceJson="{}"), ["SourceJson"])
+            sdk._powershell_main("validate", _parameters(ExpectedPayloadRoot=raw), ["ExpectedPayloadRoot"])
     else:
-        assert sdk._powershell_main("source-id", _parameters(SourceJson="{}"), ["SourceJson"]) == 0
+        assert sdk._powershell_main("validate", _parameters(ExpectedPayloadRoot=raw), ["ExpectedPayloadRoot"]) == 0
     assert seen == [tmp_path / "expanded" / "missing"]
     assert sdk.canonical_path(raw) == Path(raw)
     assert not sdk._POWERSHELL_PATHS.get()
+
+
+def test_expanded_inputs_and_receipts_keep_literal_environment_tokens(
+    sdk: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SDK_OUTER", "%SDK_INNER%")
+    monkeypatch.setenv("SDK_INNER", "wrong-directory")
+    raw = str(tmp_path / "%SDK_OUTER%")
+    expanded = str(tmp_path / "%SDK_INNER%")
+    parameters = _parameters(
+        CopilotHome=expanded, DurableHome=expanded, PayloadRoot=expanded,
+        Context=expanded + "/install.json", ExpectedPayloadRoot=raw,
+        ExpectedCellRoot=raw, ProjectRoot=expanded,
+    )
+
+    def main(arguments: list[str]) -> int:
+        assert f"--expected-payload-root={expanded}" in arguments
+        assert f"--expected-cell-root={expanded}" in arguments
+        assert f"--payload-root={expanded}" in arguments
+        assert f"--context={expanded}/install.json" in arguments
+        path = sdk.canonical_path(expanded)
+        assert sdk.canonical_path(path) == tmp_path / "%SDK_INNER%"
+        assert sdk.canonical_path(str(path / "install.json")) == path / "install.json"
+        descriptor = {"kind": "directory", "canonical": "directory:" + expanded}
+        assert sdk.normalize_source(descriptor, from_receipt=True).canonical == descriptor["canonical"]
+        return 0
+
+    monkeypatch.setattr(sdk, "main", main)
+    assert sdk._powershell_main(
+        "status", parameters, ["ExpectedPayloadRoot", "ExpectedCellRoot"],
+    ) == 0
+
+
+@pytest.mark.parametrize("from_file", [False, True])
+def test_raw_directory_declaration_expands_once_only_at_cli_intake(
+    sdk: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, from_file: bool,
+) -> None:
+    monkeypatch.setenv("SDK_OUTER", "%SDK_INNER%")
+    monkeypatch.setenv("SDK_INNER", "wrong-directory")
+    descriptor = {"source": "directory", "path": str(tmp_path / "%SDK_OUTER%")}
+    arguments = Namespace(
+        source_json=None if from_file else json.dumps(descriptor),
+        source_file="/source.json" if from_file else None,
+    )
+    monkeypatch.setattr(sdk, "read_json", lambda path: descriptor)
+    assert sdk._source_descriptor(arguments) == descriptor
+    token = sdk._POWERSHELL_PATHS.set(True)
+    try:
+        expected = {**descriptor, "path": str(tmp_path / "%SDK_INNER%")}
+        assert sdk._source_descriptor(arguments) == expected
+        canonical = {"kind": "directory", "canonical": "directory:" + expected["path"]}
+        assert sdk._powershell_source_descriptor(canonical) == canonical
+        assert sdk.normalize_source(canonical, from_receipt=True).canonical == canonical["canonical"]
+    finally:
+        sdk._POWERSHELL_PATHS.reset(token)
+
+
+def test_settings_declaration_expands_only_its_raw_path_not_its_base(
+    sdk: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SDK_OUTER", "%SDK_INNER%")
+    monkeypatch.setenv("SDK_INNER", "wrong-directory")
+    base = tmp_path / "%SDK_INNER%"
+    descriptor = {"source": "directory", "path": "%SDK_OUTER%"}
+    monkeypatch.setattr(Path, "is_file", lambda path: path.name == "settings.json")
+    monkeypatch.setattr(sdk, "canonical_path", lambda path, **kwargs: Path(path))
+    monkeypatch.setattr(sdk, "read_json", lambda path: {
+        "extraKnownMarketplaces": {"example": {"source": descriptor}},
+    })
+    token = sdk._POWERSHELL_PATHS.set(True)
+    try:
+        declarations = sdk._get_declarations("example", base, None)
+        assert declarations[0]["source"].canonical == f"directory:{base / '%SDK_INNER%'}"
+        assert declarations[0]["settingsPath"] == base / "settings.json"
+    finally:
+        sdk._POWERSHELL_PATHS.reset(token)
+
+
+@pytest.mark.parametrize("action,name", [
+    ("validate", "ExpectedPayloadRoot"), ("validate", "ExpectedCellRoot"),
+    ("validate", "PayloadRoot"), ("validate", "Context"),
+    ("activation-cas", "LegacyRoot"), ("slot-release", "ReservationRoot"),
+])
+def test_remaining_raw_path_inputs_expand_once_without_relaxing_absolute_admission(
+    sdk: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, action: str, name: str,
+) -> None:
+    monkeypatch.setenv("SDK_OUTER", "%SDK_INNER%")
+    monkeypatch.setenv("SDK_INNER", str(tmp_path / "wrong-directory"))
+    option = {
+        "ExpectedPayloadRoot": "expected-payload-root", "ExpectedCellRoot": "expected-cell-root",
+        "PayloadRoot": "payload-root", "Context": "context",
+        "LegacyRoot": "legacy-root", "ReservationRoot": "reservation-root",
+    }[name]
+    raw = str(tmp_path / "%SDK_OUTER%")
+    arguments = sdk._powershell_arguments(action, _parameters(**{name: raw}), [name])
+    assert f"--{option}={tmp_path / '%SDK_INNER%'}" in arguments
+    arguments = sdk._powershell_arguments(action, _parameters(**{name: "%SDK_INNER%"}), [name])
+    assert f"--{option}=%SDK_INNER%" in arguments
 
 
 def test_path_expansion_does_not_relax_receipt_admission(

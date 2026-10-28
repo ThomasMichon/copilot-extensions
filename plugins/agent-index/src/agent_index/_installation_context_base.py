@@ -171,8 +171,6 @@ def canonical_path(value: str | os.PathLike[str], *, must_exist: bool = False) -
     text = os.fspath(value)
     if not text.strip():
         _fail("A required path is empty.")
-    if _POWERSHELL_PATHS.get():
-        text = _powershell_path_text(text)
     path = Path(text)
     try:
         resolved = path.resolve(strict=must_exist)

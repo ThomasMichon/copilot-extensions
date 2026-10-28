@@ -109,6 +109,25 @@ def test_posix_exec_intermediary_and_observer_keep_caller_containment():
     assert census["sites"]["caller-contained"]["w:launch_seed_posix.py::execute::fork"] == 2
 
 
+def test_all_sdk_adapters_are_counted_as_caller_contained_not_resident():
+    root = Path(__file__).resolve().parents[1]
+    census = json.loads((root / "tools/daemon-coverage.json").read_text(encoding="utf-8"))
+    adapters = sorted((root / "plugins").glob(
+        "*/scripts/installation-context/installation-context.ps1",
+    ))
+    assert adapters
+    for path in adapters:
+        key = f"r:{path.relative_to(root).as_posix()}::<script>::Process.Start"
+        assert census["sites"]["caller-contained"][key] == 1
+        assert GUARD.native_sites(path.read_text(encoding="utf-8")) == {
+            ("<script>", "Process.Start"): 1,
+        }
+        assert all(
+            key not in sites for kind, sites in census["sites"].items()
+            if kind != "caller-contained"
+        )
+
+
 def test_counted_classification_cannot_cover_second_launch(tmp_path):
     fixture(tmp_path, "def serve(argv):\n    Popen(argv)\n    Popen(argv)\n", {
         "caller-contained": {"s:service.py::serve::Popen": 1},

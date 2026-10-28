@@ -26,6 +26,17 @@ def _powershell_path_text(text: str) -> str:
     return re.sub(r"%([^%]+)%", lambda match: os.environ.get(match[1], match[0]), text)
 
 
+def _powershell_source_descriptor(value: Mapping[str, Any]) -> Mapping[str, Any]:
+    kind = (_string_property(value, "kind") or _string_property(value, "source")).strip().lower()
+    if (
+        kind in {"local", "directory"}
+        and not _string_property(value, "canonical")
+        and not _string_property(value, "stableId").strip()
+    ):
+        return {**value, "path": _powershell_path_text(_string_property(value, "path"))}
+    return value
+
+
 def _powershell_arguments(
     action: str,
     parameters: Mapping[str, Any],
@@ -114,14 +125,28 @@ def _powershell_arguments(
                 names += ("RuntimeVersion", "ExpectedPayloadRoot", "ExpectedPayloadVersion")
                 if action == "slot-cutover":
                     names += ("ExpectedNamespaceGeneration", "ExpectedInstallGeneration", "ExpectedCurrentVersion")
+    # Other scalar paths have already passed ConvertTo-InputPath in the shell.
+    # Expand only the remaining raw inputs, never a receipt or a derived path.
+    raw_paths = {"ExpectedPayloadRoot", "ExpectedCellRoot", "ReservationRoot"}
+    if action not in {"status", "deployment-status", "probe-plugin-publication", "probe-legacy"}:
+        raw_paths.add("Context")
+    if action == "validate":
+        raw_paths.add("PayloadRoot")
+    if action == "activation-cas":
+        raw_paths.add("LegacyRoot")
     arguments = [action]
     for name in names:
-        if name not in parameters or parameters[name] is None:
+        value = parameters.get(name)
+        if name == "Context" and not value:
+            value = os.environ.get("COPILOT_EXTENSIONS_CONTEXT")
+        if value is None:
             continue
-        if parameters[name] == "" and name != "ExpectedCurrentVersion":
+        if value == "" and name != "ExpectedCurrentVersion":
             continue
+        if name in raw_paths and _path_is_fully_qualified(str(value)):
+            value = _powershell_path_text(str(value))
         option = re.sub(r"(?<!^)([A-Z])", r"-\1", name).lower()
-        arguments.append(f"--{option}={parameters[name]}")
+        arguments.append(f"--{option}={value}")
     if action == "slot-cutover" and parameters["ExpectCurrentAbsent"]:
         arguments.append("--expect-current-absent")
     if parameters["WithContextValidation"]:

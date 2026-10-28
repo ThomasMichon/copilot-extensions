@@ -221,6 +221,10 @@ establish a pass. These controls are distinct from source/argument compatibility
 interpreter prerequisite, and desktop visibility qualification. Native platform
 skips do not qualify another platform. Actor-free admission/framing and
 pipe-bound Job controls live in `tools/promotion_unit_tests/test_shell_caller_owned.py`.
+The separate Linux-only `test_shell_completion_native.py` checks actual
+returned and abrupt exits with both zero and nonzero statuses. It requires the
+callback-return witness independently of the reaped status and does not
+repeat the desktop matrix or qualify Windows behavior.
 The fixture's identity report is admitted only after a separate marker confirms
 the producer completed its closed-file publication. A failed admitted read stays
 an error; the fixture does not suppress permissions failures or retry them as a pass.

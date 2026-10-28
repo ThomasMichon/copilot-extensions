@@ -53,6 +53,53 @@ Write-Output 'compiler-free-reentry'
 
 
 @pytest.mark.parametrize("host", HOSTS or [None])
+def test_sdk_expands_raw_percent_paths_once_not_each_canonicalization(tmp_path, host):
+    if host is None:
+        pytest.skip("PowerShell is unavailable")
+    harness = tmp_path / "literal-percent.ps1"
+    harness.write_text(
+        r"""
+param([string]$Source, [string]$Root)
+$ErrorActionPreference = 'Stop'
+$env:COPILOT_EXTENSIONS_CONTEXT = $null
+$env:COPILOT_PLUGIN_ROOT = $null
+$env:SDK_OUTER = '%SDK_INNER%'
+$env:SDK_INNER = 'wrong-directory'
+$literal = Join-Path $Root '%SDK_INNER%'
+$raw = Join-Path $Root '%SDK_OUTER%'
+[void][IO.Directory]::CreateDirectory($literal)
+$parameters = @{
+    Action = 'resolve'
+    SourceJson = (@{ source = 'directory'; path = $raw } | ConvertTo-Json -Compress)
+    PluginId = 'agent-example'
+    PayloadRoot = $raw
+    ProjectRoot = $raw
+    CopilotHome = Join-Path $raw 'copilot'
+    DurableHome = Join-Path $raw 'durable'
+    ExpectedPayloadRoot = $raw
+}
+$result = & $Source @parameters | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) { throw 'Literal environment tokens were expanded again' }
+@{ result = $result; literal = $literal } | ConvertTo-Json -Depth 20 -Compress
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-File", str(harness),
+         "-Source", str(SCRIPT), "-Root", str(tmp_path)],
+        capture_output=True, text=True, encoding="utf-8", timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    value = json.loads(result.stdout)
+    assert value["result"]["payloadRoot"] == value["literal"]
+    assert value["result"]["source"]["canonical"] == "directory:" + value["literal"]
+    assert Path(value["result"]["cellRoot"]).is_relative_to(Path(value["literal"]) / "durable")
+    assert not (Path(value["literal"]) / "durable").exists()
+    assert not (tmp_path / "wrong-directory").exists()
+
+
+@pytest.mark.parametrize("host", HOSTS or [None])
 def test_sdk_physical_paths_and_missing_suffix_are_not_cached(tmp_path, host):
     if host is None:
         pytest.skip("PowerShell is unavailable")

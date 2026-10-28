@@ -334,6 +334,8 @@ def _source_descriptor(arguments: argparse.Namespace) -> Mapping[str, Any] | Non
         return None
     if not isinstance(value, Mapping):
         _fail("A source descriptor must be a JSON object.")
+    if _POWERSHELL_PATHS.get():
+        value = _powershell_source_descriptor(value)
     return value
 
 
