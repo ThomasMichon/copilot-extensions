@@ -186,6 +186,10 @@ def _eligibility(inputs) -> tuple[list[dict], str | None]:
         uv_settings = data.get("tool", {}).get("uv", {})
         if _BUILD_CONFIG.intersection(uv_settings) or _BUILD_CONFIG.intersection(uv_settings.get("pip", {})):
             return [], name + ":custom-build-configuration"
+        for source in uv_settings.get("sources", {}).values():
+            path = source.get("path") if isinstance(source, dict) else None
+            if not isinstance(path, str) or (package / path).resolve() not in inputs.packages:
+                return [], name + ":non-project-source-mapping"
         build = data.get("build-system", {})
         project = data.get("project", {})
         settings = data.get("tool", {}).get("setuptools", {})
@@ -207,6 +211,8 @@ def _eligibility(inputs) -> tuple[list[dict], str | None]:
         ):
             return [], name + ":non-static-setuptools-contract"
         manifests.append(data)
+    if len({frozenset(data["build-system"]["requires"]) for data in manifests}) > 1:
+        return [], "distinct-build-requirements"
     return manifests, None
 
 

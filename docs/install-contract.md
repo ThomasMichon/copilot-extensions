@@ -4226,7 +4226,11 @@ remain in their original order. Completed-generation reuse does not construct
 another tools environment. Mutable dev builds, dynamic/custom backends,
 setup scripts beyond the ordinary `from setuptools import setup; setup()`
 boilerplate, and custom build/cache settings explicitly retain the original
-isolated-source path; a refusal or a failed supported build is not a silent
+isolated-source path. Graphs with differing build-requirement sets retain
+per-project isolated tools rather than combining potentially conflicting pins.
+Non-project UV source mappings, including Manager's admitted bundled `dbus-next`
+wheel, also retain the original transaction and its requirements-file mappings.
+A refusal or a failed supported build is not a silent
 fallback. This applies to actual Python-engine callers, not automatically to
 the other native installer implementations.
 

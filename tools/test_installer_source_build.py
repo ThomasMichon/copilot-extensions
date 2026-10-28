@@ -248,6 +248,56 @@ def test_canonical_setuptools_setup_boilerplate_keeps_the_graph_cacheable(engine
             assert len(counter.read_text().splitlines()) == 3
 
 
+@pytest.mark.parametrize("change", ["bundled-wheel", "conflicting-build-tools"])
+def test_unsupported_source_or_build_graph_preserves_the_held_transaction(
+    engine, ordinary, tmp_path, change, capsys,
+):
+    plugin, uv, counter, _state = ordinary
+    manifest = plugin / "pyproject.toml"
+    content = manifest.read_text()
+    if change == "bundled-wheel":
+        content = content.replace('name="example-app"', 'name="copilot-extensions-worktree-manager"')
+        content += '\ndbus-next={path="vendor/dbus_next-0.2.3-py3-none-any.whl"}\n'
+        wheel = plugin / "vendor" / "dbus_next-0.2.3-py3-none-any.whl"
+        wheel.parent.mkdir()
+        shutil.copyfile(
+            Path(__file__).resolve().parents[1] / "worktree-manager" / "vendor" / wheel.name, wheel,
+        )
+        reason = "non-project-source-mapping"
+    else:
+        content = content.replace('requires=["setuptools>=83"]', 'requires=["setuptools==83.0.0"]')
+        leaf = plugin.parent / "leaf" / "pyproject.toml"
+        leaf.write_text(leaf.read_text().replace(
+            'requires=["setuptools>=83"]', 'requires=["setuptools==84.0.0"]',
+        ))
+        reason = "distinct-build-requirements"
+    manifest.write_text(content)
+    packages = engine._package_roots(plugin)
+    inputs = engine.FrozenInputs(
+        plugin, packages, engine._construction_hash(engine._source_files(packages), ()),
+    )
+    root = tmp_path / "installation"
+    with engine._retained_inputs(inputs, uv, tmp_path / "absent-python", refresh=False) as retained:
+        arguments = retained.transaction.argv
+        if change == "bundled-wheel":
+            import tomllib
+
+            mapping = tomllib.loads((retained.plugin / "pyproject.toml").read_text())["tool"]["uv"]["sources"]
+            admitted_wheel = retained.plugin / mapping["dbus-next"]["path"]
+            assert admitted_wheel.read_bytes() == wheel.read_bytes()
+        with builds.retained_source_wheels(
+            retained, root, uv, Path(sys.executable),
+            run=lambda *_args, **_kwargs: pytest.fail("unsupported graph provisioned combined build tools"),
+            timeout=30,
+        ) as admitted:
+            assert admitted is retained
+            assert admitted.transaction.argv == arguments
+            assert str(retained.plugin / "pyproject.toml") in arguments
+            assert admitted.source_wheels is None
+    assert not root.exists() and not counter.exists()
+    assert reason in capsys.readouterr().err
+
+
 def test_changed_retained_archive_refuses_before_complete_stamp(engine, ordinary, tmp_path, monkeypatch):
     from contextlib import contextmanager
 

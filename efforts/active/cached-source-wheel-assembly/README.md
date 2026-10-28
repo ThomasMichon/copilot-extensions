@@ -199,6 +199,21 @@ evidence is no longer needed.
 
 ## Journal
 
+### 2026-10-28 - Preserve artifact mappings and isolated build requirements
+
+Review of #9340 identified two unsupported graph shapes that must retain the
+original constructor transaction. Removing local requirements manifests would
+drop Manager's bundled `dbus-next` wheel mapping; pooling unlike build
+requirements could create an unsatisfiable tools environment from individually
+valid projects. Eligibility now explicitly misses before effects for either
+shape. The unchanged held transaction retains the source mapping and separate
+isolated build environments. The canonical helper and all nine mirrors are
+synchronized. Twenty-six focused controls passed, including the exact held
+Manager mapping, conflicting Setuptools pins and native offline bundled-wheel
+installation. Test process containment completed, but immediate sandbox cleanup
+encountered a transient Windows executable lock. A later exact-path cleanup
+removed the owned sandbox without changing permissions or host state.
+
 ### 2026-10-28 - Speed-first direction and actual hardlink reuse
 
 The immediate scope is release-artifact prepackaging and hardlink assembly,
