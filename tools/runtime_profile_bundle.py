@@ -4,17 +4,24 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import stat
 import time
 import zipfile
+from pathlib import Path
 
 from runtime_profile import ProfileError, validate_profile
 from runtime_profile_wheels import verify_profile_wheels
+
+# isort: split
+
 from installer_dependency_policy import _private_retained_root, _temporary_inputs
 from installer_wheel_inputs import WheelError, WheelLimits, _check_deadline, _ordinary
 from installer_wheel_snapshot import (
-    _digest, _open, _unchanged, retain_wheel_bundle, retain_wheel_inputs,
+    _digest,
+    _open,
+    _unchanged,
+    retain_wheel_bundle,
+    retain_wheel_inputs,
 )
 
 
@@ -33,21 +40,28 @@ class _BoundedOutput:
 
 
 def _write_bundle(snapshot, path: Path, *, max_bytes: int, deadline: float) -> None:
-    with path.open("xb") as output:
-        with zipfile.ZipFile(
-            _BoundedOutput(output, max_bytes, deadline), "w", compression=zipfile.ZIP_STORED,
-        ) as archive:
-            for name, stream in sorted(snapshot.archives.items()):
-                _check_deadline(deadline)
-                member = zipfile.ZipInfo("wheels/" + name, date_time=(1980, 1, 1, 0, 0, 0))
-                member.create_system = 3
-                member.external_attr = (stat.S_IFREG | 0o644) << 16
-                member.file_size = os.fstat(stream.fileno()).st_size
-                stream.seek(0)
-                with archive.open(member, "w") as target:
-                    while chunk := stream.read(1 << 20):
-                        _check_deadline(deadline)
-                        target.write(chunk)
+    _write_archive(
+        {"wheels/" + name: stream for name, stream in snapshot.archives.items()},
+        path, max_bytes=max_bytes, deadline=deadline,
+    )
+
+
+def _write_archive(archives, path: Path, *, max_bytes: int, deadline: float) -> None:
+    with path.open("xb") as output, zipfile.ZipFile(
+        _BoundedOutput(output, max_bytes, deadline), "w", compression=zipfile.ZIP_STORED,
+    ) as archive:
+        for name, stream in sorted(archives.items()):
+            _check_deadline(deadline)
+            member = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            member.create_system = 3
+            member.external_attr = (stat.S_IFREG | 0o644) << 16
+            stream.seek(0, os.SEEK_END)
+            member.file_size = stream.tell()
+            stream.seek(0)
+            with archive.open(member, "w") as target:
+                while chunk := stream.read(1 << 20):
+                    _check_deadline(deadline)
+                    target.write(chunk)
 
 
 def build_profile_bundle(
