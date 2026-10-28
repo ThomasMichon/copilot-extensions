@@ -200,7 +200,7 @@ try {
     if ($diagnostic) { [Console]::Error.Write($diagnostic) }
     [Console]::Out.Write($result)
 } catch {
-    [Console]::Error.WriteLine('agent-worktrees preToolUse: ' + $_.Exception.Message)
+    [Console]::Error.WriteLine('agent-worktrees preToolUse: policy evaluation failed; repair its owning installation')
     [Console]::Out.Write('{"permissionDecision":"deny","permissionDecisionReason":"agent-worktrees pre-tool policy is unavailable; repair its owning installation"}')
 }
 exit 0
