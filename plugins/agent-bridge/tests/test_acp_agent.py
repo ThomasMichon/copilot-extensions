@@ -190,7 +190,7 @@ class TestBridgeAgentInitialize:
 
 class TestBridgeAgentSessions:
     @pytest.mark.asyncio
-    async def test_new_session(self, bridge_agent, mock_conn):
+    async def test_new_session(self, bridge_agent, mock_conn, tmp_path):
         bridge_agent.on_connect(mock_conn)
 
         with patch("agent_bridge.session_manager.spawn") as mock_spawn:
@@ -220,7 +220,7 @@ class TestBridgeAgentSessions:
                 with patch.object(
                     SessionManager, "_connect_via_session_host", _fake_host_connect
                 ):
-                    resp = await bridge_agent.new_session(cwd="/tmp/test")
+                    resp = await bridge_agent.new_session(cwd=str(tmp_path))
 
                 assert resp.session_id is not None
                 assert resp.field_meta == {"agent-bridge": {"role": "owner"}}
@@ -623,8 +623,8 @@ class TestPermissionCallback:
         assert resp.outcome.outcome == "selected"
 
     @pytest.mark.asyncio
-    async def test_make_permission_callback_auto_approves_without_conn(self, bridge_agent):
-        # No connection set
+    async def test_make_permission_callback_cancels_without_conn(self, bridge_agent, caplog):
         cb = bridge_agent._make_permission_callback()
         resp = await cb("session-1", [], MagicMock())
-        assert resp.outcome.option_id == "allow_always"
+        assert resp.outcome.outcome == "cancelled"
+        assert "upstream client is unavailable" in caplog.text

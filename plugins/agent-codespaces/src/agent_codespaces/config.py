@@ -1846,9 +1846,9 @@ class CodespacesConfig:
           missing-remote misconfiguration rather than silently launching in the
           wrong place.
 
-        ``--allow-all --experimental`` are required for headless dispatch:
-        there is no human to answer interactive tool-permission prompts, and
-        SDK extensions do not load without ``--experimental``.
+        Default launches retain normal permissions. Headless dispatch does not
+        authorize automatic approval; the ACP client owns permission requests.
+        SDK extensions still require ``--experimental``.
         """
         from .plugin_preparation import checkout_acp_command
         return checkout_acp_command(
