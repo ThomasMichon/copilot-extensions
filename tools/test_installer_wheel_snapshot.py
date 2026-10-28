@@ -237,7 +237,7 @@ def test_windows_read_guard_does_not_treat_access_metadata_as_byte_mutation(tmp_
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows extended-length file opens")
 def test_windows_read_guard_preserves_long_input_paths(tmp_path):
-    directory = tmp_path / ("long-" + "x" * 180)
+    directory = Path(policy._native_retained_path(tmp_path / ("long-" + "x" * 180)))
     directory.mkdir()
     paths, hashes = inputs(directory)
     assert all(len(str(path)) > 260 for path in paths.values())

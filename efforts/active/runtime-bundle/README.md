@@ -122,9 +122,14 @@ Comparison request (verbatim):
   registration or default-runtime pointer changes.
 
 ### Later slices - Explicitly retained, not completed by the first proof
-- [ ] Retain an independently selected aggregate transport through the existing
+- [x] Retain an independently selected aggregate transport through the existing
   wheel snapshot owner, then exercise the same inspected-profile and numbered
-  constructor/reuse path with original transport inputs unavailable.
+  constructor/reuse path with original transport inputs unavailable. #9319
+  merged as `89e9529c865dd21dbc57baefc42f4a9a21b9b1ef`; this completes custody,
+  not ordinary selection or publication.
+- [ ] Replace experiment-specific wheel transport assembly with the repeatable
+  exact-profile producer in #9413. Its candidate bytes do not establish profile
+  approval, complete source-material distribution or publication authority.
 - [ ] Expand core plus optional heavy environments and the required platform/ABI
   matrix through the same admission contract.
 - [ ] Integrate install/update/no-op/rollback with the existing governor and
@@ -265,3 +270,27 @@ choose the wheel path, not a reason to relax source identity.
 - This is byte custody, not acquisition policy, license/source-material
   qualification, release publication, ordinary installer enabling or service
   migration. Those retained parent gates remain open.
+
+### 2026-10-28 - Repeatable selected-profile transport producer
+- #9413 implements the producer matching the existing aggregate consumer:
+  profile validation, original snapshot custody, complete wheel/metadata
+  inspection, deterministic stored ZIP members, canonical consumer readback and
+  atomic non-replacing output. There is no resolver, download, admission receipt,
+  runtime installation, publisher or channel update.
+- Focused producer and existing snapshot controls pass 58 cases on native
+  Windows, including actual CLI invocation, output races, corrupt candidates,
+  source independence, inclusive aggregate storage and failure cleanup. A
+  coupled long-path fixture now creates its input using native spelling rather
+  than depending on the host's LongPathsEnabled setting.
+- The real selected 116-wheel profile produces byte-identical transports from
+  two function calls and the actual CLI. Original transport removal precedes
+  canonical readback; existing source-material assets remain unchanged. This
+  qualifies the producer/consumer byte seam, not a new installed run or complete
+  distribution envelope. Native Linux/macOS and pipeline activation remain
+  unqualified. The parent stays Active.
+- The first review exposed two real transaction defects. Five failing-first
+  controls measure header/closing-directory storage overshoot and output left
+  visible after retained-input exit verification fails. All ZIP writes are now
+  pre-bounded, and publication follows successful retained-input exit plus a
+  final private-candidate check. The real selected profile and CLI still produce
+  the identical transport bytes after these corrections.

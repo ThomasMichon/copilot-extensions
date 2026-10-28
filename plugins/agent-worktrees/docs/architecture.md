@@ -810,8 +810,13 @@ handoff; abandoned startup handoffs share the existing 24-hour expiry.
 Uncopied/custom commands, older copied wrappers and other host options retain
 their previous invocation. This transport does not exempt any process from
 uninstall consumer checks or establish real installed-removal survival.
-Manager's separate Picker/retry producer has not yet adopted startup
-serialization; each retry needs its own fresh startup handoff.
+Manager's separate Picker/retry producer applies the same copied-reader marker
+gate in its shipped PowerShell helper, without starting another Python process.
+Every retry gets a fresh startup handoff. Known creation failures, unused
+concurrent joins and failed outer receipts clean up that attempt's inner file;
+publication uncertainty retains it alongside the outer handoff. Creation
+leases, seed correlation and native process custody remain with their existing
+owners.
 
 The Windows `scripts/native-seed-boundary.ps1` adapter is dot-sourced
 into that existing setup owner. It retains the actual child handle and wait, selecting

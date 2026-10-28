@@ -2157,7 +2157,6 @@ if (-not $noMux) {
         if ($ahpTokenFile) {
             $wrapperArgs += @('-AwAhpTokenFile', $ahpTokenFile)
         }
-        $wrapperArgs += $cmd
     } else {
         Write-SetupLog "pane wrapper missing at $paneWrapper; using verbatim command" 'WARN'
     }
@@ -2165,36 +2164,7 @@ if (-not $noMux) {
     $savedPsmuxSession = $env:PSMUX_SESSION; $env:PSMUX_SESSION = $null
     $savedTmux = $env:TMUX; $env:TMUX = $null
     $savedTmuxPane = $env:TMUX_PANE; $env:TMUX_PANE = $null
-    function Remove-AwPaneArgsFile([string]$Path) {
-        try {
-            [IO.File]::Delete($Path)
-        } catch [IO.IOException], [UnauthorizedAccessException] {
-            Write-SetupLog (
-                "Could not remove pane argument handoff; retained for expiry: " +
-                $_.Exception.Message
-            ) 'WARN'
-        }
-    }
-    function Read-AwPaneArgsReceipt([string]$Path, [string]$Manifest) {
-        if (-not (Test-Path -LiteralPath $Path)) { return $null }
-        try {
-            $receipt = [IO.File]::ReadAllText($Path) | ConvertFrom-Json -ErrorAction Stop
-            if (
-                ($receipt.version -isnot [long] -and $receipt.version -isnot [int]) -or
-                $receipt.version -ne 1 -or
-                $receipt.manifest -ne [IO.Path]::GetFileName($Manifest) -or
-                $receipt.status -notin @('consumed', 'rejected') -or
-                $receipt.stage -notin @('manifest-open', 'manifest-json', 'manifest-schema', 'wrapper-path') -or
-                ($receipt.pid -isnot [long] -and $receipt.pid -isnot [int]) -or
-                $receipt.pid -le 0
-            ) {
-                throw 'Invalid pane argument receipt.'
-            }
-            return $receipt
-        } catch {
-            return [pscustomobject]@{ status = 'invalid'; stage = 'receipt-validation' }
-        }
-    }
+    . (Join-Path $PSScriptRoot 'pane-args.ps1')
     $maxCreateAttempts = 3
     $retryDelayMs = 1000
     $totalCreateAttempts = 0
@@ -2213,6 +2183,7 @@ if (-not $noMux) {
             $newSessionError = ''
             $paneArgsFile = $null
             $paneReceiptFile = $null
+            $startupArgsFile = $null
             try {
                 if (Test-Path -LiteralPath $paneWrapper) {
                     # Each retry owns a fresh handoff; the pane consumes it once.
@@ -2230,10 +2201,11 @@ if (-not $noMux) {
                         'aw-pane-' + [Guid]::NewGuid().ToString('N') + '.json'
                     )
                     $paneReceiptFile = "$paneArgsFile.receipt.json"
+                    $startupCommand = New-AwPaneStartupCommand $cmd ([ref]$startupArgsFile) ([string]$plan.record_path)
                     $argsJson = ConvertTo-Json -InputObject @{
                         version = 1
                         wrapper = $paneWrapper
-                        argv = @($wrapperArgs)
+                        argv = @($wrapperArgs) + @($startupCommand)
                     } -Compress
                     [IO.File]::WriteAllText($paneArgsFile, $argsJson)
                     $paneCmd = @(
@@ -2319,6 +2291,7 @@ if (-not $noMux) {
             if ($newSessionExit -eq 0) { break }
             if ($creationUncertain) { break }
 
+            if ($startupArgsFile) { Remove-AwPaneArgsFile $startupArgsFile }
             if ($paneArgsFile) {
                 Remove-AwPaneArgsFile $paneArgsFile
                 Remove-AwPaneArgsFile $paneReceiptFile
@@ -2346,6 +2319,7 @@ if (-not $noMux) {
     $env:TMUX = $savedTmux
     $env:TMUX_PANE = $savedTmuxPane
     if ($joinedDuringCreate) {
+        if ($startupArgsFile) { Remove-AwPaneArgsFile $startupArgsFile }
         if ($paneArgsFile) { Remove-AwPaneArgsFile $paneArgsFile }
         if ($paneReceiptFile) { Remove-AwPaneArgsFile $paneReceiptFile }
         if ($ahpTokenFile) {
@@ -2410,6 +2384,7 @@ if (-not $noMux) {
                     "receipt_status=$receiptStatus", "receipt_stage=$receiptStage", 'recoverable=true'
                 )
                 Stop-AwOwnedPsmuxSession $sessName
+                if ($startupArgsFile) { Remove-AwPaneArgsFile $startupArgsFile }
                 Remove-AwPaneArgsFile $paneArgsFile
                 Remove-AwPaneArgsFile $paneReceiptFile
                 if ($ahpTokenFile) {

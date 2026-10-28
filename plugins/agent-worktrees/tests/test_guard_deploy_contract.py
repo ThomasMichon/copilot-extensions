@@ -139,7 +139,7 @@ def test_legacy_python_installer_uses_manager_wrapper_manifest():
         ):
             if wrapper not in installers[name]:
                 missing.append(f"{name} does not deploy {wrapper}")
-    for wrapper in ("pane-launch.ps1", "pane-wrapper.ps1", "pane-wrapper.sh"):
+    for wrapper in ("pane-args.ps1", "pane-launch.ps1", "pane-wrapper.ps1", "pane-wrapper.sh"):
         if wrapper not in manifest["files"]:
             missing.append(f"launch-wrapper-assets.json does not list {wrapper}")
     assert not missing, "\n".join(missing)
