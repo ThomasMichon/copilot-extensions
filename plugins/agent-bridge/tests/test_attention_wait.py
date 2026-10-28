@@ -490,6 +490,65 @@ async def test_permission_request_defaults_to_live_correlation_and_resolution() 
     assert not acp.has_pending_permission(request_id)
 
 
+@pytest.mark.asyncio
+async def test_overlapping_permissions_keep_independent_answers_and_options() -> None:
+    events: list[tuple[str, dict]] = []
+    acp = AcpClient(on_event=lambda event, data: events.append((event, data)))
+    tasks = [
+        asyncio.create_task(acp._handle_permission_request(
+            [SimpleNamespace(option_id=option, name=option, kind="allow_once")],
+            SimpleNamespace(title=option),
+        ))
+        for option in ("first", "second")
+    ]
+    try:
+        await asyncio.sleep(0)
+        requests = [data for event, data in events if event == "permission_request"]
+        first, second = [request["request_id"] for request in requests]
+        assert acp.has_pending_permission(first)
+        assert acp.has_pending_permission(second)
+        with pytest.raises(ValueError, match="Unknown permission option"):
+            acp.resolve_permission(first, "second")
+        assert acp.resolve_permission(second, "second")
+        assert (await asyncio.wait_for(tasks[1], 1)).outcome.option_id == "second"
+        assert acp.has_pending_permission(first)
+        assert acp.resolve_permission(first, "first")
+        assert (await asyncio.wait_for(tasks[0], 1)).outcome.option_id == "first"
+        assert not acp.resolve_permission(first, "first")
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cleanup", ["shutdown", "reset"])
+async def test_lifecycle_cancels_every_overlapping_permission(cleanup: str) -> None:
+    events: list[tuple[str, dict]] = []
+    acp = AcpClient(on_event=lambda event, data: events.append((event, data)))
+    tasks = [
+        asyncio.create_task(acp._handle_permission_request(
+            [SimpleNamespace(option_id="allow", name="Allow", kind="allow_once")],
+            SimpleNamespace(title=f"Tool {index}"),
+        ))
+        for index in range(2)
+    ]
+    try:
+        await asyncio.sleep(0)
+        requests = [data for event, data in events if event == "permission_request"]
+        if cleanup == "shutdown":
+            await acp.shutdown()
+        else:
+            acp._reset_buffers()
+        responses = await asyncio.wait_for(asyncio.gather(*tasks), 1)
+        assert all(response.outcome.outcome == "cancelled" for response in responses)
+        assert all(not acp.has_pending_permission(item["request_id"]) for item in requests)
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
 def test_permission_attention_is_actionable(tmp_db) -> None:
     session = _session(tmp_db)
     session.event_log.append(

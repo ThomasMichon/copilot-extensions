@@ -132,9 +132,10 @@ _DISPATCH_MAX_AGE_S = 30 * 24 * 3600  # 30 days
 def _check_launch_permissions(command: str, depth: int = 0) -> None:
     """Inspect literal POSIX launch arguments without running the command."""
     uninspectable = "CodeSpace namespace launch cannot inspect the configured shell command."
-    if depth > 8:
+    if depth > 8 or re.search(r"\\\r?\n", command):
         raise ValueError(uninspectable)
-    lexer = shlex.shlex(command, posix=True, punctuation_chars="();&|<>")
+    lexer = shlex.shlex(command, posix=True, punctuation_chars="();&|<>\n")
+    lexer.whitespace = lexer.whitespace.replace("\n", "")
     lexer.whitespace_split = True
     lexer.commenters = ""
     try:
@@ -148,6 +149,14 @@ def _check_launch_permissions(command: str, depth: int = 0) -> None:
         )
     for index, word in enumerate(words):
         if word.rsplit("/", 1)[-1] not in ("sh", "bash", "dash", "zsh"):
+            continue
+        # Exempt directory operands only when cd is in command position.
+        cd_index = index - 1
+        if cd_index > 0 and words[cd_index] == "--":
+            cd_index -= 1
+        if (cd_index >= 0 and words[cd_index] == "cd"
+                and (cd_index == 0
+                     or re.fullmatch(r"[();&|\n]+|\{", words[cd_index - 1]))):
             continue
         arguments = words[index + 1:]
         if (len(arguments) < 2 or arguments[0] not in ("-c", "-lc", "-cl")
