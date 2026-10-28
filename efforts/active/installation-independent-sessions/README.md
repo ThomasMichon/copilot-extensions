@@ -505,6 +505,12 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   three native-POSIX skips. The selected native publication/uninstall packet
   passed nine controls. Native Linux/macOS deadline/group qualification remains
   pending; these local results are not native terminal or removal evidence.
+- Native run `40676755235` passed Linux and Windows but failed on stock macOS
+  Bash 3.2: process-substitution PIDs are not waitable there. Replaced that
+  nonportable wait with a private per-call completion field emitted only after
+  the finite supervisor has reaped its actual provider and settled its group.
+  The existing deadline is unchanged. The draft remains unqualified pending
+  the corrected native run; the failed attempt is not passing evidence.
 - Capability/rollback selection, canonical process-birth capture, backend
   custody and foreground terminal/signal behavior remain the next integration
   gates. Neither POSIX runtime waiter is removed, and no host installation,

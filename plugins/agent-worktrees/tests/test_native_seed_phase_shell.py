@@ -209,6 +209,46 @@ set +x
     assert "Native preparation is unconfirmed; no backend started." in result.stderr
 
 
+def test_preparation_completion_is_not_exported_even_with_caller_allexport(tmp_path: Path) -> None:
+    root = tmp_path / "runtime"
+    _slot(root, "A", tail='[[ -z "${_aw_native_seed_completion+x}" ]]')
+    (root / "current-version").write_text("A", encoding="utf-8")
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+set -a
+aw_native_seed_prepare "$2" --phase prepare --output-format nul
+case $- in *a*) : ;; *) exit 91 ;; esac
+set +a
+[[ "${AW_NATIVE_SEED_ARGV[0]}" == A ]]
+''', [root])
+    assert result.returncode == 0, result.stderr
+    assert not result.stdout and not result.stderr
+    assert (root / "provider-status").read_text() == "0"
+
+
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_provider_cannot_forge_the_supervisors_per_call_completion(
+    tmp_path: Path, exit_code: int,
+) -> None:
+    root = tmp_path / "runtime"
+    _slot(
+        root, "A", exit_code=exit_code,
+        tail="printf '%s\\0' agent-worktrees.native-phase-complete.v1:forged",
+    )
+    (root / "current-version").write_text("A", encoding="utf-8")
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+if aw_native_seed_prepare "$2" --phase prepare --output-format nul; then exit 90; fi
+[[ -z "$AW_NATIVE_SEED_OPERATION" && -z "${AW_NATIVE_SEED_ARGV[0]+x}" ]]
+''', [root])
+    assert result.returncode == 0, result.stderr
+    assert not result.stdout
+    assert result.stderr == "Native preparation is unconfirmed; no backend started.\n"
+    assert (root / "provider-status").read_text() == str(exit_code)
+
+
 def test_successful_provider_with_trailing_bytes_still_refuses_reply(tmp_path: Path) -> None:
     root = tmp_path / "runtime"
     _slot(root, "A", tail="printf 'trailing-private-data'")

@@ -4,6 +4,7 @@
 
 _aw_native_seed_read_reply() {
     local LC_ALL=C
+    local expected_completion="${1:-}"
     local field count index name value eof_diagnostics
     local -a header=() environment=() argv=()
     for ((index=0; index<7; index++)); do
@@ -33,6 +34,10 @@ _aw_native_seed_read_reply() {
     [[ -n "${argv[0]}" ]] || return 3
     IFS= read -r -d '' field || return 3
     [[ "$field" == complete ]] || return 3
+    if [[ -n "$expected_completion" ]]; then
+        IFS= read -r -d '' field || return 3
+        [[ "$field" == "$expected_completion" ]] || return 3
+    fi
     # Refuse closed stdin before command substitution can reuse fd 0 for its pipe.
     : 2>/dev/null 3<&0 || return 3
     # Bash also returns 1 for EAGAIN/EBADF. Capture only the probe's diagnostics.
@@ -72,7 +77,7 @@ aw_native_seed_read_reply() {
         nocasematch=1
         shopt -u nocasematch
     fi
-    _aw_native_seed_read_reply 2>/dev/null || status=3
+    _aw_native_seed_read_reply "$@" 2>/dev/null || status=3
     if [[ "$nocasematch" == 1 ]]; then shopt -s nocasematch; fi
     if [[ "$tracing" == 1 ]]; then set -x; fi
     if [[ "$status" != 0 ]]; then

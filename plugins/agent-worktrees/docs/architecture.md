@@ -686,11 +686,16 @@ The copied shell owns a separate provider job group, a ten-second deadline and
 group cleanup; its 50-millisecond sleep children exist only during the call.
 It streams stdout without prompt-bearing temporary files. Nonzero provider
 exit, timeout or descendants retaining the pipe are unconfirmed, not successful
-preparation. `aw_native_seed_prepare` takes the same arguments, consumes the
-NUL frame with the sibling reader and retains the actual process-substitution
-PID before parsing. It waits for successful finite producer exit and clears
-all reply fields on refusal, including a complete frame followed by a failed
-producer. It does not apply the reply environment or execute backend arguments.
+preparation. `aw_native_seed_prepare` takes the same arguments and consumes the
+NUL frame with the sibling reader. Bash 3.2 cannot wait for process substitutions,
+so the finite supervisor appends a per-call completion field only after its
+actual provider wait and group cleanup succeed. The reader's optional expected
+completion field must match before EOF; ordinary reader calls still require
+the unchanged provider frame followed immediately by EOF. The completion value
+stays out of provider arguments/environment, including with caller `allexport`.
+Missing, mismatched or trailing completion data clears all reply fields,
+including a complete frame followed by a failed producer. The transport does
+not apply the reply environment or execute backend arguments.
 Caller stdin, descriptors and tracing settings remain owned by the caller.
 
 No production POSIX caller selects that setup path yet. Capability discovery
