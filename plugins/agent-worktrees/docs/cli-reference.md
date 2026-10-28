@@ -491,6 +491,8 @@ Unrecognized/custom setup commands and `gh copilot` retain terminal fallback;
 this exclusion follows recognized wrappers recursively. Normalized setup must
 have an available standalone backend in its selected launch/session PATH or
 an explicit non-intermediary `copilot_path`; gh-only setup keeps fallback.
+An environment-priming script can change backend discovery after preparation;
+that opaque setup retains fallback rather than running the script as a probe.
 Non-UTF-8 custom PowerShell setup is unsupported for marker qualification and
 logs that selection without preventing its existing terminal launch.
 `--seed-ready-timeout` applies only there. No post-launch terminal fallback is

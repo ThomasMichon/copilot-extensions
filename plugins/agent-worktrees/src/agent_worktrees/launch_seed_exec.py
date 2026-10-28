@@ -256,6 +256,8 @@ def _setup_command(
                     if flag in options:
                         path = options[flag] + os.pathsep + path
                 override = options.get("-copilotpath") or options.get("--copilot-path")
+                if options.get("-envscript") or options.get("--env-script"):
+                    return None
                 backend = override or "copilot"
                 if (
                     PureWindowsPath(backend).stem.casefold() == "gh"

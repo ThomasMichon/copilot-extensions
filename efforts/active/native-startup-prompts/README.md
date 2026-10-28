@@ -207,6 +207,11 @@ instead of weakening those guarantees.
   and recovery launches without misreading an option-shaped native value.
   The updated state/launch-argument packet passed 326 tests. The shared
   execution-directory validation contract is unchanged.
+- Environment-priming scripts remain opaque even when an explicit backend is
+  configured: preparation neither executes them as a probe nor pins their later
+  lookup. Both setup forms retain their prior terminal fallback for that whole
+  class. The prepared normal/recovery/backend packet passed 24 cases, including
+  currently available standalone and explicitly selected executable controls.
 
 ### 2026-10-28 - Proposal reviewed
 

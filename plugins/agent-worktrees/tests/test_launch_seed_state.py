@@ -206,7 +206,9 @@ def test_wrapped_intermediary_keeps_terminal_fallback(tmp_path, monkeypatch, she
 
 
 @pytest.mark.parametrize("shell", ["bash", "pwsh"])
-@pytest.mark.parametrize("selection", ["gh-only", "session-path", "explicit-gh", "explicit-cli"])
+@pytest.mark.parametrize("selection", [
+    "gh-only", "session-path", "explicit-gh", "explicit-cli", "env-script", "explicit-cli-env-script",
+])
 @pytest.mark.parametrize("recovery", [False, True])
 def test_default_setup_requires_available_nonintermediary_backend(
     tmp_path, monkeypatch, shell, selection, recovery,
@@ -232,11 +234,13 @@ def test_default_setup_requires_available_nonintermediary_backend(
     if recovery:
         command += ["--recovery" if shell == "bash" else "-Recovery"]
     command += ["--model", "-CopilotPath", "--allow-all"]
-    if selection == "session-path":
+    if selection in {"session-path", "env-script"}:
         command += ["--session-path" if shell == "bash" else "-SessionPath", str(cli_dir)]
     elif selection.startswith("explicit"):
         command += ["--copilot-path" if shell == "bash" else "-CopilotPath",
                     str(gh if selection == "explicit-gh" else cli)]
+    if "env-script" in selection:
+        command += ["--env-script" if shell == "bash" else "-EnvScript", str(tmp_path / "env-script")]
     command = process_launcher.bind_execution_directory(
         command, str(tmp_path / "checkout"), ValueError, passthrough_start=len(command),
     )
@@ -247,7 +251,7 @@ def test_default_setup_requires_available_nonintermediary_backend(
     prepared, seed_id = embody_completion.prepare_startup_seed(
         command, path, seed.text, explicit=False, environment={"PATH": str(bin_dir)},
     )
-    if selection in {"gh-only", "explicit-gh"}:
+    if selection in {"gh-only", "explicit-gh"} or "env-script" in selection:
         assert (prepared, seed_id) == (command, None)
     else:
         assert seed_id == seed.seed_id and prepared != command
