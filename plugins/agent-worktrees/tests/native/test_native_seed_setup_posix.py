@@ -168,6 +168,7 @@ print(json.dumps({
             '        printf "descriptor %s %s\\n" "$mode" "${statuses[*]}" >> "$FIXTURE_CASE/probe-status"',
         )
         source = source.replace("aw_native_seed_phase() (", "_fixture_native_seed_phase() (")
+        source = source.replace('2>/dev/null', '2>> "$FIXTURE_CASE/probe-errors"')
         source += r'''
 aw_native_seed_phase() {
     local code=0
@@ -292,7 +293,11 @@ def test_native_control_utilities_do_not_change_a_restricted_backend_path(
         plan["command"], env=environment, cwd=checkout, input_text="retained stdin\n",
         timeout=60, max_stdout_bytes=65536, max_stderr_bytes=65536,
     )
-    assert result.returncode == 7, result.stdout + result.stderr + repr(_observations(plan))
+    assert result.returncode == 7, {
+        "stdout": result.stdout, "stderr": result.stderr, "observations": _observations(plan),
+        "probes": (tmp_path / "probe-status").read_text() if (tmp_path / "probe-status").exists() else "",
+        "errors": (tmp_path / "probe-errors").read_text() if (tmp_path / "probe-errors").exists() else "",
+    }
     assert (tmp_path / "backend-path").read_text() == environment["PATH"]
     _assert_return(plan, 7, True)
 
