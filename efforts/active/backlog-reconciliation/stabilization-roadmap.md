@@ -2,9 +2,11 @@
 
 **Status:** Research method with the reviewed [first-200-issue planning
 proposal](roadmap-wave-1.md) and the reviewed [second disjoint 200-issue
-proposal](roadmap-wave-2.md), plus the [third-wave
-proposal](roadmap-wave-3.md) awaiting reviewed publication; later eligible
-coverage and full execution sequencing remain open.
+proposal](roadmap-wave-2.md), plus the reviewed [third-wave
+proposal](roadmap-wave-3.md) in #9396. The [fourth-wave
+proposal](roadmap-wave-4.md) adds the remaining 82 identities in the frozen
+eligible census; its publication review, provisional decisions, later inflow
+and full execution sequencing remain open.
 
 Parent: [Backlog Reconciliation](README.md), Phase 2b.
 
@@ -77,13 +79,17 @@ four Lifecycle interface rows are already in the 34. A separately admitted
 #8669 refinement credits reported source completion, not installed/removal
 qualification. #6934's unavailable necessary history remains an unranked stop.
 
-The cumulative 600 assignments comprise 513 researched proposals,
-86 provisional outcomes and one history-gated issue. They do not rank the
-remaining eligible supply or count excluded-author issues as researched.
+The [fourth-wave proposal](roadmap-wave-4.md) adds 61 researched proposals
+and 21 explicit provisional outcomes. The cumulative 682 distinct assignments
+comprise 574 researched proposals, 107 provisional outcomes and one
+history-gated issue. Their identities exactly match the 682 creator-eligible
+issues in the 2026-10-28 12:11 UTC whole census. This does not resolve every
+provisional implementation decision, rank later inflow or count the 252
+excluded metadata-only records as researched.
 
 The [cross-wave sequencing proposal](roadmap-sequencing.md) joins those
-evidence classes and existing work homes. Its 109 recorded relationships retain
-the three scoped registers, including same-issue slice dependencies, rather than
+evidence classes and existing work homes. Its 145 recorded relationships retain
+the four scoped registers, including same-issue slice dependencies, rather than
 collapsing them into whole-issue barriers. Later research can change the
 selection; it is not an implementation charter.
 
