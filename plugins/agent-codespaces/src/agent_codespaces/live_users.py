@@ -179,15 +179,18 @@ def _split_windows_cmdline(cmdline: str) -> tuple[str, ...]:
 def _read_proc_windows() -> list[ProcInfo] | None:
     from agent_procutil import no_window_flags
 
-    script = ("Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,"
+    script = ("[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); "
+              "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,"
               "CommandLine | ConvertTo-Json -Compress")
     try:
         result = subprocess.run(
             ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
-            capture_output=True, text=True, timeout=30, check=False,
+            capture_output=True, timeout=30, check=False,
             stdin=subprocess.DEVNULL, creationflags=no_window_flags(),
         )
-        rows = json.loads(result.stdout) if result.returncode == 0 else None
+        if result.returncode != 0 or not isinstance(result.stdout, bytes):
+            return None
+        rows = json.loads(result.stdout.decode("utf-8"))
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
     if isinstance(rows, dict):

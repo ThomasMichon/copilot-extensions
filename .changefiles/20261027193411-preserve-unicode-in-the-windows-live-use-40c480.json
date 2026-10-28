@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve Unicode in the Windows live-user census and fail closed on invalid captures",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}
