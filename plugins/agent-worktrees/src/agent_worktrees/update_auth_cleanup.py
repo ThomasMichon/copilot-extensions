@@ -53,8 +53,10 @@ def _command(arguments: list[str]) -> tuple[list[str], dict[str, str]]:
 
 
 def _invoke(arguments: list[str], cwd: Path) -> dict:
+    from .git_ops import repository_identity_env
+
     argv, env = _command(arguments)
-    result = run(argv, env=env, cwd=cwd, timeout=30)
+    result = run(argv, env=repository_identity_env(env), cwd=cwd, timeout=30)
     if result.timed_out or result.missing or result.truncated or result.status is None:
         raise PolicyUnavailable("policy_owner_unconfirmed")
     try:

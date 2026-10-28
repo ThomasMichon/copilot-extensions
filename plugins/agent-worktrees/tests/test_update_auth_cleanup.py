@@ -137,6 +137,57 @@ def test_explicit_context_refusal_never_falls_back_to_legacy(tmp_path, monkeypat
         cleanup._command(["git-config", "restore", "--json"])
 
 
+@pytest.mark.real_installer_processes
+@pytest.mark.parametrize("explicit", [False, True])
+def test_owner_discovers_selected_repository_despite_inherited_git_routing(
+    tmp_path, monkeypatch, explicit,
+):
+    import subprocess
+    import sys
+
+    from agent_procutil import no_window_kwargs
+
+    from agent_worktrees import _peer_launch, claim_providers, peer_launch_adapter, registry_paths
+
+    selected, other = tmp_path / "selected", tmp_path / "other"
+    for path in (selected, other):
+        subprocess.run(
+            ["git", "init", "--quiet", str(path)], check=True,
+            **no_window_kwargs(),
+        )
+    target = tmp_path / "global-config"
+    target.write_bytes(b"# preserve explicit configuration target\n")
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(other))
+    monkeypatch.setenv("GIT_COMMON_DIR", str(other / ".git"))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(target))
+    driver = (
+        "import json,os,subprocess; "
+        "root=subprocess.check_output(['git','rev-parse','--show-toplevel'], "
+        "text=True,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0)).strip(); "
+        "print(json.dumps({'root':root,'target':os.environ.get('GIT_CONFIG_GLOBAL')}))"
+    )
+    command = [sys.executable, "-c", driver]
+    root = tmp_path / "marketplace" / "agent-worktrees"
+    peer = root.parent / "agent-machines"
+    peer.mkdir(parents=True)
+    (peer / "plugin.json").write_text(json.dumps({"name": "agent-machines"}))
+    monkeypatch.setattr(registry_paths, "_payload_root", lambda: root)
+    monkeypatch.setattr(claim_providers, "_resolve_command", lambda *a, **k: command)
+    monkeypatch.setattr(claim_providers, "_windows_batch_argv", lambda argv: argv)
+    if explicit:
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "fixture")
+        monkeypatch.setattr(peer_launch_adapter, "validate_context", lambda: {
+            "pluginRoot": str(root), "installReceipt": "fixture",
+        })
+        monkeypatch.setattr(_peer_launch, "launch_prefix", lambda *a: command)
+    else:
+        monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    result = cleanup._invoke([], selected)
+    assert Path(result["root"]).resolve() == selected.resolve()
+    assert result["target"] == str(target)
+
+
 @pytest.mark.parametrize("digest", ["", "a" * 63, "--apply", "A" * 64])
 def test_invalid_consent_never_reaches_owner(tmp_path, monkeypatch, digest):
     monkeypatch.setattr(cleanup, "_invoke", lambda *a: pytest.fail("owner invoked"))
@@ -165,6 +216,7 @@ def test_cleanup_offer_is_retained_in_status():
 ])
 def test_cleanup_cli_cannot_hide_mutation_in_an_update_or_manager_export(names):
     import argparse
+
     from agent_worktrees import update_options
 
     with pytest.raises(SystemExit):
@@ -188,20 +240,22 @@ def test_native_owner_subprocess_preview_apply_and_regression_rollback(tmp_path,
         "      - key: credential.helper\n        values: [fixture-helper]\n",
         encoding="utf-8",
     )
-    driver = (
-        "import os,sys; from pathlib import Path; from types import SimpleNamespace; "
-        "from agent_machines import __main__ as cli; "
-        "from agent_machines.manifest import load_package; "
-        "cli._collect_reconcile_packages=lambda *a: ([load_package(Path(os.environ['POLICY_FIXTURE']))], 'fixture'); "
-        "cli._resolve_machine_identity=lambda *a: SimpleNamespace(canonical='fixture',raw='fixture',"
-        "accepted=('fixture',),warnings=()); sys.exit(cli.main(sys.argv[1:]))"
-    )
     root = Path(__file__).resolve().parents[3]
     paths = [root / "plugins" / "agent-machines" / "src", *root.glob("libs/*/src")]
+    driver = (
+        f"import os,sys; sys.path[:0]={list(map(str, paths))!r}; "
+        "from pathlib import Path; from types import SimpleNamespace; "
+        "from agent_machines import __main__ as cli; "
+        "from agent_machines.manifest import load_package; "
+        "cli._collect_reconcile_packages=lambda *a: "
+        "([load_package(Path(os.environ['POLICY_FIXTURE']))], 'fixture'); "
+        "cli._resolve_machine_identity=lambda *a: "
+        "SimpleNamespace(canonical='fixture',raw='fixture',"
+        "accepted=('fixture',),warnings=()); sys.exit(cli.main(sys.argv[1:]))"
+    )
     env = {
         **os.environ, "HOME": str(home), "USERPROFILE": str(home),
         "GIT_CONFIG_GLOBAL": str(target), "POLICY_FIXTURE": str(fixture),
-        "PYTHONPATH": os.pathsep.join(map(str, paths)),
     }
     monkeypatch.setattr(
         cleanup, "_command", lambda args: ([sys.executable, "-c", driver, *args], env),
@@ -224,7 +278,9 @@ def test_report_cli_displays_the_post_mutation_health_not_the_old_report(
     tmp_path, monkeypatch, capsys, operation,
 ):
     import argparse
-    from agent_worktrees import update_auth_context as context, update_auth_sources as sources
+
+    from agent_worktrees import update_auth_context as context
+    from agent_worktrees import update_auth_sources as sources
 
     before, after = report("auth_required"), report()
     monkeypatch.setenv("CE_UPDATE_AUTH", "on")
@@ -255,7 +311,9 @@ def test_read_only_modes_block_apply_before_the_owner_is_called(
     tmp_path, monkeypatch, capsys, mode,
 ):
     import argparse
-    from agent_worktrees import update_auth_context as context, update_auth_sources as sources
+
+    from agent_worktrees import update_auth_context as context
+    from agent_worktrees import update_auth_sources as sources
 
     monkeypatch.setenv("CE_UPDATE_AUTH", mode)
     monkeypatch.setattr(sources, "anchors", lambda: [])
@@ -275,7 +333,9 @@ def test_report_cleanup_uses_selected_repository_unless_explicitly_overridden(
     tmp_path, monkeypatch, capsys, explicit,
 ):
     import argparse
-    from agent_worktrees import update_auth_context as context, update_auth_sources as sources
+
+    from agent_worktrees import update_auth_context as context
+    from agent_worktrees import update_auth_sources as sources
 
     selected, override = tmp_path / "selected", tmp_path / "override"
     monkeypatch.setattr(context, "_marketplace_context", lambda: selected)
@@ -296,6 +356,7 @@ def test_update_offer_uses_selected_repository_not_process_cwd(tmp_path, monkeyp
     import argparse
     from contextlib import nullcontext
     from types import SimpleNamespace
+
     from agent_worktrees import update_auth_context as context
 
     selected = tmp_path / "selected"
@@ -313,6 +374,7 @@ def test_update_offer_uses_selected_repository_not_process_cwd(tmp_path, monkeyp
 
 def test_large_preview_survives_the_real_emitter_and_status_fold(tmp_path, monkeypatch):
     import update_telemetry as ut
+
     from agent_worktrees import update_events
 
     events_path = tmp_path / "events.jsonl"
@@ -338,6 +400,7 @@ def test_invalid_retained_preview_is_unavailable_without_losing_its_digest(
     tmp_path, monkeypatch, damage,
 ):
     import update_telemetry as ut
+
     from agent_worktrees import update_events
 
     events_path = tmp_path / "events.jsonl"
