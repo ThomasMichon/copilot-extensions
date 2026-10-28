@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from agent_worktrees import embody_resume
 
 
@@ -22,6 +24,12 @@ class TestWithResume:
 
 
 class TestWithSeed:
+    @pytest.mark.parametrize("seed", ["--resume=literal", "-p\nquoted ' \"", "-"])
+    def test_option_leading_prompt_is_bound_to_the_interactive_option(self, seed):
+        assert embody_resume.with_seed(["copilot", "--", "literal"], seed) == [
+            "copilot", f"--interactive={seed}", "--", "literal",
+        ]
+
     def test_appends_the_full_interactive_flag_when_seed_given(self):
         """Never the short -i: PowerShell's own argument parser can
         intercept it before it ever reaches the exec'd copilot process on

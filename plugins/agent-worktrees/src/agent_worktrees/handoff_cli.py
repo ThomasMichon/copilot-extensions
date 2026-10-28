@@ -89,7 +89,7 @@ def add_parsers(sub) -> None:
     g.add_argument("--new", action="store_true", help="Create a fresh worktree first, then embody in it")
     g.add_argument("--codename", default=None, help="Embody the worktree with this codename (pr-attribution-codenames Phase 2/3) -- resolved locally first, then via a cross-machine SSH scan. A codename found on a DIFFERENT machine fails closed with the machine name (remote launch is not supported); resolve/embody there directly instead.")
     g.add_argument("--anchor", action="store_true", help="Embody directly in the active project's ANCHOR checkout instead of any worktree -- no worktree is created or required. Matches the existing headless-dispatch behavior (a CodeSpace/container ACP session already runs in the anchor, never a worktree); this brings CLI-mode into line with that same contract. Session id is synthesized as `anchor-<repo_name>` (one live anchor session per repo, same one-live-session-per-target rule as an ordinary worktree). The anchor is not writable through this harness's own PR-gated flow (see AGENTS.md) -- use for reads/exploration or a repo whose anchor is otherwise safe to drive directly; an actual change still belongs in a worktree/PR.")
-    p.add_argument("--seed", default=None, help="Seed prompt injected as the session's first interactive turn once Copilot is ready")
+    p.add_argument("--seed", default=None, help="Initial prompt through native startup on qualified cold launches; terminal fallback otherwise")
     p.add_argument("--bridge-seed-operation", default=None,
                    help="Defer this Bridge-owned seed operation to readiness-bound inbox delivery")
     p.add_argument("--bridge-seed-pending", action="store_true",
@@ -98,8 +98,8 @@ def add_parsers(sub) -> None:
     bridge_acquisition_launch.add_arguments(p, r)
     native_restart_launch.add_arguments(p, r)
     r.add_argument("--fresh", action="store_true", help="Start a new conversation even in an existing worktree. By default, an existing worktree embodied without a seed resumes its head session (the conversation the worktree's ledger names as current), so bringing a task back never loses its history")
-    r.add_argument("--resume-head", dest="resume_head", action="store_true", help="Resume the worktree's head session even when a --seed (or pending seed) is given; the seed is then typed into the resumed conversation. Without this, a seeded embody starts a fresh conversation for its new task")
-    p.add_argument("--seed-ready-timeout", dest="seed_ready_timeout", type=float, default=180.0, metavar="SECONDS", help="Idle window while waiting for Copilot's input prompt before typing the --seed (default 180). Visibly busy/changing panes keep waiting up to a hard cap; if the pane never reaches a confirmed live input prompt, the seed is never delivered and the session idles at an empty prompt")
+    r.add_argument("--resume-head", dest="resume_head", action="store_true", help="Resume the worktree's head session even when a --seed (or pending seed) is given; deliver the prompt to that conversation. Without this, a seeded embody starts a fresh conversation for its new task")
+    p.add_argument("--seed-ready-timeout", dest="seed_ready_timeout", type=float, default=180.0, metavar="SECONDS", help="Terminal fallback only: idle window before typing --seed (default 180); native startup does not scrape or wait for an input prompt")
     p.add_argument("--driver", default=None, help="Label of the agent steering this session; stamps the 'driven by <agent>' banner (AGENT_BRIDGE_DRIVEN_BY) so a human taking over in Neuron Forge sees who's at the wheel")
     p.add_argument("--verify-timeout", dest="verify_timeout", type=float, default=0.0, metavar="SECONDS", help="Wait up to N seconds for the mux session to come up before returning (default 0: don't wait)")
     p.add_argument("--recovery", action="store_true", help="Use the repo's recovery launch command")
@@ -476,6 +476,15 @@ def cmd_embody(args: argparse.Namespace) -> int:
             output._json_output(bridge_acquisition_launch.preparation_failure(wt_id, work_dir, exc))
             return 3
         return output._json_error(str(exc), exit_code=3)
+    native_seed_id = None
+    if seed and not acquisition and not deferred:
+        try:
+            launch_cmd, native_seed_id = embody_completion.prepare_startup_seed(
+                launch_cmd, cfg.tracking_dir() / f"{wt_id}.yaml", seed, explicit=explicit_seed,
+                environment=env,
+            )
+        except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
+            return output._json_error(f"Could not prepare native startup prompt: {exc}", exit_code=3)
     admission = ExitStack()
     try:
         admission.enter_context(bridge_acquisition_launch.launch_fence(
@@ -575,6 +584,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
         resume_target=resume_target, driver=driver, selection=selection, result=result,
         cfg=cfg, sessions=sessions, output=output, launch_seed_state=launch_seed_state,
         tracking_write=tracking_write, profile_assignment=profile_assignment, clock=time,
+        native_seed_id=native_seed_id,
     )
 
 

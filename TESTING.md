@@ -51,6 +51,17 @@ managed-removal controls refuse an active target before fresh record reads or
 removal, including forced cleanup. These are lifecycle-fence controls, not
 whole-launch parallelism, full Picker, real mux or installation-removal acceptance.
 
+Agent-worktrees' optional `tests/native/test_native_startup_prompt.py` runs a
+real CLI against an offline loopback synthetic provider, in an empty workspace
+and a separate `COPILOT_HOME` without inherited credentials or plugins.
+Set `COPILOT_NATIVE_TEST_EXECUTABLE` to the exact absolute CLI executable and run
+`python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_native_startup_prompt.py --allow-explicit-tiers`.
+The control checks literal initial-prompt delivery, exact resumed conversation,
+retained history and two completed turns. No terminal input is injected and no
+installed service or retained conversation is changed. This is native CLI
+startup qualification, not real-mux, physical keyboard, installed rollout or
+whole managed-launch acceptance; platform lanes are qualified independently.
+
 Agent-worktrees' `test_launch_seed_native.py` covers the finite backend and setup
 provider: retained one-time seed claims, literal argv, existing prompt-free
 execution observations, PID/birth and incarnation refusals, definite-spawn

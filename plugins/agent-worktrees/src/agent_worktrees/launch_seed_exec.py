@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import logging
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path, PureWindowsPath
@@ -14,6 +16,7 @@ from agent_procutil import no_window_kwargs
 from . import embody_resume, installer, launch_admission, launch_seed_state, sessions
 from . import tracking, tracking_write
 from . import launch_execution
+from .native_arguments import SETUP_VALUE_OPTIONS, VALUE_OPTIONS
 
 BOUNDARY_MARKER = "# agent-worktrees:launch-seed-boundary-v1"
 ATTEMPT_BOUNDARY_MARKER = "# agent-worktrees:launch-attempt-boundary-v1"
@@ -204,6 +207,7 @@ def _invocation_command(
 def _setup_command(
     record_path: Path, seed_id: str, command: list[str],
     correlation: launch_execution.Correlation | None = None,
+    *, native_only: bool = False, environment: dict[str, str] | None = None,
 ) -> list[str] | None:
     index = _script_index(command)
     if index is not None:
@@ -220,10 +224,46 @@ def _setup_command(
                 )
                 if delimiter is None:
                     return None
-                inner = _setup_command(record_path, seed_id, command[delimiter + 1:], correlation)
+                inner = _setup_command(
+                    record_path, seed_id, command[delimiter + 1:], correlation,
+                    native_only=native_only, environment=environment,
+                )
                 return [*command[:delimiter + 1], *inner] if inner is not None else None
         markers = script.read_text(encoding="utf-8-sig").splitlines() if script.is_file() else []
         if BOUNDARY_MARKER in markers:
+            if native_only and script.name in {"default-setup.ps1", "default-setup.sh"}:
+                options = {}
+                position = index + 1
+                setup_values = SETUP_VALUE_OPTIONS | {
+                    "-nativeargumentsjson", "-executiondirectory", "--execution-directory",
+                }
+                while position < len(command):
+                    argument = command[position]
+                    flag = argument.casefold()
+                    if argument == "--":
+                        break
+                    if flag in setup_values:
+                        if position + 1 >= len(command):
+                            return None
+                        options[flag] = command[position + 1]
+                        position += 2
+                    elif argument in VALUE_OPTIONS or argument == "-C":
+                        position += 2
+                    else:
+                        position += 1
+                path = {**os.environ, **(environment or {})}.get("PATH", "")
+                for flag in ("-sessionpath", "--session-path"):
+                    if flag in options:
+                        path = options[flag] + os.pathsep + path
+                override = options.get("-copilotpath") or options.get("--copilot-path")
+                if options.get("-envscript") or options.get("--env-script"):
+                    return None
+                backend = override or "copilot"
+                if (
+                    PureWindowsPath(backend).stem.casefold() == "gh"
+                    or not ((override and Path(backend).is_file()) or shutil.which(backend, path=path))
+                ):
+                    return None
             if correlation and ATTEMPT_BOUNDARY_MARKER not in markers:
                 return None
             flags = (
@@ -248,11 +288,28 @@ def _setup_command(
             return [*command[:index + 1], *flags, *command[index + 1:]]
         return None
     host = Path(command[0]).name.lower() if command else ""
+    if native_only and host in {"gh", "gh.exe"}:
+        return None
     if host in {"copilot", "copilot.exe", "copilot.cmd"} or (
         host in {"gh", "gh.exe"} and command[1:2] == ["copilot"]
     ):
         return _invocation_command(record_path, seed_id, command, correlation)
     return None
+
+
+def supports_seed_command(
+    command: list[str], record_path: Path, *, environment: dict[str, str] | None = None,
+) -> bool:
+    """Recognize the existing finite setup/direct-backend contract without effects."""
+    try:
+        return _setup_command(
+            record_path, "preview", command, native_only=True, environment=environment,
+        ) is not None
+    except UnicodeDecodeError:
+        logging.getLogger(__name__).info(
+            "Native startup does not support this setup encoding; retaining terminal fallback",
+        )
+        return False
 
 
 def launch(

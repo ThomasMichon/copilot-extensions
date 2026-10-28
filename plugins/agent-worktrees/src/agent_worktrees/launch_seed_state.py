@@ -150,6 +150,16 @@ def _apply_stage(args: dict) -> dict:
         current = peek(path)
         text = args.get("text")
         kind = args.get("kind")
+        snapshot = args.get("creation_snapshot")
+        if snapshot is not None:
+            if not isinstance(snapshot, dict) or set(snapshot) != {"seed"} or kind != "new":
+                raise ValueError("Invalid creation-prompt replacement snapshot")
+            actual = dataclasses.asdict(current) if current is not None else None
+            if (
+                actual != snapshot["seed"] or record.pending_seed
+                or (current is not None and (current.kind != "new" or current.handoff_id))
+            ):
+                raise ValueError("Staged prompt custody changed before replacement; refresh and retry")
         if text is not None or current is not None or record.pending_seed:
             _require_native_transport(record)
         if text is None:
@@ -301,6 +311,8 @@ def _valid_birth_token(value: object) -> bool:
 def _dispatch(verb: str, args: dict, *, min_version: int = 4) -> dict:
     if verb in {"launch_seed_stage", "launch_seed_take"}:
         min_version = max(min_version, 7)
+    if verb == "launch_seed_stage" and args.get("creation_snapshot") is not None:
+        min_version = max(min_version, 8)
     enabled = status_monitor_runtime._status_monitor_enabled()
 
     def read_authority():
@@ -340,6 +352,7 @@ def _dispatch(verb: str, args: dict, *, min_version: int = 4) -> dict:
 def stage(
     yaml_path: Path, *, kind: Literal["new", "resume"] | None = None, text: str | None = None,
     seed_id: str | None = None,
+    creation_snapshot: dict | None = None,
 ) -> LaunchSeed | None:
     from . import agent_policy
 
@@ -347,6 +360,7 @@ def stage(
     result = _dispatch("launch_seed_stage", {
         "yaml_path": str(yaml_path), "worktree_id": yaml_path.stem,
         "seed_id": seed_id or uuid.uuid4().hex, "kind": kind, "text": text,
+        **({"creation_snapshot": creation_snapshot} if creation_snapshot is not None else {}),
     })
     return LaunchSeed(**result["seed"]) if result["seed"] is not None else None
 
@@ -454,7 +468,7 @@ def _authority_checked(handler: Callable[[dict], dict]) -> Callable[[dict], dict
     return apply
 
 
-tracking_write.register_verb("launch_seed_stage", _authority_checked(_apply_stage), version=7)
+tracking_write.register_verb("launch_seed_stage", _authority_checked(_apply_stage), version=8)
 tracking_write.register_verb("launch_seed_take", _authority_checked(_apply_take), version=7)
 tracking_write.register_verb("launch_seed_restore", _authority_checked(_apply_restore), version=4)
 tracking_write.register_verb("launch_seed_finish", _authority_checked(_apply_finish), version=4)

@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent proposal and implementation PRs against `dev`
 - **Created:** 2026-10-28
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/native-convergence/README.md` (native substrate, feature-detected convergence and no capability regression); `visions/session-hosting/README.md`
 - **Umbrella issue:** #9364
 - **Sub-issues:** none yet
@@ -83,26 +83,26 @@ realize that source-only request. They are not additional deployment authority.
 ### Phase 1 - Reviewed contract and ownership
 
 - [x] Deduplicate and claim #9364; preserve the neighboring owners above.
-- [ ] Submit this proposal through automated PR review and merge before
+- [x] Submit this proposal through automated PR review and merge before
   production source edits.
-- [ ] Record the reviewed contract and select the smallest first consumer slice.
+- [x] Record the reviewed contract and select the smallest first consumer slice.
 
 ### Phase 2 - Managed cold-launch implementation (agent-recommended)
 
-- [ ] Trace the existing cold-launch setup and final invocation boundary;
+- [x] Trace the existing cold-launch setup and final invocation boundary;
   select the existing native helper and pre-effect prompt claim seam.
-- [ ] Deliver explicit and staged New/Resume prompts through the native startup
+- [x] Deliver explicit and staged New/Resume prompts through the native startup
   mechanism on qualified cold-launch paths, retaining selected conversation
   identity, hosting policy, admission fences and exact literal input.
-- [ ] Preserve deferred Bridge acquisition and its SDK inbox ownership; do not
+- [x] Preserve deferred Bridge acquisition and its SDK inbox ownership; do not
   pass a Bridge-owned seed through two transports.
-- [ ] Define truthful pre-effect refusal, launch handoff and unknown outcomes
+- [x] Define truthful pre-effect refusal, launch handoff and unknown outcomes
   using existing seed/attempt receipts. A spawned process or forwarded argv
   does not prove a consumed prompt. Never automatically replay an ambiguous turn.
-- [ ] Keep an explicitly supported terminal fallback where native support or
+- [x] Keep an explicitly supported terminal fallback where native support or
   the launch shape requires it; no implicit downgrade after possible delivery.
   Leave already-live delivery with its existing owner.
-- [ ] Update affected help/docs and add the required plugin changefile without
+- [x] Update affected help/docs and add the required plugin changefile without
   editing versions or installed payloads.
 
 ### Phase 3 - Qualification and source completion (agent-recommended)
@@ -118,36 +118,108 @@ realize that source-only request. They are not additional deployment authority.
 All implementation checks below are **agent-recommended**; they preserve the
 operator's no-rollout/no-restart constraint.
 
-- [ ] Focused unit regressions fail on the old ordinary cold-launch path and
+- [x] Focused unit regressions fail on the old ordinary cold-launch path and
   pass for native initial-prompt selection without a pane-readiness scrape.
-- [ ] Exercise the real supported parser/setup/process boundary with literal
+- [x] Exercise the real supported parser/setup/process boundary with literal
   quotes, whitespace, multiline, non-ASCII and option-shaped input; qualify
   size limits and invalid/NUL input with an explicit pre-effect outcome rather
   than truncation or silent fallback.
-- [ ] Qualify fresh and resumed conversations with an isolated native CLI
+- [x] Qualify fresh and resumed conversations with an isolated native CLI
   fixture: the resume-plus-prompt path keeps the exact conversation and executes
   the intended next turn. No retained operator conversation is used or restarted.
-- [ ] Cover staged versus explicit intent, superseding revisions, no-mux where
+- [x] Cover staged versus explicit intent, superseding revisions, no-mux where
   supported, already-live targets, refused launch and unknown post-launch
   outcomes without duplicate prompt delivery or consumption claims.
-- [ ] Exercise current/prior supported provider behavior and rollback through
+- [x] Exercise current/prior supported provider behavior and rollback through
   existing contract seams. Missing support remains explicit; no blind replay.
 - [ ] Qualify Windows and POSIX boundaries independently. Preserve the open
   Bash-reader owner's scope; unavailable lanes remain named, not presumed passed.
-- [ ] Run affected lint, test portfolio and install-contract checks. Use bounded
+- [x] Run affected lint, test portfolio and install-contract checks. Use bounded
   contained tests; no new heavy native matrix in required PR CI.
-- [ ] Check public artifacts for private prompt/path leakage and verify there
+- [x] Check public artifacts for private prompt/path leakage and verify there
   were no installed edits, service changes, retained-session restarts or rollout.
 
 ## Proposal
 
-Pending review. Implementation is not yet admitted. An isolated CLI fixture
+Reviewed in #9365. The first consumer is ordinary cold `embody`; existing
+native-seed consumers and already-live delivery retain their owners.
+An isolated CLI fixture
 may establish native semantics without touching an existing agent; its launch,
 capture and cleanup must remain caller-owned. A source change that cannot
 preserve the existing custody or fallback contract returns here for an amendment
 instead of weakening those guarantees.
 
 ## Journal
+
+### 2026-10-28 - Cold-launch source and Windows qualification
+
+- Ordinary cold `embody` now stages explicit intent or validates the existing
+  New seed, then reuses `launch_seed_exec`'s final-invocation boundary. It does
+  not claim or scrape after launching the mux. Typed Resume staging elsewhere,
+  Bridge acquisition, already-live targets, anchor and cutover are unchanged.
+- Existing setup markers and direct-backend support determine selection
+  without adding a provider option or a per-launch probe. Unmarked/custom and
+  intermediary commands keep their previous terminal fallback. The selected
+  deferred runtime retains its existing invocation protocol and refusal checks;
+  unsupported setup cannot silently become prompt consumption.
+- Actual CLI 1.0.100-1, offline loopback provider, empty workspace and isolated
+  configuration: one exact native conversation accepted a literal multiline,
+  quoted, non-ASCII, option-leading first prompt and a 12,000-character second
+  prompt through `--resume`; both turns completed and prior history reached the
+  second request. No terminal input, authentication or external inference used.
+- That real parser control exposed a pre-existing option-leading prompt bug:
+  separate `--interactive`/`--resume=literal...` argv was rejected. The shared
+  helper now uses `--interactive=<prompt>` only for option-leading input.
+- Windows over-limit argv produced the actual OS error 206 before another
+  turn. Ordinary NUL input refuses before staging. Existing definite-spawn
+  restoration, uncertain handoff and finite NUL-frame semantics remain intact;
+  a broader NUL-helper change was rejected by the existing regression packet
+  and removed rather than weakening that owner's held/unknown contract.
+- Focused contained packet: 449 passed, including real CLI qualification,
+  staged/explicit/typed-Resume controls, current/legacy setup selection, marked
+  PowerShell/Bash preparation, resume composition and Bridge exclusion. Touched
+  Python lint and the thirteen-plugin install contract passed.
+- Clean first-touch CLI configuration and the native parser were exercised.
+  Actual POSIX CLI, full mux/installed-host acceptance and live external venue
+  remain unqualified: this source-only run has no admitted native POSIX or
+  external target, and rollout/restart is explicitly forbidden. Bash/setup
+  framing controls are not native Linux evidence. Those gates remain open
+  under #9364; no installation-independent POSIX consumer is activated.
+- Review corrections keep snapshot validation and explicit replacement atomic
+  inside the existing record writer. Conditional creation staging requires
+  writer version 8; legacy calls retain the version-7 baseline and a guarded
+  call never reaches an unaware resident. The existing canonical direct writer
+  fallback retains ownership. Interleaving claim/New/Resume/absent-state controls
+  and a real legacy-rendezvous refusal pass. Nested PowerShell/Bash wrappers
+  now preserve intermediary exclusion recursively rather than selecting a
+  startup path that will refuse `gh copilot`. The changed packet passed 266
+  tests after both corrections.
+- The next compatibility review exposed gh-only normalized setup and UTF-16
+  custom setup. Selection now checks the existing explicit backend/session PATH
+  against the actual launch environment, retaining terminal fallback when only
+  an intermediary is available. Unsupported marker encoding is classified and
+  logged before staging rather than aborting a valid custom launcher. The
+  corresponding PowerShell/Bash and encoding packet passed 276 tests.
+- Qualification now consumes the actual execution-directory fields injected
+  by `bind_execution_directory`, plus setup switches and complete native option
+  values. Prepared-command controls use that real binder before qualification;
+  they preserve explicit-gh refusal and session-PATH selection under normal
+  and recovery launches without misreading an option-shaped native value.
+  The updated state/launch-argument packet passed 326 tests. The shared
+  execution-directory validation contract is unchanged.
+- Environment-priming scripts remain opaque even when an explicit backend is
+  configured: preparation neither executes them as a probe nor pins their later
+  lookup. Both setup forms retain their prior terminal fallback for that whole
+  class. The prepared normal/recovery/backend packet passed 24 cases, including
+  currently available standalone and explicitly selected executable controls.
+
+### 2026-10-28 - Proposal reviewed
+
+- #9365 merged after exact-head approval and required CI; the first-prompt
+  observation ownership correction preserves #7942 separately from Bridge.
+- Pulled the source worktree onto the reviewed proposal. The complete plan
+  remains active; implementation and isolated qualification follow without
+  installing anything or restarting a retained conversation.
 
 ### 2026-10-28 - Kickoff
 
