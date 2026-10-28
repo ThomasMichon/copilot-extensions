@@ -250,11 +250,11 @@ gate and effort-discovery rule.
 
 - **2026-10-28** - Extended intent for a voluntary efforts-owned agenda,
   optional cursor helpers and nested child-return continuity. Planned in
-  [effort-agenda-companion](../../../efforts/active/effort-agenda-companion/README.md)
+  [effort-agenda-companion](../../../efforts/2026/10/28%20effort-agenda-companion/README.md)
   and [#9377](https://github.com/ThomasMichon/copilot-extensions/issues/9377).
 - **2026-08-27** - Established the standing intent for explicit repository
   adoption, reviewed wave execution, effort-scoped completion, compact handoffs,
   bounded session-start recovery, and capability-aware cross-repository effort
   ownership. This intent was carved into
-  [`effort-driven-session-loops`](../../../efforts/active/effort-driven-session-loops/README.md)
+  [`effort-driven-session-loops`](../../../efforts/2026/08/28%20effort-driven-session-loops/README.md)
   and issue [#1255](https://github.com/ThomasMichon/copilot-extensions/issues/1255).

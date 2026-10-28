@@ -10,7 +10,6 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Effort Agenda Companion](active/effort-agenda-companion/README.md) | Active; implementation admitted, usable guidance then paired spike and helper decision | #9377; efforts-owned process aide, no dispatch integration; preserves #3581/#3582/#3583 owners |
 | [Native Startup Prompts](active/native-startup-prompts/README.md) | Active; ordinary cold-launch consumer #9374 merged, native POSIX/full-mux and installed qualification remain | #9364; preserves #7116/#8375/#7942/#8669/#5579 owners; no rollout or retained-session restart |
 | [Dispatch Reversible Action Controls](active/dispatch-reversible-action-controls/README.md) | Draft; action-level inhibition with live restoration, review before implementation | #9334; preserves #6820/#7694 maintenance ownership and existing lifecycle controls; no rollout |
 | [Cached Source Wheel Assembly](active/cached-source-wheel-assembly/README.md) | Active; proposal reviewed in #9291, content-bound reuse and native qualification remain | #9290; preserves #8873/#8949 verification, #5851 staging and #6937/#6941 release-lock owners |
@@ -150,6 +149,7 @@ that pattern to this repository.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Effort Agenda Companion](2026/10/28%20effort-agenda-companion/README.md) | Done; worktree-journal-local guidance and read-only next/check helper merged in #9421/#9429, paired spike and manual/Windows/Linux qualification recorded | #9377; normal promotion remains #3336, no installed rollout; #3581/#3582/#3583 ownership retained |
 | [Direct Instruction Propagation](2026/10/27%20direct-instruction-propagation/README.md) | Done; direct-copy publisher, reader and independent compatibility source merged in #9336/#9350, qualified without runtime instruction attestation | #9329; #9097 owner retained; normal promotion and separately authorized rollout |
 | [Machine Alias Compatibility and Locality](2026/10/26%20machine-alias-compatibility-and-locality/README.md) | Done; qualified and authorized native/guest installation, ordinary tuple acceptance, all 362 native records/current rosters and actual direct-login/SSH agent readiness verified; exact validation resources retired | #5674 · #6945 · #7057; reviewed #7097 integrity intake remains with authoritative-daemon; original source/resources and wider transport owners preserved |
 | [Repository PR Fleet Sweep](2026/10/25%20repository-pr-fleet-sweep/README.md) | Done; complete one-shot census, selected original-root observations and bounded publication repair merged in #8855 with approval, required CI and native Windows/Linux proof | #8802; source-only delivery, no runtime rollout; broader #7039 ownership retained |
