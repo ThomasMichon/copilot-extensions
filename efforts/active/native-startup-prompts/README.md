@@ -151,6 +151,14 @@ instead of weakening those guarantees.
 
 ## Journal
 
+### 2026-10-28 - Source focus returns to installer qualification
+
+- The owner returns to the existing #9290 cached-source-wheel effort after
+  the reviewed #9374 source merge. Remaining POSIX/full-mux and installed
+  qualification stays explicitly open under #9364 and its existing owners.
+  This is a focus transfer, not completion of this effort, installed acceptance
+  or permission to restart the retained client.
+
 ### 2026-10-28,08:26 UTC - Cold-launch source merged; remaining qualification retained
 
 - #9374 actually merged as `9dc3491fc527bbf5561a082341c2b12c44343087`.
