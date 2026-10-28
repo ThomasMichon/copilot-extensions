@@ -60,6 +60,12 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+
+from registry_root import resolve_registry_root
+
 # --- Tool classification (mirrors statelessness_guard) ------------------------
 WRITE_TOOLS = frozenset({
     "create", "edit", "str_replace", "str_replace_editor",
@@ -225,13 +231,15 @@ def _resolve(p: str, cwd: str) -> str:
 
 # --- Break-glass (persisted allow-edits.json) ---------------------------------
 
-def active_break_glass(repo_name: str, home: Path) -> bool:
+def active_break_glass(
+    repo_name: str, home: Path, *, registry_root: Path | None = None
+) -> bool:
     """Honor a persisted ``allow-edits`` grant for the repo (epoch-ms)."""
     if not repo_name:
         return False
     try:
         data = json.loads(
-            (home / ".agent-worktrees" / "allow-edits.json").read_text("utf-8"))
+            ((registry_root or home / ".agent-worktrees") / "allow-edits.json").read_text("utf-8"))
         g = (data.get("grants") or {}).get(repo_name)
         return bool(g) and float(g.get("expires_at_ms", 0)) > time.time() * 1000
     except (OSError, ValueError, TypeError, KeyError):
@@ -284,9 +292,11 @@ def _deny_reason(g: dict, detail: str) -> str:
 
 # --- Guarded-root discovery (via the related CLI, cached) ---------------------
 
-def _cache_path(root: str, home: Path) -> Path:
+def _cache_path(
+    root: str, home: Path, *, registry_root: Path | None = None
+) -> Path:
     h = hashlib.sha256(_canon(root).encode("utf-8", "replace")).hexdigest()[:16]
-    return home / ".agent-worktrees" / "cache" / f"guarded-roots.{h}.json"
+    return (registry_root or home / ".agent-worktrees") / "cache" / f"guarded-roots.{h}.json"
 
 
 def _read_cache(path: Path) -> list[dict] | None:
@@ -340,7 +350,9 @@ def _strip_nt_prefix(target: str) -> str:
     return target
 
 
-def _runtime_argv(root: Path | None = None) -> list[str] | None:
+def _runtime_argv(
+    root: Path | None = None, *, allow_legacy_fallback: bool = True
+) -> list[str] | None:
     """An argv prefix that runs the agent-worktrees CLI, WITHOUT the PATH binstubs.
 
     The binstubs are fragile for a subprocess (#1089): ``shutil.which`` prefers
@@ -373,6 +385,9 @@ def _runtime_argv(root: Path | None = None) -> list[str] | None:
     except Exception:
         pass
 
+    if not allow_legacy_fallback:
+        return None
+
     # Legacy .venv reparse target (read the link, never traverse it).
     try:
         target = _strip_nt_prefix(os.readlink(str(root / ".venv")))
@@ -392,10 +407,16 @@ _RUNTIME_UNRESOLVED_WARNED = False
 
 
 def _run_related(
-    args: list[str], cwd: str, deadline: float | None = None
+    args: list[str], cwd: str, deadline: float | None = None,
+    *, registry_root: Path | None = None,
 ) -> str | None:
     """Run ``agent-worktrees related <args>`` and return stdout, or None."""
-    argv = _runtime_argv()
+    argv = (
+        _runtime_argv(registry_root, allow_legacy_fallback=False)
+        if registry_root is not None else _runtime_argv()
+    )
+    if not argv and registry_root is not None:
+        raise ValueError("selected agent-worktrees runtime is unavailable")
     if not argv:
         global _RUNTIME_UNRESOLVED_WARNED
         if not _RUNTIME_UNRESOLVED_WARNED:
@@ -436,7 +457,8 @@ class _DiscoveryResult(NamedTuple):
 
 
 def _discover_guarded_roots(
-    root: str, deadline: float | None = None
+    root: str, deadline: float | None = None,
+    *, registry_root: Path | None = None,
 ) -> _DiscoveryResult:
     """Guarded related repos with a local checkout path, via the related CLI.
 
@@ -448,6 +470,8 @@ def _discover_guarded_roots(
     def _run(args: list[str]) -> str | None:
         if deadline is not None and time.monotonic() >= deadline:
             return None
+        if registry_root is not None:
+            return _run_related(args, root, deadline, registry_root=registry_root)
         if deadline is None:
             return _run_related(args, root)
         return _run_related(args, root, deadline)
@@ -510,14 +534,18 @@ def _discover_guarded_roots(
 
 
 def load_guarded_roots(
-    root: str, home: Path, deadline: float | None = None
+    root: str, home: Path, deadline: float | None = None,
+    *, registry_root: Path | None = None,
 ) -> list[dict]:
     """Cached :func:`_discover_guarded_roots` (short TTL sidecar)."""
-    cache = _cache_path(root, home)
+    cache = _cache_path(root, home, registry_root=registry_root)
     cached = _read_cache(cache)
     if cached is not None:
         return cached
-    result = _discover_guarded_roots(root, deadline)
+    result = (
+        _discover_guarded_roots(root, deadline, registry_root=registry_root)
+        if registry_root is not None else _discover_guarded_roots(root, deadline)
+    )
     if result.complete:
         _write_cache(cache, result.roots)
     return result.roots
@@ -631,12 +659,19 @@ def decide(payload: dict, *, env=None, home=None,
         if not cmd or not _WRITE_VERBS.search(cmd):
             return None  # identical to _shell_hit's topology-independent allow
 
+    selected_root = (
+        resolve_registry_root(legacy_root=home / ".agent-worktrees", environment=env)
+        if env.get("COPILOT_EXTENSIONS_CONTEXT", "").strip() else None
+    )
     cwd = str(payload.get("cwd") or "")
     if guarded_roots is None:
         root = find_repo_root(cwd)
         if root is None:
             return None
-        guarded = load_guarded_roots(str(root), home, deadline)
+        guarded = (
+            load_guarded_roots(str(root), home, deadline, registry_root=selected_root)
+            if selected_root is not None else load_guarded_roots(str(root), home, deadline)
+        )
     else:
         guarded = guarded_roots
     if not guarded:
@@ -646,7 +681,7 @@ def decide(payload: dict, *, env=None, home=None,
     if hit is None:
         return None
     # A live break-glass grant for the target repo lets the write through.
-    if active_break_glass(hit.get("name", ""), home):
+    if active_break_glass(hit.get("name", ""), home, registry_root=selected_root):
         return None
     return _hit_to_output(hit, mode)
 

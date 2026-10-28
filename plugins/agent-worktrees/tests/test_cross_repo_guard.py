@@ -568,3 +568,18 @@ def test_fallback_pre_reuses_cache_across_real_topology_subprocesses(
         assert decision["permissionDecision"] == "deny"
     assert len(counter.read_text().splitlines()) == 2
     assert not (target / "never-written.txt").exists()
+
+
+@pytest.mark.parametrize("complete", [False, True])
+def test_selected_runtime_never_uses_ambient_binstub(monkeypatch, tmp_path, complete):
+    root = tmp_path / "selected"
+    monkeypatch.setattr(
+        guard.shutil, "which",
+        lambda _name: pytest.fail("selected installation must not consult PATH"),
+    )
+    if complete:
+        python = _make_slot(root, "1.0.0")
+        expected = [str(python), "-m", "agent_worktrees"]
+    else:
+        expected = None
+    assert guard._runtime_argv(root, allow_legacy_fallback=False) == expected
