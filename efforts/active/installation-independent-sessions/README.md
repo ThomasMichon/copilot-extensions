@@ -544,6 +544,16 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   in the existing copied launch directory. It preserves inherited-group
   custody and refuses escaped stdout without claiming cross-group retirement.
   Fresh native qualification and accepted review are still required.
+- Candidate `936b49a87faadf20a02b58d29bf552466107e6e5` passed the native
+  Linux escaped-stdout packet (64 passed, 17 Windows-only skips) and the
+  Windows setup/Picker packet; macOS remained queued. Its unit packet passed
+  2,565 with 12 deselected in 100.093 seconds. Review then found caller
+  `noclobber` prevented writing the existing control file. A real regression
+  reproduced refusal after 11.18 seconds; the writer now uses `>|` only for
+  its own receipt, preserving caller options and suppressing raw path errors.
+  The local corrected packet passed 78 with five native-POSIX skips,
+  including actual control-write failure. This newer candidate still requires
+  its own native packet and accepted review.
 - Capability/rollback selection, canonical process-birth capture, backend
   custody and foreground terminal/signal behavior remain the next integration
   gates. Neither POSIX runtime waiter is removed, and no host installation,

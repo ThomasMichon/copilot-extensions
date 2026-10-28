@@ -701,7 +701,9 @@ helper in the existing launch-owned directory. The supervisor writes only
 `0` or `3` after its provider wait/group cleanup; the collector waits for that
 receipt, not arbitrary stdout EOF, after malformed input. Settlement has at
 most one second of additional grace. The call removes that exact control file;
-if the caller is lost, the existing launch-directory owner retains custody.
+its write uses `>|` only on this invocation-owned file so caller `noclobber`
+remains unchanged. Control-path failures use the generic refusal diagnostic.
+If the caller is lost, the existing launch-directory owner retains custody.
 No reply, argument or environment data is written there. Creating/removing the
 receipt adds two short-lived utility invocations; dot-sourcing creates nothing.
 As with the existing POSIX process owner, descendants must retain their inherited

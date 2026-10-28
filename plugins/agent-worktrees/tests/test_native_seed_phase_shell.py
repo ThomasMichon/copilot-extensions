@@ -264,6 +264,40 @@ if aw_native_seed_prepare "$2" --phase prepare --output-format nul; then exit 90
     assert not (root / "provider-pid").exists()
 
 
+def test_preparation_preserves_caller_noclobber(tmp_path: Path) -> None:
+    root = tmp_path / "runtime"
+    _slot(root, "A")
+    (root / "current-version").write_text("A", encoding="utf-8")
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+set -C
+aw_native_seed_prepare "$2" --phase prepare --output-format nul
+case $- in *C*) : ;; *) exit 91 ;; esac
+[[ "${AW_NATIVE_SEED_ARGV[0]}" == A ]]
+''', [root])
+    assert result.returncode == 0, result.stderr
+    assert not result.stdout and not result.stderr
+
+
+def test_control_write_error_is_bounded_and_does_not_expose_its_path(tmp_path: Path) -> None:
+    root = tmp_path / "runtime"
+    _slot(root, "A")
+    (root / "current-version").write_text("A", encoding="utf-8")
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+failed_control="$2/missing/private-control-path"
+mktemp() { printf '%s\n' "$failed_control"; }
+if aw_native_seed_prepare "$2" --phase prepare --output-format nul; then exit 90; fi
+[[ -z "$AW_NATIVE_SEED_OPERATION" && -z "${AW_NATIVE_SEED_ARGV[0]+x}" ]]
+''', [root])
+    assert result.returncode == 0, result.stderr
+    assert not result.stdout
+    assert result.stderr == "Native preparation is unconfirmed; no backend started.\n"
+    assert (root / "provider-status").read_text() == "0"
+
+
 @pytest.mark.parametrize("exit_code", [0, 7])
 def test_provider_cannot_forge_the_supervisors_per_call_completion(
     tmp_path: Path, exit_code: int,

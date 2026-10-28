@@ -128,7 +128,9 @@ plus settlement grace; the fixture separately observes the writer retired
 before ending. This is bounded I/O qualification, not cross-group custody.
 The copied test helper's private status-only control file must be removed after
 every returned call, and a missing writable control path refuses before the
-provider starts. Reader controls reject noncanonical deadline arithmetic and
+provider starts. Caller `noclobber` must survive a successful call; an actual
+control-write error must refuse within the bound without exposing its path.
+Reader controls reject noncanonical deadline arithmetic and
 require all fields and EOF to share one deadline.
 Synthetic shell providers do not qualify real bootstrap
 startup performance, capability discovery or native backend ownership.

@@ -60,7 +60,7 @@ _aw_native_seed_prepare_phase() {
     shift 3
     aw_native_seed_phase "$@" || phase_status=3
     # This file contains only status, never reply/argument/environment bytes.
-    printf '%s\n' "$phase_status" > "$_aw_native_seed_control" || return 3
+    printf '%s\n' "$phase_status" 2>/dev/null >| "$_aw_native_seed_control" || return 3
     [[ "$phase_status" == 0 ]] || return 3
     printf '%s\0' "$_aw_native_seed_completion"
 }
