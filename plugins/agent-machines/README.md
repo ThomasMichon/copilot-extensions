@@ -241,6 +241,11 @@ scripts/init.sh slot-validate --context /path/to/install.json --expected-marketp
 scripts/init.sh slot-cutover --context /path/to/install.json --expected-marketplace-id <marketplace-id> --expected-namespace-generation <n> --expected-install-generation <n> --expected-current-version <version>
 ```
 
+Cell/slot actions use their explicit receipt transaction without entering the
+legacy payload self-stage or creating its legacy runtime footprint. This
+exception is selected from the parsed action, not an inherited stage marker;
+ordinary legacy installation still stages a replaceable marketplace payload.
+
 `cell-provision` is reserved for the payload-local dispatcher and bootstrap
 reconciler after the shared resolver proves an already-active Agent Machines
 cell. It snapshots the owning payload, reserves the fixed-identity slot, builds

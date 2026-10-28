@@ -15,7 +15,7 @@ from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from agent_procutil._windows_parent_job import _ParentJobOffer
+    from agent_procutil._windows_parent_job import ParentJobOffer
 
 
 def _callback_code(callback: Callable[[], int]) -> int:
@@ -41,7 +41,7 @@ def _acknowledge(descriptor: int, nonce: str) -> None:
             raise RuntimeError("original caller did not acknowledge lifetime custody")
 
 
-def _windows_handoff(descriptor: int, nonce: str, offer: _ParentJobOffer) -> None:
+def _windows_handoff(descriptor: int, nonce: str, offer: ParentJobOffer) -> None:
     try:
         message = bytearray()
         for _ in range(len(nonce) + 7):
@@ -64,7 +64,7 @@ def _windows_handoff(descriptor: int, nonce: str, offer: _ParentJobOffer) -> Non
         if offer.parent:
             # EOF is not proof of non-adoption. The caller could already have
             # closed/reused its handle, so release only our pinned process ref.
-            offer._release_parent()
+            offer.abandon()
 
 
 def _posix_watch(descriptor: int, ready: int, group: int, closed: tuple[int, ...]) -> None:
@@ -194,12 +194,12 @@ def serve(
     if os.name == "nt":
         import msvcrt
 
-        from agent_procutil._windows_parent_job import _offer_lifetime_to_pipe_server
+        from agent_procutil._windows_parent_job import offer_lifetime_to_pipe_server
 
         # Until the complete request is delivered, cancellation cannot leave a
         # remote handle: the shell has not permitted creating an offer yet.
         _acknowledge(descriptor, "offer:" + nonce)
-        offer = _offer_lifetime_to_pipe_server(
+        offer = offer_lifetime_to_pipe_server(
             parent_pid=owner_pid, parent_birth=owner_birth,
             pipe_handle=msvcrt.get_osfhandle(descriptor),
         )

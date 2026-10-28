@@ -263,7 +263,9 @@ Each worker sets `--rootdir` to the verified SDK tree while keeping its empty
 configuration file in the output directory. Without that explicit root,
 pytest can assign an empty filesystem node ID to an individually selected
 external file and emit an empty JUnit `classname`. The strict source-identity
-check still rejects empty or unrelated class names; it is not relaxed to fit
+check requires the exact dotted classname derived from the source path under
+that SDK root, including its complete prefix. Empty, missing or suffix-matching
+unrelated class names are refused; the gate is not relaxed to fit
 a failed artifact. The separate cold metadata regression reproduces that
 failure and verifies the explicit-root form using synthetic, actor-free cases.
 It preserves the original 20-ms poll, 0.5-second coverage/delivery

@@ -481,12 +481,11 @@ if [[ "$ACTION" == "slot-provision" ||
       "$ACTION" == "slot-cutover" ||
       "$ACTION" == "cell-provision" ]]; then
     cd "$HOME"
-    if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ]]; then
-        export COPILOT_PLUGIN_INSTALL_STAGED=cell-slot-action
-        __cell_slot_direct=1
-    fi
+    __cell_slot_direct=1
 fi
 
+# The common guard deliberately distrusts inherited stage markers.
+if [[ "$__cell_slot_direct" -ne 1 ]]; then
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
@@ -626,8 +625,6 @@ INSTALL_WATCHDOG
     esac
 fi
 # === end install-contract:v4 self-stage ===
-if [[ "$__cell_slot_direct" -eq 1 ]]; then
-    unset COPILOT_PLUGIN_INSTALL_STAGED
 fi
 
 # === install-contract:v4 smoke seam (test-only) -- keep byte-identical ===

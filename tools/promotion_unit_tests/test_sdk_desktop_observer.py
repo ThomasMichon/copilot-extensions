@@ -828,6 +828,7 @@ def test_native_offer_fixture_names_original_pipe_owner_not_interpreter_launcher
 
 @pytest.mark.parametrize("change", [
     "none", "failure", "error", "skipped", "missing", "duplicate", "other", "empty-classname",
+    "wrong-prefix", "missing-classname",
 ])
 def test_native_junit_requires_all_44_actual_case_results(tmp_path, change):
     sdk = tmp_path / "sdk"
@@ -836,7 +837,7 @@ def test_native_junit_requires_all_44_actual_case_results(tmp_path, change):
         suite = ET.Element("testsuite")
         for node in nodes:
             ET.SubElement(suite, "testcase", {
-                "classname": "sdk.native.test_shell_caller_owned_native",
+                "classname": sys.modules["sdk_visibility_cases"].NATIVE_CLASSNAME,
                 "name": node.partition("::")[2],
             })
         ET.ElementTree(suite).write(tmp_path / f"native-{index + 1:02}.xml")
@@ -852,6 +853,10 @@ def test_native_junit_requires_all_44_actual_case_results(tmp_path, change):
         suite[0].set("name", "test_synthetic_publication_control")
     elif change == "empty-classname":
         suite[0].set("classname", "")
+    elif change == "wrong-prefix":
+        suite[0].set("classname", "unrelated.test_shell_caller_owned_native")
+    elif change == "missing-classname":
+        del suite[0].attrib["classname"]
     ET.ElementTree(suite).write(path)
     if change == "none":
         assert runner.verify_native_junit(tmp_path, sdk, packets)["case_count"] == 44

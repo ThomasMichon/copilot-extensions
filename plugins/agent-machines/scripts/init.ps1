@@ -190,10 +190,6 @@ if ($cellSlotAction) {
     Set-Location -LiteralPath $env:USERPROFILE
     [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
 }
-$cellSlotDirect = $cellSlotAction -and -not $env:COPILOT_PLUGIN_INSTALL_STAGED
-if ($cellSlotDirect) {
-    $env:COPILOT_PLUGIN_INSTALL_STAGED = 'cell-slot-action'
-}
 
 # Review finding (round 10): `stamp-binstub` (#3303, full-harness-startup-
 # reliability) exists SPECIFICALLY so bootstrap-check.ps1's synchronous
@@ -207,10 +203,10 @@ if ($cellSlotDirect) {
 # Invoke-StampBinstubOnly only ever reads/writes via $probePayload/
 # $InstallDir (never $PluginDir, since the round-7 fix), so it needs no
 # staged copy to run correctly.
-if ($Action -eq 'stamp-binstub' -and -not $env:COPILOT_PLUGIN_INSTALL_STAGED) {
-    $env:COPILOT_PLUGIN_INSTALL_STAGED = 'stamp-binstub-fast-path'
-}
+$skipLegacyStage = $cellSlotAction -or $Action -eq 'stamp-binstub'
 
+# The common guard deliberately distrusts inherited stage markers.
+if (-not $skipLegacyStage) {
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
@@ -342,7 +338,7 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
     }
 }
 # === end install-contract:v4 self-stage ===
-if ($cellSlotDirect) { Remove-Item Env:COPILOT_PLUGIN_INSTALL_STAGED }
+}
 
 # === install-contract:v4 smoke seam (test-only) -- keep byte-identical ===
 # #935 install-flow test hook. When COPILOT_PLUGIN_INSTALL_SMOKE is set, prove

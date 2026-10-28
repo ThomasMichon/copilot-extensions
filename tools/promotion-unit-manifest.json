@@ -2982,7 +2982,9 @@
         "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_native_junit_requires_all_44_actual_case_results[duplicate]",
         "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_native_junit_requires_all_44_actual_case_results[other]",
         "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_native_junit_requires_all_44_actual_case_results[empty-classname]",
-        "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_unbounded_or_incomplete_native_packet_matrices_are_refused[missing-startup-mode]"
+        "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_unbounded_or_incomplete_native_packet_matrices_are_refused[missing-startup-mode]",
+        "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_native_junit_requires_all_44_actual_case_results[wrong-prefix]",
+        "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_native_junit_requires_all_44_actual_case_results[missing-classname]"
     ],
     "sources": {
         "tools/core_python_artifacts.py": "cfeae35bfee4537022e1026ffae498b61b23508426a676d9dc09ca8ab8d4b4a0",
@@ -3323,14 +3325,14 @@
         "tools/promotion_unit_tests/test_local_launch_boundary.py": "0095d29f3b8dacbac3265b32130ca6019a13b020a68851715a0c84d69bfa7076",
         "libs/installation-context/_installation_context_powershell.py": "f9950453c5475c84d3fe186e1d63235b665d2b0c8307f17d8ee6216ea25a96d7",
         "tools/promotion_unit_tests/test_powershell_adapter.py": "3d56cefc1d86c4e5e5fb4f749a0265099f678cde2a31a6e7e8a77234972afd61",
-        "libs/agent-procutil/src/agent_procutil/_shell_caller_owned.py": "b8a93883bac3abcf1c521cfb193d7ca11fca71d967a1e03e1de161cb42e25482",
-        "libs/agent-procutil/src/agent_procutil/_windows_parent_job.py": "5d4f9ce182a3972de278ecf998c058b905606a1c144b4bff579577d74d743ef1",
-        "tools/promotion_unit_tests/test_shell_caller_owned.py": "6568563c7bc6909cfb49be9671c28551651d2505182e055b253502537964785e",
+        "libs/agent-procutil/src/agent_procutil/_shell_caller_owned.py": "ac7a083c4bcfd41fc9c657c367b4717837ae5fecdd57bff1dd215ce4253873b1",
+        "libs/agent-procutil/src/agent_procutil/_windows_parent_job.py": "d59e628dae3016c67df4d0e691407cc9ca3e1f77df576a36b10ca17d7d658277",
+        "tools/promotion_unit_tests/test_shell_caller_owned.py": "ee1732b62513cb81f7934f8e22750e2cf3b4a3a7aadb50ea587c008fa3815d14",
         "libs/agent-procutil/tests/sdk_desktop_observer.py": "3e60d161237ad4ba2bee2ff5f67c9aafbacfd916cfb9bb1fd2c2e4fd798063a2",
         "libs/agent-procutil/tests/sdk_visibility.py": "1dd963ecc72096b8a9b91d1f3089dd4b9301ca0ee7e2ba89a71a3cfcb30ca901",
-        "tools/promotion_unit_tests/test_sdk_desktop_observer.py": "5bc167aa59893ce9f46d6544fb13b113a50bf32d849b275e04dac1acfd55a747",
+        "tools/promotion_unit_tests/test_sdk_desktop_observer.py": "5a5edd274c26569cd817fcc5a792ffc0874005d7f4e4087bf9f685b0d8e8be0d",
         "libs/agent-procutil/tests/sdk_visibility_sources.py": "202d284dd0d3e5e592c8a449ffd23b7b413a58083d657d5e6643f6d60a2c33aa",
-        "libs/agent-procutil/tests/sdk_visibility_cases.py": "ec83609baa925146faabbec87e64529a49a02821295de507b370bcf621901bb5",
+        "libs/agent-procutil/tests/sdk_visibility_cases.py": "88e26d52424879491a8d622fcb043c542e43fe5a8f3f05f3aa25afc5ce109444",
         "libs/installation-context/_installation_context_worker.py": "6c10396cb0555736155b25bf3f52d507c9e36b189eb06a175d0a27fc778f6c8d",
         "libs/agent-procutil/tests/test_shell_caller_owned_native.py": "89e0e3bc4da7c2779a13d04d151caa3e52735d938879062d8074de493d17489d"
     },

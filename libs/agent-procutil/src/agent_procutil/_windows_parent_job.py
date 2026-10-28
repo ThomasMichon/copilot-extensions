@@ -28,7 +28,14 @@ class ParentJob:
 
 
 @dataclass
-class _ParentJobOffer:
+class ParentJobOffer:
+    """Pending custody through the same birth-pinned parent process handle.
+
+    Publish ``receipt`` and wait for an authenticated caller decision before
+    application work. Call ``accept`` only after adoption, ``abort`` only after
+    an explicit unadopted declaration, or ``abandon`` when custody is unknown.
+    A failed or partial publication never proves that the caller did not adopt.
+    """
     receipt: ParentJob
     kernel: Any
     parent: int
@@ -51,6 +58,10 @@ class _ParentJobOffer:
             _check(self.kernel.CloseHandle(recovered))
         finally:
             _check(self.kernel.CloseHandle(parent))
+
+    def abandon(self) -> None:
+        """Release only the process reference; remote Job custody is unknown."""
+        self._release_parent()
 
     def _release_parent(self) -> None:
         if not self.parent:
@@ -113,25 +124,20 @@ def transfer_lifetime_to_parent(*, parent_pid: int, parent_birth: str) -> Parent
     return _transfer(parent_pid=parent_pid, parent_birth=parent_birth, pipe_handle=None)
 
 
-def transfer_lifetime_to_pipe_server(
+def offer_lifetime_to_pipe_server(
     *, parent_pid: int, parent_birth: str, pipe_handle: int,
-) -> ParentJob:
+) -> ParentJobOffer:
     """Bind to the original caller that created an inherited input pipe.
 
     Unlike the direct-parent entry point, this permits an ordinary interpreter
     launcher between caller and worker. The kernel's pipe-server identity and
     the same pinned process birth establish the owner, not a numeric ancestry
-    walk. The caller must adopt the receipt and acknowledge it over that pipe
-    before application work. This does not admit an interpreter or source.
+    walk. The retained offer must be settled after receipt publication using
+    its accept/abort/abandon protocol, before application work. In particular,
+    publication failure requires an explicit caller decision or abandonment,
+    never reopening a parent PID or blindly reclaiming a remote numeric handle.
+    This does not admit an interpreter or source.
     """
-    if type(pipe_handle) is not int or pipe_handle <= 0:
-        raise ValueError("original caller requires an inherited pipe handle")
-    return _transfer(parent_pid=parent_pid, parent_birth=parent_birth, pipe_handle=pipe_handle)
-
-
-def _offer_lifetime_to_pipe_server(
-    *, parent_pid: int, parent_birth: str, pipe_handle: int,
-) -> _ParentJobOffer:
     if type(pipe_handle) is not int or pipe_handle <= 0:
         raise ValueError("original caller requires an inherited pipe handle")
     return _transfer(
@@ -142,7 +148,7 @@ def _offer_lifetime_to_pipe_server(
 @overload
 def _transfer(
     *, parent_pid: int, parent_birth: str, pipe_handle: int | None, offer: Literal[True],
-) -> _ParentJobOffer: ...
+) -> ParentJobOffer: ...
 
 
 @overload
@@ -153,7 +159,7 @@ def _transfer(
 
 def _transfer(
     *, parent_pid: int, parent_birth: str, pipe_handle: int | None, offer: bool = False,
-) -> ParentJob | _ParentJobOffer:
+) -> ParentJob | ParentJobOffer:
     global _transferred
     if not _is_windows():
         raise OSError("parent-owned Job transfer requires native Windows")
@@ -221,7 +227,7 @@ def _transfer(
         job = None
         receipt = ParentJob(parent_pid, parent_birth, os.getpid(), worker_birth, remote.value)
         if offer:
-            pending = _ParentJobOffer(receipt, kernel, parent)
+            pending = ParentJobOffer(receipt, kernel, parent)
             offered = True
             return pending
         return receipt

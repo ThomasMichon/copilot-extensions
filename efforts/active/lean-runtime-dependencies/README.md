@@ -359,6 +359,67 @@ transfer without acceptance by a named tracked objective.
 
 ## Journal
 
+### 2026-10-28 - Complete the full installation-context fixture repair
+
+- The remaining snapshot packet now exhausts all 377 distinct cases:
+  356 pass, 21 existing exhaustive-adapter opt-in cases skip, and none fail.
+  All 51 previously failing cases pass, including the two new real-host
+  no-legacy-stage controls. Actual JUnit identities and outcomes were
+  independently reconciled, not inferred from the worker's summary.
+- Combined with the already-exhausted other 24 files, the full library
+  inventory is 1,423 passed and 45 explicit capability/opt-in skips out of
+  1,468 cases. No prior failure became a skip or disappeared from inventory.
+  Every packet stayed within its original bounded supervisor and settled.
+- Fixtures now include current source-runtime assertions, canonical engine
+  layout, complete paired helpers and attached construction ownership.
+  Marker-write failure has an explicit execution witness, and the actual
+  production completion guard must prevent the activation witness.
+  Refusal, retryability, publication identity and primary cleanup errors
+  retain their behavioral checks.
+- These are Linux/source-fixture results, not current native Windows
+  acceptance. Fresh source-bound publication, PR review and the reserved
+  single-attempt Windows qualification remain open before SDK merge.
+
+### 2026-10-28 - Exhaust the exposed suite and restore cell-slot isolation
+
+- The full installation-context inventory exhausted all 25 files in bounded
+  serial packets: 1,370 passed, 45 explicit skips and 51 snapshot-provenance
+  failures. Other files' obsolete adapter fixtures are repaired; no failed
+  case is being hidden behind a partial whole-suite run or a platform skip.
+- Actual cell/slot calls exposed a source defect: the intended no-legacy-stage
+  fast path used an environment marker that the common self-stage guard
+  correctly distrusts for replaceable payloads. Consequently those calls
+  staged into legacy state and asserted the wrong staged payload identity.
+- Both adapters now select that existing fast path from the parsed action,
+  outside the unchanged common staging block. Ordinary installer staging and
+  its anti-environment-bypass guard remain intact. Two real-host regressions
+  reproduce the old provenance mismatch, then verify slot provision/validation
+  without legacy footprint or activation. The install contract passes.
+- Remaining snapshot fixture dependencies and canonical engine layouts are
+  still under repair. Full-suite, current Windows, PR merge and aggregate
+  acceptance remain open; the reserved native attempt is still unspent.
+
+### 2026-10-28 - Keep public offer custody and exact qualification identity
+
+- Review found that the newly exposed pipe-server transfer could discard its
+  pinned parent reference before receipt delivery. The unreleased immediate
+  entry point is replaced by `offer_lifetime_to_pipe_server` returning a public
+  `ParentJobOffer`. Acceptance, explicit unadopted abort and unknown abandonment
+  retain their one-shot semantics through the same original parent. The
+  pre-existing direct-parent primitive remains unchanged.
+- The native JUnit gate now requires the exact source-derived classname,
+  including its complete prefix. Missing and suffix-matching unrelated
+  classnames are refused. Actual cold pytest metadata confirms the exact
+  classname rather than only testing a synthetic suffix.
+- The focused offer/identity/mock-native/cold-source packet passes 238 cases.
+  Stale full-suite fixtures are being migrated from removed PowerShell/C#
+  internals to the shared Python owner through the actual thin adapter.
+  The migrated focused fixtures pass, but two additional bootstrap/diagnostic
+  failures remain under diagnosis and the full suite is not yet qualified.
+- No fresh Windows producer or visible attempt has started. The reserved
+  single-run grant and original containment limits remain unchanged; current
+  source and producer review must clear before it is armed.
+
 ### 2026-10-28 - Cover actual adapter receipt-parse failure
 
 - Independent source scrutiny distinguished missing-receipt EOF and malformed

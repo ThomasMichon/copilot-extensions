@@ -157,7 +157,7 @@ def test_stock_bash_management_retains_modern_shell_floor(tmp_path: Path) -> Non
 def test_native_policy_decision_matches_reference(
     tmp_path: Path, runner: str, case: str,
 ) -> None:
-    module = _load_module()
+    module = _load_module(native_environment=True)
     layout = _cell_layout(tmp_path)
     current = _environment()
     profile = Path(current["homeRealPath"])
@@ -268,7 +268,7 @@ def test_native_policy_decision_matches_reference(
 
 @pytest.mark.parametrize("runner", ADMISSION_RUNNERS)
 def test_namespaced_adapter_policy_uses_governed_actual_root(tmp_path: Path, runner: str) -> None:
-    module = _load_module()
+    module = _load_module(native_environment=True)
     layout = _cell_layout(tmp_path)
     current = _environment()
     profile = Path(current["homeRealPath"])
@@ -308,7 +308,7 @@ def test_inaccessible_policy_cannot_become_missing(
 ) -> None:
     if os.geteuid() == 0:
         pytest.skip("An OS superuser can read the restricted fixture")
-    module = _load_module()
+    module = _load_module(native_environment=True)
     layout = _cell_layout(tmp_path)
     legacy = tmp_path / "runtime"
     path = legacy / module.RUNTIME_DEPLOYMENT_FILE

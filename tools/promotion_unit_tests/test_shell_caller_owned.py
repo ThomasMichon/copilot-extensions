@@ -226,10 +226,10 @@ def windows(monkeypatch):
 
         offer.accept = lambda: settle("accept")
         offer.abort = lambda: settle("abort")
-        offer._release_parent = lambda: settle("unknown")
+        offer.abandon = lambda: settle("unknown")
         return offer
 
-    monkeypatch.setattr(parent_job, "_offer_lifetime_to_pipe_server", transfer)
+    monkeypatch.setattr(parent_job, "offer_lifetime_to_pipe_server", transfer)
     return SimpleNamespace(calls=calls, incoming=incoming)
 
 
@@ -291,7 +291,7 @@ def test_native_transfer_failure_never_admits_or_starts_application(windows, mon
     def failed(**kwargs):
         raise OSError("controlled Job transfer failure")
 
-    monkeypatch.setattr(parent_job, "_offer_lifetime_to_pipe_server", failed)
+    monkeypatch.setattr(parent_job, "offer_lifetime_to_pipe_server", failed)
     with pytest.raises(OSError, match="controlled Job transfer"):
         owner.serve(lambda: pytest.fail("failed Job reached application"), owner_pid=12,
                     owner_birth="windows:13", nonce=NONCE)
@@ -338,11 +338,11 @@ def test_adoption_process_reference_close_failure_never_starts_application(
         offer = SimpleNamespace(
             receipt=parent_job.ParentJob(12, "windows:13", 14, "windows:15", 303),
             parent=101, accept=accept,
-            _release_parent=lambda: pytest.fail("must not retry a possibly reused handle"),
+            abandon=lambda: pytest.fail("must not retry a possibly reused handle"),
         )
         return offer
 
-    monkeypatch.setattr(parent_job, "_offer_lifetime_to_pipe_server", failed_offer)
+    monkeypatch.setattr(parent_job, "offer_lifetime_to_pipe_server", failed_offer)
     with pytest.raises(OSError, match="pinned-parent close failure"):
         owner.serve(lambda: pytest.fail("failed handoff ran application"), owner_pid=12,
                     owner_birth="windows:13", nonce=NONCE)
@@ -365,7 +365,7 @@ def test_offer_settles_only_through_the_original_pinned_parent(
             "close", handle.value if hasattr(handle, "value") else handle,
         )) or 1,
     )
-    offer = parent_job._ParentJobOffer(
+    offer = parent_job.ParentJobOffer(
         parent_job.ParentJob(12, "windows:13", 14, "windows:15", 303), kernel, 101,
     )
     if decision == "abort":
@@ -377,7 +377,7 @@ def test_offer_settles_only_through_the_original_pinned_parent(
         if decision == "accept":
             offer.accept()
         else:
-            offer._release_parent()
+            offer.abandon()
         assert calls == [("close", 101)]
     assert offer.parent == 0
     with pytest.raises(RuntimeError, match="already settled"):
@@ -401,7 +401,7 @@ def test_offer_cleanup_failure_never_retries_a_remote_numeric_handle(
         calls.append(name)
         return failure != name
 
-    offer = parent_job._ParentJobOffer(
+    offer = parent_job.ParentJobOffer(
         parent_job.ParentJob(12, "windows:13", 14, "windows:15", 303),
         SimpleNamespace(GetCurrentProcess=lambda: -1, DuplicateHandle=duplicate, CloseHandle=close),
         101,
@@ -456,8 +456,8 @@ def test_real_pipe_transfer_core_retains_one_original_owner(monkeypatch, failure
     monkeypatch.setattr(parent_job.ctypes, "WinError", lambda *args: OSError("native failure"), raising=False)
     monkeypatch.setattr(parent_job.ctypes, "get_last_error", lambda: 5, raising=False)
     transfer = (
-        parent_job._offer_lifetime_to_pipe_server if offered
-        else parent_job.transfer_lifetime_to_pipe_server
+        parent_job.offer_lifetime_to_pipe_server if offered
+        else parent_job._transfer
     )
     if failure:
         with pytest.raises((ProcessLookupError, OSError)):

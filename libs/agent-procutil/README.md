@@ -70,12 +70,19 @@ whole-descendant settlement and observation of the original helper's exit.
 A receipt is not a settlement witness. Transfer failure is terminal for the
 sacrificial helper; it must never continue application work.
 
-`transfer_lifetime_to_pipe_server` is a distinct entry point for a trusted
+`offer_lifetime_to_pipe_server` is a distinct entry point for a trusted
 interpreter launcher between the shell and Python. It retains the same
 birth-pinned process handle and strict Job transfer, but requires the kernel's
 inherited-pipe server PID to name that original caller. It does not weaken the
-direct-parent API or walk/reopen numeric ancestry. The caller adopts the
-returned handle and pins the actual worker's birth before acknowledging work.
+direct-parent API or walk/reopen numeric ancestry. It returns a `ParentJobOffer`,
+not an immediate transfer that discards its process reference before delivery.
+Publish `offer.receipt`, then call `accept()` only after the caller adopts the
+handle and acknowledges its actual worker's birth. Only an explicit unadopted
+declaration permits `abort()` to reclaim the offer through that retained parent.
+On failed/partial publication or unknown adoption, keep awaiting the caller's
+decision or call `abandon()` to release only the process reference and report
+unknown custody. Never infer non-adoption from an I/O failure. Every decision
+is one-shot, including a failed close; the direct-parent primitive is unchanged.
 
 The private `_shell_caller_owned.serve` adapter supplies this startup receipt,
 acknowledgement and correlated completion framing for synchronous shell

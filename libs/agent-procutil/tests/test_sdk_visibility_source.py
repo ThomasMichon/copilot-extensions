@@ -199,7 +199,7 @@ if mode == 'old-root':
     else:
         raise AssertionError('Strict source identity unexpectedly accepted an empty classname')
 else:
-    assert all(case.attrib['classname'].endswith('test_shell_caller_owned_native') for case in cases)
+    assert all(case.attrib['classname'] == contract.NATIVE_CLASSNAME for case in cases)
     assert contract.verify_packet_junit(xml, nodes)['case_count'] == 16
 print(json.dumps({'mode': mode, 'case_count': 16, 'pytest_exit': code}), flush=True)
 """

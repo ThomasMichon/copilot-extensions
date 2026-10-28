@@ -12,6 +12,7 @@ from sdk_desktop_observer import ObservationBlocked
 
 
 NATIVE_TEST = "libs/agent-procutil/tests/test_shell_caller_owned_native.py"
+NATIVE_CLASSNAME = NATIVE_TEST.removesuffix(".py").replace("/", ".")
 FUNCTION = "test_sdk_scope_retires_before_observer_cleanup"
 CASE = re.compile(
     re.escape(FUNCTION)
@@ -100,12 +101,12 @@ def native_arguments(sdk: Path, output: Path, nodes: list[str], packet: int) -> 
 def verify_packet_junit(path: Path, nodes: list[str]) -> dict:
     tree = ET.parse(path)
     cases = tree.findall(".//testcase")
-    names = [(case.attrib["classname"], case.attrib["name"]) for case in cases]
+    names = [(case.attrib.get("classname"), case.attrib.get("name")) for case in cases]
     expected = {node.partition("::")[2] for node in nodes}
     if (
         not 1 <= len(nodes) <= 16 or len(expected) != len(nodes) or len(cases) != len(nodes)
         or len(set(names)) != len(nodes) or {name for _, name in names} != expected
-        or any(not classname.endswith("test_shell_caller_owned_native") for classname, _ in names)
+        or any(classname != NATIVE_CLASSNAME for classname, _ in names)
         or tree.findall(".//failure") or tree.findall(".//error") or tree.findall(".//skipped")
     ):
         raise ObservationBlocked("actual native JUnit differs from its exact literal packet")

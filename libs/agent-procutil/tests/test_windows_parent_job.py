@@ -187,11 +187,15 @@ def test_pipe_server_can_own_a_worker_beyond_an_interpreter_launcher(
         return native.kernel.result("pipe-server", handle)
 
     monkeypatch.setattr(native.kernel, "GetNamedPipeServerProcessId", server)
-    receipt = owner.transfer_lifetime_to_pipe_server(
+    offer = owner.offer_lifetime_to_pipe_server(
         parent_pid=original, parent_birth="windows:12", pipe_handle=505,
     )
+    receipt = offer.receipt
     assert receipt.parent_pid == original
     assert receipt.parent_handle == 303
+    assert offer.parent == 101
+    assert native.kernel.calls[-1][0] == "close-202"
+    offer.accept()
     names = [call[0] for call in native.kernel.calls]
     assert names[:3] == ["open-parent", "pipe-server", "wait-parent"]
     assert names[-3:] == ["assign-self", "close-202", "close-101"]
@@ -202,7 +206,7 @@ def test_invalid_pipe_handle_never_reaches_native_access(
     native: SimpleNamespace, handle: object,
 ) -> None:
     with pytest.raises(ValueError, match="inherited pipe handle"):
-        owner.transfer_lifetime_to_pipe_server(
+        owner.offer_lifetime_to_pipe_server(
             parent_pid=native.pid, parent_birth="windows:12", pipe_handle=handle,
         )
     assert native.kernel.calls == []
@@ -219,7 +223,7 @@ def test_unconfirmed_pipe_server_refuses_before_creating_a_job(
     monkeypatch.setattr(native.kernel, "GetNamedPipeServerProcessId", server)
     native.kernel.fail = failure
     with pytest.raises((ProcessLookupError, OSError)):
-        owner.transfer_lifetime_to_pipe_server(
+        owner.offer_lifetime_to_pipe_server(
             parent_pid=native.pid, parent_birth="windows:12", pipe_handle=505,
         )
     assert [call[0] for call in native.kernel.calls] == [
