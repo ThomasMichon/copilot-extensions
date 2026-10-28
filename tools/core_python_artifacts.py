@@ -133,12 +133,15 @@ def source_closure(root: Path, builder) -> CoreSources:
                 sources = data.get("tool", {}).get("uv", {}).get("sources", {})
                 mappings = [value for key, value in sources.items() if canonicalize_name(key) == dependency]
                 if dependency not in catalog:
-                    if any(
-                        isinstance(entry, dict) and "path" in entry
-                        for mapping in mappings
-                        for entry in (mapping if isinstance(mapping, list) else [mapping])
-                    ):
-                        raise PromotionArtifactError(f"{dependency}: local dependency has no canonical source")
+                    from seasoned_uv import _bundled_dbus_next
+                    for mapping in mappings:
+                        for entry in (mapping if isinstance(mapping, list) else [mapping]):
+                            if isinstance(entry, dict) and "path" in entry:
+                                path = entry["path"]
+                                if not isinstance(path, str) or not _bundled_dbus_next(
+                                    name, dependency, contained_path(directory / path, root),
+                                ):
+                                    raise PromotionArtifactError(f"{dependency}: local dependency has no canonical source")
                     continue
                 if requirement.url or not requirement.specifier.contains(
                     Version(catalog[dependency][1]["project"]["version"]), prereleases=True,

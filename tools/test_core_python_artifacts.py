@@ -36,6 +36,44 @@ def _fixture(root):
     return source
 
 
+@pytest.mark.parametrize("mapping", ["direct", "conditional", "bytes", "project", "dependency", "filename"])
+def test_core_preserves_only_the_existing_exact_manager_wheel_exception(tmp_path, mapping):
+    _fixture(tmp_path)
+    repository = Path(__file__).resolve().parents[1]
+    manager = core._read(repository / "worktree-manager" / "pyproject.toml")
+    requirement = next(value for value in manager["project"]["dependencies"] if value.startswith("dbus-next"))
+    relative = manager["tool"]["uv"]["sources"]["dbus-next"]["path"]
+    directory = tmp_path / "plugins" / "agent-sample"
+    wheel = directory / relative
+    wheel.parent.mkdir()
+    wheel.write_bytes((repository / "worktree-manager" / relative).read_bytes())
+    if mapping == "bytes":
+        wheel.write_bytes(b"changed")
+    if mapping == "filename":
+        renamed = wheel.with_name("another.whl")
+        wheel.rename(renamed)
+        relative = "vendor/another.whl"
+    name = "other-project" if mapping == "project" else manager["project"]["name"]
+    dependency = "other-dependency" if mapping == "dependency" else "dbus-next"
+    source = "{path=" + json.dumps(relative) + "}"
+    if mapping == "conditional":
+        source = "[" + source[:-1] + ',marker="sys_platform == \'linux\'"}]'
+    (directory / "pyproject.toml").write_text(
+        '[build-system]\nrequires=["setuptools>=68"]\nbuild-backend="setuptools.build_meta"\n'
+        '[project]\nname=' + json.dumps(name) + '\nversion="1.0"\ndependencies='
+        + json.dumps([requirement.replace("dbus-next", dependency)])
+        + '\n[tool.uv.sources]\n' + dependency + "=" + source + "\n"
+    )
+    if mapping not in ("direct", "conditional"):
+        with pytest.raises(artifacts.PromotionArtifactError, match="canonical"):
+            core.source_closure(tmp_path, builder)
+        return
+    closure = core.source_closure(tmp_path, builder)
+    assert dependency not in {entry["name"] for entry in closure.selection["projects"]}
+    assert wheel not in closure.resources
+    assert any(edge["requirement"] == str(core.Requirement(requirement)) for edge in closure.selection["edges"])
+
+
 def _build(root, monkeypatch):
     _fixture(root)
     monkeypatch.setattr(builder, "REPO", root)

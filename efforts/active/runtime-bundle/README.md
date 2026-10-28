@@ -427,3 +427,14 @@ choose the wheel path, not a reason to relax source identity.
   42 native wheel records and the unchanged selected payload identity in
   32.391 seconds. The parser tooling used the existing governed source route;
   neither live runtime state nor dependency source authority changed.
+- The new missing-canonical refusal also exposed Manager's existing qualified
+  local `dbus_next` wheel exception. Two controls using its actual manifest and
+  wheel bytes reproduce the regression; the closure now defers that exact
+  decision to `_bundled_dbus_next`, with contained paths. Altered bytes,
+  distribution, project and filename remain refused. No general local-wheel
+  exemption or third-party artifact inclusion is added. Two bounded owner
+  delegation controls join the packet (27 core cases total); the combined
+  core/profile controls pass 100 cases with one platform skip. Real repository
+  closure selection again produces the same 42 canonical projects and payload
+  identity, including on the Windows host where the dependency's Linux marker
+  is false.

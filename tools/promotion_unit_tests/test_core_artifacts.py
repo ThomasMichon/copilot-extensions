@@ -381,3 +381,35 @@ def test_first_party_extras_match_canonical_declarations(tmp_path, extra):
         "helper",
         "sample",
     }
+
+
+@pytest.mark.parametrize("admitted", [False, True], ids=["refused", "admitted"])
+def test_local_wheel_exception_stays_with_its_existing_owner(
+    tmp_path, monkeypatch, admitted
+):
+    import seasoned_uv
+
+    _source(tmp_path)
+    manifest = tmp_path / "plugins" / "sample" / "pyproject.toml"
+    manifest.write_text(
+        manifest.read_text().replace(
+            "helper>=1; sys_platform == 'linux'", "external-wheel"
+        )
+        + '\n[tool.uv.sources]\nexternal-wheel={path="vendor/external.whl"}\n'
+    )
+    calls = []
+
+    def qualified(project, dependency, path):
+        calls.append((project, dependency, path))
+        return admitted
+
+    monkeypatch.setattr(seasoned_uv, "_bundled_dbus_next", qualified)
+    if admitted:
+        closure = core.source_closure(tmp_path, builder)
+        assert [item["name"] for item in closure.selection["projects"]] == ["sample"]
+    else:
+        with pytest.raises(artifacts.PromotionArtifactError, match="canonical"):
+            core.source_closure(tmp_path, builder)
+    assert calls == [
+        ("sample", "external-wheel", manifest.parent / "vendor" / "external.whl")
+    ]
