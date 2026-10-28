@@ -122,14 +122,14 @@ def test_native_jobs_do_not_reenter_required_unit_only_ci(retired_job: str) -> N
     assert not execution.get("continue-on-error", False)
 
 
-def test_native_launch_acceptance_is_explicit_windows_only_and_source_pinned() -> None:
+def test_native_launch_acceptance_is_explicit_and_source_pinned() -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
     )
     trigger = workflow.get("on", workflow.get(True))
     assert set(trigger) == {"workflow_dispatch"}
     assert trigger["workflow_dispatch"]["inputs"]["native_launch"] == {
-        "description": "Qualify copied Windows setup interrupt handling against a real current runtime",
+        "description": "Qualify copied Windows setup, cross-entrypoint mux admission and the POSIX seed reply reader",
         "type": "boolean", "default": False,
     }
     job = workflow["jobs"]["native-launch-windows"]
@@ -141,14 +141,48 @@ def test_native_launch_acceptance_is_explicit_windows_only_and_source_pinned() -
     }
     preflight = next(step for step in job["steps"] if step.get("name", "").startswith("Verify native"))
     assert "$actual -cne $env:GITHUB_SHA" in preflight["run"]
-    execution = job["steps"][-1]["run"]
+    execution = next(
+        step["run"] for step in job["steps"]
+        if "tests/native/test_native_seed_console.py" in step.get("run", "")
+    )
     assert "tests/native/test_native_seed_console.py" in execution
     assert "tests/test_native_seed_shell.py" in execution
-    assert '-k "copied_setup_admission or real_copied_setup"' in execution
+    arguments = shlex.split(execution)
+    assert set(arguments[arguments.index("-k") + 1].split(" or ")) == {
+        "copied_setup_admission", "real_copied_setup", "same_target_joins_at_discovery",
+    }
     assert "--allow-host-state" not in execution
     assert not any(step.get("continue-on-error", False) for step in job["steps"])
     for name in ("derived-diagnostics-posix", "derived-diagnostics-windows"):
         assert "!inputs.native_launch" in workflow["jobs"][name]["if"]
+
+
+@pytest.mark.parametrize(("name", "runner"), [
+    ("native-seed-reply-linux", "ubuntu-latest"),
+    ("native-seed-reply-macos", "macos-latest"),
+])
+def test_native_seed_reader_acceptance_uses_stock_posix_shells_only_when_selected(name, runner) -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    job = workflow["jobs"][name]
+    assert job["if"] == "${{ inputs.native_launch }}"
+    assert job["runs-on"] == runner
+    assert job["timeout-minutes"] == 8
+    assert job["steps"][0]["with"] == {
+        "ref": "${{ github.sha }}", "persist-credentials": False,
+    }
+    preflight = next(step for step in job["steps"] if step.get("name", "").startswith("Verify native"))
+    assert 'git rev-parse HEAD' in preflight["run"] and '"$EXPECTED_SHA"' in preflight["run"]
+    if runner == "macos-latest":
+        assert '/bin/bash -c \'[[ "$BASH_VERSINFO" == 3 ]]\'' in preflight["run"]
+    execution = job["steps"][-1]["run"]
+    assert 'export PATH="/bin:$PATH"' in execution
+    assert "--test-file tests/test_native_seed_reply_shell.py" in execution
+    assert "--test-file tests/test_session_shell.py" in execution
+    assert "--timeout 180 --plugin-timeout 240 --test-timeout 30" in execution
+    assert "--allow-host-state" not in execution
+    assert not any(step.get("continue-on-error", False) for step in job["steps"])
 
 
 def test_displaced_native_sources_and_unavailable_portfolio_remain_explicit() -> None:
@@ -460,7 +494,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "immutable_runtime", "immutable_runtime_ref",
         "interactive_completion", "native_launch", "ssh_service",
         "ssh_headless", "update_diagnostics",
-        "runtime_removal",
+        "runtime_removal", "source_cache",
     }
     assert inputs["watch_owner"]["type"] == "boolean"
     assert inputs["watch_owner"]["default"] is False
@@ -478,6 +512,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "pr-artifacts-linux", "pr-artifacts-windows",
         "dependency-compile-linux", "dependency-compile-windows",
         "source-build-linux", "source-build-windows",
+        "source-cache-linux", "source-cache-windows",
         "marketplace-source-linux", "marketplace-source-windows",
         "installer-latency-linux", "installer-latency-windows",
         "packaging-seed-linux", "packaging-seed-windows",
@@ -494,6 +529,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "interactive-completion-linux", "interactive-completion-macos",
         "interactive-completion-windows",
         "native-launch-windows",
+        "native-seed-reply-linux", "native-seed-reply-macos",
         "ssh-headless-linux", "ssh-headless-windows",
         "update-diagnostics-linux", "update-diagnostics-windows",
         "packaging-seed-linux", "packaging-seed-windows",
@@ -505,7 +541,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
             "${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime "
             "&& !inputs.guardian_followthrough && !inputs.watch_owner "
             "&& !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service "
-            "&& !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles "
+            "&& !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.candidate_profiles "
             "&& !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless "
             "&& !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics "
             "&& !inputs.runtime_removal }}"

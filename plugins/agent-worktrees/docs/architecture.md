@@ -623,6 +623,9 @@ consumer. A future caller must discover support from the selected current
 runtime before sending new syntax, retain a supported legacy path for older
 providers or rollback, and never retry an uncertain preparation using another
 format. Existing JSON callers need no capability probe or migration.
+Both preparation forms reject an empty executable before any seed claim or
+process query; the NUL encoder and reader retain the same nonempty-executable
+rule. Empty subsequent arguments remain supported.
 
 The NUL reply is one fully encoded UTF-8 byte sequence, with a NUL after every
 field, in this order:
@@ -641,10 +644,41 @@ remain literal. Unrepresentable NUL/UTF-8 values are refused without partial
 output; a seed already claimed during preparation remains held and the
 execution becomes unknown, never automatically restored or replayed. A reader
 must validate the complete frame and successful finite producer exit before
-dispatch. It must not use command substitution (which drops NULs), `eval`,
+dispatch. It must not pass reply fields through command substitution (which drops NULs), `eval`,
 word splitting, or source the fields as shell code. The provider does not
 spawn a backend or retain a parser to wait for one; prompt-bearing reply bytes
 remain on the private preparation pipe, outside execution receipts and logs.
+
+`scripts/native-seed-reply.sh` is a dormant Bash reader for this frame.
+Dot-sourcing it only defines functions. `aw_native_seed_read_reply` consumes
+stdin through EOF, clears previous output, validates framing and correlation,
+and then publishes literal `AW_NATIVE_SEED_ARGV` / `AW_NATIVE_SEED_ENV` arrays
+and the correlation fields. It neither exports environment entries nor executes
+arguments; an environment count of `-1` stays distinct from empty replacement.
+Invalid or truncated input returns 3 with a prompt-free diagnostic and no
+partially published reply. Counts use canonical decimal with at most nine
+digits, never provider text evaluated as arithmetic.
+The final read must report EOF specifically; an interrupted or otherwise failed
+empty read is not proof of stream completion. Bash also returns status 1 for
+nonblocking-pipe and bad-descriptor errors. One finite Bash subshell probes EOF,
+requiring status 1, no trailing bytes and no read diagnostics. Only diagnostics
+pass through command substitution; reply fields stay in the original shell.
+This adds no external executable or resident helper.
+Closed stdin is refused before that subshell can reuse descriptor 0 for its
+capture pipe. Internal parser diagnostics are suppressed; every input refusal
+uses the same generic diagnostic.
+Parsing uses ASCII collation and case-sensitive matching independently of
+caller settings, restoring the caller's locale and `nocasematch` option on
+success and refusal.
+The reader suppresses caller xtrace while private fields are in use and restores
+the original tracing setting afterward; it never traces reply data itself.
+The existing installers, publication inventory and uninstall profile own this
+asset; `session_shell.prepare` can copy it with the POSIX normalized setup,
+launch-command and reconciliation scripts outside the removable roots.
+No production POSIX caller selects that setup path yet. A future caller must
+also verify successful, bounded producer exit before using these arrays;
+the reader alone does not establish a successful callback, child custody,
+terminal ownership or removal of either runtime-Python waiter.
 
 On Windows, a current engine recognizes its canonical normalized setup's
 `native-setup-owner-v1` marker, a PowerShell 7 host and the selected canonical
