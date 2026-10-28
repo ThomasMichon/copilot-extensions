@@ -87,6 +87,9 @@ def candidate_projects(root: Path) -> dict[str, str]:
             projects[f"standalone:{component}"] = data["project"]["version"]
         except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError, KeyError, TypeError) as exc:
             raise PromotionArtifactError(f"{project}: invalid standalone Python project") from exc
+    from core_python_artifacts import enabled, release_version
+    if enabled(root):
+        projects["composition:core"] = release_version(root)
     return projects
 
 
@@ -121,6 +124,7 @@ def bundle_wheels(manifest: dict, wheel_dir: Path, out_dir: Path) -> dict:
             name = wheel["filename"]
             if (
                 wheel["role"] not in (
+                    ("plugin", "standalone", "vendored-lib") if "composition" in manifest else
                     ("standalone", "vendored-lib") if "component" in manifest
                     else ("plugin", "vendored-lib")
                 )
@@ -139,7 +143,7 @@ def bundle_wheels(manifest: dict, wheel_dir: Path, out_dir: Path) -> dict:
             except OSError as exc:
                 raise PromotionArtifactError(f"{name}: cannot read wheel for bundling: {exc}") from exc
     return {
-        **{key: manifest[key] for key in ("plugin", "component") if key in manifest},
+        **{key: manifest[key] for key in ("plugin", "component", "composition") if key in manifest},
         "version": version, "artifact_id": artifact_id,
         "filename": filename, "sha256": _digest(destination),
     }
@@ -165,6 +169,10 @@ def build_candidate_bundles(
     projects = candidate_projects(root)
     from standalone_python_artifacts import build_standalone_artifacts, source_closure, validate_build
     for plugin in projects:
+        if plugin == "composition:core":
+            from core_python_artifacts import source_closure as core_closure
+            core_closure(root, builder)
+            continue
         if plugin.startswith("standalone:"):
             component = plugin.split(":", 1)[1]
             directory, dependencies, _resources = source_closure(component, root, builder)
@@ -183,6 +191,17 @@ def build_candidate_bundles(
             source_policy=source_policy, min_age_days=min_age_days,
         )
         for plugin, version in projects.items():
+            if plugin == "composition:core":
+                from core_python_artifacts import build_core_artifacts
+                wheel_dir = out_dir / "composition-core"
+                manifest = build_core_artifacts(
+                    out_dir=wheel_dir, toolchain=toolchain, builder=builder,
+                )
+                if manifest["version"] != version or manifest["build_toolchain"] != toolchain.record:
+                    raise PromotionArtifactError("core builder returned another release or toolchain")
+                entries.append(bundle_wheels(manifest, wheel_dir, out_dir))
+                shutil.rmtree(wheel_dir)
+                continue
             standalone = plugin.startswith("standalone:")
             component = plugin.split(":", 1)[1] if standalone else None
             wheel_dir = out_dir / (f"standalone-{component}" if standalone else plugin)
@@ -312,7 +331,9 @@ def validate_bundle(path: Path, entry: dict, *, candidate_root: Path | None = No
                 not isinstance(manifest, dict)
                 or manifest.get("schema") != "copilot-extensions.python-artifact-manifest"
                 or type(manifest.get("schema_version")) is not int
-                or manifest["schema_version"] != (4 if "component" in entry else 3)
+                or manifest["schema_version"] != (
+                    5 if "composition" in entry else 4 if "component" in entry else 3
+                )
                 or _artifact_label(manifest) != _artifact_label(entry)
                 or any(manifest.get(key) != entry[key] for key in ("version", "artifact_id"))
             ):
@@ -323,12 +344,13 @@ def validate_bundle(path: Path, entry: dict, *, candidate_root: Path | None = No
             declared = {"manifest.json"}
             plugin_wheels = 0
             primary_role = "standalone" if "component" in entry else "plugin"
+            core = "composition" in entry
             for wheel in wheels:
                 if not isinstance(wheel, dict):
                     raise PromotionArtifactError(f"{path.name}: invalid wheel record")
                 name, digest, role = wheel.get("filename"), wheel.get("sha256"), wheel.get("role")
                 if (
-                    role not in (primary_role, "vendored-lib")
+                    role not in (("plugin", "standalone", "vendored-lib") if core else (primary_role, "vendored-lib"))
                     or not isinstance(name, str) or "/" in name or "\\" in name
                     or not name.endswith(".whl") or name in declared
                     or not isinstance(digest, str) or not digest.startswith("sha256:")
@@ -337,7 +359,7 @@ def validate_bundle(path: Path, entry: dict, *, candidate_root: Path | None = No
                     raise PromotionArtifactError(f"{path.name}: invalid first-party wheel record")
                 declared.add(name)
                 plugin_wheels += role == primary_role
-            if plugin_wheels != 1 or set(names) != declared:
+            if (not core and plugin_wheels != 1) or set(names) != declared:
                 raise PromotionArtifactError(f"{path.name}: first-party wheel member set mismatch")
             validate_manifest(manifest)
             if candidate_root is not None:
@@ -355,7 +377,10 @@ def validate_bundle(path: Path, entry: dict, *, candidate_root: Path | None = No
                     validate_wheel(
                         archive, wheel,
                         source_dir=candidate_root / wheel["source"] if candidate_root is not None else None,
-                        component=entry.get("component") if wheel["role"] == primary_role else None,
+                        component=(
+                            next((key for key, source in COMPONENTS.items() if source == wheel["source"]), None)
+                            if core else entry.get("component") if wheel["role"] == primary_role else None
+                        ),
                         candidate_root=candidate_root,
                     )
             return manifest
@@ -607,8 +632,21 @@ def validate_manifest(manifest: dict) -> None:
         wheel_infos = []
         label = _artifact_label(manifest)
         standalone = "component" in manifest
+        core = "composition" in manifest
         primary_role = "standalone" if standalone else "plugin"
         source_root = COMPONENTS[manifest["component"]] if standalone else f"plugins/{label}"
+        if core:
+            selection = manifest.get("selection")
+            if (
+                not isinstance(selection, dict) or set(selection) != {"roots", "projects", "edges"}
+                or any(not isinstance(selection[key], list) for key in selection)
+                or not selection["roots"] or not selection["projects"]
+                or not isinstance(manifest.get("build_resources"), list)
+            ):
+                raise PromotionArtifactError("invalid core manifest selection")
+            sources = [item["source"] for item in selection["projects"]]
+            if len(sources) != len(set(sources)) or len(manifest["wheels"]) != len(sources):
+                raise PromotionArtifactError("invalid core manifest project set")
         if standalone:
             from standalone_consumers import standalone_build_resources
             expected_resources = [
@@ -621,12 +659,20 @@ def validate_manifest(manifest: dict) -> None:
         for wheel in manifest["wheels"]:
             info = parse_wheel_filename(Path(wheel["filename"]))
             source = wheel.get("source")
-            if wheel["role"] == primary_role:
+            if not core and wheel["role"] == primary_role:
                 _assert_version_corresponds(
                     raw_version=manifest["version"], wheel_version=info["version"],
                     label=label,
                 )
             source_matches = (
+                any(item["source"] == source and item["role"] == wheel["role"] for item in selection["projects"])
+                and isinstance(source, str) and (
+                    source in COMPONENTS.values() if wheel["role"] == "standalone" else
+                    len(source.split("/")) == 2 and source.startswith(
+                        "plugins/" if wheel["role"] == "plugin" else "libs/"
+                    )
+                )
+                if core else
                 source == source_root if wheel["role"] == primary_role
                 else isinstance(source, str) and source.startswith((
                     "libs/", f"{source_root}/libs/" if standalone else f"{source_root}/",
@@ -639,7 +685,7 @@ def validate_manifest(manifest: dict) -> None:
                 or not isinstance(source, str) or "\\" in source
                 or any(part in ("", ".", "..") for part in source.split("/"))
                 or not source_matches
-                or wheel["role"] not in (primary_role, "vendored-lib")
+                or wheel["role"] not in (("plugin", "standalone", "vendored-lib") if core else (primary_role, "vendored-lib"))
             ):
                 raise PromotionArtifactError("invalid manifest wheel provenance or tags")
             wheel_infos.append(info)
@@ -656,7 +702,7 @@ def validate_manifest(manifest: dict) -> None:
         )
         if manifest["artifact_id"] != identity:
             raise PromotionArtifactError("manifest artifact identity mismatch")
-    except ArtifactBuildError as exc:
+    except (ArtifactBuildError, KeyError, TypeError, ValueError) as exc:
         raise PromotionArtifactError(f"invalid manifest provenance: {exc}") from exc
 
 
@@ -673,12 +719,28 @@ def validate_source_binding(manifest: dict, root: Path) -> None:
     builder.LIBS_DIR = root / "libs"
     label = _artifact_label(manifest)
     standalone = "component" in manifest
+    core = "composition" in manifest
     plugin_dir = root / COMPONENTS[manifest["component"]] if standalone else builder.PLUGINS_DIR / label
     try:
-        if plugin_dir.is_symlink() or builder.uer._find_symlink(plugin_dir, skip_test_runs=False) is not None:
+        if not core and (
+            plugin_dir.is_symlink() or builder.uer._find_symlink(plugin_dir, skip_test_runs=False) is not None
+        ):
             raise PromotionArtifactError("artifact source tree contains a symlink")
         resources = ()
-        if standalone:
+        if core:
+            from core_python_artifacts import payload_hash, source_closure
+            closure = source_closure(root, builder)
+            directories = [directory for _role, directory in closure.projects]
+            resources = closure.resources
+            if (
+                manifest["version"] != closure.version or manifest.get("selection") != closure.selection
+                or manifest.get("build_resources") != [path.relative_to(root).as_posix() for path in resources]
+                or {(wheel["role"], wheel["source"]) for wheel in manifest["wheels"]} != {
+                    (role, directory.relative_to(root).as_posix()) for role, directory in closure.projects
+                }
+            ):
+                raise PromotionArtifactError("core manifest selection differs from candidate")
+        elif standalone:
             from standalone_python_artifacts import source_closure
             plugin_dir, libs, resources = source_closure(manifest["component"], root, builder)
             if manifest.get("build_resources") != [
@@ -689,7 +751,8 @@ def validate_source_binding(manifest: dict, root: Path) -> None:
             libs = builder.resolve_vendored_libs(plugin_dir)
             from plugin_runtime_resources import build_inputs
             build_inputs(plugin_dir, root=root)
-        directories = [plugin_dir, *(directory for _name, directory in libs)]
+        if not core:
+            directories = [plugin_dir, *(directory for _name, directory in libs)]
         expected = {
             directory.resolve().relative_to(root.resolve()).as_posix(): directory
             for directory in directories
@@ -708,7 +771,7 @@ def validate_source_binding(manifest: dict, root: Path) -> None:
                 raw_version=project["version"], wheel_version=info["version"],
                 label=wheel["source"],
             )
-        actual = builder.compute_payload_hash([*directories, *resources])
+        actual = payload_hash(builder, closure) if core else builder.compute_payload_hash([*directories, *resources])
         if manifest["payload_hash"] != actual:
             raise PromotionArtifactError(
                 f"{label}@{manifest['version']}: manifest payload hash differs "

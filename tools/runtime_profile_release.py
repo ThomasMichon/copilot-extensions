@@ -84,7 +84,7 @@ def validate_release_bindings(index: dict, manifests: dict) -> None:
         wheels = {canonicalize_name(item["name"]): item for item in record["wheels"]}
         for first_party in manifest["wheels"]:
             wheel = wheels.get(canonicalize_name(first_party["name"]))
-            if wheel is None and first_party["role"] == "vendored-lib":
+            if wheel is None and first_party["role"] == "vendored-lib" and "composition" not in manifest:
                 continue
             if wheel is None or any(
                 wheel[field] != first_party[field] for field in ("filename", "sha256")

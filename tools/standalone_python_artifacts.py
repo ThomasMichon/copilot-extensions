@@ -20,6 +20,10 @@ _RESOURCE_PACKAGES = {
 
 def artifact_label(record: dict) -> str:
     """Keep standalone release names separate from unchanged plugin names."""
+    if "composition" in record:
+        if record["composition"] != "core" or "plugin" in record or "component" in record:
+            raise ValueError("invalid core artifact identity")
+        return "composition-core"
     if "component" in record:
         component = record["component"]
         if not isinstance(component, str) or component not in COMPONENTS or "plugin" in record:
@@ -30,6 +34,8 @@ def artifact_label(record: dict) -> str:
 
 def project_key(record: dict) -> str:
     label = artifact_label(record)
+    if "composition" in record:
+        return "composition:core"
     return f"standalone:{record['component']}" if "component" in record else label
 
 

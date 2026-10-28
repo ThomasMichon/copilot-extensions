@@ -121,6 +121,27 @@ Comparison request (verbatim):
   identities, phase timings and explicit unavailable lanes. No serving
   registration or default-runtime pointer changes.
 
+### Slice C - Consolidated first-party release binding
+- [ ] Derive the canonical core project closure from the existing inventories
+  and selected root/extras declarations. Preserve target conditions and source
+  indirections as data; do not resolve third-party dependencies or remove the
+  qualified-origin workaround. Share this selection with the existing input
+  owner rather than maintaining another roster.
+- [ ] Extend the existing Python artifact manifest with a registered core
+  composition, using the marketplace's existing version authority. Build each
+  canonical first-party distribution once through the common locked builder;
+  include the existing standalone build resources and source admission.
+  Composition selection participates in the existing content identity.
+- [ ] Re-derive and verify the complete composition against candidate source
+  through the existing promotion validator, then carry it in the existing
+  artifact index and immutable first-party publisher. Keep signing and source
+  admission with their current owners. No complete-environment archive, dummy
+  metapackage, second resolver or parallel provenance channel.
+- [ ] Prove the emitted first-party artifact and release-profile binding with
+  real native inputs and failing-first identity/closure/resource controls.
+  Record absent native lanes honestly. The first-party artifact does not
+  publish third-party runtime bytes or enable ordinary installations.
+
 ### Later slices - Explicitly retained, not completed by the first proof
 - [x] Retain an independently selected aggregate transport through the existing
   wheel snapshot owner, then exercise the same inspected-profile and numbered
@@ -131,14 +152,15 @@ Comparison request (verbatim):
   exact-profile producer in #9413. Its candidate bytes do not establish profile
   approval, complete source-material distribution or publication authority.
   #9417 merged as `326a72d1332afe351e7f5e8ac0841ecba56a8230`.
-- [ ] Produce and read back a reproducible candidate delivery envelope binding
+- [x] Produce and read back a reproducible candidate delivery envelope binding
   the exact profile, its existing wheel transport and explicitly selected
   accompanying source/notice materials. Bind each material to affected wheel
   digests and preserve its bytes; selection/qualification of required materials
   remains with the caller. Reuse profile and transport identities rather than
   creating release approval, signing, feed authority or a second constructor.
   Keep the public first-party publisher unchanged; this slice neither chooses
-  an aggregate channel nor uploads third-party content.
+  an aggregate channel nor uploads third-party content. #9424 merged as
+  `832f0e66065582d55b152b7dd0fa9f994bc173fe`.
 - [ ] Expand core plus optional heavy environments and the required platform/ABI
   matrix through the same admission contract.
 - [ ] Integrate install/update/no-op/rollback with the existing governor and
@@ -150,7 +172,7 @@ Comparison request (verbatim):
 
 ## Validation Plan
 
-- [ ] Candidate delivery controls reject changed/omitted/unexpected material
+- [x] Candidate delivery controls reject changed/omitted/unexpected material
   bytes, unrelated wheel bindings, unsafe paths, incomplete wheel transports,
   exhausted budgets and output replacement. Real readback must retain the
   selected materials and reach the existing wheel consumer without the original
@@ -200,8 +222,9 @@ choose the wheel path, not a reason to relax source identity.
   decoding. The real complete candidate remains byte-identical.
 - Focused delivery/transport/release controls pass 105 cases with one
   platform-specific skip. The PR documents its install-contract/effort impact;
-  final review and merge remain pending. The parent stays Active for the
-  remaining release, consumer and lifecycle gates.
+  #9424 merged as `832f0e66065582d55b152b7dd0fa9f994bc173fe` after exact-head
+  approval, successful actual CI and all feedback resolved. The parent stays
+  Active for the remaining release, consumer and lifecycle gates.
 
 ### 2026-10-26 - Reviewed-intent boundary
 - Existing inventory and constructor research established the source-identity
@@ -335,3 +358,91 @@ choose the wheel path, not a reason to relax source identity.
   is complete. Enclosing release/material bindings, production publication and
   ordinary consumer integration remain the next retained work; no rollout or
   complete-distribution claim follows from the merge.
+
+### 2026-10-28 - Consolidated core promotion candidate
+- The existing builder, manifest/index, source verifier and immutable
+  publisher now have an explicit `core` composition candidate. Its version
+  comes from marketplace metadata, not a second version clock or metapackage.
+  Canonical project discovery and runtime-root/extras selection share
+  `python_project_inventory`; the pending lock-input owner must reuse that
+  selector before it lands.
+- Native Windows/CPython 3.11 builds 42 canonical first-party wheels with one
+  governed toolchain and independently verifies the complete source/resource
+  closure through the ordinary promotion verifier. The API archive is
+  10,563,113 bytes, SHA-256
+  `8eef8e788b543a3b7f3056f6ca2d3da413cbdf2afcb5a7c691b4d9a7e5dc2f9c`.
+  The measured 398.172 seconds includes toolchain resolution, wheel builds
+  and independent readback, not source export, installation or service cutover.
+- The actual CLI rebuild uses the same source, composition and retained
+  toolchain. All 42 wheels have identical member payloads; their ZIP timestamps
+  differ, so rebuilt wheel/archive content identities are not claimed equal.
+  The existing identity correctly includes the actual wheel bytes.
+- Focused controls cover complete release-profile binding, omitted shared
+  libraries, source/resource/version/selection changes, duplicate canonical
+  identities, malformed data, selected extras and optional-environment
+  boundaries. The omitted-library control fails with legacy optional-library
+  behavior restored and passes with complete-core binding. Existing legacy
+  artifact, publication and reuse contracts remain covered.
+- Validation tiers: unit controls and real API/CLI builds plus source-bound
+  archive readback exercise the simple end-to-end lane. Fresh exported source
+  and a new locked build environment cover first-touch artifact construction,
+  not clean-room host provisioning. Native Linux/macOS, public promotion
+  publication, full third-party release qualification and ordinary updater
+  adoption remain open. No aggregate channel is selected or updated, no
+  third-party bytes are uploaded, and no service/default runtime changes.
+- After rebasing onto current development source, the exact candidate's native
+  API build and independent source binding pass again: 42 wheels,
+  10,563,113 bytes, 372.937 seconds, archive SHA-256
+  `7f04619645f1a5ea7e197ca93ce3fbd53096b32fcad3c8102462e18f86c9ca8e`.
+- Review found two portability defects: an eager core import imposed ambient
+  `packaging` on legacy help/builds, and default specifier membership depended
+  on the parser's prerelease defaults. Five controls fail before correction
+  and pass afterward. Core CLI selection now runs in the resolved toolchain
+  and explicitly admits compatible development versions without weakening
+  version floors. A genuinely package-free caller passes legacy help and the
+  real 42-wheel core CLI; independent source-bound readback passes in 246.422
+  seconds with the retained toolchain. This rebuild has archive SHA-256
+  `efc450c3b78da2fea085aede68506476e444658ce72c333fdf3d7336e4f8b1b9`;
+  member payloads match the API build, while ZIP timestamps remain distinct.
+- Eighteen bounded core controls join the existing exact-input unit packet,
+  with only changed/new source bindings and the two new helper coverage targets.
+  The existing five-minute budget and effect/coverage rules are unchanged.
+  The native Windows full-packet attempt stops at an unchanged long-path
+  source-publication fixture after 1,743 passing cases and eight platform
+  skips; it is not passing packet evidence. Hosted Linux CI remains required.
+- A second review catches omitted-selector interpreter drift during CLI
+  re-entry. The new control reproduces uv's default differing from the calling
+  interpreter; re-entry now forwards the interpreter already recorded in the
+  lock. Explicit selection remains unchanged. Both controls and the focused
+  CLI/core decisions pass 20 cases after the correction.
+- Final selection review reproduces two previously missed cases: a local
+  dependency absent from the canonical inventory was treated as external, and
+  equivalent underscore/mixed-case extra spellings were not normalized.
+  Selection now refuses any direct or conditional local path mapping without a
+  canonical source and canonicalizes queued extras. Seven controls cover both
+  failures and retain external wheel URL mappings as data; all 25 core packet
+  cases pass. Four controls fail before the corrections. The qualified packet
+  gains those seven nodes and only the two affected source digests.
+- Independent validation with the exact pinned `packaging==25.0` verifies all
+  42 native wheel records and the unchanged selected payload identity in
+  32.391 seconds. The parser tooling used the existing governed source route;
+  neither live runtime state nor dependency source authority changed.
+- The new missing-canonical refusal also exposed Manager's existing qualified
+  local `dbus_next` wheel exception. Two controls using its actual manifest and
+  wheel bytes reproduce the regression; the closure now defers that exact
+  decision to `_bundled_dbus_next`, with contained paths. Altered bytes,
+  distribution, project and filename remain refused. No general local-wheel
+  exemption or third-party artifact inclusion is added. Two bounded owner
+  delegation controls join the packet (27 core cases total); the combined
+  core/profile controls pass 100 cases with one platform skip. Real repository
+  closure selection again produces the same 42 canonical projects and payload
+  identity, including on the Windows host where the dependency's Linux marker
+  is false.
+- Review's final portability assessment identifies an undefined Python 3.10
+  child path: the locked toolchain intentionally does not carry a TOML
+  backport. The new core construction command now explicitly requires a
+  Python 3.11+ locked build interpreter, checking that interpreter's marker
+  environment before selection or re-entry. Two failing-first controls cover
+  caller re-entry and already-locked invocation. This does not change legacy
+  builders, emitted wheel Python ranges, installer target qualification or
+  the shared toolchain's package set; broader native acceptance remains open.
