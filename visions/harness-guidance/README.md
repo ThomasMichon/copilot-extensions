@@ -3,7 +3,7 @@
 - **Subject:** Ambient guidance across repositories, plugins, skills, and operator policy
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-26
+- **Last revised:** 2026-10-27
 - **Reality docs:** `docs/patterns/session-scoped-dynamic-guidance.md`, `docs/patterns/worktree-scoped-dynamic-guidance.md`, `docs/harness-runbook.md`
 
 ## Purpose & Intent
@@ -182,6 +182,18 @@ Delivering already-static files should not require a separately packaged
 projection engine, authoring/review framework, sibling runtime, service or
 network operation. The implementation should stay simple rather than inherit
 unrelated machinery merely to reuse code from a similar subject.
+
+Every worktree creation and session start should copy the selected plugins'
+current declared files. Content hashes, fingerprints, provenance envelopes,
+version comparisons and prepared-generation receipts should not gate copying
+or the use of these managed instruction copies. Existing plugin selection and
+harness trust boundaries should own instruction trust rather than a second
+runtime authentication layer.
+
+Generated instructions may be overwritten while a session is running. An
+operator should be able to restart that session to load corrected upstream
+guidance; protecting a previously copied generation must not prevent refresh.
+Filesystem delivery should remain distinct from proving model admission.
 
 ### coordinator-first-task-routing
 
