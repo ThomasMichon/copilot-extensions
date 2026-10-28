@@ -326,10 +326,13 @@ def _setup(record, *, seed_id=None, **options):
         legacy.BOUNDARY_MARKER + "\n" + legacy.ATTEMPT_BOUNDARY_MARKER + "\n",
         encoding="utf-8",
     )
+    identity = {
+        "pid": os.getpid(), "process_start_time": locks.process_start_time(os.getpid()),
+        **options,
+    }
     return native.prepare(
         record, ["pwsh", "-NoProfile", "-File", str(script)], seed_id=seed_id,
-        setup=True, pid=os.getpid(), process_start_time=locks.process_start_time(os.getpid()),
-        **options,
+        setup=True, **identity,
     )
 
 
@@ -399,6 +402,135 @@ def test_setup_refuses_unconfirmed_owner_before_any_receipt(record):
             pid=os.getpid(), process_start_time="0",
         )
     assert not list((record.parent / "launch-attempts").glob("*/*.execution.json"))
+
+
+@pytest.mark.parametrize("admission_only", [False, True])
+def test_setup_can_resolve_process_start_time_from_its_canonical_owner(record, admission_only):
+    seed = seeds.stage(record, kind="resume", text="retained setup intent")
+    expected = locks.process_start_time(os.getpid())
+    reply = _setup(
+        record, seed_id=None if admission_only else seed.seed_id,
+        admission_only=admission_only,
+        preserve_seed_id=seed.seed_id if admission_only else None,
+        process_start_time=None,
+    )
+    assert _saved(record, reply)["events"][-1]["details"] == {
+        "pid": os.getpid(), "process_start_time": expected, "boundary": "launcher-command",
+    }
+    assert seeds.peek(record) == seed
+
+
+@pytest.mark.parametrize("pid", [None, 0, -1, True, "123"])
+def test_setup_provider_identity_refuses_invalid_pid_before_queries_or_effects(
+    record, monkeypatch, pid,
+):
+    seed = seeds.stage(record, kind="new", text="unclaimed")
+    monkeypatch.setattr(locks, "process_start_time", lambda *_a: pytest.fail("Invalid PID query"))
+    with pytest.raises(ValueError, match="identity is unconfirmed"):
+        native.prepare(record, ["copilot"], seed_id=seed.seed_id, setup=True, pid=pid)
+    assert seeds.peek(record) == seed
+    assert not (record.parent / "launch-attempts").exists()
+
+
+@pytest.mark.parametrize("birth", [None, ""])
+def test_setup_refuses_unavailable_provider_identity_before_any_effects(record, monkeypatch, birth):
+    seed = seeds.stage(record, kind="new", text="unclaimed")
+    monkeypatch.setattr(locks, "process_start_time", lambda *_a: birth)
+    with pytest.raises(ValueError, match="identity is unconfirmed"):
+        native.prepare(record, ["copilot"], seed_id=seed.seed_id, setup=True, pid=os.getpid())
+    assert seeds.peek(record) == seed
+    assert not (record.parent / "launch-attempts").exists()
+
+
+def test_explicit_empty_birth_does_not_opt_into_provider_identity(record, monkeypatch):
+    monkeypatch.setattr(locks, "process_start_time", lambda *_a: pytest.fail("Explicit invalid birth"))
+    with pytest.raises(ValueError, match="identity is unconfirmed"):
+        native.prepare(
+            record, ["copilot"], seed_id=None, setup=True, pid=os.getpid(), process_start_time="",
+        )
+    assert not (record.parent / "launch-attempts").exists()
+
+
+@pytest.mark.parametrize("supplied", [False, True])
+def test_setup_birth_change_during_preparation_is_unknown_not_a_recorded_spawn(
+    record, monkeypatch, supplied,
+):
+    seed = seeds.stage(record, kind="new", text="unclaimed")
+    prepare = legacy._prepare
+    birth = locks.process_start_time(os.getpid())
+
+    def replace_process(*args, **kwargs):
+        prepared = prepare(*args, **kwargs)
+        monkeypatch.setattr(locks, "process_start_time", lambda *_a: "replacement")
+        return prepared
+
+    script = record.parent / "default-setup.ps1"
+    script.write_text(
+        legacy.BOUNDARY_MARKER + "\n" + legacy.ATTEMPT_BOUNDARY_MARKER + "\n", encoding="utf-8",
+    )
+    correlation = audit.Correlation(uuid4().hex, uuid4().hex)
+    monkeypatch.setattr(legacy, "_prepare", replace_process)
+    with pytest.raises(ValueError, match="identity is unconfirmed"):
+        native.prepare(
+            record, ["pwsh", "-NoProfile", "-File", str(script)], seed_id=seed.seed_id,
+            setup=True, pid=os.getpid(), process_start_time=birth if supplied else None,
+            correlation=correlation,
+        )
+    assert seeds.peek(record) == seed
+    saved, = (record.parent / "launch-attempts" / correlation.attempt_id).glob("*.execution.json")
+    events = audit.read(record.parent, correlation.attempt_id, saved.name.split(".")[0])["events"]
+    assert [event["phase"] for event in events] == ["execution-requested", "unknown"]
+
+
+@pytest.mark.parametrize("output_format", ["json", "nul"])
+def test_cli_setup_resolves_process_start_time_without_changing_reply_or_seed_custody(
+    record, monkeypatch, capsysbinary, output_format,
+):
+    seed = seeds.stage(record, kind="new", text="retained private intent")
+    script = record.parent / "default-setup.sh"
+    script.write_text(
+        legacy.BOUNDARY_MARKER + "\n" + legacy.ATTEMPT_BOUNDARY_MARKER + "\n", encoding="utf-8",
+    )
+    expected = locks.process_start_time(os.getpid())
+    monkeypatch.setattr(native, "require_current_runtime", lambda root: None)
+    monkeypatch.setattr(sys, "argv", [
+        "launch_seed_native", "--contract-version", "1",
+        "--root", str(cfg.install_dir()), "--record", str(record),
+        "--phase", "setup", "--output-format", output_format, "--pid", str(os.getpid()),
+        "--seed-id", seed.seed_id, "--", "bash", str(script),
+    ])
+    assert native.main() == 0
+    captured = capsysbinary.readouterr()
+    assert not captured.err
+    assert seed.text.encode("utf-8") not in captured.out
+    assert seeds.peek(record) == seed
+    if output_format == "json":
+        reply = json.loads(captured.out)
+        attempt, operation = reply["attempt_id"], reply["operation_id"]
+        assert reply["version"] == 1 and reply["setup_seed_id"] == seed.seed_id
+    else:
+        fields = captured.out.decode("utf-8").split("\0")
+        assert fields[0] == native.NUL_REPLY_SCHEMA
+        assert fields[5] == seed.seed_id and fields[-2:] == ["complete", ""]
+        attempt, operation = fields[1], fields[3]
+    saved = audit.read(record.parent, attempt, operation)
+    assert saved["events"][-1]["details"] == {
+        "pid": os.getpid(), "process_start_time": expected, "boundary": "launcher-command",
+    }
+
+
+def test_backend_spawn_callback_does_not_infer_missing_child_birth(record, monkeypatch):
+    seed = seeds.stage(record, kind="new", text="held backend intent")
+    reply = native.prepare(record, ["copilot"], seed_id=seed.seed_id)
+    monkeypatch.setattr(
+        locks, "process_start_time", lambda *_a: pytest.fail("Missing child birth must not be inferred"),
+    )
+    with pytest.raises(ValueError, match="identity is unconfirmed"):
+        native.spawned(
+            record, _identity(reply), reply["operation_id"], pid=os.getpid(), process_start_time=None,
+        )
+    assert seeds.peek(record).handoff_id
+    assert _saved(record, reply)["events"][-1]["phase"] == "seed-claimed"
 
 
 @pytest.mark.parametrize("environment", [None, {}, {"ODD-NAME": "value=\n'\u03a9", "EMPTY": ""}])
@@ -573,6 +705,7 @@ def test_selected_runtime_describes_literal_output_support_without_preparation()
         "contract": "agent-worktrees.native-seed", "version": 1,
         "preparation_output_formats": ["json", "nul"],
         "nul_reply_schema": "agent-worktrees.native-seed-reply.v1",
+        "setup_process_start_time_sources": ["caller", "provider"],
     }
     assert not result.stderr
 
