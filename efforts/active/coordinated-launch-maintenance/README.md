@@ -252,6 +252,19 @@ repository history.
   from its caller; all 76 broker/retirement controls passed. The stopped-resident
   desktop-startup failure remains owned by this repair, with a peer-owned
   temporary mitigation retained until separately authorized installed cutover.
+- Run 40760494432 passed original Windows activation and native/portable POSIX.
+  Real cold Worktrees construction, automatic SSH construction, all four scoped
+  maintenance requests and manual update completed; Worktrees broker/runtime
+  cleanup passed. SSH cleanup correctly refused its unbound self-staging
+  publisher, so the overall consumer result remains failed. Establish SSH
+  teardown lifecycle custody before self-staging on both native frontends,
+  using the existing canonical binding owner rather than restoring the removed
+  publisher exemption. Twenty canonical owner/staging controls and four SSH
+  exclusion guards passed; the actual hosted cleanup still must qualify it.
+- Reconciled the subsequent current-base Bridge snapshot change by preserving
+  its complete repository-policy closure and the broker's update-driver entry
+  exactly once. Both real PowerShell snapshot controls passed. No independent
+  installer queue, stop-consumer behavior or deployed change was introduced.
 
 ### 2026-10-28 - Qualify real broker consumers and canonical removal
 
