@@ -578,6 +578,15 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   pipe closure and handler restoration, then propagate it. Successful exec
   resets the caught handler in the kernel; an already ignored interrupt stays
   ignored. This is a cleanup fix, not production consumer activation.
+- The following review correctly distinguished cleanup deferral from an
+  interrupt inside an otherwise successful exec attempt. Native run
+  `40741403409` on `6ce50e51ad657d9575a7e5391d0d00917e16788f`
+  reproduced the backend reaching exit 99 instead of refusing with 3 after
+  actual SIGINT on Linux and stock macOS Bash 3.2. Each platform passed the
+  other 155 controls with 17 Windows-only skips; Windows remained green.
+  The handler now enters interrupted cleanup immediately during the attempt,
+  deferring only further cleanup-time interrupts. Final green proof and
+  review remain pending; no ordinary consumer or host installation changed.
 
 ### 2026-10-28 - Provider-owned setup birth prerequisite
 

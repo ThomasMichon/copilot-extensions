@@ -686,12 +686,13 @@ Before exec, the helper restores `SIGPIPE` and the available `SIGXFZ` /
 If exec unwinds, it restores the helper's original handlers before reporting
 failure or uncertainty; CPython's ignored dispositions do not reach a
 non-Python backend.
-During the exec attempt and failed-exec cleanup, caught `SIGINT` is deferred
-until the non-success marker is published, the pipe is closed and the helper's
-handlers are restored. An interrupt observed before the attempt refuses exec;
-successful exec resets the caught handler in the kernel. An already ignored
-`SIGINT` remains ignored. Cleanup-time interruption cannot turn a failed exec
-into success-shaped EOF.
+During the exec attempt, caught `SIGINT` immediately enters interrupted cleanup
+and refuses exec, including an interrupt inside Python's PATH search. Only
+cleanup-time interrupts are deferred until the non-success marker is published,
+the pipe is closed and the helper's handlers are restored. Successful exec
+resets the caught handler in the kernel. An already ignored `SIGINT` remains
+ignored. Cleanup-time interruption cannot turn a failed exec into success-shaped
+EOF.
 Only the explicit exec-error path permits restoration. A future native
 consumer must discover this capability before invoking the new phase, retain
 the actual foreground wait and exit code, settle the finite status boundary,

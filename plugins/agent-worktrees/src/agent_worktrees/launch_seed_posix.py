@@ -148,10 +148,14 @@ def execute(
     outcome = b"U"
     previous_signals = {}
     interrupt_pending = False
+    cleaning = False
 
     def defer_interrupt(_signal, _frame):
-        nonlocal interrupt_pending
+        nonlocal interrupt_pending, cleaning
         interrupt_pending = True
+        if not cleaning:
+            cleaning = True
+            raise KeyboardInterrupt
 
     interrupt_handler = signal.getsignal(signal.SIGINT)
     if interrupt_handler != signal.SIG_IGN:
@@ -166,6 +170,7 @@ def execute(
             except InterruptedError:
                 continue
         if status != 0:
+            cleaning = True
             native.spawn_failed(record, correlation, operation_id)
             return 3
         if interrupt_pending:
@@ -182,9 +187,14 @@ def execute(
                 raise KeyboardInterrupt
             os.execvpe(command[0], command, os.environ)
         except OSError:
+            cleaning = True
             outcome = b"F"
             return 3
+    except BaseException:
+        cleaning = True
+        raise
     finally:
+        cleaning = True
         # Exec resets the caught SIGINT handler in the kernel. On unwind,
         # defer it until non-success is published and all descriptors settle.
         try:
