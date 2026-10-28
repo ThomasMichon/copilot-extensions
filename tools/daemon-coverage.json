@@ -322,6 +322,7 @@
       "t:clean-room/scenarios/plugin-process-hygiene-convergence/fixtures/plugin_process_hygiene_convergence.py::_spawn::Popen": 1
     },
     "caller-contained": {
+      "r:plugins/agent-worktrees/scripts/pre-tool-hook.ps1::<script>::Process.Start": 1,
       "r:plugins/agent-worktrees/scripts/native-seed-boundary.ps1::<script>::Process.Start": 2,
       "r:worktree-manager/bin/pane-wrapper.ps1::<script>::Process.Start": 2,
       "r:worktree-manager/bin/launch-session.ps1::<script>::Process.Start": 3,
