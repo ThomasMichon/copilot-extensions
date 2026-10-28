@@ -207,6 +207,11 @@ owns the revised implementation and validation boundary.
 - [ ] Complete the shared daemon replacement through the reactivated
   [leased-daemon instance owner](../leased-daemon-instances/README.md), preserving
   its existing registry, lifecycle protocol and safety guarantees.
+- [x] Replace the shared compiled evaluator interpreter selector and its two
+  Windows adopters with setup-provided PATH Python, removing registry,
+  signature, PE and physical-path interpreter attestation (#9262). This closes
+  selector and consumer compatibility, not the remaining compiled SDK,
+  installer or daemon entrypoints.
 - [ ] Replace executable embedded Windows helper compilation and runtime code
   emission through their existing installation-context, operation-lock,
   update-driver, process and session-host owners. Establish the existing
@@ -272,9 +277,9 @@ shared mutable venv is presumed acceptable.
 
 The compiler-free Phase 7 amendment merged in #9120 after current-head approval
 with no findings and successful required CI. The Linux shared-instance
-replacement subsequently merged in #9129; the next source slice replaces the
-Windows compiled interpreter selector with setup-provided PATH Python. Neither
-merge closes the complete bootstrap, platform, release or adoption gates.
+replacement subsequently merged in #9129; the Windows evaluator selector
+migration to setup-provided PATH Python merged in #9262. These slices do not
+close the complete bootstrap, platform, release or adoption gates.
 The prerequisite clarification and Linux merge reconciliation then merged in
 #9162. Windows implementation now proceeds from the existing machine-owned
 Python prerequisite, not another interpreter acquisition mechanism.
@@ -353,6 +358,213 @@ from #6767: no rejected routing broker or shared mutable venv, and no claimed
 transfer without acceptance by a named tracked objective.
 
 ## Journal
+
+### 2026-10-27 - Retained SDK desktop properties independently reconciled
+
+- The consented source-only witness recorded a 0.125-second visible control,
+  raw owned foreground activation, exact original foreground restoration and
+  retirement. One continuous 38.938-second quiet epoch covered both disjoint
+  16-case workers and their cleanup with zero violations, 47-ms maximum gap,
+  two closed hooks, sealed capture and no observation error.
+- All 32 native cases passed. Their literal source-bound selectors and exact
+  JUnit names, complete source hashes, closed-publication records, 144 per-case
+  unique birth-identity slots, original Job drain and controller disposal were
+  independently reconciled within the original 180-second bound.
+- The original qualification still returned negative because an external
+  pytest configuration root produced empty JUnit class names. Its strict
+  checker correctly rejected that metadata. The original result and all 267
+  evidence artifacts remain unchanged; no failed case is retrospectively
+  relabelled as a pass.
+- The fixture now supplies the verified SDK as pytest's root. Cold synthetic
+  subprocess controls reproduce the old metadata failure and check the fix;
+  strict empty/foreign-class rejection remains. The corrected producer has
+  not run natively, and no new window or replay was authorized.
+- Independent source/data review accepts only the caller-lifetime and
+  no-unintended-window/foreground properties actually exercised by the retained
+  matrix. This is not a positive corrected-fixture native end-to-end run,
+  full Manager desktop acceptance, publication, release, rollout or aggregate
+  effort completion.
+- The current actor-free packet passes 2,715 units with unchanged effect
+  refusal; focused source/metadata/policy checks pass 100. Source publication
+  and normal independent PR review remain next. The complete compiler-free
+  Plan and Validation Plan remain open.
+
+### 2026-10-27 - Critical Windows matrix complete; visibility remains separate
+
+- Exhaust the authorized 114-case Windows matrix: 112 pass, no failure or unrun
+  case, and the same two explicit directory-symlink privilege skips. All 32
+  real lifetime cases, 34 bootstrap cases, four composed-status cases and
+  the remaining foundation cases pass, including the missing-drive,
+  junction-escape and case-stability checks.
+- Independently verify the 63 artifact hashes, unique JUnit inventory,
+  complete frozen source closure and all 14 native owner/controller
+  settlements. The real lifetime cases retain 32 closed-publication markers
+  and 144 per-case birth-pinned identities. None of the prior failed cases
+  becomes retrospective evidence.
+- The new compiler-free SDK launch still needs independently calibrated
+  visibility/foreground observation. Prepare a source-only, opt-in witness
+  through the original bounded owner; preserve the existing whole-stream
+  observer's exact gap, delivery, overflow and sealing rules. Do not equate
+  functional/lifetime acceptance or launch flags with desktop proof.
+- The portable observer/consent controls are positively admitted without
+  native actors in required CI. The candidate still needs independent source
+  audit and passive binding qualification before any deliberately visible
+  control. No visibility, review, merge, aggregate effort or rollout claim
+  follows from source preparation.
+
+### 2026-10-27 - Preserve the required-path diagnostic contract
+
+- Fixed-fixture Windows qualification passes all 32 actual lifetime cases,
+  all 34 PowerShell bootstrap cases and all four composed-status cases.
+  Independent evidence correlates the lifetime cases to 32 closed-publication
+  markers and 144 per-case birth-pinned identities, including real venv
+  launcher/base-worker/leaf chains.
+- The same run stops on a late foundation diagnostic mismatch: a missing
+  drive is correctly rejected, but Python's strict resolver emits
+  `Cannot resolve path` before the legacy PowerShell `Path does not exist`
+  branch. The bounded result is 95 passes, one failure, two genuine symlink
+  privilege skips and 16 unrun cases, not an aggregate pass.
+- A separate read-only native control confirms `FileNotFoundError` with
+  errno 2/Windows error 3 for the exact missing drive. Translate only that
+  type when both the PowerShell adapter scope and `must_exist` are active.
+  Ordinary Python, optional-path, access-denied and other resolution errors
+  retain their previous diagnostics; no refusal becomes success.
+- Six new actor-free cases cover those scope/type distinctions without
+  weakening the native diagnostic assertion. Fresh frozen-source Windows
+  conformance, review, desktop visibility and broader effort gates remain
+  open; no installation or rollout is inferred.
+- Inspection of the remaining Windows-only fixtures also makes the concurrent
+  PowerShell and junction-command launches explicitly windowless. The
+  previously uncapped junction command now has a ten-second child deadline;
+  no existing deadline grows and no visible calibration is run.
+
+### 2026-10-27 - Close the native fixture publication boundary
+
+- Corrected-source Windows qualification passed 24 lifetime cases, including
+  the repaired Desktop result path. The next case stopped before process-pin
+  admission when the observer could not read its newly visible identity report.
+  The remaining 89 cases are unrun, not a pass; no permissions changed.
+- A bounded, separate Windows control reproduces the relevant filesystem
+  hazard: an already-visible renamed file can refuse ordinary reads with
+  `PermissionError` while a DELETE-access handle remains open. Native reads
+  without delete sharing return error 32; delete-sharing reads and reads after
+  the owned handle closes succeed on the same file. This proves that class of
+  publication hazard, not the historical failed read's exact cause.
+- Strengthen the test protocol instead of swallowing that error. The producer
+  emits a separate exclusive marker only after closing and renaming its
+  report; the observer waits for that causal completion before reading.
+  Controls require no premature admission and preserve explicit failures
+  after admission. Process-birth pins, retirement-before-cleanup assertions
+  and every existing deadline remain unchanged.
+- Production SDK/process bytes remain identical to the already unit-qualified
+  corrected source. The fixture change still owes fresh Windows qualification;
+  no source, review, desktop, effort or rollout gate closes from a fixture fix.
+
+### 2026-10-27 - Desktop cleanup and request framing corrections
+
+- The first actual SDK lifetime packet reached two normal-PATH completion
+  cases: Core passed; PowerShell 5.1 returned the correct application JSON but
+  then failed its exit contract. Both cases had already observed pinned
+  callback/descendant retirement. Stop on that first failure; the remaining
+  108 cases are unrun, not qualification evidence.
+- A separate, read-only stock .NET control identifies the cause: Framework's
+  `StreamWriter.Close` makes `BaseStream` null, while Core retains the disposed
+  stream reference. Retaining and disposing the original stream is safe and
+  idempotent on both. The adapter now owns that original reference and closes
+  captured readers explicitly rather than re-querying the closed writer.
+- A new 120,000-character in-memory request exposed a separate native argv
+  limit in the encoded-packet transport. Move the encoded request to the
+  private input pipe, with asynchronous delivery under the same startup
+  deadline before custody acknowledgement. No application deadline grows.
+  A closed request pipe must also retain the child's prerequisite error;
+  its regression initially exposed a generic broken-pipe diagnostic and now
+  preserves the actual prerequisite message.
+- The corrected focused Linux packet passes 94 cases with eight explicit
+  Windows path skips, including large requests, unsupported-prerequisite
+  diagnostics and all 32 actual caller-lifetime controls. Native Windows
+  SDK requalification requires a new frozen source; the earlier failure,
+  declared test-dependency repair and all bounded evidence remain retained.
+  No review, merge, aggregate effort or rollout gate closes here.
+
+### 2026-10-27 - Original-caller custody source and bounded qualification
+
+- Extend the existing shared process owner, not interpreter admission. A
+  distinct pipe-server-bound Windows entry retains the original direct-parent
+  API's strict contract and uses one birth-pinned caller handle for the Job
+  transfer. Stock .NET adopts the continuing handle and pins the actual worker
+  before acknowledgement; a normal venv launcher remains supported.
+- Native PowerShell 5.1 and Core each observed the original shell's kernel pipe
+  server PID through both normal PATH Python and an existing venv. All four
+  queries succeeded; the venv workers' direct parents were launcher stubs.
+  This establishes pipe-origin observability while the caller is alive, not
+  complete SDK lifetime or desktop qualification.
+- The source-only SDK worker now uses that shared receipt/acknowledgement
+  boundary. Linux/macOS reuse caller-owned session/group retirement and a
+  private lifetime pipe; completion and cancellation are not inferred from
+  `Process.Dispose`. Generated source archives use the existing lifecycle
+  builder, not another runtime or service.
+- The final focused Linux packet passes 90 cases with eight explicit Windows
+  path skips. Its actual PowerShell lifetime controls cover two cycles of
+  completion, abrupt callback exit, original caller death and runspace
+  cancellation, under normal PATH and an existing test venv. Pinned callback,
+  child and grandchild processes must retire before observer cleanup.
+  The new 32 actor-free framing/Job cases are admitted without adding native
+  actors to required CI; full packet qualification for this source is next.
+- The earlier bounded Windows compatibility packet completed 48 cases,
+  skipped two directory-symlink cases for unavailable privilege and left
+  28 foundation cases unrun. Optional slot cases were not invoked. No
+  aggregate Windows SDK pass is claimed, and no privilege/settings remedy
+  or deadline extension is authorized by those skips.
+- Actual Windows SDK lifetime/venv qualification, remaining compatibility,
+  independent review and merge remain publication gates. All broader
+  compiler-free, daemon, desktop, release and authorized rollout gates remain
+  open; no installed runtime has changed.
+
+### 2026-10-27 - PowerShell SDK source candidate and caller-lifetime gate
+
+- Replace the canonical embedded-C# SDK with a thin PowerShell adapter to its
+  existing stdlib Python owner and synchronize the complete script, wheel and
+  standalone consumer roster. Keep strict action/generation/supplied-empty
+  behavior, native rooted paths, default homes and the success pipeline.
+- Composed status and independent receipt validation share one request's
+  validation scope, retaining detection of a receipt changed between reads.
+  The positively admitted packet passes 2,462 cases with source coverage.
+  Focused source/adapter/shipping controls pass 80 cases with five explicit
+  platform skips; six additional literal/large-output controls pass on Linux
+  PowerShell Core. An isolated POSIX governance/deployment partition passes
+  105 cases. Native Windows compatibility qualification is still in progress.
+- Direct integration review identifies an additional completion gate: the new
+  Python worker must remain owned by the original PowerShell caller across
+  exit/cancellation. Disposing a `Process` object does not establish that
+  lifetime. Reuse the canonical process-custody owner and preserve normal PATH
+  composition, including a Windows venv's launcher/base-process boundary;
+  do not replace this with interpreter attestation or an unowned fallback.
+- This is a source candidate, not merged or installed completion. Keep all
+  aggregate helper, daemon, desktop, release and rollout items open. Finish the
+  caller-lifetime binding and its native evidence before publishing this slice.
+
+### 2026-10-27 - PATH selector merged; continue the SDK migration
+
+- #9262 merged as `d671040c56453823fbfbf305c6259301f75953cf` after genuine
+  current-head Copilot approval, resolution of the obsolete shared-consumer
+  expectations and successful required CI. The completed selector and consumer
+  slice retains 156 cases of bounded Windows coverage as recorded below.
+- Re-read both entire owning effort READMEs and their complete Plan and
+  Validation Plans after merge. Close only the selector migration item.
+  Windows shared-daemon entrypoints, compiled installation-context and
+  operation-lock/update-driver helpers, desktop acceptance, release attribution
+  and authorized rollout remain open.
+- Post-merge pull-forward initially replayed intermediate commits already
+  present in the squash merge. Retained the original tip, proved every owned
+  path already matched the provider-confirmed merge with no unmerged tail,
+  dropped only that delivered range and completed managed reconciliation.
+  No new work, source or qualification evidence was discarded.
+- Next replace the compiled PowerShell installation-context entrypoint with
+  the existing stdlib Python owner. Preserve strict action/argument behavior,
+  Windows path and home semantics, complete status/context validation, locks,
+  finite cleanup and error propagation. Do not remove the remaining native
+  path-semantics route by silently changing valid inputs, or reintroduce
+  interpreter attestation. No installed change follows from this source merge.
 
 ### 2026-10-27 - Implement the PATH selector
 

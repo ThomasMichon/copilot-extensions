@@ -89,6 +89,7 @@ _VALIDATION_SCOPE_DEPTH: ContextVar[int] = ContextVar(
     "_VALIDATION_SCOPE_DEPTH",
     default=0,
 )
+_POWERSHELL_PATHS: ContextVar[bool] = ContextVar("_POWERSHELL_PATHS", default=False)
 
 
 class InstallationContextError(ValueError):
@@ -170,10 +171,14 @@ def canonical_path(value: str | os.PathLike[str], *, must_exist: bool = False) -
     text = os.fspath(value)
     if not text.strip():
         _fail("A required path is empty.")
+    if _POWERSHELL_PATHS.get():
+        text = _powershell_path_text(text)
     path = Path(text)
     try:
         resolved = path.resolve(strict=must_exist)
     except (OSError, RuntimeError) as error:
+        if must_exist and _POWERSHELL_PATHS.get() and isinstance(error, FileNotFoundError):
+            _fail(f"Path does not exist: {value}")
         _fail(f"Cannot resolve path '{value}': {error}")
     if must_exist and not resolved.exists():
         _fail(f"Path does not exist: {value}")

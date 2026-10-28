@@ -41,6 +41,10 @@ def _api() -> Any:
     ]
     kernel.DuplicateHandle.restype = wintypes.BOOL
     kernel.AssignProcessToJobObject.restype = wintypes.BOOL
+    kernel.GetNamedPipeServerProcessId.argtypes = [
+        wintypes.HANDLE, ctypes.POINTER(wintypes.ULONG),
+    ]
+    kernel.GetNamedPipeServerProcessId.restype = wintypes.BOOL
     return kernel
 
 
@@ -74,6 +78,26 @@ def transfer_lifetime_to_parent(*, parent_pid: int, parent_birth: str) -> Parent
     closing its last Job handle may terminate it before Python can unwind.
     Callers must never continue application work following a failed transfer.
     """
+    return _transfer(parent_pid=parent_pid, parent_birth=parent_birth, pipe_handle=None)
+
+
+def transfer_lifetime_to_pipe_server(
+    *, parent_pid: int, parent_birth: str, pipe_handle: int,
+) -> ParentJob:
+    """Bind to the original caller that created an inherited input pipe.
+
+    Unlike the direct-parent entry point, this permits an ordinary interpreter
+    launcher between caller and worker. The kernel's pipe-server identity and
+    the same pinned process birth establish the owner, not a numeric ancestry
+    walk. The caller must adopt the receipt and acknowledge it over that pipe
+    before application work. This does not admit an interpreter or source.
+    """
+    if type(pipe_handle) is not int or pipe_handle <= 0:
+        raise ValueError("original caller requires an inherited pipe handle")
+    return _transfer(parent_pid=parent_pid, parent_birth=parent_birth, pipe_handle=pipe_handle)
+
+
+def _transfer(*, parent_pid: int, parent_birth: str, pipe_handle: int | None) -> ParentJob:
     global _transferred
     if not _is_windows():
         raise OSError("parent-owned Job transfer requires native Windows")
@@ -83,7 +107,8 @@ def transfer_lifetime_to_parent(*, parent_pid: int, parent_birth: str) -> Parent
         raise RuntimeError("this worker already transferred its lifetime")
     if (
         type(parent_pid) is not int or not 0 < parent_pid <= 0xFFFFFFFF
-        or parent_pid == os.getpid() or parent_pid != os.getppid()
+        or parent_pid == os.getpid()
+        or (pipe_handle is None and parent_pid != os.getppid())
     ):
         raise ValueError("lifetime owner must be this worker's original direct parent")
     if (
@@ -108,6 +133,11 @@ def transfer_lifetime_to_parent(*, parent_pid: int, parent_birth: str) -> Parent
     try:
         if _windows_birth(parent) != parent_birth:
             raise ProcessLookupError("original parent birth identity changed")
+        if pipe_handle is not None:
+            server = wintypes.ULONG()
+            _check(kernel.GetNamedPipeServerProcessId(pipe_handle, ctypes.byref(server)))
+            if server.value != parent_pid:
+                raise ProcessLookupError("inherited pipe does not belong to the original caller")
         _parent_live(kernel, parent)
         current = kernel.GetCurrentProcess()
         worker_birth = _windows_birth(current)

@@ -38,6 +38,7 @@ py-modules = [
     "_installation_context_mode_cli",
     "_installation_context_deployment",
     "_installation_context_publication",
+    "_installation_context_powershell",
 ]
 
 [project.optional-dependencies]

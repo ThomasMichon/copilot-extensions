@@ -44,9 +44,10 @@ def test_sync_repairs_missing_and_drifted_copies(tmp_path: Path) -> None:
     module.LEGACY_ENTRYPOINT_ADOPTERS = ("plugin-a",)
     module.STANDALONE_PYTHON_ADOPTERS = ()
     module.STANDALONE_ASSETS = ()
+    module.lifecycle_archive = lambda repo: b"source-only fixture archive"
     assert module.verify()
     written = module.sync()
-    assert len(written) == len(module.FILES) * 2 + len(module.LEGACY_ENTRYPOINT_FILES)
+    assert len(written) == len(module.FILES) * 2 + len(module.LEGACY_ENTRYPOINT_FILES) + 1
     assert module.verify() == []
     if os.name != "nt":
         destination = plugins / "plugin-a" / "scripts" / "installation-context" / module.FILES[0]
@@ -77,6 +78,7 @@ def test_verify_flags_a_plugin_that_vendors_without_being_registered(
     module.LEGACY_ENTRYPOINT_ADOPTERS = ()
     module.STANDALONE_PYTHON_ADOPTERS = ()
     module.STANDALONE_ASSETS = ()
+    module.lifecycle_archive = lambda repo: b"source-only fixture archive"
     module.sync()
     assert module.verify() == []
 

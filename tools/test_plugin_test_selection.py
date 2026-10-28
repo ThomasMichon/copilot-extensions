@@ -26,6 +26,37 @@ finally:
     sys.path[:] = _previous_path
 
 
+def test_installation_context_prepares_only_its_source_test_prerequisites(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "source"
+    root.mkdir()
+    (root / "pyproject.toml").write_text("[project]\nname = 'fixture'\n", encoding="utf-8")
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    interpreter = cache / "python"
+    installs: list[list[str]] = []
+    monkeypatch.setattr(runner, "ordinary_cache_root", lambda path: cache)
+    monkeypatch.setattr(runner, "clear_cache_contents", lambda path: None)
+    monkeypatch.setattr(runner, "_venv_python", lambda name: interpreter)
+    monkeypatch.setattr(runner, "_dep_fingerprint", lambda name: "source-fingerprint")
+    monkeypatch.setattr(runner, "_plugin_dir", lambda name: root)
+
+    def create_environment(*args: object, **kwargs: object) -> None:
+        interpreter.touch()
+
+    def install(uv: str, arguments: list[str], **kwargs: object) -> None:
+        installs.append(arguments)
+
+    monkeypatch.setattr(runner.subprocess, "run", create_environment)
+    monkeypatch.setattr(runner, "run_uv_install", install)
+    assert runner._ensure_venv("installation-context", "uv", reinstall=False) == interpreter
+    assert installs == [
+        ["--python", str(interpreter), "pytest", *runner.RUNNER_DEPENDENCIES]
+    ]
+    assert (cache / ".dep-fingerprint").read_text() == "source-fingerprint"
+
+
 @pytest.fixture
 def selection_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
     tests = tmp_path / "tests"

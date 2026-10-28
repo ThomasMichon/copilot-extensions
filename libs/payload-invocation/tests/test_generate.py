@@ -929,13 +929,14 @@ def test_worktrees_composed_status_revalidates_changed_receipt(tmp_path: Path, h
         "TEST_NAMESPACE_REPLACEMENT": str(replacement),
     })
     native = payload / "scripts" / "installation-context" / "installation-context.ps1"
-    source = native.read_text(encoding="utf-8")
-    status_call = "$result = Resolve-InstallationStatus $resolvedCopilotHome $resolvedProjectRoot $resolvedDurableHome"
+    owner = native.with_name("_installation_context_mode_cli.py")
+    source = owner.read_text(encoding="utf-8")
+    status_call = "    result = resolve_installation_mode(**mode_arguments)"
     assert source.count(status_call) == 1
-    native.write_text(source.replace(
+    owner.write_text(source.replace(
         status_call, status_call + "\n"
-        "[IO.File]::WriteAllText($env:TEST_NAMESPACE_RECEIPT, "
-        "[IO.File]::ReadAllText($env:TEST_NAMESPACE_REPLACEMENT))",
+        "    Path(os.environ['TEST_NAMESPACE_RECEIPT']).write_bytes("
+        "Path(os.environ['TEST_NAMESPACE_REPLACEMENT']).read_bytes())",
     ), encoding="utf-8")
     result = subprocess.run(
         [host, "-NoProfile", "-File", str(native), "status",

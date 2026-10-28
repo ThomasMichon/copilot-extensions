@@ -70,6 +70,27 @@ whole-descendant settlement and observation of the original helper's exit.
 A receipt is not a settlement witness. Transfer failure is terminal for the
 sacrificial helper; it must never continue application work.
 
+`transfer_lifetime_to_pipe_server` is a distinct entry point for a trusted
+interpreter launcher between the shell and Python. It retains the same
+birth-pinned process handle and strict Job transfer, but requires the kernel's
+inherited-pipe server PID to name that original caller. It does not weaken the
+direct-parent API or walk/reopen numeric ancestry. The caller adopts the
+returned handle and pins the actual worker's birth before acknowledging work.
+
+The private `_shell_caller_owned.serve` adapter supplies this startup receipt,
+acknowledgement and correlated completion framing for synchronous shell
+callbacks. Windows keeps the continuing Job handle exclusively in the original
+shell; cancellation or shell death closes it. Linux/macOS retain the original
+shell's private stdin lifetime pipe in a session/group leader, run the callback
+in a forked member, and use the existing caller-owned group retirement after
+callback exit or pipe loss. The callback never inherits an application-input
+pipe or a continuing lifetime writer. The shell must reject missing completion
+or an unexpected owner-exit status; it closes the Job before awaiting captured
+pipe EOF, and its interruptible waits permit cancellation to run that cleanup.
+This is a caller-bounded helper, not a daemon, another service or a new registry.
+The source-only lifecycle archive packages the same implementation for cold
+shell callers; it contains Python source, not a compiled helper.
+
 This primitive does not select or admit an interpreter, authenticate a
 command, acquire an operation lock, or switch an existing bootstrap caller.
 Interpreter/complete-source admission, bounded shell framing, native desktop
@@ -77,7 +98,9 @@ qualification and migration of the compiled implementations remain open in
 the [compiler-free amendment](../../efforts/active/lean-runtime-dependencies/compiler-free-execution.md).
 The portable controls and separate native parent-exit, explicit-handle-close
 and stale-parent-birth controls test this building block, not that complete
-bootstrap contract.
+bootstrap contract. `test_shell_caller_owned_native.py` separately exercises the
+actual PowerShell SDK's callback completion, abrupt exit, original caller death
+and runspace cancellation, observing pinned descendants before test cleanup.
 
 ### Existing compiled entrypoints
 
