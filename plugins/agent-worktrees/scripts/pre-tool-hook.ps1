@@ -183,7 +183,7 @@ try {
     }
     $response = ConvertFrom-PreToolJson $result
     if ($response -isnot [Collections.IDictionary]) { throw 'Invalid pre-tool policy response' }
-    foreach ($name in $response.Keys) {
+    foreach ($name in $response.get_Keys()) {
         if ($name -cnotin @('permissionDecision', 'permissionDecisionReason', 'additionalContext')) {
             throw 'Invalid pre-tool policy response'
         }

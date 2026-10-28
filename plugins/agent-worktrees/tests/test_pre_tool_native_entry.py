@@ -16,7 +16,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.mark.parametrize("case", ["read", "guard-drift", "missing-contract", "write", "context", "active", "invalid-flag", "future-flag-contract", "array-flag", "array-contract-id", "empty-contract-id", "drive-relative-flag", "root-relative-flag", "array-contract", "non-utf8-environment", "old-client", "empty-policy", "array-response", "invalid-decision-response", "invalid-context-response", "policy-error", "malformed-response", "case-flag", "case-payload"])
+@pytest.mark.parametrize("case", ["read", "guard-drift", "missing-contract", "write", "context", "active", "invalid-flag", "future-flag-contract", "array-flag", "array-contract-id", "empty-contract-id", "drive-relative-flag", "root-relative-flag", "array-contract", "non-utf8-environment", "old-client", "empty-policy", "array-response", "invalid-decision-response", "invalid-context-response", "policy-error", "malformed-response", "case-flag", "case-payload", "keys-shadow-response"])
 @pytest.mark.parametrize("native_shell", ["powershell.exe", "pwsh"])
 def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_path):
     shell = shutil.which(native_shell)
@@ -82,7 +82,7 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
         env["PYTHONIOENCODING"] = "cp1252"
     if case in {
         "old-client", "empty-policy", "array-response", "invalid-decision-response",
-        "invalid-context-response", "policy-error", "malformed-response",
+        "invalid-context-response", "policy-error", "malformed-response", "keys-shadow-response",
     }:
         action = {
             "old-client": "if sys.argv[1] == 'preToolUse': print('{}')\n",
@@ -92,6 +92,7 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
             "invalid-context-response": "import json\nprint(json.dumps({'additionalContext':[]}))\n",
             "policy-error": "print('private native diagnostic',file=sys.stderr)\nraise SystemExit(3)\n",
             "malformed-response": "print('{private-native-response-text')\n",
+            "keys-shadow-response": "import json\nprint(json.dumps({'Keys': [], 'unexpected': True}))\n",
         }[case]
         (scripts / "hook_client.py").write_text(
             "import sys\nfrom pathlib import Path\n"
