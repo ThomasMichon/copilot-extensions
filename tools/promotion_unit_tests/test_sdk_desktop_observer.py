@@ -343,8 +343,8 @@ def case_packets(sdk):
         for mode in module.OFFER_MODES
     ])
     packets.append([
-        str(sdk / module.NATIVE_TEST) + "::" + f"{module.EOF_FUNCTION}[{host}]"
-        for host in hosts
+        str(sdk / module.NATIVE_TEST) + "::" + f"{module.STARTUP_FUNCTION}[{failure}-{host}]"
+        for failure, host in itertools.product(("eof", "malformed"), hosts)
     ])
     return packets
 
@@ -829,7 +829,7 @@ def test_native_offer_fixture_names_original_pipe_owner_not_interpreter_launcher
 @pytest.mark.parametrize("change", [
     "none", "failure", "error", "skipped", "missing", "duplicate", "other", "empty-classname",
 ])
-def test_native_junit_requires_all_42_actual_case_results(tmp_path, change):
+def test_native_junit_requires_all_44_actual_case_results(tmp_path, change):
     sdk = tmp_path / "sdk"
     packets = case_packets(sdk)
     for index, nodes in enumerate(packets):
@@ -854,7 +854,7 @@ def test_native_junit_requires_all_42_actual_case_results(tmp_path, change):
         suite[0].set("classname", "")
     ET.ElementTree(suite).write(path)
     if change == "none":
-        assert runner.verify_native_junit(tmp_path, sdk, packets)["case_count"] == 42
+        assert runner.verify_native_junit(tmp_path, sdk, packets)["case_count"] == 44
     else:
         with pytest.raises(observer.ObservationBlocked, match="literal packet"):
             runner.verify_native_junit(tmp_path, sdk, packets)
@@ -863,7 +863,7 @@ def test_native_junit_requires_all_42_actual_case_results(tmp_path, change):
 @pytest.mark.parametrize("change", [
     "one-packet", "oversize", "duplicate", "overlap", "wrong-function", "wrong-source",
     "missing-mode", "wrong-host", "missing-controls", "wrong-order", "control-duplicate",
-    "eof-host-mismatch",
+    "eof-host-mismatch", "missing-startup-mode",
 ])
 def test_unbounded_or_incomplete_native_packet_matrices_are_refused(tmp_path, change):
     sdk = tmp_path / "sdk"
@@ -884,6 +884,8 @@ def test_unbounded_or_incomplete_native_packet_matrices_are_refused(tmp_path, ch
         packets[2][-1] = packets[2][0]
     elif change == "eof-host-mismatch":
         packets[3] = [node.replace("PowerShell", "OtherPowerShell") for node in packets[3]]
+    elif change == "missing-startup-mode":
+        packets[3] = [node.replace("[malformed-", "[eof-") for node in packets[3]]
     else:
         before, after = {
             "wrong-function": ("test_sdk_scope_retires_before_observer_cleanup", "test_other"),

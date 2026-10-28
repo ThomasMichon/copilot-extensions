@@ -22,7 +22,8 @@ OFFER_MODES = (
     "no-permission", "wrong-permission", "abort", "write-abort",
     "write-eof", "wrong-ack", "missing-ack", "adopted",
 )
-EOF_FUNCTION = "test_startup_receipt_eof_releases_input_before_waiting_for_worker"
+STARTUP_FUNCTION = "test_startup_receipt_failure_releases_input_before_waiting_for_worker"
+STARTUP_CASE = re.compile(re.escape(STARTUP_FUNCTION) + r"\[(eof|malformed)-(.+)\]")
 
 
 def packet_kind(nodes: list[str]) -> str:
@@ -31,13 +32,14 @@ def packet_kind(nodes: list[str]) -> str:
         return "sdk"
     if len(nodes) == 8 and set(names) == {f"{OFFER_FUNCTION}[{mode}]" for mode in OFFER_MODES}:
         return "offer"
-    if len(nodes) == 2 and all(
-        name.startswith(EOF_FUNCTION + "[") and name.endswith("]") for name in names
-    ):
-        hosts = {name[len(EOF_FUNCTION) + 1:-1] for name in names}
+    if len(nodes) == 4 and all(STARTUP_CASE.fullmatch(name) for name in names):
+        keys = [STARTUP_CASE.fullmatch(name).groups() for name in names]
+        hosts = {host for _, host in keys}
         kinds = {host.replace("\\", "/").rsplit("/", 1)[-1].casefold() for host in hosts}
-        if kinds == {"powershell.exe", "pwsh.exe"}:
-            return "eof"
+        if kinds == {"powershell.exe", "pwsh.exe"} and set(keys) == set(
+            itertools.product(("eof", "malformed"), hosts),
+        ):
+            return "startup"
     raise ObservationBlocked("native packet differs from its literal bounded control roster")
 
 
@@ -58,9 +60,9 @@ def validate_case_packet(sdk: Path, nodes: object) -> list[str]:
 
 def validate_case_packets(sdk: Path, packets: object) -> list[list[str]]:
     if not isinstance(packets, list) or len(packets) != 4:
-        raise ObservationBlocked("qualification requires SDK, offer and startup EOF packets")
+        raise ObservationBlocked("qualification requires SDK, offer and startup failure packets")
     result = [validate_case_packet(sdk, packet) for packet in packets]
-    if [packet_kind(packet) for packet in result] != ["sdk", "sdk", "offer", "eof"]:
+    if [packet_kind(packet) for packet in result] != ["sdk", "sdk", "offer", "startup"]:
         raise ObservationBlocked("qualification packet kinds or order differ")
     nodes = [node for packet in result[:2] for node in packet]
     keys = [CASE.fullmatch(node.partition("::")[2]).groups() for node in nodes]
@@ -73,11 +75,11 @@ def validate_case_packets(sdk: Path, packets: object) -> list[list[str]]:
     if (len(hosts) != 2 or kinds != {"powershell.exe", "pwsh.exe"}
             or len(set(nodes)) != 32 or set(keys) != expected):
         raise ObservationBlocked("native packets differ from the complete 32-case Windows matrix")
-    eof_hosts = {
-        node.partition("::")[2][len(EOF_FUNCTION) + 1:-1] for node in result[3]
+    startup_hosts = {
+        STARTUP_CASE.fullmatch(node.partition("::")[2]).group(2) for node in result[3]
     }
-    if eof_hosts != hosts:
-        raise ObservationBlocked("startup EOF controls differ from the qualified SDK hosts")
+    if startup_hosts != hosts:
+        raise ObservationBlocked("startup failure controls differ from the qualified SDK hosts")
     return result
 
 
@@ -85,7 +87,7 @@ def native_arguments(sdk: Path, output: Path, nodes: list[str], packet: int) -> 
     validate_case_packet(sdk, nodes)
     if type(packet) is not int or packet not in (0, 1, 2, 3):
         raise ObservationBlocked("native packet ordinal must be zero through three")
-    if packet_kind(nodes) != ("sdk", "sdk", "offer", "eof")[packet]:
+    if packet_kind(nodes) != ("sdk", "sdk", "offer", "startup")[packet]:
         raise ObservationBlocked("native packet ordinal differs from its literal roster")
     return [
         "-q", "-x", "--noconftest", "-p", "no:cacheprovider",

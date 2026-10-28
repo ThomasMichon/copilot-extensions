@@ -150,7 +150,8 @@ def test_published_report_read_errors_are_not_silently_retried(tmp_path, monkeyp
 
 
 @pytest.mark.parametrize("host", HOSTS or [None])
-def test_startup_receipt_eof_releases_input_before_waiting_for_worker(tmp_path, host):
+@pytest.mark.parametrize("failure", ["eof", "malformed"])
+def test_startup_receipt_failure_releases_input_before_waiting_for_worker(tmp_path, host, failure):
     if host is None:
         pytest.skip("PowerShell is unavailable")
     source = tmp_path / "sdk"
@@ -158,14 +159,34 @@ def test_startup_receipt_eof_releases_input_before_waiting_for_worker(tmp_path, 
     shutil.copyfile(SDK / "installation-context.ps1", source / "installation-context.ps1")
     (source / "installation_context.py").write_text("", encoding="utf-8")
     (source / "_installation_context_worker.py").write_text(
-        "import os,sys\n"
+        "import json,os,sys\n"
         "from pathlib import Path\n"
         "def main(request):\n"
-        "    os.close(1)\n"
-        "    sys.stdin.buffer.read()\n"
-        "    Path(request['parameters']['DurableHome']).mkdir()\n"
-        "    sys.stderr.write('controlled receipt publication failure\\n')\n"
-        "    return 1\n",
+        "    root = Path(request['parameters']['DurableHome'])\n"
+        "    root.mkdir()\n"
+        "    if os.environ['SHELL_STARTUP_TEST_FAILURE'] == 'eof':\n"
+        "        os.close(1)\n"
+        "        sys.stdin.buffer.read()\n"
+        "        (root / 'input-closed').touch()\n"
+        "        sys.stderr.write('controlled receipt publication failure\\n')\n"
+        "        return 1\n"
+        "    sys.path.insert(0, os.environ['SHELL_STARTUP_TEST_SOURCE'])\n"
+        "    from agent_procutil._shell_caller_owned import serve\n"
+        "    original = sys.stdout\n"
+        "    class MalformedReceipt:\n"
+        "        def write(self, text):\n"
+        "            json.loads(text)\n"
+        "            (root / 'offer.json').write_text(text, encoding='utf-8')\n"
+        "            sys.stderr.write('controlled malformed receipt\\n')\n"
+        "            sys.stderr.flush()\n"
+        "            return original.write('{invalid-json\\n')\n"
+        "        def flush(self):\n"
+        "            original.flush()\n"
+        "    sys.stdout = MalformedReceipt()\n"
+        "    def callback():\n"
+        "        (root / 'forbidden-application').touch()\n"
+        "        return 0\n"
+        "    return serve(callback, **request['lifetime'])\n",
         encoding="utf-8",
     )
     process = subprocess.Popen(
@@ -175,15 +196,33 @@ def test_startup_receipt_eof_releases_input_before_waiting_for_worker(tmp_path, 
          "-CopilotHome", str(tmp_path / "copilot"),
          "-DurableHome", str(tmp_path / "released")],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
+        env={
+            **os.environ, "SHELL_STARTUP_TEST_FAILURE": failure,
+            "SHELL_STARTUP_TEST_SOURCE": str(ROOT / "libs/agent-procutil/src"),
+        },
         **no_window_kwargs(),
     )
     try:
         stdout, stderr = process.communicate(timeout=5)
         assert process.returncode == 1, (stdout, stderr)
         assert not stdout
-        assert "startup failed" in stderr
-        assert "controlled receipt publication failure" in stderr
-        assert (tmp_path / "released").is_dir()
+        root = tmp_path / "released"
+        if failure == "eof":
+            assert "startup failed" in stderr
+            assert "controlled receipt publication failure" in stderr
+            assert (root / "input-closed").is_file()
+        else:
+            assert "installation-context:" in stderr
+            assert "controlled malformed receipt" in stderr
+            assert "startup failed before a custody receipt" not in stderr
+            receipt = json.loads((root / "offer.json").read_text("utf-8"))
+            assert receipt["owner_pid"] == process.pid
+            assert receipt["scope"] == ("windows-job" if os.name == "nt" else "posix-group")
+            assert not (root / "forbidden-application").exists()
+            if os.name == "nt":
+                assert receipt["job"]["parent_pid"] == process.pid
+                assert "unconfirmed" not in stderr
+                assert "original caller refused the unadopted Job offer" not in stderr
     finally:
         if process.poll() is None:
             process.kill()

@@ -241,14 +241,17 @@ The `passive` mode creates no window and changes no foreground state: it checks
 the native bindings, complete raw-event/poll capture and private-pipe identity
 handshake. After independent source review, the separately authorized visible
 mode consumes one control attempt, requires raw show/foreground/original-
-restoration/retirement witnesses, then observes 42 cases inside one uninterrupted
+restoration/retirement witnesses, then observes 44 cases inside one uninterrupted
 quiet epoch: the exact 32-case SDK lifetime matrix in two disjoint 16-case
 packets, eight real Windows Job-offer protocol controls, and startup receipt-EOF
-unwinding on both PowerShell hosts. The offer controls cover absent/invalid
+and malformed-nonempty-receipt unwinding on both PowerShell hosts. The latter
+passes an actual canonical lifetime offer through deliberately malformed JSON,
+requires refusal before the callback and rejects unknown native settlement.
+The offer controls cover absent/invalid
 permission, explicit unadopted abort, receipt-write failure, absent/invalid ACK
 and normal adoption, including exact parent handle-table settlement. They test
 the native protocol, not every possible shell cancellation instruction.
-The probe request's `case_packets` supplies all 42 literal parametrized node
+The probe request's `case_packets` supplies all 44 literal parametrized node
 IDs in that order. `sdk_visibility_cases.py` rejects broad function selectors, overlapping
 packets, source escapes and incomplete host/composition/mode/cycle coverage
 before any native binding or visible attempt. Each isolated worker runs at

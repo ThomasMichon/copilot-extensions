@@ -359,6 +359,21 @@ transfer without acceptance by a named tracked objective.
 
 ## Journal
 
+### 2026-10-28 - Cover actual adapter receipt-parse failure
+
+- Independent source scrutiny distinguished missing-receipt EOF and malformed
+  ACK from malformed nonempty receipt JSON: the prepared 42-case roster did
+  not exercise the adapter's JSON-parse refusal with a real pending offer.
+- The startup packet now includes EOF and malformed-receipt cases on both
+  PowerShell hosts, giving 44 literal cases in packets of 16, 16, 8 and 4.
+  The malformed control uses the canonical lifetime owner, corrupts only its
+  wire receipt, forbids callback admission and refuses unknown native cleanup.
+  All four actual Linux startup controls pass; Windows remains unexecuted.
+- Original packet/resource/deadline limits and the single calibration grant
+  remain unchanged and unspent. The frozen source must be reviewed again
+  before a producer is armed; neither a coverage claim nor the historical
+  negative qualification is silently promoted to acceptance.
+
 ### 2026-10-28 - Prepare fresh source-bound native qualification
 
 - Startup-failure scrutiny found a wait cycle: receipt EOF waited for worker
