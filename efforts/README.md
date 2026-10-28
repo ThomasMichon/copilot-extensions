@@ -11,7 +11,6 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Dispatch Reversible Action Controls](active/dispatch-reversible-action-controls/README.md) | Draft; action-level inhibition with live restoration, review before implementation | #9334; preserves #6820/#7694 maintenance ownership and existing lifecycle controls; no rollout |
-| [Direct Instruction Propagation](active/direct-instruction-propagation/README.md) | Active; proposal reviewed in #9331, direct-copy source implementation in progress | #9329; coordinates #9097; no runtime content-hash/fingerprint admission, no rollout |
 | [Cached Source Wheel Assembly](active/cached-source-wheel-assembly/README.md) | Active; proposal reviewed in #9291, content-bound reuse and native qualification remain | #9290; preserves #8873/#8949 verification, #5851 staging and #6937/#6941 release-lock owners |
 | [Consolidated Core Runtime Bundle](active/runtime-bundle/README.md) | Draft; reviewed composition contract before isolated artifact/CLI proof | Core composition only; reuses #6937/#4876/#6234/#6707 owners, no new authority or rollout |
 | [Leased Daemon Instances](active/leased-daemon-instances/README.md) | Active; original custody source delivered, compiler-free Python amendment reviewed in #9120; replacement open | #8403; preserves identity, leases, descendant settlement and installer owners; no rollout |
@@ -149,6 +148,7 @@ that pattern to this repository.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Direct Instruction Propagation](2026/10/27%20direct-instruction-propagation/README.md) | Done; direct-copy publisher, reader and independent compatibility source merged in #9336/#9350, qualified without runtime instruction attestation | #9329; #9097 owner retained; normal promotion and separately authorized rollout |
 | [Machine Alias Compatibility and Locality](2026/10/26%20machine-alias-compatibility-and-locality/README.md) | Done; qualified and authorized native/guest installation, ordinary tuple acceptance, all 362 native records/current rosters and actual direct-login/SSH agent readiness verified; exact validation resources retired | #5674 · #6945 · #7057; reviewed #7097 integrity intake remains with authoritative-daemon; original source/resources and wider transport owners preserved |
 | [Repository PR Fleet Sweep](2026/10/25%20repository-pr-fleet-sweep/README.md) | Done; complete one-shot census, selected original-root observations and bounded publication repair merged in #8855 with approval, required CI and native Windows/Linux proof | #8802; source-only delivery, no runtime rollout; broader #7039 ownership retained |
 | [Native Mux Launch Contract](2026/10/23%20native-mux-launch-contract/README.md) | Done for bounded source delivery; terminal custody, connected status and selected-directory repairs merged in #8031 | #7962 retains human/native qualification, release and authorized rollout; no installed changes |
