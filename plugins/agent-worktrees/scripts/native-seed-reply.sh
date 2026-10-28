@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # agent-worktrees:native-seed-reply-v1
-# Dot-source only. Reading a reply neither launches a child nor applies its env.
+# Dot-source only. A Bash subshell probes EOF; reply environment is never applied.
 
 _aw_native_seed_read_reply() {
     local LC_ALL=C
-    local field count index name value extra eof_status=0
+    local field count index name value eof_diagnostics
     local -a header=() environment=() argv=()
     for ((index=0; index<7; index++)); do
         IFS= read -r -d '' field || return 3
@@ -33,8 +33,14 @@ _aw_native_seed_read_reply() {
     [[ -n "${argv[0]}" ]] || return 3
     IFS= read -r -d '' field || return 3
     [[ "$field" == complete ]] || return 3
-    IFS= read -r -d '' extra || eof_status=$?
-    [[ "$eof_status" == 1 && -z "$extra" ]] || return 3
+    # Bash also returns 1 for EAGAIN/EBADF. Capture only the probe's diagnostics.
+    eof_diagnostics="$(
+        extra=
+        eof_status=0
+        { IFS= read -r -d '' extra || eof_status=$?; } 2>&1
+        [[ "$eof_status" == 1 && -z "$extra" ]]
+    )" || return 3
+    [[ -z "$eof_diagnostics" ]] || return 3
     AW_NATIVE_SEED_ATTEMPT="${header[1]}"
     AW_NATIVE_SEED_RESOLUTION="${header[2]}"
     AW_NATIVE_SEED_OPERATION="${header[3]}"

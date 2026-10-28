@@ -470,6 +470,23 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   lifetime ownership. Both production POSIX Python waiters, #5579 forwarding
   ownership and the parent live acceptance remain open.
 
+### 2026-10-28 - Final-read error discrimination
+
+- An actual closed stdin after the complete marker reproduced two failures:
+  the reader accepted Bash's status-1 I/O error with nounset off, and aborted
+  on an unbound probe variable with nounset on. Both controls now require the
+  normal refusal and cleared outputs, not an injected return status.
+- The final probe uses one finite Bash subshell to capture only read
+  diagnostics, requiring status 1, empty trailing data and no diagnostics.
+  Reply fields never pass through command substitution; no external parser,
+  resident helper, environment application or backend execution is added.
+- The focused reader/provider/copied-setup packet passed 87 cases with one
+  native-POSIX skip on Windows. The separate native fixture prewrites a full
+  frame into a nonblocking pipe, keeps its writer alive and writes later data;
+  actual Linux and stock macOS Bash acceptance remain required before merging.
+  This still does not activate a production POSIX consumer or close callback,
+  exact-birth, terminal or installation-survival gates.
+
 ### 2026-10-27 - Literal POSIX preparation transport prerequisite
 
 - #9318 merged as `b4d1c753b6f7645f225a3c57f0af8caae24c50b3` after

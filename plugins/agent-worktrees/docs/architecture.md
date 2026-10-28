@@ -644,7 +644,7 @@ remain literal. Unrepresentable NUL/UTF-8 values are refused without partial
 output; a seed already claimed during preparation remains held and the
 execution becomes unknown, never automatically restored or replayed. A reader
 must validate the complete frame and successful finite producer exit before
-dispatch. It must not use command substitution (which drops NULs), `eval`,
+dispatch. It must not pass reply fields through command substitution (which drops NULs), `eval`,
 word splitting, or source the fields as shell code. The provider does not
 spawn a backend or retain a parser to wait for one; prompt-bearing reply bytes
 remain on the private preparation pipe, outside execution receipts and logs.
@@ -659,7 +659,11 @@ Invalid or truncated input returns 3 with a prompt-free diagnostic and no
 partially published reply. Counts use canonical decimal with at most nine
 digits, never provider text evaluated as arithmetic.
 The final read must report EOF specifically; an interrupted or otherwise failed
-empty read is not proof of stream completion.
+empty read is not proof of stream completion. Bash also returns status 1 for
+nonblocking-pipe and bad-descriptor errors. One finite Bash subshell probes EOF,
+requiring status 1, no trailing bytes and no read diagnostics. Only diagnostics
+pass through command substitution; reply fields stay in the original shell.
+This adds no external executable or resident helper.
 Parsing uses ASCII collation and case-sensitive matching independently of
 caller settings, restoring the caller's locale and `nocasematch` option on
 success and refusal.

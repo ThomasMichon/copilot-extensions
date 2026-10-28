@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import shutil
+import sys
 
 import pytest
 from agent_procutil.owned_process import run_caller_owned
@@ -123,6 +124,88 @@ done
     assert result.stderr.splitlines() == [
         "Native preparation reply is invalid; no backend started.",
     ] * 4
+
+
+@pytest.mark.parametrize("nounset", ["on", "off"])
+def test_reader_refuses_real_bad_descriptor_after_complete_frame(nounset: str) -> None:
+    result = _run(r'''
+set -eo pipefail
+if [[ "$2" == on ]]; then set -u; fi
+. "$1"
+complete_seen=0
+read() {
+    local builtin_status=0
+    builtin read "$@" || builtin_status=$?
+    if [[ "$builtin_status" == 0 && "${!#}" == field && "$field" == complete ]]; then
+        complete_seen=1
+        exec 0<&-
+    fi
+    return "$builtin_status"
+}
+AW_NATIVE_SEED_OPERATION=previous
+AW_NATIVE_SEED_ARGV=(previous)
+code=0
+aw_native_seed_read_reply || code=$?
+[[ "$complete_seen" == 1 && "$code" == 3 && -z "$AW_NATIVE_SEED_OPERATION" && \
+    -z "${AW_NATIVE_SEED_ARGV[0]+x}" && -z "${AW_NATIVE_SEED_ENV[0]+x}" ]]
+''', [nounset], payload=nul_reply(_reply({"PRIVATE": "private-value"})).decode("utf-8"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not result.stdout
+    assert result.stderr == "Native preparation reply is invalid; no backend started.\n"
+    assert "private-value" not in result.stderr
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Requires a native POSIX nonblocking pipe")
+def test_reader_refuses_real_nonblocking_pipe_without_eof() -> None:
+    bash = shutil.which("bash")
+    if not bash:
+        pytest.skip("Bash is unavailable")
+    fixture = r'''
+import os
+import sys
+
+frame = sys.stdin.buffer.read()
+read_fd, write_fd = os.pipe()
+assert len(frame) <= os.fpathconf(write_fd, "PC_PIPE_BUF")
+assert os.write(write_fd, frame) == len(frame)
+os.set_blocking(read_fd, False)
+os.dup2(read_fd, 0, inheritable=True)
+os.dup2(write_fd, 9, inheritable=True)
+for fd in (read_fd, write_fd):
+    if fd not in (0, 9):
+        os.close(fd)
+os.execv(sys.argv[1], [sys.argv[1], "--noprofile", "--norc", "-c", sys.argv[2],
+                     "reader", sys.argv[3]])
+'''
+    shell = r'''
+set -euo pipefail
+. "$1"
+complete_seen=0
+read() {
+    local builtin_status=0
+    builtin read "$@" || builtin_status=$?
+    if [[ "$builtin_status" == 0 && "${!#}" == field && "$field" == complete ]]; then
+        complete_seen=1
+    fi
+    return "$builtin_status"
+}
+AW_NATIVE_SEED_OPERATION=previous
+AW_NATIVE_SEED_ARGV=(previous)
+code=0
+aw_native_seed_read_reply || code=$?
+printf 'late' >&9
+[[ "$complete_seen" == 1 && "$code" == 3 && -z "$AW_NATIVE_SEED_OPERATION" && \
+    -z "${AW_NATIVE_SEED_ARGV[0]+x}" && -z "${AW_NATIVE_SEED_ENV[0]+x}" ]]
+'''
+    result = run_caller_owned(
+        [sys.executable, "-c", fixture, bash, shell, SCRIPT.as_posix()],
+        input_text=nul_reply(_reply({"PRIVATE": "private-value"})).decode("utf-8"),
+        timeout=15, max_stdout_bytes=8192, max_stderr_bytes=8192,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not result.stdout
+    assert result.stderr == "Native preparation reply is invalid; no backend started.\n"
+    assert "private-value" not in result.stderr
 
 
 def test_invalid_frames_clear_previous_reply_without_evaluating_counts_or_leaking_data(tmp_path):
