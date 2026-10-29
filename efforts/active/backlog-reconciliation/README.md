@@ -162,7 +162,7 @@ outcomes from agent-recommended research and prioritization mechanics.
   #8733/#7650/#8802/#9072/#9413/#7940/#7408/#9332 finite completions,
   #8796's exact retained claim
   duty, #9233's focused documentation gap and the independently verified
-  929-open census after eight further administrative consolidations,
+  925-open census after the separately recorded administrative consolidations,
   alongside the earlier twelve consolidations and three further finite
   source completions; the whole
   target remains unmet. The next-decision matrix
@@ -197,6 +197,12 @@ outcomes from agent-recommended research and prioritization mechanics.
   identifies #9489's scoped P1 compatibility boundary, retaining its original
   unreviewed-report attribution, non-editable installed-source and native
   acceptance duties without operational repair or broader ownership.
+  The [real-venue and Picker presentation assessments](roadmap-inflow-venue-picker.md)
+  add #9493/#9495's bounded P2 proposals: a matching real user-systemd
+  qualification venue with positive cleanup, and finite retry/loading/error/
+  stale presentation under existing loader and source custody. Existing
+  foundation and asynchronous-state credit is preserved; no venue/UI run,
+  accepted receiving relation, implementation assignment or closure is claimed.
 - [ ] Coalesce thematic duplicates into canonical issues and existing efforts;
   transfer explicit residual checklists before closing superseded reports.
   The [current receiving-contract unit](consolidation-current-unit.md)
@@ -226,14 +232,21 @@ outcomes from agent-recommended research and prioritization mechanics.
   No technical completion or claim/resource release is inferred.
   The latest complete census is 929 whole issues, 200 above 729; four own
   original-cohort closures coexist with two eligible metadata-only arrivals.
-- [ ] _(Agent-recommended)_ Deliver the [seven further receiving
+- [x] _(Agent-recommended)_ Deliver the [seven further receiving
   contracts](receiving-last-seven.md) under five existing efforts through
   normal review and complete merged-file readback, followed by separate
   source-specific judgments. The direct Plan/global Validation/Coordination
   proposals preserve #3367/#3944/#3945/#4016/#4028/#4055/#4229 whole scope
   and existing custody. #4229's specific incumbent-assignee whole-mapping
   receipt remains unmet; its keeper #1266 body draft remains unapplied.
-  Authored tracking alone neither retires a source nor completes its work.
+  #9502 merged the direct contracts; all five complete ROOTs and five strict
+  annexes were read back, followed by separate whole-source judgments.
+  Four guarded administrative folds preserve the work under the same
+  custodians; #3367/#4055/#4229 and keeper #1266 remain open under their
+  specific conditions. No technical completion or claim release is inferred.
+  The latest complete census is 925 whole issues, 196 above 729; all four
+  departures are verified own original-cohort folds, with no new arrivals
+  or external departures in that observation.
 - [ ] Refresh live and original-cohort metrics, append journal checkpoints, and
   continue graph-backed consolidation with creation-oldest-first coverage until
   at most 729 issues remain.

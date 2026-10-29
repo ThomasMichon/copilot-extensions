@@ -59,6 +59,16 @@ An unverified home remains an explicit gap with its original tracker and
 custodians. Thematic fit, an Active effort or a Done source slice is not a
 receiving receipt for a whole inherited issue.
 
+The later [real-venue and Picker assessments](roadmap-inflow-venue-picker.md)
+add two independent bounded P2 decisions, not another shared hard gate.
+#9493 first needs the matching real user-systemd qualification venue and
+positive cleanup under the existing fixture/installer/service custodians;
+default-service remains unqualified without that venue. #9495's existing
+implementer qualifies retry/pending, selected-List errors and quiet scoped
+stale state using the delivered cache/epoch/empty-result foundations.
+Neither proposal appoints a new owner or reopens completed Manager source
+work; actual UI/native qualification and installed holds remain separate.
+
 ## Apply only the scoped edges
 
 The [first-wave register](roadmap-wave-1-dependencies.md) has 33 directed
