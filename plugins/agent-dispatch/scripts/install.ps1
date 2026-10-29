@@ -28,7 +28,8 @@
     (inert), and the generated launcher hard-refuses a label-less run (#2869).
 
 .PARAMETER Action
-    install (default) | update | status | start | stop | uninstall.
+    install (default) | prepare | update | status | start | stop | uninstall.
+    prepare constructs and health-gates a candidate without adopting it.
 
 .PARAMETER InstallDir
     Override the runtime install directory (default: ~/.agent-dispatch).
@@ -54,6 +55,10 @@
     routed coordinator cuts over successfully. Runtime selection may already
     have changed when a cutover fails.
 
+.PARAMETER PreserveSupervisors
+    With update -RequireGracefulCutover: leave supervisor definitions, processes
+    and retained runtimes unchanged. This does not disable resident self-update.
+
 .PARAMETER RetainedRuntime
     With restore: a record captured by retained_runtime.py before the update.
     Reuses its completed immutable marketplace assembly with mandatory strict
@@ -61,7 +66,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'uninstall', 'stamp', 'provision', 'restore')]
+    [ValidateSet('install', 'prepare', 'update', 'status', 'start', 'stop', 'uninstall', 'stamp', 'provision', 'restore')]
     [string]$Action = 'install',
     [string]$InstallDir,
     [switch]$NoService,
@@ -70,6 +75,7 @@ param(
     [switch]$Purge,
     [switch]$Force,
     [switch]$RequireGracefulCutover,
+    [switch]$PreserveSupervisors,
     [string]$RetainedRuntime,
     [string]$RetainedRuntimeSha256,
 
@@ -123,6 +129,10 @@ function Copy-InstallerStageDirectory {
 if ($RequireGracefulCutover -and ($Action -ne 'update' -or $NoService)) {
     throw '-RequireGracefulCutover requires update without -NoService'
 }
+if ($PreserveSupervisors -and ($Action -ne 'update' -or -not $RequireGracefulCutover -or
+    $NoService -or $NoSupervisor)) {
+    throw '-PreserveSupervisors requires update -RequireGracefulCutover without -NoService or -NoSupervisor'
+}
 if ($Action -eq 'restore') {
     if (-not $RetainedRuntime -or $NoService -or $NoSupervisor) {
         throw 'restore requires -RetainedRuntime and full coordinator/supervisor reconciliation'
@@ -142,7 +152,7 @@ if ($env:OS -eq 'Windows_NT' -and
         else { Join-Path $env:USERPROFILE '.agent-dispatch' }
     $driverOptions = @()
     foreach ($name in @('NoService', 'NoSupervisor', 'Interactive', 'Purge', 'Force',
-        'RequireGracefulCutover', 'ZeroDowntime', 'DryRun')) {
+        'RequireGracefulCutover', 'PreserveSupervisors', 'ZeroDowntime', 'DryRun')) {
         if ($PSBoundParameters.ContainsKey($name) -and [bool]$PSBoundParameters[$name]) {
             $driverOptions += $name
         }
@@ -686,7 +696,11 @@ function Invoke-VersionedActivate {
             $script:ActivationSuperseded = $true
             return $true
         }
-        Assert-DispatchActions @('runtime-activation', 'coordinator-replacement', 'supervisor-reconcile')
+        $actions = @('runtime-activation', 'coordinator-replacement')
+        if (-not (Get-Variable PreserveSupervisors -ValueOnly -ErrorAction SilentlyContinue)) {
+            $actions += 'supervisor-reconcile'
+        }
+        Assert-DispatchActions $actions
         $legacyVenv = Join-Path $InstallDir '.venv'
         if ((Test-Path $legacyVenv) -and -not (Test-VenvIsLink $legacyVenv)) {
             if ($RequireGracefulCutover) {
@@ -868,7 +882,12 @@ function Assert-DispatchActions {
 
 function Assert-InstallActions {
     if ($Action -in @('install', 'update', 'provision', 'restore')) {
-        Assert-DispatchActions @('runtime-activation', 'coordinator-replacement', 'supervisor-reconcile')
+        if ($Action -eq 'update' -and
+            (Get-Variable PreserveSupervisors -ValueOnly -ErrorAction SilentlyContinue)) {
+            Assert-DispatchActions @('runtime-activation', 'coordinator-replacement')
+        } else {
+            Assert-DispatchActions @('runtime-activation', 'coordinator-replacement', 'supervisor-reconcile')
+        }
     } elseif ($Action -eq 'stamp') {
         Assert-DispatchActions @('runtime-activation')
     }
@@ -1771,6 +1790,19 @@ function Install-RetainedRuntime {
 }
 
 function Install-Runtime {
+    param([switch]$PrepareOnly)
+    if ($PrepareOnly -and -not $VersionedRuntime) {
+        throw 'Preparation requires a versioned runtime candidate'
+    }
+    if (Get-Variable PreserveSupervisors -ValueOnly -ErrorAction SilentlyContinue) {
+        $legacyVenv = Join-Path $InstallDir '.venv'
+        try {
+            [IO.File]::GetAttributes($legacyVenv) | Out-Null
+            throw 'Supervisor preservation requires an installation without a legacy .venv path'
+        } catch [IO.FileNotFoundException] {
+        } catch [IO.DirectoryNotFoundException] {
+        }
+    }
     if ($RetainedRuntime) { Install-RetainedRuntime; return }
     Assert-SourceRuntime
     $selectedBasePython = Resolve-DispatchBasePython
@@ -1839,7 +1871,8 @@ function Install-Runtime {
         Write-Warn 'uv acquisition failed -- using Python venv/pip fallback'
     }
 
-    foreach ($dir in @($InstallDir, $LocalBin)) {
+    $directories = if ($PrepareOnly) { @($InstallDir) } else { @($InstallDir, $LocalBin) }
+    foreach ($dir in $directories) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
     Write-Ok "Directories: $InstallDir"
@@ -2145,8 +2178,12 @@ function Install-Runtime {
             exit 1
         }
         if (-not (Invoke-VersionedMarkComplete)) { exit 1 }
-        Invoke-RuntimeBrokerAdoption
         Invoke-SupervisorAudit -Event runtime-ready -Reason import-health-gate -Outcome ok
+        if ($PrepareOnly) {
+            Write-Ok "Prepared runtime: $VenvDir (not activated; retention ends when this command exits)"
+            return
+        }
+        Invoke-RuntimeBrokerAdoption
         if (-not (Invoke-VersionedActivate)) { exit 1 }
         # The supersession check and the shared publication it protects
         # (the binstub + deploy-manifest, both readable/overwritable by any
@@ -2253,7 +2290,10 @@ function Install-Runtime {
 
     # Versioned layout: prune old slots, keeping current + the previous-good (the
     # slot a not-yet-cycled daemon may still run from) + any live-pid-pinned slot.
-    if ($VersionedRuntime) { Invoke-VersionedGc -KeepPrev $prevVersion }
+    if ($VersionedRuntime -and
+        -not (Get-Variable PreserveSupervisors -ValueOnly -ErrorAction SilentlyContinue)) {
+        Invoke-VersionedGc -KeepPrev $prevVersion
+    }
 
     # -- PATH --
     $pathDirs = $env:PATH -split ';'
@@ -4311,7 +4351,11 @@ function Invoke-Update {
             # Refresh the boot task definition either way; -NoStart avoids launching a
             # SECOND coordinator when the cutover already brought the new one up.
             Install-CoordinatorTask -NoStart:$didCutover
-            Install-SupervisorTask
+            if (-not (Get-Variable PreserveSupervisors -ValueOnly -ErrorAction SilentlyContinue)) {
+                Install-SupervisorTask
+            } else {
+                Write-Skip 'Supervisor reconciliation and runtime collection explicitly preserved'
+            }
             if (-not $didCutover) { Confirm-CoordinatorRunning }
         } finally {
             [void]$cutoverMutex.ReleaseMutex()
@@ -4690,16 +4734,17 @@ $script:InstallerLifecycleAction = if ($Action -in @('install', 'provision')) { 
 $script:InstallerLifecycleOutcome = 'fail'
 if ($script:InstallerLifecycleAction) { Write-InstallerLifecycle begin }
 Assert-InstallActions
-if ($Action -in @('install', 'update', 'provision', 'stamp')) {
+if ($Action -in @('install', 'update', 'provision', 'stamp', 'prepare')) {
     Initialize-SourceRuntime
     Assert-SourceRuntime
 }
-if ($Action -in @('install', 'update', 'provision')) {
+if ($Action -in @('install', 'update', 'provision') -and -not $PreserveSupervisors) {
     . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
     Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
 }
 switch ($Action) {
     'install'   { Invoke-Install }
+    'prepare'   { Install-Runtime -PrepareOnly }
     'update'    { Invoke-Update }
     'start'     { Invoke-Start }
     'stop'      { Invoke-Stop }

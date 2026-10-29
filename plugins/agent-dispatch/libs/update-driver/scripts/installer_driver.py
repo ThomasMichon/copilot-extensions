@@ -18,7 +18,7 @@ RECIPES = {
     "agent-codespaces": frozenset({"Force", "DryRun"}),
     "agent-dispatch": frozenset({
         "NoService", "NoSupervisor", "Interactive", "Purge", "Force",
-        "RequireGracefulCutover", "ZeroDowntime", "DryRun",
+        "RequireGracefulCutover", "PreserveSupervisors", "ZeroDowntime", "DryRun",
     }),
     "agent-pull-requests": frozenset({"Force"}),
     "agent-vault": frozenset({"NoService", "Purge", "Force", "DryRun"}),

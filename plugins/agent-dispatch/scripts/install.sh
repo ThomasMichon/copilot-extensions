@@ -28,6 +28,7 @@
 # Usage:
 #   bash scripts/install.sh install        # venv + binstub + service + pivot
 #   bash scripts/install.sh update         # idempotent refresh (downgrade-guarded)
+#   bash scripts/install.sh prepare        # build/health-gate without adoption
 #   bash scripts/install.sh restore --retained-runtime RECORD
 #   bash scripts/install.sh status
 #   bash scripts/install.sh start | stop
@@ -44,6 +45,9 @@
 #   --require-graceful-cutover
 #                      On update: fail without restart/supervisor reconciliation
 #                      unless a routed coordinator cuts over successfully.
+#   --preserve-supervisors
+#                      With update --require-graceful-cutover: leave supervisor
+#                      definitions, processes and retained runtimes unchanged.
 #   --install-dir DIR  Override the runtime root (default ~/.agent-dispatch).
 # =============================================================================
 
@@ -358,6 +362,7 @@ NO_SUPERVISOR=0
 PURGE=0
 DRY_RUN=0
 REQUIRE_GRACEFUL_CUTOVER=0
+PRESERVE_SUPERVISORS=0
 RETAINED_RUNTIME=""
 INSTALL_DIR=""
 FORCE="${AGENT_DISPATCH_ALLOW_DOWNGRADE:-0}"
@@ -369,6 +374,7 @@ while [[ $# -gt 0 ]]; do
         --purge) PURGE=1; shift ;;
         --force) FORCE=1; shift ;;
         --require-graceful-cutover) REQUIRE_GRACEFUL_CUTOVER=1; shift ;;
+        --preserve-supervisors) PRESERVE_SUPERVISORS=1; shift ;;
         --retained-runtime) RETAINED_RUNTIME="$2"; shift 2 ;;
         --dry-run) DRY_RUN=1; shift ;;
         --install-dir) INSTALL_DIR="$2"; shift 2 ;;
@@ -389,6 +395,12 @@ fi
 if [[ "$REQUIRE_GRACEFUL_CUTOVER" -eq 1 ]] &&
    { [[ "$ACTION" != update ]] || [[ "$NO_SERVICE" -eq 1 ]]; }; then
     _fail '--require-graceful-cutover requires update without --no-service'
+    exit 1
+fi
+if [[ "$PRESERVE_SUPERVISORS" -eq 1 ]] &&
+   { [[ "$ACTION" != update || "$REQUIRE_GRACEFUL_CUTOVER" -ne 1 ||
+         "$NO_SERVICE" -eq 1 || "$NO_SUPERVISOR" -eq 1 ]]; }; then
+    _fail '--preserve-supervisors requires update --require-graceful-cutover without --no-service or --no-supervisor'
     exit 1
 fi
 
@@ -1023,7 +1035,19 @@ STUBEOF
 }
 
 _ensure_runtime() {
-    _maintenance_preflight || return $?
+    local prepare_only="${1:-0}"
+    if [[ "$prepare_only" == 1 && "$VERSIONED_RUNTIME" != 1 ]]; then
+        _fail 'Preparation requires a versioned runtime candidate'
+        return 1
+    fi
+    if [[ "${PRESERVE_SUPERVISORS:-0}" == 1 &&
+          ( -e "$INSTALL_DIR/.venv" || -L "$INSTALL_DIR/.venv" ) ]]; then
+        _fail 'Supervisor preservation requires an installation without a legacy .venv path'
+        return 1
+    fi
+    if [[ "$prepare_only" != 1 ]]; then
+        _maintenance_preflight || return $?
+    fi
     if [[ -z "${RETAINED_RUNTIME:-}" ]]; then
     _assert_source_runtime || return 1
     if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
@@ -1043,7 +1067,8 @@ _ensure_runtime() {
     local have_uv=0
     command -v uv >/dev/null 2>&1 && have_uv=1
 
-    mkdir -p "$INSTALL_DIR" "$LOCAL_BIN" || return 1
+    mkdir -p "$INSTALL_DIR" || return 1
+    if [[ "$prepare_only" != 1 ]]; then mkdir -p "$LOCAL_BIN" || return 1; fi
     _ok "Directories: $INSTALL_DIR"
 
     _versioned_slot_clean || return 1
@@ -1242,6 +1267,10 @@ _ensure_runtime() {
             _versioned_mark_complete || exit 1
         fi
         _supervisor_audit runtime-ready import-health-gate "" "" ok
+        if [[ "$prepare_only" == 1 ]]; then
+            _ok "Prepared runtime: $VENV_DIR (not activated; retention ends when this command exits)"
+            return 0
+        fi
         # Hold one publication lock across activation and required file writes.
         # Restore the previous selectors/readers if any publication fails;
         # the immutable candidate and its completion evidence remain reusable.
@@ -1384,7 +1413,8 @@ _ensure_runtime() {
     fi
 
     # Versioned: prune old slots, keeping current + previous-good + live-pinned.
-    if [[ "$VERSIONED_RUNTIME" == 1 && -z "${RETAINED_RUNTIME:-}" ]]; then
+    if [[ "$VERSIONED_RUNTIME" == 1 && -z "${RETAINED_RUNTIME:-}" &&
+          "${PRESERVE_SUPERVISORS:-0}" != 1 ]]; then
         _versioned_gc "$prev_version"
     fi
 
@@ -2468,8 +2498,10 @@ do_update() {
         fi
         _install_service || native_reconcile_rc=$?
     fi
-    if [[ "$native_reconcile_rc" == 0 ]]; then
+    if [[ "$native_reconcile_rc" == 0 && "${PRESERVE_SUPERVISORS:-0}" != 1 ]]; then
         _install_supervisor_service || native_reconcile_rc=$?
+    elif [[ "$native_reconcile_rc" == 0 ]]; then
+        _skip 'Supervisor reconciliation and runtime collection explicitly preserved'
     fi
     _unlock_cutover
     if [[ "$native_reconcile_rc" != 0 ]]; then
@@ -2731,7 +2763,7 @@ if [[ -n "$_LIFECYCLE_ACTION" ]]; then
     _lifecycle_emit begin
 fi
 case "$ACTION" in
-    install|update|provision|stamp)
+    install|update|provision|stamp|prepare)
         _maintenance_preflight || exit $?
         _initialize_source_runtime || exit 1
         _assert_source_runtime || exit 1
@@ -2739,19 +2771,22 @@ case "$ACTION" in
 esac
 case "$ACTION" in
     install|update|provision)
-        . "$SCRIPT_DIR/installer-instance-reconcile.sh"
-        reconcile_installer_instances "$SCRIPT_DIR"
+        if [[ "$PRESERVE_SUPERVISORS" != 1 ]]; then
+            . "$SCRIPT_DIR/installer-instance-reconcile.sh"
+            reconcile_installer_instances "$SCRIPT_DIR"
+        fi
         ;;
 esac
 case "$ACTION" in
     install)   do_install ;;
     stamp)     do_stamp ;;
     provision) do_install ;;
+    prepare)   _ensure_runtime 1 ;;
     update)    do_update ;;
     start)     do_start ;;
     stop)      do_stop ;;
     status)    do_status ;;
     uninstall) do_uninstall ;;
-    *) _fail "Unknown action: $ACTION (use: install|stamp|provision|update|status|start|stop|uninstall)"; exit 2 ;;
+    *) _fail "Unknown action: $ACTION (use: install|stamp|prepare|provision|update|status|start|stop|uninstall)"; exit 2 ;;
 esac
 exit 0

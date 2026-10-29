@@ -174,11 +174,49 @@ working directory before changing to home. Both its fresh pre-launch admission
 check and the worker reuse that same absolute path; the selected interpreter
 leaf and virtual-environment context are not replaced by a later PATH lookup.
 
-No prepare-only or supervisor-preserving adoption option is introduced here.
-Construction and adoption remain coupled in the existing installer. Use the
-existing preparation/retention owner's accepted interface when available;
-never call activation as a staging shortcut or infer controlled adoption from
-source tests.
+### Explicit preparation and supervisor preservation
+
+The native installer's `prepare` action (`-Action prepare` on PowerShell) runs
+its existing constructor and isolated import-health gate, then completes the
+candidate without activating it. It does not publish selectors, launchers,
+the deployment manifest or persistent PATH; it does not reconcile instances,
+coordinator, supervisors or a Windows launch broker, or collect old runtimes. Activation/replacement
+holds therefore do not prevent explicit preparation. Source attribution,
+construction admission and dependency policy remain required.
+
+The existing canonical construction helper retains the candidate and prior
+selection until the command exits. A completed candidate at rest is not a
+durable lease: later adoption reacquires admission/retention and health-checks
+again, and may need to reconstruct an unselected candidate already collected.
+This is not a new constructor, transactional rollback protocol or migration to
+the separately evolving Python-owned construction API.
+
+For an explicitly controlled coordinator-only adoption, native `update
+--require-graceful-cutover --preserve-supervisors` (PowerShell: `-Action update
+-RequireGracefulCutover -PreserveSupervisors`) skips supervisor reconciliation,
+instance reconciliation and runtime collection. It rejects `--no-service`,
+`--no-supervisor`, other actions and a legacy `.venv` path. Normal update
+behavior is unchanged. Runtime activation and coordinator-replacement policy
+still apply; supervisor-reconcile policy is not needed for an omitted effect.
+On Windows the existing finite execution driver retains the explicit strict
+and preservation options when it re-enters the installer; it is not bypassed.
+The option does not inhibit an already-running supervisor's own self-update,
+qualify an old consumer, or authorize effects on protected workers. A failed
+graceful cutover still reports failure with possible prior selection changes;
+there is no restart fallback or automatic rollback.
+
+This is a provider-only expansion of the native installer boundary. Existing
+callers keep their ordinary syntax; no automatic caller is migrated to these
+modes. An explicit caller must select and verify the actual immutable installer
+entrypoint against a reviewed source revision containing this contract before
+sending the new syntax. The selected file's source/content identity, not a
+newer marketplace payload, package-version equality or a running coordinator's
+version, establishes support. There is no new coordinator capability field.
+Older installers do not support `prepare`; older PowerShell also rejects the
+new preservation parameter. Older Bash may silently ignore an unknown option,
+so never use the preservation flag against an unverified older installer or
+retry as an ordinary update after incompatibility. Rollback uses the existing
+retained-runtime contract, not this new syntax against a historical installer.
 
 The existing **Installation context full** manual workflow offers the
 `dispatch-maintenance` portfolio for focused native Windows qualification at its

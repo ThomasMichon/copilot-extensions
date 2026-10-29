@@ -11,7 +11,7 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Native Startup Prompts](active/native-startup-prompts/README.md) | Active; ordinary cold-launch consumer #9374 merged, native POSIX/full-mux and installed qualification remain | #9364; preserves #7116/#8375/#7942/#8669/#5579 owners; no rollout or retained-session restart |
-| [Dispatch Reversible Action Controls](active/dispatch-reversible-action-controls/README.md) | Draft; action-level inhibition with live restoration, review before implementation | #9334; preserves #6820/#7694 maintenance ownership and existing lifecycle controls; no rollout |
+| [Dispatch Reversible Action Controls](active/dispatch-reversible-action-controls/README.md) | Active; controls released, native preparation and supervisor-preserving adoption qualification in progress | #9334; reuses #6820/#7694 lifecycle owners; installed and running adoption remain gated |
 | [Cached Source Wheel Assembly](active/cached-source-wheel-assembly/README.md) | Active; proposal reviewed in #9291, content-bound reuse and native qualification remain | #9290; preserves #8873/#8949 verification, #5851 staging and #6937/#6941 release-lock owners |
 | [Consolidated Core Runtime Bundle](active/runtime-bundle/README.md) | Draft; reviewed composition contract before isolated artifact/CLI proof | Core composition only; reuses #6937/#4876/#6234/#6707 owners, no new authority or rollout |
 | [Leased Daemon Instances](active/leased-daemon-instances/README.md) | Active; original custody source delivered, compiler-free Python amendment reviewed in #9120; replacement open | #8403; preserves identity, leases, descendant settlement and installer owners; no rollout |

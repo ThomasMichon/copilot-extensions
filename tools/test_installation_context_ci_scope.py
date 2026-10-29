@@ -196,7 +196,8 @@ def test_dispatch_maintenance_native_acceptance_is_manual_bounded_and_source_pin
         "policy": {"test_action_native_ps1.py", "test_action_native_policy.py",
                    "test_cutover_spawn_env.py", "test_conditional_deploy.py"},
         "installer": {"test_install_lifecycle_emit.py", "test_installer_required_cutover.py",
-                      "test_retained_runtime.py"},
+                      "test_retained_runtime.py", "test_runtime_preparation.py",
+                      "test_installer_engine_adoption.py"},
         "worker": {"test_windows_bootstrap_reconcile_lifecycle.py",
                    "test_bootstrap_check_reconcile_always_on.py"},
     }

@@ -34,8 +34,11 @@ configuration, a successful deployment or authority to discard existing work.
 - **Handoff:** issue, effort checklists and merged source receipts; preserve
   unresolved release and installed-consumer qualification explicitly.
 - Existing #6820 preparation/sequencing and #7694 launch-maintenance owners
-  remain authoritative. Do not build a competing updater or take their broader
-  runtime-transaction work into this slice.
+  retain their broader runtime-transaction work. This effort owns Dispatch's
+  adapter and consumer qualification, reusing accepted shared construction and
+  retention primitives. Historical coordination notes are not a requirement to
+  await an unverified live owner before integrating an existing API. Do not
+  build a competing updater.
 
 ## Context
 
@@ -102,29 +105,30 @@ worker termination or cross-plugin rollout.
 
 ### Phase 3 - Qualify the maintenance boundaries
 
-- [ ] Guard optional automatic runtime reconciliation and the explicit
+- [x] Guard optional automatic runtime reconciliation and the explicit
       activation/coordinator/supervisor maintenance effects addressed by the
       control contract. Service startup from an available qualified runtime
       remains possible; missing prerequisites fail explicitly.
-- [ ] Cover both installer-induced supervisor reconciliation and resident
+- [x] Cover both installer-induced supervisor reconciliation and resident
       self-update. Skipping one while the other can replace the same supervisor
       does not establish preservation.
-- [ ] Resolve required action policy before active-state publication; check
+- [x] Resolve required action policy before active-state publication; check
       current denial again at consequential boundaries. Freeze only one action
       attempt, not the daemon lifetime. Each later poll/retry is a fresh check.
 - [ ] Keep explicit preparation separate from adoption using existing runtime
       ownership primitives; do not claim a new transactional rollback protocol.
-      Coordinate any missing prepare-only primitive with #6820 rather than
-      mutating active selectors as a staging shortcut.
-- [ ] Implement equivalent POSIX and PowerShell maintenance behavior. An
+      Keep the current constructor and canonical construction/retention helper;
+      coordinate any shared primitive change with #6820 rather than mutating
+      active selectors as a staging shortcut.
+- [x] Implement equivalent POSIX and PowerShell maintenance behavior. An
       inhibited required effect is not a successful full update; retain exact
       partial-effect evidence on real downstream failures.
 
 ### Phase 4 - Release and qualify actual consumers
 
-- [ ] Add changefiles, update the owning documentation and pass the relevant
+- [x] Add changefiles, update the owning documentation and pass the relevant
       bounded tests, lint, install-contract and required repository gates.
-- [ ] Merge reviewed implementation and verify the actual released `main`
+- [x] Merge reviewed implementation and verify the actual released `main`
       content, not ancestry or package-version assumptions alone.
 - [ ] Under the installation owner's separate rollout authority, qualify
       installed commands and running consumers. An old process cannot acquire
@@ -154,9 +158,13 @@ worker termination or cross-plugin rollout.
 - [ ] Preserve existing default behavior and legacy bootstrap compatibility.
       Test default-installation fallback state paths and static configuration
       independently of dynamic inhibition.
-- [ ] Exercise both native installer frontends for maintenance changes, with a
+- [x] Exercise both native installer frontends for maintenance changes, with a
       contained process-boundary control where practical. Source fixtures do
       not establish running native-account adoption.
+
+The remaining unchecked service/loop criteria still require installed-consumer
+qualification. Source effect-boundary regressions and hosted native Windows
+execution are not a substitute for that gate.
 
 ## Proposal
 
@@ -618,3 +626,95 @@ Initial tests must prove the current gap before adding the guards.
   directory and at least two from home, then verifies the worker's installer
   effect. The combined contained hook/native selection passed all 57 cases.
   Fresh exact-head native qualification and review remain required.
+
+### 2026-10-28 - Native maintenance slice merged
+
+- #9359 merged to `dev` as `9ba9af3ad85965a59203b5370a9237406b6b41cb`
+  after actual current-head Copilot approval on `8d5829dc4e`, resolution of all
+  blocking findings and all three required checks. The final exact-head native
+  Windows run [40680863457](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40680863457)
+  passed policy 178, installer/retention 75 and worker/bootstrap 21 cases:
+  274 actual passes, with 18 explicitly POSIX-only skips and no skipped
+  native worker lifecycle cases.
+- Canonical post-merge reconciliation retained recovery history and aligned the
+  source branch to the confirmed squash merge. Re-read the complete Plan and
+  Validation Plan; only the source maintenance/qualification items above closed.
+- Next: verify actual released `main` content, then qualify controlled adoption
+  through the existing preparation/retention owner's accepted interface. #6820
+  has not supplied/accepted that interface; construction and adoption remain
+  coupled. Do not call activation staging, use a competing constructor or infer
+  supervisor preservation from omitted installation.
+- The active worktree slice transitions to **Phase 4 - Release and qualify
+  actual consumers**. The unresolved Phase 3 preparation item remains an
+  explicit dependency, not an accepted handoff or pause lift.
+- The effort remains Active. No production installation, running-consumer
+  adoption, worker launch or transfer of the remaining gate is claimed.
+
+### 2026-10-28 - Source release verified; controlled adoption still gated
+
+- Containing Dev CI `40681917459` passed at the exact merge. The existing
+  automatic promotion `40682261831` admitted that source and completed
+  successfully; no duplicate promotion, release-owner takeover or override
+  was used.
+- Actual released `main` is `448a4ff22e036b91e1f7a364c51b5af48577937b`
+  (#9397), with aligned Dispatch payload/runtime version `0.18.142-dev1`.
+  Verified all 424 source implementation entries: no missing files, 421
+  byte-identical entries, and only the two canonical installer-loader rewrites
+  plus their regenerated output hash differ. The two added engine copies
+  exactly match the admitted canonical source; the declaration hash matches
+  the released PowerShell bytes.
+- This is released source, not a local payload update or running adoption.
+  The existing #6820 coordination request was updated with the three merged
+  slices; it still has no owner-supplied/accepted preparation interface or
+  pause lift. The Phase 3 dependency and installed/consumer validation stay
+  open. Do not construct a competing updater or treat activation as staging.
+
+### 2026-10-28 - Resolve the native adapter gap directly
+
+- Correct the earlier dependency framing: no live preparation owner whose reply
+  must be awaited has been verified. The shared Python-owned constructor is an
+  available API, not a fully adopted replacement for every native installer.
+  Dispatch already uses the canonical `construction-shell` admission and
+  retention helper; preserve that lifecycle rather than add another constructor
+  or silently raise the bootstrap Python requirement.
+- The next bounded slice separates preparation at the existing health/completion
+  boundary and adds explicit strict coordinator-only adoption that leaves
+  supervisor definitions/processes and retained generations alone. It does not
+  change default updates, replace independent action policy, provide atomic
+  rollback, or prove that any installation has adopted the released controls.
+- The native adapter implementation now passes all 34 focused preparation and
+  preservation cases on POSIX/PowerShell in the development host. Real
+  construction, failed import health, immutable reuse, unchanged active files,
+  independent action holds and invalid preservation combinations are covered.
+  The existing native Windows installer packet includes these cases and the
+  constructor-adoption fixture checks; actual native results and review remain
+  required before this source item closes.
+- Broader qualification exposed fixture omissions, not grounds to skip
+  policy: the snapshot harness now loads the real action reader, and the
+  isolated publication fixture supplies its synthetic WSL identity instead of
+  accidentally depending on the host's missing direct-entry distribution
+  label. The contained publication packet passes all 35 cases; the workflow
+  contract passes all 90 cases. This is not installed-consumer evidence.
+
+### 2026-10-28 - Reconcile the newly merged native execution owner
+
+- The earlier adapter revision received independent approval and exact-head
+  Windows qualification, but its eventual merge attempt encountered a base
+  conflict. Guarded synchronization retained the original source and the
+  in-place rebase preserved the newly merged native broker/driver integration.
+- Resolve the semantic overlap as well as the generated declaration conflict:
+  preparation returns before broker adoption, and strict supervisor preservation
+  survives native driver admission and re-entry. Keep ordinary broker adoption
+  and finite execution custody intact.
+- The focused preparation/lifecycle packet passes all 72 cases, including a
+  forbidden-broker effect sentinel and the actual native option-forwarding
+  boundary. Completed synthetic slots now retain the real bootstrap helpers
+  required by the merged constructor contract.
+- Refresh every generated canonical driver copy and its consumer changefile.
+  The rebased preparation/engine/strict-cutover/retention/recovery packet passes
+  184 cases; conditional publication passes 35. Update the coupled fixture's
+  exact assertions for immutable copy installation and the new update-driver
+  dependency rather than dropping those checks.
+  The new revision still requires independent review and native qualification;
+  the preceding revision's approval is not carried forward. The effort remains
+  Active and no installed/running adoption is claimed.

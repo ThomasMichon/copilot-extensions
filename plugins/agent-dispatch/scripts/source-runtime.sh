@@ -36,7 +36,11 @@ _require_actions() {
 _maintenance_preflight() {
     case "${1:-${ACTION:-install}}" in
         install|update|provision)
-            _require_actions runtime-activation coordinator-replacement supervisor-reconcile ;;
+            if [[ "${PRESERVE_SUPERVISORS:-0}" == 1 && "${1:-${ACTION:-install}}" == update ]]; then
+                _require_actions runtime-activation coordinator-replacement
+            else
+                _require_actions runtime-activation coordinator-replacement supervisor-reconcile
+            fi ;;
         stamp) _require_actions runtime-activation ;;
         *) return 0 ;;
     esac
