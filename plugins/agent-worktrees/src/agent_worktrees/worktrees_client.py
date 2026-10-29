@@ -20,7 +20,7 @@ RECOVERY_WAIT = 0.5
 
 
 class ResidentRecoveryPending(ProjectionUnavailable):
-    """An admitted recovery has not published its first usable roster yet."""
+    """An authenticated resident or admitted recovery has no usable roster yet."""
 
 
 class _ResidentUnready(ProjectionUnavailable):
@@ -184,6 +184,9 @@ def read_current(request: dict, *, recover: bool = True) -> dict:
         return _resident(request)
     except ProjectionError:
         raise
+    except _ResidentUnready as exc:
+        unavailable = str(exc)
+        recovery_pending = True
     except (ConnectionError, FileNotFoundError) as exc:
         from . import status_monitor_runtime as monitor
 

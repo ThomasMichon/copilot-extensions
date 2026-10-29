@@ -205,6 +205,31 @@ repository history.
 
 ## Journal
 
+### 2026-10-28 - Preserve the concurrent reader's initial unready response
+
+Required CI 40795693816 and all three native lanes in 40795747288 pass at
+`9c603633d6`. Fresh review 5691542008 has no open findings and acknowledges
+the preceding two fixes, but its overview calls out the concurrent-reader
+shape. Direct assessment confirms the same error class on the initial read:
+another caller can reach the authenticated resident after launch but before
+its first publication, without entering this caller's recovery loop.
+
+The strictly validated initial `unready` response now retains retryable pending
+classification when no advisory roster exists. It does not call ensure/start
+again. The four response controls now exercise both initial and post-launch
+recovery reads; malformed, incompatible and superseded live replies remain
+terminal. Neither the half-second recovery deadline nor the two-second
+full-roster fixture cap changes.
+
+The complete 119-case client/feed packet passes in 30.08 seconds including
+preparation and cleanup with the existing import-timing diagnostic enabled;
+the three actual CLI entry variants separately pass the unchanged cap. Two
+earlier uninstrumented full-packet attempts fail the module entry's initial
+two-second cap, observing first completion at 2.227 and 2.064 seconds. Those
+are failed timing evidence, not successful cold-start measurements; no broader
+native cold-performance claim or budget waiver is made. The final source
+correction still needs its own hosted qualification, CI and fresh review.
+
 ### 2026-10-28 - Keep dev release inside retained foreground custody
 
 Review 5691343499 identifies a real immutable-launcher mismatch: Windows

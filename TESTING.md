@@ -2167,8 +2167,10 @@ installer. After stopping the resident, two actual installed Manager
 resident health observations. Two cold cycles must pass, followed by canonical
 resident shutdown and all three installers' owned cleanup. This is the actual
 Worktrees pivot data path, not a full interactive Picker run or shared-host
-rollout. Admitted cold recovery without an advisory roster must remain
-retryable; malformed live peers and refused launches do not gain that retry.
+rollout. Admitted cold recovery and an authenticated resident's valid `unready`
+response without an advisory roster must remain retryable, including the
+initial read of a concurrent caller. The live caller does not launch another
+resident; malformed live peers and refused launches do not gain that retry.
 
 ## Native file-link prerequisites
 

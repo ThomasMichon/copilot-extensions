@@ -213,8 +213,9 @@ def test_cold_feed_without_an_advisory_roster_retries_only_admitted_recovery(
 
 
 @pytest.mark.parametrize("reply", ["unready", "malformed", "incompatible", "superseded"])
-def test_admitted_cold_feed_validates_first_resident_error_before_retrying(
-    monkeypatch, tmp_path, capsys, reply,
+@pytest.mark.parametrize("first_read", [False, True])
+def test_cold_feed_validates_initial_and_recovery_resident_errors_before_retrying(
+    monkeypatch, tmp_path, capsys, reply, first_read,
 ):
     from agent_worktrees import __main__ as core
     from agent_worktrees import config as cfg
@@ -224,7 +225,7 @@ def test_admitted_cold_feed_validates_first_resident_error_before_retrying(
 
     def resident(payload):
         calls.append(payload)
-        if len(calls) == 1:
+        if not first_read and len(calls) == 1:
             raise ConnectionRefusedError("stopped resident")
         response = {
             "contract_version": 3 if reply == "incompatible" else 1,
@@ -242,14 +243,18 @@ def test_admitted_cold_feed_validates_first_resident_error_before_retrying(
     monkeypatch.setattr(cfg, "project_name", lambda: "project")
     monkeypatch.setattr(worktrees_client.monitor, "_aw_runtime_home", lambda: tmp_path)
     monkeypatch.setattr(worktrees_client.monitor, "_status_monitor_enabled", lambda: True)
-    monkeypatch.setattr(worktrees_client.monitor, "_ensure_status_monitor", lambda: True)
+    def ensure():
+        assert not first_read, "a live unready response must not start another resident"
+        return True
+
+    monkeypatch.setattr(worktrees_client.monitor, "_ensure_status_monitor", ensure)
     monkeypatch.setattr(list_cache, "cache_key", lambda *a, **kw: "fixture")
     monkeypatch.setattr(list_cache, "note_demand", lambda *a, **kw: None)
     args = core.build_parser().parse_args(["list", "--current", "--follow", "--all"])
 
     assert worktrees_client.emit_current(args) == 1
     error = json.loads(capsys.readouterr().out)["error"]
-    assert len(calls) == 2
+    assert len(calls) == (1 if first_read else 2)
     assert error["retry"] is (reply == "unready")
     assert error["code"] == ("unready" if reply == "unready" else "malformed-peer")
     assert "no usable advisory roster" in error["message"]
