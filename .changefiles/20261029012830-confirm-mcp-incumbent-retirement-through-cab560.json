@@ -64,6 +64,14 @@
     {
       "plugin": "libs/update-driver",
       "type": "patch"
+    },
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/chat",
+      "type": "patch"
     }
   ]
 }
