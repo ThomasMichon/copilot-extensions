@@ -87,11 +87,43 @@ corresponding native attributed launch/startup boundary. Flags-only
 home, never the caller's cwd or a plugin payload) and appends the daemon's
 output to a `log_path` (stderr optionally to its own `stderr_log_path`) instead
 of discarding it.
-Do not remove the caller's Job or make every child break away to repair one
-daemon. A caller already in a Job uses the installed consumer's adopted finite broker
-before launching: Windows can accept breakaway while retaining an ancestor Job
-under a venv redirector. A caller Job query failure refuses the launch. A
-direct launch's breakaway denial uses the same broker. Its fixed immutable action
+
+### Preferred path: normal creation and explicit Job ownership
+
+Ordinary native process creation is the default, not an OS-registered broker.
+Choose `CREATE_NO_WINDOW` or detached/GUI-subsystem execution for visibility,
+then select Job ownership independently. A deliberate durable launch may request
+`CREATE_BREAKAWAY_FROM_JOB` where the owning Jobs permit it. Jobs created by
+the launcher must distinguish durable children from bounded request/tool/test
+children, whose cleanup remains strict. Do not remove a caller Job or make every
+descendant escape merely to repair one daemon.
+
+Validate the actual cleanup owners using retained native Job/process handles
+and identities. `IsProcessInJob(child, NULL)` reports membership in some Job,
+not whether the launcher owns that Job or will terminate the child. Conversely,
+escaping the immediate Job does not prove independence from a shared outer
+kill-on-close Job. A NULL-job limit query does not describe the complete
+hierarchy. Unknown ownership is not a successful durability proof.
+
+Prove the supported launch topology by closing every fixture-owned caller
+cleanup Job after admission. The daemon must survive, bounded controls must die
+and a child retained by a shared outer cleanup Job must not be reported
+independent. Parent exit and an early health response are insufficient.
+
+Do not automatically substitute COM/shell activation, Scheduled Tasks/S4U, an
+installed service or UAC for a failed normal spawn. Repair and qualify the
+owning direct-creation/Job boundary first. If a restrictive external owner
+prevents the required lifetime, report that limitation explicitly. A different
+activation, availability or privilege model requires its own reviewed decision;
+it is not a silent fallback or an excuse to relax cleanup checks.
+
+### Existing finite-broker compatibility path
+
+The currently implemented `spawn_daemon` Job branch uses the installed
+consumer's adopted finite broker before launching. That implementation is not
+proof that all Job-associated callers require a broker, and this guidance
+change does not claim the direct-path runtime repair is already delivered.
+Its fixed immutable action
 uses the actual base interpreter, so a venv redirector cannot change the identity
 being adopted. It receives launch data through an authenticated native pipe,
 stages the actual child suspended, and transfers a pinned native process
@@ -101,8 +133,10 @@ without sending admission; ambiguous acknowledgement retains creation,
 admission and native-identity evidence instead of permitting replay.
 Shell interpolation, credential-bearing command lines,
 temporary launch files and wrapper PIDs are not part of this contract.
-The suspended resident must be outside every Job, not merely absent from the
-caller's immediate Job. Scheduler provenance and native process identity bind the
+That existing broker contract requires the suspended resident outside every Job,
+not merely absent from the caller's immediate Job. This is a conservative
+compatibility admission rule, not the general definition of a detached process.
+Scheduler provenance and native process identity bind the
 finite broker independently of the caller; another immediate Job under a shared
 outer cleanup Job is not escape proof. Missing adoption, optional native support
 or completed installer recovery refuses explicitly. Ordinary launch never

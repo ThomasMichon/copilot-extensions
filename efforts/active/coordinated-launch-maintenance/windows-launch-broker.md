@@ -55,7 +55,35 @@ component, not a new prerequisite for every service's normal start path.
 
 ## Proposed mechanism
 
+### Normal-process direction
+
+The operator superseded the interactive-token experiment in #9522 with
+ordinary native detached/headless creation and explicit Job ownership, avoiding
+COM, Scheduled Tasks and UAC. The first deliverable is the general spawn-guidance
+correction and its legitimate Main promotion; runtime repair remains separate.
+
+Use the owning attributed launch/startup primitive and distinguish durable
+children from bounded request/tool/test descendants. Prefer ordinary native
+creation with the appropriate headlessness and breakaway policy. Membership in
+some Job alone is not proof of launcher dependence. Check actual retained
+cleanup-owner identities and handles, not just the immediate Job or a NULL-job
+limit query. The different-inner/shared-outer negative remains binding.
+
+Require direct native survival after every fixture-owned caller cleanup Job
+closes, bounded controls that die, unchanged external restrictions, native
+process custody and stopped-resident concurrent Manager/current-roster recovery.
+Do not silently remove containment, promise escape from an unsupported external
+owner or register another activation system. Design and review the concrete
+runtime ownership changes before implementing them. General guidance must not
+present that runtime repair as already available.
+
+Source/release/installed proofs remain distinct. The central deployment hold
+and ownership are unchanged.
+
 ### Interactive-token desktop activation
+
+**Superseded:** retained as the reviewed history of #9523 and the unmerged
+#9526 experiment, not the selected implementation path.
 
 Follow-up #9522 replaces the original S4U implementation's logon contract for
 desktop use. The operator selected `interactive-token`; implementation below is
