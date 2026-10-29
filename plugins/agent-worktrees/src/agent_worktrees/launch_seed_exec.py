@@ -70,7 +70,10 @@ def deferred_command(
     ) if prepare_native else None
     if native is not None:
         if os.name == "posix" and (environment or {}).get("BASH_ENV") == "":
-            return ["env", "BASH_ENV=", *native]
+            utility = shutil.which("env", path=os.defpath)
+            if utility is None:
+                raise RuntimeError("Native POSIX setup requires the standard env utility")
+            return [utility, "BASH_ENV=", *native]
         return native
     prefix = [
         sys.executable, "-m", "agent_worktrees.launch_seed_exec",
@@ -252,7 +255,7 @@ def _native_setup_command(
 def _script_index(command: list[str]) -> int | None:
     if not command:
         return None
-    if command[:2] == ["env", "BASH_ENV="]:
+    if len(command) > 1 and Path(command[0]).name == "env" and command[1] == "BASH_ENV=":
         inner = _script_index(command[2:])
         return inner + 2 if inner is not None else None
     host = Path(command[0]).name.lower()

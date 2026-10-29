@@ -780,7 +780,8 @@ retains legacy ownership. Direct/no-mux plans use their actual inherited and
 selected environment. There is no separate renderer-admission flag or
 renderer-capability handshake, and these rules do not depend on marketplace
 cells. Full Manager launch and installation-survival acceptance remain open.
-An explicit empty initializer is applied by POSIX `env` before Bash starts,
+An explicit empty initializer is applied by an absolute POSIX `env`, resolved
+through the standard utility path without changing the backend's `PATH`, before Bash starts,
 including when an older environment renderer passes literal quotation marks.
 This preserves inherited Python-sensitive variables without initializing a
 Python interpreter. Manager refreshes only the legacy Python seed envelope,

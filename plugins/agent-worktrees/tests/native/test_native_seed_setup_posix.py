@@ -265,10 +265,13 @@ def test_inherited_python_environment_and_execution_hint_survive_native_exec(
     _assert_return(plan, 7, True)
 
 
+@pytest.mark.parametrize("bash_env", [None, ""])
 def test_native_control_utilities_do_not_change_a_restricted_backend_path(
-    tmp_path, installed_native_runtime, native_bash,
+    tmp_path, installed_native_runtime, native_bash, bash_env,
 ):
-    plan, environment, checkout = _plan(tmp_path, installed_native_runtime, native_bash, "new")
+    plan, environment, checkout = _plan(
+        tmp_path, installed_native_runtime, native_bash, "new", bash_env=bash_env,
+    )
     environment["PATH"] = str(tmp_path / "no-utilities")
     backend = tmp_path / "backend"
     backend.write_text(
@@ -488,7 +491,7 @@ def test_manager_literal_pane_environment_runs_native_setup_without_renderer_adm
     )
     assert rendered.returncode == 0, rendered.stdout + rendered.stderr
     command, arguments = map(json.loads, rendered.stdout.splitlines())
-    assert command[0] == "env"
+    assert Path(command[0]).is_absolute() and Path(command[0]).name == "env"
     assert command[command.index("--runtime-python") + 1] == prefix[0]
     assert arguments == ["-e", "BASH_ENV=", "-e", "FIXTURE_LITERAL=" + selected["FIXTURE_LITERAL"]]
     for index in range(0, len(arguments), 2):
