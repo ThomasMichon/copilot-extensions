@@ -12,6 +12,24 @@ class ObservationBlocked(RuntimeError):
     pass
 
 
+def capture_foreground(api) -> tuple[int, tuple[int, int, int]]:
+    hwnd = api.foreground()
+    if not hwnd:
+        raise ObservationBlocked("foreground unavailable during direct capture")
+    owner = api.window_identity(hwnd)
+    pin = api.pin(owner[0])
+    try:
+        if (
+            pin.gone() or not api.user.IsWindow(hwnd) or not api.user.IsWindowVisible(hwnd)
+            or api.foreground() != hwnd or api.window_identity(hwnd) != owner
+            or not api.user.IsWindow(hwnd) or not api.user.IsWindowVisible(hwnd) or pin.gone()
+        ):
+            raise ObservationBlocked("foreground changed, exited or is not directly visible")
+        return hwnd, (*owner, pin.birth)
+    finally:
+        pin.close()
+
+
 def validate_calibration(packet: dict, witnesses: list[dict], hwnd: int,
                          thread: int, original: int) -> None:
     if (
@@ -24,7 +42,8 @@ def validate_calibration(packet: dict, witnesses: list[dict], hwnd: int,
     invalid = {
         "foreground-identity-failed", "foreground-null", "foreground-missing-enumeration",
         "visible-capture-failed", "coverage-gap", "coverage-tail-gap",
-        "delayed-event-delivery", "unknown",
+        "delayed-event-delivery", "foreground-capture-changed",
+        "foreground-enumeration-identity-mismatch", "unknown",
     }
     for event in packet["raw_events"]:
         if event["kind"] in invalid:
@@ -67,10 +86,7 @@ class DesktopObserver:
         self.api, self.epoch = api, epoch
         api.require_desktop()
         self.baseline = api.raw_windows()
-        self.foreground = api.foreground()
-        if not self.foreground:
-            raise ObservationBlocked("foreground unavailable before observation")
-        self.foreground_identity = api.window_identity(self.foreground)
+        self.foreground, self.foreground_identity = capture_foreground(api)
         self.events: list[dict] = []
         self.trace: deque[dict] = deque(maxlen=128)
         self.pending_neighbors: list[dict] = []
@@ -148,8 +164,7 @@ class DesktopObserver:
             start = time.monotonic()
             foreground, identity = None, None
             try:
-                foreground = self.api.foreground()
-                identity = self.api.window_identity(foreground) if foreground else None
+                foreground, identity = capture_foreground(self.api)
             except Exception as error:
                 self.record("foreground-identity-failed", hwnd=foreground,
                             error=f"{type(error).__name__}: {error}")
@@ -170,13 +185,31 @@ class DesktopObserver:
             except Exception as error:
                 windows = None
                 self.record("visible-capture-failed", error=f"{type(error).__name__}: {error}")
+            confirmation, confirmed_identity = None, None
+            try:
+                confirmation, confirmed_identity = capture_foreground(self.api)
+                if (confirmation, confirmed_identity) != (foreground, identity):
+                    self.record("foreground-capture-changed", hwnd=confirmation,
+                                identity=confirmed_identity, previous_hwnd=foreground,
+                                previous_identity=identity)
+            except Exception as error:
+                self.record("foreground-identity-failed", stage="after-enumeration",
+                            error=f"{type(error).__name__}: {error}")
             end = time.monotonic()
             self.coverage("visible", start, end)
             row["visible"] = {"start": start, "end": end,
-                              "count": len(windows) if windows is not None else None}
+                              "count": len(windows) if windows is not None else None,
+                              "foreground_enumerated": (
+                                  foreground in windows if windows is not None and foreground else None
+                              ),
+                              "foreground_corroboration": {
+                                  "hwnd": confirmation, "identity": confirmed_identity,
+                              }}
             if windows is not None:
-                if foreground and foreground not in windows:
-                    self.record("foreground-missing-enumeration", hwnd=foreground, identity=identity)
+                # EnumWindows covers desktop apps, not every directly observable foreground.
+                if foreground in windows and identity is not None and windows[foreground] != identity[:2]:
+                    self.record("foreground-enumeration-identity-mismatch",
+                                hwnd=foreground, identity=identity, enumerated=windows[foreground])
                 for hwnd, owner in windows.items():
                     key = (hwnd, *owner)
                     if self.baseline.get(hwnd) != owner and key not in self.visible_seen:
@@ -276,6 +309,8 @@ class DesktopObserver:
             violations = [deepcopy(event) for event in self.events if event["violation"]]
             return {
                 "epoch": self.epoch, "samples": self.samples,
+                "visible_enumeration_scope": "EnumWindows: top-level desktop-app windows",
+                "foreground_capture": "independent visible HWND/PID/TID/process-birth endpoints",
                 "started": self.started, "ended": self.ended,
                 "poll_interval": self.INTERVAL, "maximum_gap": self.max_gap,
                 "first_capture": dict(self.first_capture), "last_capture": dict(self.previous),

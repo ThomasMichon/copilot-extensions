@@ -45,6 +45,14 @@ class API:
     def __init__(self):
         self.current = 10
         self.windows = {10: (1, 2), 11: (3, 4)}
+        self.birth = 100
+        self.pins = []
+        self.closed = []
+        self.visible = True
+        self.user = SimpleNamespace(
+            IsWindow=lambda hwnd: hwnd in self.windows,
+            IsWindowVisible=lambda hwnd: hwnd in self.windows and self.visible,
+        )
 
     def require_desktop(self):
         return {"available": True}
@@ -57,6 +65,12 @@ class API:
 
     def raw_windows(self):
         return dict(self.windows)
+
+    def pin(self, pid):
+        self.pins.append(pid)
+        return SimpleNamespace(
+            birth=self.birth, gone=lambda: False, close=lambda: self.closed.append(pid),
+        )
 
 
 def sealed(api=None):
@@ -103,6 +117,104 @@ def test_empty_sealed_healthy_epoch_can_pass():
     snapshot = value.packet()
     snapshot["raw_events"].append({"kind": "forged"})
     assert value.packet()["raw_events"] == []
+
+
+def test_direct_visible_foreground_need_not_belong_to_desktop_app_enumeration():
+    api = API()
+    api.raw_windows = lambda: {11: api.windows[11]}
+    value = sealed(api)
+    assert value.packet()["passed"]
+    assert value.baseline == {11: (3, 4)}
+    assert value.packet()["raw_events"] == []
+    capture = value.packet()["recent_captures"][0]
+    assert capture["visible"]["count"] == 1
+    assert capture["visible"]["foreground_enumerated"] is False
+    assert capture["visible"]["foreground_corroboration"] == {
+        "hwnd": 10, "identity": (1, 2, 100),
+    }
+    assert api.pins == api.closed == [1, 1, 1]
+
+
+@pytest.mark.parametrize("failure", [
+    "invisible", "absent", "exited", "identity", "foreground", "open", "query", "close",
+])
+def test_direct_foreground_capture_refuses_unknowns_and_closes_query_pin(failure):
+    api = API()
+    if failure == "invisible":
+        api.visible = False
+    elif failure == "absent":
+        api.user.IsWindow = lambda hwnd: False
+    elif failure == "exited":
+        original_pin = api.pin
+
+        def pin(pid):
+            value = original_pin(pid)
+            value.gone = lambda: True
+            return value
+
+        api.pin = pin
+    elif failure == "identity":
+        owners = iter([(1, 2), (1, 99)])
+        api.window_identity = lambda hwnd: next(owners)
+    elif failure == "foreground":
+        handles = iter([10, 11])
+        api.foreground = lambda: next(handles)
+    elif failure in {"open", "query"}:
+        original_pin = api.pin
+
+        def fail():
+            raise observer.ObservationBlocked("query pin failed")
+
+        def pin(pid):
+            if failure == "open":
+                fail()
+            value = original_pin(pid)
+            value.gone = fail
+            return value
+
+        api.pin = pin
+    else:
+        def close_failure(pid):
+            api.closed.append(pid)
+            raise observer.ObservationBlocked("query pin close failed")
+
+        api.pin = lambda pid: SimpleNamespace(
+            birth=100, gone=lambda: False, close=lambda: close_failure(pid),
+        )
+    with pytest.raises(observer.ObservationBlocked):
+        observer.capture_foreground(api)
+    assert api.closed == ([] if failure == "open" else [1])
+
+
+def test_process_birth_change_without_numeric_window_change_is_a_violation():
+    api = API()
+    value = observer.DesktopObserver(api, "unit")
+    api.birth += 1
+    value.sample()
+    assert any(event["kind"] == "sampled-foreground" for event in value.events)
+    assert api.pins == api.closed
+
+
+@pytest.mark.parametrize("change", ["foreground", "birth", "enumerated-owner", "enumeration-error"])
+def test_enumeration_cannot_hide_a_changed_or_unobservable_direct_foreground(change):
+    api = API()
+    value = observer.DesktopObserver(api, "unit")
+
+    def enumerate_changed():
+        if change == "foreground":
+            api.current = 11
+        elif change == "birth":
+            api.birth += 1
+        elif change == "enumerated-owner":
+            return {10: (99, 98)}
+        else:
+            raise observer.ObservationBlocked("enumeration failed")
+        return dict(api.windows)
+
+    api.raw_windows = enumerate_changed
+    value.sample()
+    assert any(event["violation"] for event in value.events)
+    assert api.pins == api.closed
 
 
 @pytest.mark.parametrize("hwnd", [0, 10, 999])
@@ -217,7 +329,10 @@ def test_restoration_before_owned_activation_is_not_a_witness():
         observer.validate_calibration(packet, witnesses, 20, 7, 10)
 
 
-@pytest.mark.parametrize("kind", ["coverage-gap", "delayed-event-delivery", "foreground-null"])
+@pytest.mark.parametrize("kind", [
+    "coverage-gap", "delayed-event-delivery", "foreground-null",
+    "foreground-capture-changed", "foreground-enumeration-identity-mismatch",
+])
 def test_unknown_or_delayed_control_intervals_cannot_qualify_calibration(kind):
     packet, witnesses = control_packet()
     packet["raw_events"].append({"kind": kind, "violation": True})

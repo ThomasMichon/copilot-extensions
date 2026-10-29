@@ -303,6 +303,17 @@ failure and verifies the explicit-root form using synthetic, actor-free cases.
 It preserves the original 20-ms poll, 0.5-second coverage/delivery
 ceiling, bounded raw stream and same-thread hook cleanup. Unknown/unrelated
 foreground events remain evidence, never a process-name-filtered zero.
+Foreground polling independently captures a directly visible HWND, PID, TID
+and query-pinned process birth before and after each enumeration. Microsoft
+documents that `EnumWindows` enumerates top-level desktop-app windows, not every
+foreground window; an observable foreground can therefore be absent even from
+a successful enumeration. The trace preserves that absence without inserting
+a fabricated enumeration member or applying a window-class allowlist.
+Null, invisible, exited, changed or unqueryable foregrounds, failed query-handle
+closure, enumeration failures and conflicting enumerated ownership still refuse
+qualification. Enumeration and direct captures are non-atomic endpoints, not
+proof that no intervening change occurred: the same unfiltered raw WinEvent
+stream, calibration witnesses and original coverage ceilings remain required.
 Its portable policy controls are in
 `tools/promotion_unit_tests/test_sdk_desktop_observer.py`; actual desktop proof
 is a different lane and must never appear in required unit-only CI.
