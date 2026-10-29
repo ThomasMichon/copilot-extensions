@@ -1,5 +1,14 @@
 # Testing copilot-extensions
 
+The optional `update_diagnostics` lane also runs MCP's focused
+`test_source_install_transactions.py -k footprint_routes` controls through the
+canonical contained plugin runner on native Linux and Windows. They exercise
+the actual attached constructor and both native shell adapters with compatible,
+missing-deployment and corrupt-completion fixtures, source identity preservation
+and unchanged incumbent bytes. The POSIX FIFO adapter requires native POSIX
+Python; Git Bash feeding a Windows Python is not qualified. These controls do
+not perform full installation, old-owner retirement or installed-host rollout.
+
 The opt-in Windows broker consumer lane also constructs the actual Manager
 runtime through its canonical installer in the credential-free disposable
 profile. Two concurrent current-roster

@@ -1452,12 +1452,14 @@ def retain_runtime_helpers(slot: Path, *, complete: bool, context_source: Path |
 
 
 def construction_session(root: Path, version: str, *, payload_hash: str,
-                         link_name: str = CURRENT_LINK, dev_owner: str | None = None) -> int:
+                         link_name: str = CURRENT_LINK, dev_owner: str | None = None,
+                         footprint: Path | None = None, plugin: str | None = None) -> int:
     component = _runtime_component("versioned_runtime_construction")
     runtime = component.RuntimeOperations(
         version_dir=version_dir,
         _load_unique_json=_load_unique_json,
         current_version=current_version,
+        is_complete=is_complete,
         _is_link=_is_link,
         LAST_KNOWN_GOOD_FILE=LAST_KNOWN_GOOD_FILE,
         retention_lease=retention_lease,
@@ -1473,6 +1475,7 @@ def construction_session(root: Path, version: str, *, payload_hash: str,
     )
     return component.construction_session(
         runtime, root, version, payload_hash=payload_hash, link_name=link_name, dev_owner=dev_owner,
+        footprint=footprint, plugin=plugin,
     )
 
 
@@ -1782,6 +1785,8 @@ def main(argv: list[str] | None = None) -> int:
     session_parser.add_argument("version")
     session_parser.add_argument("--payload-hash", required=True)
     session_parser.add_argument("--dev-owner", default=None)
+    session_parser.add_argument("--footprint", type=Path)
+    session_parser.add_argument("--plugin")
     shell_parser = sub.add_parser("construction-shell", help="render the canonical pipe adapter")
     shell_parser.add_argument("--shell", choices=("ps1", "sh"), required=True)
     ap = sub.add_parser("activate", help="publish current-version -> <version>")
@@ -1872,6 +1877,7 @@ def main(argv: list[str] | None = None) -> int:
             return construction_session(
                 root, args.version, payload_hash=args.payload_hash, link_name=link_name,
                 dev_owner=args.dev_owner,
+                footprint=args.footprint, plugin=args.plugin,
             )
         elif args.cmd == "construction-shell":
             print(construction_shell_helpers(args.shell))

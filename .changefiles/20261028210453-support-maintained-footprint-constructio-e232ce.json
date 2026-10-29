@@ -1,0 +1,9 @@
+{
+  "comment": "Support maintained footprint construction plans in the canonical native adapter; preserve existing callers and synchronize shared helpers.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

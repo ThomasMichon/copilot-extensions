@@ -16,6 +16,7 @@ class RuntimeOperations:
     version_dir: Callable[[Path, str], Path]
     _load_unique_json: Callable[[Path], dict]
     current_version: Callable[..., str | None]
+    is_complete: Callable[..., bool]
     _is_link: Callable[[Path], bool]
     LAST_KNOWN_GOOD_FILE: str
     retention_lease: Callable[..., ContextManager[Path]]
@@ -253,7 +254,8 @@ def remove_owned_candidate(runtime: CleanupOperations, root: Path, version: str,
 
 
 def construction_session(runtime: RuntimeOperations, root: Path, version: str, *, payload_hash: str,
-                         link_name: str = "current", dev_owner: str | None = None) -> int:
+                         link_name: str = "current", dev_owner: str | None = None,
+                         footprint: Path | None = None, plugin: str | None = None) -> int:
     """Own one shell constructor through a private, caller-held stdin pipe.
 
     The attached helper is finite: EOF aborts construction or ends retention.
@@ -265,6 +267,27 @@ def construction_session(runtime: RuntimeOperations, root: Path, version: str, *
 
     if not re.fullmatch(r"[0-9a-f]{64}", payload_hash):
         raise ValueError("construction requires an attributable SHA-256 payload fingerprint")
+    plan = None
+    if footprint is not None:
+        import importlib.util
+
+        if dev_owner is not None or not plugin:
+            raise ValueError("Footprint construction requires an immutable plugin owner")
+        source = Path(__file__).with_name("installer_engine_footprint.py")
+        spec = importlib.util.spec_from_file_location("_construction_footprint", source)
+        if spec is None or spec.loader is None:
+            raise RuntimeError("The canonical footprint provider is unavailable")
+        provider = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = provider
+        spec.loader.exec_module(provider)
+        if footprint.absolute() != source.with_name("uninstall-profile.json"):
+            raise ValueError("Construction requires this payload's maintained footprint")
+        manifest = provider.parse(provider.decode(provider._marker_text(footprint)), plugin)
+        plan = provider.plan_construction(
+            manifest, root, version,
+            admission=lambda root, version: runtime.check_admission(root, version, payload_hash=payload_hash),
+        )
+        version = plan.version
     executable = Path(sys.executable).resolve()
     if executable.is_relative_to(runtime.version_dir(root, version).resolve()):
         raise RuntimeError("construction supervisor must use a base interpreter outside the candidate")
@@ -331,16 +354,32 @@ def construction_session(runtime: RuntimeOperations, root: Path, version: str, *
         )
 
     with ExitStack() as retained, ExitStack() as building:
-        references = {runtime.current_version(root, link_name)}
-        last_good = root / runtime.LAST_KNOWN_GOOD_FILE
-        if os.path.lexists(last_good):
-            if runtime._is_link(last_good) or not last_good.is_file():
-                raise RuntimeError("last-known-good selector must be an ordinary file")
-            references.add(last_good.read_text(encoding="utf-8").strip())
+        if plan is not None and plan.mode == "fresh":
+            # A broken incumbent cannot approve its replacement. Retain healthy
+            # references when available; construction never mutates the others.
+            references = set()
+            for name in ("current-version", runtime.LAST_KNOWN_GOOD_FILE):
+                try:
+                    previous = provider._marker_text(root / name).strip()
+                    if (re.fullmatch(r"[0-9][A-Za-z0-9._+-]*", previous)
+                            and not runtime._is_link(runtime.version_dir(root, previous))
+                            and runtime.is_complete(root, previous)):
+                        references.add(previous)
+                except (OSError, ValueError):
+                    continue
+        else:
+            references = {runtime.current_version(root, link_name)}
+            last_good = root / runtime.LAST_KNOWN_GOOD_FILE
+            if os.path.lexists(last_good):
+                if runtime._is_link(last_good) or not last_good.is_file():
+                    raise RuntimeError("last-known-good selector must be an ordinary file")
+                references.add(last_good.read_text(encoding="utf-8").strip())
         for previous in references:
             if previous:
                 retained.enter_context(runtime.retention_lease(root, previous))
         building.enter_context(runtime.construction_lease(root, version))
+        if plan is not None and plan.mode == "fresh" and os.path.lexists(runtime.version_dir(root, version)):
+            raise RuntimeError("Fresh construction requires a distinct absent candidate")
         if runtime.is_dev_generation(version):
             runtime._require_dev_owner(root, dev_owner)
         admission = runtime.check_admission(root, version, payload_hash=payload_hash)
@@ -360,7 +399,10 @@ def construction_session(runtime: RuntimeOperations, root: Path, version: str, *
                 cell_module.provision_runtime_slot(**cleanup_arguments, environment={})
                 ownership_digest = hashlib.sha256(ownership_file.read_bytes()).hexdigest()
         try:
-            reply(admission=admission)
+            reply(admission=admission, **(
+                {"version": version, "construction": plan.mode}
+                if plan is not None else {}
+            ))
             for line in sys.stdin:
                 if len(line) > 4096:
                     raise ValueError("construction command exceeds its bounded protocol")
@@ -430,6 +472,7 @@ _runtime_construction_channels_close() {
 _runtime_construction_begin() {
     local python="$1" helper="$2" root="$3" version="$4" hash="$5" link="$6"
     local owner="${7:-}"
+    local footprint="${8:-}" plugin="${9:-}"
     if [[ -n "${_RUNTIME_CONSTRUCTION_PID:-}" ]]; then
         [[ "$_RUNTIME_CONSTRUCTION_KEY" == "$root/$version" ]] || {
             printf '%s\n' 'A different runtime construction is still unsettled' >&2; return 1;
@@ -496,6 +539,7 @@ _runtime_construction_begin() {
             rmdir -- "$_RUNTIME_CONSTRUCTION_CHANNEL" || exit 1
         set -- "$base" -I "$helper" --root "$root" --link-name "$link" construction-session "$version" --payload-hash "$hash"
         [[ -z "$owner" ]] || set -- "$@" --dev-owner "$owner"
+        [[ -z "$footprint" ]] || set -- "$@" --footprint "$footprint" --plugin "$plugin"
         exec "$@"
     } &
     _RUNTIME_CONSTRUCTION_PID="$!"
@@ -514,6 +558,21 @@ _runtime_construction_begin() {
     fi
     # The child removed its private rendezvous before emitting admission.
     _RUNTIME_CONSTRUCTION_CHANNEL=""
+    if [[ -n "$footprint" ]]; then
+        local fields
+        fields="$("$base" -I -c 'import json,re,sys
+d=json.loads(sys.argv[1])
+assert set(d)=={"admission","version","construction"}
+assert d["admission"] in ("reuse","construct")
+assert re.fullmatch(r"[0-9][A-Za-z0-9._+-]*", d["version"])
+assert d["construction"] in ("fresh","incremental")
+print(d["version"]); print(d["construction"]); print(d["admission"])' "$reply")" || return 1
+        _RUNTIME_CONSTRUCTION_VERSION="${fields%%$'\n'*}"
+        fields="${fields#*$'\n'}"
+        _RUNTIME_CONSTRUCTION_MODE="${fields%%$'\n'*}"
+        _RUNTIME_CONSTRUCTION_KEY="$root/$_RUNTIME_CONSTRUCTION_VERSION"
+        reply="{\"admission\": \"${fields##*$'\n'}\"}"
+    fi
     case "$reply" in
         '{"admission": "reuse"}') _RUNTIME_CONSTRUCTION_REUSE=1; _RUNTIME_CONSTRUCTION_COMPLETE=1;;
         '{"admission": "construct"}') _RUNTIME_CONSTRUCTION_REUSE=0; _RUNTIME_CONSTRUCTION_COMPLETE=0;;
@@ -578,7 +637,8 @@ function script:ConvertTo-RuntimeConstructionArgument([string]$Value) {
 }
 function script:Start-RuntimeConstruction {
     param([string]$Python, [string]$Helper, [string]$Root, [string]$Version,
-          [string]$PayloadHash, [string]$LinkName, [string]$DevOwner = '')
+          [string]$PayloadHash, [string]$LinkName, [string]$DevOwner = '',
+          [string]$Footprint = '', [string]$Plugin = '')
     if ($script:RuntimeConstructionSession) {
         if ($script:RuntimeConstructionSession.Key -ne "$Root/$Version" -or
             $script:RuntimeConstructionSession.Process.HasExited) {
@@ -609,6 +669,7 @@ function script:Start-RuntimeConstruction {
     $argv = @('-I', $Helper, '--root', $Root, '--link-name', $LinkName,
               'construction-session', $Version, '--payload-hash', $PayloadHash)
     if ($DevOwner) { $argv += @('--dev-owner', $DevOwner) }
+    if ($Footprint) { $argv += @('--footprint', $Footprint, '--plugin', $Plugin) }
     $psi.Arguments = ($argv | ForEach-Object { ConvertTo-RuntimeConstructionArgument $_ }) -join ' '
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
@@ -629,8 +690,21 @@ function script:Start-RuntimeConstruction {
         throw 'Invalid construction admission'
     }
     $reuse = $admission.admission -eq 'reuse'
+    $selected = $Version
+    $construction = $null
+    if ($Footprint) {
+        if ($admission.version -notmatch '^[0-9][A-Za-z0-9._+-]*$' -or
+            $admission.construction -notin @('fresh', 'incremental')) {
+            $process.StandardInput.Close()
+            $process.WaitForExit()
+            throw 'Invalid footprint construction admission'
+        }
+        $selected = $admission.version
+        $construction = $admission.construction
+    }
     $script:RuntimeConstructionSession = [pscustomobject]@{
-        Key = "$Root/$Version"; Process = $process; Errors = $errors;
+        Key = "$Root/$selected"; Process = $process; Errors = $errors;
+        Version = $selected; Construction = $construction;
         Reuse = $reuse; Complete = $reuse
     }
     return $reuse

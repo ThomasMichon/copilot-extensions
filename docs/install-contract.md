@@ -2538,6 +2538,19 @@ discarding the reset inventory or executing installed code. A layout match is
 not update permission, source/content qualification, a lifecycle handshake or
 a health result. No new installed receipt is required.
 
+MCP's native installers now pass that maintained footprint into the existing
+attached construction session under the same installer lock/execution owner.
+A compatible layout can reuse an admitted candidate, including the selected
+same-input replacement generation. Otherwise construction is fresh: an occupied
+target receives a distinct `repair.<id>` generation, without rewriting the
+incumbent or requiring its completion receipt. Healthy incumbent references
+remain retained; unusable selectors/completion evidence do not veto building
+beside them. Source identity remains pinned independently of this physical
+generation name. The optional protocol leaves other callers unchanged.
+This construction boundary does not execute the reset descriptors, establish
+old-process silence, relax command ownership, or complete fresh publication
+through corrupt deployment metadata. Those remain native lifecycle obligations.
+
 `tools/check-install-contract.py` checks this first adopter's complete
 `scripts` and `src` producer trees, including added/removed files, with
 LF-normalized content digests. The manifest itself and Python bytecode caches
