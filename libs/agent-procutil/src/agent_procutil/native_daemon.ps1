@@ -330,8 +330,10 @@ function Start-NativeDaemon {
 `$ErrorActionPreference = 'Stop'
 [IO.File]::WriteAllText($diagnosticLiteral, "native-daemon-stage:script-entry``n")
 `$d = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$data')) | ConvertFrom-Json
+[IO.File]::AppendAllText($diagnosticLiteral, "native-daemon-stage:decoded``n")
 try {
     [Console]::Error.WriteLine('native-daemon-stage:bootstrap')
+    [IO.File]::AppendAllText($diagnosticLiteral, "native-daemon-stage:console-ready``n")
     . `$d.helper
     [Console]::Error.WriteLine('native-daemon-stage:peer-ready')
     `$pipe = New-Object IO.Pipes.NamedPipeClientStream(
@@ -373,6 +375,7 @@ try {
         $launcher = [CopilotExtensions.NativeDaemonAdmission]::Start(
             $shell, $commandArgs, $WorkingDirectory, $LogPath, $contained
         )
+        [IO.File]::WriteAllText(($LogPath + '.parent.log'), "native-daemon-stage:launcher-returned`n")
         if (-not $connected.AsyncWaitHandle.WaitOne(15000)) {
             $launcher.Describe($LogPath)
             throw 'Native daemon did not reach admission.'
