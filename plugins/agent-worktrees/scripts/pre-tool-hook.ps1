@@ -1,4 +1,5 @@
 # Native event entry; Python remains the policy path for uncertain input/cell admission.
+if ($env:AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION -ceq 'resident') { exit 0 }
 $ErrorActionPreference = 'Stop'
 $utf8 = [Text.UTF8Encoding]::new($false, $true)
 

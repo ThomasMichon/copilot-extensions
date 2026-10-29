@@ -909,6 +909,9 @@ def main(argv: list[str] | None = None) -> int:
     if kind not in {"preToolUse", "postToolUse", "sessionStart", "sessionEnd"}:
         return 0
     strict_policy = kind == "preToolUse" and "--require-policy" in argv[1:]
+    if (kind == "preToolUse" and not strict_policy
+            and os.environ.get("AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION") == "resident"):
+        return 0
     if kind == "preToolUse":
         switch = _load_sibling("pretool_killswitch.py")
         if switch is None:

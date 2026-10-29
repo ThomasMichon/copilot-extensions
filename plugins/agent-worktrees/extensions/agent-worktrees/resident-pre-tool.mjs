@@ -181,3 +181,28 @@ export function createResidentPreToolHook({
     }
   };
 }
+
+export function selectResidentPreToolHooks({
+  environment = process.env, createHook,
+  report = reason => console.error(`agent-worktrees pre-tool selection: ${reason}`),
+}) {
+  const mode = environment.AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION || "command";
+  if (mode === "command") return undefined;
+  if (mode !== "resident") {
+    report("invalid-implementation; command hook retained");
+    return undefined;
+  }
+  try {
+    const hook = createHook();
+    if (typeof hook !== "function") throw new Error("resident-hook-unavailable");
+    return { onPreToolUse: hook };
+  } catch {
+    report("resident-policy-unavailable; repair interpreter or select command mode");
+    return {
+      onPreToolUse: async () => ({
+        permissionDecision: "deny",
+        permissionDecisionReason: "agent-worktrees resident pre-tool policy is unavailable; repair its interpreter or select command mode",
+      }),
+    };
+  }
+}

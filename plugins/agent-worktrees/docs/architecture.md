@@ -3043,12 +3043,31 @@ without falling back to an ambient Python lacking the owned-process SDK.
 
 ### Opt-in resident pre-tool pilot
 
-The existing extension can register an SDK `onPreToolUse` callback when
-`AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON` explicitly names an absolute,
-existing policy interpreter. The normal extension does not request hook
-capability approval or register callbacks without this opt-in. The interpreter
-must come from the owning installation's already-resolved runtime; this is not
-a second selector or a self-provisioning path.
+`AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION` is a launch-time choice shared by
+the extension and command entries. Unset, empty or `command` keeps the command
+implementation and registers no SDK callback. Setting only
+`AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON` no longer activates a second hook.
+An invalid selection retains command mode and reports a bounded diagnostic.
+
+Exact `resident` selects the SDK implementation. Both platform command wrappers,
+the direct native entry and cached Python command entry return before input,
+policy, discovery or IPC work. The internal strict Python policy entry remains
+available to the selected resident implementation; it is not a second hook.
+The same mode must be inherited by the host and its extension/command children.
+Changing one child environment or hot-editing a running session is unsupported.
+No hook settings, registrations, services or installed runtimes are rewritten.
+Enable resident only after the extension and every actually invoked command
+helper support this mode contract. Older helpers ignore the ENV selection and
+can still evaluate policy; keep command mode throughout mixed-version upgrades
+and rollback. Payload availability alone does not prove cached helper currency.
+
+Resident mode needs `AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON` to name an absolute
+existing interpreter from the owning installation's already-resolved runtime.
+If policy construction fails, the selected SDK hook returns an explicit denial;
+it never enables the command policy as a second implementation. Selection uses
+no discovery RPC, helper process, timer, file marker or second runtime selector.
+Native hook discovery is configuration inventory, not proof of live dispatch,
+and is deliberately not used to arbitrate implementations.
 
 The callback retains its verified read-policy generation in memory and checks
 source metadata before reuse. Partial upgrades, malformed policy and changed
@@ -3098,13 +3117,20 @@ Installation-owned shim currency includes the client, both policy helpers,
 native entry, read contract and native runner. An already-current runtime must
 therefore repair missing or changed bin companions rather than skipping them.
 
-SDK hooks are awaited decisions, not passive event listeners. Registration
-requires the host's capability approval and does **not** disable a command hook.
-With both registered, both run; registration alone is not a throughput win.
-Any bounded foreground read-only cutover must verify the live callback first
-and restore the exact command hook before unload, rollback or further work.
-A callback's disappearance does not restore a separately disabled command
-hook. Unattended replacement therefore remains gated on a host-owned,
-lifetime-safe handback contract; this opt-in is a pilot, not automatic fleet
-migration. It closes the staged-convergence seam in
+SDK hooks are awaited decisions, not passive event listeners. The host must
+approve registration before a resident-mode session may perform work. A callback
+connection's disappearance does not restore command mode: automatic hot handback
+is not supplied by an environment variable. Use command mode until the host's
+registration/failure/unload lifecycle is separately qualified; never select
+resident in a retained session as a workaround for missing handback support.
+The selector does not claim atomic reconfiguration or measured speedups. Transition
+only after matched complete dispatch/cleanup measurements demonstrate a gain
+without policy or lifecycle regression. This opt-in remains a pilot, not automatic
+fleet migration. It closes the staged-convergence seam in
 `visions/native-convergence/README.md` without weakening existing policy.
+
+ACP and other hosts without a qualified extension registration/lifecycle keep
+`command` mode. Do not export `resident` as a machine-wide default: the ENV value
+selects a qualified session launch, not a feature-detection or failover mechanism.
+ACP command-hook compatibility and measured whole-path gains remain transition
+gates, not inferred benefits of moving code into an extension.

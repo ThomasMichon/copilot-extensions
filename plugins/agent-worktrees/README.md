@@ -1058,3 +1058,24 @@ For scope, hot-session delivery, installation-cell isolation and rollback, see
 [`libs/bootstrap-killswitch/README.md`](../../libs/bootstrap-killswitch/README.md#emergency-pre-tool-workflow-guard-switch).
 The control is inactive until explicitly enabled; a deployed release alone does
 not activate it.
+
+
+### Pre-tool implementation selection
+
+`AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION=command` is the default. Exact
+`resident` selects the experimental SDK pre-tool implementation; command entries
+then return before policy work. The host and all extension/command children must
+inherit the same launch-time value. Setting only
+`AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON` does not register a second hook.
+Resident mode also needs that interpreter; invalid policy construction produces
+an explicit SDK denial, not a second command-policy evaluation. No live settings
+are changed and automatic hot handback is not provided. Keep command mode until
+matched complete-path measurements demonstrate a gain and the host's lifecycle
+is qualified. See the [resident pre-tool contract](docs/architecture.md#opt-in-resident-pre-tool-pilot)
+for selection, conservative failure behavior and lifetime limitations.
+
+ACP and other hosts without a qualified extension registration/lifecycle keep
+`command` mode. Do not export `resident` as a machine-wide default: the ENV value
+selects a qualified session launch, not a feature-detection or failover mechanism.
+ACP command-hook compatibility and measured whole-path gains remain transition
+gates, not inferred benefits of moving code into an extension.
