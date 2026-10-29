@@ -4068,3 +4068,193 @@ def test_resolve_pinned_commits_never_pins_a_non_local_checkout_source(
     result = scan.resolve_pinned_commits([unpinned])
 
     assert result == {}
+
+
+# Hook timeout checks are static declarations, not runtime admission decisions.
+def _hook_timeout_document(root: Path, entries: list[dict], relative='hooks.json'):
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({'version': 1, 'hooks': {'preToolUse': entries}}),
+                    encoding='utf-8')
+    return path
+
+
+def _hook_timeout_findings(root, sources=None):
+    return [f for f in scan.run(root, sources, projection_sources=[]).findings
+            if f.check.startswith('hook-timeout')]
+
+
+@pytest.mark.parametrize('timeout', [True, False, None, '5', 0, -1,
+                                    float('nan'), float('inf'), [], {}])
+def test_hook_timeout_rejects_explicit_invalid_owned_value(tmp_path, timeout):
+    path = _hook_timeout_document(tmp_path, [{'type': 'command',
+        'bash': 'private-command-must-not-leak', 'timeoutSec': timeout}])
+    findings = _hook_timeout_findings(tmp_path)
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding.severity == scan.BLOCKING
+    assert finding.check == 'hook-timeout-invalid'
+    assert str(path) in finding.path
+    assert 'preToolUse[0]' in finding.message
+    assert 'finite positive number' in finding.message
+    assert 'private-command-must-not-leak' not in finding.message
+
+
+@pytest.mark.parametrize('timeout', [0.25, 15, 1000000, 10 ** 400])
+def test_hook_timeout_accepts_finite_positive_without_arbitrary_ceiling(tmp_path, timeout):
+    _hook_timeout_document(tmp_path, [{'bash': 'never-execute', 'timeoutSec': timeout}])
+    assert _hook_timeout_findings(tmp_path) == []
+
+
+def test_hook_timeout_legacy_missing_is_advisory_and_noncommand_is_untouched(tmp_path):
+    _hook_timeout_document(tmp_path, [
+        {'bash': 'legacy-default'},
+        {'type': 'prompt', 'prompt': 'example', 'timeoutSec': False},
+        {'type': 'http', 'url': 'https://example.invalid', 'timeoutSec': 0},
+    ])
+    findings = _hook_timeout_findings(tmp_path)
+    assert [(f.severity, f.check) for f in findings] == [
+        (scan.WARNING, 'hook-timeout-missing')]
+    assert 'host default' in findings[0].message
+
+
+@pytest.mark.parametrize('relative', [
+    '.github/hooks/guard.json', '.github/copilot/settings.json',
+    '.github/copilot/settings.local.json', '.claude/settings.json',
+    '.claude/settings.local.json', 'plugins/example/hooks.json',
+])
+def test_hook_timeout_scans_owned_registration_locations(tmp_path, relative):
+    _hook_timeout_document(tmp_path, [{'timeoutSec': 0}], relative)
+    findings = _hook_timeout_findings(tmp_path)
+    assert [(f.severity, f.check) for f in findings] == [
+        (scan.BLOCKING, 'hook-timeout-invalid')]
+
+
+@pytest.mark.parametrize('controlled', [False, True])
+def test_hook_timeout_selected_plugin_findings_respect_ownership(tmp_path, controlled):
+    root = tmp_path / 'repo'
+    root.mkdir()
+    payload = tmp_path / 'external' / 'cap'
+    _hook_timeout_document(payload, [{'timeoutSec': 0}])
+    source = scan.PluginSource(skills_root=payload / 'skills',
+        origin='outside/cap', controlled=controlled, version='1.2.3',
+        source='https://example.invalid/cap')
+    findings = _hook_timeout_findings(root, [source])
+    assert len(findings) == 1
+    assert findings[0].severity == (scan.BLOCKING if controlled else scan.WARNING)
+    assert 'outside/cap' in findings[0].message
+    assert '1.2.3' in findings[0].message
+    assert 'https://example.invalid/cap' in findings[0].message
+
+
+def test_hook_timeout_controlled_declared_file_is_deduplicated(tmp_path):
+    payload = tmp_path / 'plugins' / 'cap'
+    _hook_timeout_document(payload, [{'timeoutSec': 0}], 'hooks/owned.json')
+    (payload / 'plugin.json').write_text(
+        json.dumps({'name': 'cap', 'hooks': 'hooks/owned.json'}), encoding='utf-8')
+    source = scan.PluginSource(skills_root=payload / 'skills',
+        origin='local/cap', controlled=True)
+    findings = _hook_timeout_findings(tmp_path, [source, source])
+    assert len(findings) == 1
+    assert findings[0].severity == scan.BLOCKING
+
+
+def test_hook_timeout_reports_unreadable_json_without_execution(tmp_path, monkeypatch):
+    path = tmp_path / 'hooks.json'
+    path.write_text('{broken', encoding='utf-8')
+    def forbidden(*args, **kwargs):
+        pytest.fail('static hook review must not execute a subprocess')
+    monkeypatch.setattr(scan.subprocess, 'run', forbidden)
+    findings = _hook_timeout_findings(tmp_path)
+    assert [(f.severity, f.check) for f in findings] == [
+        (scan.WARNING, 'hook-timeout-unavailable')]
+    _hook_timeout_document(tmp_path, [{'bash': 'must-never-run', 'timeoutSec': 3}])
+    assert _hook_timeout_findings(tmp_path) == []
+
+
+def test_hook_timeout_strict_cli_blocks_only_invalid_owned_declaration(tmp_path, capsys):
+    _hook_timeout_document(tmp_path, [{'timeoutSec': 0}])
+    assert scan.main([str(tmp_path), '--strict', '--json']) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload['blocking'] == 1
+    assert payload['findings'][0]['check'] == 'hook-timeout-invalid'
+    _hook_timeout_document(tmp_path, [{'bash': 'legacy-default'}])
+    assert scan.main([str(tmp_path), '--strict', '--json']) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload['blocking'] == 0
+    assert payload['findings'][0]['check'] == 'hook-timeout-missing'
+
+
+def test_hook_timeout_editable_source_supersedes_stale_external(tmp_path):
+    root = tmp_path / 'repo'
+    editable = root / 'plugins' / 'cap'
+    _hook_timeout_document(editable, [{'timeoutSec': 3}])
+    (editable / 'plugin.json').write_text(
+        json.dumps({'name': 'cap'}), encoding='utf-8')
+    external = tmp_path / 'installed' / 'cap'
+    _hook_timeout_document(external, [{'timeoutSec': 0}])
+    source = scan.PluginSource(skills_root=external / 'skills',
+        origin='copilot-extensions/cap')
+    assert _hook_timeout_findings(root, [source]) == []
+
+
+@pytest.mark.parametrize('candidate,marketplace', [
+    ('empty', 'copilot-extensions'),
+    ('no-manifest', 'copilot-extensions'),
+    ('wrong-manifest', 'copilot-extensions'),
+    ('matching-manifest', 'other-marketplace'),
+])
+def test_hook_timeout_same_basename_never_hides_unrelated_plugin(
+    tmp_path, candidate, marketplace,
+):
+    root = tmp_path / 'repo'
+    editable = root / 'plugins' / 'cap'
+    editable.mkdir(parents=True)
+    if candidate != 'empty':
+        _hook_timeout_document(editable, [{'timeoutSec': 3}])
+    if candidate in {'wrong-manifest', 'matching-manifest'}:
+        (editable / 'plugin.json').write_text(
+            json.dumps({'name': 'other' if candidate == 'wrong-manifest' else 'cap'}),
+            encoding='utf-8')
+    external = tmp_path / 'installed' / 'cap'
+    path = _hook_timeout_document(external, [{'timeoutSec': 0}])
+    source = scan.PluginSource(skills_root=external / 'skills',
+        origin=f'{marketplace}/cap')
+    findings = _hook_timeout_findings(root, [source])
+    assert len(findings) == 1
+    assert findings[0].severity == scan.WARNING
+    assert findings[0].check == 'hook-timeout-invalid'
+    assert findings[0].path == str(path)
+
+
+@pytest.mark.parametrize('hook_type', ['command', 'prompt', 'http'])
+def test_hook_timeout_compatibility_matcher_group_is_not_native_command(
+    tmp_path, hook_type,
+):
+    path = tmp_path / '.claude' / 'settings.json'
+    path.parent.mkdir()
+    entry = {'type': hook_type, 'timeout': 60}
+    path.write_text(json.dumps({'hooks': {'PreToolUse': [
+        {'matcher': '*', 'hooks': [entry]},
+    ]}}), encoding='utf-8')
+    assert _hook_timeout_findings(tmp_path) == []
+
+
+def test_hook_timeout_compatibility_timeout_field_is_not_native_policy(tmp_path):
+    path = tmp_path / '.claude' / 'settings.json'
+    path.parent.mkdir()
+    path.write_text(json.dumps({'hooks': {'PreToolUse': [
+        {'type': 'command', 'command': 'never-execute', 'timeout': 60},
+    ]}}), encoding='utf-8')
+    assert _hook_timeout_findings(tmp_path) == []
+
+
+def test_hook_timeout_skips_group_without_hiding_flat_native_command(tmp_path):
+    _hook_timeout_document(tmp_path, [
+        {'matcher': '*', 'hooks': [{'type': 'prompt', 'timeout': 60}]},
+        {'type': 'command', 'timeoutSec': 0},
+    ])
+    findings = _hook_timeout_findings(tmp_path)
+    assert len(findings) == 1
+    assert findings[0].check == 'hook-timeout-invalid'
+    assert 'preToolUse[1]' in findings[0].message

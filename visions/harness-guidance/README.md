@@ -3,7 +3,7 @@
 - **Subject:** Ambient guidance across repositories, plugins, skills, and operator policy
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-27
+- **Last revised:** 2026-10-29
 - **Reality docs:** `docs/patterns/session-scoped-dynamic-guidance.md`, `docs/patterns/worktree-scoped-dynamic-guidance.md`, `docs/harness-runbook.md`
 
 ## Purpose & Intent
@@ -22,6 +22,11 @@ portable, attributable, and intentionally budgeted.
   enabled.
 - **Skills** provide detailed procedures at task time rather than occupying
   always-on context.
+- **Circumstance-based skills** use instruction-injection hooks to detect a
+  problem-specific occurrence and deliver just-in-time guidance, as a last line
+  of defense when general upfront instructions and reactive skill selection
+  are insufficient. Fact acquisition, event-time evaluation and contextual
+  intervention remain distinct responsibilities.
 - **Coordinators and delegates** divide work by context cost and separability:
   the coordinating agent owns decomposition, integration, synthesis, and
   completion, while bounded delegates isolate independent evidence gathering,
@@ -83,8 +88,8 @@ Plugin-owned ambient policy should reach every applicable session as a concise
 kernel containing only what must remain active, with detailed mechanics
 available on demand. **`sessionStart` `additionalContext` composition across
 multiple hooks is empirically unreliable** — observed sessions deliver no
-contributor's output at all, not merely a last-writer-wins loss. Guidance a
-harness genuinely depends on should therefore reach the agent through a
+contributor's output at all, not merely a last-writer-wins loss. Ambient session
+guidance a harness depends on should therefore reach the agent through a
 checked-in static pointer instruction plus a hook-written session-scoped file
 the agent is directed to read (see
 `docs/patterns/session-scoped-dynamic-guidance.md`), not through
@@ -93,6 +98,27 @@ independent hook output and that behavior is proven at the supported version
 floor, direct plugin-owned `additionalContext` should become the preferred
 perfectly dynamic path. Until then, the checked-in pointer plus exact-session
 guidance file remains authoritative.
+
+### circumstance-based-intervention
+
+Problem-specific guidance should arrive when its circumstance is present.
+General startup guidance should not substitute for occurrence detection, and a
+blanket once-per-session acknowledgement should not silence later circumstances.
+A known rule should still be evaluated against a new target or changed condition.
+Advisory intervention should not require a blocking bounce merely to be visible.
+Acknowledgement should not grant permission or prove the underlying condition
+resolved; its scope and invalidation should follow the actual circumstance.
+
+### reusable-facts-current-decisions
+
+Computed discovery should be reusable through its existing authority, with
+complete input binding, freshness and completeness, or precomputed at startup
+when stable. Event facts and current controls should retain their source
+provenance and freshness. A complete empty result should remain meaningful, while
+unavailable or incomplete evidence should not become an invented allow decision.
+An unavailable-evaluation default should remain distinct from asserting that
+evidence authorized the action. Facts may be reused; final authorization and dynamic occurrences should not be
+memoized away. Optional discovery should not dominate the essential event path.
 
 ### portable-operator-policy
 
@@ -322,6 +348,31 @@ otherwise-usable session start. A session-scoped dynamic guidance file that has
 not yet been written (or whose owning hook could not run, e.g. an untrusted
 repository-level hook path) is an explicit no-op for the reader, never a
 blocker.
+
+### bounded-actionable-hook-failures
+
+Circumstantial guidance, explicit policy enforcement and lifecycle work should
+have explicit, different failure outcomes. When an uninstalled, missing or
+broken backing suite prevents ordinary evaluation, hooks should default to fail
+open and preserve inspection, recovery and repair, rather than making every tool
+depend on suite infrastructure. Unavailable advisory guidance should likewise
+remain nonblocking and legible. A narrow exception should require a documented
+protected condition or installation prerequisite, positively applicable trusted
+inputs, a bounded actionable error and a reachable recovery path, without relying
+on the missing helper to select that default. Absence or validator failure should
+not prove applicability. Confirmed policy outcomes should retain their explicit
+scoped meaning without fabricated successful evaluation. Existing runtime
+fallback and recovery selection should remain usable. Errors should identify
+their owner, failed boundary, operation effect, supported next action and retry
+safety through a
+verified agent-readable channel. Unknown mutation effects should be reconciled
+by their owner rather than blindly replayed.
+
+Whole-path cost should include first attempt, retries, response delivery,
+cancellation and owned-descendant cleanup within the caller's deadline. A
+transition should preserve policy, error, lifecycle and cleanup behavior and
+keep one active implementation per event. Diagnostic deduplication should avoid
+loops without permanently concealing an unresolved or newly occurring failure.
 
 ### bounded-source-modules
 

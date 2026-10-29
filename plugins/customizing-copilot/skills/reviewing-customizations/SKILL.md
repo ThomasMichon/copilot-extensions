@@ -99,6 +99,15 @@ gate. It is a **heuristic aid, not a proof** — it deliberately under-flags rat
 than cry wolf; feed its findings into the design critique, don't treat a clean
 scan as a full review.
 
+The scan also checks native command-hook `timeoutSec` declarations without
+executing hooks. Explicit values must be finite positive numbers, excluding
+booleans: invalid owned declarations are BLOCKING in offline review, external
+findings stay WARNING with source/version attribution. Missing timeouts warn
+and preserve legacy host defaults; no universal ceiling or runtime allow/deny
+change is imposed. Unreadable hook documents warn that review is incomplete.
+Compatibility matcher groups and their `timeout` fields are outside this native
+check. Actual deadline margin, cleanup and semantic correctness still require review.
+
 The ordinary scan also validates checked-in static instruction projections and
 `.github/copilot/context-projections.json` offline. With `--from-settings`, it
 uses the same enabled-plugin payload resolution as the rest of the scan to
@@ -559,6 +568,22 @@ blindly. And **never edit an external plugin's installed payload in place** — 
 is overwritten on update; fix it in-repo or upstream.
 
 ### 1. Design critique (rubber-duck)
+
+For hooks, read the plugin-owned portable
+[circumstantial hook contract](../authoring-skills/references/circumstantial-hooks.md).
+Review fact acquisition, cheap event-time evaluation and contextual intervention
+separately. Require the per-hook purpose, five exposure mechanisms, input-bound
+freshness/completeness, acknowledgement invalidation, violation versus dependency
+errors, actionable response visibility, retry safety and total deadline/cleanup
+cost. Startup guidance or blanket session acknowledgement cannot replace
+circumstantial detection. Default to fail open when an absent/uninstalled/broken
+backing suite prevents ordinary evaluation, preserving inspection and recovery.
+Any required-installation exception needs positive applicability to its documented
+protected action from available trusted inputs, bounded diagnostics and reachable
+recovery, independent of the missing helper. Absence or validator failure cannot
+prove that exception. Preserve confirmed policy outcomes and unknown lifecycle
+effects without fabricating success or replaying unknown mutations. Match behavioral claims to focused tests and supported host evidence,
+not keyword presence or a clean timeout scan.
 
 Hand the gathered files to a **reviewer** — the Copilot CLI **`/rubber-duck`**
 critique command where available, a harness-provided review sub-agent, or an

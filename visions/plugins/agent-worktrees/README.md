@@ -5,7 +5,7 @@
   obligations, disposition, and source-control completion.
 - **Scope:** branch (worktree-lifetime authority; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-26
+- **Last revised:** 2026-10-29
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
 
@@ -249,6 +249,30 @@ that receives and acts on the reminder once it reaches the guard's covered
 path; exhaustively closing every exotic invocation that could evade
 pattern-matching is not the goal, and a gap of that kind is a coverage note,
 not by itself a blocking defect.
+
+Write guards should remain circumstance-based skills: acquire attributable
+facts, cheaply evaluate the current edit, and deliver the relevant owner's
+procedure at that occurrence. Startup instructions and a session-wide
+acknowledgement should not replace this last line of defense. Acknowledging a
+known rule should not authorize an edit, resolve its condition, or silence a
+new circumstance. Advisory reminders need not force a blocking bounce.
+
+Reusable computed facts should follow their canonical input and freshness
+contract, while current ownership and the attempted action remain live inputs.
+Complete empty discovery should remain distinct from unavailable or incomplete
+evidence. An absent, uninstalled or broken backing suite that prevents ordinary
+evaluation should default to fail open, preserving inspection, recovery and
+repair. Any narrow required-installation exception should positively match its
+documented protected condition from trusted available inputs, independently of
+missing helpers, with a bounded error and reachable recovery. Suite absence or
+validator failure should never prove the exception applies. Confirmed policy
+outcomes should retain their explicit scoped meaning without fabricated success.
+Existing runtime fallback and recovery selection should remain usable.
+Failures should name the owner, operation effect and safe next action without
+making global disable, reinstall or restart the default. Unknown lifecycle
+mutation effects should remain the existing owner's reconciliation obligation.
+Response delivery, bounded first-attempt/retry cost, cancellation and descendant
+cleanup should preserve these responsibilities through any implementation change.
 
 ### Pull-request capability
 
