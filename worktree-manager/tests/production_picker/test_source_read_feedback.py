@@ -377,6 +377,13 @@ def test_retry_key_repaints_loading_before_the_background_reload_finishes(monkey
             assert "Loading worktrees" in rendered()
             assert "fixture unavailable" not in rendered()
             assert "✗" not in screen._machine_group([screen.machine_idx], True).plain
+            first_body = rendered()
+            first_tab = screen._machine_group([screen.machine_idx], True).plain
+            screen.frame += 1
+            screen.refresh()
+            await pilot.pause()
+            assert rendered() != first_body
+            assert screen._machine_group([screen.machine_idx], True).plain != first_tab
             release.set()
             assert await asyncio.to_thread(screen._ensure_setup_completion_event().wait, 3)
             await pilot.pause()

@@ -276,14 +276,14 @@ class WorktreesView:
         for notice in notices[:6]:
             if notice.cached:
                 status = (
-                    f"{eng.spin()} Refreshing" if notice.state == "loading" else
+                    "Refreshing" if notice.state == "loading" else
                     "Updates paused · connection unavailable" if notice.failure_kind == "connection"
                     else "Updates paused · refresh failed"
                 )
                 add(Text(f"  {notice.label} · {status} · showing last loaded worktrees", style=C_DIM))
                 continue
             if notice.state == "loading":
-                add(Text(f"  {eng.spin()} Loading worktrees · {notice.label}", style=C_LOAD))
+                add(Text(f"  {notice.loading_frame} Loading worktrees · {notice.label}", style=C_LOAD))
                 continue
             title = (
                 "Worktrees connection unavailable" if notice.failure_kind == "connection"

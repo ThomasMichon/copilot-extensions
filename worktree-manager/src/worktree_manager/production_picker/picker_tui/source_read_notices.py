@@ -12,6 +12,7 @@ class ReadFeedback:
     reason: str = ""
     failure_kind: str = "content"
     cached: bool = False
+    loading_frame: str = ""
 
 
 def worktree_reload_pending(engine):
@@ -124,6 +125,7 @@ def worktree_read_feedback(engine):
             str(reason or "No current source snapshot was obtained.").strip()[:240],
             detail.get("failure_kind", "content") if not setup_failed else "content",
             cached,
+            engine.spin() if state == "loading" and not cached else "",
         ))
     if setup_failed and not notices:
         notices.append(ReadFeedback(
