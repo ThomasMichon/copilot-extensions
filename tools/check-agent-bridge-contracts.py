@@ -76,6 +76,7 @@ _DEFERRED_KEYS = {
     "reference_sha256",
 }
 _HTTP_CAPABILITY_CONSTANTS = {
+    "native_send_idempotency": "NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION",
     "retained_inbox": "RETAINED_INBOX_PROTOCOL_VERSION",
     "retained_inbox_producer": "RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION",
     "retained_inbox_recovery": "RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION",
@@ -763,6 +764,9 @@ def _validate_contract(
         if current >= 50:
             from bridge_http50_evidence import validate_http50
             validate_http50(REPO, {"contracts": [contract]}, loaded, errors)
+        if current >= 51:
+            from bridge_http51_evidence import validate_http51
+            validate_http51(REPO, {"contracts": [contract]}, loaded, errors)
 
     missing_generations = sorted(evidence_generations - fixture_generations)
     if missing_generations:

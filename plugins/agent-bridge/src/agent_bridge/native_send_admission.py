@@ -43,28 +43,38 @@ async def submit(
     if session is None:
         raise KeyError("native_session_unavailable")
     session_id = session.session_id
-    async with session._turn_start_lock:
-        def require_native() -> None:
-            if (
-                manager.get_session(session_id) is not session
-                or session.acp_session_id != request.expected_native_session_id
-            ):
-                raise ValueError("expected_native_mismatch")
+    def require_native() -> None:
+        if (
+            manager.get_session(session_id) is not session
+            or session.acp_session_id != request.expected_native_session_id
+        ):
+            raise ValueError("expected_native_mismatch")
 
-        require_native()
-        saved = stored_receipt(manager.db, session_id, request)
-        if saved is not None:
-            return saved
-        if manager.is_draining:
-            raise DaemonDrainingError("turn")
-        if session.status == SessionStatus.STOPPED:
-            await manager.resume_session(session_id, drain=False, allow_recreate=False)
+    async def admit(*, may_resume: bool) -> dict[str, Any] | None:
+        async with session._turn_start_lock:
             require_native()
-        await manager._submit_prompt_locked(
-            session_id, request.prompt, no_resume=True,
-            delivery_id=request.delivery_id(), native_admission=request,
-        )
-        saved = stored_receipt(manager.db, session_id, request)
-        if saved is None:
-            raise ValueError("native_admission_history_unproven")
+            saved = stored_receipt(manager.db, session_id, request)
+            if saved is not None:
+                return saved
+            if manager.is_draining:
+                raise DaemonDrainingError("turn")
+            if may_resume and session.status == SessionStatus.STOPPED:
+                return None
+            await manager._submit_prompt_locked(
+                session_id, request.prompt, no_resume=True,
+                delivery_id=request.delivery_id(), native_admission=request,
+            )
+            saved = stored_receipt(manager.db, session_id, request)
+            if saved is None:
+                raise ValueError("native_admission_history_unproven")
+            return saved
+
+    saved = await admit(may_resume=True)
+    if saved is not None:
         return saved
+    # Cold reconnect takes the turn lock itself; resume must not retain it.
+    await manager.resume_session(session_id, drain=False, allow_recreate=False)
+    saved = await admit(may_resume=False)
+    if saved is None:
+        raise ValueError("native_admission_history_unproven")
+    return saved

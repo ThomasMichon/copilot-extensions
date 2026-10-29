@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import http.client
+import json
+import time
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
@@ -25,10 +28,21 @@ def submit_native_bound_prompt(
             target=session_id, error="daemon does not support native-bound prompt admission",
         )
     if idempotency_key is not None:
+        from .client import BridgeConnectionError
         from .client_protocol_floor import protocol_floored_request
         from .protocol import NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION
+        from .startup_observation import StartupObservationError
 
         client._request = protocol_floored_request(client, NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION)
+        started = time.monotonic()
+        attempted = False
+
+        def unknown() -> StartupObservationError:
+            return StartupObservationError(
+                None, "native-prompt-admission", time.monotonic() - started,
+                reason="native_send_acceptance_unknown",
+            )
+
         try:
             target = client.get_session(session_id)
             if (
@@ -40,6 +54,7 @@ def submit_native_bound_prompt(
                     target=session_id, error="native send target does not match the retained conversation",
                 )
             native_target = target["session_id"]
+            attempted = True
             result = client._request(
                 "POST", f"/api/v1/sessions/{quote(native_target, safe='')}/turns/native-bound/send",
                 {"prompt": prompt, "expected_native_session_id": expected_native_session_id,
@@ -49,6 +64,15 @@ def submit_native_bound_prompt(
             detail = exc.detail if isinstance(exc.detail, dict) else {}
             code = detail.get("code", "native_send_unavailable")
             busy = exc.status == 409 and "not idle" in str(code)
+            proven_refusal = (
+                exc.status in {422, 426}
+                or exc.status == 404 and code == "native_session_unavailable"
+                or exc.status == 409 and (busy or code in {
+                    "native_invocation_conflict", "expected_native_mismatch",
+                })
+            )
+            if attempted and not proven_refusal:
+                raise unknown() from exc
             raise SendRefused(
                 "refused_busy" if busy else (
                     "refused_conflict" if code == "native_invocation_conflict" else "refused_unavailable"
@@ -56,6 +80,11 @@ def submit_native_bound_prompt(
                 reason="busy" if busy else str(code), retryable=busy,
                 target=session_id, error=str(exc.detail),
             ) from exc
+        except (BridgeConnectionError, OSError, http.client.HTTPException,
+                UnicodeError, json.JSONDecodeError) as exc:
+            if attempted:
+                raise unknown() from exc
+            raise
         if (
             not isinstance(result, dict) or result.get("session_id") != native_target
             or type(result.get("version")) is not int or result["version"] != 1
@@ -64,10 +93,7 @@ def submit_native_bound_prompt(
             or result.get("admission") != "accepted" or result.get("queued") is not False
             or type(result.get("turn_index")) is not int or result["turn_index"] < 0
         ):
-            raise SendRefused(
-                "refused_unavailable", reason="native_admission_unproven", retryable=False,
-                target=session_id, error="native send returned no matching idempotency receipt",
-            )
+            raise unknown()
         return result
     try:
         result = client._request(

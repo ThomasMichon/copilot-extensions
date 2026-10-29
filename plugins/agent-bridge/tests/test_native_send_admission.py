@@ -163,17 +163,15 @@ def test_real_api_uses_standard_native_send_receipt(native_send):
     }
 
 
-@pytest.mark.parametrize("generation", [50, 51])
-def test_real_send_parser_keeps_the_native_target_and_gates_the_receiving_daemon(
-    native_send, monkeypatch, capsys, generation,
-):
+def _command(native_send, monkeypatch, *, generation=51, transform=None, api=None):
     from agent_bridge import __main__ as core
 
     manager, session, request = native_send
-    app = FastAPI()
-    app.state.session_manager = manager
-    app.include_router(router)
-    api = TestClient(app)
+    if api is None:
+        app = FastAPI()
+        app.state.session_manager = manager
+        app.include_router(router)
+        api = TestClient(app, raise_server_exceptions=False)
     calls = []
 
     class Client:
@@ -193,8 +191,13 @@ def test_real_send_parser_keeps_the_native_target_and_gates_the_receiving_daemon
             calls.append((method, path, body))
             result = api.request(method, path, json=body)
             if result.is_error:
-                raise BridgeClientError(result.status_code, result.json().get("detail"))
-            return result.json()
+                try:
+                    detail = result.json().get("detail")
+                except ValueError:
+                    detail = result.text
+                raise BridgeClientError(result.status_code, detail)
+            value = result.json()
+            return transform(value) if transform is not None else value
 
         def resolve_live_session(self, *args, **kwargs):
             pytest.fail("native send must not use a represented inbox")
@@ -207,6 +210,15 @@ def test_real_send_parser_keeps_the_native_target_and_gates_the_receiving_daemon
         "--expected-native-session-id", "native-a",
         "--idempotency-key", "same-operation", "--no-wait",
     ])
+    return args, calls
+
+
+@pytest.mark.parametrize("generation", [50, 51])
+def test_real_send_parser_keeps_the_native_target_and_gates_the_receiving_daemon(
+    native_send, monkeypatch, capsys, generation,
+):
+    _, session, request = native_send
+    args, calls = _command(native_send, monkeypatch, generation=generation)
     if generation == 50:
         with pytest.raises(SystemExit) as refused:
             args.func(args)
@@ -238,3 +250,80 @@ async def test_admission_survives_lost_reply_without_becoming_new_send(native_se
     assert (await submit(manager, session.session_id, request))["turn_index"] == 0
     assert session.turn_count == 1
     manager._run_prompt.assert_not_awaited()
+
+
+def test_post_commit_http_500_is_unknown_and_same_key_recovers_receipt(
+    native_send, monkeypatch, capsys,
+):
+    manager, session, _ = native_send
+    args, _ = _command(native_send, monkeypatch)
+    original = manager.db.update_session_status
+
+    def fail_after_admission(*args, **kwargs):
+        raise RuntimeError("HTTP failure after journal commit")
+
+    monkeypatch.setattr(manager.db, "update_session_status", fail_after_admission)
+    with pytest.raises(SystemExit) as unknown:
+        args.func(args)
+    assert unknown.value.code == 70
+    result = json.loads(capsys.readouterr().out)
+    assert result["outcome"] == "unknown"
+    assert result["target"] == "native-a"
+    assert result["idempotency_key"] == "same-operation"
+    assert result["reason"] == "native_send_acceptance_unknown"
+    monkeypatch.setattr(manager.db, "update_session_status", original)
+    args.func(args)
+    assert json.loads(capsys.readouterr().out)["turn_index"] == 0
+    assert session.turn_count == 1
+    manager._run_prompt.assert_not_awaited()
+
+
+def test_malformed_post_receipt_is_unknown_not_proven_refusal(native_send, monkeypatch, capsys):
+    _, session, _ = native_send
+    malformed = [True]
+    args, _ = _command(
+        native_send, monkeypatch,
+        transform=lambda value: {} if malformed[0] else value,
+    )
+    with pytest.raises(SystemExit) as unknown:
+        args.func(args)
+    assert unknown.value.code == 70
+    assert json.loads(capsys.readouterr().out)["outcome"] == "unknown"
+    malformed[0] = False
+    args.func(args)
+    assert json.loads(capsys.readouterr().out)["turn_index"] == 0
+    assert session.turn_count == 1
+
+
+@pytest.mark.asyncio
+async def test_strict_resume_reaches_actual_cold_reconnect_without_holding_turn_lock(
+    native_send, monkeypatch, tmp_db,
+):
+    from agent_bridge import cold_outages
+
+    manager, session, request = native_send
+    session.status = SessionStatus.STOPPED
+    outage = {
+        "outage_id": "fixture-outage", "native_session_id": "native-a",
+        "state": "interrupted", "recovery_phase": "registered",
+    }
+    monkeypatch.setattr(cold_outages, "latest", lambda *args: outage)
+    monkeypatch.setattr(cold_outages, "require_custody", lambda *args: None)
+    monkeypatch.setattr(cold_outages, "_assert_recovery_current", lambda *args: None)
+
+    async def resume(*args, **kwargs):
+        assert not session._turn_start_lock.locked()
+        assert kwargs == {"drain": False, "allow_recreate": False}
+        session.status = SessionStatus.IDLE
+        await cold_outages.reconnect(manager, session, outage)
+        return session
+
+    manager.resume_session.side_effect = resume
+    with pytest.raises(ValueError, match="cold outage|not idle"):
+        await asyncio.wait_for(submit(manager, session.session_id, request), timeout=2)
+    await session._prompt_task
+    [turn] = tmp_db.get_turns(session.session_id)
+    assert turn["prompt"] == cold_outages.RECONNECT_PROMPT
+    assert turn["acquisition_delivery_id"] == "cold-outage:fixture-outage"
+    assert session.acp_session_id == "native-a"
+    assert turn["prompt"] != request.prompt
