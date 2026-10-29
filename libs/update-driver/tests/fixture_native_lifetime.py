@@ -11,14 +11,20 @@ import agent_procutil as pu
 from update_driver import borrowed_custody, ensure_worker
 
 
+def publish_json(path, value):
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(value), encoding="utf-8")
+    temporary.replace(path)
+
+
 def main():
     action, root_text, console, mode = sys.argv[1:]
     root = Path(root_text)
     if action == "daemon":
         from agent_procutil import _job_scopes
 
-        (root / "daemon-ready").write_text(
-            json.dumps({"scopes": _job_scopes.scope_names(os.environ)}), encoding="utf-8",
+        publish_json(
+            root / "daemon-ready", {"scopes": _job_scopes.scope_names(os.environ)},
         )
         deadline = time.monotonic() + 20
         while not (root / "daemon-continue").exists():
@@ -52,7 +58,7 @@ def main():
                 result.update(
                     admitted=True, daemon=daemon.pid, daemon_birth=_windows_birth(daemon._handle),
                 )
-            (root / "product-result.json").write_text(json.dumps(result), encoding="utf-8")
+            publish_json(root / "product-result.json", result)
             deadline = time.monotonic() + 10
             while not (root / "product-continue").exists():
                 if time.monotonic() >= deadline:

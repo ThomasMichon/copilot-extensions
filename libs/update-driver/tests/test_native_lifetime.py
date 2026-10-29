@@ -53,11 +53,35 @@ def window_observer():
     return module._WindowObserver(user, kernel, callback)
 
 
-@pytest.mark.parametrize("restrictive_outer", [False, True])
-def test_queued_installer_detaches_daemon_but_retires_ordinary_children(area, restrictive_outer):
+def pin_fixture_process(pid, birth, label):
     from agent_procutil.daemon_broker import WindowsDaemonProcess
     from agent_procutil._daemon_instance_identity import _windows_birth
 
+    process = WindowsDaemonProcess(pid, [label])
+    try:
+        assert _windows_birth(process._handle) == birth, "fixture process birth changed"
+    except BaseException:
+        process.close()
+        raise
+    return process
+
+
+def test_fixture_identity_mismatch_closes_without_termination(monkeypatch):
+    from unittest.mock import Mock
+    from agent_procutil import daemon_broker, _daemon_instance_identity
+
+    process = Mock()
+    monkeypatch.setattr(daemon_broker, "WindowsDaemonProcess", lambda *_args: process)
+    monkeypatch.setattr(_daemon_instance_identity, "_windows_birth", lambda _handle: "different")
+    with pytest.raises(AssertionError, match="birth changed"):
+        pin_fixture_process(123, "original", "unverified")
+    process.close.assert_called_once_with()
+    process.kill.assert_not_called()
+    process.wait.assert_not_called()
+
+
+@pytest.mark.parametrize("restrictive_outer", [False, True])
+def test_queued_installer_detaches_daemon_but_retires_ordinary_children(area, restrictive_outer):
     console, python_env = pu.direct_python(sys.executable)
     script = Path(__file__).with_name("fixture_native_lifetime.py").resolve()
     root = area / "queue"
@@ -84,11 +108,13 @@ def test_queued_installer_detaches_daemon_but_retires_ordinary_children(area, re
         try:
             observe_until(lambda: (root / "product-result.json").exists())
             result = json.loads((root / "product-result.json").read_text())
-            ordinary = WindowsDaemonProcess(result["ordinary"], ["bounded-installation-child"])
-            assert _windows_birth(ordinary._handle) == result["ordinary_birth"]
+            ordinary = pin_fixture_process(
+                result["ordinary"], result["ordinary_birth"], "bounded-installation-child",
+            )
             if result["admitted"]:
-                daemon = WindowsDaemonProcess(result["daemon"], ["durable-installed-daemon"])
-                assert _windows_birth(daemon._handle) == result["daemon_birth"]
+                daemon = pin_fixture_process(
+                    result["daemon"], result["daemon_birth"], "durable-installed-daemon",
+                )
             (root / "product-continue").write_text("identities pinned", encoding="ascii")
             assert worker.wait(timeout=15) == 0, (area / "worker.log").read_text()
             assert wait(request.id, root=root, timeout=1).exit_code == 0
