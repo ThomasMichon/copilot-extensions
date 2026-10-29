@@ -120,6 +120,89 @@ or integration fails, retain an attributable failure and describe any loss of
 service; do not claim readiness, silence or an untouched healthy predecessor
 unless actually established.
 
+### Bounded MCP control-state reset - agent-recommended
+
+The next implementation slice clears declared disposable MCP control state,
+not the entire installation. It closes the reset portion of the installer
+vision above using the existing immutable constructor, native process
+settlement and execution driver. Incremental/ZDD remains a separate path.
+Old-code collection and complete reactivation prevention remain required
+follow-on work, not consequences inferred from a clean control directory.
+
+The current native installers activate a completed candidate, attempt cutover,
+then settle displaced processes on the fresh path. Cutover can already start
+the selected daemon. Do not append indiscriminate cleanup after that sequence:
+it could unlink the new owner's endpoint. Instead:
+
+1. Construct and health-check the immutable candidate through the existing
+   owner. Preserve construction completion as build evidence, not proof of
+   integrated reset or serving readiness. Fresh installation skips the
+   installer's best-effort ZDD attempt; recognized incremental installation
+   retains its existing handoff. Retain health-gated current selection before
+   the existing displaced-process census; selection is not reset completion.
+2. Resolve the addressed control home using the same socket-home semantics as
+   `ipc.default_socket_path()` and `Server._config_dir()`. It can differ from
+   the code installation root. Validate that scope independently; never
+   substitute the install root or treat an arbitrary supplied directory as
+   disposable. Preserve unknown/foreign state and refuse unsafe parent
+   indirection before effects.
+3. Hold the existing `zdd.CutoverLock` for that home across fresh settlement
+   and reset so an orchestrated passive start cannot race cleanup. Reuse
+   the confirmed original-birth process settlement without extending its
+   protected/current/excluded scope. After settlement, acquire the ordinary
+   `SingleInstance(home, service="agent-mcp-serve")` lease nonblocking.
+   A normal on-demand start may win first: report incomplete reset without
+   unlinking control files or terminating that selected current owner.
+   A free lease alone does not establish that an older lease-less passive
+   owner has exited; retain native settlement and reject uncertain ownership,
+   including a current passive owner left by a cutover completed before lock
+   acquisition. Do not kill or clean through that owner.
+4. While holding both guards, acquire the existing deadline-bounded
+   `routing.routing_lock` for routing-state mutation. Reset only the finite
+   declared socket, endpoint, generation-socket and control-token classes and
+   routing state attributable to this home. Confirm displaced-owner exit
+   before removing its state. Missing/corrupt contents are not an old-receipt
+   veto, but a live foreign owner or ambiguous scope is not stale evidence.
+   Remove a declared socket link itself without following its target; reject
+   other unsafe file types, shared-file aliases and redirected ancestors.
+   Never unlink the lease, cutover or routing lock files: replacing a held
+   lock inode would let another writer bypass custody.
+5. Release guards on every success/failure path. Continue generated-global
+   publication and final deployment metadata only after mandatory reset
+   succeeds. MCP stays on-demand; reset does not invent an always-running
+   service. A post-reset current daemon may publish fresh state normally.
+   A failure reports the actual selected/build/serving state and retained
+   predecessor metadata, not success or automatic rollback to a dead owner.
+
+Use the existing deployment record's `runtime_version` together with
+`current-version` and construction completion to recognize an integrated
+layout. Reject missing, malformed or inconsistent selected-generation
+evidence for reuse, selecting fresh construction instead. In particular,
+activation followed by failed reset/global publication must not let an old
+deployment record plus a new completion marker turn the retry incremental.
+This strengthens consistency of existing evidence; it introduces no
+installation-permission receipt, repair flag or approval from the old runtime.
+Do not publish the new deployment record early to make recognition pass.
+
+Append the next footprint revision after published revision 4, with the
+changed producers, reset descriptors and preserved coordination files.
+Do not rewrite historical snapshots. Keep configuration, durable application
+and driver data, logs and unknown artifacts outside this reset. Do not invoke
+whole-uninstall or recursively clear the runtime root as an implementation
+shortcut. Retained old slots, pinned global routes and any other declared
+reactivation effects still need their own bounded retirement qualification
+before the parent old-version-silence requirement is complete.
+
+Qualification must cover actual native Windows/Linux fresh adapters with
+missing/corrupt evidence, distinct code/control roots and interrupted retries;
+finite scope and byte/data continuity; normal-start and cutover contention;
+lease-less passive uncertainty; preserved lock identity; caller failure and
+guard release; and successful on-demand serving after reset. Negative cases
+must show no deletion of a winning current owner's state or foreign targets,
+not merely a nonzero return. Exercise the recognized incremental path as a
+positive control. Source fixtures do not satisfy the separately authorized
+installed survival, complete portfolio or same-existing-data adoption gates.
+
 ## Implementation sequence - agent-recommended
 
 1. Review and merge this revision of the existing vision and effort before

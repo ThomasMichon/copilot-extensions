@@ -411,11 +411,16 @@ reuse/admission behavior is not an exception to the fresh-default revision.
   reuse evidence, exact Index/native launcher recognition, intact relocated
   publisher matching and foreign/edited/storage-error refusal on Windows/Linux.
   Keep actual reset effects, displaced-owner silence and portfolio acceptance open.
-- [ ] **Agent-recommended bounded incumbent-process settlement:** qualify MCP's
+- [x] **Agent-recommended bounded incumbent-process settlement:** qualify MCP's
   original-birth native process pins, parent-first pause and descendant closure,
   failed-inspection resume, exact exit confirmation and native fresh-path failure
   propagation on Windows/Linux. Preserve protected/current/excluded scope; keep
   disposable-state reset, old-code retirement and installed-host acceptance separate.
+- [ ] **Agent-recommended bounded control-state reset:** implement the
+  [MCP reset ordering, existing-lock custody and retry-consistency slice](fresh-default-installation.md#bounded-mcp-control-state-reset---agent-recommended)
+  after its proposal clears review. Preserve winning current owners,
+  configuration/durable/foreign state and incremental handoff; keep old-code
+  collection and complete reactivation prevention open.
 - [x] Qualify Main bootstrap transport independently of Manager/service runtime
   source policy through the actual Linux and Windows global entry points, including
   explicit transport overrides, broken incumbents and older explicit-source callers.
@@ -993,11 +998,16 @@ implementation, rollout or parent completion is declared.
   native launchers remain recognized; edited/foreign commands and storage
   failures remain no-write refusals. This is not reset or old-owner-silence proof.
 - [ ] **Footprint evolution:** real installer-produced artifacts and process/registration effects match maintained manifests; installed-footprint changes without matching inventory/deltas fail validation. Qualify historical reset descriptors separately from incremental contract support, preserve unknown/foreign and durable/protected content, and prove displaced code cannot serve or reactivate.
-- [ ] **Agent-recommended bounded incumbent-process settlement:** real synthetic
+- [x] **Agent-recommended bounded incumbent-process settlement:** real synthetic
   Windows/Linux trees and native shell adapters confirm old root/child exits,
   original-parent survival, pause rollback and explicit no-reap refusal without
   depending on an old deployment receipt. This does not close full reset or
   the independently authorized critical-connectivity/installed-survival gates.
+- [ ] **Agent-recommended bounded control-state reset:** qualify the
+  [native reset and contention matrix](fresh-default-installation.md#bounded-mcp-control-state-reset---agent-recommended),
+  including failed-reset retry remaining fresh, actual winner-state preservation,
+  distinct control/code roots and post-reset on-demand serving. This is not
+  full displaced-code silence, installed survival or all-tool/Manager adoption.
 - [ ] **Critical connectivity:** resolve the [route/removal matrix and retention acceptance](connectivity-retention.md), distinguishing provisioning code from actual SSH/Gateway transport and protecting its complete live/reconnect dependency closure. Force or purge cannot bypass it; credential relays can be removed. Source audit/vision alignment is not installed survival proof.
 
 - [ ] **Disposable services and shared maintenance hold:** resolve the [YAML banner implementation/validation sequence](maintenance-banner.md#implementation-and-validation-sequence). Prove the same applicable banner blocks actual automatic updates/reprovisioning and explains agent standby, including Manager, queued execution and missing catalog tools. Retain durable state and independently hosted session continuity, native 30-minute polling and no self-repair during an explained hold; source text, an unrelated kill switch or a merged vision is not acceptance.
@@ -1257,5 +1267,40 @@ Remaining manifests, assembled public entry points, macOS, all-tool/Manager
 same-data transition and live session/connectivity survival remain open.
 No host rollout, maintenance hold, service or protected process was changed;
 merged source does not establish released or installed state.
+
+### 2026-10-29 - Confirmed MCP incumbent-process settlement
+
+#9541 merged as `78a5d11f7652c2c3949d5d5c59883de28f7187e5` after
+Copilot approved the exact final head and required CI `40883025652` passed.
+The description-triggered source-attribution check was observed passing before
+the managed merge. The final metadata-only commit updates one existing unit
+source digest without changing the 2,619-node inventory, coverage targets,
+effect restrictions or 300-second packet budget.
+
+Native workflow `40881548874` passed on the unchanged runtime/test bytes at
+`470086a1b9a8f7e7dca716b71a4f0fed184c1b74` on Windows and Linux.
+Linux passed all 48 MCP retirement controls and all 17 native pause/custody
+controls without skips, including main-thread exit before census and during
+executable observation, opaque task names, rollback and actual caller-group
+death. Earlier full Windows broker qualification `40869467283` passed the
+unchanged nested caller-Job death witnesses and contained negative, retaining
+original targets and observing custodian kernel exit without desktop effects.
+
+Fresh MCP fallback now confirms original-birth root/descendant exit through
+native handle/pidfd custody, preserves protected/current/excluded scope, and
+cannot turn an explicit no-reap override into successful settlement. Review
+corrections cover disappeared/reused identities, same-birth protected exec,
+stable all-thread pauses, owner-death rollback, dead-main-thread census races,
+kernel-task recognition, opaque task names and available PowerShell warnings.
+Only the bounded process Plan/Validation items above are complete.
+
+The parent remains Active. The next bounded integration is actual reset of
+MCP's maintained disposable control/runtime inventory and displaced-code
+reactivation routes through the same native installer/execution owner.
+Durable/configuration/unknown/protected preservation, the remaining manifest
+portfolio, assembled public entry points, macOS, all-tool/Manager same-data
+transition and live session/connectivity survival remain open.
+No host rollout, maintenance hold, service or protected process was changed;
+merged source is not released or installed-state proof.
 
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.
