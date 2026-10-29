@@ -205,6 +205,20 @@ repository history.
 
 ## Journal
 
+### 2026-10-28 - Reconcile the current publication base before CI
+
+The provider reports a real merge conflict after the latest gate fixes, so
+ordinary PR CI cannot start. Preserved `886bd22590` on a local backup before
+rebasing the owned branch onto Dev `cc63cf74cc8bcea4c1afc27324e818e9b9f5bbc8`.
+The only manual conflict is the generated Worktrees installer fingerprint;
+the canonical sync owner regenerates it from the merged installer, retaining
+the upstream native setup/callback and literal pane-environment changes.
+All 13 install contracts, 219 changed-module limits and exact release-helper
+source admission pass. The actual broker/Manager consumer lanes must now run
+again against the reconciled dispatch SHA; the prior run remains evidence
+for its own functional generation, not this new one. Required review, CI,
+merge and promotion remain open, with all installed-host holds unchanged.
+
 ### 2026-10-28 - Preserve exact release admission and historical contract sources
 
 Hosted run 40787588118 passes all three selected lanes at
