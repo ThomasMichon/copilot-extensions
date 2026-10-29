@@ -1,0 +1,9 @@
+{
+  "comment": "Honor standard send idempotency for exact native follow-ups without recreating a stopped conversation",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

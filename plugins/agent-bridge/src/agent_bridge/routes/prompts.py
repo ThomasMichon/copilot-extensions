@@ -15,12 +15,30 @@ from ..prompt_models import (
 from ..session_manager import DaemonDrainingError, ProviderTargetRefreshError
 from ..session_status import SessionStatus
 from ..native_keyed_admission import KeyedNativePrompt, submit as keyed_submit
+from ..native_send_admission import NativeSendPrompt, submit as native_send
 from ..acquisition_contract import AcquisitionRefused
 
 if TYPE_CHECKING:
     from ..session_manager import SessionManager
 
 router = APIRouter()
+
+
+@router.post("/{session_id}/turns/native-bound/send")
+async def submit_native_send(
+    session_id: str, req: NativeSendPrompt, request: Request,
+) -> dict:
+    """The ordinary send command owns its key and exact retained native target."""
+    try:
+        return await native_send(request.app.state.session_manager, session_id, req)
+    except KeyError as exc:
+        raise HTTPException(404, detail={"code": "native_session_unavailable"}) from exc
+    except DaemonDrainingError as exc:
+        raise HTTPException(503, detail={"code": "draining"}) from exc
+    except AcquisitionRefused as exc:
+        raise HTTPException(409, detail={"code": exc.code}) from exc
+    except ValueError as exc:
+        raise HTTPException(409, detail={"code": str(exc)}) from exc
 
 
 async def _keyed(session_id: str, req: KeyedNativePrompt, request: Request, *, read_only: bool):

@@ -342,6 +342,10 @@ def _submit_and_stream(
             result = submit_native_bound_prompt(
                 client, session_id, prompt, caller_id=caller_id,
                 expected_native_session_id=expected_native,
+                **(
+                    {"idempotency_key": args.idempotency_key}
+                    if getattr(args, "idempotency_key", None) is not None else {}
+                ),
             )
         else:
             result = client.submit_prompt(

@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .native_send_admission import NativeSendPrompt
 
 def _canonical(value: object) -> str:
     try:
@@ -66,7 +67,7 @@ class KeyedNativePrompt(BaseModel):
 
 
 def stored_receipt(
-    db: Any, session_id: str, request: KeyedNativePrompt, *, connection=None,
+    db: Any, session_id: str, request: KeyedNativePrompt | NativeSendPrompt, *, connection=None,
 ) -> dict[str, Any] | None:
     sql = ("SELECT session_id,turn_index,prompt,native_admission_json FROM turns "
            "WHERE acquisition_delivery_id=?")
@@ -94,7 +95,7 @@ def stored_receipt(
 
 
 def admission_receipt(
-    session_id: str, turn_index: int, request: KeyedNativePrompt,
+    session_id: str, turn_index: int, request: KeyedNativePrompt | NativeSendPrompt,
 ) -> dict[str, Any]:
     return {
         "version": 1, "session_id": session_id,
@@ -104,11 +105,15 @@ def admission_receipt(
     }
 
 
-def validate_holder(manager: Any, session_id: str, session: Any, request: KeyedNativePrompt) -> None:
-    binding = request.binding.model_dump(mode="json")
+def validate_holder(
+    manager: Any, session_id: str, session: Any, request: KeyedNativePrompt | NativeSendPrompt,
+) -> None:
     if (session.session_id != session_id or manager.get_session(session_id) is not session
             or session.acp_session_id != request.expected_native_session_id):
         raise ValueError("expected_native_mismatch")
+    if isinstance(request, NativeSendPrompt):
+        return
+    binding = request.binding.model_dump(mode="json")
     if any(binding[key] != value for key, value in (
         ("worktree_id", session.target.worktree_id),
         ("project", session.target.project), ("path", session.target.cwd),

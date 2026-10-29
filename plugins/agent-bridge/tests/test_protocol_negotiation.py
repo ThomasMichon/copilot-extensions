@@ -142,9 +142,20 @@ def test_retained_producer_mixed_version_detection(generation, transport, produc
 def test_retained_recovery_has_its_own_advertised_floor(generation, supported) -> None:
     from agent_bridge.protocol import RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION
 
-    assert RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION == HTTP_PROTOCOL_VERSION == 50
+    assert RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION == 50
+    assert RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
     assert _client({"protocol_version": generation, "min_protocol_version": 1}).daemon_supports(
         RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION,
+    ) is supported
+
+
+@pytest.mark.parametrize("generation,supported", [(0, False), (50, False), (51, True)])
+def test_native_send_idempotency_is_an_independent_capability(generation, supported) -> None:
+    from agent_bridge.protocol import NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION
+
+    assert NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION == HTTP_PROTOCOL_VERSION == 51
+    assert _client({"protocol_version": generation, "min_protocol_version": 1}).daemon_supports(
+        NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION,
     ) is supported
 
 
