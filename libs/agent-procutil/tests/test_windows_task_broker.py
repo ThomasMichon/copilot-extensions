@@ -62,7 +62,35 @@ def test_registration_names_are_installation_and_user_scoped():
     assert "$(Arg2)" in config.task()["arguments"]
     assert set(config.frame()) == {
         "schema", "version", "installation", "root", "pythonw", "entrypoint", "principal",
+        "logon_type",
     }
+
+
+def test_legacy_adoption_round_trips_without_relabeling_its_logon_policy():
+    legacy = registration(logon_type=2)
+    desired = registration()
+    assert task._registration(legacy.frame()) == legacy
+    assert task._registration(desired.frame()) == desired
+    assert legacy.frame()["version"] == 1
+    assert legacy.key == desired.key
+    assert legacy != desired
+
+
+@pytest.mark.parametrize("value", [2, True, "3", None])
+def test_interactive_metadata_refuses_other_or_malformed_logon_policies(value):
+    frame = registration().frame()
+    frame["logon_type"] = value
+    with pytest.raises(DaemonSpawnError, match="adoption required"):
+        task._registration(frame)
+
+
+@pytest.mark.parametrize("action", ["install", "update", "activate", "status"])
+def test_legacy_policy_cannot_be_used_for_new_adoption_or_normal_activation(monkeypatch, action):
+    execute = Mock()
+    monkeypatch.setattr(task, "run_caller_owned", execute)
+    with pytest.raises(DaemonSpawnError, match="interactive-token adoption required"):
+        task.task_operation(action, registration(logon_type=2), Deadline(1))
+    execute.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -145,6 +173,34 @@ def test_installer_publish_failure_rolls_back_only_exact_registration(monkeypatc
     assert [call.args[0] for call in operation.call_args_list] == ["inspect", "install", "recover"]
     assert all(call.args[1] == config for call in operation.call_args_list)
     assert not config.pending_path.exists()
+
+
+@pytest.mark.parametrize("fail_publication", [False, True])
+def test_owned_s4u_migration_preserves_exact_policy_on_rollback(monkeypatch, tmp_path, fail_publication):
+    desired = fixture_registration(tmp_path)
+    previous = fixture_registration(tmp_path, logon_type=2)
+    monkeypatch.setattr(task.Registration, "validate_files", lambda config: None)
+    monkeypatch.setattr(task, "_qualify", Mock())
+    task._publish(previous)
+    operation = Mock(side_effect=[
+        {"installed": True, "accepting": True}, {},
+        *([{"recovered": True}] if fail_publication else []),
+    ])
+    monkeypatch.setattr(task, "task_operation", operation)
+    if fail_publication:
+        monkeypatch.setattr(task, "_publish", Mock(side_effect=OSError("publication failed")))
+        with pytest.raises(OSError, match="publication failed"):
+            task.reconcile(desired, previous=previous)
+        assert operation.call_args_list[-1].args[0] == "recover"
+        assert operation.call_args_list[-1].kwargs["previous"]["logon_type"] == 2
+        assert task._published(desired) == previous
+    else:
+        task.reconcile(desired, previous=previous)
+        assert task._published(desired) == desired
+    assert operation.call_args_list[1].args[0] == "update"
+    assert operation.call_args_list[1].args[1].logon_type == 3
+    assert operation.call_args_list[1].kwargs["previous"]["logon_type"] == 2
+    assert not desired.pending_path.exists()
 
 
 def test_healthy_repeat_keeps_registration_and_accepted_finite_work_untouched(monkeypatch, tmp_path):
@@ -538,6 +594,20 @@ def test_native_error_code_is_fixed_width_not_arbitrary_text(monkeypatch, line, 
     assert "private-value" not in str(caught.value)
 
 
+def test_missing_interactive_logon_reports_prerequisite_without_s4u_retry(monkeypatch):
+    monkeypatch.setattr(task, "os", SimpleNamespace(name="nt", environ={"SystemRoot": r"C:\Windows"}))
+    monkeypatch.setattr(task.Registration, "validate_files", lambda config: None)
+    execute = Mock(return_value=subprocess.CompletedProcess(
+        ["safe-command"], 1, "",
+        "broker-phase:run-requested\nbroker-native-hresult:80041320\nprivate-value\n",
+    ))
+    monkeypatch.setattr(task, "run_caller_owned", execute)
+    with pytest.raises(DaemonSpawnError, match="interactive-logon-unavailable") as caught:
+        task.task_operation("activate", registration(), Deadline(30))
+    execute.assert_called_once()
+    assert "private-value" not in str(caught.value)
+
+
 def spawn_fixture(monkeypatch, activation=None):
     config = registration()
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
@@ -755,6 +825,49 @@ if ('FUNCTION_NAME') {
 def test_activation_phase_calls_match_the_fixed_diagnostic_allowlist():
     source = Path(task.__file__).with_name("windows_broker_task.ps1").read_text(encoding="utf-8")
     assert set(re.findall(r"Write-ActivationPhase '([^']+)'", source)) == task._ACTIVATION_PHASES
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native task registration argument contract")
+@pytest.mark.parametrize("logon_type", [2, 3])
+def test_native_registration_uses_the_same_exact_logon_policy_in_both_arguments(logon_type):
+    result = native_function(
+        "Register-OwnedTask",
+        r"""
+$actions = [pscustomobject]@{}
+$actions | Add-Member ScriptMethod Create {
+    param($type)
+    return [pscustomobject]@{Path='';Arguments='';WorkingDirectory=''}
+}
+$global:definition = [pscustomobject]@{
+    RegistrationInfo = [pscustomobject]@{Description=''}
+    Principal = [pscustomobject]@{UserId='';LogonType=0;RunLevel=0}
+    Settings = [pscustomobject]@{
+        Enabled=$false;AllowDemandStart=$false;Hidden=$false;MultipleInstances=1
+        DisallowStartIfOnBatteries=$true;StopIfGoingOnBatteries=$true;ExecutionTimeLimit=''
+    }
+    Actions = $actions
+}
+$service = [pscustomobject]@{}
+$service | Add-Member ScriptMethod NewTask { param($flags); return $global:definition }
+$folder = [pscustomobject]@{}
+$folder | Add-Member ScriptMethod RegisterTaskDefinition {
+    param($name,$definition,$flags,$principal,$password,$logon,$security)
+    if ($definition.Principal.LogonType -ne LOGON -or $logon -ne LOGON -or
+        $definition.Principal.RunLevel -ne 0 -or $null -ne $password) {
+        throw 'registration contract changed'
+    }
+    return 'matched'
+}
+$config = [pscustomobject]@{
+    owner='owned';principal='synthetic';pythonw='pythonw.exe';arguments='fixed'
+    cwd='C:\synthetic';task_name='synthetic';logon_type=LOGON
+}
+$value = Register-OwnedTask $service $folder $config 2
+[Console]::Out.Write($value)
+""".replace("LOGON", str(logon_type)),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "matched"
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows exception code redaction")

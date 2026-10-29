@@ -2140,7 +2140,8 @@ are in-process data tests, not 35 native executions.
 It selects only the credential-free probe on a disposable hosted Windows
 runner, with no package installation, persistent trigger, elevated principal
 or shared-host change. The PowerShell entrypoint refuses without explicit
-ephemeral-CI consent. Its newly created S4U task has a one-minute execution
+ephemeral-CI consent. Its newly created interactive-token task requires an
+existing user logon and has a one-minute execution
 limit, a unique owned name and no saved password; cleanup stops only its own
 instances and deletes only that registration.
 
@@ -2185,6 +2186,11 @@ must release the settled registration's durable references.
 earlier capability probe; either failure rejects the job. Ordinary contained
 units never register a task. This lane is still synthetic source qualification,
 not permission to adopt or update a broker on a shared host.
+The source-only contained process suite cannot admit an outside-Job finite
+worker without an installed broker. Its direct survival control retains that
+explicit prerequisite; the actual finite-worker acceptance above runs through
+the installed execution driver and closes both submitting Jobs. A contained
+source-suite skip is not a native lifetime pass.
 
 The separately selected `windows_broker_consumers` lane has a 15-minute cap
 and constructs actual Worktrees, SSH and Manager runtimes in a credential-free

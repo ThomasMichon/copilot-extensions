@@ -474,6 +474,11 @@ def test_broker_direct_venv_controls_worker_pid_and_preserves_imports(tmp_path, 
 
 
 def test_finite_worker_outlives_caller_job_then_closes_control_record(tmp_path, monkeypatch):
+    if pu.contained_test_mode():
+        pytest.skip(
+            "outside-Job finite-worker acceptance requires an adopted installed broker; "
+            "tools/windows_broker_protocol_acceptance.py owns the disposable native lane"
+        )
     # Keep the explicit test-owner lease; only exercise real outside-Job launch.
     assert os.environ.get("COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT")
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)

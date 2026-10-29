@@ -40,7 +40,7 @@ function Resolve-TaskPrincipalSid([string]$Principal) {
     ).Value
 }
 
-function Find-OwnedTask($Folder, $Config) {
+function Find-OwnedTask($Folder, $Config, [int[]]$LogonTypes = @(3)) {
     try { $task = $Folder.GetTask($Config.task_name) }
     catch [System.IO.FileNotFoundException] { return $null }
     catch [Runtime.InteropServices.COMException] {
@@ -58,7 +58,7 @@ function Find-OwnedTask($Folder, $Config) {
     if ((Resolve-TaskPrincipalSid $definition.Principal.UserId) -cne $Config.principal) {
         throw 'broker-registration-principal-refused'
     }
-    if ($definition.Principal.LogonType -ne 2 -or $definition.Principal.RunLevel -ne 0 -or
+    if ($definition.Principal.LogonType -notin $LogonTypes -or $definition.Principal.RunLevel -ne 0 -or
         $definition.Triggers.Count -ne 0 -or $definition.Actions.Count -ne 1 -or
         $definition.Actions.Item(1).Type -ne 0) {
         throw 'broker-registration-policy-refused'
@@ -68,6 +68,9 @@ function Find-OwnedTask($Folder, $Config) {
 
 function Assert-Action($Task, $Config) {
     $definition = $Task.Definition
+    if ($definition.Principal.LogonType -ne $Config.logon_type) {
+        throw 'broker-registration-policy-refused'
+    }
     $exec = $definition.Actions.Item(1)
     if ($exec.Path -cne $Config.pythonw -or $exec.Arguments -cne $Config.arguments -or
         $exec.WorkingDirectory -cne $Config.cwd -or
@@ -92,7 +95,7 @@ function Register-OwnedTask($Service, $Folder, $Config, [int]$Flags) {
     $definition = $Service.NewTask(0)
     $definition.RegistrationInfo.Description = $Config.owner
     $definition.Principal.UserId = $Config.principal
-    $definition.Principal.LogonType = 2
+    $definition.Principal.LogonType = $Config.logon_type
     $definition.Principal.RunLevel = 0
     $definition.Settings.Enabled = $true
     $definition.Settings.AllowDemandStart = $true
@@ -106,12 +109,13 @@ function Register-OwnedTask($Service, $Folder, $Config, [int]$Flags) {
     $exec.Arguments = $Config.arguments
     $exec.WorkingDirectory = $Config.cwd
     $registered = $Folder.RegisterTaskDefinition(
-        $Config.task_name, $definition, $Flags, $Config.principal, $null, 2, $null
+        $Config.task_name, $definition, $Flags, $Config.principal, $null, $Config.logon_type, $null
     )
     return $registered
 }
 
 $rollbackXml = $null
+$rollbackLogonType = $null
 $newRegistration = $false
 try {
     Write-ActivationPhase 'input'
@@ -131,7 +135,10 @@ try {
     Write-ActivationPhase 'folder'
     $folder = $service.GetFolder('\')
     Write-ActivationPhase 'lookup'
-    $task = Find-OwnedTask $folder $c
+    $allowedLogons = if ($Action -in @('inspect', 'update', 'recover', 'stop', 'uninstall')) {
+        @(2, 3)
+    } else { @(3) }
+    $task = Find-OwnedTask $folder $c $allowedLogons
     if ($Action -eq 'recover') {
         $prior = $inputValue.previous
         if ($null -ne $prior -and (
@@ -146,6 +153,7 @@ try {
             }
             $wasEnabled = $task.Enabled
             $originalXml = $task.Xml
+            $originalLogonType = $task.Definition.Principal.LogonType
             $task.Enabled = $false
             try { Wait-Drained $task }
             catch {
@@ -153,6 +161,7 @@ try {
                 throw
             }
             $rollbackXml = $originalXml
+            $rollbackLogonType = $originalLogonType
         }
         if ($null -eq $prior) {
             if ($null -ne $task) { $folder.DeleteTask($c.task_name, 0) }
@@ -180,6 +189,7 @@ try {
                 Assert-Action $task $inputValue.previous
                 $wasEnabled = $task.Enabled
                 $originalXml = $task.Xml
+                $originalLogonType = $task.Definition.Principal.LogonType
                 $task.Enabled = $false
                 try {
                     Wait-Drained $task
@@ -188,6 +198,7 @@ try {
                     throw
                 }
                 $rollbackXml = $originalXml
+                $rollbackLogonType = $originalLogonType
             }
         }
         if ($null -eq $task -or $Action -eq 'update') {
@@ -261,7 +272,7 @@ try {
     try {
         if ($null -ne $rollbackXml) {
             $null = $folder.RegisterTask(
-                $c.task_name, $rollbackXml, 4, $c.principal, $null, 2, $null
+                $c.task_name, $rollbackXml, 4, $c.principal, $null, $rollbackLogonType, $null
             )
         } elseif ($newRegistration) {
             $owned = Find-OwnedTask $folder $c

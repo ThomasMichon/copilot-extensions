@@ -133,7 +133,7 @@ interactive user logon. This changes source intent, not the existing deployment
 hold or central deployment ownership. The following implementation and validation
 decomposition is **agent-recommended**.
 
-- [ ] Review the [interactive-token amendment](windows-launch-broker.md#interactive-token-desktop-activation)
+- [x] Review the [interactive-token amendment](windows-launch-broker.md#interactive-token-desktop-activation)
   before implementation.
 - [ ] Replace S4U registration and normal admission with the existing interactive
   token contract, including explicit unavailable behavior without an eligible
@@ -258,6 +258,22 @@ repository history.
 - Plan-only proposal. The existing deployment inhibition and installed adoption
   hold remain intact; no registration, source implementation or rollout is
   claimed by this entry.
+
+### 2026-10-29 - Begin reviewed interactive-token source follow-up
+
+- Plan #9523 merged as `14b1e6f621` after Copilot approval and required checks.
+  #9522 owns implementation; deployment remains with its existing owner.
+- The candidate uses version-2 metadata for interactive-token adoption and
+  retains version-1 S4U metadata as exact installer migration/rollback input.
+  Normal activation refuses legacy policy instead of launching S4U.
+- The first focused packet passed 93 contained controls, including actual
+  PowerShell registration-expression checks without host registration.
+- The broad Windows source packet encountered a finite-worker control that
+  deliberately escaped containment without an installed broker. It failed with
+  the correct missing-adoption refusal. The source control now requires its
+  actual installed prerequisite rather than bypassing containment; the existing
+  disposable native execution-driver lane retains all-caller-Job survival
+  acceptance. That failure is not counted as positive lifetime qualification.
 
 ### 2026-10-29 - Verify legitimate promotion; retain installed acceptance
 

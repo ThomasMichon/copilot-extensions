@@ -87,6 +87,7 @@ class Registration:
     pythonw: str
     entrypoint: str
     principal: str
+    logon_type: int = 3
 
     def __post_init__(self) -> None:
         if (
@@ -94,6 +95,7 @@ class Registration:
             or not re.fullmatch(r"[A-Za-z0-9_.:/@+-]{1,256}", self.installation)
             or not isinstance(self.principal, str)
             or not re.fullmatch(r"S-1-[0-9-]{1,180}", self.principal)
+            or type(self.logon_type) is not int or self.logon_type not in (2, 3)
         ):
             raise _refuse("installation identity refused")
         for path in (self.root, self.pythonw, self.entrypoint):
@@ -133,14 +135,19 @@ class Registration:
             "owner": self.owner, "task_name": "CE-LaunchBroker-" + self.key,
             "principal": self.principal, "pythonw": self.pythonw,
             "arguments": args, "cwd": self.root,
+            "logon_type": self.logon_type,
         }
 
     def frame(self) -> dict[str, object]:
-        return {
-            "schema": _SCHEMA, "version": 1, "installation": self.installation,
+        value = {
+            "schema": _SCHEMA, "version": 1 if self.logon_type == 2 else 2,
+            "installation": self.installation,
             "root": self.root, "pythonw": self.pythonw, "entrypoint": self.entrypoint,
             "principal": self.principal,
         }
+        if self.logon_type == 3:
+            value["logon_type"] = self.logon_type
+        return value
 
     def validate_files(self) -> None:
         _validated_daemon_cwd(self.root)
@@ -170,16 +177,21 @@ class Registration:
 
 
 def _registration(value: object) -> Registration:
-    if type(value) is not dict or set(value) != {
-        "schema", "version", "installation", "root", "pythonw", "entrypoint", "principal",
-    } or (
-        value["schema"] != _SCHEMA
-        or type(value["version"]) is not int or value["version"] != 1
+    fields = {"schema", "version", "installation", "root", "pythonw", "entrypoint", "principal"}
+    if type(value) is not dict or value.get("schema") != _SCHEMA:
+        raise _refuse("adoption required")
+    version = value.get("version")
+    if type(version) is not int or not (
+        (version == 1 and set(value) == fields)
+        or (
+            version == 2 and set(value) == fields | {"logon_type"}
+            and type(value["logon_type"]) is int and value["logon_type"] == 3
+        )
     ):
         raise _refuse("adoption required")
     return Registration(
         value["installation"], value["root"], value["pythonw"],
-        value["entrypoint"], value["principal"],
+        value["entrypoint"], value["principal"], 2 if version == 1 else 3,
     )
 
 
@@ -227,6 +239,8 @@ def task_operation(
         "install", "update", "activate", "status", "stop", "uninstall", "inspect", "recover",
     }:
         raise _refuse("task operation refused")
+    if action in {"install", "update", "activate", "status"} and config.logon_type != 3:
+        raise _refuse("interactive-token adoption required")
     if os.name != "nt":
         raise _refuse("Windows prerequisite unavailable")
     config.validate_files()
@@ -268,6 +282,8 @@ def task_operation(
             "broker-registration-rollback-unconfirmed",
         }
         reason = reason if reason in allowed else "scheduler-operation-failed"
+        if action == "activate" and "80041320" in codes:
+            reason = "interactive-logon-unavailable"
         phase = _activation_phase(result.stderr)
         elapsed = _activation_elapsed(result.stderr, started)
         code = codes[-1] if codes else "unobserved"

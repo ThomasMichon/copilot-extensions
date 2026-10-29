@@ -30,7 +30,7 @@ try {
     $definition = $service.NewTask(0)
     $definition.RegistrationInfo.Description = 'Owned finite CI fixture; no credentials or triggers.'
     $definition.Principal.UserId = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-    $definition.Principal.LogonType = 2 # S4U; no stored password or network credentials.
+    $definition.Principal.LogonType = 3 # Existing interactive token; no stored password.
     $definition.Principal.RunLevel = 0
     $definition.Settings.Enabled = $true
     $definition.Settings.AllowDemandStart = $true
@@ -44,7 +44,7 @@ try {
     $action.WorkingDirectory = $root
     # TASK_CREATE refuses an existing name; never update or take over a task.
     $task = $folder.RegisterTaskDefinition(
-        $name, $definition, 2, $definition.Principal.UserId, $null, 2, $null
+        $name, $definition, 2, $definition.Principal.UserId, $null, 3, $null
     )
     foreach ($cycle in 1..2) {
         $nonce = [guid]::NewGuid().ToString('N')

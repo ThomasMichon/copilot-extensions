@@ -774,6 +774,15 @@ implementation. It requires the optional `windows-broker` extra, which reuses
 `agent-zdd`'s stdlib-only private native transport. Ordinary process operations
 retain no runtime dependencies and need no sibling plugin or service.
 
+Desktop activation uses `TASK_LOGON_INTERACTIVE_TOKEN`: the same user must
+already have an eligible interactive logon, which may be locked. Signed-out
+operation is unavailable; there is no S4U, stored-password or elevated fallback.
+A scheduler `SCHED_E_USER_NOT_LOGGED_ON` refusal reports
+`interactive-logon-unavailable`. Other native refusals remain explicit.
+Version-2 adoption metadata records this policy. Version-1 S4U metadata remains
+readable only for owned installer migration, recovery and removal; ordinary
+activation refuses it with `interactive-token adoption required`.
+
 Only the consumer's canonical installer, under its existing execution driver,
 calls `reconcile` with its validated installation identity, private durable root
 and already-qualified immutable runtime. Registration has no triggers, saved
@@ -809,6 +818,9 @@ or adopted configuration. While that record exists, ordinary launches refuse
 with `installer recovery required`; they never repair it. The next explicitly
 owned installer can call `recover` (also called at the start of `reconcile`)
 to restore the original action, enabled state and configuration. Recovery
+also preserves the original logon policy when rolling back a legacy S4U task;
+it does not relabel an old registration as an interactive-token adoption.
+Recovery
 accepts only the recorded old/new action and configuration, refuses foreign
 state and keeps its record if restoration cannot be confirmed. Repeated
 adoption failure preserves a pre-existing Task rather than uninstalling it.
