@@ -77,6 +77,11 @@ namespace CopilotExtensions {
         private static void Check(bool success) {
             if (!success) throw new Win32Exception(Marshal.GetLastWin32Error());
         }
+        private static void Stage(FileStream output, string stage) {
+            byte[] data = Encoding.UTF8.GetBytes("native-daemon-stage:" + stage + "\n");
+            output.Write(data, 0, data.Length);
+            output.Flush();
+        }
         public sealed class Child : IDisposable {
             private IntPtr handle;
             public readonly uint Pid;
@@ -133,6 +138,7 @@ namespace CopilotExtensions {
                 env = Marshal.StringToHGlobalUni(block.ToString());
                 using (var output = new FileStream(log, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
                 using (var input = CreateFile("NUL", 0x80000000, 3, IntPtr.Zero, 3, 0x80, IntPtr.Zero)) {
+                    Stage(output, "prepared");
                     Check(!input.IsInvalid);
                     Check(SetHandleInformation(output.SafeFileHandle, 1, 1));
                     Check(SetHandleInformation(input, 1, 1));
@@ -156,8 +162,10 @@ namespace CopilotExtensions {
                     var command = new StringBuilder("\"" + executable + "\" " + arguments);
                     uint flags = 0x08080404; // NO_WINDOW | EXTENDED_STARTUPINFO | UNICODE_ENVIRONMENT | SUSPENDED.
                     if (!contained) flags |= 0x01000000; // BREAKAWAY_FROM_JOB; denial has no fallback.
+                    Stage(output, "creating");
                     Check(CreateProcess(executable, command, IntPtr.Zero, IntPtr.Zero, true,
                         flags, env, cwd, ref startup, out child));
+                    Stage(output, "created-suspended");
                     foreach (IntPtr query in queries) {
                         bool member;
                         Check(IsProcessInJob(child.Process, query, out member));
@@ -169,6 +177,7 @@ namespace CopilotExtensions {
                         queries[i] = IntPtr.Zero;
                     }
                     Check(ResumeThread(child.Thread) != UInt32.MaxValue);
+                    Stage(output, "resumed");
                     Check(CloseHandle(child.Thread));
                     child.Thread = IntPtr.Zero;
                 }
@@ -301,17 +310,21 @@ function Start-NativeDaemon {
 `$ErrorActionPreference = 'Stop'
 `$d = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$data')) | ConvertFrom-Json
 try {
+    [Console]::Error.WriteLine('native-daemon-stage:bootstrap')
     . `$d.helper
+    [Console]::Error.WriteLine('native-daemon-stage:peer-ready')
     `$pipe = New-Object IO.Pipes.NamedPipeClientStream(
         '.', `$d.channel, [IO.Pipes.PipeDirection]::InOut, [IO.Pipes.PipeOptions]::Asynchronous
     )
     try {
         `$pipe.Connect(15000)
+        [Console]::Error.WriteLine('native-daemon-stage:connected')
         if ([CopilotExtensions.NativeDaemonAdmission]::PipeProcess(`$pipe, `$false) -ne `$d.parent) {
             throw 'Native daemon admission server identity changed.'
         }
         `$frame = [BitConverter]::GetBytes([int]`$PID)
         `$pipe.Write(`$frame, 0, 4)
+        [Console]::Error.WriteLine('native-daemon-stage:offered')
         `$ack = Read-NativeDaemonFrame -Pipe `$pipe -Length 1
         if (`$ack[0] -ne 1) { throw 'Native daemon adoption was refused.' }
     } finally { `$pipe.Dispose() }
