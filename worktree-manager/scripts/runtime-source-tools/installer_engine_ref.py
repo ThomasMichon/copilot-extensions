@@ -28,6 +28,7 @@ FILES = ("installer-engine.ps1", "installer-engine.sh")
 SUPPORT_FILES = (
     "installer_dependency_policy.py", "installer_dependency_config.py",
     "installer_engine_uninstall.py", "installer_engine_uninstall_darwin.py",
+    "installer_engine_footprint.py",
     "installer_engine_uninstall_controllers.py",
     "installer_engine_commands.py", "installer_engine_stop.py",
     "installer_engine_process.py",
@@ -58,6 +59,7 @@ STANDALONE_NATIVE_ADOPTERS = (
 STANDALONE_NATIVE_FILES = (
     "installer-engine.ps1", "installer-engine.sh", "installer_engine_process.py",
     "installer_engine_uninstall.py", "installer_engine_uninstall_darwin.py",
+    "installer_engine_footprint.py",
     "installer_engine_uninstall_controllers.py",
     "installer_engine_commands.py", "installer_engine_stop.py",
 )

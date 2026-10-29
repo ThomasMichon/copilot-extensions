@@ -507,6 +507,11 @@ def test_whole_payload_human_contract(
     source_root = Path("source")
     destination = Path("payload")
     _copy_real_installer_engine(source_root)
+    manager = source_root / "worktree-manager"
+    manager.mkdir()
+    (manager / "pyproject.toml").write_text(
+        '[project]\nname = "worktree-manager"\nversion = "0.0.0"\n', encoding="utf-8",
+    )
     for name in names:
         source = REPO / "plugins" / name
         consumer = _real_human_consumer(source_root, name, layout)
@@ -696,6 +701,7 @@ def test_standalone_native_engine_uses_existing_sync_owner(fake_repo, monkeypatc
     consumer.mkdir()
     for name in (
         "installer_engine_uninstall.py", "installer_engine_uninstall_darwin.py",
+        "installer_engine_footprint.py",
         "installer_engine_uninstall_controllers.py",
         "installer_engine_commands.py", "installer_engine_stop.py",
     ):

@@ -50,6 +50,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import installer_engine_ref as ier
+from install_footprint_contract import check as check_footprints
 from update_machine_gate_contract import check_machine_gate
 
 from install_contract_guard import (
@@ -733,6 +734,7 @@ def check() -> int:
         return 1
 
     violations.extend(_runtime_scope_violations(PLUGINS_DIR))
+    violations.extend(check_footprints(REPO))
     violations.extend(check_machine_gate(PLUGINS_DIR / "agent-worktrees" / "src" / "agent_worktrees"))
     violations.extend(_exec_stderr_swallow_violations(PLUGINS_DIR))
     violations.extend(_mark_complete_result_violations(PLUGINS_DIR))

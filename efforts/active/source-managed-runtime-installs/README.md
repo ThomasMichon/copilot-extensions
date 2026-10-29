@@ -385,7 +385,7 @@ transaction execution from the existing recurring-maintenance assignment.
 Completed items below retain earlier source evidence; their conservative
 reuse/admission behavior is not an exception to the fresh-default revision.
 
-- [ ] Review the [fresh-default upstream contract](fresh-default-installation.md) before changing
+- [x] Review the [fresh-default upstream contract](fresh-default-installation.md) before changing
   its routing or recovery implementation: global update interception, upstream
   bootstrap and local overrides, positive incremental/ZDD recognizers, and the
   mostly fresh known-runtime fallback. Preserve durable config/data, silence
@@ -1048,6 +1048,14 @@ no separate updater, signing protocol or new blanket permission gate is added.
 Existing #7758, maintenance, removal and critical-connectivity owners remain.
 Review precedes new orchestration implementation; no host operation is authorized.
 
+#9487 merged as `5963bf78d5ed2d96217d843e03fb524b206dfbac` after genuine
+exact-head Copilot approval with no open findings and all required checks
+passing. Documentation consistency, three effort/vision structure checks and
+diff checks passed. The review gate closes; manifests, deltas, routing,
+fresh/incremental execution and native installed acceptance remain unfinished.
+The next bounded slice extends the existing finite uninstall inventory into
+the maintained footprint contract, rather than adding a second cleanup list.
+
 ### 2026-10-28 - Direct retained keeper and source selector
 
 The complete #7028/#7029 original/refined/inherited acceptance is retained
@@ -1062,5 +1070,32 @@ Existing implementation, transaction, source/resource and native custodians
 are unchanged. Normal review, actual merge and complete current receiving
 readback precede any supported #7029 tracker consolidation. #7028 stays open;
 no code, test, native, service, source claim or deployment action occurred.
+
+### 2026-10-28 - First maintained footprint provider
+
+The first source slice extends the existing finite uninstall inventory rather
+than introducing another cleanup owner. Agent MCP's version-2 profile contains
+one current reset inventory, append-only historical snapshots/deltas, separate
+layout recognizers and explicit process/control/registration/shared-environment/
+preserved-state descriptors. Its native remover consumes the same profile.
+The source guard covers complete producer trees, including new files, and
+compares published history with the source baseline.
+
+Bounded qualification passed 151 shared removal controls (three platform skips),
+124 canonical packaging controls (two skips), and four native MCP
+removal/restamp/provenance controls (one skip). Native removal/restamp exercised
+both Windows PowerShell and PowerShell with only the process census mocked.
+The installer contract passed for all 13 runtime plugins. The packaging fixture
+now supplies the Manager package manifest needed by the complete-payload
+validator and the new canonical support file. No deadline was enlarged after
+the initial combined batch timed out; its owned cleanup was verified and the
+failing fixtures were isolated and corrected.
+
+This is a data provider and finite-inventory convergence, not complete fresh
+orchestration or old-owner silence. Effect resolution/retirement, global
+bootstrap routing, driver integration, the remaining suite/Manager manifests,
+cross-platform assembled entry points and actual installed survival/adoption
+remain open under the same owners and authorization gates. No live cleanup,
+runtime update, service action or maintenance hold was performed.
 
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.

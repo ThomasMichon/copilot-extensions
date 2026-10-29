@@ -5,11 +5,19 @@
 Parent: [Backlog Reconciliation](README.md), Phase 2.
 Prior units: [current consolidation register](consolidation-current-unit.md).
 
-**Status:** Four disjoint studies are independently admitted; direct Plan,
-actual global Validation, continuing Coordination and Journal amendments are
-authored under seven existing efforts. Normal review, actual merged delivery,
-complete current receiving readback and separate source judgments remain.
-No source disposition or numerical reduction is claimed by this proposal.
+**Status:** #9496 actually merged the direct Plan, actual global Validation,
+continuing Coordination and Journal amendments under seven existing efforts.
+Complete current receiving readback and separate literal-condition judgments
+then supported four guarded administrative folds: #60/#566/#1151/#2853.
+#876/#1246/#1266/#2335/#2830/#2847 remain open and unchanged. These are
+tracking outcomes, not technical completion, owner transfer or claim release.
+
+**Reviewed delivery:** merged at 2026-10-29 02:14:26 UTC
+(2026-10-28 19:14:26 PDT) as
+`cab67a4842b2700a57b91ef007ccc19f4ffb72ae`, following exact-head Copilot
+approval with no open issues, no review threads and required green checks.
+All fifteen published files matched the audited authored bytes. The entire
+parent README was re-read after merge and remains Active.
 
 These are _(agent-recommended)_ tracking amendments, not implementation
 assignments. Creation-oldest-first selection covers #60/#566/#876/#1151/
@@ -45,17 +53,30 @@ Taking or an old milestone creates no new ACK ceremony, and age is not claim
 expiry. Actual source-specific conditions above remain operative; none is
 generalized into a whole-parent or every-host gate.
 
-The next step is normal reviewed document delivery, full current ROOT
-readback, and **separate per-source judgments**. Some sources must remain open
-under their actual canonical, confirmation, assignee or held-lane restrictions.
-There is no closure quota and no implication that ten researched origins
-mean ten closeable issues. Technical work, release, installed/native
-qualification and all unsettled effects remain with their existing owners.
+The complete current seven ROOTs and three direct annexes were read after
+canonical pull-forward, followed by all 35 whole original/refinement texts and
+**separate per-source judgments**. The four administrative dispositions and
+their public explanations are recorded in the
+[follow-through register](roadmap-follow-through.md#four-oldest-source-folds-after-first-ten-receiving-readback).
+Each explanation was read back before closure; whole-record guards admitted
+only that own comment delta, and original bodies/assignees/prior comments/edit
+metadata and final provider states/reasons were verified.
 
-The last complete whole-queue observation remains **931 open issues** at
-2026-10-29 01:38:52 UTC (2026-10-28 18:38:52 PDT): 676 creator-eligible and
-255 excluded, or 700 original-cohort and 231 inflow. This is 202 above the
-fixed 729 checkpoint; document authorship is not a new census or closure credit.
+The six retained sources preserve actual coordination and conditions:
+#876's assigned startup lane and completed-disposition caveat; #1246's
+owner-retained HOME/error acceptance; #1266's held AHP keeper; #2335's
+literal original-contention confirmation; #2830's full incident canonical;
+and #2847's named-assignee acknowledgement-versus-age/overlap restriction.
+#876 retention is not a new universal native-completion or ACK prerequisite
+for every administrative fold. No closure quota or unrelated whole-parent
+gate is added, and all technical/release/installed/native work remains planned.
+
+The latest complete whole-queue observation is **929 open issues** at
+2026-10-29 02:23:39 UTC (2026-10-28 19:23:39 PDT): 674 creator-eligible and
+255 excluded, or 696 original-cohort and 233 inflow. The prior 931 observation
+lost exactly these four original-cohort wrappers and gained eligible
+#9493/#9495, still metadata-only pending separately bounded research.
+This is 200 above the fixed 729 checkpoint, not parent completion.
 
 ## Evidence boundary
 

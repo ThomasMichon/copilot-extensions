@@ -217,12 +217,23 @@ outcomes from agent-recommended research and prioritization mechanics.
   administrative dispositions. #6236 and #7944 remain open keepers; actual
   technical work, source appointments and resource custody continue unchanged.
   No new implementation assignment or technical completion is inferred.
-- [ ] _(Agent-recommended)_ Deliver the [first ten oldest receiving
+- [x] _(Agent-recommended)_ Deliver the [first ten oldest receiving
   relationships](receiving-first-ten.md) through normal review and full current
-  readback, then make separate source judgments. Direct contracts are authored
-  under seven existing efforts; canonical incident, post-fix confirmation,
-  named-assignee and held-lane restrictions remain. Ten studied origins are
-  not ten closeable issues or a new numerical reduction.
+  readback, then make separate source judgments. #9496 merged the direct
+  contracts under seven existing efforts. Complete current readback and
+  separate literal-condition judgments supported four guarded administrative
+  folds; six sources retain their specific coordination or conditions.
+  No technical completion or claim/resource release is inferred.
+  The latest complete census is 929 whole issues, 200 above 729; four own
+  original-cohort closures coexist with two eligible metadata-only arrivals.
+- [ ] _(Agent-recommended)_ Deliver the [seven further receiving
+  contracts](receiving-last-seven.md) under five existing efforts through
+  normal review and complete merged-file readback, followed by separate
+  source-specific judgments. The direct Plan/global Validation/Coordination
+  proposals preserve #3367/#3944/#3945/#4016/#4028/#4055/#4229 whole scope
+  and existing custody. #4229's specific incumbent-assignee whole-mapping
+  receipt remains unmet; its keeper #1266 body draft remains unapplied.
+  Authored tracking alone neither retires a source nor completes its work.
 - [ ] Refresh live and original-cohort metrics, append journal checkpoints, and
   continue graph-backed consolidation with creation-oldest-first coverage until
   at most 729 issues remain.
