@@ -772,16 +772,14 @@ share the native setup's sole EXIT callback without changing shell semantics.
 The planner uses the selected session/profile environment over inherited
 values, including an explicit empty override. Direct/stale native setup also
 refuses a pre-existing EXIT trap before admission instead of replacing it.
-Mux plans require a known effective environment before selecting this owner:
-the server/session environment can differ from the planning client. The
-literal Python pane builder can forward an explicit empty `BASH_ENV` override;
-a nonempty one retains legacy ownership. Opaque shell-rendered creation,
-JSON and Launcher mux plans always retain the legacy owner, even with an
-explicit empty override: older Manager shell renderers pass the shell
-quotation characters literally, and a newer source file does not establish
-which renderer actually executes. Qualification and compatible migration of
-that Manager path remain pending under #8669; corrected literal forwarding
-alone does not remove this fence or establish installation survival.
+Mux plans require an explicit `BASH_ENV` override before selecting this owner:
+the server/session environment can differ from the planning client. An empty
+override permits native selection through both Manager's corrected literal
+forwarding and the Python pane builder; a nonempty or unknown initializer
+retains legacy ownership. Direct/no-mux plans use their actual inherited and
+selected environment. There is no separate renderer-admission flag or
+renderer-capability handshake, and these rules do not depend on marketplace
+cells. Full Manager launch and installation-survival acceptance remain open.
 Plans containing non-UTF-8 POSIX command or record-path bytes also retain that
 owner before discovery or copying; the literal reply remains strict UTF-8.
 Direct NUL preparation with such arguments refuses before runtime selection or

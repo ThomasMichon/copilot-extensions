@@ -232,6 +232,10 @@ They execute the production export/flag-building blocks and observe literal
 tmux argument delivery for empty values, quotes, multiline values and unchanged
 AHP credential exclusions. They do not qualify a live tmux server, complete
 Manager launch or installation survival.
+The copied POSIX consumer packet also feeds those actual Manager-produced
+environment arguments into the unmodified native setup and requires a direct
+Bash parent, literal backend environment, retained input and completed receipts.
+It does not replace that component path with a renderer-admission mock.
 That packet also explicitly selects `test_launch_seed_native.py` so the
 setup-only provider birth query exercises the canonical native OS helper,
 not a Bash ABI substitute. It covers caller-provided identity compatibility,
