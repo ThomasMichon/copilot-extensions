@@ -164,6 +164,8 @@ When creating or modifying a skill, validate against Anthropic's best practices:
 - **Body:** under 500 lines. Split into companion files if larger.
 - **Conciseness:** only add context the agent doesn't already have. Challenge
   each paragraph: does it justify its token cost?
+- **Capability-level prose:** describe outcomes, not routine skill names or CLI
+  recipes; preserve required exact invocation and routing identities.
 - **Degrees of freedom:** match specificity to fragility -- exact commands for
   fragile ops, high-level guidance for flexible tasks.
 - **No time-sensitive data.** Use "old patterns" sections if needed.
@@ -181,15 +183,13 @@ When creating or modifying a skill, validate against Anthropic's best practices:
 
 ### Referencing skills or agents from another plugin
 
-When a skill (or its docs/references) refers to a skill or sub-agent **shipped by
-a different plugin**, name it in the **namespaced `plugin:name` form** — e.g. the
-`agent-bridge` skill in the agent-bridge plugin is `agent-bridge:agent-bridge`,
-agent-worktrees' worktree skill is `agent-worktrees:worktree`, and the
-the logger writer agent is `agent-logger:session-log-writer`. This disambiguates
-same-named skills across plugins and tells the reader (and the agent) exactly
-which plugin owns it. **Within the same plugin, keep the bare name** — only
-*cross-plugin* references are namespaced. The same rule applies to a sub-agent's
-`agent_type` (see the defining-subagents skill).
+Default to capability-level prose rather than naming other skills, qualified
+paths, infrastructure CLIs, or copied command recipes. Keep mechanics with their
+owning capability. Only an explicit invocation or genuine ambiguity needs a
+named cross-plugin reference: use `plugin:name`, or the bare name within one
+plugin. Do not name every capability merely to qualify it. Preserve required
+frontmatter, routing identities, sub-agent `agent_type` values, and exact
+operations where correctness depends on them.
 
 ### Skills vs custom instructions
 

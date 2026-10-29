@@ -1,7 +1,7 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","bodySha256":"7cfc68945aeaf61dcea5a9aeebdad69595a7538716e4e90e672389d527e4fe41","customizationKind":"instructions","deliveryKind":"body","destination":".github/instructions/customizing-copilot/local-cache-catchall.instructions.md","plugin":"customizing-copilot@copilot-extensions","pluginVersion":"0.2.40-dev1","renderedBytes":3251,"schema":"copilot-extensions.instruction-projection","sourceId":"local-cache-catchall","template":"instructions/local-cache-catchall.instructions.md","templateBytes":2126,"templateSha256":"7a570bc3e67c29b5ad7d3225f578d0ee7814045fde8434f61422c4554c11cdb0","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","bodySha256":"7cfc68945aeaf61dcea5a9aeebdad69595a7538716e4e90e672389d527e4fe41","customizationKind":"instructions","deliveryKind":"body","destination":".github/instructions/customizing-copilot/local-cache-catchall.instructions.md","plugin":"customizing-copilot@copilot-extensions","pluginVersion":"0.2.41-dev1","renderedBytes":3251,"schema":"copilot-extensions.instruction-projection","sourceId":"local-cache-catchall","template":"instructions/local-cache-catchall.instructions.md","templateBytes":2126,"templateSha256":"7a570bc3e67c29b5ad7d3225f578d0ee7814045fde8434f61422c4554c11cdb0","version":1} -->
 
 
 > Prefer the current plugin copy at `.github/instructions/agent-worktrees-generated/copilot-extensions/customizing-copilot/local-cache-catchall.local.instructions.md` when present.
@@ -39,4 +39,4 @@ loaded it. Files may be replaced during a live session. Restart or begin a fresh
 context to load corrected copies, and read applicable guidance again after
 context reconstruction. Do not persist loaded-state claims.
 
-<!-- copilot-guidance-body-end:v1 {"bindingSha256":"634631231165b6f9c21abe32f0b2a072eb69df28ce499789d175ce0a14e60126"} -->
+<!-- copilot-guidance-body-end:v1 {"bindingSha256":"a373ad7d0701c878f9a3ee98e28e3dac0a9a52d68c60de0f5361490f6557a4d9"} -->

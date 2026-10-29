@@ -55,6 +55,26 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The finite #4395 ordinary developer-entry diagnostic OR supported-local-setup
+contract continues through Phase5 workflow and Phase7 migration-intake/domain
+review below, its actual global Validation and Journal. Preserve the existing
+primary, Worktrees/runner/dependency/documentation/platform, audit/source/
+cohort/periodic-failure and release/control custodians, #1303 and actual
+source/resource holds. No new runner, implementation assignment, owner
+contact, universal signature condition or resource transfer is created.
+
+The finite #609 connection-owner witness and #4056 real MCP chaos family enter
+the existing Phase7 migration-intake and Phase4 Vault/MCP waves below, with
+direct local and actual global Validation and Journal. Existing primary,
+clean-room, Vault/MCP warmth/cutover/IPC/installer, audit/source/cohort,
+periodic-failure/native/release and resource custodians retain their scopes.
+Keep #609 canonical until an exact eligible stronger receiver accepts every
+residual; #4056 narrowing/closure requires every residual in an accepted
+DIRECT FINAL-OPEN canonical. Those are source-specific conditions, not new
+universal ACKs. OPEN #1303, all incumbent families/holds and excluded
+#4036/#4049 custody remain; this intake grants no execution, assignment,
+credential transport, rollout or resource release.
+
 The directly retained #5921 finite clean-room verdict-completeness family continues through this SAME Active ROOT's Phase4 payload/harness/tools wave and Phase7 migration-intake/domain-Plan acceptance, its actual global Validation and append-only Journal. Existing primary maintainer, clean-room rig/reducer/script, audit/source/cohort/native/periodic-failure and release/control custodians retain their exact scopes; OPEN #1303 and every incumbent inheritance/hold remain. #5922/#8511 and #4312/#688/#1475 remain independent. This is tracking acceptance only, not implementation, execution, source/resource reassignment, a new generic ACK or a parent-completion waiver.
 
 The direct retained #4123 acceptance continues through this SAME existing Active ROOT's
@@ -753,6 +773,131 @@ full current receiving readback precede a separate source judgment; this paper
 amendment executes no fixture, resource action or implementation and releases
 no claim.
 
+### Finite Vault warm connection-owner witness from #609
+
+**Agent-recommended tracking amendment.** Receive the complete original and
+current refined contract through Phase7 and the Phase4 Vault/clean-room wave,
+without replacing the existing scenario contract or creating another effort.
+
+- [ ] **P609-1:** Qualify warm TTL/no-reunlock continuity AND non-resumable
+  in-flight work surviving OR deliberately draining cleanly, with actual
+  admitted activation/routing, old-generation retirement and interruption/
+  breadcrumb recovery. Preserve owner-gated safe transport and explicit
+  platform/degrade limits at the finite Tier-P connection-owner boundary.
+- [ ] **P609-2:** Credit #634 rendezvous/forward-ready INFO and #2486
+  POSIX/systemd handoff plus its recorded isolated KeePass update/no-reunlock
+  witness at their delivered scopes. Do not rebuild completed warm handoff
+  or equate INFO/import/marker success with the remaining acceptance battery.
+  #873 Windows DACL/cross-user security, #688 Tier-E and #743 implementation
+  remain independent; none substitutes for every residual here.
+
+#### Local Validation for #609
+
+- [ ] **V609-1:** At the existing separately authorized finite Tier-P venue,
+  record exact source/generation, warm TTL/no-reunlock, in-flight survival OR
+  clean-drain, routing, retirement and interrupted-recovery outcomes.
+  Preserve explicit unavailable platform/degrade facts and safe transport;
+  no unsafe secret transfer, live credential/store access or whole-parent/
+  native-every-host prerequisite is introduced by this intake.
+
+### Finite four-case real MCP chaos family from #4056
+
+**Agent-recommended tracking amendment.** Receive all remaining cases through
+Phase7 and the Phase4 MCP wave; keep the warmth half credited as delivered,
+not a new daemon design or latency benchmark.
+
+- [ ] **P4056-1:** Retain ALL FOUR original real-consumer cases: supported
+  immutable-runtime update/cutover mid-call with a warm daemon; client-connect
+  versus idle eviction; Windows stale listener/token/generation; upstream
+  failure during a pooled call followed by isolated recovery of later calls.
+  Do not force obsolete in-place venv mutation or treat an atomic marker as
+  complete consumer evidence.
+- [ ] **P4056-2:** Use ONE caller deadline. Distinguish known pre-admission
+  failure from accepted-but-unknown work; timeout, lost reply or EOF after
+  transmission never permits automatic consequential-call replay. Preserve
+  winner handles/active attachments, unrelated warm sessions and truthful
+  results. Keep exact daemon/child/config/endpoint/control-token/runtime-
+  generation custody across repeated/concurrent updates, orchestrator
+  failure, drain/undrain, failed passive promotion and stale recovery.
+  Unknown native evidence and active/non-expiring work remain holds, not
+  age-prune targets; do not extend bounds to hide a hang.
+- [ ] **P4056-3:** Specify reproducible isolated real-consumer evidence using
+  admitted harmless MCP subjects, exact source/installed generation and all
+  four outcomes, deadline measurements, failures and postconditions.
+  Preserve warmth credit: optional cross-platform IPC, on-demand/single-
+  instance/refcount/idle lifecycle (recorded default 300 seconds without
+  references), stateless fallback, per-key serialization, configuration-
+  replacement lease drain and poisoned-entry isolation. Shared component,
+  helper and Bridge controls are partial evidence, not proof no rig exists
+  anywhere or that the whole MCP rig passed.
+
+#### Local Validation for #4056
+
+- [ ] **V4056-1:** Qualify EACH of the four original cases with bounded
+  outcome/deadline/effect/ownership/postcondition evidence, explicit
+  unavailable Windows/installed/native facts and positive absence versus
+  unknown. Endpoint file presence, parser success or PID age proves neither
+  listener readiness nor cleanup authority.
+- [ ] **V4056-2:** Preserve at-most-once negatives, unrelated-session recovery
+  and every exact custody/hold above. Use the original faithful contained/
+  periodic/explicit/native boundary without live consequential subjects,
+  increased budgets or restored integration-as-required-CI. Keep compatible
+  handoff OR bounded cold recovery and separately owned installer/old-daemon
+  bootstrap/backstop policy; this does not waive #609's explicit warm witness.
+
+Both finite families retain the existing Phase7 deduplication/domain-Plan
+acceptance and serial-wave process. Normal reviewed actual merge, complete
+current receiving readback and separate literal source-condition judgments
+precede administrative supersession. This is direct planning intake, not
+acceptance of an executed battery, current liveness or a new implementation
+appointment. Preserve every incumbent Plan, Validation, Request, participant,
+checked credit, journal, source and resource obligation.
+
+### Finite ordinary developer-entry and collection semantics from #4395
+
+**Agent-recommended tracking amendment.** Preserve the whole original and
+current refinements through the existing Phase5/Phase7 boundaries.
+
+- [ ] **P4395-1:** At the actual ordinary developer entry, provide an
+  actionable package-missing/collection-time diagnostic pointing to the
+  sanctioned bounded runner OR document a working supported plugin-local
+  dependency/setup route after which ordinary pytest works without manual
+  `PYTHONPATH` surgery. Choose one supported realization; both are not
+  required. Dependency declarations or a separately known TESTING guide
+  alone do not supply this caller-visible outcome.
+- [ ] **P4395-2:** Reuse the existing runner, governed UV/vendored dependency
+  preparation and documentation/Worktrees owners. Preserve dependency
+  seasoning, containment, supervision, declared effects, runner-owned state
+  and item/group/plugin budgets. Do not invent a pip-compatible recipe,
+  ambient environment patch, new runner or whole-suite prerequisite, or
+  reopen delivered admission/isolation/budget controls.
+- [ ] **P4395-3:** Preserve accurate collection guidance: supported
+  `--test-file` bounds selected file collection, whereas `-k` filters tests
+  after those selected files are imported. Preparation, code-executing
+  collection and execution are distinct. Credit runner/file-selection
+  progress; the historical 300-second/about-five-file observation is not a
+  fresh timeout, performance SLA or universal speedup claim.
+
+#### Local Validation for #4395
+
+- [ ] **V4395-1:** Qualify the ONE chosen original alternative at the real
+  ordinary entry/setup boundary using the least expensive faithful
+  separately authorized bounded lane. The diagnostic gives an actionable
+  supported next step rather than a bare missing-module error; the setup
+  arm verifies its documented supported dependency route without manual
+  `PYTHONPATH`. A helper that bypasses the failing boundary proves neither.
+- [ ] **V4395-2:** Preserve selected-file versus `-k` semantics and narrow-
+  iteration guidance, including the preparation/collection/execution
+  distinction. Record exact original/source/caller evidence and any
+  separately authorized measurements; no present 300-second failure,
+  mandatory timing experiment or broad benchmark is inferred.
+- [ ] **V4395-3:** Preserve existing runner/dependency/file-selection credit,
+  unit/contained/periodic boundaries, effect/state/resource budgets and
+  owning cleanup. Source/docs are not actual caller/setup evidence.
+  Intake authorizes no import, collection, dependency install, test,
+  native trial or host operation and adds no unrelated whole-portfolio/
+  every-host prerequisite.
+
 ## Validation Plan
 
 - [ ] G5921: Resolve EVERY direct #5921 P1-P6, V1-V5 and C1-C3 clause in the Phase4 finite clean-room verdict family at its ORIGINAL source/API consumer tier: actual Python AND Python-less version/schema/evidence-complete reduction and real caller shape, explicit malformed/incomplete/unjudged NON-PASS, correct valid control/classified-jam results/exits, literal-mode separation and source-safe diagnostics. Preserve all incumbent Plan/Validation, OPEN #1303, same owners and independent #5922/#8511/#4312/#688/#1475 gates. Administrative intake is not a reducer fix or executed evidence; no live box/model/all-host/native programme or unrelated whole-portfolio prerequisite is added, and this does not waive the ROOT's own whole completion gate.
@@ -819,6 +964,30 @@ no claim.
   routing credit and Done container foundations do not complete this duty;
   unrelated whole-portfolio, native-every-host or new ACK gates are not added.
 
+- [ ] **G609:** Resolve EVERY direct #609 Plan/local Validation clause at its
+  finite Tier-P connection-owner scope: warm continuity AND non-resumable
+  survival OR deliberate clean drain, real routing/retirement/recovery,
+  safe owner/platform boundaries and preserved completed partials. Retain
+  independent #873/#688/#743 scope and the exact stronger-receiver condition.
+  Tracker intake is not a run or source acceptance; unrelated portfolio work
+  is not an added finite-family gate.
+- [ ] **G4056:** Resolve EVERY direct #4056 four-case Plan/local Validation
+  clause under ONE caller deadline, pre-admission versus accepted-but-unknown/
+  no consequential replay, exact ownership/generation and preserved warmth
+  credit. Routing to a contained/periodic/explicit/native lane is not a pass.
+  Retain every original alternative/hold, excluded coordinator scope and the
+  accepted DIRECT FINAL-OPEN all-residual condition without adding a whole-
+  portfolio prerequisite or waiving this ROOT's own completion gate.
+- [ ] **G4395:** Resolve EVERY direct #4395 Plan/local Validation clause:
+  actionable ordinary-entry diagnostic OR documented working supported
+  local setup without manual `PYTHONPATH`, truthful `-k` versus explicit
+  `--test-file` collection semantics and preparation/execution separation.
+  Preserve existing UV/runner/dependency/file-selection credit, current
+  tiers/budgets and the same custodians. Normal reviewed receiving delivery
+  and complete current readback precede a separate source judgment;
+  documentation is not an implemented fix or executed result. No new
+  generic ACK or unrelated native/whole-parent gate is added or waived.
+
 ## Proposal
 
 Approve the vision, framework, and phased campaign as the repository's
@@ -827,6 +996,32 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-10-28 - Finite ordinary developer-entry intake
+
+- Added direct #4395 Plan/local Validation, actual level-two global
+  Validation and continuing coordination. Preserve diagnostic OR working
+  supported setup, exact `-k`/`--test-file` collection semantics and all
+  existing owners, rows, checked credit and first gates.
+- Existing UV/vendored dependency preparation and explicit-file guidance
+  are credit, not an ordinary-entry diagnostic or verified local recipe.
+  No product-code audit, test/import/collection, install, benchmark,
+  native operation or source/resource disposition occurs here.
+
+### 2026-10-28 - Finite Vault and real MCP witness intake
+
+- Added complete direct #609 and #4056 Plan/local Validation, actual global
+  Validation and continuing coordination under the existing Phase7/Phase4
+  owners, retaining every incumbent row and checked foundation.
+- Preserved #609's warm continuity AND survival OR clean drain, full
+  routing/retirement/recovery and stronger-receiver condition; kept #4056's
+  ALL FOUR cases, one deadline, ambiguous-effect/no-replay custody and
+  accepted direct final-open canonical condition. Existing warm/partial
+  source credit is not missing implementation or a fresh run.
+- Normal reviewed actual delivery and complete current readback precede
+  separate source judgments. No test/import/collection, scenario, credential/
+  endpoint/token/native probe, service operation, implementation, rollout or
+  source/resource release occurs here. The effort remains Active.
 
 ### 2026-10-28 - Direct retained preparation lifetime
 

@@ -8,6 +8,8 @@ Prior inflow: [bounded inflow decisions](roadmap-inflow.md).
 **Status:** Independently admitted, _(agent-recommended)_ bounded P2
 assessments for #9493/#9495. Neither priority is an implementation assignment,
 accepted receiving relation, native qualification or source disposition.
+The assessment and preceding receiving outcomes were reviewed and merged in
+#9505; that publication does not accept either issue into a receiving effort.
 The source investigation is pinned to
 `cab67a4842b2700a57b91ef007ccc19f4ffb72ae`; no tests, UI, native venue or
 runtime operation ran. Whole original requirements, current creator/editor
