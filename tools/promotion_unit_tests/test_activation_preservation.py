@@ -54,6 +54,7 @@ for _name in (
     "test_project_identity_memo_unit_work_counts",
     "test_project_identity_memo_unit_failed_probe",
     "test_project_identity_memo_unit_a_b_a_write_metadata",
+    "test_project_identity_memo_unit_rejects_legacy_origin",
 ):
     assert _name not in globals(), f"duplicate original identity test: {_name}"
     globals()[_name] = getattr(_identity_original, _name)

@@ -1478,23 +1478,20 @@ def test_registered_identity_memo_rejects_a_b_a_config_probe(tmp_path, monkeypat
     assert any(f.reason == "identity-mismatch" for f in report.findings)
 
 
-def test_project_identity_memo_unit_a_b_a_write_metadata(tmp_path, monkeypatch):
+def _synthetic_identity_input_files(tmp_path, monkeypatch):
     from plugin_activation import _project_identity
 
     root = tmp_path / "synthetic-root"
     root.mkdir()
     config = tmp_path / "synthetic-config.txt"
     config.write_bytes(b"original source bytes")
-    original = config.read_bytes()
-    initial_time = config.stat().st_mtime_ns
     executable = tmp_path / "synthetic-git"
     executable.write_bytes(b"not executed")
-    directory_info = root.lstat()
     lstat, read_bytes = Path.lstat, Path.read_bytes
 
     def synthetic_stat(path, *args, **kwargs):
         if path in (root / "objects", root / "refs"):
-            return directory_info
+            return lstat(root)
         if path in (root / "HEAD", root / "config"):
             return lstat(config)
         return lstat(path, *args, **kwargs)
@@ -1509,11 +1506,110 @@ def test_project_identity_memo_unit_a_b_a_write_metadata(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "lstat", synthetic_stat)
     monkeypatch.setattr(Path, "read_bytes", synthetic_read)
     monkeypatch.setattr(_project_identity, "_owned_directory", lambda *_: True)
+    return root, config, executable
+
+
+@pytest.mark.parametrize("changed", ["file", "directory"])
+def test_project_identity_memo_unit_a_b_a_write_metadata(tmp_path, monkeypatch, changed):
+    from plugin_activation import _project_identity
+
+    root, config, executable = _synthetic_identity_input_files(tmp_path, monkeypatch)
+    original = config.read_bytes()
+    target = config if changed == "file" else root
+    initial_time = target.stat().st_mtime_ns
     before = _project_identity.identity_inputs(root, "expected", str(executable))
-    config.write_bytes(b"different intermediate bytes")
-    config.write_bytes(original)
-    os.utime(config, ns=(config.stat().st_atime_ns, initial_time + 1_000_000_000))
+    if changed == "file":
+        config.write_bytes(b"different intermediate bytes")
+        config.write_bytes(original)
+    os.utime(target, ns=(target.stat().st_atime_ns, initial_time + 1_000_000_000))
     after = _project_identity.identity_inputs(root, "expected", str(executable))
     assert config.read_bytes() == original
     assert before is not None and after is not None
     assert before != after
+
+
+@pytest.mark.parametrize("legacy_dir", ["remotes", "branches"])
+def test_project_identity_memo_unit_rejects_legacy_origin(tmp_path, monkeypatch, legacy_dir):
+    from plugin_activation import _project_identity
+
+    root, _config, executable = _synthetic_identity_input_files(tmp_path, monkeypatch)
+    legacy = root / legacy_dir / "origin"
+    legacy.parent.mkdir()
+    legacy.write_bytes(b"synthetic legacy source")
+    assert _project_identity.identity_inputs(root, "expected", str(executable)) is None
+
+
+@pytest.mark.parametrize("mutation", ["worktree-config", "gitdir-swap"])
+def test_registered_identity_memo_rejects_directory_a_b_a_probe(tmp_path, monkeypatch, mutation):
+    repo = tmp_path / "repo"
+    expected = "https://github.com/example/demo.git"
+    wrong = "https://github.com/other/demo.git"
+    _register_project(tmp_path, "demo", repo, expected, actual_remote=wrong)
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    gitdir = repo / ".git"
+    if mutation == "worktree-config":
+        _git(repo, "config", "extensions.worktreeConfig", "true")
+        directory = gitdir
+    else:
+        matching = tmp_path / "matching"
+        matching.mkdir()
+        _git(matching, "init", "-q")
+        _git(matching, "remote", "add", "origin", expected)
+        directory = repo
+    initial_time = directory.stat().st_mtime_ns
+    original = resolver._git
+
+    def transient_match(root, *args):
+        if args != ("remote", "get-url", "origin"):
+            return original(root, *args)
+        if mutation == "worktree-config":
+            volatile = gitdir / "config.worktree"
+            volatile.write_text('[url "https://github.com/example/"]\n    insteadOf = https://github.com/other/\n', encoding="utf-8")
+        else:
+            gitdir.rename(repo / ".git-saved")
+            (matching / ".git").rename(gitdir)
+        try:
+            return original(root, *args)
+        finally:
+            if mutation == "worktree-config":
+                volatile.unlink()
+            else:
+                gitdir.rename(matching / ".git")
+                (repo / ".git-saved").rename(gitdir)
+            os.utime(directory, ns=(directory.stat().st_atime_ns, initial_time + 1_000_000_000))
+
+    monkeypatch.setattr(resolver, "_git", transient_match)
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    monkeypatch.setattr(resolver, "_git", original)
+    report = resolve_active_plugins(home=tmp_path)
+    assert report.active == {}
+    assert any(f.reason == "identity-mismatch" for f in report.findings)
+
+
+@pytest.mark.parametrize("legacy_dir", ["remotes", "branches"])
+def test_registered_identity_memo_reprobes_changed_legacy_origin(tmp_path, legacy_dir):
+    repo = tmp_path / "repo"
+    expected = "https://github.com/example/demo.git"
+    wrong = "https://github.com/other/demo.git"
+    _register_project(tmp_path, "demo", repo, expected)
+    _git(repo, "remote", "remove", "origin")
+    legacy = repo / ".git" / legacy_dir / "origin"
+    legacy.parent.mkdir(exist_ok=True)
+
+    def set_legacy(url):
+        text = f"URL: {url}\nPull: refs/heads/main:refs/heads/main\n" if legacy_dir == "remotes" else f"{url}#main\n"
+        legacy.write_text(text, encoding="utf-8")
+
+    set_legacy(expected)
+    try:
+        actual = _git(repo, "remote", "get-url", "origin")
+    except subprocess.CalledProcessError:
+        pytest.skip("selected Git has no legacy origin reader")
+    if actual != expected:
+        pytest.skip("selected Git does not expose this legacy URL form")
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    set_legacy(wrong)
+    assert resolve_active_plugins(home=tmp_path).active == {}

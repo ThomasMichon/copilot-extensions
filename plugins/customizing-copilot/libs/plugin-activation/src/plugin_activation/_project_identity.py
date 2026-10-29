@@ -24,6 +24,13 @@ def _regular(info: os.stat_result, *, directory: bool = False) -> bool:
     )
 
 
+def _write_version(info: os.stat_result) -> tuple[int, ...]:
+    return (
+        info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+        info.st_size, info.st_mtime_ns, info.st_ctime_ns,
+    )
+
+
 def _owned_directory(path: Path, info: os.stat_result) -> bool:
     if os.name != "nt":
         return info.st_uid == os.geteuid()
@@ -49,15 +56,24 @@ def identity_inputs(root: Path, expected_remote: str, git: str | None) -> str | 
         executable_info = executable.stat()
         dotgit = root / ".git"
         gitdir = dotgit if os.path.lexists(dotgit) else root
-        if os.path.lexists(gitdir / "commondir"):
+        if any(os.path.lexists(path) for path in (
+            gitdir / "commondir", gitdir / "remotes" / "origin",
+            gitdir / "branches" / "origin",
+        )):
             return None
         directories = []
-        for path in (root, gitdir, gitdir / "objects", gitdir / "refs"):
-            info = path.lstat()
+        optional = (gitdir / "remotes", gitdir / "branches")
+        for path in dict.fromkeys((root, gitdir, gitdir / "objects", gitdir / "refs", *optional)):
+            try:
+                info = path.lstat()
+            except FileNotFoundError:
+                if path not in optional:
+                    return None
+                directories.append((str(path), None))
+                continue
             if not _regular(info, directory=True) or not _owned_directory(path, info):
                 return None
-            directories.append((str(path), info.st_dev, info.st_ino, info.st_mode,
-                                info.st_uid, info.st_gid))
+            directories.append((str(path), _write_version(info)))
         files = []
         for name in ("HEAD", "config", "config.worktree"):
             path = gitdir / name
@@ -72,12 +88,8 @@ def identity_inputs(root: Path, expected_remote: str, git: str | None) -> str | 
                 return None
             raw = path.read_bytes()
             after = path.lstat()
-            fields = (
-                "st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_size",
-                "st_mtime_ns", "st_ctime_ns",
-            )
-            before_version = tuple(getattr(before, field) for field in fields)
-            after_version = tuple(getattr(after, field) for field in fields)
+            before_version = _write_version(before)
+            after_version = _write_version(after)
             if before_version != after_version:
                 return None
             if name != "HEAD" and (
