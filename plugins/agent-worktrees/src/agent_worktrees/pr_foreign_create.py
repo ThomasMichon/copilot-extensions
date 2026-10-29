@@ -51,6 +51,8 @@ def create_foreign_pr_from_branch(
     draft: bool = False,
     attribution: bool | None = None,
     new: bool = False,
+    publication_origin: str | None = None,
+    publication_labels: tuple[str, ...] = (),
 ) -> dict:
     """Open a PR on ``target_repo`` from ``from_branch`` (already pushed
     there by some other process) and claim it onto ``worktree_id``'s own
@@ -70,6 +72,13 @@ def create_foreign_pr_from_branch(
     ``finalize_cli.cmd_create_pr``'s own ``--repo``/``--from-branch`` gating,
     which is this function's only caller today).
     """
+    from dataclasses import replace
+    from . import pr_publication_labels
+    try:
+        config = pr_publication_labels.activate(config, publication_origin, publication_labels)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    origin = pr_publication_labels.selected(config.default_repo.pr)
     resolution = pr_config.resolve_repo_config_for_slug(config, target_repo)
     if not resolution.resolved:
         return {
@@ -90,6 +99,12 @@ def create_foreign_pr_from_branch(
 
     repo_cfg = resolution.repo_config
     prcfg = repo_cfg.pr
+    if origin is not None:
+        try:
+            pr_publication_labels.validate_policy(prcfg, origin)
+        except ValueError as exc:
+            return {"error": str(exc)}
+        prcfg = replace(prcfg, publication_origin=origin, publication_origin_active=True)
     if not prcfg.enabled:
         return {
             "error": (
@@ -305,4 +320,9 @@ def create_foreign_pr_from_branch(
             claimed_ref, worktree_id=claim_worktree_id,
             machine=claim_machine, event="claimed", project=claim_project,
         )
+    label_status = pr_publication_labels.reconcile(
+        provider, target_repo, pull.number, origin, api_base=prcfg.api_base, token=token,
+    )
+    if label_status is not None:
+        result["publication_labels"] = label_status
     return result

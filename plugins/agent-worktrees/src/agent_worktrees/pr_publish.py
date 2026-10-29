@@ -663,6 +663,10 @@ def record_pushed_head(
         config, record, pushed_pr, head_sha, remote=remote,
         head_repo=head_repo, head_identity=head_identity, rebase_base_sha=rebase_base_sha,
     )
+    from . import pr_publication_labels
+    labels = pr_publication_labels.refresh(config, record, pushed_pr)
+    if labels and not labels["ok"]:
+        output.warn(f"PR head was pushed; publication labels need repair: {labels['error']}")
     from . import pr_ops
 
     observation_error = pr_ops.refresh_head_observation(config, record, pushed_pr, head_sha)

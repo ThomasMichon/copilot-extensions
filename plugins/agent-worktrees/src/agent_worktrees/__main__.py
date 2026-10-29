@@ -5358,6 +5358,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'config-migrate': ('maintenance_cli', 'cmd_config_migrate'),
     'create': ('worktree_ops_cli', 'cmd_create'),
     'create-pr': ('finalize_cli', 'cmd_create_pr'),
+    'pr-publication-labels': ('finalize_cli', 'cmd_publication_labels'),
     'deploy-instructions': ('context_cli', 'cmd_deploy_instructions'),
     'deregister-session': ('session_binding_cli', 'cmd_deregister_session'),
     'dev': ('maintenance_cli', 'cmd_dev'),
