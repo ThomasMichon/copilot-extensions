@@ -8,21 +8,27 @@ PID files, signals a process group, or treats a stop request as confirmed exit.
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable
-from contextlib import ExitStack
 import json
 import os
-from pathlib import Path
 import sys
+from collections.abc import Callable
+from contextlib import ExitStack
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import installer_engine_uninstall as inspection
 import installer_engine_footprint as footprint
+import installer_engine_uninstall as inspection
 from agent_procutil._daemon_instance_identity import birth_identity
-from agent_procutil.process_retirement import PinnedProcess, RetirementRefused
+from agent_procutil.process_retirement import RetirementRefused
+from agent_procutil.retirement_custody import RetirementCustody
 from versioned_runtime import (
-    CURRENT_LINK, VERSIONS_DIR, _norm_version, _publication_lease, _slot_of_path,
-    current_version, list_versions,
+    CURRENT_LINK,
+    VERSIONS_DIR,
+    _norm_version,
+    _publication_lease,
+    _slot_of_path,
+    current_version,
+    list_versions,
 )
 
 
@@ -149,7 +155,7 @@ def _retire(
     if check_only and targets:
         raise RetirementRefused("Old MCP owners remain while version reaping is explicitly disabled")
     retired = set()
-    with ExitStack() as custody:
+    with RetirementCustody(root) as guardian, ExitStack() as custody:
         pinned = {}
         for _ in range(64):
             # Pause parents before discovering further descendants. Once every
@@ -162,7 +168,7 @@ def _retire(
                 for pid in sorted(ready):
                     row = rows[pid]
                     try:
-                        pin = custody.enter_context(PinnedProcess(pid, _birth(row)))
+                        pin = custody.enter_context(guardian.pin(pid, _birth(row)))
                         pin.pause()
                         if pin.exited():
                             raise RetirementRefused(

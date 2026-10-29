@@ -239,6 +239,15 @@
           "module": "agent_mcp"
         },
         "effects": {
+          "retirement-custodian": {
+            "kind": "process", "scope": "installation",
+            "entries": ["runtime-retirement-custodian"], "disposition": "preserve"
+          },
+          "retirement-coordination": {
+            "kind": "preserved-state", "scope": "installation",
+            "entries": ["private-native-retirement-lifeline", "daemon-instance:runtime-retirement-custodian"],
+            "disposition": "preserve"
+          },
           "legacy-runtime-processes": {
             "kind": "process", "scope": "runtime-root",
             "entries": [".venv", "venv", "tool"], "disposition": "retire"
@@ -271,7 +280,7 @@
           },
           "configuration-and-data": {
             "kind": "preserved-state", "scope": "runtime-root",
-            "entries": ["bridges", "overrides", "token-cache", "materialized", "logs", "serve.log", "serve-g{generation}.log", "unknown-contents"],
+            "entries": ["bridges", "overrides", "token-cache", "materialized", "logs", "serve.log", "serve-g{generation}.log", "retirement-custodian.log", "unknown-contents"],
             "disposition": "preserve"
           }
         },
@@ -282,13 +291,13 @@
           }
         },
         "producers": {
-          "scripts": "cf68f488f136746015ae81db2c8f551a9e63edf73d75b9aea250406638a7fc11",
+          "scripts": "7e398658a9dc95e20b2cd90497480090818980704f5f6131cedb8fdd81b219cd",
           "src": "bc105c7f586800030974daeda7a65667a62a3cbc8bd4efa0accb071bbac1a684"
         }
       },
       "delta": {
-        "introduced": ["effects:legacy-runtime-processes", "root_entries:venv"],
-        "changed": ["producers:scripts"],
+        "introduced": ["effects:legacy-runtime-processes", "effects:retirement-coordination", "effects:retirement-custodian", "root_entries:venv"],
+        "changed": ["effects:configuration-and-data", "producers:scripts"],
         "retired": []
       }
     }

@@ -684,6 +684,10 @@ def inspect(root: Path) -> dict[str, object]:
         if first_status.get("configured") is not True:
             raise RuntimeError("fixture adoption was not configured")
         result["negative_topology"] = negative_topology(root, pu, callers, children, jobs)
+        from retirement_custody_acceptance import qualify as qualify_retirement
+
+        result["retirement_started"] = True
+        result["retirement"] = qualify_retirement(root, packages, pu)
         for cycle in range(2):
             if cycle == 1:
                 previous = config
@@ -905,6 +909,7 @@ def inspect(root: Path) -> dict[str, object]:
         cleanup = (
             (not result.get("update_worker_started") or "update_worker" in result)
             and (not result.get("cell_started") or "cell" in result)
+            and (not result.get("retirement_started") or "retirement" in result)
         )
         for child in children:
             if child._handle is not None:

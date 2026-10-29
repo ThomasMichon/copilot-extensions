@@ -15,6 +15,22 @@ It never discovers targets, authorizes an update, signals a group, or replaces
 the caller's lifecycle/critical-connectivity policy. Other platforms refuse
 external pinning rather than falling back to numeric PID kills.
 
+For an installer that can be killed while its incumbents are paused, use
+`agent_procutil.retirement_custody.RetirementCustody(root)` from the
+`retirement-custody` extra, and obtain context-managed pins with
+`custody.pin(pid, birth)`. One attributed finite worker owns the actual pins
+outside the production caller's Windows Jobs or Linux process group. Windows
+uses the already-adopted launch broker and authenticated private pipe; Linux
+inherits one anonymous socketpair and the original caller's pidfd. The worker
+never discovers targets or adds update authority. Caller death, a closed
+lifeline, or a 30-second idle deadline resumes all remaining originals before
+worker exit. Normal close confirms kernel exit and settles the instance record.
+An ambiguous native resume retains the live pin without blindly repeating
+Windows suspend-count changes; the worker waits for that original's exit and
+the caller reports unsettled custody. No hard-kill cleanup is permitted while
+live paused pins remain. Contained tests do not escape their enclosing cleanup
+boundary; they are not evidence of production Job-death survival.
+
 `agent_procutil.diagnostics` also supplies the pure, bounded subprocess
 diagnostic parser/redactor originally owned by Bridge's resolver. Bridge retains
 its compatibility exports and retry policy; Dispatch can use

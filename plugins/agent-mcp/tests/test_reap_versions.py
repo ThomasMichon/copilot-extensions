@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import importlib.util
-from dataclasses import replace
 import os
-from pathlib import Path
 import subprocess
 import sys
+from contextlib import nullcontext
+from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -32,7 +33,10 @@ def owners(tmp_path, monkeypatch):
         112: _row(112, 111, tmp_path / "upstream"),
         222: _row(222, os.getpid(), tmp_path / "versions/2.0/bin/python"),
     }
-    state = {"rows": rows, "paused": [], "terminated": [], "resumed": [], "exited": set()}
+    state = {
+        "rows": rows, "paused": [], "terminated": [], "resumed": [], "exited": set(),
+        "custodies": 0,
+    }
 
     class Pin:
         def __init__(self, pid, birth):
@@ -55,7 +59,12 @@ def owners(tmp_path, monkeypatch):
             if not self.exited():
                 state["terminated"].append(self.pid)
 
-    monkeypatch.setattr(rv, "PinnedProcess", Pin)
+    def custody(root):
+        state["custodies"] += 1
+        return nullcontext(type("Custody", (), {"pin": staticmethod(Pin)})())
+
+    monkeypatch.setattr(rv, "RetirementCustody", custody)
+    state["pin_type"] = Pin
     monkeypatch.setattr(rv, "birth_identity", lambda pid: f"linux:boot:ns:{rows[pid]['created']}")
     monkeypatch.setattr(rv, "_inspect", lambda root: {
         pid: row for pid, row in rows.items() if pid not in state["terminated"]
@@ -70,12 +79,14 @@ def test_reap_settles_original_tree_and_spares_current_and_parent(tmp_path, owne
     assert owners["paused"] == [111, 112]
     assert owners["terminated"] == [111, 112]
     assert owners["resumed"] == []
+    assert owners["custodies"] == 1
     assert reaped == [{"version": "1.0", "pid": 111, "terminated": True}]
 
 
 def test_reap_exclusion_protects_descendants(tmp_path, owners):
     assert rv.reap_stale(tmp_path, exclude_pids={111}) == []
     assert owners["paused"] == []
+    assert owners["custodies"] == 0
 
 
 def test_fresh_recovery_cannot_call_a_retained_old_owner_settled(tmp_path, owners):
@@ -213,7 +224,7 @@ def test_rooted_process_paths_cannot_traverse_a_foreign_version_directory(tmp_pa
 
 
 def test_exit_failure_resumes_remaining_originals(tmp_path, owners, monkeypatch):
-    pin_type = rv.PinnedProcess
+    pin_type = owners["pin_type"]
 
     def fail(_):
         raise rv.RetirementRefused("Process exit was not confirmed")
@@ -333,6 +344,7 @@ def test_idle_fresh_reaper_does_not_require_current_owner_retirement_custody(tmp
     owners["rows"][222]["children"] = [999]
     assert rv.reap_stale(tmp_path, fresh=True) == []
     assert owners["paused"] == []
+    assert owners["custodies"] == 0
 
 
 def test_missing_current_is_not_silently_reported_as_settled(tmp_path, owners, monkeypatch):

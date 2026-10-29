@@ -620,6 +620,10 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-procutil --allow-explicit-tiers
           --test-file tests/test_process_retirement.py
+          --test-file tests/test_retirement_custody.py
+      - name: Qualify retirement custody after actual Linux caller group death
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' && runner.os == 'Linux' }}
+        run: python tools/retirement_custody_acceptance.py --ephemeral-ci-consent
       - name: Qualify fresh command metadata and pending-owner recovery
         if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
         run: >-

@@ -2569,6 +2569,14 @@ receipt. A disabled version-reap override requests check-only admission: it cann
 report remaining old owners as settled. Incremental callers retain best-effort
 behavior but report unconfirmed retirement as incomplete.
 
+The reaper uses procutil's optional
+[`RetirementCustody`](../libs/agent-procutil/README.md) finite-worker API so
+installer death cannot strand its externally paused originals. The worker
+retains the native pins outside the production caller's cleanup boundary;
+lost caller custody resumes remaining originals rather than authorizing further
+termination. It reuses the already-adopted Windows broker, never installs a
+broker or requires a legacy runtime receipt to gain update permission.
+
 An identity disappearing before its tree is frozen is unconfirmed settlement,
 not success. Exited pins never seed later PID ancestry, every paused member's
 executable protection is rechecked, and an excluded root missing from census

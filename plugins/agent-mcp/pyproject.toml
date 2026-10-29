@@ -19,7 +19,7 @@ dependencies = [
     "agent-update-driver",
     "pyyaml>=6.0.3",
     "agent-credential-relay",
-    "agent-procutil",
+    "agent-procutil[retirement-custody]",
     "agent-single-instance-lease",
     "agent-zdd",
 ]
