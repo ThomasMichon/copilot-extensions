@@ -12,6 +12,13 @@ boundary, not a full interactive Picker/desktop-session launch or installed
 host rollout. The existing activation lane retains the shared-outer negative
 control and positive desktop-observer canary.
 
+Worktrees' `test_command_lifecycle_recovery.py` covers read-only inspection,
+evidence-bound pending-owner qualification, preservation of unrelated manifest
+and runtime state, changed source/evidence and policy refusals, and live
+publication-lock custody. Its Windows subprocess control runs the shipped helper
+against disposable payload/runtime roots before ordinary lifecycle publication;
+it is not installed-host rollout or service-convergence evidence.
+
 `tools/test_runtime_profile_bundle.py` checks the repeatable exact-profile
 transport producer, actual command invocation, canonical consumer readback,
 determinism, source independence, aggregate storage and refusal/cleanup paths.
@@ -244,6 +251,14 @@ They execute the production export/flag-building blocks and observe literal
 tmux argument delivery for empty values, quotes, multiline values and unchanged
 AHP credential exclusions. They do not qualify a live tmux server, complete
 Manager launch or installation survival.
+The copied POSIX consumer packet also feeds those actual Manager-produced
+environment arguments into the unmodified native setup and requires a direct
+Bash parent, literal backend environment, retained input and completed receipts.
+It does not replace that component path with a renderer-admission mock.
+It executes the production command-array/interpreter-refresh blocks and covers
+quoted-empty initializer behavior. Native host-preservation controls execute
+the matching Bash and PowerShell refresh blocks, and JSON resume coverage
+checks direct native eligibility without an explicit no-mux override.
 That packet also explicitly selects `test_launch_seed_native.py` so the
 setup-only provider birth query exercises the canonical native OS helper,
 not a Bash ABI substitute. It covers caller-provided identity compatibility,

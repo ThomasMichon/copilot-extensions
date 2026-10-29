@@ -7,7 +7,7 @@ Selected priorities: [current slice qualification](roadmap-current-qualification
 Integration: [cross-wave sequencing](roadmap-sequencing.md).
 Actual dispositions and census: [follow-through register](roadmap-follow-through.md).
 
-**Status:** Two bounded inflow groups are independently admitted outside the
+**Status:** Bounded inflow groups are independently admitted outside the
 frozen 682-assignment roster. The first #9412/#9413/#9414 group uses
 `326a72d1332afe351e7f5e8ac0841ecba56a8230`; the later
 #9435/#9436/#9442 group starts at `94df27510cd6a6d6db1c659846e0ff5921d7aa7a`,
@@ -286,3 +286,143 @@ failure, exact selected source/blob identities and stable full-roster/whole-
 issue guards. Neither proposes whole-issue completion, reads a PR body or
 performs a guard, fixture, native, cache, source/claim or tracker action.
 The older `94df` reports remain immutable evidence of their actual snapshots.
+
+## Installation-owner and qualification inflow: finite next decisions
+
+The following are **agent-recommended, source-qualified triage proposals**,
+not new source appointments or an exhaustive priority order. #9443/#9448
+use `6867bbbc05dcb8f81dd7cfd39f4ec1f6940fb82e`;
+#9456/#9457/#9460/#9462 use
+`fc2286c4522058723b2c28a1bb80da8f563f889b`; #9464 uses
+`c4dce1df00f9009c4938c9e7155b076c9b1480ff`. Later candidate
+delivery/native readiness must be qualified separately. These snapshots are
+not claims that every described source gap still exists at the moving tip.
+No native failure cause, ordinary production outage or new implementation
+permission follows.
+
+| Issue | Scoped recommendation and admitted distinction | First existing-owner decision and finite exit |
+|---|---|---|
+| #9464 | **P1, selected native qualification/coverage integrity.** Five already-selected cold modules share a 900-second plugin aggregate; `--timeout 1380` controls sub-suites, not that aggregate. Prior individual passes and separate foundation success do not establish complete first-use or later health/snapshot/admission coverage. | Through the existing #9455/runner/native owners, qualify the exact reviewed framing and preserve the same complete module/case union in independent optional native packets. Keep every item/group/plugin/job/intrinsic-child cap, cleanup and health control. Native receipts must identify completed/failed/skipped outcomes honestly. If an unchanged complete module still fails its bound, retain that residual; no automatic retry-until-pass, cap increase or case drop. |
+| #9448 | **P2, first retained foundation admission.** An existing healthy queue without a retained selector reaches a selected-foundation-only path at the pin. The separately reported cold outside-Job failure occurs before bridge/construction and remains launch-outcome-unknown; it is not the bridge's proved cause. | Qualify the current claimant's actual immutable delivery and originally promised hosted/installed witness. Preserve the supported installed-runtime bridge OR equivalent canonical repair entry, fixed admission module, full runtime selection, strict health/witness/state compatibility, queue bytes and no replay. Existing selected-foundation upgrades and missing/corrupt refusals remain. |
+| #9456 | **P2, Linux native entry framing.** The raw native workflow step lacks the existing canonical tools import root; the asset packager is delivered, not a missing implementation. The reported failure is helper import before foundation construction. | Qualify the existing owner's bounded import-path correction through the original real native step, preserving actual child/cleanup controls. An import fixture or workflow file change alone is not that native result; no replacement packager or bridge is nominated. |
+| #9462 | **P2, selected lifecycle interpreter/custody.** The supported absolute interpreter selector, existing custody guard, renewable lifecycle and real child assertions are credit. The reported hosted owner/mode rejection remains unexplained. | Qualify supported interpreter selection and actual owner/mode through the existing native owner. Preserve custody refusal, renewable lease, real exit 37, PID relationship and 20-second child limit. No `chmod`, ownership bypass or lease/deadline expansion follows. |
+| #9460 | **P2, fixture teardown discovery.** The hosted cold bootstrap fixture carries an intentionally Python-free PATH into finally cleanup. Production's external Python 3.10+ and removed-prefix closure checks are correct. | Restore only teardown-child discovery of the already-owned external base, preserving cold isolation, private fixture roots, routing scrubs and production closure checks. The original hosted case and scoped cleanup must pass at unchanged bounds; no cold-path weakening or uninstaller bypass. |
+| #9457 | **P2, failure evidence retention.** The first cold-admission assertion reads only the submitter log rather than the existing broader collector. Inner exception, per-launch log and uncertain-lifetime safeguards are credit; native cause and disappeared-fixture contents remain unknown. | Qualify a bounded attributed collector at that first assertion using synthetic present/missing/unreadable/truncated evidence. Preserve actual instance/operation/source identity, exception stage/code when present, unknown fields, redaction and durable failure evidence. Original native qualification stays separate; no replay, foreground fallback, deadline increase or speculative broker/Job/ACL/OOM repair. |
+| #9443 | **P2, ordinary SSH transport window isolation.** The shared helper also serves interactive SSH, so globally suppressing its window would alter intended behavior. The original ordinary list AND follow-forwarding scope is retained; the reported live cause is not independently established. | Use the existing SSH/Bridge owners to preserve aliases, trust/routing, platform/provider behavior and interactive use while qualifying both ordinary list and follow paths through their original supported boundary. No new transport helper, live SSH action or process operation is authorized here. |
+
+These are seven different finite outcomes, not seven symptoms of one guessed
+failure. #9455 was OPEN at the admitted candidate observations; its title,
+changed paths and inclusion notes are not delivery or native acceptance.
+The first decision is to credit its actual reviewed source where established,
+then address only the genuinely remaining original-tier qualification or
+source gap. No duplicate driver, launcher or recovery patch is allocated.
+
+The proposed **P1** concerns completion and integrity of the already-selected
+native portfolio, not a newly measured production latency or all-fleet
+incident. Its meaningful packet boundaries do not imply that all independent
+packets combined share one 900-second family cap. All original late coverage,
+individual caps and honest residual failures survive; successful foundation
+construction cannot substitute for first-use/adopter acceptance.
+
+Source-Managed Runtime Installs and its existing execution-owner contract
+supply #9448's related home, but exact #9448 receiving intake is not established.
+The other bounded studies likewise do not establish a complete applicable
+ROOT intake. This is a finite home-mapping gap, not proof no home exists,
+permission to create parallel efforts or an unrelated whole-parent gate.
+Existing issue/source/native/resource custodians and their literal active
+conditions remain the continuing coordination boundary.
+
+### Actual #9444 delivery is not another enforcement repair
+
+The old fixed-`6867` #9444 gap is superseded by actual **merged #9447**,
+approved head `be4c0860a0baa3c7fa4c4cfb2321ba2c6a60b337` and merge
+`17c8272e76523304a755a428bbcf52a00b657f4d`. Ten changed
+approved/merged/selected blob relations were independently checked; the
+selected source is `b992973b6a0493ca4e48c3e4f5986b940cafd383`.
+All seven original clauses remain retained. The source issue was externally
+closed as completed at **2026-10-28 22:34:44 UTC (15:34:44 PDT)**, earning
+zero campaign closure credit.
+
+No fresh issue, PR or closeout-comment body was read for that delta.
+Per-case execution not independently witnessed here is not a new reopening
+or duplicate-patch gate. Do not retain the old missing-enforcement proposal
+as an active repair merely because its earlier research snapshot is immutable.
+
+### Sequencing and continued inflow limits
+
+Preserve the actual same-owner edit/validation interfaces around #9455, not a
+whole-issue chain among these records. Qualification framing, diagnostic
+retention, Linux entry/interpreter custody and Windows fixture cleanup are
+distinct bounded work. A pre-bridge admission failure does not establish a
+bridge cause; an aggregate-budget overrun does not establish an individual
+assertion failure. Native unknowns cannot be resolved by arbitrary replay,
+unowned cleanup or expanding deadlines.
+
+The later #9465/#9466/#9467/#9468 records have separately admitted metadata-first
+studies, not rankings inferred from their titles. #9467's refined result is
+recorded below; [the other three owner-boundary assessments](roadmap-inflow-late-owner.md)
+retain their exact partial-source, candidate and native-proof limits.
+The [later complete census](roadmap-follow-through.md#eight-further-administrative-folds-after-complete-receiving-readback)
+contains 929 whole issues after eight separately verified administrative
+folds and six arrivals; the earlier 931 observation remains historical.
+Neither this triage nor #9444's external closure silently changes a census.
+This research performs no product import, collection,
+test, native experiment, runtime/service/process action, install, repair,
+claim transfer or rollout.
+
+## #9467 - P2 managed-base delegation attribution
+
+The complete original and later own refinement were separately qualified
+against the full current collaborator roster. Eleven immutable source
+files and 32 exact quotations at
+`cc63cf74cc8bcea4c1afc27324e818e9b9f5bbc8` support this bounded
+assessment. The original isolated Windows bootstrap packet refused cleanup
+**before stopping** an unclassified live child; that is neither a stop-latency
+measurement nor permission to terminate it.
+
+The [complete eligible refinement](https://github.com/ThomasMichon/copilot-extensions/issues/9467#issuecomment-6483912301)
+materially narrows the **reported**, not independently reproduced, case: in BOTH
+bootstrap AND command packets, the owned venv launcher delegates to the
+controlled managed-base interpreter named by that venv, outside `InstallDir`,
+with the same service module/foreground/persistent arguments. Failure-only
+diagnostic progress is credit, not a new diagnostics rewrite. Do not retain
+the original wholly-unattributed description as though that refinement did not
+exist.
+
+The [public comment API](https://api.github.com/repos/ThomasMichon/copilot-extensions/issues/comments/6483912301)
+retains the complete body, including "the same controlled managed base Python
+named by the venv", "running the same -m agent_vault.service --foreground
+--persistent argv" and "rejects its physical interpreter child outside
+InstallDir". These are the author's diagnostic assertions, not positive
+native ownership proof supplied by this research.
+
+The pinned ownership guard classifies root-local service rows and refuses a
+live child outside that classified set before stop/removal. This corroborates
+the reported compatibility boundary; it does not independently establish a
+native child's ownership. The original claimant is still verifying the
+canonical base-interpreter AND native ancestry/SID/birth relationship.
+Matching argv, basename or later creation alone cannot supply that proof.
+The actual log-handle owner and current process lifetime remain unknown.
+
+**First existing-owner decision and finite exit:** Use the existing Vault
+installer/driver/native lane and reported diagnostics to qualify the exact
+canonical venv/base relationship at the pre-stop ownership boundary. Preserve
+both original controlled Windows packet classes and actual teardown outcomes.
+Foreign/unknown executables or bases, argv/SID mismatch, unavailable ownership,
+stale/reused PID/birth and unrelated children must still refuse before stop
+or removal. Existing manifest/root-indirection/task/PID receipt and retained-
+state safeguards remain, along with bounded redacted diagnostics and original
+time limits. If positive native binding is incomplete, retain that exact gap;
+do not make a test green through a broad child whitelist, stop-first behavior,
+foreground/direct-Python bypass, deadline increase or live Vault cleanup.
+
+The related Vault Service ROOT is **Draft architecture/planning**, not accepted
+intake or an appointment for this compatibility leaf. Its broader credential/
+provider/federation/adopter work is not a new prerequisite. #9467 and its
+continuing claimant remain the finite tracking boundary; #9455 was observed
+OPEN with relevant changed-path metadata, not delivered source or native proof.
+#9460's external-interpreter fixture duty remains distinct.
+
+This is an agent-recommended **P2** source/native-qualification proposal, not
+an independently reproduced incident, actual production correction, technical
+completion, claim release or rollout authorization.

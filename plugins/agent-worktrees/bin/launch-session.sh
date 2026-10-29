@@ -1148,7 +1148,9 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
     fi
     PYTHON="$_REFRESHED_PYTHON"
     setup_log INFO "Runtime refreshed before knowledge preflight: $PYTHON"
-    if [[ "$_PENDING_NEW_SEED" == "1" ]]; then
+    if [[ "$_PENDING_NEW_SEED" == "1" &&
+        "${CMD_ARRAY[1]:-}" == "-m" &&
+        "${CMD_ARRAY[2]:-}" == "agent_worktrees.launch_seed_exec" ]]; then
         CMD_ARRAY[0]="$PYTHON"
     fi
 

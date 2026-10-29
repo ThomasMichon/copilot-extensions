@@ -39,7 +39,7 @@ def _run(prefix, environment, cwd, *arguments):
 
 def _plan(
     tmp_path, installed, bash, seed_kind, *, interactive=False, env_script=None,
-    arguments=None, expect_native=True, bash_env=None, environment_known=True,
+    arguments=None, expect_native=True, bash_env=None, mux=False,
 ):
     root, plugin, prefix, environment = installed
     scripts = root / "scripts"
@@ -142,7 +142,7 @@ prepared = launch_seed_exec.deferred_command(
     command, created.yaml_path, seed_id=seed.seed_id if seed else None,
     admission_only=seed is None, correlation=correlation,
     environment={"BASH_ENV": sys.argv[10]} if sys.argv[12] == "1" else None,
-    environment_known=sys.argv[11] == "1",
+    mux=sys.argv[11] == "1",
 )
 index = launch_seed_exec.native_setup_index(prepared)
 assert (index is not None) == (bool(seed_kind) and not sys.argv[8] and sys.argv[9] == "1"), prepared
@@ -159,7 +159,7 @@ print(json.dumps({
         str(env_script) if env_script is not None else "",
         "1" if expect_native else "",
         str(bash_env) if bash_env is not None else "",
-        "1" if environment_known else "",
+        "1" if mux else "",
         "1" if bash_env is not None else "",
     ))
     env = {
@@ -265,10 +265,13 @@ def test_inherited_python_environment_and_execution_hint_survive_native_exec(
     _assert_return(plan, 7, True)
 
 
+@pytest.mark.parametrize("bash_env", [None, ""])
 def test_native_control_utilities_do_not_change_a_restricted_backend_path(
-    tmp_path, installed_native_runtime, native_bash,
+    tmp_path, installed_native_runtime, native_bash, bash_env,
 ):
-    plan, environment, checkout = _plan(tmp_path, installed_native_runtime, native_bash, "new")
+    plan, environment, checkout = _plan(
+        tmp_path, installed_native_runtime, native_bash, "new", bash_env=bash_env,
+    )
     environment["PATH"] = str(tmp_path / "no-utilities")
     backend = tmp_path / "backend"
     backend.write_text(
@@ -411,7 +414,7 @@ def test_mux_server_initializer_uses_only_explicit_pane_overrides(
 
     plan, environment, checkout = _plan(
         tmp_path, installed_native_runtime, native_bash, "new",
-        environment_known=override is not None, expect_native=override == "", bash_env=override,
+        mux=True, expect_native=override == "", bash_env=override,
     )
     primer = tmp_path / "server-bash-env.sh"
     primer.write_text("trap 'exit 1' EXIT\nexit 5\n", encoding="utf-8")
@@ -446,22 +449,65 @@ def test_mux_server_initializer_uses_only_explicit_pane_overrides(
     )
 
 
-def test_opaque_shell_rendered_empty_override_retains_legacy_backend_and_receipts(
-    tmp_path, installed_native_runtime, native_bash,
+@pytest.mark.parametrize("legacy_forwarding", [False, True])
+def test_manager_literal_pane_environment_runs_native_setup_without_renderer_admission(
+    tmp_path, installed_native_runtime, native_bash, legacy_forwarding,
 ):
     plan, environment, checkout = _plan(
         tmp_path, installed_native_runtime, native_bash, "new",
-        bash_env="", environment_known=False, expect_native=False,
+        bash_env="", mux=True,
     )
-    environment["BASH_ENV"] = "''"
+    _root, _plugin, prefix, _env = installed_native_runtime
+    source = (Path(__file__).resolve().parents[4] / "worktree-manager/bin/launch-session.sh").read_text(
+        encoding="utf-8",
+    )
+    start = source.index("    # Export profile env vars")
+    exports = source[start:source.index("    # Build command array from JSON", start)]
+    start = source.index("    # Build command array from JSON")
+    command_array = source[start:source.index('    SESSION_BACKEND_JSON=""', start)]
+    start = source.index('    if [[ "$_PENDING_NEW_SEED" == "1" &&')
+    refresh = source[start:source.index("    _KNOWLEDGE_CWD=", start)]
+    start = source.index("        TMUX_ENV_FLAGS=()")
+    flags = source[start:source.index("        # Pane wrapper", start)]
+    selected = {"BASH_ENV": "", "FIXTURE_LITERAL": environment["FIXTURE_LITERAL"]}
+    selected_command = list(plan["command"])
+    selected_command[selected_command.index("--runtime-python") + 1] = "/missing/old-runtime/python"
+    rendered = run_caller_owned(
+        [native_bash, "-c", "\n".join([
+            "set -euo pipefail",
+            f"PYTHON={shlex.quote(prefix[0])}",
+            f"JSON={shlex.quote(json.dumps({'env': selected, 'cmd': selected_command}))}",
+            exports,
+            command_array,
+            "_PENDING_NEW_SEED=1; setup_log() { :; }",
+            refresh,
+            "_AHP_RESUME_AVAILABLE=0; SETUP_LOG=; LAUNCH_ID=",
+            flags,
+            '''"$PYTHON" -I -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "${CMD_ARRAY[@]}"''',
+            '''"$PYTHON" -I -c 'import json,sys; print(json.dumps(sys.argv[1:]))' '''
+            '''${TMUX_ENV_FLAGS[@]+"${TMUX_ENV_FLAGS[@]}"}''',
+        ])], env=environment, cwd=checkout, timeout=30,
+        max_stdout_bytes=65536, max_stderr_bytes=65536,
+    )
+    assert rendered.returncode == 0, rendered.stdout + rendered.stderr
+    command, arguments = map(json.loads, rendered.stdout.splitlines())
+    assert Path(command[0]).is_absolute() and Path(command[0]).name == "env"
+    assert command[command.index("--runtime-python") + 1] == prefix[0]
+    assert arguments == ["-e", "BASH_ENV=", "-e", "FIXTURE_LITERAL=" + selected["FIXTURE_LITERAL"]]
+    for index in range(0, len(arguments), 2):
+        key, _, content = arguments[index + 1].partition("=")
+        environment[key] = content
+    if legacy_forwarding:
+        environment["BASH_ENV"] = "''"
     result = run_caller_owned(
-        plan["command"], env=environment, cwd=checkout, input_text="retained stdin\n", timeout=60,
+        command, env=environment, cwd=checkout, input_text="retained stdin\n", timeout=60,
         max_stdout_bytes=65536, max_stderr_bytes=65536,
     )
     assert result.returncode == 7, result.stdout + result.stderr + repr(_observations(plan))
     backend = json.loads((tmp_path / "backend.json").read_text())
-    assert "python" in backend["parent_command"].lower()
+    assert "bash" in backend["parent_command"].lower()
     assert backend["stdin"] == "retained stdin\n"
+    assert backend["literal_env"] == selected["FIXTURE_LITERAL"]
     _assert_return(plan, 7, True)
 
 

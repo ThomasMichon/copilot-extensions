@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -179,6 +180,55 @@ def test_powershell_launcher_contains_unwrap():
     text = _LAUNCH_PS1.read_text()
     assert "$plan.PSObject.Properties.Name -contains 'launch'" in text
     assert "$plan = $plan.launch" in text
+
+
+@pytest.mark.parametrize("command", [
+    ["bash", "default-setup.sh"],
+    ["pwsh", "-File", "default-setup.ps1"],
+    ["old-python", "-m", "agent_worktrees.launch_seed_exec", "--", "copilot"],
+    ["env", "BASH_ENV=", "bash", "default-setup.sh"],
+])
+def test_seed_interpreter_refresh_preserves_native_hosts(tmp_path, command):
+    expected = "selected-python" if command[0] == "old-python" else command[0]
+    if os.name == "nt":
+        source = _LAUNCH_PS1.read_text(encoding="utf-8")
+        start = source.index("if ($plan.cmd) {")
+        refresh = source[start:source.index("$knowledgeCwd =", start)]
+        code = "\n".join([
+            "$ErrorActionPreference = 'Stop'",
+            "$plan = '" + json.dumps({"seed_pending": True, "cmd": command}) + "' | ConvertFrom-Json",
+            "$VenvPython = 'selected-python'",
+            "function Write-SetupLog {}",
+            refresh,
+            "ConvertTo-Json -Compress -InputObject @($plan.cmd)",
+        ])
+        executable = shutil.which("pwsh")
+        assert executable, "The native Manager packet requires PowerShell"
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command", code],
+            cwd=tmp_path, capture_output=True, text=True, timeout=15,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    else:
+        source = _LAUNCH_SCRIPT.read_text(encoding="utf-8")
+        start = source.index('    if [[ "$_PENDING_NEW_SEED" == "1" &&')
+        refresh = source[start:source.index("    _KNOWLEDGE_CWD=", start)]
+        code = "\n".join([
+            "set -euo pipefail",
+            "CMD_ARRAY=(" + shlex.join(command) + ")",
+            "_PENDING_NEW_SEED=1; PYTHON=selected-python; setup_log() { :; }",
+            refresh,
+            shlex.quote(sys.executable) + " -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "
+            '"${CMD_ARRAY[@]}"',
+        ])
+        environment = dict(os.environ)
+        environment.pop("BASH_ENV", None)
+        result = subprocess.run(
+            ["/bin/bash", "-c", code], cwd=tmp_path, env=environment,
+            capture_output=True, text=True, timeout=15,
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == [expected, *command[1:]]
 
 
 def test_launchers_pass_project_to_resolve_and_post_exit():

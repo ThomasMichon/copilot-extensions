@@ -512,16 +512,15 @@ def test_posix_unsupported_inputs_keep_legacy_owner_without_matching_literal_val
 
 
 @pytest.mark.skipif(os.name != "posix", reason="Native POSIX setup plan")
-@pytest.mark.parametrize("ambient, environment, environment_known, legacy", [
-    (None, {"BASH_ENV": "selected-primer.sh"}, True, True),
-    ("ambient-primer.sh", None, True, True),
-    ("ambient-primer.sh", {"BASH_ENV": ""}, True, False),
-    (None, None, False, True),
+@pytest.mark.parametrize("ambient, environment, mux, legacy", [
+    (None, {"BASH_ENV": "selected-primer.sh"}, False, True),
+    ("ambient-primer.sh", None, False, True),
+    ("ambient-primer.sh", {"BASH_ENV": ""}, False, False),
+    (None, None, True, True),
     (None, {"BASH_ENV": ""}, True, False),
-    (None, {"BASH_ENV": ""}, False, True),
 ])
 def test_posix_bash_env_selection_uses_the_effective_launch_environment(
-    launch, monkeypatch, ambient, environment, environment_known, legacy,
+    launch, monkeypatch, ambient, environment, mux, legacy,
 ):
     from agent_worktrees import launch_seed_contract
 
@@ -542,15 +541,14 @@ def test_posix_bash_env_selection_uses_the_effective_launch_environment(
     monkeypatch.setattr(launch_seed_contract, "supports_posix_setup", support)
     command = ["/bin/bash", str(scripts / "default-setup.sh"), "--stdio"]
     prepared = launch_seed_exec.deferred_command(
-        command, record, seed_id="staged", environment=environment,
-        environment_known=environment_known,
+        command, record, seed_id="staged", environment=environment, mux=mux,
     )
     if legacy:
         assert prepared[1:3] == ["-m", "agent_worktrees.launch_seed_exec"]
         assert prepared[-len(command):] == command
         assert not (record.parent / "launch-attempts").exists()
     else:
-        assert launch_seed_exec.native_setup_index(prepared) == 1
+        assert launch_seed_exec.native_setup_index(prepared) == 3
 
 
 @pytest.mark.skipif(os.name != "posix", reason="Native POSIX setup plan")

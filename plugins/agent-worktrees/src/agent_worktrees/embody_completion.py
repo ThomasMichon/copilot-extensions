@@ -35,8 +35,7 @@ def prepare_startup_seed(
         raise ValueError("Could not stage native startup prompt")
     return (
         launch_seed_exec.deferred_command(
-            command, record_path, seed_id=current.seed_id, environment=environment,
-            environment_known="BASH_ENV" in (environment or {}),
+            command, record_path, seed_id=current.seed_id, environment=environment, mux=True,
         ),
         current.seed_id,
     )

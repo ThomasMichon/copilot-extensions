@@ -164,6 +164,14 @@ and [repair register](reconstruction-findings.md) retain the evidence and limits
 
 ## Plan
 
+**Renderer-admission direction (2026-10-28), summary:** eliminate the blanket
+conservative renderer-admission workaround rather than add a renderer
+capability handshake. It is unrelated to marketplace cells. Preserve concrete
+shell-initializer behavior and existing seed/lifecycle custody; qualify the
+corrected Manager forwarding together with the actual copied native setup.
+The [verbatim clarification](inception-transcript.md#operator---renderer-admission)
+retains the operator's wording.
+
 ### Phase 1 - Reviewed contract and shared ownership
 
 - [x] Resolve the target's effort adoption, read its conventions, deduplicate
@@ -225,9 +233,13 @@ and [repair register](reconstruction-findings.md) retain the evidence and limits
     seed/execution receipts. Admission-only, sourced initialization, opaque
     shell-rendered environments and unsupported providers retain legacy
     ownership; this is not full Manager or installed-survival acceptance.
-  - [ ] Repair Manager's literal pane-environment forwarding and qualify its
-    real shell consumer before considering migration of the conservative
-    opaque-renderer fence. Preserve the existing #5579 forwarding boundary.
+  - [x] Repair Manager's literal pane-environment forwarding and qualify the
+    production export/argument blocks on Linux and stock macOS Bash 3.2
+    (#9470). Preserve AHP exclusions and the existing #5579 edit boundary.
+  - [ ] Eliminate blanket renderer admission and qualify the corrected Manager
+    environment boundary with the real copied native setup. Keep actual
+    initializer constraints and seed/lifecycle custody, without a new
+    renderer-capability handshake. Full Manager launch remains distinct.
 - [ ] Fence only same-worktree check/create races until mux discoverability.
   Recheck and join on contention; distinct worktrees remain parallel and no
   launch lock survives for Copilot's lifetime.
@@ -477,6 +489,12 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
 [Merge evidence and remaining integration](<journal/2026/10.28 copied-posix-consumer.md>).
 The conditional consumer is landed; full consumer parity, release/rollout and
 the real same-process installation cycles remain open.
+
+### 2026-10-28 - Literal Manager forwarding merged
+
+[Forwarding evidence and the remaining renderer gate](<journal/2026/10.28 copied-posix-consumer.md#literal-manager-forwarding>).
+The literal-value repair is landed; opaque-renderer admission and complete
+Manager launch qualification remain open.
 
 ### 2026-10-28 - Source-wheel deadline diagnosis
 

@@ -413,3 +413,57 @@ owned six-hour backstop, retained source restrictions and all outside
 obligations remain active. Next work is actual reviewed receiving amendments
 for the nine retained origins and the coherent inflow/source-credit record,
 not another unbounded source audit or implementation assignment.
+
+## Eight further administrative folds after complete receiving readback
+
+PR #9475 actually merged at **2026-10-29 00:18:57 UTC
+(2026-10-28 17:18:57 PDT)** as
+`8552e5e196cebd983db3bd2249e70453bc2ae2d9`, after exact-head
+approval and all three required checks. Independent readback subsequently
+admitted all twelve complete current receiving files: 730,480 bytes and
+10,779 lines across five ROOTs and their annexes. The direct Plan AND actual
+global Validation, continuing Coordination and dated Journal preserve every
+whole source contract and incumbent status/participant/credit/gate.
+The [current receiving unit](consolidation-current-unit.md#next-nine-origin-receiving-group)
+records those boundaries; paper delivery is not technical completion.
+
+Separate literal-condition judgments then supported these **administrative**
+duplicate-tracker dispositions:
+
+| Source | Existing receiving home | Public explanation; verified `not_planned` closure |
+|---|---|---|
+| #4121 | Fleet Control V2, complete four-operation library AND CLI substrate; not an observation-only reservation expansion | [Explanation](https://github.com/ThomasMichon/copilot-extensions/issues/4121#issuecomment-6484863024); 00:57:13 UTC (17:57:13 PDT) |
+| #4304 | Worktree Manager Control Plane, finite installed/skipped/error adoption/doctor reporting | [Explanation](https://github.com/ThomasMichon/copilot-extensions/issues/4304#issuecomment-6484870300); 00:57:41 UTC (17:57:41 PDT) |
+| #5862 | Fleet Control V2, complete observation/recovery and actual retained interface agreements | [Explanation](https://github.com/ThomasMichon/copilot-extensions/issues/5862#issuecomment-6484877037); 00:58:10 UTC (17:58:10 PDT) |
+| #5868 | Test Portfolio Rationalization, actual preparation-holder containment and original finite synthetic exit | [Explanation](https://github.com/ThomasMichon/copilot-extensions/issues/5868#issuecomment-6484884069); 00:58:39 UTC (17:58:39 PDT) |
+| #6240 | Fleet Control V2, complete selected-role/release/configuration lifecycle with existing appointments | [Explanation](https://github.com/ThomasMichon/copilot-extensions/issues/6240#issuecomment-6484892062); 00:59:10 UTC (17:59:10 PDT) |
+| #6241 | Fleet Control V2, full operation-to-settlement contract and exact narrow shared-manager seam | [Explanation](https://github.com/ThomasMichon/copilot-extensions/issues/6241#issuecomment-6484899036); 00:59:38 UTC (17:59:38 PDT) |
+| #7945 | Bounded Passive Git Observation, Draft status and original native watcher contract retained | [Explanation](https://github.com/ThomasMichon/copilot-extensions/issues/7945#issuecomment-6484906370); 01:00:10 UTC (18:00:10 PDT) |
+| #8860 | Linux Role Fleet, complete canonical official-image/adopter/independent substrate lifecycle | [Explanation](https://github.com/ThomasMichon/copilot-extensions/issues/8860#issuecomment-6484913766); 01:00:42 UTC (18:00:42 PDT) |
+
+UTC times in this table are on October 29; local PDT times are on October 28.
+Each fresh whole-source/actor/eleven-member-roster guard matched the admitted
+contract before publication. Each explanation was read back before a separate
+state change; only that own comment delta was admitted. Original bodies,
+assignees, prior comments and edit metadata were preserved, then whole-record
+and provider-state/reason readbacks were verified. #6236 and #7944 remain
+open and unchanged. No source/resource claim, reservation or owner was
+released or reassigned; no technical completion, native result, implementation
+admission or rollout is inferred.
+
+The complete metadata-only census at **2026-10-29 01:01:59 UTC
+(2026-10-28 18:01:59 PDT)** is **929 whole open**: 675 creator-eligible,
+254 excluded, 700 original-cohort and 229 inflow. All twelve raw responses,
+ten pages, unique issue IDs and the stable full eleven-member roster were
+checked. Since the actual 931 census, eight own closures and six arrivals
+produce a net reduction of two. This unit earns eight administrative credits:
+six original-cohort and two inflow, with no external departures. The 758
+original-cohort issues not currently open are not all campaign closure credit.
+
+Five new eligible records #9471/#9472/#9476/#9481/#9482 remain explicitly
+pending bounded research; excluded #9480 remains metadata-only and counted.
+The separate [three later owner-boundary assessments](roadmap-inflow-late-owner.md)
+are admitted with their partial-source/candidate/native limits, not closures.
+The fixed whole checkpoint remains 729, **200 issues away**. The parent stays
+Active; the same four researchers, continuing inflow/provisional/supply work,
+six-hour backstop and all retained outside obligations continue.
