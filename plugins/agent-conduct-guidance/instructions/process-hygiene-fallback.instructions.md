@@ -30,11 +30,13 @@ nothing in a single blocking script (those events need PowerShell's own idle
 loop, which a blocking `WaitForExit()` never yields to); see the paired skill
 for the full, verified pattern. Prefer
 routing to an existing local API/runtime over spawning a process at all.
-Headlessness does not establish durable lifetime: keep bounded helpers inside
-caller-owned cleanup, but use the canonical explicit escape/ensure primitive
-for daemons that must outlive it. Verify survival after caller Job cleanup,
-not only parent exit or an early health probe; preserve contained-test suppression.
-Flags are not instance custody: use the owner's attributed launch/startup path.
+Headlessness is not durable lifetime. Prefer ordinary native detached/headless
+creation through the owner's attributed launch/ensure path. Keep bounded helpers
+contained and preserve test suppression. Neither arbitrary Job membership nor
+immediate-Job escape proves lifetime: verify survival after every caller-owned
+cleanup Job closes, not just parent exit or early health. Do not default to COM,
+Scheduled Tasks/S4U, services or UAC; repair the owned boundary and report external
+restrictions without weakening cleanup proof. Flags are not instance custody.
 Test daemons need runner-renewed leases (defaults: 10 minutes; 4-hour unattended maximum);
 interactive tests declare a pause-tolerant policy. Retain exact cleanup receipts.
 Before starting a long-lived, repeating, or backgrounded process, invoke the

@@ -21,7 +21,7 @@ than disabling updates or starting an independent updater for every launch.
 | Launch driver | Design, implementation, review, release and qualified acceptance | Managed source `welded-circuit`; #7694 |
 | Broker repair | Follow-up #6859 bug and native qualification prerequisite | Managed source `whirring-doohickey`; same launch driver |
 | Broker design | Source-only lifecycle amendment and review | Managed source `tinkling-cylinder`; same launch driver |
-| Desktop activation follow-up | Interactive-token source migration and qualification; no deployment ownership | Managed source `rusty-buckle`; #9522 |
+| Normal-process follow-up | Direct spawn/Job guidance and runtime qualification; no deployment ownership | Managed source `rusty-buckle`; #9522 |
 
 ## Coordination
 
@@ -122,29 +122,43 @@ execution driver's lifetime refusals and does not authorize installed rollout.
 
 ## Plan
 
-### Desktop activation follow-up (#9522)
+### Normal-process follow-up (#9522)
 
 Operator direction, verbatim:
 
 > We need to do something that isn't the S4U task model, to achieve the same goal
 
-The operator selected `interactive-token`: an on-demand task using the existing
-interactive user logon. This changes source intent, not the existing deployment
-hold or central deployment ownership. The following implementation and validation
-decomposition is **agent-recommended**.
+The initial `interactive-token` selection was reviewed in #9523. Its candidate
+#9526 did not satisfy native lifetime qualification and was closed unmerged.
+The operator then superseded that mechanism, verbatim:
 
-- [ ] Review the [interactive-token amendment](windows-launch-broker.md#interactive-token-desktop-activation)
-  before implementation.
-- [ ] Replace S4U registration and normal admission with the existing interactive
-  token contract, including explicit unavailable behavior without an eligible
-  logon; do not fall back to passwords, S4U, elevation or another service.
-- [ ] Migrate only fully verified, owned legacy registrations through the
-  canonical installer, preserving finite transactions, rollback and retained
-  generations. Foreign or altered registrations continue to refuse.
-- [ ] Qualify the actual Windows broker and Manager recovery boundary, then land
-  source/tests/docs and all affected consumer changefiles through review and CI.
-- [ ] Record release separately and transfer installed adoption to the existing
-  deployment owner; this follow-up does not register tasks or update shared hosts.
+> The intent is that it's just a normal "detached process". Are those not possible to create anymore?
+>
+> Let's try using jobs and normal detached-process spawn. Stay away from COM and Schduled Tasks is possible. Avoid UAC needs
+>
+> Great. Update general process-spawn guidance to reflect your chosen pathways
+>
+> Drive this fix first and get it promoted to main
+
+The following decomposition is **agent-recommended**. Deployment remains with
+its existing owner; neither source work nor publication disables that hold.
+
+- [x] Review the original activation proposal in #9523; retain its history and
+  the failed #9526 qualification rather than calling that candidate delivered.
+- [ ] Land the general spawn-guidance correction first and verify legitimate
+  promotion to Main, separately from any runtime change.
+- [ ] Amend and review the [normal-process direction](windows-launch-broker.md#normal-process-direction)
+  before implementing the runtime repair: ordinary native headless/detached
+  creation, explicit launcher-owned Job scopes and no automatic COM, Task
+  Scheduler or UAC fallback.
+- [ ] Qualify the direct runtime boundary against all actual caller-owned
+  cleanup Jobs, including bounded tools and the restrictive shared-outer
+  negative. No blanket any-Job rejection or immediate-Job-only escape claim.
+- [ ] Exercise stopped-resident concurrent Manager recovery, preserve
+  singleton/current-roster ownership, and land source through ordinary review,
+  consumer changefiles and CI.
+- [ ] Record runtime release separately and return installed adoption to the
+  existing deployment owner; no shared-host registration or rollout is implied.
 
 ### Phase 1 - Reviewed contract
 - [x] Land this plan through ordinary review before implementation.
@@ -197,16 +211,18 @@ the requested coordinated-background behavior.
 
 ## Validation Plan
 
-### Interactive-token follow-up (#9522; agent-recommended)
+### Normal-process follow-up (#9522; agent-recommended)
 
-- [ ] Portable controls cover matching interactive principal admission, S4U
-  refusal on ordinary activation, narrowly owned installer migration, foreign
-  refusal and failed-update rollback that restores the prior logon contract.
-- [ ] Disposable native Windows qualification proves existing-token activation,
-  exact native child custody, survival after every caller Job closes, the
-  shared-outer negative, bounded cleanup and zero attributable window/focus
-  effects. Missing interactive-logon capability is a prerequisite failure, not
-  a successful or silently substituted S4U run.
+- [ ] Guidance surfaces agree on normal native creation, independent visibility
+  and ownership choices, retained cleanup-Job proof and explicit unsupported
+  external restrictions; no unsupported runtime delivery claim.
+- [ ] Runtime controls distinguish launcher-owned Job dependence from arbitrary
+  Job membership, retain bounded descendants and refuse unproven escape from a
+  shared outer cleanup owner.
+- [ ] Disposable native Windows qualification proves direct creation, exact
+  native child custody, survival after every fixture-owned caller Job closes,
+  the shared-outer negative, bounded cleanup and headlessness without COM,
+  Task registration, UAC or modified external Job limits.
 - [ ] Actual concurrent installed Manager readers recover a stopped resident and
   obtain one current roster under the unchanged deadlines and election owner.
 - [ ] Shared portable regression, consumer materialization, release changefiles
@@ -248,6 +264,22 @@ worker is insufficient. Machine-local request/status/log data never enters
 repository history.
 
 ## Journal
+
+### 2026-10-29 - Prefer normal detached creation and correct guidance first
+
+- The operator superseded the interactive-task candidate with ordinary native
+  detached/headless spawning and explicit Job ownership, avoiding COM, Task
+  Scheduler and UAC. #9526 was closed unmerged; its failed native run
+  40826195814 remains failed qualification, not a shipped repair.
+- A bounded direct native fixture created a headless child with breakaway from
+  an explicitly breakaway-enabled launcher Job. The child remained associated
+  with some other Job but survived closure of the actual launcher-owned Job.
+  A nested different-inner/shared-outer negative remained in the restrictive
+  outer cleanup Job and died when it closed. Both fixture children were settled.
+  These are controlled native observations, not whole Manager qualification.
+- The requested first slice corrects the general skill, ambient process kernel
+  and Windows pattern without changing runtime implementation or deployment.
+  Main promotion must be observed before treating that guidance as released.
 
 ### 2026-10-29 - Propose existing-token desktop activation
 

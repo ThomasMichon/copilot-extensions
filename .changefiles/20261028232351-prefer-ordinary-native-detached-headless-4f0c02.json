@@ -1,0 +1,9 @@
+{
+  "comment": "Prefer ordinary native detached/headless spawning with explicit Job ownership; keep bounded tools contained and require separate decisions for COM, scheduled activation or elevation.",
+  "changes": [
+    {
+      "plugin": "agent-conduct-guidance",
+      "type": "patch"
+    }
+  ]
+}
