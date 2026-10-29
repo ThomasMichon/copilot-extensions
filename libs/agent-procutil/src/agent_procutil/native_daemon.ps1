@@ -52,8 +52,8 @@ namespace CopilotExtensions {
         private static extern bool TerminateProcess(IntPtr process, uint code);
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern uint ResumeThread(IntPtr thread);
+        [DllImport("ntdll.dll")]
+        private static extern int NtResumeProcess(IntPtr process);
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool SetHandleInformation(SafeFileHandle handle, uint mask, uint flags);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -194,9 +194,9 @@ namespace CopilotExtensions {
                         Check(CloseHandle(queries[i]));
                         queries[i] = IntPtr.Zero;
                     }
-                    uint suspended = ResumeThread(child.Thread);
-                    Check(suspended != UInt32.MaxValue);
-                    Stage(output, "resumed count=" + suspended + " pid=" + child.Pid);
+                    int status = NtResumeProcess(child.Process);
+                    if (status != 0) throw new IOException("native daemon resume failed: NTSTATUS " + status);
+                    Stage(output, "resumed process pid=" + child.Pid);
                     Check(CloseHandle(child.Thread));
                     child.Thread = IntPtr.Zero;
                 }

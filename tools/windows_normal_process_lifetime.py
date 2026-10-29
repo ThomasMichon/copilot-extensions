@@ -172,7 +172,7 @@ def _qualify_native_shell(root: Path, environment, pu) -> list[dict]:
                 diagnostic = directory / "daemon.log"
                 if diagnostic.exists():
                     pids.update(int(value) for value in re.findall(
-                        r"resumed count=\d+ pid=(\d+)", diagnostic.read_text(errors="replace"),
+                        r"resumed process pid=(\d+)", diagnostic.read_text(errors="replace"),
                     ))
                 try:
                     chains = subprocess.run(
