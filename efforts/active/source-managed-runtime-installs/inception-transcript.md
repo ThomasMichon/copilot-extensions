@@ -153,3 +153,32 @@ services must select the immutable Dev generation while using the existing
 Main installation's data/configuration. Separate scoped-install capability
 does not gate this transition. The clarification does not itself authorize
 a concrete host cutover, restart or configuration change.
+
+## Fresh-default upstream installation orchestration
+
+> The path is simple:
+> `<repo> update` -> `worktree-manager update --project=<repo>`
+> `update` should get intercepted by the global-install binstub, and direct to re-install from upstream source, unless overridden by an environment variable. We should then run the `irm/iex` command that pulls from GitHub main. Upon running, it should check for any local overrides (like dev-based install mode, marketplace cell, test override, etc.) and then be the install/update orchestrator. Its *default* assumption should be "I'm going to do a fresh install", and shold want to just blit over everything fresh if it can, after installing into its assigned slot folder.
+> Now, the installer/updater should have "recognizers" for valid existing footprints, which will permit incremental/ZDD updates and installs. So if it finds a match, then we can attempt incremental/ZDD install and cutover. But if we *don't* have a match, we want a "hard-kill" install, which just clears known runtime (non-persisted) state, kills known processes, unsets scheduled tasks, deletes only non-config globals, and starts fresh.
+> The use of "receipts" and checks is reversed. We check for the *ability to do incremental*, not *permission to update*. Obviously, we want to succeed in doing an incremental update every time, but our default fallback needs to be a "mostly fresh install", ensuring the old version goes silent.
+
+This changes the default recovery model: positive footprint recognition admits
+incremental/ZDD reuse; absence of that match selects the mostly fresh path,
+not refusal merely because old receipts are missing. Configuration and durable
+data remain outside runtime cleanup. Existing protected session/connectivity
+and scoped host-operation constraints remain; this architectural direction is
+not a concrete request to clean or terminate processes on a particular host.
+
+## Recognizer manifests and footprint migrations
+
+> What we likely need are "recognizer" manifests that keep track of expected runtime footprints. This provides two things:
+> 1. A list of everything we can assume is safe for us to clear/delete
+> 2. A list of markers and known version/contract ranges for each thing we find to ensure incremental update is possible.
+> Agents which make changes to what gets installed will need to take care to update the manifest as they add things, both to ensure what they add is trackeed, but also to handle deltas. This is equivalent to adding the schema-upgrade code for a DB installer every time you make a schema change in the product.
+
+The proposed manifest has distinct reset-scope and incremental-compatibility
+roles. Installed-footprint changes carry their corresponding manifest and
+delta/migration updates, rather than leaving new artifacts or old layouts
+untracked. This refines the fresh-default direction above; it does not turn
+recognizer mismatch into permission to erase unknown data or into a veto on
+the scoped fresh installation.
