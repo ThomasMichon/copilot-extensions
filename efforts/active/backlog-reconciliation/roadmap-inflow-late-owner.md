@@ -6,10 +6,14 @@ Parent: [Backlog Reconciliation](README.md), Phase 2.
 Related assessments: [bounded inflow decisions](roadmap-inflow.md).
 Actual dispositions and count: [follow-through register](roadmap-follow-through.md).
 
-**Status:** Three independently admitted, agent-recommended **P2** proposals,
-not implementations, accepted receiving intakes or source-owner assignments.
-All source evidence is fixed at
-`cc63cf74cc8bcea4c1afc27324e818e9b9f5bbc8`. The two partial studies
+**Status:** Three independently admitted, agent-recommended **P2** proposals
+and one bounded pre-construction sequencing assessment, not implementations,
+accepted receiving intakes or source-owner assignments.
+The original #9465/#9466/#9468 source evidence is fixed at
+`cc63cf74cc8bcea4c1afc27324e818e9b9f5bbc8`. The later #9476 assessment
+cites published `8552e5e196cebd983db3bd2249e70453bc2ae2d9`, whose twelve
+complete source files were verified byte-identical to that study's admitted
+snapshot; the line ranges are unchanged. The two partial studies
 name exactly what they did not establish; a lookup failure is not proof of
 an undocumented owner or absent capability.
 
@@ -101,6 +105,52 @@ No timestamp expiry, forced lock release, source fallback, manual manifest
 edit, service cleanup or policy override is authorized. The exact whole-scope
 effort home remains unestablished, not proved absent.
 
+## #9476 - Typed repair authority before Manager construction
+
+The [fixed runtime installer](https://github.com/ThomasMichon/copilot-extensions/blob/8552e5e196cebd983db3bd2249e70453bc2ae2d9/worktree-manager/scripts/runtime_install.py#L414-L442)
+calls `self_install` before rewriting the command to `update --repair-engine`
+and dispatching the constructed Manager. Its
+[public adapter](https://github.com/ThomasMichon/copilot-extensions/blob/8552e5e196cebd983db3bd2249e70453bc2ae2d9/worktree-manager/src/worktree_manager/update_driver_cli.py#L281-L327)
+constructs/enqueues `RequestSpec` later. Ordinary queued update therefore
+does not itself establish typed retained-driver admission for the earlier
+construction. This is a bounded direct-entry ordering finding, not a complete
+audit of transitive `self_install` or every installer.
+
+Existing repair classification, inhibited-normal nonzero/no-execution
+retirement, legacy identity preservation, canonical root/kernel lock,
+retained launcher, native custody and unsettled-effect fences are source
+credit, not missing infrastructure. `--recover-for-repair` authorizes explicit
+queue release; it is not replay, successful settlement or implicit runtime
+upgrade. Existing source assertions were read, not executed.
+
+**First existing-owner decision and finite exit:** Under the original #7758
+lane, choose the smallest published typed fixed-bootstrap stage before runtime
+construction, then reuse ordinary public update orchestration. Retain the same
+execution root/kernel lock, exact complete retained foundation, immutable
+accepted inputs, configured source, provider/launcher ownership and existing
+installer/health/publication behavior. Do not patch installed source, choose
+another root, submit arbitrary commands or add a second controller.
+Explicit authorized repair stays distinct from ordinary inhibited work, with
+all unsettled-effect fences intact.
+
+Adapter-specific proof must cover pending legacy preservation, concurrency,
+caller loss and native containment without foreground fallback or deadline
+inflation. #9455's native bridge/qualification fixes retain their own
+**review AND release** prerequisite; its captured open candidate is not
+delivery. For any **separately authorized actual rollout**, retain concrete
+selected/installed/serving health and complete elapsed time. This conditional
+receipt duty is not authority to perform a rollout here or a new numerical
+threshold.
+
+The exact accepted receiving ROOT remains unestablished within twelve complete
+Git bodies, fifty-one literal proofs and eleven clause mappings. That is not
+proof no home exists. Existing artifact-consumer #9032, watchdog #6928,
+diagnostics #8826, native process-lifetime owners and default-off maintenance
+remain outside this slice. No first-use enrollment expansion, maintenance
+scheduling, owner appointment, generic ACK or whole-parent/every-host gate
+is added. Current queue, reservation, process/liveness, health, release,
+installed/native result and actual repair cause remain unknown.
+
 ## Scope and next supply
 
 These assessments neither close an issue nor accept a transfer. Existing
@@ -108,8 +158,11 @@ source/resource owners, #9467's separate managed-base ownership proof and
 the original finite acceptance remain. No product import, collection, test,
 build, native experiment, process/service action, repair or rollout occurred.
 
-The later metadata-only eligible arrivals #9471/#9472/#9476/#9481/#9482 have
-separate bounded grants to the same four researchers. Their titles are not
-rankings or evidence of missing implementation. The excluded #9480 remains
-untouched and counted. Conditional older supply still needs independent
-admission and overlap reconciliation before any fresh source-body grant.
+The [cold-fixture/image-metadata assessments](roadmap-inflow-fixtures.md)
+now retain independently admitted #9471/#9472/#9481/#9482 decisions under
+their existing claimants; #9476's distinct consumer boundary is retained above. Their titles
+are not rankings or evidence of missing implementation. The excluded #9480
+remains untouched and counted. Seventeen conditional older relationships now
+have independent historical admission and an empty overlap check; current
+metadata eligibility and the first bounded receiving studies are not accepted
+transfers or source-closure authority.

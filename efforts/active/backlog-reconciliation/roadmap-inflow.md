@@ -6,6 +6,8 @@ Parent: [Backlog Reconciliation](README.md), Phase 2.
 Selected priorities: [current slice qualification](roadmap-current-qualification.md).
 Integration: [cross-wave sequencing](roadmap-sequencing.md).
 Actual dispositions and census: [follow-through register](roadmap-follow-through.md).
+Later assessments: [installation-owner boundaries](roadmap-inflow-late-owner.md)
+and [cold fixtures/optional image metadata](roadmap-inflow-fixtures.md).
 
 **Status:** Bounded inflow groups are independently admitted outside the
 frozen 682-assignment roster. The first #9412/#9413/#9414 group uses
