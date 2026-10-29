@@ -16,11 +16,11 @@ snapshot also resolves #4395's former availability gap.
 
 The six direct tracking amendments below preserve original alternatives,
 checked credit, Request, participants, status, old-row ordering and each
-existing first unchecked Plan/global Validation gate. They are proposals
-until normal review and actual merge; later complete current receiving
-readback and separate source-specific judgments remain necessary. None of
-these rows is an implementation, native result, accepted source disposition,
-custody transfer or closure.
+existing first unchecked Plan/global Validation gate. Normal review and actual merge
+in #9511 delivered these contracts; complete current receiving readback and
+separate source-specific judgments then supported the four administrative
+outcomes below. None of these rows is an implementation, native result,
+custody transfer or technical completion.
 
 ## Direct receiving contracts
 
@@ -44,6 +44,43 @@ Phase4/5 waves; command/design work stays with the existing owners of its
 Draft or Active ROOT. Genuine unit, contained/periodic and explicit/native
 boundaries remain unchanged.
 
+**Actual delivery:** #9511 merged on 2026-10-29 at 04:10:02 UTC (2026-10-28
+21:10:02 Pacific), merge `ab157c89dc8a03bd67749e9b99fc8d1caec78882`,
+after Copilot approved exact head
+`1cd7e6f6c2da46f1dcf412dcfb1436be7db1639b` and all three required checks
+passed. That merge established reviewed file delivery only; the subsequent
+readback and separate source outcomes below are not technical results.
+
+## Complete readback and separate source outcomes
+
+The complete current four ROOTs, Terminal's interface-neutral annex,
+Dispatch's conversation amendment and Portfolio's linked historical journal
+were read back against the actual merged files. Current full collaborator
+and original/comment/edit/assignment/state/lock metadata admitted all ten
+unchanged source contracts and five coordination keepers. Every one of the
+38 whole source records and 56 whole keeper records was read; source
+conditions were judged individually, not inferred from a title or a generic
+Taking statement.
+
+| Source | Provider-verified administrative outcome | Preserved work or condition |
+|---|---|---|
+| [#609](https://github.com/ThomasMichon/copilot-extensions/issues/609#issuecomment-6487856247) | Superseded as `not_planned` | The stronger Active Portfolio ROOT directly accepts every warm-continuity/in-flight/routing/retirement/recovery residual, with local/global Validation, safe transport and independent #873/#688/#743 retained. |
+| [#4056](https://github.com/ThomasMichon/copilot-extensions/issues/4056#issuecomment-6487863768) | Superseded as `not_planned` | The direct final-open Portfolio canonical retains all four real MCP cases, one deadline, no consequential replay, exact custody and warmth credit; no rig pass or implementation completion is claimed. |
+| [#4395](https://github.com/ThomasMichon/copilot-extensions/issues/4395#issuecomment-6487871256) | Superseded as `not_planned` | Direct Portfolio acceptance preserves ordinary-entry diagnostic OR supported local setup, accurate collection guidance and existing runner/dependency custodians. |
+| [#4464](https://github.com/ThomasMichon/copilot-extensions/issues/4464#issuecomment-6487878065) | Superseded as `not_planned` | Direct Dispatch lifecycle acceptance preserves guidance-only producing-lane reasoning across CWDs, with no task move, harness adoption or resolver redesign. |
+| #810, #2567 | Retained OPEN | Their receiving homes remain Draft; planning delivery does not supply the required receiving fit, temporary-token implementation admission or accepted executor-design decision. |
+| #1176, #1239, #2882 | Retained OPEN | Delivered finite work stays credited; their actual later assigned-source disposition conditions remain unmet. No whole-parent or generic signature requirement is added. |
+| #1488 | Retained OPEN | Its bounded source receipt expressly retains the other terminal-allocation/shared-claim/history duties; Draft fit and separate #1918/#6471/#1666 custody survive. |
+
+Each closure followed a fresh complete source/keeper guard, disclosed public
+explanation and exact live readback, then a separate `not_planned` mutation.
+Only the coordinator's new explanation was added; original bodies, prior
+discussion and assignments were unchanged. All six retained sources and
+five keepers remained provider-verified OPEN and unchanged. #1303 retains
+its full live audit/source/cohort/native/periodic/release coordination.
+Neither documentation nor administrative supersession releases any claim or
+certifies technical, native, installed or parent completion.
+
 ## Four retained source judgments
 
 No new technical migration, vision rewrite or whole-parent gate is proposed
@@ -63,18 +100,22 @@ numerical target.
 
 ## Sequence and completion boundary
 
-1. Deliver the complete six finite tracking contracts through ordinary review
-   and actual merge, preserving all incumbent ROOT obligations and owners.
-2. Read back the complete current receiving files and relevant coordination;
-   judge each source against its literal individual conditions. Retain every
+1. Reviewed delivery and complete current readback are complete for this
+   unit; all incumbent ROOT obligations and owners remain.
+2. The separate literal judgments above preserve every
    unresolved assignment, genuine live-token requirement, Draft/home-fit gap
    or resource hold. A documentation merge alone closes none of these sources.
 3. Keep the four credited/retained sources distinct from missing
    implementation. The existing source owners, not this research campaign,
    choose and execute any separately authorized finite technical next action.
-4. Refresh the whole queue after the actual publication/disposition unit.
-   The last complete observation remains 925 open, 196 above the fixed 729
-   checkpoint; drafting this unit supplies no subtraction.
+4. The complete post-unit census at 2026-10-29 04:24:56 UTC (2026-10-28
+   21:24:56 Pacific) is **923 open = 667 creator-eligible + 256 excluded**,
+   with **688 original-cohort + 235 inflow**. Four verified own original-
+   cohort administrative departures and two arrivals (#9510 eligible,
+   #9513 excluded) explain the net decrease from 925. Both arrivals remain
+   metadata-only; no content research or disposition is inferred. There
+   were no external departures. The fixed checkpoint remains 729, leaving
+   194 above it; original-cohort disappearance is not all campaign credit.
 
 The parent campaign remains Active. No test/import/collection, dependency
 install, native/venue/UI experiment, service or process operation, rollout,

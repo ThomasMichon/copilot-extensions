@@ -46,6 +46,43 @@ deployment or destructive migration of durable data.
   canonical portable plan. Deployment-specific elaboration remains downstream;
   the public plan never links to private state.
 
+<!-- backlog-reconciliation:7556:transport-bridge-receiving -->
+
+### Continuing source-specific Transport/Bridge custody
+
+#### Source #1843
+
+#1843 remains the assigned Index lifecycle/scoped-activation
+coordination token pending its existing owner's complete accepted
+disposition. Native, lightweight-client, managed-companion and standalone/
+controller modes retain explicit mode-qualified authority and safe scoped
+withdrawal; shared infrastructure is not stopped when one scope is disabled.
+#1941's separate assigned effective-configuration boundary and generic
+companion/engine/deployment owners remain independent. No full unconditional
+same-owner completion receipt is inferred from this service plan.
+
+
+
+#### Source #1941
+
+#1941 remains the assigned effective-configuration token. Preserve
+supported repository/knowledge/scoped overlays, current layered-resolution
+credit and invalid-layer refusal. Its actual same-owner completion/
+disposition caveat remains; no formal new signature ceremony or assignment
+release is introduced. Generic companion supervision, runtime provisioning,
+engine lifecycle and mesh deployment remain outside this finite slice.
+
+
+
+#### Source #2860
+
+Existing adopter/harness validation, feed inputs/authentication,
+SSH, GPU/model, data/canary/warm-engine and deployment owners retain their
+actual source/resource authority. Missing authorized endpoints/query specs
+remain a feed prerequisite, not a new whole-parent or generic ACK gate.
+The four original witnesses remain separate. This plan neither runs them
+nor transfers private deployment responsibility to its documentation author.
+
 ## Context
 
 - The independently installable `agent-index-engine` is the embedding RPC
@@ -222,6 +259,147 @@ store-native scoped retrieval and autonomous indexing. Existing-store backfill,
 legacy-writer exclusion and data transfer remain tracked for later realization;
 unsupported existing layouts fail explicitly without mutation.
 
+<!-- backlog-reconciliation:7556:transport-bridge-receiving -->
+
+### Direct retained Transport/Bridge acceptance
+
+**Agent-recommended additive tracking amendment.** Preserve every incumbent
+Request, status, checked credit, original row and first unresolved gate. The
+direct rows below retain unfinished work at its original finite scope,
+alternatives and evidence tiers. They do not authorize implementation,
+native/installed trials, operational changes, source closure, reassignment
+or claim/resource release. Normal review, actual merge and complete current
+receiving readback precede any separate source-specific disposition.
+
+
+#### Source #1843
+
+- [ ] **P1843-companion:** For the supported managed-companion mode,
+  retain a generic plugin-owned companion declaration consumed by Dispatch,
+  not hard-coded Index lifecycle logic. Reconcile a configured host and
+  scope withdrawal through that mode's selected authority; native/self-
+  supervised and standalone/controller modes keep their accepted owners.
+  Cover absent configuration, external knowledge configuration, ordered
+  host selection and lifecycle reconciliation at their original contract tier.
+
+
+- [ ] **P.1843.effective-inertness:** Keep enabling/loading the plugin distinct from activation.
+  Absent/invalid effective repo/bound-knowledge scope emits no product command capability,
+  provision/start/routing or service mutation; preserve legitimate metadata-only stamping/passive
+  inspection.
+
+- [ ] **P.1843.mode-qualified-authority:** Use current ACCEPTED mode-qualified lifecycle:
+  native/self-supervised host, supported managed-companion and standalone/controller modes each have
+  an explicit existing lifecycle authority. Do NOT restore the obsolete rule that ALL Index hosts
+  are exclusively provisioned/supervised by Dispatch.
+
+- [ ] **P.1843.ordered-hosts-and-light-client:** Preserve canonical machine identity and ordered
+  primary/failover SSH hosts with effective scoped configuration; clients do not install
+  store/model/engine host dependencies. Gateway is an explicit separate mode, not a disguised SSH
+  host.
+
+- [ ] **P.1843.startup-no-service-work:** Session-start is metadata-only: no package provisioning,
+  installation, service/engine start or hidden heavy host acquisition. Do not remove supported
+  stamping or turn service's explicit host config into a required repo checkout.
+
+- [ ] **P.1843.scope-safe-withdrawal:** Removing effective config/disabling the plugin withdraws
+  ONLY its owning contribution/scope through the selected existing lifecycle owner. Preserve
+  infrastructure, work, warm engine and other admitted scopes; no unreviewed
+  stop/enrollment/resource or privilege action.
+
+- [ ] **P.1843.retained-union:** Retain ALL original1843 requirements/acceptance AS MODIFIED by
+  current accepted mode-qualified refinements, own assignment/coordination token, separate1941
+  config gate and generic companion/engine/deployment source. Same-owner completion caveats stay
+  exact, not a universal formal ACK; service Root does not silently absorb everything.
+
+#### Source #1941
+
+- [ ] **P.1941.supported-effective-layers:** Resolve client effective repo/required bound knowledge
+  and CURRENT supported explicit scoped overlays through the existing authority. Preserve the
+  accepted later layer semantics, not an obsolete literal path/fallback. Standalone service uses
+  explicit host config, not plugin repo discovery.
+
+- [ ] **P.1941.invalid-never-falls-through:** Missing/malformed/unsafe/ambiguous/unavailable
+  REQUIRED config stays inactive or explicitly refused. Invalid higher-priority config NEVER
+  silently falls through. No product capability/runtime/service action without opt-in;
+  metadata/passive status exceptions retain their current supported semantics.
+
+- [ ] **P.1941.every-entry-before-routing:** Gate EVERY actual client
+  catalog/guidance/CLI/runtime-provision/routing first-touch boundary with the effective
+  configuration decision, not just one boot/install path. Emit scope/capability only when valid
+  opted in.
+
+- [ ] **P.1941.no-startup-provision:** Startup/hook behavior remains metadata-only with no
+  downloads/host service/engine start. Lightweight clients and ordered canonical SSH routes reach
+  already-provisioned hosts.
+
+- [ ] **P.1941.scope-and-assignment:** Generic Dispatch companion supervision, runtime/package
+  provisioning, engine generation management and mesh deployment remain OUTSIDE1941.1843 and actual
+  native/standalone/lifecycle owners retain those duties. Actual assigned config custodian remains;
+  no same-owner unconditional completed receipt is invented or turned into a general ACK.
+
+- [ ] **P.1941.retained-union:** Retain complete CURRENT1941 original and BOTH accepted refinements,
+  all six scoped requirements/four acceptance rows, precedence/refusal/opt-in/CLI/SSH/metadata
+  constraints, original assignment and separate release/installed/native tiers. Do not wait for
+  unrelated whole-parent native or container/GPU gates.
+
+#### Source #2860
+
+- [ ] **P.2860.original-four-and-adopter-custody:** Retain FOUR separate original real
+  consuming-environment witnesses: hosted feeds, second-machine SSH, actual CUDA/CPU fallback,
+  durable corpus/config runtime cutover/compatible rollback. Existing harness/adopter validation,
+  canary/warm-engine/data/model/deployment owners remain; packaging/coordinator authorship is not
+  takeover.
+
+- [ ] **P.2860.delivered-credit-not-native-proxy:** Credit closed96 build/CPU functional path,4345
+  CPU engine lifecycle,6074 candidate staging, current native recovery and isolated
+  image/query/restart proof ONLY at actual tiers. CPU-only~8.8k chunks/five tools or two-chunk
+  synthetic image is not hosted feeds, GPU throughput or SSH witness.
+
+- [ ] **P.2860.fresh-versus-existing-data:** Selected fresh-isolated creation/reindex does NOT need
+  legacy backfill or incumbent database copy. The separate original2860 durable-corpus/config
+  runtime cutover/compatible rollback witness still remains; preserve writer
+  exclusion/data-compatible recovery, no stale-state restore or wider timeout as a proxy.
+
+- [ ] **P.2860.retained-union:** Retain complete CURRENT2860 original and BOTH refinements, ALL four
+  checklist clauses, real authorized inputs/venue/evidence tiers and explicit deployment-tail
+  keeper/source/resource duties. No live feed, SSH, GPU, engine restart or cutover is granted; no
+  everyhost or unconditional zero-outage veto.
+
+- [ ] **P.2860.r0-check-8:** **Hosted work-tracking / PR feed — live good-citizen validation.**
+  Exercise the optional hosted connector (work items + PRs) against a real managed tracker with
+  operator-supplied query specs (e.g. "PRs assigned to me", one or two team backlogs) and confirm:
+  incremental/delta by default, rate-limit-aware backoff, no-firehose guard holds, bounded
+  footprint. Blocked on operator-supplied endpoints + query specs (auth via the host's existing
+  credentialed CLI login).
+
+- [ ] **P.2860.r0-check-9:** **SSH fan-in cross-host reach.** A second machine reaches the single
+  service host's `agent-index` over an SSH port-forward (no per-machine listener, no new inbound
+  port).
+
+- [ ] **P.2860.r0-check-10:** **GPU-path exercise.** Run the CUDA embedding path on a GPU host (the
+  Dev Box validator is CPU-only), confirming GPU throughput + CPU-fallback parity.
+
+- [ ] **P.2860.r0-check-11:** **Durable index survives a runtime cutover** on the deployment host
+  (index untouched by a versioned-runtime swap/rollback; not rebuilt on upgrade).
+
+- [ ] **P.2860.r1-check-6:** Exercise authorized managed work-item/PR feeds with operator-supplied
+  endpoints and query specifications, proving incremental/delta behavior, rate-limit/backoff
+  response, no-firehose scope and bounded footprint. Source fixtures or connector presence do not
+  supply those inputs or authorization.
+
+- [ ] **P.2860.r1-check-7:** Prove a second machine reaches the selected service host over the
+  intended SSH forward, without adding per-machine listeners or inbound ports. A newer Gateway route
+  is not automatically that SSH witness.
+
+- [ ] **P.2860.r1-check-8:** Exercise the actual CUDA/GPU embedding path and CPU-fallback parity
+  with attributable host/runtime/model evidence; CPU-only engine lifecycle evidence is not GPU
+  throughput qualification.
+
+- [ ] **P.2860.r1-check-9:** Prove durable corpus/data/configuration survive an actual compatible
+  runtime cutover and supported rollback without rebuilding the index; separate executable-slot
+  selection from data/schema rollback.
+
 ## Validation Plan
 
 - [x] Unit regressions for layered designation, unconfigured/client nonactivation
@@ -267,6 +445,212 @@ unsupported existing layouts fail explicitly without mutation.
   against the existing Gateway deadline with real inference/transport headroom.
   Do not replace this gate with a larger timeout or a raised candidate cap.
   _(agent-recommended acceptance detail)_
+
+<!-- backlog-reconciliation:7556:transport-bridge-receiving -->
+
+### Global validation of retained Transport/Bridge acceptance
+
+#### Source #1843
+
+- [ ] **V1843-companion:** Qualify the actual plugin-declared
+  managed-companion host and withdrawal path where that mode is selected,
+  together with absent config, external knowledge and ordered SSH selection.
+  Preserve native/self-supervised/controller authority and other admitted
+  scopes rather than restoring universal Dispatch-exclusive hosting.
+
+
+- [ ] **V.1843.effective-inertness:** Verify the COMPLETE original/refined clause at its ORIGINAL
+  finite scope, alternatives, venue, metrics and evidence tier; preserve completed credit and SAME
+  source/resource custodians, no new everyhost/whole-parent/ACK gate: Keep enabling/loading the
+  plugin distinct from activation. Absent/invalid effective repo/bound-knowledge scope emits no
+  product command capability, provision/start/routing or service mutation; preserve legitimate
+  metadata-only stamping/passive inspection.
+
+- [ ] **V.1843.mode-qualified-authority:** Verify the COMPLETE original/refined clause at its
+  ORIGINAL finite scope, alternatives, venue, metrics and evidence tier; preserve completed credit
+  and SAME source/resource custodians, no new everyhost/whole-parent/ACK gate: Use current ACCEPTED
+  mode-qualified lifecycle: native/self-supervised host, supported managed-companion and
+  standalone/controller modes each have an explicit existing lifecycle authority. Do NOT restore the
+  obsolete rule that ALL Index hosts are exclusively provisioned/supervised by Dispatch.
+
+- [ ] **V.1843.ordered-hosts-and-light-client:** Verify the COMPLETE original/refined clause at its
+  ORIGINAL finite scope, alternatives, venue, metrics and evidence tier; preserve completed credit
+  and SAME source/resource custodians, no new everyhost/whole-parent/ACK gate: Preserve canonical
+  machine identity and ordered primary/failover SSH hosts with effective scoped configuration;
+  clients do not install store/model/engine host dependencies. Gateway is an explicit separate mode,
+  not a disguised SSH host.
+
+- [ ] **V.1843.startup-no-service-work:** Verify the COMPLETE original/refined clause at its
+  ORIGINAL finite scope, alternatives, venue, metrics and evidence tier; preserve completed credit
+  and SAME source/resource custodians, no new everyhost/whole-parent/ACK gate: Session-start is
+  metadata-only: no package provisioning, installation, service/engine start or hidden heavy host
+  acquisition. Do not remove supported stamping or turn service's explicit host config into a
+  required repo checkout.
+
+- [ ] **V.1843.scope-safe-withdrawal:** Verify the COMPLETE original/refined clause at its ORIGINAL
+  finite scope, alternatives, venue, metrics and evidence tier; preserve completed credit and SAME
+  source/resource custodians, no new everyhost/whole-parent/ACK gate: Removing effective
+  config/disabling the plugin withdraws ONLY its owning contribution/scope through the selected
+  existing lifecycle owner. Preserve infrastructure, work, warm engine and other admitted scopes; no
+  unreviewed stop/enrollment/resource or privilege action.
+
+- [ ] **V.1843.retained-union:** Verify the COMPLETE original/refined clause at its ORIGINAL finite
+  scope, alternatives, venue, metrics and evidence tier; preserve completed credit and SAME
+  source/resource custodians, no new everyhost/whole-parent/ACK gate: Retain ALL original1843
+  requirements/acceptance AS MODIFIED by current accepted mode-qualified refinements, own
+  assignment/coordination token, separate1941 config gate and generic companion/engine/deployment
+  source. Same-owner completion caveats stay exact, not a universal formal ACK; service Root does
+  not silently absorb everything.
+
+- [ ] **G1843:** Resolve every directly retained #1843 Plan and Validation clause at its original
+  finite evidence tier, preserving alternatives, completed credit and existing custodians.
+  Administrative tracking is not technical completion or claim release.
+
+#### Source #1941
+
+- [ ] **V1941-original:** Verify all four original outcomes:
+  no effective config means no capability/mutation; valid bound-knowledge
+  config enables lightweight SSH routing; invalid higher-precedence config
+  never falls through; no startup path downloads dependencies or starts a
+  service. Apply the current accepted layers, all six scoped requirements
+  and every entry boundary, without absorbing provisioning/engine/deployment.
+
+
+- [ ] **V.1941.supported-effective-layers:** Verify the COMPLETE original/refined clause at its
+  ORIGINAL finite scope, alternatives, venue, metrics and evidence tier; preserve completed credit
+  and SAME source/resource custodians, no new everyhost/whole-parent/ACK gate: Resolve client
+  effective repo/required bound knowledge and CURRENT supported explicit scoped overlays through the
+  existing authority. Preserve the accepted later layer semantics, not an obsolete literal
+  path/fallback. Standalone service uses explicit host config, not plugin repo discovery.
+
+- [ ] **V.1941.invalid-never-falls-through:** Verify the COMPLETE original/refined clause at its
+  ORIGINAL finite scope, alternatives, venue, metrics and evidence tier; preserve completed credit
+  and SAME source/resource custodians, no new everyhost/whole-parent/ACK gate:
+  Missing/malformed/unsafe/ambiguous/unavailable REQUIRED config stays inactive or explicitly
+  refused. Invalid higher-priority config NEVER silently falls through. No product
+  capability/runtime/service action without opt-in; metadata/passive status exceptions retain their
+  current supported semantics.
+
+- [ ] **V.1941.every-entry-before-routing:** Verify the COMPLETE original/refined clause at its
+  ORIGINAL finite scope, alternatives, venue, metrics and evidence tier; preserve completed credit
+  and SAME source/resource custodians, no new everyhost/whole-parent/ACK gate: Gate EVERY actual
+  client catalog/guidance/CLI/runtime-provision/routing first-touch boundary with the effective
+  configuration decision, not just one boot/install path. Emit scope/capability only when valid
+  opted in.
+
+- [ ] **V.1941.no-startup-provision:** Verify the COMPLETE original/refined clause at its ORIGINAL
+  finite scope, alternatives, venue, metrics and evidence tier; preserve completed credit and SAME
+  source/resource custodians, no new everyhost/whole-parent/ACK gate: Startup/hook behavior remains
+  metadata-only with no downloads/host service/engine start. Lightweight clients and ordered
+  canonical SSH routes reach already-provisioned hosts.
+
+- [ ] **V.1941.scope-and-assignment:** Verify the COMPLETE original/refined clause at its ORIGINAL
+  finite scope, alternatives, venue, metrics and evidence tier; preserve completed credit and SAME
+  source/resource custodians, no new everyhost/whole-parent/ACK gate: Generic Dispatch companion
+  supervision, runtime/package provisioning, engine generation management and mesh deployment remain
+  OUTSIDE1941.1843 and actual native/standalone/lifecycle owners retain those duties. Actual
+  assigned config custodian remains; no same-owner unconditional completed receipt is invented or
+  turned into a general ACK.
+
+- [ ] **V.1941.retained-union:** Verify the COMPLETE original/refined clause at its ORIGINAL finite
+  scope, alternatives, venue, metrics and evidence tier; preserve completed credit and SAME
+  source/resource custodians, no new everyhost/whole-parent/ACK gate: Retain complete CURRENT1941
+  original and BOTH accepted refinements, all six scoped requirements/four acceptance rows,
+  precedence/refusal/opt-in/CLI/SSH/metadata constraints, original assignment and separate
+  release/installed/native tiers. Do not wait for unrelated whole-parent native or container/GPU
+  gates.
+
+- [ ] **G1941:** Resolve every directly retained #1941 Plan and Validation clause at its original
+  finite evidence tier, preserving alternatives, completed credit and existing custodians.
+  Administrative tracking is not technical completion or claim release.
+
+#### Source #2860
+
+- [ ] **V.2860.original-four-and-adopter-custody:** Verify the COMPLETE original/refined clause at
+  its ORIGINAL finite scope, alternatives, venue, metrics and evidence tier; preserve completed
+  credit and SAME source/resource custodians, no new everyhost/whole-parent/ACK gate: Retain FOUR
+  separate original real consuming-environment witnesses: hosted feeds, second-machine SSH, actual
+  CUDA/CPU fallback, durable corpus/config runtime cutover/compatible rollback. Existing
+  harness/adopter validation, canary/warm-engine/data/model/deployment owners remain;
+  packaging/coordinator authorship is not takeover.
+
+- [ ] **V.2860.delivered-credit-not-native-proxy:** Verify the COMPLETE original/refined clause at
+  its ORIGINAL finite scope, alternatives, venue, metrics and evidence tier; preserve completed
+  credit and SAME source/resource custodians, no new everyhost/whole-parent/ACK gate: Credit
+  closed96 build/CPU functional path,4345 CPU engine lifecycle,6074 candidate staging, current
+  native recovery and isolated image/query/restart proof ONLY at actual tiers. CPU-only~8.8k
+  chunks/five tools or two-chunk synthetic image is not hosted feeds, GPU throughput or SSH witness.
+
+- [ ] **V.2860.fresh-versus-existing-data:** Verify the COMPLETE original/refined clause at its
+  ORIGINAL finite scope, alternatives, venue, metrics and evidence tier; preserve completed credit
+  and SAME source/resource custodians, no new everyhost/whole-parent/ACK gate: Selected
+  fresh-isolated creation/reindex does NOT need legacy backfill or incumbent database copy. The
+  separate original2860 durable-corpus/config runtime cutover/compatible rollback witness still
+  remains; preserve writer exclusion/data-compatible recovery, no stale-state restore or wider
+  timeout as a proxy.
+
+- [ ] **V.2860.retained-union:** Verify the COMPLETE original/refined clause at its ORIGINAL finite
+  scope, alternatives, venue, metrics and evidence tier; preserve completed credit and SAME
+  source/resource custodians, no new everyhost/whole-parent/ACK gate: Retain complete CURRENT2860
+  original and BOTH refinements, ALL four checklist clauses, real authorized inputs/venue/evidence
+  tiers and explicit deployment-tail keeper/source/resource duties. No live feed, SSH, GPU, engine
+  restart or cutover is granted; no everyhost or unconditional zero-outage veto.
+
+- [ ] **V.2860.r0-check-8:** Verify the COMPLETE original/refined clause at its ORIGINAL finite
+  scope, alternatives, venue, metrics and evidence tier; preserve completed credit and SAME
+  source/resource custodians, no new everyhost/whole-parent/ACK gate: **Hosted work-tracking / PR
+  feed — live good-citizen validation.** Exercise the optional hosted connector (work items + PRs)
+  against a real managed tracker with operator-supplied query specs (e.g. "PRs assigned to me", one
+  or two team backlogs) and confirm: incremental/delta by default, rate-limit-aware backoff,
+  no-firehose guard holds, bounded footprint. Blocked on operator-supplied endpoints + query specs
+  (auth via the host's existing credentialed CLI login).
+
+- [ ] **V.2860.r0-check-9:** Verify the COMPLETE original/refined clause at its ORIGINAL finite
+  scope, alternatives, venue, metrics and evidence tier; preserve completed credit and SAME
+  source/resource custodians, no new everyhost/whole-parent/ACK gate: **SSH fan-in cross-host
+  reach.** A second machine reaches the single service host's `agent-index` over an SSH port-forward
+  (no per-machine listener, no new inbound port).
+
+- [ ] **V.2860.r0-check-10:** Verify the COMPLETE original/refined clause at its ORIGINAL finite
+  scope, alternatives, venue, metrics and evidence tier; preserve completed credit and SAME
+  source/resource custodians, no new everyhost/whole-parent/ACK gate: **GPU-path exercise.** Run the
+  CUDA embedding path on a GPU host (the Dev Box validator is CPU-only), confirming GPU throughput +
+  CPU-fallback parity.
+
+- [ ] **V.2860.r0-check-11:** Verify the COMPLETE original/refined clause at its ORIGINAL finite
+  scope, alternatives, venue, metrics and evidence tier; preserve completed credit and SAME
+  source/resource custodians, no new everyhost/whole-parent/ACK gate: **Durable index survives a
+  runtime cutover** on the deployment host (index untouched by a versioned-runtime swap/rollback;
+  not rebuilt on upgrade).
+
+- [ ] **V.2860.r1-check-6:** Verify the COMPLETE original/refined clause at its ORIGINAL finite
+  scope, alternatives, venue, metrics and evidence tier; preserve completed credit and SAME
+  source/resource custodians, no new everyhost/whole-parent/ACK gate: Exercise authorized managed
+  work-item/PR feeds with operator-supplied endpoints and query specifications, proving
+  incremental/delta behavior, rate-limit/backoff response, no-firehose scope and bounded footprint.
+  Source fixtures or connector presence do not supply those inputs or authorization.
+
+- [ ] **V.2860.r1-check-7:** Verify the COMPLETE original/refined clause at its ORIGINAL finite
+  scope, alternatives, venue, metrics and evidence tier; preserve completed credit and SAME
+  source/resource custodians, no new everyhost/whole-parent/ACK gate: Prove a second machine reaches
+  the selected service host over the intended SSH forward, without adding per-machine listeners or
+  inbound ports. A newer Gateway route is not automatically that SSH witness.
+
+- [ ] **V.2860.r1-check-8:** Verify the COMPLETE original/refined clause at its ORIGINAL finite
+  scope, alternatives, venue, metrics and evidence tier; preserve completed credit and SAME
+  source/resource custodians, no new everyhost/whole-parent/ACK gate: Exercise the actual CUDA/GPU
+  embedding path and CPU-fallback parity with attributable host/runtime/model evidence; CPU-only
+  engine lifecycle evidence is not GPU throughput qualification.
+
+- [ ] **V.2860.r1-check-9:** Verify the COMPLETE original/refined clause at its ORIGINAL finite
+  scope, alternatives, venue, metrics and evidence tier; preserve completed credit and SAME
+  source/resource custodians, no new everyhost/whole-parent/ACK gate: Prove durable
+  corpus/data/configuration survive an actual compatible runtime cutover and supported rollback
+  without rebuilding the index; separate executable-slot selection from data/schema rollback.
+
+- [ ] **G2860:** Resolve every directly retained #2860 Plan and Validation clause at its original
+  finite evidence tier, preserving alternatives, completed credit and existing custodians.
+  Administrative tracking is not technical completion or claim release.
 
 ## Proposal
 
@@ -640,3 +1024,21 @@ boundaries from implementation decisions and deployment-specific policy.
   completed-slot conflicts identify their version/path and receipt category.
   The complete installed Windows suite and real offline uv fixture passed
   381 tests with two Linux-specific process cases separately validated.
+
+<!-- backlog-reconciliation:7556:transport-bridge-receiving -->
+
+### 2026-10-28 - Additive Transport/Bridge tracking contracts
+
+Authored direct finite Plan and actual global Validation with continuing
+
+custody after complete current receiving-document and source-contract
+
+research. Normal review, actual merge and complete current readback remain
+
+separate publication gates; no future delivery or disposition is claimed.
+
+Credited metadata-only startup, layered nonactivation and native recovery without treating them as whole assigned-source completion.
+
+Credited current layered resolution, invalid-input refusal, metadata stamping and host-activation repair without claiming every client boundary is qualified.
+
+Credited the CPU functional path, #4345 engine lifecycle, #6074 staging and synthetic image/restart proof at their actual tiers. Hosted feeds, second-host SSH, real CUDA/CPU parity and existing-corpus compatible cutover/rollback remain distinct; fresh isolated creation does not require legacy backfill.
