@@ -62,6 +62,27 @@ CLI/REST consumers.
   the bridge-owned durable ledger waits for #1460's registry and reader/fencing
   review.
 
+<!-- backlog-reconciliation:7556:first-ten:Coordination -->
+
+### Continuing source-specific #1266 custody
+
+- **R1266-C1:** Current actual #1266 assignee and held AHP
+  implementation/source/resource lane remain unchanged. ROOT
+  maintainer/harness/ACP/native-host roles do not reassign the lane by paper fit;
+  tracker consolidation is not implementation completion, reassignment, release or
+  rollout.
+
+- **R1266-C2:** Keep exact AHP semantics here; consume #1460 only for the durable
+  reader/writer/fencing records a phase changes, #1138 for public reference semantics
+  and #1454 through its existing later projection lane. #1454 is not a new Phase3
+  read-only ordering gate. One shared state-model owner remains.
+
+- **R1266-C3:** Ingress Phases1-6 and optional released native-host-proxy egress remain
+  orthogonal within the existing core/assignee and actual consumer need. Draft/Active
+  labels, old milestones or closed historical umbrellas are not execution consent or
+  fresh ACK demands. Inherited native Phase D and existing claims stay explicit without
+  an every-native-product or all-parent gate.
+
 ## Context
 
 agent-bridge is already a substantial host substrate: an authenticated local
@@ -283,6 +304,42 @@ rather than binding to private implementation details.
       extending this plan before implementation when necessary.
 - [ ] Keep reproductions synthetic and independent of any adopting environment.
 
+<!-- backlog-reconciliation:7556:first-ten:Plan -->
+
+### Direct retained acceptance from #1266
+
+_Agent-recommended additive tracking proposal; original source requirements,
+alternatives, finite proof tiers and custody remain binding._
+
+These rows retain work rather than certify it complete. Existing Request,
+Status, Participants, Plan, global Validation, Journal, checked credit and
+first unresolved gates remain intact. Review of this amendment is document
+intake only, not implementation, native/installed proof, source closure,
+owner reassignment or claim/resource release. A separate source judgment
+must preserve each literal source-specific hold; no generic ACK, every-host
+or whole-parent completion gate is added.
+
+#### Source #1266
+
+- [ ] **R1266-P1:** Map inherited #989 native task/session/environment identity,
+  observation, steering and handoff through released native contracts while preserving
+  cross-machine durable agency and claims. Native identity/lifecycle/replay authority
+  retains one owner and never silently replaces a conversation.
+
+- [ ] **R1266-P2:** Detect actual released product capabilities for inherited native
+  Phase D; protocol fixtures, remote ACP and AHP corpus/source alone are not native
+  cloud/Agent Host product qualification. Native peers stay feature-detected and
+  optional to AHP core.
+
+- [ ] **R1266-P3:** Preserve inherited CLI/mux, SDK, App, ACP and third-party fallback
+  paths with no capability regression; stage native adoption through released/stable
+  supported surfaces without making every optional native product a core dependency.
+
+- [ ] **R1266-P4:** Feed actual native boundary facts back to #985 while preserving
+  #1454 projection, #1460 compatibility and #1138 reference ownership. Keep the existing
+  #1266 assignee, held source/resource claims and original qualification/activation
+  gates unchanged.
+
 ## Validation Plan
 
 - [ ] A released AHP 0.8 client initializes, subscribes to root state, discovers
@@ -318,6 +375,29 @@ rather than binding to private implementation details.
       host using the same AHP core behavior, with differences represented only
       by named capabilities, optional state, or negotiated extensions, and
       without creating two authorities for one session.
+
+<!-- backlog-reconciliation:7556:first-ten:Validation -->
+
+### Global validation of retained #1266
+
+#### Source #1266
+
+- [ ] **R1266-V1:** Qualify actual native product task/session/environment identity,
+  observation/steering/handoff and retained cross-machine claims at the original Phase D
+  tier. Synthetic schema, remote ACP and corpus fixtures are not that witness.
+
+- [ ] **R1266-V2:** Qualify actual capability detection and honest
+  missing/older/incompatible native-host behavior. Core ingress may proceed
+  independently of optional egress when its own existing prerequisites suffice;
+  inherited native acceptance remains explicit, not waived.
+
+- [ ] **R1266-V3:** Preserve actual CLI/mux, SDK, App, ACP and third-party fallback
+  compatibility under released/stable capabilities, exact logical resource/conversation
+  identity and no parallel owner across transitions.
+
+- [ ] **R1266-V4:** Retain boundary-fact feedback/coordination for
+  #985/#1138/#1454/#1460 and SAME current assignee/held lane. Report unavailable
+  original native evidence honestly; add no all-host/whole-parent veto.
 
 ## Proposal
 
@@ -463,3 +543,9 @@ policy, version decision, and exception ledger live in
   it is corroborating evidence for the architecture already chosen at
   kickoff. Recorded here so a future contributor doesn't re-attempt the
   external-host-reliance path without first checking this entry.
+
+<!-- backlog-reconciliation:7556:first-ten:Journal -->
+
+### 2026-10-28 - Additive retained #1266 contract proposal
+
+Added direct per-source Plan, actual global Validation and continuing custody rows after whole-record and complete receiving-document research. Normal review and current complete receiving readback remain publication gates; this entry records authored tracking only, not a future merge or source disposition. All incumbent finite source/design/release/native credits remain at their actual tiers, with original alternatives, unknowns, source-specific holds and existing source/resource custodians preserved. No implementation, operational effect or claim release is authorized. The campaign's receiving register records delivery and later source judgments separately.

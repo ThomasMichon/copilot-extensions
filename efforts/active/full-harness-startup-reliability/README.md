@@ -64,6 +64,31 @@ and reliably).
 - **Delegates:** none yet.
 - **Handoff:** none yet; single-session effort so far.
 
+<!-- backlog-reconciliation:7556:first-ten:Coordination -->
+
+### Continuing source-specific #1151/#2830 custody
+
+- **C1151:** Keep actual existing source/resource/native/domain custodians and current
+  ROOT process. File authors and generic Participant roles do not appoint executors. Any
+  new scoped receiving authority must be normally reviewed and source-specific
+  restrictions preserved before a separate source judgment; no automatic transfer.
+  Preserve3303's existing bounded cold-hook claimant and its cited inherited1215
+  acceptance as independent current-owner work; no outside BODY or expanded custody. Any
+  additive receiving amendment must preserve the WHOLE existing
+  Request/Status/Participants/Plan/actual global Validation/Journal, checked credit and
+  first unchecked gates; no actual Done foundation is reopened.
+
+- **C2830:** Keep actual existing source/resource/native/domain custodians and current
+  ROOT process. File authors and generic Participant roles do not appoint executors. Any
+  new scoped receiving authority must be normally reviewed and source-specific
+  restrictions preserved before a separate source judgment; no automatic transfer.
+  Preserve the literal source-specific 'Keep #2830 as the full incident owner' condition
+  and all five directly inherited2633 obligations; this proposed ROOT receiving map does
+  not adjudicate that standalone/canonical source condition. Any additive receiving
+  amendment must preserve the WHOLE existing Request/Status/Participants/Plan/actual
+  global Validation/Journal, checked credit and first unchecked gates; no actual Done
+  foundation is reopened.
+
 ## Context
 
 This effort is seeded directly from a live investigation this session (see
@@ -218,6 +243,97 @@ Operator's verbatim ask (this session):
   or whether the existing per-plugin test suites are sufficient — record the
   decision and, if a new guard is warranted, build it.
 
+<!-- backlog-reconciliation:7556:first-ten:Plan -->
+
+### Direct retained acceptance from #1151/#2830
+
+_Agent-recommended additive tracking proposal; original source requirements,
+alternatives, finite proof tiers and custody remain binding._
+
+These rows retain work rather than certify it complete. Existing Request,
+Status, Participants, Plan, global Validation, Journal, checked credit and
+first unresolved gates remain intact. Review of this amendment is document
+intake only, not implementation, native/installed proof, source closure,
+owner reassignment or claim/resource release. A separate source judgment
+must preserve each literal source-specific hold; no generic ACK, every-host
+or whole-parent completion gate is added.
+
+#### Source #1151
+
+- [ ] **P1151-1:** At original repeated fresh Windows noninteractive custom-agent
+  boundary, PRIMARY declared tools are complete OR readiness refuses actionably BEFORE
+  domain work; remain read-only until ready.
+
+- [ ] **P1151-2:** Independent auxiliary/download bridge success cannot certify primary
+  catalog. Discovery of both bridge declarations and a later successful launch do not
+  prove earlier readiness or durable repair.
+
+- [ ] **P1151-3:** Attribute startup/multiplexer/materialization, authentication,
+  HTTP/catalog retrieval, pagination, filtering and CLI tool registration failures
+  actionably.
+
+- [ ] **P1151-4:** Credit3564 configuration/transport/checked-catalog diagnostics and699
+  parent-death/descendant lifecycle mitigation at actual tier; neither separate
+  diagnostic success nor old process fix completes catalog readiness.
+
+- [ ] **P1151-5:** Preserve actual primary/tool-registration source owner and original
+  finite Windows venue. The prior generic #3303 startup scope alone did not receive this
+  distinct catalog contract. Preserve3303's existing bounded cold-hook claim and cited
+  inherited1215 acceptance separately; this own-source reference is not permission to
+  read1215 BODY or absorb its work.
+
+#### Source #2830
+
+- [ ] **P2830-1:** Distinguish mux absent from still-present windowless/paneless,
+  unavailable probe and healthy detached/attached state. Empty capture, names or935
+  historical processes are not current identity/liveness proof.
+
+- [ ] **P2830-2:** Attribute repeated launch/embody/cutover to actual caller, exact
+  handoff/task token, launch identity and owner generation; establish original trigger
+  OR explicitly keep it unknown.
+
+- [ ] **P2830-3:** Qualify lifecycle-owned recovery/quiescence of exact owned
+  server/pane/descendants across noninteractive attach return, failure, repeats, handoff
+  races and guarded post-exit finalization; preserve dirty/unpushed,
+  unrelated/legitimate sessions and live/unknown claims.
+
+- [ ] **P2830-4:** Credit4282 actual launch-id-owned session-GONE cleanup,2632
+  pre-handoff/full-ancestor mitigation and7431 live SSH/WSL witness protection; preserve
+  original bounded native Windows incident evidence for BOTH failure shapes and repeated
+  control-plane cycles. The7431 direct/nested SSH/WSL witness credit is
+  synthetic/source-tier, explicitly NOT native disconnect qualification.
+
+- [ ] **P2830-5:** Reuse2457's thirteen-stage observability only within actual mux/CLI
+  resident-monitor runner; independent Bridge/ACP instrumentation and cross-runner
+  atomic claim stay deferred. Native context-only continuation and new-process cutover
+  remain separate.
+
+- [ ] **P2830-6:** Inherited2633 row1: keep bounded project/config/plan resolution
+  INCLUDING direct fallback's own resolution; do not cancel so early that required
+  resolution becomes unbounded.
+
+- [ ] **P2830-7:** Inherited2633 row2: disarm at ACTUAL handoff BEFORE legitimate
+  long-lived local executable or interactive SSH child wait; preserve healthy Windows
+  launcher-wait cancellation and normal lifetime without timeout enlargement.
+
+- [ ] **P2830-8:** Inherited2633 row3: unconditional normal/error/SystemExit
+  cancellation; synthetic timer/child/blocking-wait controls observe timer already
+  disarmed INSIDE wait. No real watchdog, budget sleep, process launch/probe/termination
+  for this ordering proof.
+
+- [ ] **P2830-9:** Inherited2633 row4: conservative full-ancestor/snapshot/live-edge
+  safeguards; live Copilot/mux/SSH/WSL vetoes, service/self/age/signature gates and
+  explicit termination authority. Unknown ancestry/claim visibility is non-authorizing.
+
+- [ ] **P2830-10:** Inherited2633 row5: CPython-close and larger repeated-trigger remain
+  hypotheses unless established. Original2830 native incident acceptance stays
+  separately owned; finite watchdog boundary does not complete the incident or wait for
+  all parents.
+
+- [ ] **P2830-11:** Source-specific canonical restriction: Keep2830 as FULL incident
+  owner;4282/2457/2633 are bounded related scopes, not exhaustive successors. No
+  source/resource ownership transfer.
+
 ## Validation Plan
 
 - [ ] 20/20 clean full-harness starts: all 3 real extensions (and any others
@@ -253,6 +369,55 @@ Operator's verbatim ask (this session):
 - [ ] No regression introduced in `scan-customizations.py --strict` /
   `manage-instruction-projections.py scan` (this repo's existing hook-output
   guards) as a side effect of any hook rewrite.
+
+<!-- backlog-reconciliation:7556:first-ten:Validation -->
+
+### Global validation of retained #1151/#2830
+
+#### Source #1151
+
+- [ ] **V1151-1:** Repeat the ORIGINAL fresh Windows custom-agent primary/auxiliary
+  consumer boundary: complete declared primary catalog OR actionable readiness refusal
+  before work; auxiliary/diagnose success cannot substitute. Keep read-only-until-ready
+  and stage attribution.
+
+- [ ] **V1151-2:** Preserve actual prior diagnostic/process-lifecycle credits without
+  treating them as current catalog acceptance. Keep finite1151 proof separate from3303
+  whole20/20 headed hook programme; use existing owner and separately authorized lane.
+
+- [ ] **G1151:** Resolve every directly retained P1151/V1151 clause at its
+  ORIGINAL finite alternative/venue/tier, retaining actual component credit, unknowns,
+  same owners and every source-specific restriction. Paper intake is not
+  implementation/native/installed proof or source/resource release. No unrelated
+  whole-parent, every-host or generic ACK gate.
+
+#### Source #2830
+
+- [ ] **V2830-1:** At original bounded owner-authorized native Windows tier distinguish
+  missing, present-but-windowless/paneless, unavailable and healthy mux outcomes;
+  qualify exact retry caller/token/launch/owner/tree quiescence across repeated
+  noninteractive/failure/handoff/finalization cycles while preserving
+  dirty/unpushed/live/unknown safeguards. Original trigger may remain explicitly
+  unknown.
+
+- [ ] **V2830-2:** For the FIVE inherited2633 rows, use synthetic
+  timer/child/blocking-wait controls: required fallback resolution stays bounded, timer
+  is already disarmed at actual handoff before legitimate wait, finally cancels on
+  normal/error/SystemExit. No real watchdog, timeout-budget sleep, process
+  probe/termination or larger incident prerequisite for this finite ordering proof.
+
+- [ ] **V2830-3:** Retain4282 session-gone cleanup,2632 mitigation and7431 live SSH/WSL
+  witness credit at actual tier. Keep full2830 incident owner,13-stage
+  observability/Bridge-ACP deferrals, native context-only versus actual cutover and
+  unknown interpreter-close/trigger hypotheses distinct; observation never grants
+  remediation. The7431 source/synthetic witness is not native SSH/WSL disconnect
+  acceptance.
+
+- [ ] **G2830:** Resolve every directly retained P2830/V2830 clause at its
+  ORIGINAL finite alternative/venue/tier, retaining actual component credit, unknowns,
+  same owners and every source-specific restriction. Paper intake is not
+  implementation/native/installed proof or source/resource release. No unrelated
+  whole-parent, every-host or generic ACK gate.
 
 ## Proposal
 
@@ -715,3 +880,9 @@ correction inline, per the effort's own journal discipline)._
   authorization for exactly this outcome. **PR #4129 is merged** as of this
   entry -- the effort's Journal above describing it as still open predates
   this merge; do not re-derive its status from earlier entries.
+
+<!-- backlog-reconciliation:7556:first-ten:Journal -->
+
+### 2026-10-28 - Additive retained #1151/#2830 contract proposal
+
+Added direct per-source Plan, actual global Validation and continuing custody rows after whole-record and complete receiving-document research. Normal review and current complete receiving readback remain publication gates; this entry records authored tracking only, not a future merge or source disposition. All incumbent finite source/design/release/native credits remain at their actual tiers, with original alternatives, unknowns, source-specific holds and existing source/resource custodians preserved. No implementation, operational effect or claim release is authorized. The campaign's receiving register records delivery and later source judgments separately.
