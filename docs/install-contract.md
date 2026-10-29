@@ -2532,7 +2532,8 @@ a health result. No new installed receipt is required.
 `tools/check-install-contract.py` checks this first adopter's complete
 `scripts` and `src` producer trees, including added/removed files, with
 LF-normalized content digests. The manifest itself and Python bytecode caches
-are excluded. Coverage cannot be narrowed to selected files to hide a new
+and generated egg-info metadata are excluded, matching materialization.
+Coverage cannot be narrowed to selected files to hide a new
 producer. A producer change must carry its manifest revision and delta;
 published history is compared with the local publication merge-base, PR base, or CI push
 parent rather than trusting a rewritten baseline. Source digests are omission

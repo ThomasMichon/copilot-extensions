@@ -213,7 +213,8 @@ def producer_digest(payload: Path, relative: str) -> str:
     digest = hashlib.sha256()
     for candidate in paths:
         local = candidate.relative_to(payload)
-        if ("__pycache__" in local.parts
+        if (any(part == "__pycache__" or part.endswith(".egg-info") for part in local.parts)
+                or candidate.name.endswith((".pyc", ".pyo"))
                 or local.as_posix() == "scripts/uninstall-profile.json"):
             continue
         # Inspect directories too: rglob does not traverse a redirected child,
