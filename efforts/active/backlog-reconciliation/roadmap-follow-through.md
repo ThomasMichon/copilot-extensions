@@ -467,3 +467,64 @@ are admitted with their partial-source/candidate/native limits, not closures.
 The fixed whole checkpoint remains 729, **200 issues away**. The parent stays
 Active; the same four researchers, continuing inflow/provisional/supply work,
 six-hour backstop and all retained outside obligations continue.
+
+## Four oldest-source folds after first-ten receiving readback
+
+PR #9496 actually merged at **2026-10-29 02:14:26 UTC
+(2026-10-28 19:14:26 PDT)** as
+`cab67a4842b2700a57b91ef007ccc19f4ffb72ae`, after exact-head Copilot
+approval with no open issues, zero review threads and required green CI.
+All fifteen published files matched the audited authored bytes, including
+the prior bounded #9489 assessment and actual #9491 record. The complete
+parent README was re-read and remains Active.
+
+Independent semantic readback then covered all seven complete current
+receiving ROOTs and three strict contract annexes. The entire original and
+all refinements, 35 whole texts, were read separately before per-source
+judgment. Every incumbent Request, status, participant, checked prerequisite,
+first unchecked Plan/global Validation gate and Journal survived.
+Intervening #9470/#9479 forwarding/renderer-removal direction and credit
+remain; the eliminated renderer fence was not restored.
+
+| Source | Complete retained receiving lane | Public explanation; verified `not_planned` closure |
+|---|---|---|
+| #60 | Session Discovery: registry liveness/state/revival/grace purge and filtering, independent of project scoping | [Explanation](https://github.com/ThomasMichon/copilot-extensions/issues/60#issuecomment-6486101315); 02:20:50 UTC (19:20:50 PDT) |
+| #566 | Installation-Independent Sessions: all original SSH/mesh/local AND remote elevated survival plus all twenty inherited diagnostic/ACP/preflight clauses | [Explanation](https://github.com/ThomasMichon/copilot-extensions/issues/566#issuecomment-6486109029); 02:21:20 UTC (19:21:20 PDT) |
+| #1151 | Full-Harness Startup Reliability: distinct fresh Windows primary catalog complete OR actionable refusal before domain work | [Explanation](https://github.com/ThomasMichon/copilot-extensions/issues/1151#issuecomment-6486116135); 02:21:50 UTC (19:21:50 PDT) |
+| #2853 | Unified Skill Review: central routing projection OR explicit reviewed requirement-preserving disposition, separate from assigned loader/rubric work | [Explanation](https://github.com/ThomasMichon/copilot-extensions/issues/2853#issuecomment-6486123483); 02:22:20 UTC (19:22:20 PDT) |
+
+UTC dates in this table are October 29; local PDT dates are October 28.
+Each fresh full-roster/whole-record guard preceded publication. Each complete
+explanation was read back before a separate closure, with only that own
+comment delta admitted. Original bodies, assignees, prior comments and edit
+metadata remained unchanged, followed by final whole-record and
+provider-state/reason audits. Four original-cohort administrative credits
+are verified, not four fixed technical outcomes.
+
+Six sources remain OPEN and unchanged under their actual coordination or
+conditions: #876's assigned startup lane/completed-disposition caveat;
+#1246's actual owner-retained HOME-routing/error distinction; #1266's held
+AHP keeper; #2335's literal post-fix original-contention confirmation;
+#2830's full incident canonical; and #2847's specific named-assignee
+acknowledgement-versus-age/overlap condition. Conservative #876 retention
+does not invent a universal ACK or native-completion prerequisite for every
+administrative fold. No source/resource reservation was released or
+reassigned, and no new implementer or operational authority was appointed.
+
+The independently checked metadata-only census at **2026-10-29 02:23:39 UTC
+(2026-10-28 19:23:39 PDT)** is **929 whole open**: 674 creator-eligible,
+255 excluded, 696 original-cohort and 233 inflow. Twelve raw responses,
+ten pages, unique issue IDs and the stable full eleven-member roster were
+verified. Compared with the actual prior 931 census, exactly four own
+original-cohort closures and two eligible arrivals #9493/#9495 produce
+the net reduction of two; no external departure receives campaign credit.
+The 762 original-cohort issues not currently open are not all campaign
+closures. Both arrivals remain metadata-only pending separately bounded
+research; no title-derived priority or automatic BODY access is inferred.
+
+The fixed whole checkpoint remains 729, **200 issues away**. The same four
+researchers continue disjoint receiving studies for the seven remaining
+older nominations under the existing charter. Their studies, continuing
+inflow/provisional work, six-hour backstop and all outside obligations
+remain open. The completed first-ten document/judgment slice is not the
+campaign's completion gate.

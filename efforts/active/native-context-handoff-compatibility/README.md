@@ -38,6 +38,27 @@ Compaction remains emergency recovery rather than the planned continuity path.
   A completed context or merged phase is not objective completion.
 - No private deployment record is required to understand or execute this plan.
 
+
+<!-- backlog-reconciliation:7556:last-seven:Coordination -->
+
+### Continuing source-specific #3367
+
+#### Source #3367
+
+- **R3367-CN1:** Continue #3367's complete original, refinements and ALL SIX #4133 rows
+  under the SAME actual native-dispatch/error, continuity, task/file storage,
+  ground/target and host custodians. Existing ROOT coordinator/evidence roles do not
+  become consume implementers or owners of #912/#3000 duties. Unassigned metadata is not
+  a custody transfer; no approval write, reconnect, consume, GC, launch, retirement,
+  source or resource effect is authorized.
+
+- **R3367-CN2:** Retain the source's literal condition that full added acceptance and
+  any actual current owner/hold govern an INTERVENING custody change. Generic Taking, a
+  historical milestone or a closed historical tracker is not a new universal
+  ACK/live-token veto. Preserve existing source/privacy/activation holds and the
+  error-repair OR supported-native-owner-dependency choice; normal reviewed receiving
+  intake and full readback are later coordinator decisions, not source completion.
+
 ## Context
 
 The plugin owns continuity policy, not terminal/process lifecycle. Its original
@@ -121,6 +142,68 @@ Unrelated repository lifecycle work is intentionally outside this scope.
 - [ ] Verify deployed behavior through the supported update flow and retain
   explicitly documented unsupported-venue fallback.
 
+
+<!-- backlog-reconciliation:7556:last-seven:Plan -->
+
+### Direct retained contract proposal from #3367
+
+_Agent-recommended additive tracking proposal; the original finite
+requirements, alternatives, evidence tiers and custody remain binding._
+
+These rows retain work, not completion credit. All incumbent Request,
+Status, Participants, Plan, global Validation, Journal, checked credit and
+first unresolved gates remain intact, including prior receiving amendments.
+Reviewed document intake is not implementation, native/installed proof,
+owner reassignment, source disposition or claim/resource release.
+
+#### Source #3367
+
+- [ ] **R3367-PN0:** Retain #3367's original query-timeout and immediate
+  extension-disconnect/tool-not-found consume paths, including ordinary FILE and
+  historical TASK recovery. Preserve permission-seeding queued delay versus independent
+  registry churn, credit the location-bound #3440 approval mitigation and existing
+  stabilized retry/CLI guidance, and retain the clear catchable extension-unavailable
+  ask. Longer deadlines, local startup approval or native-context selection are not
+  complete transport/error repair.
+
+- [ ] **R3367-PN1:** Preserve the direct #4133 in-flight native extension-generation
+  case: generation advances while consume_handoff awaits a semantic reply. Detect the
+  actual mismatch and return a clear recoverable bounded error at the real
+  runtime/dispatch boundary OR explicitly retain the supported native-owner dependency
+  until actual capability/version proof exists. Do not invent a generation API or claim
+  a plugin timeout answers a request the dispatcher never delivers.
+
+- [ ] **R3367-PN2:** Keep native tool/connection generation distinct from task
+  generation, ground/head revision, package/runtime version, baton storage and
+  ownership. Preserve separate query timeout, permission-seeding delay, registry
+  churn/disconnect, semantic not-found, already-consumed and unknown outcomes; do not
+  collapse them into one deadline, permission or selection result.
+
+- [ ] **R3367-PN3:** Preserve the exact TASK/FILE baton, full prompt and recovery
+  locator after ambiguous in-flight failure. Use existing authoritative
+  delivery/checkpoint/claim state to identify an actual consumer where known and report
+  uncertainty otherwise; disconnect is not proof of absence, an unconsumed store or safe
+  replay.
+
+- [ ] **R3367-PN4:** Preserve one-time delivery and rightful
+  predecessor/candidate/consumer custody. Age, orphan GC, stale scheduler observations,
+  failed probes or reloads cannot authorize abandon, supersede, force-consume, steal or
+  delete. Keep actual lifecycle/target/storage owners, the separately owned #912
+  unreleased reservation and #3000 arbitration intact; no generic live-token or
+  owner-ACK requirement is added.
+
+- [ ] **R3367-PN5:** Retain one identical bounded retry after supported registration
+  stabilization and independent attributable CLI/manual recovery using the actual owning
+  payload/runtime and original identity. No three blind retries, state loss, second
+  consumer, self-granted approval, native permission change or
+  raw-file-read-as-consumption.
+
+- [ ] **R3367-PN6:** Preserve caller-visible real generation-change error/recovery, a
+  stable-generation positive and BOTH TASK/FILE storage cases, with useful non-secret
+  diagnostics. Keep synthetic source, supported native floor, actual host qualification
+  and rollout distinct; no private incident identifiers/full continuation in public
+  errors or effects from this receiving intake.
+
 ## Validation Plan
 
 - [ ] Selection matrix covers settings true/false/absent, detection present/
@@ -140,6 +223,49 @@ Unrelated repository lifecycle work is intentionally outside this scope.
   do not clear or cut over a real operator session.
 - [ ] Required implementation tests, docs, changefile, review, release, and
   deployment are resolved or explicitly transferred before marking Done.
+
+
+<!-- backlog-reconciliation:7556:last-seven:Validation -->
+
+### Global validation of retained #3367
+
+#### Source #3367
+
+- [ ] **R3367-VN0:** Qualify the actual #3367 consume caller's separate timeout and
+  immediate disconnect/not-found paths, permission-seeding versus independent registry
+  churn and clear catchable unavailable outcome. Retain original Windows/CLI venue and
+  historical TASK versus FILE distinction; local approval mitigation and native-context
+  rollover mechanics do not stand in for these cases.
+
+- [ ] **R3367-VN1:** For an actual in-flight native generation change, prove the clear
+  recoverable bounded runtime/dispatch error OR preserve an explicit supported
+  native-owner dependency with the missing capability/version evidence named. No guessed
+  API, plugin-only timeout or synthetic dispatch result counts as native delivery.
+
+- [ ] **R3367-VN2:** Verify distinct native connection/tool generation, task generation,
+  ground/head revision, runtime version, storage and claim facts across timeout,
+  permission delay, churn/disconnect, semantic not-found, already-consumed and unknown
+  results; no longer deadline or startup approval is universal success.
+
+- [ ] **R3367-VN3:** Preserve the exact full-prompt TASK/FILE recovery identity and
+  authoritative existing consumer/claim uncertainty after ambiguous delivery, with no
+  false absent/unconsumed assertion, substituted baton or replay.
+
+- [ ] **R3367-VN4:** Verify one-time predecessor/candidate/consumer custody is not
+  expired, abandoned, superseded or stolen by age, GC, stale observations, probe failure
+  or reload. Preserve each actual source/resource hold without requiring unrelated
+  whole-parent/native matrices or new all-owner signatures.
+
+- [ ] **R3367-VN5:** Qualify the supported one-identical-retry-after-stabilization and
+  independent attributable recovery path, preserving original identity and no second
+  consumer. Unknown outcome remains explicit; raw file read, displayed locator,
+  self-granted permission or repeated blind retry is not semantic consume.
+
+- [ ] **R3367-VN6:** Retain real caller-visible generation-change and stable-generation
+  positive evidence for BOTH TASK and FILE, separate from synthetic/source, supported
+  native floor, installed/host and rollout tiers. Protect continuation/privacy and keep
+  native SAME-owner checkpoint selection distinct from custom consume/owner transfer; no
+  unrelated all-host acceptance is required.
 
 ## Proposal
 
@@ -887,3 +1013,10 @@ below-altitude evidence/tooling documentation, with no new rollout claim.
   prompts remain native/diagnostic while metadata is unknown, rather than all
   continuity being disabled. Confirmed unsupported/unavailable support takes
   precedence over a true flag; execution failures/policy caps remain distinct.
+
+
+<!-- backlog-reconciliation:7556:last-seven:Journal -->
+
+### 2026-10-28 - Additive retained #3367 contract proposal
+
+Authored direct per-source Plan, actual global Validation and continuing custody rows from complete original/refined requirements and admitted receiving-document evidence. This entry records a tracking proposal, not a future review, merge, acceptance or source judgment. Existing checked credit and all prior receiving amendments remain at their actual tiers. Normal publication and complete receiving readback precede separate source-specific judgments. No implementation, native experiment, runtime change, owner appointment or claim/resource release is authorized. Keep the mismatch-error OR explicit supported-native-owner-dependency alternative and original TASK/FILE uncertainty. The four historical native FAIL packets and later bounded native-selection credit are unchanged; no dispatcher generation API is invented.
