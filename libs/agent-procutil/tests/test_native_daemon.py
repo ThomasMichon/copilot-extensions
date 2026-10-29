@@ -248,10 +248,12 @@ def test_native_contained_handshake_with_credential_free_private_profile(tmp_pat
 
     directory = tmp_path / f"private-{cycle}"
     directory.mkdir()
+    argument = "quote'`;\n\u2603"
+    encoded_argument = base64.b64encode(argument.encode("utf-16le")).decode("ascii")
     worker = directory / "worker.ps1"
     worker.write_text(
         "$ErrorActionPreference='Stop'\n"
-        f"[IO.File]::WriteAllText({literal(directory / 'started')}, 'ready')\n"
+        f"[IO.File]::WriteAllText({literal(directory / 'started')}, $args[0])\n"
         "$deadline=[DateTime]::UtcNow.AddSeconds(15)\n"
         f"while (-not (Test-Path -LiteralPath {literal(directory / 'continue')})) {{\n"
         " if ([DateTime]::UtcNow -gt $deadline) { throw 'caller did not release worker' }\n"
@@ -264,7 +266,8 @@ def test_native_contained_handshake_with_credential_free_private_profile(tmp_pat
         "Write-Output 'native caller loading admission'\n"
         f". {literal(helper)}\n"
         "Write-Output 'native caller starting daemon'\n"
-        f"$p=Start-NativeDaemon -Script {literal(worker)} -Arguments @('fixture') "
+        f"$p=Start-NativeDaemon -Script {literal(worker)} -Arguments @("
+        f"([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('{encoded_argument}')))) "
         f"-WorkingDirectory {literal(directory)} -LogPath {literal(directory / 'daemon.log')}\n"
         "Write-Output 'native caller received admission'\n"
         "@{pid=$p.Id} | ConvertTo-Json -Compress "
@@ -287,6 +290,7 @@ def test_native_contained_handshake_with_credential_free_private_profile(tmp_pat
         daemon = WindowsDaemonProcess(outcome["pid"], ["native-private-profile"])
         observe(lambda: (directory / "started").exists() or daemon.poll() is not None)
         assert (directory / "started").exists(), (directory / "daemon.log").read_text(errors="replace")
+        assert (directory / "started").read_text(encoding="utf-8") == argument
         stages = (directory / "daemon.log").read_text(errors="replace")
         for stage in ("prepared", "creating", "created-suspended", "resumed", "bootstrap",
                       "peer-ready", "connected", "offered"):

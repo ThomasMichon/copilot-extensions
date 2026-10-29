@@ -11,6 +11,7 @@ import sys
 import time
 import tempfile
 import traceback
+import re
 
 from windows_broker_fixture import admit, fixture_environment
 
@@ -167,6 +168,21 @@ def _qualify_native_shell(root: Path, environment, pu) -> list[dict]:
                     raise RuntimeError("native shell did not complete owned work after caller cleanup")
                 cycles.append({"caller_job_closed": True, "post_close_owned_work_completed": True})
             except subprocess.TimeoutExpired as error:
+                pids = {process.pid}
+                diagnostic = directory / "daemon.log"
+                if diagnostic.exists():
+                    pids.update(int(value) for value in re.findall(
+                        r"resumed count=\d+ pid=(\d+)", diagnostic.read_text(errors="replace"),
+                    ))
+                try:
+                    chains = subprocess.run(
+                        [sys.executable, str(Path(__file__).with_name("windows_native_wait_chain.py")),
+                         *(str(pid) for pid in sorted(pids))],
+                        capture_output=True, text=True, timeout=10, **pu.no_window_kwargs(),
+                    )
+                    print("native startup wait chains:", chains.returncode, chains.stdout, chains.stderr, flush=True)
+                except subprocess.TimeoutExpired:
+                    print("native startup wait-chain diagnostic timed out", flush=True)
                 details = "\n".join(
                     path.name + ":\n" + path.read_text(encoding="utf-8", errors="replace")[-8192:]
                     for path in directory.glob("*.log")
