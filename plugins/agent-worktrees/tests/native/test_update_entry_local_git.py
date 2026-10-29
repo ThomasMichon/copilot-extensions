@@ -237,6 +237,8 @@ def test_update_entry_native_local_git(
     env.update({
         "HOME": str(home), "USERPROFILE": str(home),
         "WORKTREE_MANAGER_ROOT": str(manager), "AGENT_SCRATCH_ROOT": str(scratch),
+        "WORKTREE_MANAGER_BOOTSTRAP_REPO": repo.as_uri(),
+        "WORKTREE_MANAGER_BOOTSTRAP_REF": REF,
         "AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR": str(registry),
         "AGENT_WORKTREES_NO_SELFPROVISION": "1",
         "NATIVE_BOOTSTRAP_ARGS": str(root / "fresh.args"),
@@ -301,7 +303,7 @@ def test_update_entry_native_local_git(
         args = json.loads((root / "fresh.args").read_text(encoding="utf-8"))
     else:
         args = (root / "fresh.args").read_bytes().decode().split("\0")[:-1]
-    assert args == ["--repair-update", repo.as_uri(), REF, "update", "--project",
+    assert args == ["--bootstrap-update", "update", "--project",
                     "native-fixture", *flags[1:]]
     fetched_script = Path((root / "fresh.path").read_text(encoding="utf-8"))
     assert fetched_script.is_relative_to(scratch)

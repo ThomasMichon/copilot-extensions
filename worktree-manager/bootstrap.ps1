@@ -215,16 +215,57 @@ $Config  = Join-Path $Root 'config.toml'
 # Source (repo + ref): user-level config file [source] overrides, else defaults.
 $Repo = 'https://github.com/ThomasMichon/copilot-extensions.git'
 $Ref  = 'main'
-if (Test-Path $Config) {
-    $cfg = Get-Content $Config -Raw
-    # Isolate the [source] table (up to the next [table] header or EOF).
-    $sec = [regex]::Match($cfg, '(?ms)^\s*\[source\]\s*(.*?)(?=^\s*\[|\z)')
-    if ($sec.Success) {
-        $body  = $sec.Groups[1].Value
-        $mRepo = [regex]::Match($body, '(?m)^\s*repo\s*=\s*"(.*?)"')
-        $mRef  = [regex]::Match($body, '(?m)^\s*ref\s*=\s*"(.*?)"')
-        if ($mRepo.Success) { $Repo = $mRepo.Groups[1].Value }
-        if ($mRef.Success)  { $Ref  = $mRef.Groups[1].Value }
+function ConvertFrom-BootstrapSourceString([string]$Text) {
+    if (-not $Text -or $Text[0] -cnotin @([char]'"', [char]"'")) {
+        throw 'Unsupported or malformed source string.'
+    }
+    $quote = $Text[0]
+    $value = [Text.StringBuilder]::new()
+    for ($i = 1; $i -lt $Text.Length; $i++) {
+        $character = $Text[$i]
+        if ($character -ceq $quote) {
+            if ($Text.Substring($i + 1) -notmatch '^\s*(#.*)?$' -or -not $value.Length) {
+                throw 'Unsupported or malformed source string.'
+            }
+            return $value.ToString()
+        }
+        if ([char]::IsControl($character)) { throw 'Control characters in source string.' }
+        if ($quote -ceq [char]'"' -and $character -ceq [char]'\') {
+            $i++
+            if ($i -ge $Text.Length -or $Text[$i] -cnotin @([char]'\', [char]'"')) {
+                throw 'Unsupported or malformed source escape.'
+            }
+            $character = $Text[$i]
+        }
+        [void]$value.Append($character)
+    }
+    throw 'Unterminated source string.'
+}
+$explicitSource = $args.Count -ge 4 -and $args[0] -ceq '--repair-update' -and $args[3] -ceq 'update'
+if ((Test-Path -LiteralPath $Config) -and -not $explicitSource) {
+    $inSource = $false
+    $seen = @{}
+    $sourceSeen = $false
+    foreach ($line in [IO.File]::ReadAllLines($Config)) {
+        if ($line -match '^\s*\[') {
+            $inSource = $line -cmatch '^\s*\[source\]\s*(#.*)?$'
+            if ($line -cmatch '^\s*\[\[?\s*(?:source|["'']source["''])(?:[^A-Za-z0-9_-]|$)' -and
+                -not $inSource) { throw 'Unsupported source table syntax.' }
+            if ($inSource -and $sourceSeen) { throw 'Duplicate source table.' }
+            if ($inSource) { $sourceSeen = $true }
+            continue
+        }
+        if (-not $inSource -and $line -cmatch '^\s*["'']?source["'']?[\s.=]') { throw 'Unsupported inline source table.' }
+        if ($inSource -and $line -cmatch '^\s*(repo|ref)\s*=\s*(.*)$') {
+            $key = $Matches[1]
+            $encodedValue = $Matches[2]
+            if ($seen.ContainsKey($key)) { throw 'Duplicate source key.' }
+            $seen[$key] = $true
+            $value = ConvertFrom-BootstrapSourceString $encodedValue
+            if ($key -ceq 'repo') { $Repo = $value } else { $Ref = $value }
+        } elseif ($inSource -and $line -notmatch '^\s*(#.*)?$') {
+            throw 'Unsupported source key syntax.'
+        }
     }
 }
 
@@ -237,7 +278,7 @@ if ($SystemPythonRequested) {
     }
     $commandArgs = @($commandArgs | Select-Object -Skip 1)
     if ($commandArgs.Count -and $commandArgs[0] -in @(
-        '--system-python', '--recover-for-repair', '--repair-update'
+        '--system-python', '--recover-for-repair', '--repair-update', '--bootstrap-update'
     )) { throw 'System Python mode cannot be repeated or combined with bootstrap repair.' }
 }
 $RecoveryStaging = $null
@@ -253,7 +294,13 @@ if ($commandArgs.Count -and $commandArgs[0] -ceq '--recover-for-repair') {
     New-Item -ItemType Directory -Path $RecoveryStaging | Out-Null
     $Staging = Join-Path $RecoveryStaging 'source'
 }
-if ($commandArgs.Count -and $commandArgs[0] -ceq '--repair-update') {
+if ($commandArgs.Count -and $commandArgs[0] -ceq '--bootstrap-update') {
+    if ($commandArgs.Count -lt 2 -or $commandArgs[1] -cne 'update') {
+        throw 'Bootstrap update only accepts update.'
+    }
+    $installerArgs += '--repair-update'
+    $commandArgs = @($commandArgs | Select-Object -Skip 1)
+} elseif ($commandArgs.Count -and $commandArgs[0] -ceq '--repair-update') {
     if ($commandArgs.Count -lt 4 -or $commandArgs[3] -cne 'update') {
         throw 'Incomplete or invalid update bootstrap source/command.'
     }
@@ -261,6 +308,14 @@ if ($commandArgs.Count -and $commandArgs[0] -ceq '--repair-update') {
     $Ref = $commandArgs[2]
     $installerArgs += '--repair-update'
     $commandArgs = @($commandArgs | Select-Object -Skip 3)
+}
+if (-not $Repo -or $Repo.StartsWith('-') -or -not $Ref -or $Ref.StartsWith('-') -or
+    $Repo -match '[\x00-\x1f\x7f]' -or $Ref -match '[\x00-\x1f\x7f]') {
+    throw 'Invalid configured Git source/ref; source preserved.'
+}
+if ($Repo -notmatch '^[^/\\:]+:' -or [IO.Path]::IsPathRooted($Repo)) {
+    if (-not [IO.Path]::IsPathRooted($Repo)) { $Repo = Join-Path (Get-Location).Path $Repo }
+    $Repo = [IO.Path]::GetFullPath($Repo)
 }
 try {
 Write-BootstrapProgress 'Worktree Manager bootstrap'

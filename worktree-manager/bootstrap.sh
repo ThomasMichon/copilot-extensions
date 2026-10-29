@@ -41,19 +41,56 @@ CONFIG="$ROOT/config.toml"
 # Source (repo + ref): user-level config file [source] overrides, else defaults.
 REPO='https://github.com/ThomasMichon/copilot-extensions.git'
 REF='main'
-if [ -f "$CONFIG" ]; then
-    # Read a key only from within the [source] table (ignore other tables).
-    _wm_src_cfg() {
-        awk -v k="$1" '
-            /^[[:space:]]*\[/ { insrc = ($0 ~ /^[[:space:]]*\[source\][[:space:]]*$/); next }
-            insrc && match($0, "^[[:space:]]*" k "[[:space:]]*=[[:space:]]*\"") {
-                s = substr($0, RSTART + RLENGTH); sub(/".*/, "", s); print s; exit
-            }' "$CONFIG"
-    }
-    cfg_repo=$(_wm_src_cfg repo)
-    cfg_ref=$(_wm_src_cfg ref)
-    [ -n "${cfg_repo:-}" ] && REPO="$cfg_repo"
-    [ -n "${cfg_ref:-}" ] && REF="$cfg_ref"
+explicit_source=0
+if [ "$#" -ge 4 ] && [ "${1-}" = --repair-update ] && [ "${4-}" = update ]; then
+    explicit_source=1
+fi
+if [ -f "$CONFIG" ] && [ "$explicit_source" -eq 0 ]; then
+    source_config="$(awk '
+        function value(text, quote, out, i, c, e, tail) {
+            quote = substr(text, 1, 1)
+            if (quote != "\"" && quote != sprintf("%c", 39)) exit 1
+            for (i = 2; i <= length(text); i++) {
+                c = substr(text, i, 1)
+                if (c == quote) {
+                    tail = substr(text, i + 1)
+                    if (tail !~ /^[[:space:]]*(#.*)?$/ || out == "") exit 1
+                    return out
+                }
+                if (c ~ /[[:cntrl:]]/) exit 1
+                if (quote == "\"" && c == "\\") {
+                    e = substr(text, ++i, 1)
+                    if (e != "\\" && e != "\"") exit 1
+                    c = e
+                }
+                out = out c
+            }
+            exit 1
+        }
+        /^[[:space:]]*\[/ {
+            insrc = ($0 ~ /^[[:space:]]*\[source\][[:space:]]*(#.*)?$/)
+            if ($0 ~ /^[[:space:]]*\[\[?[[:space:]]*(source|["\047]source["\047])([^A-Za-z0-9_-]|$)/ && !insrc) exit 1
+            if (insrc && source_seen++) exit 1
+            next
+        }
+        !insrc && /^[[:space:]]*["\047]?source["\047]?[[:space:].=]/ { exit 1 }
+        insrc && /^[[:space:]]*(repo|ref)[[:space:]]*=/ {
+            line=$0
+            sub(/^[[:space:]]*/, "", line)
+            key=line; sub(/[[:space:]]*=.*/, "", key)
+            sub(/^[^=]*=[[:space:]]*/, "", line)
+            if (seen[key]++) exit 1
+            print key "=" value(line)
+            next
+        }
+        insrc && $0 !~ /^[[:space:]]*(#.*)?$/ { exit 1 }
+        ' "$CONFIG")" || {
+            _bootstrap_progress 'source config cannot be safely read by the shell bootstrap.' failed
+            exit 126
+        }
+    while IFS= read -r line; do
+        case "$line" in repo=*) REPO="${line#*=}" ;; ref=*) REF="${line#*=}" ;; esac
+    done <<< "$source_config"
 fi
 
 installer_args=()
@@ -68,7 +105,11 @@ if [ "${1-}" = --recover-for-repair ]; then
     fi
     [ "$#" -eq 0 ] || { _bootstrap_progress 'repair recovery accepts only --json.' failed; exit 2; }
 fi
-if [ "${1-}" = --repair-update ]; then
+if [ "${1-}" = --bootstrap-update ]; then
+    shift
+    [ "${1-}" = update ] || { _bootstrap_progress 'bootstrap update only accepts update.' failed; exit 2; }
+    installer_args+=(--repair-update)
+elif [ "${1-}" = --repair-update ]; then
     [ "$#" -ge 4 ] || { _bootstrap_progress 'incomplete update bootstrap source.' failed; exit 2; }
     REPO="$2"
     REF="$3"
@@ -76,6 +117,16 @@ if [ "${1-}" = --repair-update ]; then
     [ "${1-}" = update ] || { _bootstrap_progress 'update bootstrap only accepts update.' failed; exit 2; }
     installer_args+=(--repair-update)
 fi
+case "$REPO" in ""|-*|*[[:cntrl:]]*) _bootstrap_progress 'invalid configured Git source.' failed; exit 126 ;; esac
+case "$REF" in ""|-*|*[[:cntrl:]]*) _bootstrap_progress 'invalid configured Git ref.' failed; exit 126 ;; esac
+# Anchor local runtime sources before staging changes Git's working directory.
+source_prefix="${REPO%%:*}"
+case "$REPO:$source_prefix" in
+    /*:*|*://*:*) ;;
+    *:*) case "$source_prefix" in
+        *[/\\]*|"$REPO") REPO="$(pwd -P)/$REPO" ;;
+    esac ;;
+esac
 
 if [ "$recovery_only" -eq 1 ]; then
     recovery_staging="$(mktemp -d -t manager-repair.XXXXXXXX)"

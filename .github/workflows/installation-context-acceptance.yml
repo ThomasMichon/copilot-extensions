@@ -593,16 +593,14 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers
           --test-file tests/test_update_serving_reconcile.py
-      - name: Qualify POSIX selected-phase front doors
-        if: ${{ !cancelled() && steps.tooling.outcome == 'success' && runner.os == 'Linux' }}
+      - name: Qualify bootstrap transport, runtime source and diagnostic front doors
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
         run: >-
           python tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers
-          --test-file tests/test_update_entry.py -k selected_update_phase
-      - name: Qualify Windows selected-phase front doors
-        if: ${{ !cancelled() && steps.tooling.outcome == 'success' && runner.os == 'Windows' }}
-        run: >-
-          python tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers
-          --test-file tests/test_update_entry_windows.py -k selected_update_phase
+          --test-file tests/test_update_entry.py
+          --test-file tests/test_update_entry_sources.py
+          --test-file tests/test_update_entry_windows.py
+          --test-file tests/native/test_update_entry_local_git.py
   update-diagnostics-windows:
     if: ${{ inputs.update_diagnostics }}
     name: Update diagnostic contracts (Windows)
