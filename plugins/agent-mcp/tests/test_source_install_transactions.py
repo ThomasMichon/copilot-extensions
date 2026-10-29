@@ -416,7 +416,9 @@ def test_native_owner_settlement_best_effort_failures_use_an_available_warning(
             response = "$global:LASTEXITCODE=1; return ''"
             warning = "Version-reap incomplete"
         else:
-            begin = text.index("if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_CUTOVER)")
+            cutover = re.search(r"(?m)^if \(\$VersionedRuntime .*AGENT_MCP_NO_CUTOVER\) \{", text)
+            assert cutover
+            begin = cutover.start()
             fragment = text[begin:text.index("# agent-mcp-specific (NOT part", begin)]
             response = """return '{"skipped":false,"ok":false,"error":"fixture failure"}'"""
             warning = "Cutover attempted"
@@ -425,6 +427,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference='Stop'
 $WarningPreference='Stop'
 $VersionedRuntime=$true
+$script:RuntimeConstructionSession=[pscustomobject]@{{Construction='incremental'}}
 $VenvPython='fixture-only-unused'
 $InstallDir={_quote(tmp_path, 'ps1')}
 $env:AGENT_MCP_NO_CUTOVER=''
