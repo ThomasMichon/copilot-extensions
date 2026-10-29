@@ -1,0 +1,9 @@
+{
+  "comment": "Handle omitted optional Docker image Config fields without weakening image validation",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

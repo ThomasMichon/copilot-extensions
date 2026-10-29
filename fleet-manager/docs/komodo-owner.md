@@ -110,6 +110,13 @@ same selected official repository and exact digest; other registries and the
 Core/Periphery repository names remain exact. Network discovery matches the
 complete expected name, not similarly named neighboring networks.
 
+Image inspection reads the complete Docker `Config` object so omitted optional
+fields do not fail Docker's formatting template. Missing or null `Env`,
+`Entrypoint` and `Cmd` mean empty sequences; an omitted `User` means Docker's
+empty default user. Explicit user strings are preserved. A malformed configuration
+object, non-string user (including null) or malformed sequence still refuses.
+Image identity, official digest and selected-platform checks remain unchanged.
+
 Compose 5 retains the Compose Specification and the fixed `up --no-build
 --pull never --wait --wait-timeout` interface used here. Stable 5.x is accepted
 alongside the existing 2.x contract; other majors and 5.x prereleases refuse.

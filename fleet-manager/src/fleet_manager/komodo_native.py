@@ -159,12 +159,10 @@ class KomodoNative:
             result = decode(self._call(material, [
                 "image", "inspect", "--format",
                 '{"id":{{json .Id}},"os":{{json .Os}},"architecture":{{json .Architecture}},'
-                '"digests":{{json .RepoDigests}},"environment":{{json .Config.Env}},'
-                '"entrypoint":{{json .Config.Entrypoint}},"command":{{json .Config.Cmd}},'
-                '"user":{{json .Config.User}}}', image,
+                '"digests":{{json .RepoDigests}},"configuration":{{json .Config}}}', image,
             ], deadline=deadline).encode())
             if (not isinstance(result, dict) or set(result) != {
-                    "id", "os", "architecture", "digests", "environment", "entrypoint", "command", "user"}
+                    "id", "os", "architecture", "digests", "configuration"}
                     or type(result["id"]) is not str
                     or re.fullmatch(r"sha256:[0-9a-f]{64}", result["id"]) is None
                     or result["os"] != "linux" or result["architecture"] != value["architecture"]
@@ -172,17 +170,21 @@ class KomodoNative:
                     or not any(type(item) is str and item in _digest_spellings(image)
                                for item in result["digests"])):
                 raise PlanError("Komodo immutable image is absent or differs from admitted platform")
+            configuration = result["configuration"]
+            if not isinstance(configuration, dict):
+                raise PlanError("Komodo immutable image configuration is invalid")
             values = []
-            for name in ("environment", "entrypoint", "command"):
-                item = result[name]
+            for name in ("Env", "Entrypoint", "Cmd"):
+                item = configuration.get(name)
                 if item is not None and (
                     not isinstance(item, list) or any(type(value) is not str for value in item)
                 ):
                     raise PlanError("Komodo immutable image configuration is invalid")
                 values.append(tuple(item or ()))
-            if type(result["user"]) is not str:
+            user = configuration.get("User", "")
+            if type(user) is not str:
                 raise PlanError("Komodo immutable image configuration is invalid")
-            selected[service] = KomodoImage(result["id"], *values, result["user"])
+            selected[service] = KomodoImage(result["id"], *values, user)
         return selected
 
     def inspect(self, declaration: KomodoDeclaration, material: KomodoMaterialization,
