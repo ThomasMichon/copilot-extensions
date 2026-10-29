@@ -21,6 +21,19 @@ def worktree_reload_pending(engine):
     )
 
 
+def worktree_setup_failed(engine):
+    return bool(getattr(engine, "_setup_error", "")) and (
+        getattr(engine, "_setup_failed_epoch", 0) == getattr(engine, "_setup_epoch", 0)
+    )
+
+
+def worktree_row_identity(row):
+    return (
+        row.get("source_id") or (row.get("machine"), row.get("env")),
+        (row.get("source") or {}).get("instance_id") or None,
+    )
+
+
 def retained_worktree_scope(engine, tabs):
     if not getattr(engine, "_roster_ready", False) or len(engine.machines) <= 1:
         return None
@@ -40,7 +53,7 @@ def has_worktree_snapshot(engine, index, state):
     tab = engine.source_tabs[index] if engine.source_tabs else {}
     _, machine, environment, _ = engine.machines[index]
     identity = tab.get("source_id") or (machine, environment)
-    key = (identity, tab.get("instance_id"))
+    key = (identity, tab.get("instance_id") or None)
     remembered = getattr(engine, "_loaded_worktree_sources", None)
     if remembered is None:
         remembered = engine._loaded_worktree_sources = set()
@@ -48,14 +61,16 @@ def has_worktree_snapshot(engine, index, state):
     row_cache = getattr(engine, "_worktree_source_rows", None)
     if row_cache is None or row_cache[0] is not rows:
         row_cache = engine._worktree_source_rows = (rows, {
-            row.get("source_id") or (row.get("machine"), row.get("env")) for row in rows
+            worktree_row_identity(row) for row in rows
         })
     read_status = getattr(loader, "read_status_for_source", None)
+    detail = read_status(identity) if callable(read_status) else {}
     complete = (
-        read_status(identity).get("has_snapshot", False)
+        detail.get("has_snapshot", False)
+        and (detail.get("instance_id") or None) == key[1]
         if callable(read_status) else state == "ready"
     )
-    if complete or identity in row_cache[1]:
+    if complete or key in row_cache[1]:
         remembered.add(key)
     return key in remembered
 
@@ -65,10 +80,7 @@ def worktree_read_feedback(engine):
     if not getattr(engine, "live", False):
         return []
     notices = []
-    epoch = getattr(engine, "_setup_epoch", 0)
-    setup_failed = bool(getattr(engine, "_setup_error", "")) and (
-        getattr(engine, "_setup_failed_epoch", 0) == epoch
-    )
+    setup_failed = worktree_setup_failed(engine)
     for index, (label, machine, environment, _ready) in enumerate(getattr(engine, "machines", ())):
         if not index:
             continue

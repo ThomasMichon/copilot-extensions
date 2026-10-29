@@ -149,6 +149,7 @@ class PickerScreenLoadingMixin:
             return
         threading.Thread(
             target=self._setup_live_async,
+            args=(self._setup_epoch,),
             name="picker-setup",
             daemon=True,
         ).start()
@@ -273,11 +274,14 @@ class PickerScreenLoadingMixin:
         self._config_cache_session = session
         return session.scope()
 
-    def _setup_live_async(self):
+    def _setup_live_async(self, epoch=None):
         """Enroll the current feed without a redundant advisory one-shot read."""
         from .frame_health import append_launch_event
 
-        epoch = self._setup_epoch
+        if epoch is None:
+            epoch = self._setup_epoch
+        if epoch != self._setup_epoch:
+            return
         append_launch_event("picker_live_setup_start")
         threading.Thread(
             target=self._setup_live_pivots,

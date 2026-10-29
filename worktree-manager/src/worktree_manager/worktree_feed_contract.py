@@ -24,6 +24,7 @@ class CurrentFeed:
         self.rows: list[dict] | None = None
         self.head: dict | None = None
         self.notice: str | None = None
+        self.availability: dict | None = None
         self._snapshot = CurrentSnapshot()
         self._begin: dict | None = None
         self._pending: dict | None = None
@@ -98,6 +99,7 @@ class CurrentFeed:
                 complete=False,
             )
             self.rows = self._metadata(self.rows, frame)
+            self.availability = frame.get("availability")
             return self.rows
         if kind in {"begin", "update"}:
             if self._begin is not None:
@@ -217,6 +219,7 @@ class CurrentFeed:
         ):
             raise ValueError("current-roster feed did not complete its declared roster")
         self.rows = rows
+        self.availability = self._begin.get("availability")
         self.head = dict(self._begin["projection"])
         self._begin = None
         self._pending = None

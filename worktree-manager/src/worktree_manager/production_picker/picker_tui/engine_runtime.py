@@ -706,8 +706,9 @@ class PickerScreenRuntimeMixin:
     def _apply_setup_payload(self, payload: _SetupPayload) -> None:
         """Install a collected setup/reload payload. UI-thread only."""
         selected_source = retained_worktree_scope(self, payload.source_tabs)
-        if self.debug == "loading":
+        if getattr(self, "_busy_label", None) == "Loading…":
             self._busy_label = None
+        if self.debug == "loading":
             self.debug = "ready"
         self._install_pivot_payload(payload.pivot_payload)
         self.source_tabs = payload.source_tabs

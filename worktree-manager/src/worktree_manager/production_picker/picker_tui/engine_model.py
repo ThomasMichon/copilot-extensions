@@ -6,7 +6,7 @@ import time
 
 from . import derive
 from .engine_helpers import ACTIVE_SPECS, BUTTON_SETS, C_DIM, C_READY, C_WARN, DISPO_MARK, LIST_SPECS, SPINNER
-from .source_read_notices import worktree_reload_pending
+from .source_read_notices import worktree_reload_pending, worktree_row_identity, worktree_setup_failed
 
 class PickerScreenModelMixin:
     def button_set(self):
@@ -83,6 +83,8 @@ class PickerScreenModelMixin:
         if self.live:
             if worktree_reload_pending(self):
                 return "loading"
+            if worktree_setup_failed(self):
+                return "failed"
             loader = self.loader
             if loader is None:
                 return "loading"
@@ -403,11 +405,20 @@ class PickerScreenModelMixin:
         return bool((tab.get("capabilities") or {}).get(capability))
     def _scope_data(self):
         """Worktrees in the active source-tab scope."""
+        instances = {
+            tab.get("source_id"): tab.get("instance_id")
+            for tab in self.source_tabs if tab.get("instance_id")
+        }
+        data = [
+            row for row in self.data
+            if row.get("source_id") not in instances
+            or worktree_row_identity(row)[1] == instances[row["source_id"]]
+        ] if instances else self.data
         if self.is_all():
             ready_sources = self.ready_source_ids()
             ready_envs = self.ready_envs()
             return [
-                w for w in self.data
+                w for w in data
                 if (
                     w.get("source_id") in ready_sources
                     or (w.get("machine"), w.get("env")) in ready_envs
@@ -416,9 +427,9 @@ class PickerScreenModelMixin:
         tab = self._current_tab()
         source_id = tab.get("source_id")
         if source_id:
-            return [w for w in self.data if w.get("source_id") == source_id]
+            return [w for w in data if w.get("source_id") == source_id]
         m, e, _ = self.cur_machine()
-        return [w for w in self.data if w["machine"] == m and w["env"] == e]
+        return [w for w in data if w["machine"] == m and w["env"] == e]
     def _hidden_count(self):
         """How many bridge/system worktrees are hidden in the current scope."""
         return sum(1 for w in self._scope_data() if w.get("hidden"))

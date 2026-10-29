@@ -192,6 +192,103 @@ def test_initial_loader_completion_cannot_replace_a_newer_retry(monkeypatch):
     assert screen._busy_label == "Refreshing worktrees"
 
 
+def test_initial_worker_captures_epoch_before_it_can_be_delayed(monkeypatch):
+    from worktree_manager.production_picker.picker_tui import engine_loading
+
+    screen, loader, _source = screen_and_loader()
+    scheduled = []
+
+    class DelayedThread:
+        def __init__(self, *, target, args=(), **kwargs):
+            self.target, self.args = target, args
+
+        def start(self):
+            scheduled.append(self)
+
+    monkeypatch.delenv("AGENT_WORKTREES_PICKER_FRAME_HEALTH", raising=False)
+    monkeypatch.delenv("AGENT_WORKTREES_LAUNCH_TRACE", raising=False)
+    monkeypatch.setattr(engine_loading.threading, "Thread", DelayedThread)
+    screen._after_first_refresh()
+    initial, = scheduled
+    screen._setup_epoch += 1
+    screen.src.make_loader = lambda *a: pytest.fail("superseded initial setup constructed a loader")
+    initial.target(*initial.args)
+    assert screen.loader is loader and scheduled == [initial]
+
+
+@pytest.mark.parametrize("rows", [[], [{"id": "one", "title": "Kept worktree"}]])
+def test_setup_collection_failure_retains_muted_snapshot_and_stops_spinner(rows):
+    screen, loader, source = screen_and_loader()
+    loader._feed_commit(source, 0, rows)
+    screen.data = loader.records()
+    worktree_read_feedback(screen)
+    screen._setup_epoch += 1
+    screen._apply_setup_failure(screen._setup_epoch, RuntimeError("configuration unavailable"))
+    assert screen.machine_state(screen.machine_idx) == "failed"
+    assert screen._source_failure_marker(screen.machine_idx)[0] == "~"
+    assert "Updates paused" in body(screen)
+    screen.loader = None
+    screen._loaded_worktree_sources.clear()
+    screen.data = []
+    assert screen.machine_state(screen.machine_idx) == "failed"
+    assert "Worktrees could not load" in body(screen)
+    assert "Loading worktrees" not in body(screen)
+
+
+@pytest.mark.parametrize("busy", ["Loading…", "Existing action"])
+def test_successful_retry_during_startup_clears_only_the_startup_label(busy):
+    screen = PickerScreen(_fixture_source(), live=False)
+    screen.setup_sync_for_tests()
+    payload = screen._collect_setup_payload()
+    screen._busy_label = busy
+    screen.debug = "worktree reload requested"
+    screen._apply_setup_payload(payload)
+    assert screen._busy_label == (None if busy == "Loading…" else busy)
+
+
+@pytest.mark.parametrize("rows", [[], [{"id": "one", "title": "Kept worktree"}]])
+def test_stale_availability_frames_keep_quiet_source_feedback_even_when_empty(rows):
+    from test_current_worktrees_feed import head, receive, snapshot
+
+    screen, loader, source = screen_and_loader()
+    receiver = CurrentFeed()
+    admitted = receive(receiver, snapshot(rows))
+    loader._feed_commit(source, 0, admitted, availability=receiver.availability)
+    stale = {
+        "type": "availability", "projection": head(count=len(rows)),
+        "availability": {"status": "stale", "reason": "refresh failed"},
+    }
+    admitted = receiver.receive(stale)
+    loader._feed_commit(source, 0, admitted, availability=receiver.availability)
+    screen.data = loader.records()
+    assert "Updates paused · refresh failed" in body(screen)
+    assert "~" in screen._machine_group([screen.machine_idx], True).plain
+    for row in loader.records():
+        assert row["title"] == "Kept worktree" and row["raw"]["_availability"]["status"] == "stale"
+    admitted = receiver.receive({**stale, "availability": None})
+    loader._feed_commit(source, 0, admitted, availability=receiver.availability)
+    assert worktree_read_feedback(screen) == []
+
+
+def test_provider_replacement_cannot_inherit_an_old_instances_cached_rows():
+    screen, loader, source = screen_and_loader(provider=True)
+    source.instance_id = screen.source_tabs[screen.machine_idx]["instance_id"] = "old"
+    loader._feed_commit(source, 0, [{"id": "one", "title": "Old instance"}])
+    screen.data = loader.records()
+    worktree_read_feedback(screen)
+    replacement = data_ssh.Source(
+        source.machine, source.env, None, local=True, source_kind=source.source_kind,
+        source_id=source.source_id, instance_id="new",
+    )
+    screen.source_tabs[screen.machine_idx]["instance_id"] = "new"
+    screen.loader = data_ssh.LiveLoader([replacement])
+    screen.loader._feed_error(replacement, 0, "new instance unavailable")
+    assert not worktree_read_feedback(screen)[0].cached
+    assert screen._scope_data() == [] and "Worktrees connection unavailable" in body(screen)
+    screen.machine_idx = 0
+    assert screen._scope_data() == []
+
+
 @pytest.mark.parametrize("other_action", [None, "Existing action"])
 def test_retry_key_repaints_loading_before_the_background_reload_finishes(monkeypatch, other_action):
     monkeypatch.setattr(PickerScreen, "_tick", lambda self: None)

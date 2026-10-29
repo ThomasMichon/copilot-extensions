@@ -85,6 +85,10 @@ class CurrentFeedMixin:
             return {
                 "error": self._error.get(source_id),
                 "failure_kind": getattr(self._error.get(source_id), "kind", "unknown"),
+                "instance_id": next((
+                    source.instance_id for source in self._all_sources
+                    if source.cache_key == source_id
+                ), None),
                 "has_snapshot": (
                     source_id in self._feed_complete
                     or bool(self._records.get(source_id))
@@ -99,7 +103,7 @@ class CurrentFeedMixin:
     def _feed_current(self, source, gen) -> bool:
         return not self._cancelled.is_set() and self._gen.get(source.cache_key, 0) == gen
 
-    def _feed_commit(self, source, gen, rows) -> None:
+    def _feed_commit(self, source, gen, rows, *, availability=None) -> None:
         derive.NOW = _dt.datetime.now()
         with self._lock:
             previous = {row["id"]: row for row in self._records.get(source.cache_key, [])}
@@ -112,8 +116,8 @@ class CurrentFeedMixin:
             } == {key: value for key, value in row.items() if key != "_projection"}:
                 records.append({**old, **derive.time_fields(row), "raw": row})
                 continue
-            records.append(derive.norm(
-                row, source.machine, source.env,
+            normalized = derive.norm(
+                {**row, "_availability": None}, source.machine, source.env,
                 source_kind=source.source_kind, source_id=source.source_id,
                 source_label=source.source_label,
                 source_metadata={
@@ -121,12 +125,17 @@ class CurrentFeedMixin:
                     "instance_id": source.instance_id, "venue": dict(source.venue),
                 },
                 source_capabilities=source.capabilities,
-            ))
+            )
+            records.append({**normalized, "raw": row})
         with self._lock:
             if self._feed_current(source, gen):
                 self._records[source.cache_key] = records
                 self._state[source.cache_key] = "ready"
-                self._error[source.cache_key] = ""
+                available = availability or (rows[0].get("_availability") if rows else None)
+                self._error[source.cache_key] = (
+                    ReadFailure(available.get("reason") or "Resident refresh is unavailable", kind="content")
+                    if available and available.get("status") == "stale" else ""
+                )
                 self._feed_complete.add(source.cache_key)
                 self._feed_backoff[source.cache_key] = 0.25
 
@@ -190,7 +199,7 @@ class CurrentFeedMixin:
                 if frame.get("type") in {"begin", "update"}:
                     watchdog.arm(INITIAL_TIMEOUT)
                 if rows is not None:
-                    self._feed_commit(source, gen, rows)
+                    self._feed_commit(source, gen, rows, availability=receiver.availability)
                     watchdog.arm(IDLE_TIMEOUT)
                 elif frame.get("type") == "heartbeat":
                     watchdog.arm(IDLE_TIMEOUT)
@@ -232,7 +241,7 @@ class CurrentFeedMixin:
                     return "cancelled"
                 rows = receiver.receive(frame)
                 if rows is not None:
-                    self._feed_commit(source, gen, rows)
+                    self._feed_commit(source, gen, rows, availability=receiver.availability)
                 if receiver.notice is not None:
                     return f"resident going away: {receiver.notice}"
             return "cancelled"
