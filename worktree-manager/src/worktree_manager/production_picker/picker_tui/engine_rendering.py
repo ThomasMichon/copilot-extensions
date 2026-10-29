@@ -319,9 +319,7 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin):
             elif state == "loading":
                 marker, marker_style = self.spin(), C_LOAD
             elif state == "failed":
-                marker, marker_style = (
-                    ("✓", C_READY) if self._source_read_connected(i) else ("✗", C_WARN)
-                )
+                marker, marker_style = self._source_failure_marker(i)
             elif self._source_read_error(i):
                 marker, marker_style = "~", C_DIM
             else:
@@ -351,9 +349,7 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin):
             elif state == "loading":
                 mk, mkb = self.spin(), C_LOAD
             elif state == "failed":
-                mk, mkb = (
-                    ("✓", C_READY) if self._source_read_connected(i) else ("✗", C_WARN)
-                )
+                mk, mkb = self._source_failure_marker(i)
             elif self._source_read_error(i):
                 mk, mkb = "~", C_DIM
             else:

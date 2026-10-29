@@ -16,14 +16,19 @@ from worktree_manager.production_picker.picker_tui.source_read_notices import wo
 from worktree_manager.worktree_feed_contract import CurrentFeed, FeedUnavailable
 
 
-def screen_and_loader():
+def screen_and_loader(*, provider=False):
     screen = PickerScreen(_fixture_source(), live=False)
     screen.setup_sync_for_tests()
     screen.machine_idx = screen.local_index()
     _, machine, environment, _ = screen.machines[screen.machine_idx]
-    source = data_ssh.Source(machine, environment, None, local=True)
+    source = data_ssh.Source(
+        machine, environment, None, local=True,
+        **({"source_kind": "provider-exec", "source_id": "provider-exec:fixture:target"}
+           if provider else {}),
+    )
     screen.source_tabs[screen.machine_idx]["source_id"] = source.source_id
     screen.source_tabs[screen.machine_idx]["local"] = True
+    screen.source_tabs[screen.machine_idx]["source_kind"] = source.source_kind
     screen.loader = data_ssh.LiveLoader([source])
     screen.live = True
     screen.data = []
@@ -84,10 +89,49 @@ def test_later_failure_preserves_rows_and_marks_even_empty_snapshots_quietly(row
     assert "Refreshing" in body(screen) and "Worktrees could not load" not in body(screen)
     screen.machine_idx = 0
     assert len(screen._scope_data()) == len(rows)
+    tab = screen.machines[1]
+    screen.machines[1] = (*tab[:3], False)
+    assert screen._scope_data() == []
+    screen.machines[1] = tab
     screen._setup_applied_epoch = screen._setup_epoch
     loader._feed_commit(source, 0, rows)
     screen.data = loader.records()
     assert worktree_read_feedback(screen) == []
+
+
+@pytest.mark.parametrize("provider", [False, True])
+@pytest.mark.parametrize("kind", ["connection", "content"])
+@pytest.mark.parametrize("rows", [[], [{"id": "one", "title": "Kept worktree"}]])
+def test_failed_replacement_loader_keeps_cached_presentation(provider, kind, rows):
+    screen, loader, source = screen_and_loader(provider=provider)
+    loader._feed_commit(source, 0, rows)
+    screen.data = loader.records()
+    assert worktree_read_feedback(screen) == []
+    screen.loader = data_ssh.LiveLoader([source])
+    screen.loader._feed_error(source, 0, "replacement failed", kind=kind)
+    assert screen.loader.state_for_source(source.source_id) == "failed"
+    assert worktree_read_feedback(screen)[0].cached
+    assert "Updates paused" in body(screen) and "Press r to retry" not in body(screen)
+    tab = screen._machine_group([screen.machine_idx], True).plain
+    assert "~" in tab and "✗" not in tab and "✓" not in tab
+
+
+def test_off_scope_empty_completion_is_remembered_before_loader_replacement():
+    screen, _loader, source = screen_and_loader()
+    other = data_ssh.Source("other-host", "Win", None)
+    screen.machines.append(("Other source", other.machine, other.env, True))
+    screen.source_tabs.append({
+        "label": "Other source", "machine": other.machine, "env": other.env,
+        "source_kind": other.source_kind, "source_id": other.source_id,
+    })
+    screen.loader = data_ssh.LiveLoader([source, other])
+    screen.loader._feed_commit(other, 0, [])
+    worktree_read_feedback(screen)
+    screen.loader = data_ssh.LiveLoader([source, other])
+    screen.loader._feed_error(other, 0, "replacement failed")
+    screen.machine_idx = len(screen.machines) - 1
+    assert worktree_read_feedback(screen)[0].cached
+    assert "Updates paused" in body(screen) and "Worktrees connection unavailable" not in body(screen)
 
 
 @pytest.mark.parametrize("all_sources", [False, True])

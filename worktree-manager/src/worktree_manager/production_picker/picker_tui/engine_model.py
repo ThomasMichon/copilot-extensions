@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 
 from . import derive
-from .engine_helpers import ACTIVE_SPECS, BUTTON_SETS, DISPO_MARK, LIST_SPECS, SPINNER
+from .engine_helpers import ACTIVE_SPECS, BUTTON_SETS, C_DIM, C_READY, C_WARN, DISPO_MARK, LIST_SPECS, SPINNER
 from .source_read_notices import worktree_reload_pending
 
 class PickerScreenModelMixin:
@@ -125,6 +125,12 @@ class PickerScreenModelMixin:
         if callable(getattr(self.loader, "error", None)):
             return self.loader.error(*self.machines[index][1:3])
         return None
+    def _source_failure_marker(self, index):
+        from .source_read_notices import has_worktree_snapshot
+
+        if has_worktree_snapshot(self, index, "failed"):
+            return "~", C_DIM
+        return ("✓", C_READY) if self._source_read_connected(index) else ("✗", C_WARN)
     def ready_source_ids(self):
         from .source_read_notices import has_worktree_snapshot
 

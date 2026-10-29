@@ -34,7 +34,7 @@ def retained_worktree_scope(engine, tabs):
 
 
 def has_worktree_snapshot(engine, index, state):
-    if not getattr(engine, "live", False):
+    if not getattr(engine, "live", False) or state == "disabled":
         return False
     loader = getattr(engine, "loader", None)
     tab = engine.source_tabs[index] if engine.source_tabs else {}
@@ -70,9 +70,12 @@ def worktree_read_feedback(engine):
         getattr(engine, "_setup_failed_epoch", 0) == epoch
     )
     for index, (label, machine, environment, _ready) in enumerate(getattr(engine, "machines", ())):
-        if not index or (not engine.is_all() and index != engine.machine_idx):
+        if not index:
             continue
         state = engine.machine_state(index)
+        cached = has_worktree_snapshot(engine, index, state)
+        if not engine.is_all() and index != engine.machine_idx:
+            continue
         if state not in {"failed", "ready", "loading"}:
             continue
         tab = engine.source_tabs[index] if engine.source_tabs else {}
@@ -87,7 +90,6 @@ def worktree_read_feedback(engine):
             reason = loader.error(machine, environment)
         else:
             reason = None
-        cached = has_worktree_snapshot(engine, index, state)
         if setup_failed:
             state = "failed"
             reason = getattr(engine, "_setup_error", "Worktree sources could not be refreshed.")

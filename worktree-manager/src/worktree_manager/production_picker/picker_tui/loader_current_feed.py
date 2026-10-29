@@ -201,6 +201,7 @@ class CurrentFeedMixin:
             if watchdog.expired:
                 raise FeedUnavailable(
                     "current-roster feed missed its startup/publication/heartbeat deadline",
+                    connected=receiver.head is not None or receiver._begin is not None,
                 )
             errors.join(timeout=0.1)
             error = "".join(stderr).strip()

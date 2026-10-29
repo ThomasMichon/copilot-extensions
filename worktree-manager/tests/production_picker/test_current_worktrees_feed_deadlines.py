@@ -279,6 +279,9 @@ def test_feed_transient_deadline_recovers_without_partial_or_empty_overwrite(
                        "records": _record_state(loader),
                        "error": loader.error_for_source(source.source_id)})
         assert "deadline" in loader.error_for_source(source.source_id)
+        assert loader.read_status_for_source(source.source_id)["failure_kind"] == (
+            "connection" if boundary == "startup" else "content"
+        )
         if boundary in {"startup", "initial-publication"}:
             assert loader.records() == []
             assert loader._state[source.cache_key] == "failed"

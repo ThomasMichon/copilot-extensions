@@ -827,6 +827,7 @@ def test_source_failure_and_recovery_repaint_native_empty_body(monkeypatch):
         async with app.run_test(size=(118, 30)) as pilot:
             await pilot.pause()
             screen = app.query_one(PickerScreen)
+            assert await asyncio.to_thread(screen._ensure_setup_completion_event().wait, 3)
             screen.live = True
             screen.data = []
             screen.machine_idx = 1
