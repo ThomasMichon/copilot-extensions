@@ -352,3 +352,64 @@ priorities inferred from their titles. Frozen four-wave coverage, the five
 finite completed outcomes and all source/resource obligations remain distinct
 from this live count. The parent stays Active for remaining priority/sequence,
 provisional, inflow, consolidation and numerical gates.
+
+## Reviewed follow-through and three further finite source completions
+
+PR #9459 merged on 2026-10-28 at **22:36:30 UTC (15:36:30 PDT)** as
+`b992973b6a0493ca4e48c3e4f5986b940cafd383`, after actual current-head
+approval and all three required checks. It publishes the complete receiving
+readback, direct #4477 intake, twelve administrative dispositions and the
+dated 926-issue census. The complete parent Plan and Validation Plan were
+read again after merge; the campaign remains Active.
+
+Subsequent independent whole-contract studies support three more finite
+SOURCE completions, not native, installed, release or parent completion:
+
+| Issue | Complete finite evidence | Audited provider disposition |
+|---|---|---|
+| #7940 | Actual #8286 merge and current cache/supplier/derived-consumer/caller-guard code and regressions cover the chosen demand-driven 60-second TTL/single-flight alternative, exact byte invalidation, honest failure, manual selection retention and grounded template non-applicability. Actual #8215 plan merge precedes the functional merge by ancestry, matching the specific source-plan promise. | [Completed explanation](https://github.com/ThomasMichon/copilot-extensions/issues/7940#issuecomment-6482699682); CLOSED/completed at 22:49:03 UTC (15:49:03 PDT). #7939 release/installed and #7935 native qualification stay separate. |
+| #7408 | Actual #8468 merge and the actual preparation-argv regression cover both split/equals exact-file selectors, input immutability and production prepare/disconnect/execute wiring. The original source routing result is not #5868 preparation-resource completion or a new Docker/native run. Partial associated-PR discovery is not treated as exhaustive history. | [Completed explanation](https://github.com/ThomasMichon/copilot-extensions/issues/7408#issuecomment-6483350400); CLOSED/completed at 23:25:12 UTC (16:25:12 PDT). Existing containment, network split, admission and original limits remain. |
+| #9332 | Actual #9338 merge, four matching fix blobs, concrete positive/missing-file Bash handoff controls and connected selected-profile observation preserve private Mongo credentials, the vendor entrypoint/privilege drop and retained Periphery identity. Source/protocol execution remains attributed, not inferred from the 175 count alone. | [Completed explanation](https://github.com/ThomasMichon/copilot-extensions/issues/9332#issuecomment-6483358021); CLOSED/completed at 23:25:38 UTC (16:25:38 PDT). #8860 actual adopter/official-image lifecycle duties remain. |
+
+Fresh actual full-roster/whole-scope guards preceded publication. Each
+explanation was read back before closure; only that own comment delta was
+admitted, original bodies/prior discussion were preserved, and final provider
+state/reason and whole-record readback were verified. No source/resource
+claim, reservation, lease, cleanup duty or owner was released or reassigned.
+
+The register now distinguishes eight finite completed outcomes from the
+twelve later administrative consolidations. Neither is the total historical
+campaign count, nor the number of original-cohort issues no longer open.
+
+## External source delivery and the six-hour supply observation
+
+The actual pull-forward also contains #9447's independent post-materialization
+closure enforcement. Its approved-head, actual-merge and selected `b992`
+blobs match across all ten changed files; all seven previously admitted
+original clauses are retained. The provider externally marked #9444
+COMPLETED at 22:34:44 UTC (15:34:44 PDT), separately from the one-second-later
+timeline event. This is **zero campaign closure credit**. No new issue/PR
+body or closeout-comment body was read for that narrow delta. Per-case
+execution was not inferred from aggregate CI, and its absence here is not
+a reopening or duplicate-patch gate.
+
+The complete metadata-only six-hour observation at **2026-10-28 23:50:27 UTC
+(16:50:27 PDT)** is **931 whole open**: 678 creator-eligible, 253 excluded,
+706 original-cohort and 225 inflow. Twelve raw responses, ten pages, unique
+identities and the unchanged complete eleven-member roster were verified.
+Since the actual 927-issue census at 23:26:52 UTC, #9465/#9466/#9467/#9468
+arrived and nothing departed. This refresh earns zero closure credit.
+Those four remain explicit metadata-only research gaps.
+
+The preceding two-outcome unit received two verified credits, one original
+and one inflow, with no external departures. Its 927 count included the
+arrival of #9464; that bounded study is delivered but not yet independently
+admitted. The earlier #7940 unit recorded one inflow credit and the external
+#9444 departure separately. None of the 752 original-cohort disappearances
+is silently converted into campaign credit.
+
+The fixed whole-queue checkpoint remains 729, **202 issues away**. The parent,
+owned six-hour backstop, retained source restrictions and all outside
+obligations remain active. Next work is actual reviewed receiving amendments
+for the nine retained origins and the coherent inflow/source-credit record,
+not another unbounded source audit or implementation assignment.
