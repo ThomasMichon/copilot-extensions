@@ -137,10 +137,21 @@ def test_normal_fresh_candidates_hit_per_project_and_body_edit_rebuilds_only_lea
 
     monkeypatch.setattr(engine, "_retained_inputs", trace)
     compact = builds._compact
+    child = engine._child
+    build_scopes = []
+
+    def observe_build(argv, **options):
+        if argv[1:2] == ["build"]:
+            build_scopes.append(options["environment"].get("COPILOT_EXTENSIONS_OWNED_JOB_SCOPES"))
+        return child(argv, **options)
+
+    monkeypatch.setattr(engine, "_child", observe_build)
     installed_modules = []
     origins = []
     for index in range(2):
         monkeypatch.setenv("UPDATE_DRIVER_WITNESS", f"synthetic-request-{index}")
+        scope = "Local\\ce-owned-job-" + f"{index + 1:032x}"
+        monkeypatch.setenv("COPILOT_EXTENSIONS_OWNED_JOB_SCOPES", scope)
         if index:
             monkeypatch.setattr(
                 builds, "_compact",
@@ -154,6 +165,7 @@ def test_normal_fresh_candidates_hit_per_project_and_body_edit_rebuilds_only_lea
             assert set(receipt["source_wheels"]) == {"example-app", "example-leaf", "agent-procutil"}
             assert all("#sha256=" in value for value in receipt["packages"].values())
             assert len(counter.read_text().splitlines()) == 3
+    assert build_scopes == ["Local\\ce-owned-job-" + f"{1:032x}"] * 3
     monkeypatch.setattr(builds, "_compact", compact)
     assert origins[0] == origins[1]
     assert os.path.samefile(*installed_modules)
@@ -175,6 +187,7 @@ def test_normal_fresh_candidates_hit_per_project_and_body_edit_rebuilds_only_lea
 
 @pytest.mark.parametrize("variable,same_key", [
     ("UPDATE_DRIVER_WITNESS", True),
+    ("COPILOT_EXTENSIONS_OWNED_JOB_SCOPES", True),
     ("SOURCE_BUILD_DIAGNOSTIC_MODE", False),
 ])
 def test_request_custody_is_not_a_build_input_but_build_environment_still_is(
@@ -209,14 +222,19 @@ def test_request_custody_is_not_a_build_input_but_build_environment_still_is(
     monkeypatch.setattr(builds, "cached_source_wheel", observe)
     monkeypatch.setattr(builds, "_canonical", observe_environment)
     monkeypatch.setattr(engine, "_child", observe_admission)
-    for index in range(2):
-        monkeypatch.setenv(variable, f"synthetic-value-{index}")
+    values = [
+        "Local\\ce-owned-job-" + f"{index + 1:032x}"
+        if variable == "COPILOT_EXTENSIONS_OWNED_JOB_SCOPES" else f"synthetic-value-{index}"
+        for index in range(2)
+    ]
+    for index, value in enumerate(values):
+        monkeypatch.setenv(variable, value)
         with pytest.raises(ObservedKey):
             with _candidate(engine, root, ordinary, f"1.0.0+request{index}"):
                 pytest.fail("cache-key observation must stop before building or publishing")
-        assert os.environ[variable] == f"synthetic-value-{index}"
+        assert os.environ[variable] == value
     assert len(keys) == 2
-    assert admitted_values == ["synthetic-value-0", "synthetic-value-1"]
+    assert admitted_values == values
     assert len(environments) == 2
     assert {
         key for key in environments[0].keys() | environments[1].keys()
