@@ -215,6 +215,13 @@ def test_explicit_no_reap_cannot_claim_old_owner_silence(tmp_path, owners):
     assert rv.reap_stale(tmp_path, fresh=True, check_only=True) == []
 
 
+def test_idle_fresh_reaper_does_not_require_current_owner_retirement_custody(tmp_path, owners):
+    del owners["rows"][111]
+    owners["rows"][222]["children"] = [999]
+    assert rv.reap_stale(tmp_path, fresh=True) == []
+    assert owners["paused"] == []
+
+
 def test_missing_current_is_not_silently_reported_as_settled(tmp_path, owners, monkeypatch):
     monkeypatch.setattr(rv, "current_version", lambda *a: None)
     with pytest.raises(rv.RetirementRefused, match="installer-selected"):

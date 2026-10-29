@@ -192,24 +192,34 @@ def reap_stale(
     for version in versions:
         inspection._plain(root / VERSIONS_DIR / version)
     legacy_entries = _legacy_entries(root) if fresh else ()
+    classified = {
+        pid: version for pid, row in rows.items()
+        if (version := _version(row, root, versions, legacy_entries=legacy_entries))
+    }
+    stale = {
+        pid: version for pid, version in classified.items()
+        if _norm_version(version) != _norm_version(current)
+    }
+    if not stale:
+        return []
+    if check_only:
+        raise RetirementRefused("Old MCP owners remain while version reaping is explicitly disabled")
+    if os.name != "nt" and not sys.platform.startswith("linux"):
+        raise RetirementRefused("External pinned retirement requires Windows or Linux")
     ancestors = _ancestors(rows, os.getpid())
     excluded = set(exclude_pids or ())
     current_pids = {
-        pid for pid, row in rows.items()
-        if (version := _version(row, root, versions, legacy_entries=legacy_entries))
-        and _norm_version(version) == _norm_version(current)
+        pid for pid, version in classified.items() if _norm_version(version) == _norm_version(current)
     }
     # Explicit exclusions protect their children too, not only one numeric PID.
     protected = _descendants(rows, (excluded | current_pids) & rows.keys()) | excluded | ancestors
     targets = {}
-    for pid, row in rows.items():
-        version = _version(row, root, versions, legacy_entries=legacy_entries)
-        if version and _norm_version(version) != _norm_version(current):
-            if pid in protected:
-                if fresh:
-                    raise RetirementRefused(f"An old MCP owner is protected from retirement (pid={pid})")
-                continue
-            targets[pid] = version
+    for pid, version in stale.items():
+        if pid in protected:
+            if fresh:
+                raise RetirementRefused(f"An old MCP owner is protected from retirement (pid={pid})")
+            continue
+        targets[pid] = version
     if not targets:
         return []
     _retire(root, rows, set(targets), protected, check_only=check_only)
