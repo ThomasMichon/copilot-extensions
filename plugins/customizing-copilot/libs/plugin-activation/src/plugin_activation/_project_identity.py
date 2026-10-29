@@ -72,15 +72,19 @@ def identity_inputs(root: Path, expected_remote: str, git: str | None) -> str | 
                 return None
             raw = path.read_bytes()
             after = path.lstat()
-            if any(getattr(before, field) != getattr(after, field) for field in (
-                "st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns",
-            )):
+            fields = (
+                "st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_size",
+                "st_mtime_ns", "st_ctime_ns",
+            )
+            before_version = tuple(getattr(before, field) for field in fields)
+            after_version = tuple(getattr(after, field) for field in fields)
+            if before_version != after_version:
                 return None
             if name != "HEAD" and (
                 b"include" in raw.lower() or re.search(rb"\bworktree\b", raw, re.I)
             ):
                 return None
-            files.append((name, hashlib.sha256(raw).hexdigest()))
+            files.append((name, after_version, hashlib.sha256(raw).hexdigest()))
         inputs = [
             _VERSION, str(root), expected_remote, str(executable),
             [executable_info.st_dev, executable_info.st_ino, executable_info.st_size,

@@ -2747,12 +2747,14 @@ original test remain hash-bound; each case must contribute actual production
 call coverage under the unchanged observer, root and budget. Synthetic original
 snapshots, refused transactions, restoration, injected contention and real
 symlink assertions execute on Linux without changing production or test bodies.
-The same adapter additionally re-exports only the two explicit
+The same adapter additionally re-exports only the three explicit
 `test_project_identity_memo_unit_*` functions from `test_plugin_activation.py`
-(five parameterized cases). They call the canonical registered-root resolver
+(six cases, including parameterization). They call the canonical registered-root resolver
 with synthetic registry/input evidence and a substituted Git boundary, proving
 zero Git probes for an unchanged memo, fresh work on a miss/input change, and no
-positive publication for failed or uncertain probes. The original source and
+positive publication for failed or uncertain probes. A synthetic source-file
+fixture checks A-to-B-to-A write-metadata invalidation without creating Git
+storage or querying native ownership. The original source and
 new import closure are hash-bound and the root resolver is a production coverage
 target. Real Git, ownership queries, cross-process persistence and CLI composition
 remain in the separately contained development portfolio; they are not admitted

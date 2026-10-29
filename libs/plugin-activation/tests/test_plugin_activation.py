@@ -1444,3 +1444,76 @@ def test_project_identity_memo_unit_failed_probe(tmp_path, monkeypatch, timeout)
     assert [finding.reason for finding in findings] == [
         "registry-indeterminate" if timeout else "identity-mismatch",
     ]
+
+
+
+def test_registered_identity_memo_rejects_a_b_a_config_probe(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    expected = "https://github.com/example/demo.git"
+    wrong = "https://github.com/other/demo.git"
+    _register_project(tmp_path, "demo", repo, expected, actual_remote=wrong)
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    config = repo / ".git" / "config"
+    initial = config.read_bytes()
+    initial_time = config.stat().st_mtime_ns
+    original = resolver._git
+
+    def transient_match(root, *args):
+        if args != ("remote", "get-url", "origin"):
+            return original(root, *args)
+        _git(repo, "remote", "set-url", "origin", expected)
+        try:
+            return original(root, *args)
+        finally:
+            config.write_bytes(initial)
+            os.utime(config, ns=(config.stat().st_atime_ns, initial_time + 1_000_000_000))
+
+    monkeypatch.setattr(resolver, "_git", transient_match)
+    assert "demo@local" in resolve_active_plugins(home=tmp_path).active
+    assert config.read_bytes() == initial
+    monkeypatch.setattr(resolver, "_git", original)
+    report = resolve_active_plugins(home=tmp_path)
+    assert report.active == {}
+    assert any(f.reason == "identity-mismatch" for f in report.findings)
+
+
+def test_project_identity_memo_unit_a_b_a_write_metadata(tmp_path, monkeypatch):
+    from plugin_activation import _project_identity
+
+    root = tmp_path / "synthetic-root"
+    root.mkdir()
+    config = tmp_path / "synthetic-config.txt"
+    config.write_bytes(b"original source bytes")
+    original = config.read_bytes()
+    initial_time = config.stat().st_mtime_ns
+    executable = tmp_path / "synthetic-git"
+    executable.write_bytes(b"not executed")
+    directory_info = root.lstat()
+    lstat, read_bytes = Path.lstat, Path.read_bytes
+
+    def synthetic_stat(path, *args, **kwargs):
+        if path in (root / "objects", root / "refs"):
+            return directory_info
+        if path in (root / "HEAD", root / "config"):
+            return lstat(config)
+        return lstat(path, *args, **kwargs)
+
+    def synthetic_read(path):
+        if path == root / "HEAD":
+            return b"synthetic head input"
+        if path == root / "config":
+            return read_bytes(config)
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "lstat", synthetic_stat)
+    monkeypatch.setattr(Path, "read_bytes", synthetic_read)
+    monkeypatch.setattr(_project_identity, "_owned_directory", lambda *_: True)
+    before = _project_identity.identity_inputs(root, "expected", str(executable))
+    config.write_bytes(b"different intermediate bytes")
+    config.write_bytes(original)
+    os.utime(config, ns=(config.stat().st_atime_ns, initial_time + 1_000_000_000))
+    after = _project_identity.identity_inputs(root, "expected", str(executable))
+    assert config.read_bytes() == original
+    assert before is not None and after is not None
+    assert before != after

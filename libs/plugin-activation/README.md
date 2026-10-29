@@ -100,8 +100,11 @@ Successful registered-project Git identity checks have an input-bound file memo
 under that registry's `cache/project-identities.json`. Ordinary `.git` directory
 and bare-anchor layouts reuse the check across processes only while the canonical
 root/directory identities, normalized expected remote, selected Git executable
-metadata, `HEAD`, `config`, and the presence/content of `config.worktree` agree.
+metadata, plus `HEAD`, `config` and `config.worktree` presence, content, inode
+and write metadata agree.
 Inputs are checked before and after a fresh successful probe before publication.
+Write metadata remains in the key even when bytes return to their prior value,
+so an A-to-B-to-A change during probing cannot publish a false positive for A.
 Access-time changes from reading files do not invalidate otherwise equal inputs.
 
 This memo does not persist activation, settings, topology or policy decisions:
