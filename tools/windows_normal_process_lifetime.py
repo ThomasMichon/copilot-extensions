@@ -76,6 +76,27 @@ def _worker(root: Path) -> None:
 def _launcher(root: Path, environment) -> None:
     admit(root.parent, True)
     import agent_procutil as pu
+    from agent_procutil import _job_scopes
+
+    python, python_env = pu.direct_python(sys.executable)
+    replacement = {**environment, **python_env}
+    replacement.pop(_job_scopes.ENVIRONMENT_KEY, None)
+    process = pu.spawn_daemon(
+        [python, str(Path(__file__).resolve()), "--intermediate", str(root)],
+        env=replacement, cwd=root, log_path=root / "intermediate.log",
+        breakaway=False, console_children=True,
+    )
+    try:
+        process.wait(timeout=120)
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=5)
+
+
+def _intermediate(root: Path, environment) -> None:
+    admit(root.parent, True)
+    import agent_procutil as pu
 
     python, python_env = pu.direct_python(sys.executable)
     with (root / "worker.log").open("wb") as log:
@@ -307,9 +328,11 @@ def main(argv=None) -> int:
 
 if __name__ == "__main__":
     sys.path.insert(0, str(SOURCE))
-    if len(sys.argv) == 3 and sys.argv[1] in ("--worker", "--launcher"):
+    if len(sys.argv) == 3 and sys.argv[1] in ("--worker", "--launcher", "--intermediate"):
         if sys.argv[1] == "--worker":
             _worker(Path(sys.argv[2]))
+        elif sys.argv[1] == "--intermediate":
+            _intermediate(Path(sys.argv[2]), dict(os.environ))
         else:
             _launcher(Path(sys.argv[2]), dict(os.environ))
     else:

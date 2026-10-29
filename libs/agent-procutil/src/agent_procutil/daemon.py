@@ -237,10 +237,12 @@ def spawn_daemon(
         }
         flags = kwargs.get("creationflags", 0)
         durable_windows = bool(flags & pu._CREATE_BREAKAWAY_FROM_JOB)
-        if durable_windows:
+        if pu._is_windows():
             from . import _job_scopes
 
             scope_environment = _job_scopes.child_environment(child_env)
+            child_env.update(scope_environment)
+        if durable_windows:
             child_env.pop(_job_scopes.ENVIRONMENT_KEY, None)
             kwargs["creationflags"] = flags | pu._CREATE_SUSPENDED
         receipt = reserve()

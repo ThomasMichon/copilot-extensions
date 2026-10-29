@@ -111,6 +111,28 @@ def test_direct_native_admission_closes_queries_before_resume(
     assert scopes.ENVIRONMENT_KEY not in kwargs["env"]
 
 
+@pytest.mark.parametrize("breakaway, contained", [(False, False), (True, True)])
+def test_contained_daemon_replacement_environment_retains_outer_scopes(
+    tmp_path, monkeypatch, native_admission, breakaway, contained,
+):
+    outer = scopes.new_name()
+    monkeypatch.setenv(scopes.ENVIRONMENT_KEY, outer)
+    monkeypatch.setattr(pu, "contained_test_mode", lambda: contained)
+    queries, resume = Mock(), Mock()
+    monkeypatch.setattr(scopes, "query_scopes", queries)
+    monkeypatch.setattr(pu, "_resume_suspended_process", resume)
+    child = pu.spawn_daemon(
+        ["fixture.exe"], cwd=tmp_path, log_path=tmp_path / "log",
+        env={"literal": "retained"}, breakaway=breakaway,
+    )
+    assert child is native_admission
+    environment = subprocess.Popen.call_args.kwargs["env"]
+    assert scopes.scope_names(environment) == (outer,)
+    assert environment["literal"] == "retained"
+    queries.assert_not_called()
+    resume.assert_not_called()
+
+
 def test_shared_outer_refusal_never_resumes_and_settles_exact_child(
     tmp_path, monkeypatch, native_admission,
 ):
