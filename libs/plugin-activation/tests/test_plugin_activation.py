@@ -1490,6 +1490,8 @@ def _synthetic_identity_input_files(tmp_path, monkeypatch):
     lstat, read_bytes = Path.lstat, Path.read_bytes
 
     def synthetic_stat(path, *args, **kwargs):
+        if path in root.parents:
+            return lstat(root.parent)
         if path in (root / "objects", root / "refs"):
             return lstat(root)
         if path in (root / "HEAD", root / "config"):
@@ -1509,13 +1511,13 @@ def _synthetic_identity_input_files(tmp_path, monkeypatch):
     return root, config, executable
 
 
-@pytest.mark.parametrize("changed", ["file", "directory"])
+@pytest.mark.parametrize("changed", ["file", "directory", "ancestor"])
 def test_project_identity_memo_unit_a_b_a_write_metadata(tmp_path, monkeypatch, changed):
     from plugin_activation import _project_identity
 
     root, config, executable = _synthetic_identity_input_files(tmp_path, monkeypatch)
     original = config.read_bytes()
-    target = config if changed == "file" else root
+    target = config if changed == "file" else root if changed == "directory" else root.parent
     initial_time = target.stat().st_mtime_ns
     before = _project_identity.identity_inputs(root, "expected", str(executable))
     if changed == "file":
@@ -1539,9 +1541,11 @@ def test_project_identity_memo_unit_rejects_legacy_origin(tmp_path, monkeypatch,
     assert _project_identity.identity_inputs(root, "expected", str(executable)) is None
 
 
-@pytest.mark.parametrize("mutation", ["worktree-config", "gitdir-swap"])
+@pytest.mark.parametrize("mutation", ["worktree-config", "gitdir-swap", "root-swap", "ancestor-swap"])
 def test_registered_identity_memo_rejects_directory_a_b_a_probe(tmp_path, monkeypatch, mutation):
-    repo = tmp_path / "repo"
+    container = tmp_path / "container" if mutation == "ancestor-swap" else tmp_path
+    container.mkdir(exist_ok=True)
+    repo = container / "repo"
     expected = "https://github.com/example/demo.git"
     wrong = "https://github.com/other/demo.git"
     _register_project(tmp_path, "demo", repo, expected, actual_remote=wrong)
@@ -1554,10 +1558,14 @@ def test_registered_identity_memo_rejects_directory_a_b_a_probe(tmp_path, monkey
     else:
         matching = tmp_path / "matching"
         matching.mkdir()
-        _git(matching, "init", "-q")
-        _git(matching, "remote", "add", "origin", expected)
-        directory = repo
+        matching_repo = matching / "repo" if mutation == "ancestor-swap" else matching
+        matching_repo.mkdir(exist_ok=True)
+        _git(matching_repo, "init", "-q")
+        _git(matching_repo, "remote", "add", "origin", expected)
+        directory = repo if mutation == "gitdir-swap" else tmp_path
     initial_time = directory.stat().st_mtime_ns
+    root_mtime = repo.stat().st_mtime_ns
+    container_mtime = container.stat().st_mtime_ns
     original = resolver._git
 
     def transient_match(root, *args):
@@ -1566,17 +1574,31 @@ def test_registered_identity_memo_rejects_directory_a_b_a_probe(tmp_path, monkey
         if mutation == "worktree-config":
             volatile = gitdir / "config.worktree"
             volatile.write_text('[url "https://github.com/example/"]\n    insteadOf = https://github.com/other/\n', encoding="utf-8")
-        else:
+        elif mutation == "gitdir-swap":
             gitdir.rename(repo / ".git-saved")
             (matching / ".git").rename(gitdir)
+        elif mutation == "root-swap":
+            repo.rename(repo.with_name("repo-saved"))
+            matching.rename(repo)
+        else:
+            container.rename(container.with_name("container-saved"))
+            matching.rename(container)
         try:
             return original(root, *args)
         finally:
             if mutation == "worktree-config":
                 volatile.unlink()
-            else:
+            elif mutation == "gitdir-swap":
                 gitdir.rename(matching / ".git")
                 (repo / ".git-saved").rename(gitdir)
+            elif mutation == "root-swap":
+                repo.rename(matching)
+                repo.with_name("repo-saved").rename(repo)
+                os.utime(repo, ns=(repo.stat().st_atime_ns, root_mtime))
+            else:
+                container.rename(matching)
+                container.with_name("container-saved").rename(container)
+                os.utime(container, ns=(container.stat().st_atime_ns, container_mtime))
             os.utime(directory, ns=(directory.stat().st_atime_ns, initial_time + 1_000_000_000))
 
     monkeypatch.setattr(resolver, "_git", transient_match)

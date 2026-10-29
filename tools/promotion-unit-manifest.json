@@ -2628,7 +2628,8 @@
         "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_a_b_a_write_metadata[file]",
         "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_a_b_a_write_metadata[directory]",
         "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_rejects_legacy_origin[remotes]",
-        "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_rejects_legacy_origin[branches]"
+        "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_rejects_legacy_origin[branches]",
+        "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_a_b_a_write_metadata[ancestor]"
     ],
     "sources": {
         "tools/core_python_artifacts.py": "cfeae35bfee4537022e1026ffae498b61b23508426a676d9dc09ca8ab8d4b4a0",
@@ -2960,8 +2961,8 @@
         "libs/zdd/src/zdd/private_protocol.py": "b693ed29912fb5f17c982ef7ed1a6b7a20e4354023a7628b8cff190017f34001",
         "libs/zdd/src/zdd/private_windows.py": "358dac30bf8d7f4cdcc212dec8cacb187c8e00b43fe2591ef4fff7e0fa418e1d",
         "libs/zdd/src/zdd/private_windows_native.py": "80df5f71f4962a64eb96670a15511cdfddc50e989cc667271642c442613fab9d",
-        "libs/plugin-activation/src/plugin_activation/_project_identity.py": "4c72543e0047d1fe71a99d3fbcb322c2b38620e520485650da996015ae38889f",
-        "libs/plugin-activation/tests/test_plugin_activation.py": "2b82b0ff9661f449fe6a284cb01744fa5e814dc9ab4e966cfd558409ae08613c"
+        "libs/plugin-activation/src/plugin_activation/_project_identity.py": "c7a93fa7e5a99bb651ccd32b88f29f1ea310e42d7b0240547d34e6044f325c69",
+        "libs/plugin-activation/tests/test_plugin_activation.py": "67aa5b9153538449c6afc915175378fbabafa834422e2161185ff5155e32df7a"
     },
     "coverage_targets": [
         "tools/core_runtime_profile.py",

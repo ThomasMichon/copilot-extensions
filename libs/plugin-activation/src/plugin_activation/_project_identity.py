@@ -74,6 +74,12 @@ def identity_inputs(root: Path, expected_remote: str, git: str | None) -> str | 
             if not _regular(info, directory=True) or not _owned_directory(path, info):
                 return None
             directories.append((str(path), _write_version(info)))
+        bindings = []
+        for parent in root.parents:
+            info = parent.lstat()
+            if not _regular(info, directory=True):
+                return None
+            bindings.append((str(parent), _write_version(info)))
         files = []
         for name in ("HEAD", "config", "config.worktree"):
             path = gitdir / name
@@ -101,7 +107,7 @@ def identity_inputs(root: Path, expected_remote: str, git: str | None) -> str | 
             _VERSION, str(root), expected_remote, str(executable),
             [executable_info.st_dev, executable_info.st_ino, executable_info.st_size,
              executable_info.st_mtime_ns, executable_info.st_ctime_ns],
-            directories, files,
+            directories, bindings, files,
         ]
         return hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
     except (OSError, ValueError):

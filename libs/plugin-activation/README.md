@@ -99,13 +99,17 @@ Consumers decide how often to refresh and how to render findings.
 Successful registered-project Git identity checks have an input-bound file memo
 under that registry's `cache/project-identities.json`. Ordinary `.git` directory
 and bare-anchor layouts reuse the check across processes only while the canonical
-root/directory identities and write metadata, normalized expected remote, selected Git executable
+root/directory identities, ancestor name-binding write metadata, normalized expected remote, selected Git executable
 metadata, plus `HEAD`, `config` and `config.worktree` presence, content, inode
 and write metadata agree.
 Inputs are checked before and after a fresh successful probe before publication.
 Write metadata remains in the key even when bytes return to their prior value,
 so file and directory A-to-B-to-A changes during probing cannot publish a false
-positive for A. Optional legacy-container directories are bound even when empty;
+positive for A. Canonical ancestor directory versions also bind the root name,
+so moving/restoring an entire root or its parent cannot hide behind unchanged
+metadata on the restored repository object. These are bounded ancestor metadata
+reads, not a tree scan; ancestor ownership does not add a new admission rule.
+Optional legacy-container directories are bound even when empty;
 legacy `remotes/origin` or `branches/origin` definitions retain real Git probes
 instead of reusing a result with an untracked URL source.
 Access-time changes from reading files do not invalidate otherwise equal inputs.
