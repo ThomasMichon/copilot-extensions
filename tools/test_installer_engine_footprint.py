@@ -153,6 +153,21 @@ def test_recognized_replacement_reuses_the_same_qualified_target(tmp_path: Path)
     assert plan.version == selected and plan.mode == "incremental"
 
 
+def test_occupied_incomplete_fallback_selects_distinct_construction(tmp_path: Path) -> None:
+    _seed(tmp_path)
+    target = tmp_path / "versions/1.2.2"
+    target.mkdir()
+    (target / "unfinished").write_bytes(b"keep")
+    (tmp_path / "last-known-good").write_text("1.2.2", encoding="utf-8")
+    plan = subject.plan_construction(
+        subject.parse(_record(), "agent-mcp"), tmp_path, "1.2.2",
+        admission=lambda root, version: "construct",
+    )
+    assert plan.mode == "fresh" and plan.version.startswith("1.2.2+repair.")
+    assert not (tmp_path / "versions" / plan.version).exists()
+    assert (target / "unfinished").read_bytes() == b"keep"
+
+
 @pytest.mark.parametrize("condition", ("oversized", "hardlinked", "symlinked"))
 def test_unusable_marker_paths_select_no_match(tmp_path: Path, condition: str) -> None:
     root = tmp_path / "runtime"

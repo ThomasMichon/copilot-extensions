@@ -950,7 +950,7 @@ _source_kind() {
 # footprint (marketplace vs local) so deploys are auditable like the siblings.
 MANIFEST_PATH="$INSTALL_DIR/deploy-manifest.json"
 if [[ -z "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then _assert_source_runtime || exit 1; fi
-SOURCE_FIELDS=""
+SOURCE_FIELDS="\"runtime_version\": \"$SRC_VERSION\","
 if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
     SOURCE_FIELDS="$("$VENV_PYTHON" -I -c 'import json,sys
 d=json.loads(sys.argv[1]); d["runtime_version"]=sys.argv[2]

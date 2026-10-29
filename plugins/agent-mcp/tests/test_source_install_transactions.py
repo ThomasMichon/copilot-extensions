@@ -408,6 +408,7 @@ _stamp_source_snapshot
 @pytest.mark.parametrize("language", ["ps1", "sh"])
 @pytest.mark.parametrize("condition", [
     "current", "missing-deployment", "corrupt-completion", "completion-fifo", "fallback-directory",
+    "occupied-fallback",
 ])
 def test_native_mcp_footprint_routes_actual_construction_without_old_receipt_permission(
     tmp_path: Path, language: str, condition: str,
@@ -419,13 +420,18 @@ def test_native_mcp_footprint_routes_actual_construction_without_old_receipt_per
     payload, selected = _payload(tmp_path, "agent-mcp", construction_diagnostics=True)
     script = _setup(tmp_path, payload, "agent-mcp", language)
     root = tmp_path / "install"
-    incumbent_version = "1.2.2" if condition == "fallback-directory" else selected
+    incumbent_version = "1.2.2" if condition in {"fallback-directory", "occupied-fallback"} else selected
     incumbent = root / "versions" / incumbent_version
     incumbent.mkdir(parents=True)
     (incumbent / "incumbent-data").write_bytes(b"unchanged")
     (root / "current-version").write_text(incumbent_version, encoding="utf-8")
     if condition == "fallback-directory":
         (root / "last-known-good").mkdir()
+    if condition == "occupied-fallback":
+        occupied = root / "versions" / selected
+        occupied.mkdir()
+        (occupied / "unfinished").write_bytes(b"keep")
+        (root / "last-known-good").write_text(selected, encoding="utf-8")
     if condition != "missing-deployment":
         (root / "deploy-manifest.json").write_text(
             '{"schema_version":3,"service":"agent-mcp"}', encoding="utf-8",

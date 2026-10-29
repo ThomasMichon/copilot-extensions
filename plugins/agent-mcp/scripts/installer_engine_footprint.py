@@ -68,7 +68,10 @@ def plan_construction(
         if re.fullmatch(re.escape(version + separator) + r"repair\.[0-9a-f]{32}", selected):
             if admission(root, selected) == "reuse":
                 return ConstructionPlan(selected, "incremental", recognized)
-        if admission(root, version) in {"reuse", "construct"}:
+        decision = admission(root, version)
+        if decision == "reuse" or (
+            decision == "construct" and not os.path.lexists(root / "versions" / version)
+        ):
             return ConstructionPlan(version, "incremental", recognized)
     target = root / "versions" / version
     if os.path.lexists(target):

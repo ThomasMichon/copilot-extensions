@@ -1117,10 +1117,10 @@ $manifest = [ordered]@{
     }
     venv           = ($LinkDir -replace '\\', '/')
     runtime        = 'python'
+    runtime_version = $SrcVersion
 }
 if ($script:SourceRuntimeIdentity) {
     $fields = $script:SourceRuntimeIdentity | ConvertFrom-Json
-    $manifest.runtime_version = $SrcVersion
     $manifest.runtime_source = $fields.runtime_source
 }
 $tmp = "$manifestPath.tmp"

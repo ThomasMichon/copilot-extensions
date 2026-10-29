@@ -2550,6 +2550,12 @@ bounded files, not FIFOs or oversized evidence. Source identity remains pinned
 independently of the physical generation name; MCP still advertises that exact
 generation, including a repair suffix, for operational cutover comparisons.
 The optional protocol leaves other callers unchanged.
+MCP deployment manifests record the selected physical generation for ordinary
+and source-backed installs. Its native readiness checks validate the original
+payload/source separately from an admitted exact repair suffix, then require
+that selected completed slot rather than a healthy fallback. The shared POSIX
+readiness fragment uses the same read-only identity helper for Bridge and
+Dispatch; PowerShell keeps ordinary package readiness Python-free.
 This construction boundary does not execute the reset descriptors, establish
 old-process silence, relax command ownership, or complete fresh publication
 through corrupt deployment metadata. Those remain native lifecycle obligations.

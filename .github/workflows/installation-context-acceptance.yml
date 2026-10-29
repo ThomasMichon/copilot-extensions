@@ -607,7 +607,8 @@ jobs:
           python tools/run-plugin-tests.py agent-mcp --allow-explicit-tiers
           --test-file tests/test_source_install_transactions.py
           --test-file tests/test_source_build.py
-          -k "footprint_routes or test_source_build"
+          --test-file tests/test_bootstrap_stamp_selection.py
+          -k "footprint_routes or test_source_build or post_repair"
   update-diagnostics-windows:
     if: ${{ inputs.update_diagnostics }}
     name: Update diagnostic contracts (Windows)

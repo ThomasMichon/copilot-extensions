@@ -148,16 +148,22 @@ def test_readiness_reference_is_synchronized(plugin):
 
 
 @pytest.mark.parametrize("case", [
-    "ordinary", "source", "changed-source", "changed-bytes", "wrong-generation",
+    "ordinary", "repair", "source", "source-repair", "changed-source", "changed-bytes", "wrong-generation",
     "missing-source-receipt",
 ])
 def test_actual_identity_probe_on_host(tmp_path, case):
     payload, _, root = _fixture(tmp_path, "agent-bridge")
     expected = VERSION
-    if case != "ordinary":
+    if case == "repair":
+        expected = VERSION + "+repair." + "d" * 32
+        _manifest(root, runtime_version=expected)
+    elif case != "ordinary":
         identity = _source_payload(payload)
         fields = source.manifest_fields(identity)
         expected = identity.runtime_version
+        if case == "source-repair":
+            expected += ".repair." + "d" * 32
+            fields["runtime_version"] = expected
         if case == "changed-source":
             fields["runtime_source"] = {**identity.document(), "source_tree": "c" * 40}
         if case == "wrong-generation":
@@ -175,7 +181,7 @@ def test_actual_identity_probe_on_host(tmp_path, case):
         input=code, capture_output=True, text=True, timeout=30,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
-    if case in ("ordinary", "source"):
+    if case in ("ordinary", "repair", "source", "source-repair"):
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == expected
     else:
@@ -186,7 +192,7 @@ def test_actual_identity_probe_on_host(tmp_path, case):
 @NATIVE
 @pytest.mark.parametrize("plugin", PLUGINS)
 @pytest.mark.parametrize("case", [
-    "complete", "current-with-fallback", "source", "repair", "legacy",
+    "complete", "current-with-fallback", "source", "source-repair", "repair", "legacy",
     "wrong-selected", "wrong-selected-generation", "fallback",
     "missing-selected", "incomplete", "corrupt", "wrong-completion-version",
     "missing-interpreter", "changed-version", "changed-source", "changed-bytes",
@@ -195,10 +201,13 @@ def test_actual_identity_probe_on_host(tmp_path, case):
 def test_actual_hook_selected_readiness(tmp_path, plugin, case):
     payload, home, root = _fixture(tmp_path, plugin)
     selected = VERSION
-    if case in ("source", "changed-source", "changed-bytes", "wrong-generation"):
+    if case in ("source", "source-repair", "changed-source", "changed-bytes", "wrong-generation"):
         identity = _source_payload(payload)
         selected = identity.runtime_version
         fields = source.manifest_fields(identity)
+        if case == "source-repair":
+            selected += ".repair." + "d" * 32
+            fields["runtime_version"] = selected
         if case == "changed-source":
             fields["runtime_source"] = {**identity.document(), "source_tree": "c" * 40}
         if case == "wrong-generation":
@@ -243,7 +252,7 @@ def test_actual_hook_selected_readiness(tmp_path, plugin, case):
             (root / "current-version").unlink()
     result, elapsed = _hook(payload, home)
     assert result.returncode == 0, result.stderr
-    ready = case in ("complete", "current-with-fallback", "source", "repair", "legacy")
+    ready = case in ("complete", "current-with-fallback", "source", "source-repair", "repair", "legacy")
     if ready:
         assert _children(home) == []
         assert not (root / "reconcile.lock").exists()
