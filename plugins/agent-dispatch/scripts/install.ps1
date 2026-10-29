@@ -948,24 +948,6 @@ function Invoke-VersionedMarkComplete {
     return $true
 }
 
-function Invoke-RuntimeBrokerAdoption {
-    param([switch]$Retained)
-    if ($NoService -or $env:OS -ne 'Windows_NT' -or
-        $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1') { return }
-    if (-not $Retained -and
-        (-not $script:RuntimeConstructionSession -or -not $script:RuntimeConstructionSession.Complete -or
-         $script:RuntimeConstructionSession.Process.HasExited)) {
-        throw 'Broker adoption requires attached complete-slot retention'
-    }
-    $diagnostic = ''
-    $result = Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', '-m', 'update_driver.windows_broker',
-        '--runtime-root', $InstallDir, '--slot', $VenvDir,
-        '--execution-root', (Join-Path $env:USERPROFILE '.copilot-extensions\update-driver')) `
-        -ErrorOutput ([ref]$diagnostic)
-    if ($LASTEXITCODE -ne 0) { throw "Runtime broker adoption failed: $diagnostic" }
-    $receipt = $result | ConvertFrom-Json
-    if (-not $receipt -or $receipt.adopted -ne $true) { throw 'Runtime broker adoption returned no receipt' }
-}
 # === end install-contract:v4 marker/toss helpers ===
 
 function Get-SourceKind {
@@ -1775,7 +1757,6 @@ function Install-RetainedRuntime {
     $slotOk = ($LASTEXITCODE -eq 0)
     $ErrorActionPreference = $prevEAP
     if (-not $slotOk) { throw 'Retained runtime failed its health gate; not activating' }
-    Invoke-RuntimeBrokerAdoption -Retained
     $mutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -TimeoutSeconds $script:GlobalActivationLockTimeoutSeconds
     try {
         if (-not (Invoke-VersionedActivate)) { throw 'Retained runtime activation failed' }
@@ -2183,7 +2164,6 @@ function Install-Runtime {
             Write-Ok "Prepared runtime: $VenvDir (not activated; retention ends when this command exits)"
             return
         }
-        Invoke-RuntimeBrokerAdoption
         if (-not (Invoke-VersionedActivate)) { exit 1 }
         # The supersession check and the shared publication it protects
         # (the binstub + deploy-manifest, both readable/overwritable by any
@@ -4561,6 +4541,10 @@ function Invoke-Uninstall {
                     throw 'Owned Dispatch daemon did not stop'
                 }
             }
+        }
+        if ($env:OS -eq 'Windows_NT' -and $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1') {
+            & $driverPython @driverArguments --remove-broker
+            if ($LASTEXITCODE -ne 0) { throw 'Owned runtime broker removal failed; runtimes preserved' }
         }
         Remove-AllSupervisorTasks
         Write-Ok 'Embody supervisor tasks removed'

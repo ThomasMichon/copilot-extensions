@@ -534,31 +534,15 @@ function Invoke-VersionedActivate {
     return $true
 }
 
-function Invoke-RuntimeBrokerAdoption {
-    if ($env:OS -ne 'Windows_NT' -or $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1') { return }
-    if (-not $script:RuntimeConstructionSession -or -not $script:RuntimeConstructionSession.Complete -or
-        $script:RuntimeConstructionSession.Process.HasExited) {
-        throw 'Broker adoption requires attached complete-slot retention'
-    }
-    $diagnostic = ''
-    $result = Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', '-m', 'update_driver.windows_broker',
-        '--runtime-root', $InstallDir, '--slot', $VenvDir,
-        '--execution-root', (Join-Path $env:USERPROFILE '.copilot-extensions\update-driver')) `
-        -ErrorOutput ([ref]$diagnostic)
-    if ($LASTEXITCODE -ne 0) { throw "Runtime broker adoption failed: $diagnostic" }
-    $receipt = $result | ConvertFrom-Json
-    if (-not $receipt -or $receipt.adopted -ne $true) { throw 'Runtime broker adoption returned no receipt' }
-}
 
-function Ensure-RuntimeBrokerAdoption {
+function Ensure-RuntimeSlotRetention {
     param([string]$PayloadHash)
     if ($env:OS -ne 'Windows_NT' -or $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1') { return }
     [void](Invoke-VersionedSlotClean -PayloadHash $PayloadHash)
     if (-not $script:RuntimeConstructionReuse) {
-        throw 'Existing-runtime broker adoption requires a complete reusable slot'
+        throw 'Existing-runtime retention requires a complete reusable slot'
     }
     if (-not (Invoke-VersionedMarkComplete -PayloadHash $PayloadHash)) { throw 'Versioned completion publication failed' }
-    Invoke-RuntimeBrokerAdoption
 }
 
 function Get-BootstrapPython {
@@ -2651,7 +2635,7 @@ function Invoke-Install {
     $preLockHash = Get-PayloadHash
     if (-not (Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue) -and
         (Test-SlotContentCurrent -PayloadHash $preLockHash)) {
-        Ensure-RuntimeBrokerAdoption -PayloadHash $preLockHash
+        Ensure-RuntimeSlotRetention -PayloadHash $preLockHash
         Write-Ok "agent-bridge $SrcVersion already installed and healthy (content match) -- no-op (no venv rebuild, no restart)."
         Write-DeployManifest -PayloadHash $preLockHash   # re-assert the manifest so version drift clears and this never re-triggers every session
         return
@@ -2673,7 +2657,7 @@ function Invoke-Install {
     # Re-check after acquiring: the install we waited on may have JUST landed this
     # exact content, so our rebuild would be redundant (and a live-slot stomp).
     if (Test-SlotContentCurrent -PayloadHash $payloadHash) {
-        Ensure-RuntimeBrokerAdoption -PayloadHash $payloadHash
+        Ensure-RuntimeSlotRetention -PayloadHash $payloadHash
         Write-Ok "agent-bridge $SrcVersion already installed and healthy after lock wait -- no-op."
         Write-DeployManifest -PayloadHash $payloadHash
         Exit-InstallLock
@@ -2730,7 +2714,6 @@ function Invoke-Install {
         }
         [void](Test-PayloadUnchangedSinceAdmission -SourceIdentityOnly)
         if (-not (Invoke-VersionedMarkComplete -PayloadHash $payloadHash)) { throw 'Versioned completion publication failed' }
-        Invoke-RuntimeBrokerAdoption
         if (-not (Invoke-VersionedActivate)) { throw 'Versioned activate failed' }
     }
 
@@ -2800,7 +2783,7 @@ function Invoke-Provision {
         return
     }
 
-    Ensure-RuntimeBrokerAdoption -PayloadHash (Get-PayloadHash)
+    Ensure-RuntimeSlotRetention -PayloadHash (Get-PayloadHash)
 
     # A never-ran S4U task cannot be flipped to the default interactive
     # principal from a normal shell. Route that exact recovery through the
@@ -3530,7 +3513,7 @@ function Invoke-Update {
     $payloadHash = Get-PayloadHash
     if (Test-SlotContentCurrent -PayloadHash $payloadHash) {
         try {
-            Ensure-RuntimeBrokerAdoption -PayloadHash $payloadHash
+            Ensure-RuntimeSlotRetention -PayloadHash $payloadHash
             # Slot/import health proves reusable bytes, not the serving version.
             # This guarded seam never rebuilds, cold-starts or falls back to stop.
             Invoke-ServingRuntimeReconcile
@@ -3673,7 +3656,6 @@ function Invoke-Update {
         if ($VersionedRuntime) {
             [void](Test-PayloadUnchangedSinceAdmission -SourceIdentityOnly)
             if (-not (Invoke-VersionedMarkComplete -PayloadHash $payloadHash)) { throw 'Versioned completion publication failed' }
-            Invoke-RuntimeBrokerAdoption
         }
     }
     catch {
