@@ -17,21 +17,39 @@ from agent_procutil.process_retirement import PinnedProcess, RetirementRefused
     os.name != "nt" and not sys.platform.startswith("linux"),
     reason="External process pinning requires Windows or Linux",
 )
-def test_pause_rollback_and_confirmed_exit(tmp_path):
+@pytest.mark.parametrize("name", [
+    None,
+    pytest.param(b"worker-\xc3\xa9", marks=pytest.mark.skipif(
+        not sys.platform.startswith("linux"), reason="Native Linux task name",
+    )),
+    pytest.param(b"worker-\xff", marks=pytest.mark.skipif(
+        not sys.platform.startswith("linux"), reason="Opaque Linux task-name bytes",
+    )),
+])
+def test_pause_rollback_and_confirmed_exit(tmp_path: Path, name: bytes | None) -> None:
     progress = tmp_path / "progress"
     code = (
         "from pathlib import Path\n"
-        "import os,sys,time,threading\n"
+        "import ctypes,os,sys,time,threading\n"
         "p=Path(sys.argv[1])\n"
+        "name=bytes.fromhex(sys.argv[2]) if sys.argv[2] else None\n"
+        "ready=threading.Barrier(5)\n"
+        "def worker():\n"
+        " if name is not None: assert ctypes.CDLL(None).prctl(15,name,0,0,0)==0\n"
+        " ready.wait()\n"
+        " time.sleep(60)\n"
+        "if name is not None: assert ctypes.CDLL(None).prctl(15,name,0,0,0)==0\n"
         "for _ in range(4):\n"
-        " threading.Thread(target=lambda:time.sleep(60),daemon=True).start()\n"
+        " threading.Thread(target=worker,daemon=True).start()\n"
+        "ready.wait()\n"
         "print(os.getpid(),flush=True)\n"
         "while True:\n"
         " p.write_text(str(os.getpid())+':'+str(time.monotonic()))\n"
         " time.sleep(.01)\n"
     )
     process = subprocess.Popen(
-        [getattr(sys, "_base_executable", sys.executable), "-c", code, str(progress)],
+        [getattr(sys, "_base_executable", sys.executable), "-c", code, str(progress),
+         name.hex() if name is not None else ""],
         stdout=subprocess.PIPE, text=True,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
@@ -50,8 +68,8 @@ def test_pause_rollback_and_confirmed_exit(tmp_path):
                 tasks = list(Path(f"/proc/{process.pid}/task").iterdir())
                 assert len(tasks) >= 5
                 assert all(
-                    (task / "stat").read_text().rsplit(") ", 1)[1].split()[0]
-                    in {"T", "t"} for task in tasks
+                    (task / "stat").read_bytes().rsplit(b") ", 1)[1].split()[0]
+                    in {b"T", b"t"} for task in tasks
                 )
             before = progress.read_bytes()
             time.sleep(.05)
@@ -86,15 +104,18 @@ def test_invalid_or_wrapping_pid_is_rejected_before_native_access(pid):
         PinnedProcess(pid, "not a process authority")
 
 
-def test_linux_stopped_leader_does_not_prove_worker_threads_stopped(tmp_path):
+@pytest.mark.parametrize("name", [b"fixture", b"worker-\xc3\xa9", b"worker-\xff"])
+def test_linux_stopped_leader_does_not_prove_worker_threads_stopped(
+    tmp_path: Path, name: bytes,
+) -> None:
     from agent_procutil.process_retirement import _linux_threads_stopped
 
     for tid, state in ((1, "T"), (2, "R")):
         task = tmp_path / "task" / str(tid)
         task.mkdir(parents=True)
-        (task / "stat").write_text(f"{tid} (fixture) {state} 0", encoding="ascii")
+        (task / "stat").write_bytes(f"{tid} (".encode() + name + f") {state} 0".encode())
     assert not _linux_threads_stopped(tmp_path)
-    (tmp_path / "task" / "2" / "stat").write_text("2 (fixture) T 0", encoding="ascii")
+    (tmp_path / "task" / "2" / "stat").write_bytes(b"2 (" + name + b") T 0")
     assert _linux_threads_stopped(tmp_path)
 
 

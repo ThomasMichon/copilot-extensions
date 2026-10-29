@@ -23,7 +23,7 @@ def _linux_threads_stopped(process: Path) -> bool:
         if not tasks:
             return False
         for task in tasks:
-            stat = (task / "stat").read_text(encoding="ascii")
+            stat = (task / "stat").read_text(encoding="ascii", errors="surrogateescape")
             if stat[stat.rindex(")") + 2:].split()[0] not in {"T", "t"}:
                 return False
         return tasks == set((process / "task").iterdir())
@@ -126,7 +126,7 @@ class PinnedProcess:
             self._paused = True
             return
         status = Path(f"/proc/{self.pid}/stat")
-        before = status.read_text(encoding="ascii")
+        before = status.read_text(encoding="ascii", errors="surrogateescape")
         if before[before.rindex(")") + 2:].split()[0] in {"T", "t"}:
             raise RetirementRefused(f"Process was already stopped (pid={self.pid})")
         self._signal(signal.SIGSTOP)

@@ -700,7 +700,7 @@ def _controllers(rows: list[dict[str, Any]], payload: Path, root: Path,
 
 def _linux_require_skippable(directory: Path, created: int | None) -> None:
     try:
-        status = (directory / "stat").read_text()
+        status = (directory / "stat").read_text(encoding="utf-8", errors="surrogateescape")
     except (FileNotFoundError, ProcessLookupError):
         return
     fields = status[status.rfind(")") + 2:].split()
@@ -733,7 +733,7 @@ def inspect_processes(payload: Path, root: Path, shell: str, profile: Profile, *
             try:
                 if directory.stat().st_uid != os.getuid():
                     continue
-                status = (directory / "stat").read_text()
+                status = (directory / "stat").read_text(encoding="utf-8", errors="surrogateescape")
                 fields = status[status.rfind(")") + 2:].split()
                 parent = int(fields[1])
                 created = int(fields[19])
@@ -751,7 +751,7 @@ def inspect_processes(payload: Path, root: Path, shell: str, profile: Profile, *
                     image = ""
                     incomplete = True
                 # Bind argv/image observation to the original kernel start.
-                later = (directory / "stat").read_text()
+                later = (directory / "stat").read_text(encoding="utf-8", errors="surrogateescape")
                 if int(later[later.rfind(")") + 2:].split()[19]) != created:
                     raise UninstallRefused("Process identity changed during inspection")
                 row = {"pid": int(directory.name), "ppid": parent, "image": image,

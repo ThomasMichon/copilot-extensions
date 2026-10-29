@@ -2589,6 +2589,8 @@ refuses census instead of hiding a potentially active runtime.
 Missing command-line, executable or identity files use the same group-exit
 proof; a leader exiting between reads cannot bypass it through a file-not-found
 exception.
+Kernel stat parsing preserves opaque task-name bytes, including non-UTF-8
+names, without weakening birth, state or thread-membership checks.
 The ordinary non-signaling uninstall census retains its existing strictness.
 Current-slot protection covers both image and launch path, including new
 descendants and same-birth execs. Retirement retains the canonical publication

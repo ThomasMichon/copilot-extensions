@@ -501,8 +501,15 @@ def test_real_tree_exit_spares_original_parent(tmp_path):
 
     src = (
         "import os,subprocess,sys,time\n"
-        "c=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'],"
+        "child='import ctypes,sys,time\\n"
+        "if sys.platform.startswith(\"linux\"): assert ctypes.CDLL(None).prctl(15,b\"worker-\\\\xff\",0,0,0)==0\\n"
+        "print(\"ready\",flush=True)\\n"
+        "time.sleep(60)'\n"
+        "c=subprocess.Popen([sys.executable,'-c',child],"
+        "stdout=subprocess.PIPE,text=True,"
         "creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)\n"
+        "assert c.stdout.readline().strip()=='ready'\n"
+        "c.stdout.close()\n"
         "print(c.pid,flush=True)\n"
         "time.sleep(60)\n"
     )
