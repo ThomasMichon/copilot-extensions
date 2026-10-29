@@ -60,6 +60,11 @@ on:
         description: Exact published checkpoint; required for source-pinned native portfolios
         required: false
         type: string
+      diagnostic_stacks:
+        description: Diagnostic-only copied service fixtures; never native acceptance
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -2812,6 +2817,7 @@ jobs:
     env:
       UPDATE_DRIVER_FOUNDATION_BUILD: "1"
       UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      COPILOT_EXTENSIONS_DAEMON_PYTHON: /usr/bin/python3
       UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
@@ -2824,10 +2830,24 @@ jobs:
         uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
+      - name: Prepare the real disposable user service manager
+        run: |
+          unit="user@$(id -u).service"
+          if systemctl is-active --quiet "$unit"; then
+            echo 'FOUNDATION_USER_MANAGER_STARTED=0' >> "$GITHUB_ENV"
+          else
+            sudo systemctl start "$unit"
+            echo 'FOUNDATION_USER_MANAGER_STARTED=1' >> "$GITHUB_ENV"
+          fi
+          bus="/run/user/$(id -u)/bus"
+          test -S "$bus"
+          echo "UPDATE_DRIVER_NATIVE_USER_BUS=unix:path=$bus" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=$bus" >> "$GITHUB_ENV"
       - name: Qualify Linux native operation and child custody across exec
         env:
-          PYTHONPATH: libs/single-instance-lease/src:libs/agent-procutil/src
+          PYTHONPATH: tools:libs/single-instance-lease/src:libs/agent-procutil/src
         run: |
+          stat -Lc 'lifecycle interpreter owner=%u mode=%a' /usr/bin/python3
           python tools/seasoned_uv.py --uv uv -- --system pytest psutil setuptools
           python -m pytest -q libs/single-instance-lease/tests/test_operation.py libs/single-instance-lease/tests/test_native_operation_linux.py
           python -m pytest -q libs/agent-procutil/tests/test_native_child.py libs/agent-procutil/tests/test_caller_owned.py libs/agent-procutil/tests/test_caller_owned_native.py
@@ -2868,7 +2888,15 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py update-driver
           --test-file tests/test_foundation_linux_genesis.py
+          --test-timeout 900 --timeout 1080
+      - name: Qualify bounded Linux cold first-use genesis
+        run: >-
+          python tools/run-plugin-tests.py update-driver
           --test-file tests/test_first_use_genesis.py
+          --test-timeout 900 --timeout 1080
+      - name: Qualify bounded Linux cold first-use consumers
+        run: >-
+          python tools/run-plugin-tests.py update-driver
           --test-file tests/test_first_use_vault.py
           --test-file tests/test_first_use_vault_command.py
           --test-file tests/test_first_use_vault_bootstrap.py
@@ -2902,6 +2930,10 @@ jobs:
           --test-file tests/test_bridge_first_use_publication.py
           -k "agent-vault or test_snapshot_retains_every_byte or test_snapshot_surfaces_file_read_failure or (test_bridge_actual_first_use_publication and legacy-managed-payload)"
           --allow-explicit-tiers --test-timeout 120 --timeout 540
+
+      - name: Stop only the user service manager created for this job
+        if: always() && env.FOUNDATION_USER_MANAGER_STARTED == '1'
+        run: sudo systemctl stop "user@$(id -u).service"
 
   pr-sweep-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'pr-sweep'
@@ -2959,6 +2991,8 @@ jobs:
         uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
+      - name: Select runner-owned native scratch
+        run: '"AGENT_SCRATCH_ROOT=$env:RUNNER_TEMP" >> $env:GITHUB_ENV'
       - name: Qualify same-boot queue settlement and legacy compatibility
         run: >-
           python tools/run-plugin-tests.py update-driver
@@ -2984,22 +3018,14 @@ jobs:
           --test-file tests/test_foundation_linux_process.py
           --test-file tests/test_foundation_producer_process.py
           --test-file tests/test_foundation_upgrade_process.py
-          --test-file tests/test_foundation_genesis_process.py
           --test-file tests/test_native_participant.py
           --test-file tests/test_foundation_build_process.py
           --test-file tests/test_source_removal.py
           --test-file tests/test_first_use.py
           --test-file tests/test_first_use_native.py
           --max-files-per-sub-suite 1 --test-timeout 1200 --timeout 1380
-      - name: Qualify Python-free Windows genesis and actual Vault bootstrap
-        run: >-
-          python tools/run-plugin-tests.py update-driver
-          --test-file tests/test_first_use_genesis.py
-          --test-file tests/test_first_use_vault.py
-          --test-file tests/test_first_use_vault_command.py
-          --test-file tests/test_first_use_vault_bootstrap.py
-          --test-file tests/test_first_use_pull_requests.py
-          --max-files-per-sub-suite 1 --test-timeout 1200 --timeout 1380
+      - name: Qualify production caller-Job loss and retained foundation use
+        run: python tools/qualify_foundation_lifetime.py foundation
       - name: Qualify isolated Pull Requests CLI health before completion
         run: >-
           python tools/run-plugin-tests.py agent-pull-requests
@@ -3028,3 +3054,56 @@ jobs:
           --test-file tests/test_bridge_first_use_publication.py
           -k "agent-vault or test_snapshot_retains_every_byte or test_snapshot_surfaces_file_read_failure or (test_bridge_actual_first_use_publication and legacy-managed-payload)"
           --allow-explicit-tiers --test-timeout 120 --timeout 540
+      - name: Qualify native Vault redirector ownership and pinned retirement
+        run: >-
+          python tools/run-plugin-tests.py agent-vault
+          --test-file tests/test_native_uninstall_adapters.py
+          -k "vault_uninstall_admits_only_native_service_redirector_closure or vault_uninstall_stop_pins_native_identity"
+          --allow-explicit-tiers --test-timeout 60 --timeout 300
+  foundation-first-use-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'foundation'
+    name: foundation first use (Windows, ${{ matrix.module }})
+    runs-on: windows-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [genesis, vault, vault_command, vault_bootstrap, pull_requests]
+    env:
+      UPDATE_DRIVER_FOUNDATION_BUILD: "1"
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UPDATE_DRIVER_NATIVE_STACKS: ${{ inputs.diagnostic_stacks && (matrix.module == 'vault_command' || matrix.module == 'vault_bootstrap') && '1' || '' }}
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install tooling
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Select runner-owned native scratch
+        run: '"AGENT_SCRATCH_ROOT=$env:RUNNER_TEMP" >> $env:GITHUB_ENV'
+      - name: Qualify one bounded cold first-use module
+        if: matrix.module == 'vault' || matrix.module == 'pull_requests'
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_${{ matrix.module }}.py
+          --max-files-per-sub-suite 1 --test-timeout 1200 --timeout 1380
+      - name: Prepare explicit production-lifetime test tooling
+        if: matrix.module == 'genesis' || matrix.module == 'vault_command' || matrix.module == 'vault_bootstrap'
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_${{ matrix.module }}.py --collect-only
+      - name: Qualify production caller-Job loss and restrictive-Job refusal
+        if: matrix.module == 'genesis'
+        run: python tools/qualify_foundation_lifetime.py first-use
+      - name: Qualify default-service command lifetime and restrictive-Job refusal
+        if: matrix.module == 'vault_command'
+        run: python tools/qualify_foundation_lifetime.py vault-command
+      - name: Qualify default-service bootstrap lifetime and restrictive-Job refusal
+        if: matrix.module == 'vault_bootstrap'
+        run: python tools/qualify_foundation_lifetime.py vault-bootstrap

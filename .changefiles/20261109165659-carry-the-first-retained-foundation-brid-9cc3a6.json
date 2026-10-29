@@ -1,0 +1,17 @@
+{
+  "comment": "Carry the first-retained-foundation bridge through every current update-driver consumer",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

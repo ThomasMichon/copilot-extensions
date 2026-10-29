@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import runpy
 import shutil
 import sqlite3
 import subprocess
@@ -208,7 +209,6 @@ def test_native_bootstrap_routes_recovery_without_touching_installer_staging(
 @pytest.mark.parametrize("relative", [True, False])
 def test_native_bootstrap_preserves_hold_path_before_staging(tmp_path, monkeypatch, relative):
     from test_bootstrap_ps1 import _fake_tools, _source_repo
-    from worktree_manager import self_install
 
     shell = shutil.which("pwsh") if os.name == "nt" else shutil.which("bash")
     if not shell or not shutil.which("git"):
@@ -222,6 +222,10 @@ def test_native_bootstrap_preserves_hold_path_before_staging(tmp_path, monkeypat
     )
     hold = home / "hold file.json"
     hold.write_text(json.dumps({"active": True}))
+    staging = root / "staging"
+    staging.mkdir()
+    sentinel = staging / "unrelated"
+    sentinel.write_bytes(b"preserved staging")
     tools = tmp_path / "tools"
     _fake_tools(tools, uv_exit=0, python_exit=0)
     observer = tools / "observe.py"
@@ -255,15 +259,17 @@ def test_native_bootstrap_preserves_hold_path_before_staging(tmp_path, monkeypat
     )
     assert result.returncode == 0, result.stdout + result.stderr
     observed = json.loads(result.stdout)
-    assert Path(observed["cwd"]).is_relative_to(root / "staging")
+    assert Path(observed["cwd"]).is_relative_to(root / "bootstrap-acquisition")
+    assert not Path(observed["cwd"]).exists()
+    assert sentinel.read_bytes() == b"preserved staging"
     assert observed["argv"][-3:] == ["--", "update", "--auto"]
     assert Path(observed["hold"]).is_absolute()
     assert Path(observed["hold"]).resolve() == hold
-    monkeypatch.chdir(observed["cwd"])
+    monkeypatch.chdir(root)
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", observed["hold"])
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
-    adapter = self_install._runtime_installer()
-    assert adapter._automatic_bootstrap_inhibited(SimpleNamespace(
+    adapter = runpy.run_path(str(INSTALLER))
+    assert adapter["_automatic_bootstrap_inhibited"](SimpleNamespace(
         payload=INSTALLER.parents[1], root=root, command=["update", "--auto"],
     ))
     assert json.loads(hold.read_text()) == {"active": True}

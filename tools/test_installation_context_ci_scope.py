@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 import yaml
@@ -1493,6 +1493,248 @@ def test_foundation_snapshot_staging_is_disposable_and_bounded() -> None:
             "-k", '"native_staged_snapshot', "or", "legacy_staging_reentry", "or", 'frozen_input"',
             "--test-timeout", "60", "--timeout", "300",
         ]
+
+
+def test_linux_foundation_lease_interpreter_covers_every_qualification_step() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    job = workflow["jobs"]["foundation-linux"]
+    key = "COPILOT_EXTENSIONS_DAEMON_PYTHON"
+    assert job["env"][key] == "/usr/bin/python3"
+    for step in job["steps"]:
+        if "run" in step:
+            assert step.get("env", {}).get(key, job["env"][key]) == "/usr/bin/python3"
+
+
+def test_linux_cold_construction_does_not_consume_first_use_aggregate_budget() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    job = workflow["jobs"]["foundation-linux"]
+    construction, genesis, consumers = (
+        next(step["run"] for step in job["steps"] if step.get("name") == name)
+        for name in (
+            "Qualify Python-free Linux genesis and retained upgrade",
+            "Qualify bounded Linux cold first-use genesis",
+            "Qualify bounded Linux cold first-use consumers",
+        )
+    )
+    assert construction.count("--test-file") == 1
+    assert "tests/test_foundation_linux_genesis.py" in construction
+    assert genesis.count("--test-file") == 1
+    assert "tests/test_first_use_genesis.py" in genesis
+    assert all(name not in consumers for name in (
+        "tests/test_foundation_linux_genesis.py", "tests/test_first_use_genesis.py",
+    ))
+    assert consumers.count("--test-file") == 4
+    assert all("--plugin-timeout" not in command for command in (construction, genesis, consumers))
+    assert job["timeout-minutes"] == 25
+
+
+def test_windows_cold_foundation_modules_have_independent_aggregate_budgets() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    job = workflow["jobs"]["foundation-first-use-windows"]
+    assert job["if"] == "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'foundation'"
+    assert job["runs-on"] == "windows-latest" and job["timeout-minutes"] == 25
+    assert job["strategy"]["fail-fast"] is False
+    modules = job["strategy"]["matrix"]["module"]
+    assert len(modules) == len(set(modules)) == 5
+    assert set(modules) == {"genesis", "vault", "vault_command", "vault_bootstrap", "pull_requests"}
+    step = next(
+        entry for entry in job["steps"]
+        if entry.get("name") == "Qualify one bounded cold first-use module"
+    )
+    assert step["if"] == "matrix.module == 'vault' || matrix.module == 'pull_requests'"
+    for module in {"vault", "pull_requests"}:
+        args = shlex.split(step["run"].replace("${{ matrix.module }}", module))
+        assert args.count("--test-file") == 1
+        assert args[args.index("--test-file") + 1] == f"tests/test_first_use_{module}.py"
+        assert "--plugin-timeout" not in args
+    core = workflow["jobs"]["foundation-windows"]
+    for candidate in (job, core):
+        assert all(
+            "${{ runner." not in str(value)
+            for value in candidate.get("env", {}).values()
+        )
+        assert any(
+            "AGENT_SCRATCH_ROOT=$env:RUNNER_TEMP" in entry.get("run", "")
+            and "$env:GITHUB_ENV" in entry["run"]
+            for entry in candidate["steps"]
+        )
+    lifetime = next(
+        entry for entry in job["steps"]
+        if entry.get("run") == "python tools/qualify_foundation_lifetime.py first-use"
+    )
+    assert lifetime["if"] == "matrix.module == 'genesis'"
+    for selection, name in (
+        ("vault-command", "vault_command"), ("vault-bootstrap", "vault_bootstrap"),
+    ):
+        service_lifetime = next(
+            entry for entry in job["steps"]
+            if entry.get("run") == f"python tools/qualify_foundation_lifetime.py {selection}"
+        )
+        assert service_lifetime["if"] == f"matrix.module == '{name}'"
+    assert any(
+        entry.get("run") == "python tools/qualify_foundation_lifetime.py foundation"
+        for entry in core["steps"]
+    )
+    assert all(
+        "tests/test_first_use_vault_bootstrap.py" not in entry.get("run", "")
+        for entry in core["steps"]
+    )
+    native = next(
+        entry for entry in core["steps"]
+        if "tests/test_native_uninstall_adapters.py" in entry.get("run", "")
+    )
+    assert "vault_uninstall_admits_only_native_service_redirector_closure" in native["run"]
+    assert "vault_uninstall_stop_pins_native_identity" in native["run"]
+    assert not any(
+        "tests/test_native_uninstall_adapters.py" in entry.get("run", "")
+        for entry in workflow["jobs"]["foundation-linux"]["steps"]
+    )
+
+
+@pytest.mark.parametrize(("selection", "expected"), [
+    ("foundation", "test_foundation_genesis_process.py"),
+    ("first-use", "test_first_use_genesis.py"),
+    ("vault-command", "test_first_use_vault_command.py"),
+    ("vault-bootstrap", "test_first_use_vault_bootstrap.py"),
+])
+@pytest.mark.parametrize("cleanup_raises", [False, True])
+@pytest.mark.parametrize("cleanup_overrun", [False, True])
+@pytest.mark.parametrize("stack_diagnostics", [False, True])
+def test_explicit_foundation_lifetime_retains_negative_controls_and_failure(
+    tmp_path, monkeypatch, capsys, selection, expected, cleanup_raises, cleanup_overrun, stack_diagnostics,
+):
+    from plugin_test_containment import UnreapedProcessError
+
+    spec = importlib.util.spec_from_file_location(
+        "qualified_foundation_lifetime", HERE / "qualify_foundation_lifetime.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    environment = tmp_path / "venvs"
+    python = environment / "update-driver" / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"fixture interpreter; never executed")
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    (sandbox / "fixture.log").write_text("exact fixture failure", encoding="utf-8")
+    observed = {}
+    clock = [0.0]
+    failure = UnreapedProcessError("unconfirmed fixture cleanup")
+
+    def run(arguments, **options):
+        assert observed.get("admitted") is True
+        observed.update(arguments=arguments, **options)
+        clock[0] = 899
+        if cleanup_raises:
+            raise failure
+        return 0 if cleanup_overrun or stack_diagnostics else 17
+
+    class Sandbox:
+        def __enter__(self):
+            return str(sandbox)
+
+        def __exit__(self, *_args):
+            clock[0] += 2 if cleanup_overrun else .5
+
+    def admit(wait, root):
+        assert wait == 0 and root == environment / "update-driver"
+        observed["admitted"] = True
+
+        def release():
+            assert clock[0] == (901 if cleanup_overrun else 899.5)
+            observed["released"] = True
+
+        return SimpleNamespace(release=release)
+
+    monkeypatch.setattr(module, "os", SimpleNamespace(
+        name="nt", environ={"UPDATE_DRIVER_NATIVE_STACKS": "1"} if stack_diagnostics else {},
+    ))
+    monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+    monkeypatch.setattr(module, "venv_root", lambda _root: environment)
+    monkeypatch.setattr(module, "acquire", admit)
+    monkeypatch.setattr(module, "runs_root", lambda _root: tmp_path)
+    monkeypatch.setattr(module, "TestSandbox", lambda **_options: Sandbox())
+    monkeypatch.setattr(module, "record_owner", lambda *_args, **_options: None)
+    monkeypatch.setattr(module, "isolated_environment", lambda *_args, **_options: {})
+    monkeypatch.setattr(module, "run_contained", run)
+    monkeypatch.setattr(sys, "argv", ["qualify_foundation_lifetime.py", selection])
+    if cleanup_raises:
+        with pytest.raises(type(failure)) as caught:
+            module.main()
+        assert caught.value is failure
+    else:
+        assert module.main() == (124 if cleanup_overrun else 125 if stack_diagnostics else 17)
+    diagnostic = capsys.readouterr().out
+    if cleanup_raises or not (cleanup_overrun or stack_diagnostics):
+        assert "exact fixture failure" in diagnostic
+    elif cleanup_overrun:
+        assert "900s including daemon settlement and sandbox cleanup" in diagnostic
+    else:
+        assert "copied stack instrumentation; not native acceptance" in diagnostic
+    assert [Path(value).name for value in observed["arguments"][-2:]] == [
+        expected, "test_native_lifetime.py",
+    ]
+    assert observed["native_application"] is True
+    assert observed["released"] is True
+    assert observed["limits"].wall_seconds == (180 if stack_diagnostics else 900)
+    assert observed["env"]["UPDATE_DRIVER_NATIVE_LIFETIME"] == "1"
+    assert observed["env"].get("UPDATE_DRIVER_NATIVE_SERVICE_LIFETIME") == (
+        "1" if selection in {"vault-command", "vault-bootstrap"} else None
+    )
+
+
+def test_native_foundation_busy_environment_refuses_before_interpreter_inspection(tmp_path, monkeypatch, capsys):
+    spec = importlib.util.spec_from_file_location(
+        "qualified_foundation_busy", HERE / "qualify_foundation_lifetime.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    environment = tmp_path / "venvs" / "update-driver"
+    environment.mkdir(parents=True)
+
+    class Busy(Exception):
+        pass
+
+    def refuse(wait, root):
+        assert wait == 0 and root == environment
+        raise Busy
+
+    monkeypatch.setattr(module, "os", SimpleNamespace(name="nt", environ={}))
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+    monkeypatch.setattr(module, "venv_root", lambda _root: environment.parent)
+    monkeypatch.setattr(module, "AlreadyRunningError", Busy)
+    monkeypatch.setattr(module, "acquire", refuse)
+    monkeypatch.setattr(module, "TestSandbox", lambda **_options: pytest.fail("busy qualification must not start"))
+    monkeypatch.setattr(sys, "argv", ["qualify_foundation_lifetime.py", "foundation"])
+    assert module.main() == 3
+    assert "qualification not started" in capsys.readouterr().err
+    assert list(environment.iterdir()) == []
+
+
+def test_foundation_failure_log_capture_is_bounded_and_read_only(tmp_path, capsys):
+    spec = importlib.util.spec_from_file_location(
+        "qualified_foundation_diagnostics", HERE / "qualify_foundation_lifetime.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    paths = []
+    for index in range(18):
+        path = tmp_path / f"fixture-{index}.log"
+        path.write_bytes(b"x" * 17000 + b"exact fixture tail")
+        paths.append(path)
+    module.report_fixture_logs(tmp_path)
+    captured = capsys.readouterr().out
+    assert captured.count("[FIXTURE]") == 16
+    assert captured.count("exact fixture tail") == 16
+    assert len(captured) < 257000
+    assert all(path.stat().st_size == 17018 for path in paths)
 
 
 def test_pull_requests_command_adoption_uses_explicit_native_portfolio() -> None:

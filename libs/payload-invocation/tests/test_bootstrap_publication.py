@@ -55,6 +55,12 @@ def _bootstrap_fixture(
 ) -> dict[str, str]:
     released = release(plugin)
     environment = _adopter(fixture, plugin, released)
+    if plugin == "agent-vault":
+        configuration = fixture["home"] / "vault-publication-config.json"
+        _write(configuration, {"enabled": True})
+        environment.update(
+            AGENT_VAULT_CONFIG=str(configuration), AGENT_VAULT_HOME=str(fixture["legacy"]),
+        )
     environment["BOOTSTRAP_WITNESS"] = str(fixture["legacy"] / "installer-dispatched")
     scripts = fixture["payload"] / "scripts"
     for name in ("init", "install"):
@@ -184,7 +190,10 @@ def _assert_driver_launch(fixture: dict[str, Any], result: subprocess.CompletedP
     assert f"bootstrap {action} supervision launched" in result.stderr, result.stdout + result.stderr
     deadline = time.monotonic() + 25
     while time.monotonic() < deadline:
-        diagnostic = "\n".join(path.read_text(errors="replace") for path in root.glob("first-use-*.log"))
+        diagnostic = "\n".join(
+            path.read_text(errors="replace")
+            for path in (*root.glob("first-use-*.log"), *root.glob("process-first-use-*.log"))
+        )
         if (root / "bootstrap-native-launch").is_file() and "fixture native launch refusal" in diagnostic:
             break
         if (root / "bootstrap-foundation-entered").is_file() and (

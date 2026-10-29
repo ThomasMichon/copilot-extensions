@@ -22,9 +22,11 @@ from update_driver import core
 from test_first_use_genesis import observe
 from test_first_use_native import native_command
 from test_first_use_vault import (
-    assert_stamp_only, cold_environment, materialized_vault as materialized_vault,
-    native_genesis, vault_command,
+    assert_stamp_only, cold_environment, default_service_environment,
+    materialized_vault as materialized_vault,
+    native_genesis, selected_service_probe, vault_command,
 )
+from test_first_use_vault_command import uninstall_child_diagnostic
 
 
 ACKNOWLEDGEMENT = "[agent-vault] driver launch acknowledgement: "
@@ -101,12 +103,22 @@ def test_bootstrap_observer_waits_for_committed_receipt_without_masking_bad_stat
 def owned_hook(
     command, *, env, project, directory, timeout, diagnostic,
     acknowledgement_prefix=ACKNOWLEDGEMENT,
-    keep_contained_job_until_settlement=False,
+    keep_contained_job_until_settlement=None,
+    production_lifetime=False,
 ):
+    if keep_contained_job_until_settlement is None:
+        keep_contained_job_until_settlement = (
+            os.name == "nt" and env.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1"
+        )
     if keep_contained_job_until_settlement and (
         os.name != "nt" or env.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1"
     ):
         raise ValueError("Retained caller Jobs require a contained Windows test")
+    if production_lifetime and (
+        os.name != "nt" or env.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1"
+        or not env.get("COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT")
+    ):
+        raise ValueError("Production caller Jobs require the explicit native test owner's lease")
     directory.mkdir()
     output = directory / "stdout"
     errors = directory / "stderr"
@@ -141,7 +153,8 @@ def owned_hook(
             if os.name == "nt":
                 from test_foundation_genesis_process import pinned_worker
                 caller, job = agent_procutil.spawn_sync_in_kill_on_close_job(
-                    command, env=env, cwd=project, require_job=True, allow_breakaway=False,
+                    command, env=env, cwd=project, require_job=True,
+                    allow_breakaway=production_lifetime,
                     stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
                     **agent_procutil.no_window_kwargs(),
                 )
@@ -209,7 +222,7 @@ def owned_hook(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows owner cleanup reporting")
-@pytest.mark.parametrize("keep_job", [False, True])
+@pytest.mark.parametrize("keep_job", [False, True, None])
 @pytest.mark.parametrize("wait_fails", [False, True])
 def test_hook_failure_reports_before_waiting_for_owner_cleanup(area, monkeypatch, capsys, keep_job, wait_fails):
     import test_foundation_genesis_process as native
@@ -236,18 +249,19 @@ def test_hook_failure_reports_before_waiting_for_owner_cleanup(area, monkeypatch
 
     monkeypatch.setattr(agent_procutil, "spawn_sync_in_kill_on_close_job", launch)
     monkeypatch.setattr(native, "pinned_worker", lambda _acknowledgement: owner)
+    retained = keep_job is not False
     with pytest.raises(TimeoutError if wait_fails else RuntimeError,
                        match="fixture owner settlement timeout" if wait_fails else "controlled hook failure"):
         with owned_hook(
-            ["fixture"], env={"COPILOT_EXTENSIONS_TEST_CONTAINED": "1"} if keep_job else {},
+            ["fixture"], env={"COPILOT_EXTENSIONS_TEST_CONTAINED": "1"} if retained else {},
             project=area, directory=area / "hook", timeout=15,
             diagnostic=lambda: "retained native diagnostic",
             keep_contained_job_until_settlement=keep_job,
         ) as control:
             control.close_caller()
-            assert events == ([] if keep_job else ["caller-close"])
+            assert events == ([] if retained else ["caller-close"])
             raise RuntimeError("controlled hook failure")
-    assert events == (["wait", "owner-close", "caller-close"] if keep_job else
+    assert events == (["wait", "owner-close", "caller-close"] if retained else
                       ["caller-close", "wait", "owner-close"])
 
 
@@ -266,13 +280,20 @@ def test_hook_cannot_retain_a_job_outside_contained_windows_test(area):
     os.environ.get("GITHUB_ACTIONS") != "true",
     reason="actual default service integration is limited to disposable hosted qualification",
 )
+@pytest.mark.skipif(
+    sys.platform == "linux" and os.environ.get("UPDATE_DRIVER_NATIVE_LINUX_SERVICE") != "1",
+    reason="Linux default service remains unqualified until a matching user-systemd venue is admitted (#9448 F9)",
+)
 def test_actual_bootstrap_keeps_deadline_caller_independence_and_default_service(
     materialized_vault, area, native_window_observation,
 ):
     payload, installation, project = materialized_vault
     profile = installation.parent
     root = profile / ".copilot-extensions" / "update-driver"
-    env = cold_environment(installation, project, area)
+    env = default_service_environment(cold_environment(installation, project, area))
+    production_lifetime = (
+        os.name == "nt" and os.environ.get("UPDATE_DRIVER_NATIVE_SERVICE_LIFETIME") == "1"
+    )
     env["AGENT_VAULT_INSTALLATION_ID"] = "fixture-foreign-installation"
     env["AGENT_VAULT_PIPE"] = "fixture-foreign-pipe"
     env["BOOTSTRAP_KILLSWITCH_STATE_FILE"] = str(profile / "bootstrap-killswitch.json")
@@ -294,10 +315,10 @@ def test_actual_bootstrap_keeps_deadline_caller_independence_and_default_service
         tools = Path(env["PATH"])
         # Only the existing hook's metadata/killswitch reader uses this interpreter.
         (tools / "python3").symlink_to(sys._base_executable)
-        systemctl = shutil.which("systemctl")
+        systemctl = shutil.which("systemctl", path=env["PATH"])
         assert systemctl, "hosted qualification requires the real platform service manager client"
-        (tools / "systemctl").symlink_to(systemctl)
-        env.pop("DBUS_SESSION_BUS_ADDRESS", None)
+        if not os.environ.get("UPDATE_DRIVER_NATIVE_USER_BUS"):
+            env.pop("DBUS_SESSION_BUS_ADDRESS", None)
         link = area / "project-link"
         link.symlink_to(project, target_is_directory=True)
         command = [
@@ -348,6 +369,7 @@ def test_actual_bootstrap_keeps_deadline_caller_independence_and_default_service
         with owned_hook(
             command, env=env, project=project, directory=area / "cold-hook",
             timeout=deadline, diagnostic=diagnostic,
+            production_lifetime=production_lifetime,
         ) as cold:
             observe(lambda: foundation_status(root=root) is not None, 90, diagnostic)
             operation = foundation_status(root=root)
@@ -389,6 +411,7 @@ def test_actual_bootstrap_keeps_deadline_caller_independence_and_default_service
         with owned_hook(
             command, env=env, project=project, directory=area / "drift-hook",
             timeout=deadline, diagnostic=diagnostic,
+            production_lifetime=production_lifetime,
         ) as drift:
             drift.close_caller()
             observe(lambda: receipt_completed_count(root, 3, drift.receipt_log) or drift.exited(), 850, diagnostic)
@@ -404,14 +427,8 @@ def test_actual_bootstrap_keeps_deadline_caller_independence_and_default_service
         if os.name == "nt":
             assert (installation / "service.ps1").is_file()
             assert "fixture-foreign" not in (installation / "service.ps1").read_text()
-            task = subprocess.run(
-                [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
-                 "$ErrorActionPreference='Stop'; $task=Get-ScheduledTask -TaskName AgentVault; "
-                 f"if ($task.Actions.Arguments -notlike '*{installation}*') {{ exit 91 }}"],
-                env=env, cwd=project, capture_output=True, text=True, timeout=30,
-                **agent_procutil.no_window_kwargs(),
-            )
-            assert task.returncode == 0, task.stdout + task.stderr
+            service = selected_service_probe(completion.parent, env, project)
+            assert service.returncode == 0, service.stdout + service.stderr
         else:
             units = list((profile / ".config" / "systemd" / "user").glob("agent-vault*.service"))
             assert len(units) == 1 and str(installation) in units[0].read_text(), diagnostic()
@@ -429,8 +446,12 @@ def test_actual_bootstrap_keeps_deadline_caller_independence_and_default_service
     finally:
         clean_env = {key: value for key, value in env.items()
                      if key not in {"AGENT_VAULT_INSTALLATION_ID", "AGENT_VAULT_PIPE"}}
+        # Cold construction is complete; uninstall needs its existing external interpreter.
+        clean_env["PATH"] = str(Path(sys._base_executable).parent) + os.pathsep + clean_env["PATH"]
         removed = subprocess.run(
             cleanup, env=clean_env, cwd=project, stdin=subprocess.DEVNULL,
             capture_output=True, text=True, timeout=90, **agent_procutil.no_window_kwargs(),
         )
-        assert removed.returncode == 0, removed.stdout + removed.stderr
+        assert removed.returncode == 0, removed.stdout + removed.stderr + uninstall_child_diagnostic(
+            removed, shell=cleanup[0], env=clean_env, project=project,
+        )

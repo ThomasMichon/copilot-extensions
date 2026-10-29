@@ -212,6 +212,7 @@ def test_schedule_absent_with_unbuilt_incoming_payload(tmp_path, retained_runtim
     original_config = "{" if config_state == "malformed" else json.dumps(configuration)
     config.write_text(original_config)
     source = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8-sig")
+    parameters_start = source.index("[CmdletBinding()]")
     preamble_start = source.index("Set-StrictMode -Version 2.0")
     preamble_end = source.index("if ($Action -in @('install', 'update', 'stamp', 'provision', 'start'))")
     stage_start = source.index("                Set-Location -LiteralPath $env:USERPROFILE")
@@ -219,7 +220,7 @@ def test_schedule_absent_with_unbuilt_incoming_payload(tmp_path, retained_runtim
     setup_start = source.index("# === install-contract:v3 versioned-venv (")
     setup_end = source.index("# === end install-contract:v3 versioned-venv ===", setup_start)
     dispatch_start = source.index("    switch ($Action) {", source.index("$needsInstallLock"))
-    dispatch_end = source.index("\n} finally {", dispatch_start)
+    dispatch_end = source.index("\n    }", dispatch_start) + len("\n    }")
 
     def quote(value):
         return "'" + str(value).replace("'", "''") + "'"
@@ -227,7 +228,8 @@ def test_schedule_absent_with_unbuilt_incoming_payload(tmp_path, retained_runtim
     script = tmp_path / "dispatch.ps1"
     dispatch = source[dispatch_start:dispatch_end]
     script.write_text(
-        "$ErrorActionPreference='Stop'; Set-StrictMode -Version 2\n"
+        source[parameters_start:preamble_start]
+        + "$ErrorActionPreference='Stop'; Set-StrictMode -Version 2\n"
         f"$InstallDir={quote(root)}; $PluginDir={quote(payload)}\n"
         f"$env:USERPROFILE={quote(home)}; Set-Location -LiteralPath {quote(tmp_path)}\n"
         f"[IO.Directory]::SetCurrentDirectory({quote(tmp_path)})\n"
@@ -323,12 +325,13 @@ def test_installer_direct_start_retains_task_independent_activation(tmp_path, ta
     query = "[pscustomobject]@{State='Disabled'}" if task == "disabled" else "$null"
     script.write_text(
         "$ErrorActionPreference='Stop'\n"
-        f"$LinkPython={quote(fake_python)}; $TaskName='fixture-only'\n"
+        f"$LinkPython={quote(fake_python)}; $InstallDir={quote(tmp_path)}; $TaskName='fixture-only'\n"
         f"$env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT={quote(tmp_path)}\n"
         f"function Get-ScheduledTask {{ {query} }}\n"
         + ("function Get-Command { $null }\n" if task == "module-unavailable" else "")
         + "function Start-ScheduledTask { throw 'scheduler startup forbidden' }\n"
         "function Write-Fail { param($m) throw $m }\n"
+        + _installer_function("Get-ActiveVaultPython")
         + _installer_function("Invoke-Start") + "\nInvoke-Start\n",
         encoding="utf-8-sig",
     )
@@ -356,10 +359,10 @@ def test_payload_manifest_describes_agent_vault_runtime() -> None:
         "module": "agent_vault",
         "legacyRuntimeRoot": ".agent-vault",
         "installationContext": "required",
+        "installerLifecycle": True,
         "noSelfProvisionEnv": "AGENT_VAULT_NO_SELFPROVISION",
         "purpose": "Fetch and manage machine-local vault credentials",
         "installer": "install",
-        "installerLifecycle": True,
         "inProcessCatalog": True,
         "windowsCatalogShim": "cmd",
         "provisionMode": "direct",
@@ -543,7 +546,8 @@ def test_start_does_not_require_a_registered_scheduled_task() -> None:
     idx = install_ps1.index("function Invoke-Start")
     body = install_ps1[idx : install_ps1.index("\nfunction ", idx + 1)]
     assert "No AgentVault task installed" not in body
-    assert "& $LinkPython -m agent_vault start" in body
+    assert "$startPython = Get-ActiveVaultPython" in body
+    assert "& $startPython -m agent_vault start" in body
 
 
 def test_session_catalog_producer_is_not_registered_as_a_hook() -> None:
