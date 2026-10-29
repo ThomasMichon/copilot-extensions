@@ -33,6 +33,12 @@ installed-code patch or an installation-policy bypass. Repair does not make a
 failed update successful or establish whole-set rollback; the original
 operation's completion and consumer gates remain mandatory.
 
+Worktrees' separate [unattributed lifecycle recovery](../plugins/agent-worktrees/README.md#interrupted-unattributed-lifecycle-recovery)
+qualifies only an exact same-payload pending reservation after source provenance
+becomes available. It uses evidence-bound metadata repair under the existing
+publication lock, not directory-lock recovery, installation policy migration,
+runtime deployment or a claim that the interrupted operation completed.
+
 Standalone wheel/sdist resources name the same primitive `_versioned_runtime.py`
 instead of the plugin script's `versioned_runtime.py`. The source companion loads
 exactly one ordinary, co-located primitive in either layout, never an ambient import.

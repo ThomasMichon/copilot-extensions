@@ -539,6 +539,39 @@ def test_no_mux_launch_still_gets_the_seed(tmp_path: Path, monkeypatch, capfd):
     assert launch_seed_state.peek(tmp_path / "wt-a.yaml").text == "do the thing"
 
 
+@pytest.mark.skipif(os.name != "posix", reason="Native POSIX JSON setup plan")
+def test_default_json_resume_selects_native_setup_without_a_mux_override(tmp_path, monkeypatch, capfd):
+    from agent_worktrees import launch_seed_contract, launch_seed_exec, manager_launch_cli
+
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    monkeypatch.delenv("BASH_ENV", raising=False)
+    config = _create_config(tmp_path, platform="linux")
+    tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "linux", tmp_path,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    runtime = tmp_path / "runtime"
+    scripts = runtime / "scripts"
+    shutil.copytree(Path(__file__).resolve().parents[1] / "scripts", scripts)
+    monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: runtime)
+    monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: tmp_path / "manager")
+    monkeypatch.setattr(launch_seed_contract, "supports_posix_setup", lambda _root: True)
+    monkeypatch.setattr(
+        m, "_build_launch_cmd",
+        lambda *_a, **_k: ["/bin/bash", str(scripts / "default-setup.sh"), "--stdio"],
+    )
+
+    assert resolve_cli.cmd_resolve(_args(seed="direct JSON seed")) == 0
+
+    plan = json.loads(capfd.readouterr().out)["launch"]
+    assert plan["no_mux"] and plan["seed_pending"]
+    index = launch_seed_exec.native_setup_index(plan["cmd"])
+    assert index is not None
+    assert Path(plan["cmd"][index]).is_relative_to(tmp_path / "launch-attempts")
+    assert launch_seed_state.peek(tmp_path / "wt-a.yaml").text == "direct JSON seed"
+
+
 def test_bare_resume_leaves_a_persisted_pending_seed_queued_in_json_mode(
     tmp_path: Path, monkeypatch, capfd,
 ):

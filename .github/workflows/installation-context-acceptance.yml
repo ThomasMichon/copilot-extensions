@@ -183,6 +183,7 @@ jobs:
             --test-file tests/test_launch_seed_native.py \
             --test-file tests/test_launch_seed_contract.py \
             --test-file tests/test_session_shell.py \
+            --test-file tests/test_resolve_seed_delivery.py \
             --test-file tests/native/test_native_seed_exec_posix.py \
             --test-file tests/native/test_native_seed_setup_posix.py \
             --allow-explicit-tiers \
@@ -193,7 +194,7 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py worktree-manager
           --test-file tests/test_launch_session_unwrap.py
-          -k shell_pane_environment
+          -k "shell_pane_environment or seed_interpreter_refresh"
           --timeout 120 --plugin-timeout 240 --test-timeout 30
 
   native-seed-reply-macos:
@@ -232,6 +233,7 @@ jobs:
             --test-file tests/test_launch_seed_native.py \
             --test-file tests/test_launch_seed_contract.py \
             --test-file tests/test_session_shell.py \
+            --test-file tests/test_resolve_seed_delivery.py \
             --test-file tests/native/test_native_seed_exec_posix.py \
             --test-file tests/native/test_native_seed_setup_posix.py \
             --allow-explicit-tiers \
@@ -242,7 +244,7 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py worktree-manager
           --test-file tests/test_launch_session_unwrap.py
-          -k shell_pane_environment
+          -k "shell_pane_environment or seed_interpreter_refresh"
           --timeout 120 --plugin-timeout 240 --test-timeout 30
 
   derived-diagnostics-posix:

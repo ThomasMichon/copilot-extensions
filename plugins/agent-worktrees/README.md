@@ -257,6 +257,39 @@ ownership, not invented readiness. See the
 [shared binding contract](../../libs/payload-invocation/README.md#source-qualified-command-binding)
 for selection/refusal semantics and consumer compatibility.
 
+### Interrupted unattributed lifecycle recovery
+
+A failed legacy install can retain a pending unattributed reservation. If the
+same payload subsequently gains marketplace provenance, ordinary update refuses
+to silently replace that owner. The selected payload's
+`scripts/recover_command_lifecycle.py` provides explicit, metadata-only recovery:
+
+```text
+<python> <selected-payload>/scripts/recover_command_lifecycle.py inspect --payload-root <selected-payload> --runtime-root <existing-runtime> --project-root <launch-project>
+<python> <selected-payload>/scripts/recover_command_lifecycle.py repair --payload-root <selected-payload> --runtime-root <existing-runtime> --project-root <launch-project> --expected-evidence <inspection.expectedEvidence>
+```
+
+Use an existing Python 3 interpreter and absolute paths. Read the inspection's
+payload, runtime, environment and source before authorizing repair. Inspection
+is read-only and refuses existing publication locks. Repair revalidates the
+exact manifest bytes, source and scope under the existing publication lock;
+it never borrows a live lease or recovers stale/foreign lock custody.
+Missing or foreign provenance, another payload/root/environment, already-bound
+ownership, completed or malformed reservations, inherited context from another
+marketplace, namespaced policy and managed publication refusals remain protected.
+
+Repair replaces only the exact pending unattributed owner with the verified
+source-qualified owner. Other manifest fields and runtime/configuration files
+are preserved. The reservation remains **pending**: no command binding,
+installation success or runtime readiness is published. Retry the ordinary
+authorized update afterward and verify the actual consumer contract. A failed
+retry remains incomplete, not automatically recovered.
+
+Use only the recovery helper shipped in the selected payload, not a source
+checkout, another payload or an edited installed helper. If it is unavailable,
+the repair requires a released payload containing it; do not remove reservation
+or lock files or change installation policy to bypass that release boundary.
+
 The installation-owned runtime deployment policy also gates native bootstrap
 stamping, legacy lib-copy reconciliation and payload-local first-use
 provisioning. These paths use the canonical deployment probe before publication;

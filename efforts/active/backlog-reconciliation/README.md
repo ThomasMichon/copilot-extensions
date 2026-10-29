@@ -162,8 +162,9 @@ outcomes from agent-recommended research and prioritization mechanics.
   #8733/#7650/#8802/#9072/#9413/#7940/#7408/#9332 finite completions,
   #8796's exact retained claim
   duty, #9233's focused documentation gap and the independently verified
-  931-open six-hour census after twelve administrative consolidations and
-  three further finite source completions; the whole
+  929-open census after eight further administrative consolidations,
+  alongside the earlier twelve consolidations and three further finite
+  source completions; the whole
   target remains unmet. The next-decision matrix
   preserves #8682's specific finite consumer-qualification gap.
   The [bounded inflow decisions](roadmap-inflow.md) preserve #9414's P1
@@ -174,6 +175,16 @@ outcomes from agent-recommended research and prioritization mechanics.
   actual runtime/native causes and finite residual qualification remain
   explicit, with later delivered source credited rather than duplicated.
   No whole completion or new implementation assignment is inferred.
+  The [installation-owner/qualification inflow](roadmap-inflow.md#installation-owner-and-qualification-inflow-finite-next-decisions)
+  adds seven independently admitted bounded next-decision proposals:
+  #9464's scoped P1 aggregate/coverage question and six distinct P2
+  source/qualification/diagnostic/fixture boundaries. Actual #9444 delivery
+  and its external closure are credited separately, not proposed as another
+  missing enforcement patch or campaign closure.
+  The [later owner-boundary assessments](roadmap-inflow-late-owner.md)
+  retain #9465/#9466's explicitly partial source characterization and
+  #9468's reported, unpublished recovery candidate without claiming native
+  success, an accepted effort home or operational repair authority.
 - [ ] Coalesce thematic duplicates into canonical issues and existing efforts;
   transfer explicit residual checklists before closing superseded reports.
   The [current receiving-contract unit](consolidation-current-unit.md)
@@ -188,9 +199,12 @@ outcomes from agent-recommended research and prioritization mechanics.
   The separate #4124/#4564 specific acceptance gate remains deferred.
   The [next nine-origin receiving group](consolidation-current-unit.md#next-nine-origin-receiving-group)
   now has coordinator-authored direct Plan/Validation/Coordination amendments
-  under five existing ROOTs. These are tracking proposals, not accepted
-  donor dispositions or new implementation assignments; normal reviewed merge
-  and complete current readback remain required before separate source judgment.
+  under five existing ROOTs, reviewed and actually merged in #9475.
+  All twelve complete current receiving files were independently read back,
+  followed by separate literal-condition source judgments and eight guarded
+  administrative dispositions. #6236 and #7944 remain open keepers; actual
+  technical work, source appointments and resource custody continue unchanged.
+  No new implementation assignment or technical completion is inferred.
 - [ ] Refresh live and original-cohort metrics, append journal checkpoints, and
   continue graph-backed consolidation with creation-oldest-first coverage until
   at most 729 issues remain.

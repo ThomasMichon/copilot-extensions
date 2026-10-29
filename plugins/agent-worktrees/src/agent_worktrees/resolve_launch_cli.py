@@ -640,7 +640,7 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         launch_cmd = deferred_command(
             launch_cmd, record.yaml_path, seed_id=staged_seed.seed_id, prepare_native=not args.dry_run,
             environment=merged_env,
-            environment_known=bool(getattr(args, "no_mux", False)),
+            mux=not getattr(args, "no_mux", False),
         )
         print("   Launch prompt staged until Copilot handoff.")
     else:
@@ -649,7 +649,7 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
             preserve_seed_id=staged_seed.seed_id if staged_seed else None,
             native_resume_session=native_resume,
             environment=merged_env,
-            environment_known=bool(getattr(args, "no_mux", False)),
+            mux=not getattr(args, "no_mux", False),
         )
 
     print()

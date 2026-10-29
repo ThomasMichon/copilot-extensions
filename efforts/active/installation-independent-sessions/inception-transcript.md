@@ -159,3 +159,12 @@ surrounding requirement is changed.
 > I've started using `/exit` in the CLI prompt to exit instead of trusting `Ctrl+C`, as Ctrl+C too-readily kills the parent Mux attach (leaving the pane running) instead of properly exiting Copilot
 
 > Ctrl+C has to be hit multiple times in a row within a duration to terminate Copilot; one round will not suffice
+
+## Operator - renderer admission
+
+> We should eliminate "conservative renderer admission". Does this have to do with marketplace-cell stuff?
+
+The agent clarified that the blanket renderer workaround was unrelated to
+marketplace cells and selected removal rather than adding another capability
+handshake. Concrete shell-initializer behavior and seed/lifecycle custody
+remain separate correctness obligations.

@@ -976,7 +976,7 @@ def _create_worktree_core(
         launch_cmd = deferred_command(
             launch_cmd, record.yaml_path,
             seed_id=staged_seed.seed_id if staged_seed is not None else None,
-            admission_only=staged_seed is None, environment=env, environment_known=False,
+            admission_only=staged_seed is None, environment=env, mux=not no_mux,
         )
         result["worktree"] = core._worktree_to_dict(record)
         result["launch"] = {

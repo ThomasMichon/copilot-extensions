@@ -37,12 +37,24 @@ closeable issues or a numerical reduction.
 
 ## Next nine-origin receiving group
 
-The next group is an **agent-recommended tracking amendment**, distinct from
+This group is an **agent-recommended tracking amendment**, distinct from
 the twelve already-published administrative dispositions above. Independently
 admitted whole-clause studies support the following direct receiving proposals;
 the coordinator has authored their ROOT Plan, actual global Validation and
-continuing Coordination/Journal amendments. No source is accepted or closed by
-this proposal.
+continuing Coordination/Journal amendments. Their actual reviewed delivery,
+complete receiving readback and separate source judgments are now recorded.
+
+**Actual reviewed file delivery:** #9475 merged at **2026-10-29 00:18:57 UTC
+(2026-10-28 17:18:57 PDT)** as
+`8552e5e196cebd983db3bd2249e70453bc2ae2d9`, after exact-head Copilot approval,
+zero review issues/threads and all three required checks. All ten published
+file byte sequences match the audited authored versions after canonical
+pull-forward. The complete actual parent README was re-read and remains
+Active. Independent semantic readback then admitted all twelve complete
+receiving files across the five ROOTs and their annexes: 730,480 bytes and
+10,779 lines, with no receiving omissions. Every incumbent Request, status,
+participant, checked credit and first unchecked Plan/Validation gate survived.
+Neither merge nor byte equality alone supplied the subsequent source judgment.
 
 | Own source | Existing receiver and complete retained acceptance |
 |---|---|
@@ -60,9 +72,25 @@ a newly invented ACK ceremony; literal source-specific holds and real shared-
 source admission remain binding. No all-parent or native-on-every-host veto is
 added to a finite source judgment.
 
-Actual normal review and merge, then complete current receiving ROOT/annex
-Plan AND Validation/Coordination/Journal readback, precede any fresh separately
-supported administrative disposition. #6236 remains the open Fleet keeper.
+After those receiving gates, separate judgments against the complete literal
+source conditions supported eight administrative duplicate-tracker folds:
+#4121/#4304/#5862/#5868/#6240/#6241/#7945/#8860. Each public explanation was
+read back before a separate `not_planned` closure; fresh whole-record guards
+admitted only that explanation, and final original bodies, assignees, prior
+comments/edit metadata and provider states were audited. These are not eight
+completed technical outcomes or owner transfers.
+
+The four Fleet leaves are retained at the canonical parent, not quietly
+absorbed into #5862's observation-only reservation. Concrete DTO/source/auth
+agreement remains before affected runtime wiring. The Passive planning
+promise has its own fulfilled planning receipt; the effort stays Draft and
+R2/native admission remains separate. Manager's actual complete reviewed
+Plan/local AND global Validation/Coordination/Journal receiving gate is met.
+Linux's official-image/adopter/runtime and Portfolio's preparation-holder
+qualification remain planned rather than declared delivered.
+
+#6236 remains the open Fleet keeper and #7944 the open Passive reference.
+See the [actual dispositions and whole census](roadmap-follow-through.md#eight-further-administrative-folds-after-complete-receiving-readback).
 The existing #4124/#4564 manual-acceptance and #5972/#5974/#7937/#7946
 specific restrictions are unchanged. This group grants no implementation,
 product execution, release/installed acceptance, owner reassignment,
