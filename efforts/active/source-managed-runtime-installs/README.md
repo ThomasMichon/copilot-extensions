@@ -399,6 +399,12 @@ reuse/admission behavior is not an exception to the fresh-default revision.
   adopter, including complete producer-tree omission controls and promotion-safe
   version normalization. This does not qualify effect retirement, the remaining
   manifest portfolio or assembled fresh/incremental installation.
+- [x] **Agent-recommended bounded construction integration:** qualify MCP's
+  footprint-driven reuse or distinct immutable repair through the existing
+  attached constructor and paired native adapters. Preserve original source
+  identity, incumbent bytes and selected-generation readiness; malformed or
+  oversized old completion/environment evidence selects non-reuse. This does
+  not close command-ownership recovery, reset effects or old-owner silence.
 - [x] Qualify Main bootstrap transport independently of Manager/service runtime
   source policy through the actual Linux and Windows global entry points, including
   explicit transport overrides, broken incumbents and older explicit-source callers.
@@ -1171,5 +1177,33 @@ admission manifest; node inventory and effect restrictions are unchanged.
 Native execution, provider checks and review/merge remain pending.
 This is not effect-reset, corrupt command-ownership recovery,
 old-owner silence or complete fresh-install qualification.
+
+### 2026-10-28 - MCP footprint-driven construction qualification
+
+#9512 merged as `864dbfac12f42189b6632a365892ab7b8da1ebc5` after the
+current-head Copilot review reported no open findings and all required checks
+passed. Native workflow `40824809607` passed against
+`682966d55a352bf8562cf2174ea615399adfd812`: the combined MCP constructor,
+identity, readiness and serializer controls passed 48 tests on Linux
+(7 platform skips) and 38 on Windows (17 platform skips).
+The required local unit packet passed 2,619 tests (12 deselected);
+121 footprint/environment controls also passed.
+
+Review corrections preserve exact repair identities, avoid blocking completion
+reads and unusable fallback targets, retain physical generation identity in
+publication/readiness, and align reuse admission with the resolver's 64 KiB
+marker bound. Invalid installed UTF-8 metadata selects non-reuse without
+swallowing genuine storage errors. Actual admission and native constructor
+controls preserve both a healthy current slot and a damaged non-current desired
+slot while completing a distinct repair generation.
+
+The complete parent Plan and Validation Plan remain Active. The next bounded
+integration is fresh-path command publication through missing or corrupt old
+deployment metadata under the existing lifecycle/execution owner, preserving
+real foreign/edited command refusals and durable/protected state. Reset
+execution, identity-bound displaced effects and reactivation prevention, the
+remaining manifest portfolio, macOS and assembled public-entry/live survival
+acceptance remain open. No host rollout, maintenance hold, service or protected
+process was changed; merged source is not deployed-state proof.
 
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.
