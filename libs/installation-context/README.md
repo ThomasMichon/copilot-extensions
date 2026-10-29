@@ -290,7 +290,11 @@ PowerShell callers may opt into `status -WithContextValidation`, with both
 installation, the runner performs the independent context validation **after**
 status resolution and adds its result as `contextValidation`. It does not reuse
 the earlier validated receipt or skip any file, identity, policy, or ownership
-checks. This lets a native caller retain separate status/generation comparisons
+checks. Optional `-ExpectedMarketplaceId` and `-ExpectedCellRoot` expectations
+are forwarded to that same validation, including when status was resolved from
+payload provenance rather than an explicit context pointer. A mismatch fails;
+the composed result cannot silently validate another cell.
+This lets a native caller retain separate status/generation comparisons
 without starting a second SDK evaluation process.
 Ordinary status JSON is unchanged; legacy and blocked statuses do not include
 a validation result. The enabled option is refused on other actions;

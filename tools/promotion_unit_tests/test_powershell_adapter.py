@@ -353,8 +353,10 @@ def test_composed_status_reuses_one_validation_scope(
     pointer = tmp_path / "marketplaces/example/plugins/agent-example/install.json"
     arguments = Namespace(
         with_context_validation=True,
+        expected_marketplace_id="example--0123456789abcdef",
         expected_plugin_id="agent-example",
         expected_payload_root="/expected-payload",
+        expected_cell_root=str(tmp_path / "expected-cell"),
     )
     caches: list[dict[str, object]] = []
 
@@ -370,7 +372,9 @@ def test_composed_status_reuses_one_validation_scope(
         assert "observed-before-validation" in caches[0]
         assert context == pointer and durable == tmp_path
         assert values == {
+            "expected_marketplace_id": "example--0123456789abcdef",
             "expected_plugin_id": "agent-example", "expected_payload_root": "/expected-payload",
+            "expected_cell_root": str(tmp_path / "expected-cell"),
         }
         return {"action": "validate", "generation": 1}
 

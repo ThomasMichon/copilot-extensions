@@ -419,8 +419,10 @@ def _resolve_cli_status(
         result["contextValidation"] = validate_context_receipt(
             pointer,
             pointer.parents[4],
+            expected_marketplace_id=arguments.expected_marketplace_id,
             expected_plugin_id=arguments.expected_plugin_id,
             expected_payload_root=arguments.expected_payload_root,
+            expected_cell_root=arguments.expected_cell_root,
         )
     return result
 
