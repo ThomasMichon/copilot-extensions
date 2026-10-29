@@ -6,7 +6,7 @@ import time
 
 from . import derive
 from .engine_helpers import ACTIVE_SPECS, BUTTON_SETS, C_DIM, C_READY, C_WARN, DISPO_MARK, LIST_SPECS, SPINNER
-from .source_read_notices import worktree_reload_pending, worktree_row_identity, worktree_setup_failed
+from .source_read_notices import worktree_reload_pending, worktree_row_identity, worktree_setup_failed, worktree_source_instance
 
 class PickerScreenModelMixin:
     def button_set(self):
@@ -405,10 +405,8 @@ class PickerScreenModelMixin:
         return bool((tab.get("capabilities") or {}).get(capability))
     def _scope_data(self):
         """Worktrees in the active source-tab scope."""
-        instances = {
-            tab.get("source_id"): tab.get("instance_id")
-            for tab in self.source_tabs if tab.get("instance_id")
-        }
+        instances = {tab.get("source_id"): instance for tab in self.source_tabs
+                     if (instance := worktree_source_instance(self, tab))}
         data = [
             row for row in self.data
             if row.get("source_id") not in instances

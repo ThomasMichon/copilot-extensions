@@ -79,24 +79,30 @@ def feed_argv(source):
 
 
 class CurrentFeedMixin:
+    def _publish_source_records(self, source, records):
+        """Publish a complete roster and its incarnation under the caller's lock."""
+        self._records[source.cache_key] = records
+        self._state[source.cache_key] = "ready"
+        self._error[source.cache_key] = ""
+        self._feed_complete[source.cache_key] = source.instance_id
+
     def read_status_for_source(self, source_id):
         """Presentation evidence only; a read failure never proves host liveness."""
         with self._lock:
+            source = next((item for item in self._all_sources if item.cache_key == source_id), None)
             return {
                 "error": self._error.get(source_id),
                 "failure_kind": getattr(self._error.get(source_id), "kind", "unknown"),
-                "instance_id": next((
-                    source.instance_id for source in self._all_sources
-                    if source.cache_key == source_id
-                ), None),
-                "has_snapshot": (
-                    source_id in self._feed_complete
-                    or bool(self._records.get(source_id))
-                    or (
-                        self._state.get(source_id) == "ready"
-                        and source_id not in self._pinged_only
-                        and self._stream_incomplete.get(source_id) != self._gen.get(source_id, 0)
-                    )
+                "instance_id": source.instance_id if source is not None else None,
+                "has_snapshot": source is not None and (
+                        self._feed_complete.get(source_id) == source.instance_id
+                        or (not source.instance_id and (
+                            bool(self._records.get(source_id)) or (
+                                self._state.get(source_id) == "ready"
+                                and source_id not in self._pinged_only
+                                and self._stream_incomplete.get(source_id) != self._gen.get(source_id, 0)
+                            )
+                        ))
                 ),
             }
 
@@ -129,14 +135,12 @@ class CurrentFeedMixin:
             records.append({**normalized, "raw": row})
         with self._lock:
             if self._feed_current(source, gen):
-                self._records[source.cache_key] = records
-                self._state[source.cache_key] = "ready"
+                self._publish_source_records(source, records)
                 available = availability or (rows[0].get("_availability") if rows else None)
                 self._error[source.cache_key] = (
                     ReadFailure(available.get("reason") or "Resident refresh is unavailable", kind="content")
                     if available and available.get("status") == "stale" else ""
                 )
-                self._feed_complete.add(source.cache_key)
                 self._feed_backoff[source.cache_key] = 0.25
 
     def _feed_error(self, source, gen, reason: str, *, kind: str = "connection") -> None:
@@ -146,7 +150,7 @@ class CurrentFeedMixin:
             if not self._feed_current(source, gen):
                 return
             self._error[source.cache_key] = ReadFailure(reason, kind=kind)
-            has_snapshot = source.cache_key in self._feed_complete
+            has_snapshot = self._feed_complete.get(source.cache_key) == source.instance_id
             self._state[source.cache_key] = "ready" if has_snapshot else "failed"
             if has_snapshot:
                 records = []
@@ -215,7 +219,10 @@ class CurrentFeedMixin:
             errors.join(timeout=0.1)
             error = "".join(stderr).strip()
             if "unrecognized arguments" in error or "update the engine" in error:
-                raise FeedUnavailable("engine lacks --follow/worktrees-feed-v1; update the engine", retry=False)
+                raise FeedUnavailable(
+                    "engine lacks --follow/worktrees-feed-v1; update the engine",
+                    retry=False, connected=True,
+                )
             raise FeedUnavailable(error or "current-roster feed disconnected without a going-away notice")
         finally:
             watchdog.close()

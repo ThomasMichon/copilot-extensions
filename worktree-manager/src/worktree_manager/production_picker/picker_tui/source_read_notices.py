@@ -34,6 +34,13 @@ def worktree_row_identity(row):
     )
 
 
+def worktree_source_instance(engine, tab):
+    status = getattr(getattr(engine, "loader", None), "read_status_for_source", None)
+    if tab.get("source_id") and callable(status):
+        return status(tab["source_id"]).get("instance_id") or tab.get("instance_id") or None
+    return tab.get("instance_id") or None
+
+
 def retained_worktree_scope(engine, tabs):
     if not getattr(engine, "_roster_ready", False) or len(engine.machines) <= 1:
         return None
@@ -53,7 +60,7 @@ def has_worktree_snapshot(engine, index, state):
     tab = engine.source_tabs[index] if engine.source_tabs else {}
     _, machine, environment, _ = engine.machines[index]
     identity = tab.get("source_id") or (machine, environment)
-    key = (identity, tab.get("instance_id") or None)
+    key = (identity, worktree_source_instance(engine, tab))
     remembered = getattr(engine, "_loaded_worktree_sources", None)
     if remembered is None:
         remembered = engine._loaded_worktree_sources = set()

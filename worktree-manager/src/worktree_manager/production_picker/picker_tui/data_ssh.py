@@ -1281,7 +1281,7 @@ class LiveLoader(CurrentFeedMixin, LazyLoadMixin):
         # identities as removals during the first paint.
         self._stream_incomplete: dict = {}
         self._held_sources: set = set()
-        self._feed_complete: set = set()
+        self._feed_complete: dict = {}
         self._feed_backoff: dict = {}
         # Sources whose full worktree listing has been DEFERRED behind a cheap
         # connectivity ping (see `start`'s `focus_keys`) -- machine tabs the
@@ -1489,9 +1489,7 @@ class LiveLoader(CurrentFeedMixin, LazyLoadMixin):
                     )
                     and self._gen.get(source.cache_key, 0) == gen
                 ):
-                    self._records[source.cache_key] = recs
-                    self._state[source.cache_key] = "ready"
-                    self._error[source.cache_key] = ""
+                    self._publish_source_records(source, recs)
                     if self._stream_incomplete.get(source.cache_key) == gen:
                         self._stream_incomplete.pop(source.cache_key, None)
         finally:
@@ -1751,9 +1749,7 @@ class LiveLoader(CurrentFeedMixin, LazyLoadMixin):
                     not self._cancelled.is_set()
                     and self._gen.get(source.cache_key, 0) == gen
                 ):
-                    self._records[source.cache_key] = recs
-                    self._state[source.cache_key] = "ready"
-                    self._error[source.cache_key] = ""
+                    self._publish_source_records(source, recs)
             return
         # Remote tab: try single-connection NDJSON streaming -- fast rows paint
         # as they arrive, then each upgrades in place as its classified row

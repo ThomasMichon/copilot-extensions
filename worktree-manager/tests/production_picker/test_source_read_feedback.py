@@ -289,6 +289,45 @@ def test_provider_replacement_cannot_inherit_an_old_instances_cached_rows():
     assert screen._scope_data() == []
 
 
+@pytest.mark.parametrize("rows", [[], [{"id": "one", "title": "Replacement worktree"}]])
+def test_provider_refresh_uses_the_validated_replacement_without_reloading_tabs(monkeypatch, rows):
+    from worktree_manager.production_picker.picker_tui import derive
+
+    screen, loader, source = screen_and_loader(provider=True)
+    source.instance_id = screen.source_tabs[screen.machine_idx]["instance_id"] = "old"
+    loader._feed_commit(source, 0, [{"id": "old-row", "title": "Old instance"}])
+    screen.data = loader.records()
+    worktree_read_feedback(screen)
+
+    def resolve(current, _runner):
+        assert current is source
+        current.instance_id = "new"
+        assert not loader.read_status_for_source(source.source_id)["has_snapshot"]
+        return True
+
+    def fetch(current, **kwargs):
+        return [
+            derive.norm(row, current.machine, current.env, source_kind=current.source_kind,
+                        source_id=current.source_id, source_metadata={"instance_id": "new"})
+            for row in rows
+        ]
+
+    monkeypatch.setattr(data_ssh, "_resolve_provider_source", resolve)
+    monkeypatch.setattr(data_ssh, "_fetch", fetch)
+    loader._refresh_one_serial(source, 0)
+    screen.data = loader.records()
+    assert screen.source_tabs[screen.machine_idx]["instance_id"] == "old"
+    assert loader.read_status_for_source(source.source_id)["has_snapshot"]
+    assert worktree_read_feedback(screen) == []
+    assert [row["id"] for row in screen._scope_data()] == [row["id"] for row in rows]
+    screen.machine_idx = 0
+    assert [row["id"] for row in screen._scope_data()] == [row["id"] for row in rows]
+    loader._feed_error(source, 0, "new instance disconnected")
+    screen.machine_idx = 1
+    assert worktree_read_feedback(screen)[0].cached
+    assert screen._source_failure_marker(screen.machine_idx)[0] == "~"
+
+
 @pytest.mark.parametrize("other_action", [None, "Existing action"])
 def test_retry_key_repaints_loading_before_the_background_reload_finishes(monkeypatch, other_action):
     monkeypatch.setattr(PickerScreen, "_tick", lambda self: None)
