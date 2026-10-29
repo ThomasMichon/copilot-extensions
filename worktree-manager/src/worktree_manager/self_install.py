@@ -763,9 +763,6 @@ def _complete_candidate(
     installer = _runtime_installer()
     if before_publish is not None:
         before_publish()
-    # Broker reconciliation takes its own retention/publication leases. Validate
-    # source ownership before it mutates, then revalidate at frontdoor publication.
-    installer.adopt_broker(root, slot)
     installer.activate(
         root, slot.name, expected=previous, before_publish=publish_frontdoors,
         after_publish=(lambda: after_activate(slot))

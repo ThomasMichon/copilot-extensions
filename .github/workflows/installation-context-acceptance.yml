@@ -92,7 +92,7 @@ on:
         type: boolean
         default: false
       windows_broker_consumers:
-        description: Real cold Worktrees installation and maintenance in a disposable Windows profile
+        description: Normal native Job lifetime, cold Worktrees and Manager recovery without Task adoption
         type: boolean
         default: false
 
@@ -1017,7 +1017,7 @@ jobs:
     steps: *ssh-snapshot-native-steps
 
   windows-broker-portable:
-    if: ${{ inputs.windows_broker_probe && !inputs.watch_owner && !inputs.dispatch_delegation }}
+    if: ${{ (inputs.windows_broker_probe || inputs.windows_broker_consumers) && !inputs.watch_owner && !inputs.dispatch_delegation }}
     name: Broker portable and native POSIX regression
     runs-on: ubuntu-latest
     timeout-minutes: 6
@@ -1048,6 +1048,7 @@ jobs:
           python tools/run-plugin-tests.py agent-procutil --allow-explicit-tiers
           --test-file tests/test_daemon_broker.py
           --test-file tests/test_daemon_spawn_failures.py
+          --test-file tests/test_job_scopes.py
           --test-file tests/test_daemon_instances_linux.py
           --test-file tests/test_native_daemon_shell.py
           --timeout 120 --plugin-timeout 240
@@ -1093,7 +1094,7 @@ jobs:
 
   windows-broker-consumers:
     if: ${{ (inputs.windows_broker_probe || inputs.windows_broker_consumers) && !inputs.watch_owner && !inputs.dispatch_delegation }}
-    name: Real Worktrees broker consumers (disposable Windows)
+    name: Normal native Worktrees and Manager consumers (disposable Windows)
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
@@ -1104,7 +1105,7 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
-      - name: Real cold construction, automatic maintenance and manual exclusion
+      - name: Direct Job lifetime, cold construction and concurrent Manager recovery
         shell: pwsh
         run: python tools/windows_broker_consumer_acceptance.py --ephemeral-ci-consent
       - name: Prepare the bounded native removal controls

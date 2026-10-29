@@ -103,7 +103,7 @@ def qualify(root: Path, runtime: Path, command: list[str], projects: list[Path],
                 process, job = procutil.spawn_sync_in_kill_on_close_job(
                     [str(python), "-I", "-B", "-c", READER, str(manager_slot), str(runtime),
                      f"broker-fixture-{index}"],
-                    cwd=projects[index], env=env, require_job=True, allow_breakaway=False,
+                    cwd=projects[index], env=env, require_job=True, allow_breakaway=True,
                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     text=True, encoding="utf-8", **procutil.no_window_kwargs(),
                 )

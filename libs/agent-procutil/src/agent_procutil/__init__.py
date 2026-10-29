@@ -57,9 +57,11 @@ import ctypes
 import logging
 import math
 import os
+import re
 import subprocess
 import sys
 import time
+import uuid
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, BinaryIO
 
@@ -93,6 +95,8 @@ _PROCESS_SET_QUOTA = 0x0100
 _PROCESS_TERMINATE = 0x0001
 _PROCESS_SUSPEND_RESUME = 0x0800
 _ERROR_ACCESS_DENIED = 5
+_JOB_SCOPES_ENV = "COPILOT_EXTENSIONS_OWNED_JOB_SCOPES"
+_JOB_SCOPE_NAME = re.compile(r"Local\\ce-owned-job-[0-9a-f]{32}\Z")
 
 log = logging.getLogger("agent-procutil")
 
@@ -123,6 +127,40 @@ def _is_windows() -> bool:
     return os.name == "nt"
 
 
+def _new_job_name() -> str:
+    return "Local\\ce-owned-job-" + uuid.uuid4().hex
+
+
+def _job_scope_names(environment) -> tuple[str, ...]:
+    value = environment.get(_JOB_SCOPES_ENV)
+    if value is None:
+        return ()
+    if not isinstance(value, str) or len(value) > 4096:
+        raise ValueError("invalid owned Job scope metadata")
+    names = value.split(";")
+    if (
+        len(names) > 64 or len(set(names)) != len(names)
+        or any(_JOB_SCOPE_NAME.fullmatch(name) is None for name in names)
+    ):
+        raise ValueError("invalid owned Job scope metadata")
+    return tuple(names)
+
+
+def _job_child_environment(environment=None, *, append: str | None = None) -> dict[str, str]:
+    child = dict(os.environ if environment is None else environment)
+    names = list(dict.fromkeys((*_job_scope_names(os.environ), *_job_scope_names(child))))
+    if append is not None:
+        names.append(append)
+    if names:
+        child[_JOB_SCOPES_ENV] = ";".join(names)
+        _job_scope_names(child)
+    return child
+
+
+def _publish_job_scope(name: str) -> None:
+    os.environ[_JOB_SCOPES_ENV] = _job_child_environment(append=name)[_JOB_SCOPES_ENV]
+
+
 class JobHandle:
     """Owned Windows Job Object handle.
 
@@ -132,8 +170,9 @@ class JobHandle:
     still assigned to the job. Off Windows callers never receive one.
     """
 
-    def __init__(self, handle: Any) -> None:
+    def __init__(self, handle: Any, *, name: str | None = None) -> None:
         self._handle = handle
+        self.name = name
 
     @property
     def handle(self) -> Any:
@@ -311,7 +350,7 @@ def _log_job_failure(operation: str) -> None:
 
 
 def _assign_suspended_to_kill_on_close_job(
-    pid: int, *, allow_breakaway: bool = True,
+    pid: int, *, allow_breakaway: bool = True, name: str | None = None,
 ) -> JobHandle | None:
     """Assign a newly-created suspended ``pid`` to this owner's kill-on-close Job.
 
@@ -333,10 +372,13 @@ def _assign_suspended_to_kill_on_close_job(
         kernel32 = _kernel32()
         _configure_job_api(kernel32)
 
-        job = kernel32.CreateJobObjectW(None, None)
+        name = name or _new_job_name()
+        job = kernel32.CreateJobObjectW(None, name)
         if not job:
             _log_job_failure("CreateJobObjectW")
             return None
+        if ctypes.get_last_error() == 183:
+            raise OSError("owned Job identity already exists")
 
         limit_info = _build_job_extended_limit_info()()
         limit_info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
@@ -364,7 +406,9 @@ def _assign_suspended_to_kill_on_close_job(
             _log_job_failure("AssignProcessToJobObject")
             return None
 
-        owned = JobHandle(job)
+        owned = JobHandle(job, name=name)
+        if pid == os.getpid():
+            _publish_job_scope(name)
         job = None
         return owned
     except Exception:
@@ -498,6 +542,10 @@ def spawn_sync_in_kill_on_close_job(
             raise kind(error) from error
 
     spawn_kwargs = dict(kwargs)
+    job_name = _new_job_name()
+    spawn_kwargs["env"] = _job_child_environment(
+        spawn_kwargs.get("env"), append=job_name,
+    )
     spawn_kwargs["creationflags"] = (
         int(spawn_kwargs.get("creationflags", 0)) | _CREATE_SUSPENDED
     )
@@ -510,9 +558,11 @@ def spawn_sync_in_kill_on_close_job(
     try:
         pid = process.pid
         if allow_breakaway:
-            job_handle = _assign_suspended_to_kill_on_close_job(pid)
+            job_handle = _assign_suspended_to_kill_on_close_job(pid, name=job_name)
         else:
-            job_handle = _assign_suspended_to_kill_on_close_job(pid, allow_breakaway=False)
+            job_handle = _assign_suspended_to_kill_on_close_job(
+                pid, allow_breakaway=False, name=job_name,
+            )
         if job_handle is None and (require_job or not allow_breakaway):
             process.kill()
             process.wait(timeout=5)

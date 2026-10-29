@@ -2,6 +2,7 @@
 
 import os
 import json
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -160,7 +161,9 @@ def test_python_free_native_protocol_and_expiry(tmp_path):
         f". '{helper}'; "
         f"$guard=Enter-DaemonInstance -Service fixture -RuntimeRoot '{tmp_path}' "
         f"-Source '{helper}' -RegistryRoot '{registry}' -Purpose unattended-test "
-        "-TtlSeconds 1 -MaxLifetimeSeconds 3; Start-Sleep -Seconds 30"
+        "-TtlSeconds 1 -MaxLifetimeSeconds 3; "
+        f"[IO.File]::WriteAllText('{tmp_path / 'scopes.txt'}', $env:COPILOT_EXTENSIONS_OWNED_JOB_SCOPES); "
+        "Start-Sleep -Seconds 30"
     )
     process = subprocess.Popen(
         [str(shell), "-NoProfile", "-NonInteractive", "-Command", body],
@@ -173,6 +176,13 @@ def test_python_free_native_protocol_and_expiry(tmp_path):
         assert len(records) == 1
         assert records[0]["purpose"] == "unattended-test"
         assert records[0]["birth"].startswith("windows:")
+        before = os.environ.get("COPILOT_EXTENSIONS_OWNED_JOB_SCOPES", "").split(";")
+        if before == [""]:
+            before = []
+        scopes = (tmp_path / "scopes.txt").read_text().split(";")
+        assert scopes[:-1] == before
+        assert re.fullmatch(r"Local\\ce-owned-job-[0-9a-f]{32}", scopes[-1])
+        assert scopes[-1] not in before
         from agent_procutil._daemon_instance_identity import path_identity
         assert (records[0]["runtime_device"], records[0]["runtime_inode"]) == path_identity(tmp_path)
         from agent_procutil.daemon_instances import DaemonInstanceReceipt

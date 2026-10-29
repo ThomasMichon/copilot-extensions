@@ -93,6 +93,9 @@ def transfer_lifetime_to_parent(*, parent_pid: int, parent_birth: str) -> Parent
     ):
         raise ValueError("original parent requires an exact Windows birth identity")
     kernel = _api()
+    from . import _job_scopes
+
+    name = _job_scopes.new_name()
     # Pin query, synchronization and duplication rights together on the same
     # process object; never reopen a numeric PID after validating its birth.
     parent = kernel.OpenProcess(0x1000 | 0x100000 | 0x40, False, parent_pid)
@@ -108,8 +111,10 @@ def transfer_lifetime_to_parent(*, parent_pid: int, parent_birth: str) -> Parent
         _parent_live(kernel, parent)
         current = kernel.GetCurrentProcess()
         worker_birth = _windows_birth(current)
-        job = kernel.CreateJobObjectW(None, None)
+        job = kernel.CreateJobObjectW(None, name)
         _check(job)
+        if ctypes.get_last_error() == 183:
+            raise OSError("owned Job identity already exists")
         limits = _build_job_extended_limit_info()()
         limits.BasicLimitInformation.LimitFlags = 0x2000
         _check(kernel.SetInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits)))
@@ -122,6 +127,7 @@ def transfer_lifetime_to_parent(*, parent_pid: int, parent_birth: str) -> Parent
         _parent_live(kernel, parent)
         _check(kernel.AssignProcessToJobObject(job, current))
         assigned = True
+        _job_scopes.publish_current(name)
         _transferred = True
         close_attempted = True
         _check(kernel.CloseHandle(job))

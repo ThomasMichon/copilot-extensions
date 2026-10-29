@@ -145,7 +145,7 @@ its existing owner; neither source work nor publication disables that hold.
 
 - [x] Review the original activation proposal in #9523; retain its history and
   the failed #9526 qualification rather than calling that candidate delivered.
-- [ ] Land the general spawn-guidance correction first and verify legitimate
+- [x] Land the general spawn-guidance correction first and verify legitimate
   promotion to Main, separately from any runtime change.
 - [ ] Amend and review the [normal-process direction](windows-launch-broker.md#normal-process-direction)
   before implementing the runtime repair: ordinary native headless/detached
@@ -159,6 +159,14 @@ its existing owner; neither source work nor publication disables that hold.
   consumer changefiles and CI.
 - [ ] Record runtime release separately and return installed adoption to the
   existing deployment owner; no shared-host registration or rollout is implied.
+
+The guidance-only #9530 reached Main through #9531 as
+`d93a7fd482561760201cb479f27e1622f1dd1506`; this is not the runtime fix.
+The operator subsequently selected `owned-cleanup-scopes`, explicitly limiting
+the native runtime lifetime guarantee to every tracked launcher-owned Job
+rather than arbitrary unknown external supervisors. The concrete
+[ownership mechanism](windows-launch-broker.md#selected-runtime-ownership-contract)
+retains the restrictive shared-outer negative and the separate deployment hold.
 
 ### Phase 1 - Reviewed contract
 - [x] Land this plan through ordinary review before implementation.

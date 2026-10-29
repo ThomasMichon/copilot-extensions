@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 import subprocess
+from contextlib import contextmanager
 from unittest.mock import Mock
 
 import pytest
@@ -40,31 +41,22 @@ def test_direct_positive_creation_refusal_removes_only_record(launch, monkeypatc
     assert list(spec.registry_root.glob("*.lock")), "canonical locks are not deleted"
 
 
-@pytest.mark.parametrize("real_adapter", [False, True])
-def test_positive_broker_refusal_removes_record(launch, monkeypatch, real_adapter):
+def test_positive_native_breakaway_refusal_removes_record_without_activation(launch, monkeypatch):
     start, spec = launch
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
     monkeypatch.setattr(daemon_broker, "caller_in_job", lambda: True)
-    if real_adapter:
-        from agent_procutil import windows_broker_installation, windows_task_broker
-        monkeypatch.setattr(
-            windows_broker_installation, "load_current",
-            Mock(side_effect=pu.DaemonSpawnError("adoption required")),
-        )
-        activate = Mock(side_effect=AssertionError("unexpected activation"))
-        monkeypatch.setattr(windows_task_broker, "task_operation", activate)
-    else:
-        monkeypatch.setattr(daemon, "spawn_brokered_daemon", Mock(side_effect=pu.DaemonSpawnError(
-            "no daemon requested", process_created=False, admission_sent=False,
-        )))
+    activate = Mock(side_effect=AssertionError("unexpected activation"))
+    monkeypatch.setattr(daemon, "spawn_brokered_daemon", activate)
+    error = PermissionError("breakaway refused")
+    error.winerror = 5
+    monkeypatch.setattr(subprocess, "Popen", Mock(side_effect=error))
     with pytest.raises(pu.DaemonSpawnError):
         start()
     assert inspect_instances(spec.registry_root) == []
-    if real_adapter:
-        activate.assert_not_called()
+    activate.assert_not_called()
 
 
-def test_broker_reservation_failure_is_visible_without_exception_payload(launch, monkeypatch):
+def test_native_reservation_failure_is_visible_without_exception_payload(launch, monkeypatch):
     from agent_procutil import daemon_instances
 
     start, spec = launch
@@ -90,32 +82,49 @@ def test_refused_contained_fallback_also_removes_its_new_reservation(launch, mon
     monkeypatch.setattr(daemon, "spawn_brokered_daemon", Mock(side_effect=pu.DaemonSpawnError(
         "no daemon requested", process_created=False, admission_sent=False,
     )))
-    monkeypatch.setattr(subprocess, "Popen", Mock(side_effect=FileNotFoundError("fallback missing")))
+    denied = PermissionError("breakaway refused")
+    denied.winerror = 5
+    monkeypatch.setattr(subprocess, "Popen", Mock(side_effect=[denied, FileNotFoundError("fallback missing")]))
     with pytest.raises(FileNotFoundError):
         start(contained_fallback=True)
     assert inspect_instances(spec.registry_root) == []
 
 
-@pytest.mark.parametrize("confirmed", [False, True])
-def test_unknown_broker_creation_never_cancels_or_replays(launch, monkeypatch, confirmed):
+@pytest.mark.parametrize("kill_fails", [False, True])
+def test_unconfirmed_native_cleanup_never_cancels_or_replays(launch, monkeypatch, kill_fails):
+    from agent_procutil import _job_scopes, _daemon_instance_identity
+
     start, spec = launch
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
     monkeypatch.setattr(daemon_broker, "caller_in_job", lambda: True)
-    monkeypatch.setattr(daemon, "spawn_brokered_daemon", Mock(side_effect=pu.DaemonSpawnError(
-        "unknown creation", cleanup_confirmed=confirmed,
-    )))
-    popen = Mock()
+    child = Mock(pid=4321, _handle=456)
+    if kill_fails:
+        child.kill.side_effect = OSError("kill refused")
+    child.wait.side_effect = subprocess.TimeoutExpired("fixture", 5)
+    monkeypatch.setattr(_daemon_instance_identity, "created_process_identity", lambda _: (4321, "fixture-birth"))
+    monkeypatch.setattr(store, "identity_state", lambda *_: "matching")
+
+    @contextmanager
+    def scopes(environment):
+        yield Mock(side_effect=OSError("cleanup Job retained"))
+
+    monkeypatch.setattr(_job_scopes, "query_scopes", scopes)
+    popen = Mock(return_value=child)
     monkeypatch.setattr(subprocess, "Popen", popen)
     with pytest.raises(pu.DaemonSpawnError) as failure:
         start(contained_fallback=True)
-    popen.assert_not_called()
+    assert popen.call_count == 1
+    assert failure.value.process is child
+    assert not failure.value.cleanup_confirmed
     rows = inspect_instances(spec.registry_root)
     assert len(rows) == 1
     assert failure.value.instance_receipt.instance_id == rows[0]["instance_id"]
 
 
 @pytest.mark.parametrize("admitted", [False, True])
-def test_known_dead_broker_child_settles_only_pre_admission_tracking(launch, monkeypatch, admitted):
+def test_native_child_settles_only_before_resume_attempt(launch, monkeypatch, admitted):
+    from agent_procutil import _job_scopes, _daemon_instance_identity
+
     start, spec = launch
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
     monkeypatch.setattr(daemon_broker, "caller_in_job", lambda: True)
@@ -123,16 +132,16 @@ def test_known_dead_broker_child_settles_only_pre_admission_tracking(launch, mon
     proof = spec.runtime_root / "retained-proof"
     proof.write_text("keep")
 
-    def broker(*_args, instance_receipt, **_kwargs):
-        with store._locked(instance_receipt) as path:
-            row = store._read(path)
-            row.update(state="bound", pid="4321", birth="fixture-birth")
-            store._write(path, row)
-        raise pu.DaemonSpawnError(
-            "created child reaped", process_created=True, admission_sent=admitted,
-            process_identity=(4321, "fixture-birth"),
-        )
-    monkeypatch.setattr(daemon, "spawn_brokered_daemon", broker)
+    child = Mock(pid=4321, _handle=456)
+    monkeypatch.setattr(subprocess, "Popen", Mock(return_value=child))
+    monkeypatch.setattr(_daemon_instance_identity, "created_process_identity", lambda _: (4321, "fixture-birth"))
+    monkeypatch.setattr(pu, "_resume_suspended_process", lambda pid: False)
+
+    @contextmanager
+    def scopes(environment):
+        yield Mock() if admitted else Mock(side_effect=OSError("cleanup Job retained"))
+
+    monkeypatch.setattr(_job_scopes, "query_scopes", scopes)
     with pytest.raises(pu.DaemonSpawnError):
         start()
     rows = inspect_instances(spec.registry_root)

@@ -29,7 +29,7 @@ def installation(tmp_path, monkeypatch):
     return SimpleNamespace(adapter=adapter, root=root, slot=slot, execution_root=execution_root)
 
 
-def test_adoption_precedes_publication_and_its_transactional_callback(installation, monkeypatch):
+def test_publication_and_transactional_callback_need_no_task_adoption(installation, monkeypatch):
     from contextlib import contextmanager
 
     state = installation
@@ -38,10 +38,7 @@ def test_adoption_precedes_publication_and_its_transactional_callback(installati
     monkeypatch.setattr(self_install, "clean_legacy_artifacts", lambda root: [])
     monkeypatch.setattr(self_install, "_deploy_binstubs", lambda: ())
     monkeypatch.setattr(self_install, "_write_control_plane_provider_manifest", lambda *a, **k: None)
-    def adopt(root, slot):
-        assert events == ["validate"]
-        events.append("adopt")
-
+    adopt = Mock(side_effect=AssertionError("normal construction must not adopt a Task"))
     monkeypatch.setattr(state.adapter, "adopt_broker", adopt)
     publication = state.adapter.runtime._runtime_component("versioned_runtime_publication")
 
@@ -56,14 +53,14 @@ def test_adoption_precedes_publication_and_its_transactional_callback(installati
     monkeypatch.setattr(publication, "target_leases", targets)
 
     def publish(root, version, *, expected, before_publish, after_publish):
-        assert events == ["validate", "adopt"]
+        assert events == ["validate"]
         events.append("publication-lease")
         before_publish()
         after_publish()
 
     def callback(slot):
         assert events == [
-            "validate", "adopt", "publication-lease", "target-leases",
+            "validate", "publication-lease", "target-leases",
             "validate", "target-leases-released",
         ]
         assert slot == state.slot
@@ -77,6 +74,7 @@ def test_adoption_precedes_publication_and_its_transactional_callback(installati
     )
     assert result.action == "installed"
     assert events[-1] == "cutover"
+    adopt.assert_not_called()
 
 
 def test_source_refusal_precedes_broker_mutation(installation, monkeypatch):

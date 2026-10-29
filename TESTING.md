@@ -24,7 +24,14 @@ caller process group twice, with the custodian outside that group.
 These process witnesses do not qualify disposable-state reset, old-code removal,
 critical transport survival, full installed acceptance or rollout.
 
-The opt-in Windows broker consumer lane also constructs the actual Manager
+The opt-in Windows consumer lane (`windows_broker_consumers=true`, retained
+selector name) now uses normal native creation, not Task adoption. It proves
+two nested permissive caller-Job closures, bounded controls, cleared escaped
+metadata and the different-inner/shared-restrictive-outer negative before
+constructing the actual Worktrees and Manager runtimes. Only fixture Jobs
+explicitly launching durable work permit breakaway; bounded tools stay strict.
+No COM, WMI, Scheduled Task or UAC activation is exercised.
+The lane constructs the actual Manager
 runtime through its canonical installer in the credential-free disposable
 profile. Two concurrent current-roster
 reads start from a stopped resident through the normal installed Worktrees
@@ -33,8 +40,8 @@ Both caller Jobs close before repeated resident health checks;
 authenticated canonical shutdown and native exit confirmation finish each of
 two cycles. This is the installed Manager roster-consumer and resident recovery
 boundary, not a full interactive Picker/desktop-session launch or installed
-host rollout. The existing activation lane retains the shared-outer negative
-control and positive desktop-observer canary.
+host rollout. The legacy broker activation lane remains a separate explicit
+compatibility test, not a prerequisite or evidence for normal native startup.
 
 Worktrees' `test_command_lifecycle_recovery.py` covers read-only inspection,
 evidence-bound pending-owner qualification, preservation of unrelated manifest
