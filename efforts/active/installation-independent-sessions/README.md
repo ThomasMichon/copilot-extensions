@@ -236,10 +236,10 @@ retains the operator's wording.
   - [x] Repair Manager's literal pane-environment forwarding and qualify the
     production export/argument blocks on Linux and stock macOS Bash 3.2
     (#9470). Preserve AHP exclusions and the existing #5579 edit boundary.
-  - [ ] Eliminate blanket renderer admission and qualify the corrected Manager
+  - [x] Eliminate blanket renderer admission and qualify the corrected Manager
     environment boundary with the real copied native setup. Keep actual
     initializer constraints and seed/lifecycle custody, without a new
-    renderer-capability handshake. Full Manager launch remains distinct.
+    renderer-capability handshake (#9479). Full Manager launch remains distinct.
 - [ ] Fence only same-worktree check/create races until mux discoverability.
   Recheck and join on contention; distinct worktrees remain parallel and no
   launch lock survives for Copilot's lifetime.
@@ -381,6 +381,11 @@ operator's installation-survival contract.
     receipts and legacy fallback under malformed shell-rendered `BASH_ENV`
     (#9427). Linux and stock macOS Bash 3.2 pass; these component controls
     do not establish live tmux/Copilot or real removal survival.
+  - [x] Qualify actual Manager environment/command-array/interpreter-refresh
+    blocks with copied native setup, quoted-empty forwarding, unchanged
+    Python-sensitive environment and restricted backend PATH; match default
+    JSON resume's direct native plan (#9479). Full Manager and live survival
+    acceptance remain open.
   - [x] Native Windows engine-startup controls run real copied command/setup,
     consume arguments before the backend and preserve literal argv, same-host
     and alternate-option behavior, normal/recovery reconciliation and real
@@ -483,6 +488,13 @@ and does not delay final Copilot exit indefinitely merely to deliver a lifecycle
 notice; the existing bounded/quiet absent-handler contract remains intact.
 
 ## Journal
+
+### 2026-10-28 - Blanket renderer admission removed
+
+[Merged source and final native evidence](<journal/2026/10.28 copied-posix-consumer.md#renderer-admission-removal-merged>).
+Only the bounded renderer-removal/component items close. Full consumer parity,
+same-worktree launch admission, current-handler lifecycle, maintenance standby,
+release/rollout and both actual installation cycles remain open.
 
 ### 2026-10-28 - Conditional copied POSIX consumer merged
 
