@@ -311,7 +311,7 @@ function Start-NativeDaemon {
         [IO.Pipes.PipeTransmissionMode]::Byte, [IO.Pipes.PipeOptions]::Asynchronous,
         4096, 4096, $security
     )
-    $description = @{
+    $description = [Management.Automation.PSSerializer]::Serialize(@{
         script = $Script
         arguments = @($Arguments)
         helper = $script:NativeDaemonSource
@@ -323,13 +323,15 @@ function Start-NativeDaemon {
         registry = $receipt.registry_root
         instances = $instances
         working = $WorkingDirectory
-    } | ConvertTo-Json -Compress
+    })
     $data = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($description))
     $diagnosticLiteral = "'" + ($LogPath + '.entry.log').Replace("'", "''") + "'"
     $body = @"
 `$ErrorActionPreference = 'Stop'
 [IO.File]::WriteAllText($diagnosticLiteral, "native-daemon-stage:script-entry``n")
-`$d = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$data')) | ConvertFrom-Json
+`$d = [Management.Automation.PSSerializer]::Deserialize(
+    [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$data'))
+)
 [IO.File]::AppendAllText($diagnosticLiteral, "native-daemon-stage:decoded``n")
 try {
     [Console]::Error.WriteLine('native-daemon-stage:bootstrap')
