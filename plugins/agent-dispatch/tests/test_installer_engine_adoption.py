@@ -356,7 +356,7 @@ exit $result.ExitCode
     calls = [json.loads(line) for line in Path(env["TEST_UV_LOG"]).read_text().splitlines()]
     assert len(calls) == (1 if mode == "fatal" else 3)
     for actual in calls:
-        assert actual[:-3] == ["pip", "install", *args]
+        assert actual[:-3] == ["pip", "install", *args, "--no-editable", "--link-mode", "copy"]
         assert actual[-3] == "--exclude-newer"
         assert actual[-1] == "--reinstall"
         cutoff = datetime.fromisoformat(actual[-2].replace("Z", "+00:00"))
@@ -976,7 +976,7 @@ if ($script:InstallerDependencyPolicy -cne $originalPolicy) {{ throw 'caller pol
         str(snapshot / "libs" / lib)
         for lib in (
             "zdd", "dropin-registry", "plugin-resolve",
-            "single-instance-lease", "agent-procutil", "worktree-identity",
+            "single-instance-lease", "agent-procutil", "update-driver", "worktree-identity",
             "process-telemetry", "plugin-activation",
         )
     ]
@@ -1042,7 +1042,8 @@ exit $result.ExitCode
     assert calls[0] == ["venv", str(tmp_path / "slot"), "--allow-existing"]
     assert len(calls) == 2
     assert calls[1][:-3] == [
-        "pip", "install", "--python", sys.executable, f"{snapshot}[mcp]"
+        "pip", "install", "--python", sys.executable, f"{snapshot}[mcp]",
+        "--no-editable", "--link-mode", "copy",
     ]
     assert calls[1][-3] == "--exclude-newer"
     assert calls[1][-1] == "--reinstall"

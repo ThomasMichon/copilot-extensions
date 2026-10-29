@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -18,10 +20,24 @@ from tests.test_installer_required_cutover import _run, _update_script
 @pytest.mark.parametrize("ext", ["sh", "ps1"])
 @pytest.mark.parametrize("broken", [False, True])
 def test_prepare_qualifies_without_publishing_or_reconciling(
-    tmp_path: Path, ext: str, broken: bool,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ext: str, broken: bool,
 ) -> None:
     if ext == "sh" and os.name == "nt":
         pytest.skip("native POSIX installer; Windows uses PowerShell")
+    original = fixture.script
+
+    def render(shell: str) -> str:
+        text = original(shell)
+        if shell == "ps1":
+            assert text.count("\nInitialize-SourceRuntime\n") == 1
+            text = text.replace(
+                "\nInitialize-SourceRuntime\n",
+                "\nfunction Invoke-RuntimeBrokerAdoption { throw 'Forbidden broker mutation' }\n"
+                "Initialize-SourceRuntime\n",
+            )
+        return text
+
+    monkeypatch.setattr(fixture, "script", render)
     env, root, sources = fixture.stage(tmp_path, broken_b=broken)
     fixture.activate(env, root, sources[0][1].runtime_version)
     preserved = (
@@ -48,6 +64,39 @@ def test_prepare_qualifies_without_publishing_or_reconciling(
     assert marker.read_bytes() == marker_before
     assert not (Path(env["HOME"]) / ".local" / "bin").exists()
     assert not list(root.glob("*.runtime-publication*"))
+
+
+def test_native_driver_preserves_explicit_supervisor_option(tmp_path: Path) -> None:
+    text = (fixture.SCRIPTS / "install.ps1").read_text(encoding="utf-8")
+    parameters = text[text.index("[CmdletBinding()]"):text.index("if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8")]
+    start = text.index("if ($env:OS -eq 'Windows_NT' -and")
+    end = text.index("# Raise the shared self-stage", start)
+    script = parameters + """
+$env:OS = 'Windows_NT'
+$env:COPILOT_EXTENSIONS_TEST_CONTAINED = '0'
+function Enter-NativeInstallerDriver {
+    param($Payload, $Root, $Plugin, $Action, $Options, $RetainedRuntime, $RetainedRuntimeSha256)
+    [Console]::WriteLine(($Options | ConvertTo-Json -Compress))
+    return @{ Participant=$false; ExitCode=0 }
+}
+""" + text[start:end]
+    result = _run(
+        tmp_path, "ps1", script, "update", "-InstallDir", str(tmp_path / "runtime"),
+        "-RequireGracefulCutover", "-PreserveSupervisors",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    options = json.loads(result.stdout.strip())
+    assert set(options) == {"RequireGracefulCutover", "PreserveSupervisors"}
+    path = fixture.REPO / "libs/installer-engine/installer_driver.py"
+    spec = importlib.util.spec_from_file_location("preparation_installer_driver", path)
+    assert spec is not None and spec.loader is not None
+    driver = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(driver)
+    arguments = driver.native_arguments(SimpleNamespace(
+        plugin="agent-dispatch", action="update", root=tmp_path / "runtime", options=options,
+    ))
+    assert "-RequireGracefulCutover" in arguments
+    assert "-PreserveSupervisors" in arguments
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX constructor; PowerShell reuse is covered above")
@@ -249,6 +298,8 @@ def test_real_runtime_boundary_omits_collection_only_when_preserving(
             after = (
                 "function Invoke-VersionedGc { param($KeepPrev)\n"
                 '[IO.File]::AppendAllText($env:FIXTURE_COLLECTION_LOG, "gc`n")\n}'
+                "\nfunction Invoke-RuntimeBrokerAdoption {\n"
+                '[IO.File]::AppendAllText($env:FIXTURE_BROKER_LOG, "broker`n")\n}'
             )
         assert text.count(before) == 1
         return text.replace(before, after)
@@ -258,11 +309,15 @@ def test_real_runtime_boundary_omits_collection_only_when_preserving(
     fixture.activate(env, root, sources[0][1].runtime_version)
     log = tmp_path / "collection.log"
     env["FIXTURE_COLLECTION_LOG"] = str(log)
+    broker_log = tmp_path / "broker.log"
+    env["FIXTURE_BROKER_LOG"] = str(broker_log)
     env["FIXTURE_PRESERVE_SUPERVISORS"] = str(int(preserve))
     payload, target = sources[1]
     result = fixture.run(ext, payload / "scripts" / f"install.{ext}", ["update"], env)
     assert result.returncode == 0, result.stdout + result.stderr
     assert (root / "current-version").read_text().strip() == target.runtime_version
+    if ext == "ps1":
+        assert broker_log.read_text().splitlines() == ["broker"]
     if preserve:
         assert not log.exists()
     else:

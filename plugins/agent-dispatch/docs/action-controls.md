@@ -180,7 +180,7 @@ The native installer's `prepare` action (`-Action prepare` on PowerShell) runs
 its existing constructor and isolated import-health gate, then completes the
 candidate without activating it. It does not publish selectors, launchers,
 the deployment manifest or persistent PATH; it does not reconcile instances,
-coordinator or supervisors, or collect old runtimes. Activation/replacement
+coordinator, supervisors or a Windows launch broker, or collect old runtimes. Activation/replacement
 holds therefore do not prevent explicit preparation. Source attribution,
 construction admission and dependency policy remain required.
 
@@ -198,6 +198,8 @@ instance reconciliation and runtime collection. It rejects `--no-service`,
 `--no-supervisor`, other actions and a legacy `.venv` path. Normal update
 behavior is unchanged. Runtime activation and coordinator-replacement policy
 still apply; supervisor-reconcile policy is not needed for an omitted effect.
+On Windows the existing finite execution driver retains the explicit strict
+and preservation options when it re-enters the installer; it is not bypassed.
 The option does not inhibit an already-running supervisor's own self-update,
 qualify an old consumer, or authorize effects on protected workers. A failed
 graceful cutover still reports failure with possible prior selection changes;

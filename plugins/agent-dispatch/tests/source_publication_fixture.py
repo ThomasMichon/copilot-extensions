@@ -73,6 +73,7 @@ def script(ext: str) -> str:
             "Assert-DispatchActions",
             "Install-Runtime", "Get-PayloadHash", "Get-BootstrapPython",
             "Invoke-VersionedSlotClean", "Invoke-VersionedMarkComplete",
+            "Invoke-RuntimeBrokerAdoption",
             "New-PluginBuildSnapshot", "Enter-PluginSnapshotLock", "Publish-FileAtomically",
             "Invoke-VersionedActivate", "Get-VersionedCurrent", "Test-ActivationSupersededNow",
             "Get-VerTuple", "Test-VersionLt", "Write-Manifest",
@@ -359,6 +360,7 @@ def stage(tmp_path: Path, *, broken_b: bool = False):
         installed = Path(query.stdout.strip()) / "agent_dispatch"
         shutil.copytree(package, installed)
         full_identity = json.dumps(api.manifest_fields(identity), sort_keys=True)
+        api._runtime().retain_runtime_helpers(slot, complete=False)
         api._runtime().mark_complete(
             root, identity.runtime_version,
             payload_hash=hashlib.sha256(full_identity.encode()).hexdigest(),

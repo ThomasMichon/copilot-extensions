@@ -152,7 +152,7 @@ if ($env:OS -eq 'Windows_NT' -and
         else { Join-Path $env:USERPROFILE '.agent-dispatch' }
     $driverOptions = @()
     foreach ($name in @('NoService', 'NoSupervisor', 'Interactive', 'Purge', 'Force',
-        'RequireGracefulCutover', 'ZeroDowntime', 'DryRun')) {
+        'RequireGracefulCutover', 'PreserveSupervisors', 'ZeroDowntime', 'DryRun')) {
         if ($PSBoundParameters.ContainsKey($name) -and [bool]$PSBoundParameters[$name]) {
             $driverOptions += $name
         }
@@ -2178,12 +2178,12 @@ function Install-Runtime {
             exit 1
         }
         if (-not (Invoke-VersionedMarkComplete)) { exit 1 }
-        Invoke-RuntimeBrokerAdoption
         Invoke-SupervisorAudit -Event runtime-ready -Reason import-health-gate -Outcome ok
         if ($PrepareOnly) {
             Write-Ok "Prepared runtime: $VenvDir (not activated; retention ends when this command exits)"
             return
         }
+        Invoke-RuntimeBrokerAdoption
         if (-not (Invoke-VersionedActivate)) { exit 1 }
         # The supersession check and the shared publication it protects
         # (the binstub + deploy-manifest, both readable/overwritable by any

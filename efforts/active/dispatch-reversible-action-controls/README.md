@@ -695,3 +695,26 @@ Initial tests must prove the current gap before adding the guards.
   accidentally depending on the host's missing direct-entry distribution
   label. The contained publication packet passes all 35 cases; the workflow
   contract passes all 90 cases. This is not installed-consumer evidence.
+
+### 2026-10-28 - Reconcile the newly merged native execution owner
+
+- The earlier adapter revision received independent approval and exact-head
+  Windows qualification, but its eventual merge attempt encountered a base
+  conflict. Guarded synchronization retained the original source and the
+  in-place rebase preserved the newly merged native broker/driver integration.
+- Resolve the semantic overlap as well as the generated declaration conflict:
+  preparation returns before broker adoption, and strict supervisor preservation
+  survives native driver admission and re-entry. Keep ordinary broker adoption
+  and finite execution custody intact.
+- The focused preparation/lifecycle packet passes all 72 cases, including a
+  forbidden-broker effect sentinel and the actual native option-forwarding
+  boundary. Completed synthetic slots now retain the real bootstrap helpers
+  required by the merged constructor contract.
+- Refresh every generated canonical driver copy and its consumer changefile.
+  The rebased preparation/engine/strict-cutover/retention/recovery packet passes
+  184 cases; conditional publication passes 35. Update the coupled fixture's
+  exact assertions for immutable copy installation and the new update-driver
+  dependency rather than dropping those checks.
+  The new revision still requires independent review and native qualification;
+  the preceding revision's approval is not carried forward. The effort remains
+  Active and no installed/running adoption is claimed.
