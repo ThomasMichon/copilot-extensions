@@ -11,6 +11,7 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [PR Review Workspaces](active/pr-review-workspaces/README.md) | Draft; ADO-first vision and architecture proposal only | #9535; successor PR plugin/service cache, existing #6007/#7188 and #7051 owners retained; no implementation or rollout |
+| [Launch Boundary Repairs](active/launch-boundary-repairs/README.md) | Draft; reviewed source-repair intake before implementation | #9520; preserves #5512/#5761 and open #9322; no rollout or live venue retry |
 | [Native Startup Prompts](active/native-startup-prompts/README.md) | Active; ordinary cold-launch consumer #9374 merged, native POSIX/full-mux and installed qualification remain | #9364; preserves #7116/#8375/#7942/#8669/#5579 owners; no rollout or retained-session restart |
 | [Dispatch Reversible Action Controls](active/dispatch-reversible-action-controls/README.md) | Active; controls released, native preparation and supervisor-preserving adoption qualification in progress | #9334; reuses #6820/#7694 lifecycle owners; installed and running adoption remain gated |
 | [Cached Source Wheel Assembly](active/cached-source-wheel-assembly/README.md) | Active; proposal reviewed in #9291, content-bound reuse and native qualification remain | #9290; preserves #8873/#8949 verification, #5851 staging and #6937/#6941 release-lock owners |
