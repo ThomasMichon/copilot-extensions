@@ -1506,6 +1506,16 @@ retain their stderr diagnostics. Failed construction reclaims only its owned
 incomplete candidate, leaves the active runtime unchanged, and preserves the
 original error if cleanup also reports a failure.
 
+On Windows, explicit `install`/`init`/`provision` enters the shared execution
+owner and adopts this installation's finite launch broker after immutable
+completion, before selecting the runtime or starting a successor. Ordinary
+forwarding and passive-service launch only consume that adoption; they never
+register or repair it. This component does not make the optional `serve` daemon
+a prerequisite. `init.ps1 -Action broker-remove` removes only the owned launch
+broker under the same execution custody, preserving runtime files, configuration
+and the optional serving process. It refuses contained or non-Windows use.
+`stamp` remains runtime- and registration-free.
+
 ## Architecture
 
 ```

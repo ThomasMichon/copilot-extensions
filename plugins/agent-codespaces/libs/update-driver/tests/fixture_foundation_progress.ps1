@@ -96,7 +96,7 @@ try {
     if ($Mode -eq 'refuse-freeze') {
         $digest = [CopilotExtensions.NativeFoundationState]::SourceDigest($Plugin)
         $assertion = $owned.CreateWitnessAssertion([IO.Path]::Combine($Root, 'execution.lock'))
-        foreach ($name in @('update-driver', 'agent-procutil', 'single-instance-lease')) {
+        foreach ($name in @('update-driver', 'agent-procutil', 'single-instance-lease', 'zdd')) {
             $destination = Join-Path ([IO.Path]::GetDirectoryName($Plugin)) ($name + '\frozen')
             $refused = $false
             try { $null = [CopilotExtensions.NativeFoundationState]::FreezeSource($Plugin, $destination, $digest, $assertion) }

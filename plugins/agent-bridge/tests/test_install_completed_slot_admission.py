@@ -331,6 +331,8 @@ function Get-VersionedCurrent {{ return '' }}
 function Install-SiblingPlugins {{ Rec 'PRUNED' }}
 function Remove-ConsoleTrampolines {{ Rec 'PRUNED' }}
 function Test-RuntimeHealthy {{ Rec 'HEALTH'; return $true }}
+function Ensure-RuntimeBrokerAdoption {{ Rec 'BROKER' }}
+function Invoke-RuntimeBrokerAdoption {{ Rec 'BROKER' }}
 function Invoke-VersionedActivate {{ Rec 'ACTIVATED'; exit 50 }}
 function New-SignedVenv {{ Rec 'PROCEEDED'; exit 42 }}
 function New-SignedVenvShared {{ Rec 'BUILT'; return $true }}
@@ -341,6 +343,12 @@ $vr = Join-Path $ScriptDir 'versioned_runtime.py'
 $ph = Get-PayloadHash
 if (-not $ph) {{ throw 'payload hash unavailable' }}
 function Mark([string]$hash) {{
+    $bootstrap = Join-Path $VenvDir '.runtime-bootstrap'
+    New-Item -ItemType Directory -Force -Path $bootstrap | Out-Null
+    foreach ($name in @('runtime_launcher.py', 'versioned_runtime.py', 'versioned_runtime_leases.py',
+        'versioned_runtime_source.py', 'versioned_runtime_construction.py', 'versioned_runtime_publication.py')) {{
+        Copy-Item -LiteralPath (Join-Path $ScriptDir $name) -Destination (Join-Path $bootstrap $name) -Force
+    }}
     & $RealPython $vr --root $InstallDir --link-name venv mark-complete $SrcVersion --payload-hash $hash | Out-Null
     if ($LASTEXITCODE -ne 0) {{ throw 'setup mark-complete failed' }}
 }}

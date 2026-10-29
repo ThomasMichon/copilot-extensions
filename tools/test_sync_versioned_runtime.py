@@ -55,7 +55,7 @@ def repository(tmp_path, monkeypatch):
 @pytest.mark.parametrize("name", NAMES)
 @pytest.mark.parametrize("target_state", ["different", "matching", "dangling"])
 def test_main_refuses_linked_destinations_without_any_mutation(
-    repository, monkeypatch, capsys, check, name, target_state,
+    repository, monkeypatch, capsys, check, name, target_state, native_file_symlink,
 ):
     scripts = repository
     destination = scripts / name
@@ -65,7 +65,7 @@ def test_main_refuses_linked_destinations_without_any_mutation(
     if target_state != "dangling":
         target.write_bytes(canonical if target_state == "matching" else b"unrelated bytes\n")
         target.chmod(0o600)
-    destination.symlink_to(target)
+    native_file_symlink(destination, target)
     original_link = os.readlink(destination)
     before = (
         target.read_bytes(), stat.S_IMODE(target.stat().st_mode), target.stat().st_mtime_ns,
@@ -88,11 +88,13 @@ def test_main_refuses_linked_destinations_without_any_mutation(
 
 
 @pytest.mark.parametrize("check", [False, True], ids=["sync", "check"])
-def test_main_refuses_linked_destination_ancestor(repository, monkeypatch, capsys, check):
+def test_main_refuses_linked_destination_ancestor(
+    repository, monkeypatch, capsys, check, native_file_symlink,
+):
     scripts = repository
     actual = scripts.with_name("actual-scripts")
     scripts.rename(actual)
-    scripts.symlink_to(actual, target_is_directory=True)
+    native_file_symlink(scripts, actual, target_is_directory=True)
     before = {path.name: path.read_bytes() for path in actual.iterdir()}
     monkeypatch.setattr(sys, "argv", [str(SCRIPT), *(["--check"] if check else [])])
 

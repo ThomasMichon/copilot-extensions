@@ -47,10 +47,11 @@ def _docker_protocol(args: list[str], directory: str) -> tuple[int, str]:
     if args[:2] == ["image", "inspect"]:
         overrides = root / "image-digests.json"
         digests = json.loads(overrides.read_text()) if overrides.exists() else {}
+        configuration = root / "image-configuration.json"
         return 0, json.dumps({
             "id": "sha256:" + args[-1].split("sha256:")[1],
             "os": "linux", "architecture": "arm64", "digests": digests.get(args[-1], [args[-1]]),
-            "environment": [], "entrypoint": [], "command": [], "user": "",
+            "configuration": json.loads(configuration.read_text()) if configuration.exists() else {},
         })
     if args[:2] == ["network", "ls"]:
         network = json.loads((root / "network.json").read_text()) if (root / "network.json").exists() else None
@@ -287,10 +288,51 @@ def test_native_prerequisites_use_actual_selected_daemon_images_and_scrub_ambien
     assert all(not {"DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_AUTH_CONFIG"} & call["environment"].keys()
                for call in calls)
     assert all(call["environment"]["PATH"] == os.defpath for call in calls)
+    assert all(call["argv"][7] == (
+        '{"id":{{json .Id}},"os":{{json .Os}},"architecture":{{json .Architecture}},'
+        '"digests":{{json .RepoDigests}},"configuration":{{json .Config}}}'
+    ) for call in calls[2:])
     assert not (rig["directory"] / "effects").exists()
     other = KomodoNative(replace(rig["tooling"], daemon_id="other-daemon"))
     with pytest.raises(PlanError, match="physical host"):
         other.prerequisites(rig["selected"], rig["material"], deadline=time.monotonic() + 10)
+
+
+@pytest.mark.parametrize(("configuration", "expected"), [
+    ({}, ((), (), (), "")),
+    ({"Env": None, "Entrypoint": None, "Cmd": None}, ((), (), (), "")),
+    ({"Env": [], "Entrypoint": [], "Cmd": [], "User": ""}, ((), (), (), "")),
+    ({"Env": ["A=value"], "Entrypoint": ["/entry"], "Cmd": ["serve"], "User": "1000:1000"},
+     (("A=value",), ("/entry",), ("serve",), "1000:1000")),
+])
+def test_native_image_optional_configuration_defaults_and_preserves_explicit_values(
+    native_rig: Any, configuration: Any, expected: tuple,
+) -> None:
+    rig = native_rig
+    (rig["directory"] / "image-configuration.json").write_text(json.dumps(configuration))
+    images = rig["native"].selected_images(
+        rig["selected"], rig["material"], deadline=time.monotonic() + 10)
+    assert set(images) == {"core", "mongo", "periphery"}
+    for image in images.values():
+        assert (image.environment, image.entrypoint, image.command, image.user) == expected
+    assert not (rig["directory"] / "effects").exists()
+
+
+@pytest.mark.parametrize("configuration", [
+    None, [], "", {"User": None}, {"User": 0}, {"User": []},
+    {"Env": ""}, {"Env": [0]}, {"Entrypoint": {}}, {"Entrypoint": [None]},
+    {"Cmd": False}, {"Cmd": [1]},
+])
+def test_native_image_malformed_configuration_refuses_without_effect(
+    native_rig: Any, configuration: Any,
+) -> None:
+    rig = native_rig
+    (rig["directory"] / "image-configuration.json").write_text(json.dumps(configuration))
+    with pytest.raises(PlanError, match="immutable image configuration is invalid"):
+        rig["native"].selected_images(
+            rig["selected"], rig["material"], deadline=time.monotonic() + 10)
+    assert len((rig["directory"] / "calls.jsonl").read_text().splitlines()) == 1
+    assert not (rig["directory"] / "effects").exists()
 
 
 @pytest.mark.parametrize("version", [

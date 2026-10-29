@@ -241,6 +241,46 @@ def start_session(root, processes, version="2.0", owner=None):
     return process, json.loads(process.stdout.readline())
 
 
+@pytest.mark.parametrize("reused", [False, True])
+@pytest.mark.parametrize("fault", ["editable-origin", "external-hook"])
+def test_attached_completion_refuses_mutable_environment(tmp_path, processes, reused, fault):
+    root = tmp_path / "runtime"
+    previous = vr.slot(root, "1.0")
+    (previous / "live").write_text("working")
+    vr.mark_complete(root, "1.0", payload_hash="old")
+    vr.activate(root, "1.0")
+    candidate = vr.version_dir(root, "2.0")
+    before = None
+    if reused:
+        vr.mark_complete(root, "2.0", payload_hash="a" * 64)
+        before = vr.marker_path(root, "2.0").read_bytes()
+    process, admission = start_session(root, processes)
+    assert admission == {"admission": "reuse" if reused else "construct"}
+    site = candidate / "Lib" / "site-packages"
+    site.mkdir(parents=True)
+    if fault == "editable-origin":
+        metadata = site / "sample-1.0.dist-info"
+        metadata.mkdir()
+        (metadata / "direct_url.json").write_text(json.dumps({
+            "url": tmp_path.as_uri(), "dir_info": {"editable": True},
+        }))
+    else:
+        (site / "sample.pth").write_text(str(tmp_path / "checkout"))
+    output, error = process.communicate(input=json.dumps({
+        "command": "complete", "payload_hash": "a" * 64,
+    }) + "\n", timeout=15)
+    assert process.returncode != 0, (output, error)
+    assert '"complete": true' not in output
+    if reused:
+        assert vr.marker_path(root, "2.0").read_bytes() == before
+        assert site.is_dir()
+        assert vr.check_admission(root, "2.0", payload_hash="a" * 64) == vr.ADMIT_HEALTH_REPAIR_REQUIRED
+    else:
+        assert not candidate.exists()
+    assert vr.current_version(root) == "1.0"
+    assert (previous / "live").read_text() == "working"
+
+
 @pytest.mark.parametrize("lost_claim", [False, True])
 def test_dev_generation_failed_session_preserves_working_generation(tmp_path, processes, lost_claim):
     owner = "worktree:dev-owner"
@@ -299,6 +339,64 @@ def test_failed_construction_attached_session_abort_and_transfer(tmp_path, proce
         pass
 
 
+def test_native_completion_retains_canonical_helpers_before_releasing_construction(tmp_path, processes):
+    process, admission = start_session(tmp_path, processes)
+    assert admission == {"admission": "construct"}
+    slot = vr.version_dir(tmp_path, "2.0")
+    process.stdin.write(json.dumps({
+        "command": "complete", "payload_hash": "a" * 64, "retain_helpers": True,
+    }) + "\n")
+    process.stdin.flush()
+    assert json.loads(process.stdout.readline()) == {"complete": True}
+    assert vr.is_complete(tmp_path, "2.0", expect_hash="a" * 64)
+    retained = slot / ".runtime-bootstrap"
+    assert len(list(retained.iterdir())) == 6
+    for helper in retained.iterdir():
+        assert helper.read_bytes() == (SOURCE.parent / helper.name).read_bytes()
+    with vr.construction_lease(tmp_path, "2.0", timeout=0):
+        pass
+    with pytest.raises(vr.RetentionTimeout):
+        with vr._kernel_lease(tmp_path, "2.0", kind="retention", shared=False, timeout=0):
+            pytest.fail("canonical helpers lost complete-slot retention")
+    stdout, stderr = process.communicate(input='{"command":"settled"}\n', timeout=15)
+    assert process.returncode == 0, (stdout, stderr)
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_complete_slot_retention_helpers_are_verified_never_repaired(tmp_path, processes, changed):
+    process, _admission = start_session(tmp_path, processes)
+    complete = json.dumps({
+        "command": "complete", "payload_hash": "a" * 64, "retain_helpers": True,
+    }) + "\n"
+    stdout, stderr = process.communicate(input=complete + '{"command":"settled"}\n', timeout=15)
+    assert process.returncode == 0, (stdout, stderr)
+    slot = vr.version_dir(tmp_path, "2.0")
+    helper = slot / ".runtime-bootstrap" / "versioned_runtime.py"
+    if changed:
+        helper.write_text("changed")
+    else:
+        helper.unlink()
+    marker = vr.marker_path(tmp_path, "2.0").read_bytes()
+    retry, admission = start_session(tmp_path, processes)
+    assert admission == {"admission": "reuse"}
+    stdout, stderr = retry.communicate(input=complete, timeout=15)
+    assert retry.returncode == 1, (stdout, stderr)
+    assert vr.marker_path(tmp_path, "2.0").read_bytes() == marker
+    if changed:
+        assert helper.read_text() == "changed"
+    else:
+        assert not helper.exists()
+
+
+def test_invalid_retention_selection_refuses_completion_and_reclaims_candidate(tmp_path, processes):
+    process, _admission = start_session(tmp_path, processes)
+    stdout, stderr = process.communicate(input=json.dumps({
+        "command": "complete", "payload_hash": "a" * 64, "retain_helpers": "true",
+    }) + "\n", timeout=15)
+    assert process.returncode == 1 and "must be a boolean" in stderr, (stdout, stderr)
+    assert not vr.version_dir(tmp_path, "2.0").exists()
+
+
 def test_construction_lost_admission_reader_reclaims_owned_candidate(tmp_path, monkeypatch):
     class ClosedReader:
         def write(self, _value):
@@ -314,7 +412,8 @@ def test_construction_lost_admission_reader_reclaims_owned_candidate(tmp_path, m
 
 
 @pytest.mark.parametrize("code", [0, 23])
-def test_failed_construction_native_pipe_adapter(tmp_path, processes, code):
+@pytest.mark.parametrize("retain_helpers", [False, True])
+def test_failed_construction_native_pipe_adapter(tmp_path, processes, code, retain_helpers):
     root = tmp_path / "runtime with spaces"
     root.mkdir()
     helper = vr.construction_shell_helpers("ps1" if os.name == "nt" else "sh")
@@ -327,7 +426,9 @@ def test_failed_construction_native_pipe_adapter(tmp_path, processes, code):
             + f"-Helper {quote(SOURCE)} -Root {quote(root)} -Version '2.0' "
             + "-PayloadHash ('a'*64) -LinkName 'current'\n"
             + f"[IO.File]::WriteAllText({quote(root / 'versions' / '2.0' / 'partial')}, 'partial')\n"
-            + (f"exit {code}\n" if code else "Complete-RuntimeConstruction -PayloadHash ('a'*64)\n")
+            + (f"exit {code}\n" if code else
+               "Complete-RuntimeConstruction -PayloadHash ('a'*64)"
+               + (" -RetainHelpers" if retain_helpers else "") + "\n")
             + "} finally { Stop-RuntimeConstruction }\n"
         )
         path = tmp_path / "constructor.ps1"
@@ -337,6 +438,8 @@ def test_failed_construction_native_pipe_adapter(tmp_path, processes, code):
             "-NoProfile", "-NonInteractive", "-File", str(path),
         ]
     else:
+        if retain_helpers:
+            pytest.skip("this opt-in helper-retention adapter is PowerShell-owned")
         import shlex
         script = (
             "set -euo pipefail\n" + helper
@@ -362,6 +465,8 @@ def test_failed_construction_native_pipe_adapter(tmp_path, processes, code):
     else:
         assert process.returncode == 0, (stdout, stderr)
         assert vr.is_complete(root, "2.0", expect_hash="a" * 64)
+        if retain_helpers:
+            assert (root / "versions" / "2.0" / ".runtime-bootstrap" / "versioned_runtime.py").is_file()
     with vr.construction_lease(root, "2.0", timeout=0):
         pass
 

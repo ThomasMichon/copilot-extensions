@@ -154,6 +154,55 @@ def test_preview_and_removal_preserve_durable_bytes(tmp_path, capsys):
     assert tree_bytes(tmp_path) == after
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Native broker component ownership")
+@pytest.mark.parametrize("confirmed", [False, True])
+def test_owned_broker_removal_retains_action_until_confirmed(tmp_path, monkeypatch, capsys, confirmed):
+    from agent_procutil import windows_broker_installation as installation
+    from agent_procutil import windows_broker_retention as retention
+    from agent_procutil import windows_task_broker as broker
+    from types import SimpleNamespace
+
+    root = tmp_path / "manager"
+    slot = fixture_slot(root)
+    metadata = root / "windows-launch-broker.json"
+    metadata.write_text("{}")
+    adopted = SimpleNamespace(entrypoint=slot / "broker.py")
+    monkeypatch.setattr(installation, "load", lambda path: adopted)
+    monkeypatch.setattr(retention, "runtime_component", lambda config, name: removal.runtime)
+    calls = []
+
+    def remove(config):
+        assert config is adopted and slot.is_dir()
+        assert (root / "current-version").is_file()
+        leases = removal.runtime._runtime_component("versioned_runtime_leases")
+        with pytest.raises(TimeoutError):
+            with leases.batch_removal_custody(root, [slot.name]):
+                pytest.fail("broker action generation was not retained")
+        calls.append(True)
+        if not confirmed:
+            raise RuntimeError("native component removal is unconfirmed")
+        metadata.unlink()
+
+    monkeypatch.setattr(broker, "uninstall", remove)
+    assert removal.uninstall(root, apply=True, as_json=True) == (0 if confirmed else 1)
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == ("removed" if confirmed else "refused")
+    assert calls == [True]
+    assert slot.exists() is not confirmed
+    assert metadata.exists() is not confirmed
+
+
+def test_pending_broker_publication_refuses_before_artifact_withdrawal(tmp_path, capsys):
+    root = tmp_path / "manager"
+    fixture_slot(root)
+    (root / "windows-launch-broker.pending.json").write_text("{}")
+    before = tree_bytes(root)
+    assert removal.uninstall(root, apply=True, as_json=True) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "refused" and "installer recovery" in result["reason"]
+    assert {name: (root / name).read_bytes() for name in before} == before
+
+
 @pytest.mark.parametrize("mode", list(py_compile.PycInvalidationMode))
 @pytest.mark.parametrize("optimization", [0, 1, 2])
 def test_post_construction_bytecode_is_removed_without_resealing(tmp_path, capsys, mode, optimization):

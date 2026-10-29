@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-pull-requests"
-version = "0.3.117-dev1"
+version = "0.3.118-dev1"
 description = "Cross-repository pull-request CLI with agent-worktrees-mediated GitHub auth."
 readme = "README.md"
 license = "MIT"
@@ -16,6 +16,7 @@ authors = [
     { name = "Thomas Michon" }
 ]
 dependencies = [
+    "agent-update-driver",
     "agent-work-coalescing-singleton",
     "agent-procutil",
     "agent-single-instance-lease",

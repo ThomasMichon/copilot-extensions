@@ -392,7 +392,7 @@ namespace CopilotExtensions {
             if (Path.GetFileName(plugin) != "update-driver") throw Invalid("requires exact update-driver source");
             string common = Path.GetDirectoryName(plugin);
             var files = new List<string>();
-            foreach (string name in new[] { "update-driver", "agent-procutil", "single-instance-lease" }) {
+            foreach (string name in new[] { "update-driver", "agent-procutil", "single-instance-lease", "zdd" }) {
                 string package = Path.Combine(common, name);
                 Ordinary(package, true, false);
                 Ordinary(Path.Combine(package, "pyproject.toml"), false, false);
@@ -453,7 +453,7 @@ namespace CopilotExtensions {
         public static void CheckExecutionRoot(string root, string plugin) {
             Ordinary(root, true, true);
             string common = Path.GetDirectoryName(plugin);
-            foreach (string name in new[] { "update-driver", "agent-procutil", "single-instance-lease" }) {
+            foreach (string name in new[] { "update-driver", "agent-procutil", "single-instance-lease", "zdd" }) {
                 string package = Path.Combine(common, name);
                 if (String.Equals(root, package, StringComparison.OrdinalIgnoreCase)
                     || root.StartsWith(package + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))

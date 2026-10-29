@@ -64,7 +64,9 @@ def test_human_output_declarations_bind_real_packaged_entrypoints():
         assert declaration == contract.human_output_declaration(script)
 
 
-@pytest.mark.parametrize("plugin", ("agent-mcp", "agent-machines", "agent-containers", "budget-guidance"))
+@pytest.mark.parametrize("plugin", (
+    "agent-mcp", "agent-machines", "agent-containers", "budget-guidance", "agent-worktrees",
+))
 def test_native_cleanup_ships_its_engine_and_finite_process_supervisor(plugin: str) -> None:
     contract = sync_installer_engine.ier
     consumer = REPO / "plugins" / plugin
@@ -692,7 +694,11 @@ def test_standalone_native_engine_uses_existing_sync_owner(fake_repo, monkeypatc
     monkeypatch.setattr(contract, "STANDALONE_PYTHON_ADOPTERS", ())
     consumer = fake_repo / "libs" / "update-driver"
     consumer.mkdir()
-    for name in ("installer_engine_uninstall.py", "installer_engine_commands.py", "installer_engine_stop.py"):
+    for name in (
+        "installer_engine_uninstall.py", "installer_engine_uninstall_darwin.py",
+        "installer_engine_uninstall_controllers.py",
+        "installer_engine_commands.py", "installer_engine_stop.py",
+    ):
         (sync_installer_engine.CANONICAL_DIR / name).write_text(
             "canonical uninstall\n", encoding="utf-8",
         )

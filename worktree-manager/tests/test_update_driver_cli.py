@@ -118,6 +118,30 @@ def test_request_context_never_persists_credentials(monkeypatch):
     assert context["AGENT_WORKTREES_UPDATE_CONTEXT"] == "example-context"
 
 
+def test_cold_bootstrap_context_requires_no_uninstalled_manager_dependencies():
+    import os
+    import subprocess
+    import sys
+
+    program = """
+import json,os,sys
+sys.path.insert(0,sys.argv[1])
+from worktree_manager.update_driver_cli import request_context
+assert 'worktree_manager.engine_client' not in sys.modules
+os.environ['WORKTREE_MANAGER_ENGINE_ARGV']=json.dumps(['selected-engine'])
+assert json.loads(request_context()['WORKTREE_MANAGER_ENGINE_ARGV'])==['selected-engine']
+assert 'worktree_manager.engine_client' not in sys.modules
+assert 'worktree_identity' not in sys.modules
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", "-c", program,
+         str(Path(__file__).resolve().parents[1] / "src")],
+        capture_output=True, text=True, timeout=15,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_queue_captures_consumed_provider_without_restoring_ambient_transport(queued, monkeypatch):
     import json
     from worktree_manager import engine_client

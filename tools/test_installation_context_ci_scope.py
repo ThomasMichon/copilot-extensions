@@ -532,6 +532,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "interactive_completion", "native_launch", "ssh_service",
         "ssh_headless", "update_diagnostics",
         "runtime_removal", "source_cache",
+        "windows_broker_probe", "windows_broker_consumers",
     }
     assert inputs["watch_owner"]["type"] == "boolean"
     assert inputs["watch_owner"]["default"] is False
@@ -571,6 +572,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "update-diagnostics-linux", "update-diagnostics-windows",
         "packaging-seed-linux", "packaging-seed-windows",
         "runtime-removal-macos",
+        "windows-broker-portable", "windows-broker-probe", "windows-broker-consumers",
     }
     for name, runner in routes.items():
         job = workflow["jobs"][name]
@@ -581,7 +583,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
             "&& !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.candidate_profiles "
             "&& !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless "
             "&& !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics "
-            "&& !inputs.runtime_removal }}"
+            "&& !inputs.runtime_removal && !inputs.windows_broker_probe && !inputs.windows_broker_consumers }}"
         )
         assert job["runs-on"] == runner
         assert job["timeout-minutes"] == 4
@@ -596,6 +598,35 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         assert "-m " not in step["run"].rsplit("pytest", 1)[1]
         if runner == "windows-latest":
             assert step["env"]["INSTALLATION_CONTEXT_POWERSHELL"] == "powershell"
+
+
+def test_real_broker_consumers_retain_native_removal_failures_without_expanding_other_lanes() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    jobs = workflow["jobs"]
+    assert jobs["windows-broker-probe"]["timeout-minutes"] == 4
+    assert jobs["windows-broker-portable"]["timeout-minutes"] == 6
+    consumer = jobs["windows-broker-consumers"]
+    assert consumer["timeout-minutes"] == 15 and consumer["runs-on"] == "windows-latest"
+    assert consumer["if"] == (
+        "${{ (inputs.windows_broker_probe || inputs.windows_broker_consumers) "
+        "&& !inputs.watch_owner && !inputs.dispatch_delegation }}"
+    )
+    assert not consumer.get("continue-on-error")
+    checkout = next(step for step in consumer["steps"] if step.get("uses") == "actions/checkout@v4")
+    assert checkout["with"]["persist-credentials"] is False
+    execution = next(
+        step for step in consumer["steps"] if step.get("name") == "Complete native finite removal portfolio"
+    )
+    assert execution["if"] == "${{ !cancelled() && steps.finite-tooling.outcome == 'success' }}"
+    assert not execution.get("continue-on-error")
+    assert execution["env"] == {"PYTEST_ADDOPTS": "--timeout=90"}
+    assert shlex.split(execution["run"]) == [
+        "python", "-m", "pytest", "-q", "--durations=10",
+        "tools/test_installer_engine_uninstall.py", "tools/test_runtime_uninstall_process.py",
+        "tools/test_uninstall_path_candidates.py",
+    ]
 
 
 def test_logger_batch_acceptance_is_optional_and_bounded() -> None:

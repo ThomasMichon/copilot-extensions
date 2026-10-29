@@ -1,0 +1,980 @@
+"""Client-facing routing table -- decouples *which port is live* from config.
+
+Agent-bridge is a light-weight Copilot-plugin payload that ``copilot`` itself
+may replace at any moment, and a redeploy must not strand live sessions. The
+CLI wrapper tools resolve the daemon endpoint through this table so a
+zero-downtime redeploy can stand up a **new** daemon on a fresh port, flip the
+table atomically, and retire the **old** daemon -- without any client ever
+pointing at a dead port.
+
+Why a table rather than a front proxy: a proxy that holds a stable port ships
+in the same plugin payload, so updating *it* re-introduces the very downtime it
+was meant to remove (you would then need socket hand-off between proxy
+generations -- the hardest-on-Windows part of a supervisor split). The routing
+table has **no long-lived process to update**: it is a file. The indirection
+lives in two places that are already re-read naturally -- the short-lived client
+(every CLI invocation re-reads it) and the daemon's publish step (the daemon
+runs from the installed venv copy, not the payload folder).
+
+**Backward compatible.** When the table is absent the caller falls back to the
+static ``config.yaml`` port, so this module is inert until a daemon publishes
+itself. A reader that finds the *active* endpoint dead (no listener) heals by
+trying ``previous`` and then the config fallback.
+
+File layout (``<config_dir>/active.json``)::
+
+    {
+      "active":   {"bind": "127.0.0.1", "port": 9281, "pid": 1234,
+                   "version": "0.4.0", "generation": 7,
+                   "process_start_time": "98765"},
+      "previous": {"bind": "127.0.0.1", "port": 9282, "pid": 1200,
+                   "version": "0.4.0", "generation": 6},
+      "epoch": "2026-06-26T22:40:00Z"
+    }
+
+Writes are atomic (tmp file + ``os.replace``) so a concurrent reader sees either
+the whole old table or the whole new one, never a torn file. ``generation`` is a
+monotonically increasing counter giving readers a total order across flips.
+Recognized Windows sharing conflicts retry for at most 0.95 seconds before
+propagating; a failed replacement leaves the previous route intact.
+"""
+
+from __future__ import annotations
+
+import errno
+import json
+import logging
+import os
+import socket
+import sys
+import threading
+import time
+from collections.abc import Callable
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+
+from . import publication_history, routing_persistence
+
+log = logging.getLogger("zdd")
+
+_TABLE_FILENAME = "active.json"
+_LOCK_FILENAME = "active.lock"
+_PROCESS_ROUTING_LOCK = threading.RLock()
+# A loopback connect on a live port returns in well under a millisecond; this
+# bounds the heal-probe so a stale entry can never hang a CLI invocation.
+_PROBE_TIMEOUT_S = 0.25
+
+
+class ActivePublicationRefused(RuntimeError):
+    """Raised when a guarded route publication refuses the current active row."""
+
+
+class RoutingLockTimeout(TimeoutError):
+    """The routing mutation lock could not be acquired before the deadline."""
+
+
+def format_authority(host: str, port: int) -> str:
+    """Format a ``host:port`` authority for a URL, bracketing IPv6 hosts.
+
+    ``http://{host}:{port}`` is only valid when ``host`` has no embedded
+    colons; an IPv6 literal (e.g. ``::1``) must be wrapped in brackets per
+    RFC 3986 (``http://[::1]:1234``) or urlparse/http clients mis-split it on
+    the host's own colons. IPv4 and hostnames pass through unchanged.
+    """
+    if ":" in host and not host.startswith("["):
+        return f"[{host}]:{port}"
+    return f"{host}:{port}"
+
+
+@dataclass(frozen=True)
+class Endpoint:
+    """A resolved daemon endpoint recorded in the routing table."""
+
+    bind: str
+    port: int
+    pid: int | None = None
+    version: str | None = None
+    generation: int = 0
+    process_start_time: str | None = None
+
+    @property
+    def client_host(self) -> str:
+        """The address a client should dial (wildcard binds map to loopback)."""
+        if self.bind in ("0.0.0.0", "", None):
+            return "127.0.0.1"
+        if self.bind == "::":
+            return "::1"
+        return self.bind
+
+    @property
+    def base_url(self) -> str:
+        return f"http://{format_authority(self.client_host, self.port)}"
+
+
+    def to_dict(self) -> dict:
+        return {k: v for k, v in asdict(self).items() if v is not None or k == "pid"}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Endpoint | None:
+        try:
+            start_time = data.get("process_start_time")
+            if start_time is not None and (
+                not isinstance(start_time, str) or not start_time.isdigit()
+            ):
+                return None
+            return cls(
+                bind=str(data["bind"]),
+                port=int(data["port"]),
+                pid=(int(data["pid"]) if data.get("pid") is not None else None),
+                version=(str(data["version"]) if data.get("version") else None),
+                generation=int(data.get("generation", 0)),
+                process_start_time=start_time,
+            )
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return None
+
+
+def routing_table_path(config_dir: str | os.PathLike[str]) -> Path:
+    """Absolute path of the routing table inside ``config_dir``."""
+    return Path(config_dir) / _TABLE_FILENAME
+
+
+@contextmanager
+def _file_routing_lock(
+    config_dir: str | os.PathLike[str], *, deadline: float | None = None,
+):
+    path = Path(config_dir) / _LOCK_FILENAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+b") as handle:
+        if sys.platform == "win32":
+            import msvcrt
+
+            # Reading byte zero can itself hit another holder's mandatory lock.
+            if os.fstat(handle.fileno()).st_size == 0:
+                handle.seek(0)
+                handle.write(b"\0")
+                handle.flush()
+            handle.seek(0)
+            if deadline is None:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                _wait_for_lock(
+                    lambda: msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1),
+                    deadline,
+                )
+            try:
+                yield
+            finally:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            if deadline is None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            else:
+                _wait_for_lock(
+                    lambda: fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB),
+                    deadline,
+                )
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _wait_for_lock(acquire: Callable[[], object], deadline: float) -> None:
+    while True:
+        try:
+            acquire()
+            return
+        except OSError as exc:
+            if exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                raise
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RoutingLockTimeout("routing lock acquisition deadline expired") from exc
+            time.sleep(min(0.05, remaining))
+
+
+@contextmanager
+def _routing_lock(
+    config_dir: str | os.PathLike[str], *, deadline: float | None = None,
+):
+    """Serialize routing mutations across threads and processes."""
+    acquired = (
+        _PROCESS_ROUTING_LOCK.acquire()
+        if deadline is None
+        else _PROCESS_ROUTING_LOCK.acquire(timeout=max(0.0, deadline - time.monotonic()))
+    )
+    if not acquired:
+        raise RoutingLockTimeout("routing thread lock acquisition deadline expired")
+    try:
+        with _file_routing_lock(config_dir, deadline=deadline):
+            yield
+    finally:
+        _PROCESS_ROUTING_LOCK.release()
+
+
+@contextmanager
+def routing_lock(
+    config_dir: str | os.PathLike[str], *, deadline: float,
+):
+    """Hold native routing authority within an explicit acquisition deadline."""
+    with _routing_lock(config_dir, deadline=deadline):
+        yield
+
+
+def read_table(config_dir: str | os.PathLike[str], *, strict: bool = False) -> dict | None:
+    """Read the table; strict ownership callers distinguish absence from damage."""
+    path = routing_table_path(config_dir)
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except OSError:
+        if strict:
+            raise
+        return None
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        if strict:
+            raise
+        log.warning("Routing table at %s is corrupt -- ignoring", path)
+        return None
+    if not isinstance(data, dict):
+        if strict:
+            raise ValueError("routing table must be an object")
+        return None
+    return data
+
+
+def _pid_alive(pid: int | None) -> bool:
+    """Best-effort liveness check for a recorded daemon pid.
+
+    Conservative: returns ``True`` when liveness cannot be determined, so an
+    *unknown* pid never causes a healthy endpoint to be discarded -- the
+    listener probe is the authority for "is it actually serving".
+    """
+    if not pid or pid <= 0:
+        return True
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = ctypes.windll.kernel32.OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+            )
+            if not handle:
+                return False
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        except Exception:
+            return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return True
+    return True
+
+
+def _listening(host: str, port: int, *, timeout: float = _PROBE_TIMEOUT_S) -> bool:
+    """Return True if something accepts a TCP connection at ``host:port``."""
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    try:
+        with socket.socket(family, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
+            return sock.connect_ex((host, port)) == 0
+    except OSError:
+        return False
+
+
+def read_active_endpoint(
+    config_dir: str | os.PathLike[str],
+    *,
+    verify_listener: bool = True,
+) -> Endpoint | None:
+    """Resolve the live daemon endpoint from the routing table.
+
+    Returns the ``active`` endpoint when present (and, if ``verify_listener``,
+    actually accepting connections). When the active entry is stale it heals to
+    ``previous`` if that one is live. Returns ``None`` when the table is absent
+    or no recorded endpoint is reachable -- the caller then falls back to the
+    static ``config.yaml`` port.
+    """
+    data = read_table(config_dir)
+    if not data:
+        return None
+
+    for key in ("active", "previous"):
+        raw = data.get(key)
+        if not isinstance(raw, dict):
+            continue
+        ep = Endpoint.from_dict(raw)
+        if ep is None:
+            continue
+        if not verify_listener:
+            return ep
+        if _listening(ep.client_host, ep.port):
+            return ep
+        # No listener: only treat as a hard miss when the pid is confirmed dead
+        # or unknown. A live pid with no listener yet (mid-startup) still counts
+        # as the active endpoint so a racing client waits on it, not the old one.
+        if key == "active" and _pid_alive(ep.pid) and ep.pid:
+            return ep
+        log.debug("Routing table %s endpoint %s:%d not reachable", key,
+                  ep.client_host, ep.port)
+    return None
+
+
+def _atomic_write(path: Path, data: dict) -> None:
+    _validate_endpoint_rows(data)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    previous = _read_mutation_table(path.parent)
+    if publication_history.KEY in previous and publication_history.read(previous) is None:
+        log.error("Publication history unavailable; prior negative proofs invalidated")
+    history = publication_history.updated(previous, data)
+    following = {**data, publication_history.KEY: history}
+    # Persist conservative custody before making the new route visible. A
+    # daemon can admit work as soon as another process sees the renamed route.
+    protected = {**previous, publication_history.KEY: history}
+    routing_persistence.write(path, protected)
+    routing_persistence.write(path, following)
+
+
+def _validate_endpoint_rows(table: dict | None) -> None:
+    for key in ("active", "previous"):
+        raw = table.get(key) if table is not None else None
+        if raw is not None and (
+            publication_history._endpoint(raw) is None
+            or (raw.get("version") is not None and not isinstance(raw["version"], str))
+        ):
+            reason = f"{key} endpoint unverifiable; owner-led recovery required"
+            log.error(reason)
+            raise ActivePublicationRefused(reason)
+
+
+def _read_mutation_table(config_dir: str | os.PathLike[str]) -> dict:
+    try:
+        table = read_table(config_dir, strict=True) or {}
+        _validate_endpoint_rows(table)
+        return table
+    except (OSError, ValueError) as exc:
+        reason = f"routing state unverifiable ({type(exc).__name__}); owner-led recovery required"
+        log.error(reason)
+        raise ActivePublicationRefused(reason) from None
+
+
+def publication_witness(
+    config_dir: str | os.PathLike[str], *, deadline: float,
+) -> str:
+    """Capture routing-owned evidence before a passive candidate is born."""
+    with _routing_lock(config_dir, deadline=deadline):
+        table = _read_mutation_table(config_dir)
+        history = publication_history.read(table)
+        if history is None:
+            _atomic_write(routing_table_path(config_dir), table)
+            history = publication_history.read(_read_mutation_table(config_dir))
+        if history is None:
+            raise ActivePublicationRefused("publication history cannot establish candidate custody")
+        return history["epoch"]
+
+
+def _next_generation(data: dict | None) -> int:
+    if not data:
+        return 1
+    best = 0
+    for key in ("active", "previous"):
+        raw = data.get(key)
+        if isinstance(raw, dict):
+            try:
+                best = max(best, int(raw.get("generation", 0)))
+            except (TypeError, ValueError):
+                pass
+    return best + 1
+
+
+def _publish_active_unlocked(
+    config_dir: str | os.PathLike[str],
+    *,
+    bind: str,
+    port: int,
+    pid: int | None = None,
+    version: str | None = None,
+    generation: int | None = None,
+    demote_existing: bool = False,
+    process_start_time: str | None = None,
+    capture_process_identity: bool = True,
+) -> tuple[Endpoint, Endpoint | None]:
+    # diagnostics also imports routing; resolve the shared primitive at call time.
+    from .diagnostics import process_start_time as read_process_start_time
+
+    if process_start_time is not None:
+        if not isinstance(process_start_time, str) or not process_start_time.isdigit():
+            raise ValueError("process_start_time must be a non-empty numeric string")
+        if pid is None or pid <= 0:
+            raise ValueError("process_start_time requires a positive pid")
+        if read_process_start_time(pid) != process_start_time:
+            raise ActivePublicationRefused("process identity changed before publication")
+    elif capture_process_identity and pid is not None and pid > 0:
+        process_start_time = read_process_start_time(pid)
+        if process_start_time is None:
+            log.warning(
+                "Publishing pid %d without a process identity token; "
+                "identity-bound supervision must reject this route", pid,
+            )
+    path = routing_table_path(config_dir)
+    current = _read_mutation_table(config_dir)
+    gen = generation if generation is not None else _next_generation(current)
+
+    new_active = Endpoint(
+        bind=bind, port=port, pid=pid, version=version, generation=gen,
+        process_start_time=process_start_time,
+    )
+    table: dict = {"active": new_active.to_dict()}
+
+    demoted = None
+    if demote_existing:
+        prev_raw = current.get("active")
+        prev = Endpoint.from_dict(prev_raw) if isinstance(prev_raw, dict) else None
+        if prev is not None and prev.port != port:
+            table["previous"] = prev.to_dict()
+            demoted = prev
+
+    table["epoch"] = datetime.now(timezone.utc).isoformat()
+    _atomic_write(path, table)
+    log.info(
+        "Published active endpoint %s:%d (gen %d, pid %s)",
+        new_active.client_host, port, gen, pid,
+    )
+    return new_active, demoted
+
+
+def _same_endpoint(left: Endpoint | None, right: Endpoint | None) -> bool:
+    if left is None or right is None:
+        return left is right
+    return (
+        left.bind == right.bind
+        and left.port == right.port
+        and left.pid == right.pid
+        and left.version == right.version
+        and left.generation == right.generation
+        and left.process_start_time == right.process_start_time
+    )
+
+
+def _refuse_or_changed(
+    current_raw: dict | None,
+    *,
+    expected_active: Endpoint | None,
+    refuse_current: Callable[[dict | None], str | None] | None,
+    require_expected_active: bool,
+) -> str | None:
+    if refuse_current is not None:
+        refusal = refuse_current(current_raw)
+        if refusal:
+            return refusal
+    if not require_expected_active:
+        return None
+    current = Endpoint.from_dict(current_raw) if isinstance(current_raw, dict) else None
+    if _same_endpoint(current, expected_active):
+        return None
+    if expected_active is None:
+        return "active endpoint appeared before publication"
+    return "active endpoint changed before publication"
+
+
+def publish_active(
+    config_dir: str | os.PathLike[str],
+    *,
+    bind: str,
+    port: int,
+    pid: int | None = None,
+    version: str | None = None,
+    generation: int | None = None,
+    demote_existing: bool = False,
+    process_start_time: str | None = None,
+) -> Endpoint:
+    """Publish ``host:port`` as the active endpoint, atomically.
+
+    When ``demote_existing`` is set and the current active endpoint is a
+    *different* port, it is recorded as ``previous`` (the cutover flip). When it
+    is the same port (a plain restart re-announcing itself) it is simply
+    replaced. ``generation`` defaults to one past the highest recorded value.
+    A live ``pid`` is recorded with its process start token at publication,
+    not reconstructed by a later reader. A caller holding a spawn-time
+    baseline can supply ``process_start_time``; changed or unverifiable
+    identity then refuses publication without modifying the existing route.
+    """
+    with _routing_lock(config_dir):
+        active, _previous = _publish_active_unlocked(
+            config_dir,
+            bind=bind,
+            port=port,
+            pid=pid,
+            version=version,
+            generation=generation,
+            demote_existing=demote_existing,
+            process_start_time=process_start_time,
+        )
+        return active
+
+
+def publish_active_with_previous(
+    config_dir: str | os.PathLike[str],
+    *,
+    bind: str,
+    port: int,
+    pid: int | None = None,
+    version: str | None = None,
+    generation: int | None = None,
+    demote_existing: bool = False,
+    process_start_time: str | None = None,
+) -> tuple[Endpoint, Endpoint | None]:
+    """Publish an active endpoint and return the endpoint it atomically demoted.
+
+    The returned predecessor is captured under the same routing lock as the
+    table mutation, so a caller never has to re-read ``previous`` and risk
+    observing a different generation after a concurrent publication.
+    """
+    with _routing_lock(config_dir):
+        return _publish_active_unlocked(
+            config_dir,
+            bind=bind,
+            port=port,
+            pid=pid,
+            version=version,
+            generation=generation,
+            demote_existing=demote_existing,
+            process_start_time=process_start_time,
+        )
+
+
+def publish_active_with_previous_guarded(
+    config_dir: str | os.PathLike[str],
+    *,
+    bind: str,
+    port: int,
+    pid: int | None = None,
+    version: str | None = None,
+    generation: int | None = None,
+    demote_existing: bool = False,
+    expected_active: Endpoint | None = None,
+    refuse_current: Callable[[dict | None], str | None] | None = None,
+    require_expected_active: bool = True,
+    process_start_time: str | None = None,
+    lock_deadline: float | None = None,
+) -> tuple[Endpoint, Endpoint | None]:
+    """Publish active while validating the current active row under the lock.
+
+    This is the CAS-shaped form used by cutover: after a passive daemon becomes
+    healthy, a venue forward may have rejoined and rewritten ``active.json``.
+    Re-read and validate that row under the same routing lock that writes the
+    replacement, so a caller never flips over a newly-published route.
+    """
+    with _routing_lock(config_dir, deadline=lock_deadline):
+        current = _read_mutation_table(config_dir)
+        current_raw = current.get("active") if isinstance(current, dict) else None
+        if not isinstance(current_raw, dict):
+            current_raw = None
+        refusal = _refuse_or_changed(
+            current_raw,
+            expected_active=expected_active,
+            refuse_current=refuse_current,
+            require_expected_active=require_expected_active,
+        )
+        if refusal:
+            raise ActivePublicationRefused(refusal)
+        return _publish_active_unlocked(
+            config_dir,
+            bind=bind,
+            port=port,
+            pid=pid,
+            version=version,
+            generation=generation,
+            demote_existing=demote_existing,
+            process_start_time=process_start_time,
+        )
+
+
+def validate_active(
+    config_dir: str | os.PathLike[str],
+    expected: Endpoint,
+    *,
+    refuse_current: Callable[[dict | None], str | None] | None = None,
+    lock_deadline: float | None = None,
+) -> None:
+    """Validate an exact raw owner under the native routing lock, without writing."""
+    with _routing_lock(config_dir, deadline=lock_deadline):
+        table = read_table(config_dir, strict=True) or {}
+        raw = table.get("active")
+        refusal = _refuse_or_changed(
+            raw if isinstance(raw, dict) else None,
+            expected_active=expected,
+            refuse_current=refuse_current,
+            require_expected_active=True,
+        )
+        if refusal:
+            raise ActivePublicationRefused(refusal)
+
+
+def withdraw_active_guarded(
+    config_dir: str | os.PathLike[str],
+    *,
+    expected_active: Endpoint,
+    refuse_current: Callable[[dict | None], str | None],
+    lock_deadline: float,
+) -> dict:
+    """Withdraw an exact owner under CAS, retaining publication and generation custody.
+
+    The caller supplies lifecycle authority (including original process exit),
+    not merely a PID. Retaining the withdrawn row as ``previous`` ensures the
+    next publication advances generation rather than restarting at one.
+    """
+    if not callable(refuse_current):
+        raise TypeError("exact withdrawal requires an authority validator")
+    if (
+        not isinstance(expected_active, Endpoint) or type(expected_active.pid) is not int
+        or expected_active.pid <= 0 or not isinstance(expected_active.process_start_time, str)
+        or not expected_active.process_start_time.isascii()
+        or not expected_active.process_start_time.isdecimal()
+        or Endpoint.from_dict(expected_active.to_dict()) != expected_active
+    ):
+        raise ActivePublicationRefused("exact withdrawal requires native process identity")
+    with _routing_lock(config_dir, deadline=lock_deadline):
+        current = _read_mutation_table(config_dir)
+        raw = current.get("active")
+        refusal = _refuse_or_changed(
+            raw if isinstance(raw, dict) else None,
+            expected_active=expected_active,
+            refuse_current=refuse_current,
+            require_expected_active=True,
+        )
+        if refusal:
+            raise ActivePublicationRefused(refusal)
+        following = {key: value for key, value in current.items() if key != "active"}
+        following["previous"] = expected_active.to_dict()
+        _atomic_write(routing_table_path(config_dir), following)
+        return _read_mutation_table(config_dir)
+
+
+def restore_previous_if_owner(
+    config_dir: str | os.PathLike[str],
+    *,
+    pid: int,
+    generation: int,
+) -> bool:
+    """Restore ``previous`` iff the caller still owns the active generation."""
+    with _routing_lock(config_dir):
+        data = read_table(config_dir)
+        if not data:
+            return False
+        active_raw = data.get("active")
+        active = (
+            Endpoint.from_dict(active_raw)
+            if isinstance(active_raw, dict)
+            else None
+        )
+        if active is None or active.pid != pid or active.generation != generation:
+            return False
+
+        previous_raw = data.get("previous")
+        previous = (
+            Endpoint.from_dict(previous_raw)
+            if isinstance(previous_raw, dict)
+            else None
+        )
+        table: dict = {"epoch": datetime.now(timezone.utc).isoformat()}
+        if previous is not None:
+            restored = Endpoint(
+                bind=previous.bind,
+                port=previous.port,
+                pid=previous.pid,
+                version=previous.version,
+                generation=_next_generation(data),
+                process_start_time=previous.process_start_time,
+            )
+            table["active"] = restored.to_dict()
+        _atomic_write(routing_table_path(config_dir), table)
+        return True
+
+
+def clear_if_owner(config_dir: str | os.PathLike[str], pid: int) -> bool:
+    """Remove our active entry on shutdown iff we are still the recorded active.
+
+    Returns True when the table was cleared. A successor that already flipped
+    the table (its pid is now active) is left untouched -- we only retract our
+    own claim, so a clean exit never blanks a newer daemon's route. Demotes our
+    entry to ``previous`` so an in-flight client mid-resolve still has a fallback
+    if the successor is not yet listening.
+    """
+    observed = read_table(config_dir)
+    if observed is not None:
+        raw = observed.get("active")
+        endpoint = Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+        if raw is None or (endpoint is not None and endpoint.pid != pid):
+            # An unpublished passive must not wait on its terminator's fence.
+            return False
+    with _routing_lock(config_dir):
+        data = read_table(config_dir)
+        if not data:
+            return False
+        active = Endpoint.from_dict(data.get("active", {})) \
+            if isinstance(data.get("active"), dict) else None
+        if active is None or active.pid != pid:
+            return False
+        path = routing_table_path(config_dir)
+        table: dict = {"previous": active.to_dict(),
+                       "epoch": datetime.now(timezone.utc).isoformat()}
+        try:
+            _atomic_write(path, table)
+        except OSError:
+            return False
+    log.info("Cleared active endpoint for pid %d on shutdown", pid)
+    return True
+
+
+def reap_stale_active(
+    config_dir: str | os.PathLike[str],
+    *,
+    service: str | None = None,
+    listening: Callable[[str, int], bool] | None = None,
+    pid_alive: Callable[[int | None], bool] | None = None,
+) -> dict:
+    """Reap a stale active endpoint under the routing-table mutation lock."""
+    with _routing_lock(config_dir):
+        return _reap_stale_active_unlocked(
+            config_dir,
+            service=service,
+            listening=listening,
+            pid_alive=pid_alive,
+        )
+
+
+def _reap_stale_active_unlocked(
+    config_dir: str | os.PathLike[str],
+    *,
+    service: str | None = None,
+    listening: Callable[[str, int], bool] | None = None,
+    pid_alive: Callable[[int | None], bool] | None = None,
+) -> dict:
+    """Dead-port/missing-active watchdog: heal a table that names no live active.
+
+    :func:`read_active_endpoint` heals a stale ``active`` only for the one reader
+    that happens to probe it. This is the **proactive** counterpart a watchdog
+    loop runs on a schedule, handling two related failure shapes:
+
+    1. ``active`` names a port with **no listener** *and* a pid that is
+       **not alive** -- advertised-but-dead (the state that wedged the review
+       pipeline for days).
+    2. ``active`` is **entirely absent** while ``previous`` is still live --
+       the state :func:`clear_if_owner` leaves behind on a clean coordinator
+       shutdown when no successor ever publishes itself as active (e.g. an
+       aborted or never-attempted cutover). Nothing else notices this shape:
+       :func:`read_active_endpoint` has no ``active`` to heal *from*, so every
+       consumer (including the wake-outbox drain's route-ownership check) is
+       left with no owner indefinitely until a human manually restarts a
+       coordinator.
+
+    In both cases ``previous`` is promoted to ``active`` when it is itself
+    live -- confirmed by **both** a listener on its port **and** a positive,
+    recorded pid confirmed alive (an absent/non-positive pid is *not* treated
+    as live for promotion purposes, even though :func:`_pid_alive` alone is
+    permissive about it -- that permissiveness is only correct for deciding
+    whether to *reap* an endpoint we already distrust, not for deciding
+    whether to *trust* one). This reduces, but does not eliminate, the risk
+    of misidentifying an unrelated service that later binds the same port:
+    a listener plus a live pid is still not a cryptographic identity check,
+    so a sufficiently adversarial pid-reuse race (an unrelated process
+    reusing the exact recorded pid *and* binding the exact recorded port
+    before this check runs) is not fully closed by this alone -- a stronger
+    signal (a process start-time comparison, or an authenticated handshake)
+    would be needed for that, and is a candidate follow-up rather than part
+    of this fix. Case 1 additionally clears the table (readers fall back to
+    the static config) when no live ``previous`` exists -- case 2 has
+    nothing to clear beyond ``previous`` itself, so a dead/absent
+    ``previous`` there is simply left alone (no active claim exists to
+    retract).
+
+    A ``live-pid-but-no-listener`` active (a daemon mid-startup) is deliberately
+    left alone, matching :func:`read_active_endpoint`'s conservatism: the pid is
+    the authority for "still coming up", the listener for "actually serving".
+
+    ``listening(host, port)`` and ``pid_alive(pid)`` are injectable for testing
+    and default to the module probes. Returns a diagnosis dict
+    ``{"reaped": bool, "reason": str, "dead_port": int|None,
+    "promoted_port": int|None}``. Fail-open on IO.
+    """
+    _listen = listening or _listening
+    _alive = pid_alive or _pid_alive
+
+    def _confirmed_live(pid: int | None) -> bool:
+        """A promotion candidate needs a **positive, recorded** live pid.
+
+        ``_alive`` alone is not enough here: it returns ``True`` for
+        ``None``/non-positive pids too (its own conservative default for "we
+        cannot disprove liveness"), which is the right call when deciding
+        whether to *reap* a pid we already have reason to distrust, but wrong
+        when deciding whether to *trust* a listener as proof of identity --
+        that must require an actual recorded pid to check against.
+        """
+        return bool(pid) and pid > 0 and _alive(pid)
+
+    result: dict = {"reaped": False, "reason": "", "dead_port": None,
+                    "promoted_port": None}
+    try:
+        data = read_table(config_dir)
+        if not data:
+            result["reason"] = "no routing table"
+            return result
+        if not isinstance(data.get("active"), dict):
+            # Case 2: no active claim at all. Promote a live previous, if any
+            # -- there is nothing dead to reap, so this is a pure self-heal,
+            # not a "reaped" outcome (no prior claim is being retired).
+            prev_raw = data.get("previous")
+            prev = (
+                Endpoint.from_dict(prev_raw) if isinstance(prev_raw, dict) else None
+            )
+            if prev is not None and _listen(prev.client_host, prev.port) \
+                    and _confirmed_live(prev.pid):
+                _publish_active_unlocked(
+                    config_dir, bind=prev.bind, port=prev.port, pid=prev.pid,
+                    version=prev.version, demote_existing=False,
+                    process_start_time=prev.process_start_time,
+                    capture_process_identity=False,
+                )
+                result["promoted_port"] = prev.port
+                result["reason"] = (
+                    f"no active endpoint; promoted live previous "
+                    f"{prev.client_host}:{prev.port}"
+                )
+                log.warning(
+                    "Missing-active watchdog promoted previous %s:%d (pid %s) "
+                    "to active -- routing table had no active claim",
+                    prev.client_host, prev.port, prev.pid,
+                )
+                _emit_promotion(config_dir, service, prev, result)
+            else:
+                result["reason"] = "no active endpoint"
+            return result
+        active = Endpoint.from_dict(data["active"])
+        if active is None:
+            result["reason"] = "active endpoint unparseable"
+            return result
+        if _listen(active.client_host, active.port):
+            result["reason"] = "active endpoint is listening"
+            return result
+        # No listener. Reap only on POSITIVE evidence of death: a recorded pid
+        # that is confirmed not alive. A missing pid means we cannot prove the
+        # daemon is dead (it may have published without one, or be mid-startup),
+        # and a live pid means it may still be binding -- in both cases leave it
+        # alone, matching read_active_endpoint's conservatism (the listener is
+        # the authority for "serving", the pid for "still coming up").
+        if not active.pid:
+            result["reason"] = "no listener but pid unknown -- not reaping (unconfirmed)"
+            return result
+        if _alive(active.pid):
+            result["reason"] = "no listener but pid alive (starting)"
+            return result
+
+        # Advertised-but-dead: retire it. Promote a live `previous` if we have
+        # one, else clear the table so readers fall back to config.
+        result["dead_port"] = active.port
+        prev_raw = data.get("previous")
+        prev = Endpoint.from_dict(prev_raw) if isinstance(prev_raw, dict) else None
+        promoted = False
+        if prev is not None and prev.port != active.port and \
+                _listen(prev.client_host, prev.port) and _confirmed_live(prev.pid):
+            _publish_active_unlocked(
+                config_dir, bind=prev.bind, port=prev.port, pid=prev.pid,
+                version=prev.version, demote_existing=False,
+                process_start_time=prev.process_start_time,
+                capture_process_identity=False,
+            )
+            promoted = True
+            result["promoted_port"] = prev.port
+            result["reason"] = (
+                f"reaped dead active {active.client_host}:{active.port}; "
+                f"promoted previous {prev.client_host}:{prev.port}"
+            )
+        else:
+            _atomic_write(
+                routing_table_path(config_dir),
+                {"epoch": datetime.now(timezone.utc).isoformat()},
+            )
+            result["reason"] = (
+                f"reaped dead active {active.client_host}:{active.port}; "
+                f"no live previous, cleared table (readers fall back to config)"
+            )
+        result["reaped"] = True
+        log.warning(
+            "Dead-port watchdog reaped advertised-but-dead active %s:%d "
+            "(pid %s); %s", active.client_host, active.port, active.pid,
+            "promoted previous" if promoted else "cleared table",
+        )
+        _emit_reap(config_dir, service, active, result)
+        return result
+    except Exception as exc:  # noqa: BLE001 -- watchdog is best-effort, never fatal
+        result["reason"] = f"error: {exc}"
+        return result
+
+
+def _emit_reap(
+    config_dir: str | os.PathLike[str],
+    service: str | None,
+    dead: Endpoint,
+    result: dict,
+) -> None:
+    """Write a durable lifecycle record for a watchdog reap (fail-open)."""
+    try:
+        from zdd import lifecycle
+
+        lifecycle.record(
+            config_dir,
+            lifecycle.WATCHDOG_REAP,
+            service=service,
+            outcome=lifecycle.OK,
+            port=dead.port,
+            version=dead.version,
+            detail={"dead_pid": dead.pid,
+                    "promoted_port": result.get("promoted_port")},
+        )
+    except Exception:  # noqa: BLE001 -- lifecycle logging is best-effort
+        pass
+
+
+def _emit_promotion(
+    config_dir: str | os.PathLike[str],
+    service: str | None,
+    promoted: Endpoint,
+    result: dict,
+) -> None:
+    """Write a durable lifecycle record for a missing-active promotion (fail-open).
+
+    Distinct from :func:`_emit_reap`: no dead endpoint is being retired here,
+    ``previous`` is simply promoted because the table named no active claim
+    at all.
+    """
+    try:
+        from zdd import lifecycle
+
+        lifecycle.record(
+            config_dir,
+            lifecycle.WATCHDOG_PROMOTE,
+            service=service,
+            outcome=lifecycle.OK,
+            port=promoted.port,
+            version=promoted.version,
+            detail={"promoted_pid": promoted.pid,
+                    "promoted_port": result.get("promoted_port")},
+        )
+    except Exception:  # noqa: BLE001 -- lifecycle logging is best-effort
+        pass

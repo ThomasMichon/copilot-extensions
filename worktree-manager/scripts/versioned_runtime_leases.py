@@ -1,7 +1,8 @@
-"""Kernel ownership for runtime construction, retention and publication."""
+"""Kernel ownership and durable lifecycle references for immutable runtimes."""
 from __future__ import annotations
 
 import errno
+import json
 import math
 import os
 import re
@@ -13,6 +14,61 @@ from pathlib import Path
 from typing import Callable
 
 _construction_owners = threading.local()
+
+
+def running_pids(root: Path, *, filename: str, alive: Callable[[int], bool]) -> set[int]:
+    """Filter the legacy running record through the caller's native liveness probe."""
+    pids: set[int] = set()
+    try:
+        data = json.loads((root / filename).read_text(encoding="utf-8"))
+    except Exception:
+        return pids
+    entries = data if isinstance(data, list) else [data]
+    for entry in entries:
+        if isinstance(entry, dict) and isinstance(entry.get("pid"), int) and alive(entry["pid"]):
+            pids.add(entry["pid"])
+    return pids
+
+
+def gc_protected_versions(
+    root: Path, keep, protect_pids: bool, link_name: str, *,
+    selectors: tuple[str, str], current_version: Callable[[Path, str], str | None],
+    dev_claim: Callable[..., dict | None], dev_version: str,
+    live_versions: Callable[[Path], set[str] | None], running: Callable[[Path], set[int]],
+    versions: Callable[[Path], list[str]],
+) -> set[str]:
+    """Combine declared references, selectors, claims and current live consumers."""
+    protected = set(keep or []).union(*read_runtime_references(root).values())
+    # Missing selectors permit legacy-link fallback; unreadable selectors must
+    # not become permission to delete their unknown target.
+    for name in selectors:
+        try:
+            selected = (root / name).read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            continue
+        if selected:
+            protected.add(selected)
+    current = current_version(root, link_name)
+    if current:
+        protected.add(current)
+    claim = dev_claim(root, strict=True)
+    if claim is not None:
+        protected.add(dev_version)
+        selected = claim.get("selected_generation")
+        if selected:
+            protected.add(selected)
+        previous = claim.get("previous_version")
+        if isinstance(previous, str) and previous:
+            protected.add(previous)
+    if protect_pids:
+        in_use = live_versions(root)
+        if in_use:
+            protected |= in_use
+        elif running(root):
+            non_current = [version for version in versions(root) if version != current]
+            if non_current:
+                protected.add(non_current[-1])
+    return {version.lower() for version in protected}
 
 
 def _legacy_windows_lease_acl(value: str, *, directory: bool) -> bool:
@@ -519,3 +575,132 @@ def _kernel_lease(root: Path, version: str, *, kind: str, shared: bool,
                 unlock()
     finally:
         os.close(fd)
+
+
+_REFERENCES_FILE = "runtime-references.json"
+_REFERENCES_SCHEMA = "copilot-extensions.runtime-references"
+_REFERENCES_LIMIT = 65536
+
+
+def _reference_versions(versions) -> list[str]:
+    if not isinstance(versions, (list, tuple)) or len(versions) > 64:
+        raise ValueError("runtime references require a bounded list of slot names")
+    for version in versions:
+        if (
+            not isinstance(version, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,255}", version)
+            or version.endswith(".")
+        ):
+            raise ValueError("runtime reference must name one ordinary slot")
+    return sorted(set(versions))
+
+
+def _reference_owner(owner: str) -> None:
+    if not isinstance(owner, str) or not re.fullmatch(r"[A-Za-z0-9_.:/@+-]{1,256}", owner):
+        raise ValueError("runtime reference owner must be an explicit lifecycle identity")
+
+
+def read_runtime_references(root: Path) -> dict[str, list[str]]:
+    """Read durable deletion barriers; only absence means no references.
+
+    Readers deciding deletion already hold publication custody. Atomic replace
+    also permits diagnostic readers without a second kernel-lock acquisition.
+    Malformed or unreadable evidence never licenses deletion.
+    """
+    import json
+
+    path = root / _REFERENCES_FILE
+    try:
+        before = path.lstat()
+    except FileNotFoundError:
+        return {}
+    if (
+        not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+        or before.st_size > _REFERENCES_LIMIT
+        or getattr(before, "st_file_attributes", 0) & 0x400
+    ):
+        raise ValueError("runtime reference evidence is not a bounded ordinary file")
+    with path.open("rb") as stream:
+        opened = os.fstat(stream.fileno())
+        raw = stream.read(_REFERENCES_LIMIT + 1)
+        after = os.fstat(stream.fileno())
+    named = path.lstat()
+    fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns")
+    if len(raw) > _REFERENCES_LIMIT or any(
+        getattr(before, field) != getattr(opened, field)
+        or getattr(opened, field) != getattr(after, field)
+        or getattr(after, field) != getattr(named, field)
+        for field in fields
+    ):
+        raise ValueError("runtime reference evidence changed while reading")
+
+    def unique(pairs):
+        values = {}
+        for key, value in pairs:
+            if key in values:
+                raise ValueError("duplicate runtime reference field")
+            values[key] = value
+        return values
+
+    value = json.loads(raw, object_pairs_hook=unique)
+    if (
+        type(value) is not dict or set(value) != {"schema", "version", "owners"}
+        or value["schema"] != _REFERENCES_SCHEMA
+        or type(value["version"]) is not int or value["version"] != 1
+        or type(value["owners"]) is not dict or len(value["owners"]) > 256
+    ):
+        raise ValueError("invalid runtime reference evidence")
+    for owner, versions in value["owners"].items():
+        _reference_owner(owner)
+        if not versions or versions != _reference_versions(versions):
+            raise ValueError("invalid runtime reference generations")
+    return value["owners"]
+
+
+def replace_runtime_references(
+    root: Path, owner: str, versions: list[str], *, expected: list[str],
+) -> None:
+    """Compare and publish one lifecycle's crash-surviving deletion barriers.
+
+    The installation's existing execution owner must serialize its external
+    mutation. Publish the union of old/new generations before that mutation,
+    and shrink only after its recovery record and external obligations settle.
+    No PID, age, automatic expiry or force-release path exists.
+    """
+    from contextlib import ExitStack
+    import json
+    import secrets
+
+    _reference_owner(owner)
+    versions, expected = _reference_versions(versions), _reference_versions(expected)
+    with ExitStack() as custody:
+        # Cleanup takes retention before publication; never invert that order.
+        for version in versions:
+            custody.enter_context(_kernel_lease(root, version, kind="retention", shared=True))
+            slot = root / "versions" / version
+            info = slot.lstat()
+            if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+                raise ValueError("runtime reference target is not an ordinary slot")
+        custody.enter_context(_publication_lease(root))
+        owners = read_runtime_references(root)
+        if owners.get(owner, []) != expected:
+            raise RuntimeError("runtime references changed before publication")
+        if versions:
+            owners[owner] = versions
+        else:
+            owners.pop(owner, None)
+        raw = json.dumps({
+            "schema": _REFERENCES_SCHEMA, "version": 1, "owners": owners,
+        }, ensure_ascii=True, sort_keys=True).encode("ascii")
+        if len(raw) > _REFERENCES_LIMIT or len(owners) > 256:
+            raise ValueError("runtime reference evidence exceeds its bound")
+        path = root / _REFERENCES_FILE
+        temporary = path.with_name(path.name + "." + secrets.token_hex(16) + ".tmp")
+        try:
+            with temporary.open("xb") as stream:
+                stream.write(raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)

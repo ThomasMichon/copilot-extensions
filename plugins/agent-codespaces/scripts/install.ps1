@@ -68,6 +68,26 @@ function Copy-InstallerStageDirectory {
 # === end install-contract:v4 payload-copy ===
 . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 
+if ($env:OS -eq 'Windows_NT' -and
+    $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1' -and
+    $Action -in @('install', 'update', 'provision', 'uninstall') -and
+    -not ($Action -eq 'uninstall' -and $DryRun)) {
+    $driverPayload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    $driverRoot = if ($InstallDir) { [IO.Path]::GetFullPath($InstallDir) }
+        else { Join-Path $env:USERPROFILE '.agent-codespaces' }
+    $driverOptions = @()
+    foreach ($name in @('Force', 'DryRun')) {
+        if ($PSBoundParameters.ContainsKey($name) -and [bool]$PSBoundParameters[$name]) {
+            $driverOptions += $name
+        }
+    }
+    $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
+        -Plugin 'agent-codespaces' -Action $Action -Options $driverOptions
+    if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
+    $driverPython = $driverEntry.Python
+    $driverArguments = $driverEntry.Arguments
+}
+
 # === install-contract:test-persistent-environment -- keep byte-identical across installers ===
 function Get-CopilotPersistentEnvironmentVariable {
     param(
@@ -366,6 +386,7 @@ function Invoke-VersionedActivate {
         return $false
     }
     if (-not (Invoke-VersionedMarkComplete)) { return $false }
+    Invoke-RuntimeBrokerAdoption
     $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
     # Source manifest inputs are captured before activation.
     if ($script:SourceRuntimeIdentity) {
@@ -438,6 +459,10 @@ if (-not (Test-Path (Join-Path $SingleInstanceLeaseDir 'pyproject.toml'))) {
 $RemoteLoginShellDir = Join-Path $PluginDir 'libs\remote-login-shell'
 if (-not (Test-Path (Join-Path $RemoteLoginShellDir 'pyproject.toml'))) {
     $RemoteLoginShellDir = Join-Path $RepoRoot 'libs\remote-login-shell'
+}
+$UpdateDriverDir = Join-Path $PluginDir 'libs\update-driver'
+if (-not (Test-Path (Join-Path $UpdateDriverDir 'pyproject.toml'))) {
+    $UpdateDriverDir = Join-Path $RepoRoot 'libs\update-driver'
 }
 
 $DeploySourcePaths = @('plugins/agent-codespaces/')
@@ -604,8 +629,24 @@ function Invoke-VersionedMarkComplete {
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
     }
-    Complete-RuntimeConstruction -PayloadHash $actualHash
+    Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers
     return $true
+}
+
+function Invoke-RuntimeBrokerAdoption {
+    if ($env:OS -ne 'Windows_NT' -or $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1') { return }
+    if (-not $script:RuntimeConstructionSession -or -not $script:RuntimeConstructionSession.Complete -or
+        $script:RuntimeConstructionSession.Process.HasExited) {
+        throw 'Broker adoption requires attached complete-slot retention'
+    }
+    $diagnostic = ''
+    $result = Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', '-m', 'update_driver.windows_broker',
+        '--runtime-root', $InstallDir, '--slot', $VenvDir,
+        '--execution-root', (Join-Path $env:USERPROFILE '.copilot-extensions\update-driver')) `
+        -ErrorOutput ([ref]$diagnostic)
+    if ($LASTEXITCODE -ne 0) { throw "Runtime broker adoption failed: $diagnostic" }
+    $receipt = $result | ConvertFrom-Json
+    if (-not $receipt -or $receipt.adopted -ne $true) { throw 'Runtime broker adoption returned no receipt' }
 }
 # === end install-contract:v4 marker/toss helpers ===
 
@@ -701,17 +742,10 @@ function Install-PackageInto {
        so a local code change propagates even without a version bump (uv
        otherwise skips a same-version path dep, leaving the venv stale).
 
-       -Editable (mutable-dev-slot, #3376): installs every one of these
-       path-dependencies with `uv pip install -e` instead, so the venv's
-       site-packages resolve straight back to this worktree's own checkout --
-       an ordinary source edit takes effect without re-running the installer.
-       Used only for distinct claimed development generations; never for a
-       numbered release. #>
-    param([string]$Python, [switch]$Editable)
+       Development generations use the same non-editable installation recipe
+       as numbered releases. #>
+    param([string]$Python)
     Assert-SourceRuntime
-    if ($Editable -and $script:SourceRuntimeIdentity) {
-        throw 'A source-qualified runtime cannot use editable dependencies'
-    }
     if (-not (Test-Path (Join-Path $SshMgrDir 'pyproject.toml'))) {
         Write-ServiceErr "ssh-manager source not found at $SshMgrDir"
         return $false
@@ -744,6 +778,10 @@ function Install-PackageInto {
         Write-ServiceErr "remote-login-shell source not found at $RemoteLoginShellDir"
         return $false
     }
+    if (-not (Test-Path (Join-Path $UpdateDriverDir 'pyproject.toml'))) {
+        Write-ServiceErr "update-driver source not found at $UpdateDriverDir"
+        return $false
+    }
     # Pre-strip: rename any locked console-script trampoline aside so uv can write
     # a fresh one (Windows denies overwriting an in-use .exe -- os error 5; the
     # stale binstub or a live `agent-codespaces ssh` session may hold it open).
@@ -757,13 +795,12 @@ function Install-PackageInto {
         'agent-session-liveness-probe' = $SessionLivenessProbeDir
         'agent-single-instance-lease' = $SingleInstanceLeaseDir
         'agent-remote-login-shell' = $RemoteLoginShellDir
+        'agent-update-driver' = $UpdateDriverDir
         'agent-codespaces' = $PluginDir
     }
-    $installArguments = @('--python', $Python)
-    if (-not $Editable) { $installArguments += '--no-editable' }
+    $installArguments = @('--python', $Python, '--no-editable')
     foreach ($entry in $sources.GetEnumerator()) {
-        if ($Editable) { $installArguments += @('--editable', $entry.Value) }
-        else { $installArguments += @('--reinstall-package', $entry.Key, $entry.Value) }
+        $installArguments += @('--reinstall-package', $entry.Key, $entry.Value)
     }
     $result = Invoke-UvPipInstallResilient -UvCommand $UvCommand `
         -Arguments ($installArguments + @('--quiet'))
@@ -835,7 +872,7 @@ function Resolve-DevSlotOwner {
 }
 
 function Invoke-Dev {
-    <# Editable source stays live; each dependency refresh uses a new generation. #>
+    <# Every source refresh builds a separate non-editable generation. #>
     Write-Step 'agent-codespaces dev; explicitly claimed runtime'
     if (-not $VersionedRuntime) {
         Write-ServiceErr 'dev mode requires the versioned-runtime layout (no version in pyproject.toml?)'
@@ -887,13 +924,7 @@ function Invoke-Dev {
         return $false
     }
 
-    if (-not (Install-PackageInto -Python $devPython -Editable)) { return $false }
-    # NOTE: deliberately do NOT call Stamp-BuildInfo here -- an editable
-    # install's "package dir" resolves straight back to src/agent_codespaces/
-    # in THIS checkout, so stamping would write _build_info.py into tracked
-    # source rather than an installed copy. `agent-codespaces version` in dev
-    # mode falls back to the plain importlib-derived __version__, which is
-    # enough for dev-mode diagnostics.
+    if (-not (Install-PackageInto -Python $devPython)) { return $false }
 
     if (-not (Test-CodespacesRuntime -Python $devPython)) {
         Write-ServiceErr 'dev slot failed its module launch health gate -- not activating'
@@ -911,7 +942,7 @@ function Invoke-Dev {
         Write-ServiceErr "Failed to activate dev slot: $($act.Output)"
         return $false
     }
-    Write-ServiceOk "Development generation active: $devVersion (editable source: $PluginDir)"
+    Write-ServiceOk "Development generation active: $devVersion (copied source: $PluginDir)"
 
     Deploy-SelfProvisioningBinstub
     Write-Host ''
@@ -1390,6 +1421,12 @@ function Invoke-Uninstall {
     if ($DryRun) { Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow }
 
     . (Join-Path $PSScriptRoot 'uninstall-runtime.ps1')
+    Invoke-StatePreservingUninstall -AdmissionOnly
+    if (-not $DryRun -and $env:OS -eq 'Windows_NT' -and
+        $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1') {
+        & $driverPython @driverArguments --remove-broker
+        if ($LASTEXITCODE -ne 0) { throw 'Owned runtime broker removal failed; runtimes preserved' }
+    }
     Invoke-StatePreservingUninstall -Preview:$DryRun
 
     # A marketplace invocation self-stages below the runtime tree. Leave that

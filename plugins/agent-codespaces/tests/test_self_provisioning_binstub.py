@@ -206,7 +206,7 @@ def test_windows_binstubs_share_safe_resolution_and_locking() -> None:
     assert "powershell" in cmd
 
 
-def test_installers_preinstall_uv_editable_workspace_dependencies() -> None:
+def test_installers_copy_canonical_workspace_dependencies() -> None:
     install_sh = INSTALL_SH.read_text(encoding="utf-8")
     install_ps1 = INSTALL_PS1.read_text(encoding="utf-8")
 
@@ -222,8 +222,9 @@ def test_installers_preinstall_uv_editable_workspace_dependencies() -> None:
         assert f"agent-{lib}" in install_sh
         assert f"Join-Path $PluginDir 'libs\\{lib}'" in install_ps1
         assert f"'agent-{lib}' = ${ps_var}" in install_ps1
-    assert 'mode_args=(--reinstall-package "${packages[$i]}")' in install_sh
-    assert 'mode_args=(--editable)' in install_sh
-    assert 'invoke_uv_pip_install_resilient "$UV_CMD" --python "$py"' in install_sh
-    assert "'--editable' } else { '--reinstall-package', $entry.Key }" in install_ps1
+    assert 'install_args+=(--reinstall-package "$package")' in install_sh
+    assert "--editable" not in install_sh
+    assert 'invoke_uv_pip_install_resilient "$UV_CMD" "${install_args[@]}"' in install_sh
+    assert "$installArguments += @('--reinstall-package', $name)" in install_ps1
+    assert "-Editable" not in install_ps1
     assert "Invoke-UvPipInstallResilient -UvCommand $UvCommand" in install_ps1

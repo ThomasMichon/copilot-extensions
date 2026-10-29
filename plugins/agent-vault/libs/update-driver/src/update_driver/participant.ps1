@@ -28,6 +28,7 @@ namespace CopilotExtensions {
         private NamedPipeServerStream listener;
         private volatile bool active = true;
         private string failure;
+        private bool unconfirmedExecution;
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool PeekNamedPipe(SafePipeHandle pipe, IntPtr buffer, uint length,
@@ -147,6 +148,7 @@ namespace CopilotExtensions {
         }
 
         private void Serve(NamedPipeServerStream pipe) {
+            int executionDepth = 0;
             try {
                 assertOwned();
                 pipe.ReadMode = PipeTransmissionMode.Message;
@@ -168,8 +170,21 @@ namespace CopilotExtensions {
                     bool valid = Text(frame, "root") == root &&
                         Text(frame, "request_id") == requestId && nonce != null && nonce.Length == 64;
                     assertOwned();
-                    valid = valid && active;
-                    Send(pipe, new Dictionary<string, object> {{"valid", valid}, {"nonce", nonce}});
+                    object execution;
+                    frame.TryGetValue("execution", out execution);
+                    lock (guard) {
+                        valid = valid && active && (!unconfirmedExecution || (execution as string) == "end");
+                        if (valid && execution != null) {
+                            if ((execution as string) == "begin" && executionDepth < Int32.MaxValue)
+                                ++executionDepth;
+                            else if ((execution as string) == "end" && executionDepth > 0)
+                                --executionDepth;
+                            else valid = false;
+                        }
+                    }
+                    var response = new Dictionary<string, object> {{"valid", valid}, {"nonce", nonce}};
+                    if (valid && execution != null) response["execution"] = execution;
+                    Send(pipe, response);
                     object close;
                     if (!valid || (frame.TryGetValue("close", out close) && close is bool && (bool)close))
                         return;
@@ -190,6 +205,7 @@ namespace CopilotExtensions {
                 }
             } finally {
                 lock (guard) {
+                    if (executionDepth != 0) unconfirmedExecution = true;
                     connections.Remove(pipe);
                     handlers.Remove(Thread.CurrentThread);
                 }
@@ -220,6 +236,8 @@ namespace CopilotExtensions {
             bool settled = acceptThread.Join(3000);
             foreach (var thread in pending) settled = thread.Join(3000) && settled;
             if (!settled) throw new InvalidOperationException("native participant threads did not settle");
+            if (unconfirmedExecution)
+                throw new InvalidOperationException("native participant execution cleanup is unconfirmed");
             if (failure != null) throw new InvalidOperationException(failure);
         }
     }

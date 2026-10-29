@@ -352,6 +352,8 @@ def create_pr(
     attribution: SourceAttribution | None = None,
     dry_run: bool = False,
     confirm_fork: bool = False,
+    publication_origin: str | None = None,
+    publication_labels: tuple[str, ...] = (),
 ) -> dict:
     """Squash worktree commits, create + push a feature branch for a PR.
 
@@ -408,6 +410,8 @@ def create_pr(
     with the feature branch still local (a worktree created under the old
     reset-to-upstream scheme).
     """
+    from . import pr_publication_labels
+    config = pr_publication_labels.activate(config, publication_origin, publication_labels)
     repo = config.default_repo
     prcfg = repo.pr
     remote = repo.remote
@@ -742,6 +746,10 @@ def create_pr(
     except ValueError as exc:
         return {**base, "error": str(exc)}
     reusing = bool(active_is_live and not new and active and active.branch == feature_branch and not provisional_retry)
+    try:
+        pr_publication_labels.validate_scope(prcfg, active if reusing or provisional_retry else None)
+    except ValueError as exc:
+        return {**base, "error": str(exc)}
     ahead = git_ops.get_commits_ahead(wt_branch, upstream, cwd=worktree_path)
     if reusing and not ahead and git_ops.local_branch_exists(
         feature_branch, cwd=worktree_path
@@ -1125,7 +1133,7 @@ def _open_via_provider(
     attribution: SourceAttribution = False,
 ) -> None:
     """Open the PR through the provider plugin and auto-record it (best-effort)."""
-    from . import providers
+    from . import providers, pr_publication_labels
     from .providers import attribution as attr
 
     machine = record.execution_machine if record else ""
@@ -1261,6 +1269,9 @@ def _open_via_provider(
     # request intent for the dry-run/no-open paths; here we make it authoritative
     # for the opened PR so "opened as a DRAFT" can never be reported falsely.)
     result["draft"] = bool(draft)
+    labels = pr_publication_labels.refresh(config, record, target_pr)
+    if labels is not None:
+        result["publication_labels"] = labels
     # The PR opened, but a required label (auto-merge / source:<machine>) may
     # have failed to apply. Surface it rather than swallowing -- the merge gate
     # and source attribution depend on these labels.
@@ -1501,6 +1512,11 @@ def _finish_auto_open(
         if not want_open:  # untracked worktree: still say why nothing was opened
             result["pr_open_skipped"] = "--no-open" if open_pr is False else "pr.auto_open is off"
         return
+    from . import pr_publication_labels
+    if result.get("success"):
+        labels = pr_publication_labels.refresh(config, record, target_pr)
+        if labels is not None:
+            result["publication_labels"] = labels
     if record is not None and result.get("success"):
         error = pr_publish.record_rewrite_ownership(config, record, target_pr, result["branch"], head_sha, published_identity)
         if error:
@@ -2312,6 +2328,8 @@ def _push_existing_feature(
         None,
     )
     try:
+        from .pr_publication_labels import validate_scope
+        validate_scope(prcfg, existing_target)
         target = pr_publish.prepare_existing_publication(
             record, existing_target, feature_branch, prcfg, attribution, remote=remote, cwd=worktree_path,
         )

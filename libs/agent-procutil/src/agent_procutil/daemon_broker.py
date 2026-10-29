@@ -12,7 +12,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 _BOOT_PORT = "_CE_DAEMON_BROKER_PORT"
 _BOOT_COOKIE = "_CE_DAEMON_BROKER_COOKIE"
@@ -22,6 +22,7 @@ _SYNCHRONIZE = 0x00100000
 _PROCESS_ACCESS = _SYNCHRONIZE | 0x0001 | 0x0800 | 0x1000
 _WAIT_TIMEOUT = 0x102
 _CREATE_SUSPENDED = 0x00000004
+_ProcessT = TypeVar("_ProcessT", bound="WindowsDaemonProcess")
 
 _WMI_CREATE = r"""
 $ErrorActionPreference = 'Stop'
@@ -78,6 +79,14 @@ class WindowsDaemonProcess:
         self._handle = _kernel32().OpenProcess(_PROCESS_ACCESS, False, pid)
         if not self._handle:
             raise ctypes.WinError(ctypes.get_last_error())
+
+    @classmethod
+    def from_handle(cls: type[_ProcessT], handle: int, pid: int, args: list[str]) -> _ProcessT:
+        """Take an owned actual-process handle without reopening a numeric PID."""
+        process = cls.__new__(cls)
+        process.pid, process.args, process.returncode = pid, args, None
+        process._handle = handle
+        return process
 
     def poll(self) -> int | None:
         from ctypes import wintypes
@@ -165,6 +174,26 @@ def _receive(connection: socket.socket, deadline: float) -> dict:
     if not isinstance(result, dict):
         raise ValueError("invalid daemon broker response")
     return result
+
+
+def _outside_caller_job(process: WindowsDaemonProcess) -> bool:
+    """Observe immediate membership only; this is not durable lifetime proof."""
+    from ctypes import wintypes
+    from ._windows_caller_owned import _job_pids
+
+    kernel = _kernel32()
+    kernel.GetCurrentProcess.argtypes = []
+    kernel.GetCurrentProcess.restype = wintypes.HANDLE
+    in_job = wintypes.BOOL()
+    if not kernel.IsProcessInJob(kernel.GetCurrentProcess(), None, ctypes.byref(in_job)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    if not in_job.value:
+        return True
+    members = _job_pids(None, kernel=kernel)
+    if os.getpid() not in members:
+        raise OSError("caller Job membership did not identify the caller")
+    # The process's native handle pins this PID throughout adoption.
+    return process.pid not in members
 
 
 def _outside_job(process: WindowsDaemonProcess) -> bool:

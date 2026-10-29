@@ -27,6 +27,16 @@ installers run its actual CLI in isolation with `--help`. A successful package
 import alone is not candidate health; a failed entry point leaves the prior
 selection and completion intact.
 
+The Windows legacy `install`, `update`, and `provision` actions enter the finite
+native installation driver before staging, then adopt the finite launch broker
+after immutable-slot completion and before runtime selection. Construction
+retention stays attached through adoption. Durable watch launches only consume
+an already-adopted broker; `status` and `stamp` never install one. Owned legacy
+uninstall removes the broker contract before removing launchers or runtime
+content, preserving them if removal is refused. The explicit installation-cell
+adapter remains a separate contract; these legacy recipes do not admit cell
+actions or context arguments.
+
 Both native installers also accept an explicitly
 [prepared source payload](../../tools/prepare_runtime_source.md). Its verified
 receipt selects a source-qualified immutable generation; the deploy manifest

@@ -91,6 +91,13 @@ The checker still rejects unrefreshed source hashes, unjustified non-semantic
 classification, uncovered semantic changes and corrupt historical provenance.
 Never bulk-rebaseline goldens to make an implementation-only update pass.
 
+When a duplicate source is removed, its source record may retain the historical
+`path` with `current_path` pointing to an independently registered, byte-identical
+canonical source. The historical path must be absent; chained or unregistered
+relocations and mismatched bytes are refused. Captured packets and provenance
+keep their original paths, commits and blob identities. This repository-only
+mapping does not restore an executable shadow or change a wire contract.
+
 Local Git observations are batched by object and by each commit's requested
 paths, with the same per-command deadline and no lazy fetch. Hash normalization,
 actual commit/path/blob bindings, missing-object handling, and the complete

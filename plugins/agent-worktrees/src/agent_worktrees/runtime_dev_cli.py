@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import io
 import json
+import os
 import subprocess
 import sys
+from contextlib import redirect_stdout
 from pathlib import Path
 
 from . import config as cfg
@@ -67,6 +70,51 @@ def cmd_dev_status(args: argparse.Namespace) -> int:
 
 
 def cmd_dev_release(args: argparse.Namespace) -> int:
+    if os.name != "nt" or os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1":
+        return _cmd_dev_release(args)
+    from .update_driver_json_cli import _run_request
+
+    execution = argparse.Namespace(**vars(args))
+    execution.json = True
+    flags = ["--json"]
+    if getattr(args, "owner", None) is not None:
+        execution.owner = args.owner.resolve()
+        flags.extend(["--owner", str(execution.owner)])
+
+    def execute(request):
+        with output.capture_json_output() as captured:
+            code = _cmd_dev_release(request)
+        print(captured.getvalue(), end="")
+        return code
+
+    buffer = io.StringIO()
+    try:
+        lifecycle = _lifecycle()
+        root, slot = cfg.install_dir().resolve(), Path(sys.prefix).resolve()
+        if slot.parent != root / "versions":
+            raise RuntimeError("Dev release must execute from this installation's retained slot")
+        # The mutable dev slot cannot use the immutable launcher's admission.
+        # Keep its code pinned until the canonical caller-owned drain settles.
+        with lifecycle.runtime.retention_lease(root, slot.name):
+            with redirect_stdout(buffer):
+                code = _run_request(
+                    "dev-release", flags, execution, execute, retained_dev=slot.name == "dev",
+                )
+    except (OSError, ValueError, RuntimeError, ImportError) as error:
+        return _error(args, error)
+    text = buffer.getvalue()
+    if getattr(args, "json", False):
+        output.write_real_stdout(text)
+    elif code:
+        record = json.loads(text)
+        output.err(record.get("error") or record.get("message") or "Dev release failed")
+    else:
+        result = json.loads(text)
+        output.info(f"Dev released; current-version -> {result['runtime_version']}")
+    return code
+
+
+def _cmd_dev_release(args: argparse.Namespace) -> int:
     lifecycle = None
     try:
         lifecycle = _lifecycle()

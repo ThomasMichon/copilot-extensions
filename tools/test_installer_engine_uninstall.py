@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import os
 import shlex
@@ -10,13 +11,14 @@ import shutil
 import subprocess
 import sys
 from dataclasses import replace
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 SOURCE = REPO / "libs" / "installer-engine" / "installer_engine_uninstall.py"
+CONTROLLERS = SOURCE.with_name("installer_engine_uninstall_controllers.py")
 SPEC = importlib.util.spec_from_file_location("finite_uninstall_test_subject", SOURCE)
 assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)
@@ -139,6 +141,227 @@ def test_legacy_adapter_controller_requires_exact_script_and_root(
     ) is (mutation == "none")
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows fixed Worktrees controller stack")
+@pytest.mark.parametrize("mutation", (
+    "none", "minimal", "self-stage", "sparse-census", "remove-runtime",
+    "positional-original", "positional-duplicate", "positional-conflict", "positional-trailing", "positional-other",
+    "forged-owner", "stale-owner", "forged-lease", "stale-lease", "stale-request",
+    "wrong-action", "wrong-root", "wrong-product", "wrong-project", "wrong-helper", "changed-source", "duplicate-flag",
+    "unforwarded-option", "witness-mismatch", "reused-native", "unknown-birth",
+    "ancestor-module", "additional-module", "without-custody",
+))
+def test_worktrees_controller_requires_live_fixed_uninstall_stack(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str,
+) -> None:
+    home = tmp_path / "home with spaces"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    root = home / ".agent-worktrees"
+    original = home / ".copilot" / "installed-plugins" / "fixture-marketplace" / "agent-worktrees"
+    shell = str(HOST or Path(sys.executable).with_name("pwsh.exe"))
+    scripts = original / "scripts"
+    scripts.mkdir(parents=True)
+    shutil.copyfile(CONTROLLERS, scripts / CONTROLLERS.name)
+    for name in ("runtime_install_driver.py", "command_binding.py", "command_lifecycle.py",
+                 "installer_engine.py", "install.ps1"):
+        (scripts / name).write_text("# ordinary fixed source fixture\n", encoding="utf-8")
+    for directory, names in (
+        ("libs/update-driver/src/update_driver", ("core.py", "participant.py", "_runner.py")),
+        ("libs/procutil/src/agent_procutil", ("__init__.py",)),
+    ):
+        folder = original / directory
+        folder.mkdir(parents=True)
+        for name in names:
+            (folder / name).write_text("# ordinary library fixture\n", encoding="utf-8")
+    payload = original
+    if mutation == "self-stage":
+        payload = root / ".install-stage" / "20261028T064812245-64202" / "agent-worktrees"
+        shutil.copytree(original, payload)
+
+    def packages(source):
+        return (source, source / "libs" / "update-driver", source / "libs" / "procutil")
+
+    def files(roots):
+        return tuple(sorted({path for directory in roots for path in directory.rglob("*") if path.is_file()}))
+
+    def fingerprint(paths):
+        return hashlib.sha256(b"".join(path.read_bytes() for path in paths)).hexdigest()
+
+    engine = ModuleType("installer_engine")
+    engine.__file__ = str(payload / "scripts" / "installer_engine.py")
+    engine._package_roots = packages
+    engine._package_name = lambda path: {
+        "agent-worktrees": "agent-worktrees", "update-driver": "agent-update-driver", "procutil": "agent-procutil",
+    }[path.name]
+    engine._source_files = files
+    engine.runtime = SimpleNamespace(fingerprint_source=fingerprint)
+    participant = ModuleType("update_driver.participant")
+    participant.__file__ = str(payload / "libs" / "update-driver" / "src" / "update_driver" / "participant.py")
+    # This is deliberately not a live authenticator or endpoint.
+    witness = json.dumps({"fixture": "fixture-witness-private-marker", "root": str(home / "execution")})
+    participant.ENVIRONMENT_KEY = "UPDATE_DRIVER_WITNESS"
+    participant.participant_environment = lambda: {participant.ENVIRONMENT_KEY: witness}
+    checks = []
+
+    class Custody:
+        root = home / "execution"
+        request_id = "fixture-request"
+
+        def assert_owned(self):
+            checks.append("driver")
+            if mutation == "stale-owner":
+                raise MODULE.UninstallRefused("Fixture driver custody stale")
+
+    participant.BorrowedCustody = Custody
+    lifecycle = ModuleType("_payload_command_lifecycle")
+    lifecycle.__file__ = str(payload / "scripts" / "command_lifecycle.py")
+    project = tmp_path / "project"
+
+    class Lease:
+        ticket = {"pid": 64203}
+        arguments = {"legacy_root": root, "project_root": project,
+                     "payload_root": original, "plugin_id": "agent-worktrees"}
+
+        def assert_owned(self):
+            checks.append("lease")
+            if mutation == "stale-lease":
+                raise MODULE.UninstallRefused("Fixture teardown custody stale")
+
+        def assert_operation(self, operation):
+            assert operation == "teardown"
+
+    lifecycle.LifecycleLease = Lease
+    native = ["-Action", "uninstall", "-InstallDir", str(root)]
+    if mutation != "minimal":
+        native += ["-BootstrapPython", sys.executable, "-ProjectName", "fixture project", "-RemoveConfig"]
+
+    def driver(source, role):
+        argv = [sys.executable, "-I", "-S", "-B", "-X", "utf8", str(source / "scripts" / "runtime_install_driver.py"),
+                "--payload", str(source), "--root", str(root), "--shell", shell, "--action", "uninstall"]
+        if mutation != "minimal":
+            argv += ["--bootstrap-python", sys.executable, "--project-name", "fixture project", "--remove-config"]
+        if role:
+            argv.append("--" + role)
+        return argv
+
+    def powershell(source):
+        return [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                "-File", str(source / "scripts" / "install.ps1"), *native]
+
+    pinned = tuple(driver(original, "participant"))
+    request = SimpleNamespace(
+        id=Custody.request_id, state="running", runner=SimpleNamespace(argv=pinned),
+        spec=SimpleNamespace(backend="engine-native-install", project=str(root),
+                             argv=tuple(native), source=fingerprint(files(packages(payload))),
+                             context=(("COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT", str(project)),)),
+    )
+    core = ModuleType("update_driver.core")
+    core.__file__ = str(payload / "libs" / "update-driver" / "src" / "update_driver" / "core.py")
+    core.status = lambda identifier, **kwargs: request
+    for module in (engine, participant, lifecycle, core):
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+    binding = [sys.executable, "-I", "-S", "-B", "-X", "utf8", str(original / "scripts" / "command_binding.py"),
+               "--payload-root", str(original), "--plugin-id", "agent-worktrees", "--legacy-root", str(root),
+               "--source-payload-root", str(original), "--project-root", str(project),
+               "--teardown", "--run-lifecycle", "--", *powershell(original)]
+    runner_source = original / "libs" / "update-driver" / "src" / "update_driver" / "_runner.py"
+    procutil = original / "libs" / "procutil" / "src" / "agent_procutil" / "__init__.py"
+    callback = "remove-runtime" if mutation == "remove-runtime" else "check-removal"
+    actors = [(os.getpid(), driver(payload, callback)), (64201, powershell(payload))]
+    if mutation == "self-stage":
+        actors.append((64202, powershell(original)))
+    actors += [
+        (64203, binding), (64204, powershell(original)), (64205, list(pinned)),
+        (64206, [sys.executable, "-I", str(runner_source), str(Custody.root), request.id, witness, str(procutil)]),
+        (64207, driver(original, "")), (64208, powershell(original)),
+    ]
+    if mutation.startswith("positional-"):
+        outer = actors[-1][1]
+        outer.remove("-Action")
+        if mutation == "positional-duplicate":
+            outer.extend(("-Action", "uninstall"))
+        elif mutation == "positional-conflict":
+            outer.extend(("-Action", "update"))
+        elif mutation == "positional-trailing":
+            outer.append("uninstall")
+        elif mutation == "positional-other":
+            outer[outer.index("uninstall")] = "update"
+    if mutation == "wrong-action":
+        request.spec.argv = ("-Action", "update", "-InstallDir", str(root))
+    elif mutation == "wrong-root":
+        request.spec.project = str(root / "foreign")
+    elif mutation == "stale-request":
+        request.state = "completed"
+    elif mutation == "wrong-product":
+        binding[binding.index("agent-worktrees")] = "agent-bridge"
+    elif mutation == "wrong-project":
+        binding[binding.index("--project-root") + 1] = str(tmp_path / "foreign-project")
+    elif mutation == "wrong-helper":
+        binding[6] = str(original / "scripts" / "foreign_binding.py")
+    elif mutation == "changed-source":
+        (payload / "scripts" / "runtime_install_driver.py").write_text("# changed\n", encoding="utf-8")
+    elif mutation == "duplicate-flag":
+        actors[1][1].append("-RemoveConfig")
+    elif mutation == "unforwarded-option":
+        actors[1][1][actors[1][1].index("fixture project")] = "other project"
+    elif mutation == "witness-mismatch":
+        next(argv for pid, argv in actors if pid == 64206)[5] = "not-the-scoped-fixture"
+    elif mutation == "ancestor-module":
+        actors.insert(-2, (64209, [sys.executable, "-m", "agent_worktrees"]))
+    rows = []
+    for index, (pid, argv) in enumerate(actors):
+        rows.append({"pid": pid, "ppid": actors[index + 1][0] if index + 1 < len(actors) else 0,
+                     "image": argv[0], "command": subprocess.list2cmdline(argv),
+                     "birth": f"202610280600{10-index:02d}.000000"})
+    if mutation == "unknown-birth":
+        rows[0]["birth"] = ""
+    if mutation == "additional-module":
+        rows.append({"pid": 64210, "ppid": 0, "image": sys.executable, "command": "python -m agent_worktrees"})
+    native_rows = [dict(row) for row in rows]
+    if mutation == "sparse-census":
+        rows = [dict(row, birth=row["birth"] if index < 5 else "")
+                for index, row in enumerate(rows) if row["pid"] != 64206]
+    monkeypatch.setattr(MODULE.os, "getppid", lambda: 64201)
+    monkeypatch.setattr(sys, "argv", [str(payload / "scripts" / "runtime_install_driver.py")])
+    native_proofs = []
+
+    def inspect(owner, argv, **kwargs):
+        assert "fixture-witness-private-marker" not in argv[-1]
+        assert witness not in argv[-1]
+        if argv[-1].startswith("$expected="):
+            native_proofs.append(argv[-1])
+            return "false" if mutation == "reused-native" else "true"
+        if argv[-1].startswith("$selected="):
+            pid = int(argv[-1].splitlines()[0].split("=")[1])
+            return json.dumps(next(row for row in native_rows if row["pid"] == pid))
+        return json.dumps(rows)
+
+    monkeypatch.setattr(MODULE, "_run", inspect)
+    custody = SimpleNamespace(assert_owned=lambda: None) if mutation == "forged-owner" else Custody()
+    lease = SimpleNamespace(arguments=Lease.arguments) if mutation == "forged-lease" else Lease()
+    kwargs = {} if mutation == "without-custody" else {"controller_custody": custody, "lifecycle_lease": lease}
+    profile = MODULE.Profile((), (), (), (), "agent_worktrees")
+    if mutation in {"none", "minimal", "self-stage", "sparse-census", "remove-runtime", "positional-original"}:
+        MODULE.refuse_consumers(payload, "agent-worktrees", root, shell, profile, **kwargs)
+        assert native_proofs and checks.count("driver") == 2 and checks.count("lease") == 2
+    else:
+        with pytest.raises(MODULE.UninstallRefused):
+            MODULE.refuse_consumers(payload, "agent-worktrees", root, shell, profile, **kwargs)
+
+
+@pytest.mark.parametrize("mutation", ("missing", "shared"))
+def test_controller_packaged_helper_fails_closed(tmp_path: Path, mutation: str) -> None:
+    payload = tmp_path / "payload"
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    helper = scripts / CONTROLLERS.name
+    if mutation == "shared":
+        shutil.copyfile(CONTROLLERS, helper)
+        os.link(helper, scripts / "shared.py")
+    with pytest.raises(MODULE.UninstallRefused):
+        MODULE._controller_proofs(payload)
+
+
 @pytest.mark.parametrize("canonical_matches", (True, False))
 def test_copied_source_helper_resolves_only_matching_canonical_dependency(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, canonical_matches: bool,
@@ -175,6 +398,7 @@ def installation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path,
     payload = tmp_path / "payload"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
+    shutil.copyfile(CONTROLLERS, scripts / CONTROLLERS.name)
     origin = REPO / "plugins" / "agent-bridge" / "scripts"
     shutil.copytree(origin / "installation-context", scripts / "installation-context")
     for name in (*MODULE.RUNTIME_MODULES, "command_binding.py", "command_lifecycle.py"):
@@ -231,6 +455,168 @@ def _cleanup(payload: Path, root: Path, **arguments: Any) -> dict[str, Any]:
     if not HOST:
         pytest.skip("Native host unavailable")
     return MODULE.cleanup(payload, "agent-bridge", root, HOST, **arguments)
+
+
+def test_packaged_worktrees_native_cleanup_has_no_repository_dependency(tmp_path):
+    if not HOST:
+        pytest.skip("Native host unavailable")
+    payload = tmp_path / "packaged-worktrees"
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    source = REPO / "plugins" / "agent-worktrees" / "scripts"
+    for path in source.iterdir():
+        if path.is_file() and path.suffix in {".py", ".ps1", ".sh"}:
+            shutil.copyfile(path, scripts / path.name)
+    root = tmp_path / "runtime"
+    _seed(root, "agent-worktrees")
+    MODULE._native_remove(payload, HOST, root, ("versions",))
+    assert not (root / "versions").exists()
+    assert (root / "config.yaml").read_bytes() == b"configuration"
+    assert (root / "unknown").read_bytes() == b"\x00\xff"
+    assert (root / ".install-stage" / "custom").read_bytes() == b"staged source"
+
+
+@pytest.mark.parametrize("source_kind", ("original", "stage", "foreign"))
+def test_staged_typed_uninstall_retains_original_source_and_project(
+    installation, monkeypatch, source_kind,
+):
+    payload, root = installation
+    home = Path.home()
+    original = home / ".copilot" / "installed-plugins" / "example" / "agent-worktrees"
+    original.parent.mkdir(parents=True)
+    shutil.move(str(payload), original)
+    (original / "pyproject.toml").write_text(
+        '[project]\nname="agent-worktrees"\nversion="1.0.0"\n', encoding="utf-8",
+    )
+    shutil.copyfile(REPO / "plugins/agent-worktrees/scripts/uninstall-state.py",
+                    original / "scripts/uninstall-state.py")
+    settings = home / ".copilot" / "settings.json"
+    settings.write_text(json.dumps({"extraKnownMarketplaces": {
+        "example": {"source": {"source": "github", "repo": "Example/Plugins"}},
+        "foreign": {"source": {"source": "github", "repo": "Example/Other"}},
+    }}), encoding="utf-8")
+    project = root.parent / "project"
+    project.mkdir()
+    _seed(root, "agent-worktrees")
+    binding = MODULE._load(original / "scripts" / "command_binding.py")
+    primitive = binding._load_primitive(original)
+    arguments = dict(payload_root=original, plugin_id="agent-worktrees", legacy_root=root,
+                     project_root=project, environment={**os.environ, "COPILOT_PLUGIN_ROOT": str(original)})
+    receipt = binding.publish_legacy_binding(primitive, **arguments)
+    manifest = root / "deploy-manifest.json"
+    record = json.loads(manifest.read_text(encoding="utf-8-sig"))
+    manifest.write_text(json.dumps({**record, "commandBinding": receipt}), encoding="utf-8")
+    payload = root / ".install-stage" / "fixture" / "agent-worktrees"
+    shutil.copytree(original, payload)
+    foreign = original.parent.parent / "foreign" / "agent-worktrees"
+    shutil.copytree(original, foreign)
+    profile = payload / "scripts" / "uninstall-profile.json"
+    shutil.copyfile(REPO / "plugins" / "agent-worktrees" / "scripts" / profile.name, profile)
+    before = manifest.read_bytes()
+    admissions = []
+
+    def consumers(*_args, **kwargs):
+        lease = kwargs["lifecycle_lease"]
+        lease.assert_owned()
+        lease.assert_operation("teardown")
+        assert Path(lease.arguments["payload_root"]) == original
+        assert Path(lease.arguments["project_root"]) == project
+        admissions.append(True)
+
+    monkeypatch.setattr(MODULE, "refuse_consumers", consumers)
+    source = {"original": original, "stage": payload, "foreign": foreign}[source_kind]
+    lifecycle = binding._load_lifecycle()
+    with lifecycle.legacy_lifecycle(
+        binding._rules(), primitive, reserve=False, teardown=True, **arguments,
+    ) as lease:
+        monkeypatch.setenv(lifecycle.TICKET_ENV, json.dumps(lease.ticket))
+        monkeypatch.setenv("COPILOT_PLUGIN_STAGED_FROM", str(source))
+        monkeypatch.setenv("COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT", str(project))
+        operation = lambda: MODULE.cleanup(
+            payload, "agent-worktrees", root, HOST, profile=profile, check_consumers=True,
+            controller_custody=object(),
+        )
+        if source_kind == "original":
+            assert operation()["status"] == "ready"
+            assert admissions == [True]
+        else:
+            with pytest.raises(RuntimeError):
+                operation()
+            assert not admissions
+    assert manifest.read_bytes() == before
+    assert (root / "versions" / "1.0.0" / "runtime.py").read_bytes() == b"runtime code"
+
+
+@pytest.mark.parametrize("busy", [False, True])
+def test_component_removal_admission_checks_consumers_without_deleting_runtime(
+    installation, monkeypatch, busy,
+):
+    payload, root = installation
+    before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    calls = []
+
+    def consumers(*args):
+        calls.append(args)
+        if busy:
+            raise MODULE.UninstallRefused("live consumer")
+
+    monkeypatch.setattr(MODULE, "refuse_consumers", consumers)
+    if busy:
+        with pytest.raises(MODULE.UninstallRefused, match="live consumer"):
+            _cleanup(payload, root, check_consumers=True)
+    else:
+        assert _cleanup(payload, root, check_consumers=True)["status"] == "ready"
+    assert len(calls) == 1
+    assert all(path.read_bytes() == content for path, content in before.items())
+
+
+@pytest.mark.parametrize("name", ["windows-launch-broker.json", "windows-launch-broker.pending.json"])
+def test_runtime_removal_requires_prior_owned_broker_removal(installation, monkeypatch, name):
+    payload, root = installation
+    config = root / name
+    config.write_bytes(b'{"retained":"broker"}')
+    monkeypatch.setattr(MODULE, "refuse_consumers", lambda *_: None)
+    assert _cleanup(payload, root, check_consumers=True)["status"] == "ready"
+    with pytest.raises(MODULE.UninstallRefused, match="remove its Windows broker"):
+        _cleanup(payload, root, remove_runtime=True, remover=_remove)
+    assert config.read_bytes() == b'{"retained":"broker"}'
+    assert (root / "versions" / "1.0.0" / "runtime.py").read_bytes() == b"runtime code"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native image attribution")
+@pytest.mark.parametrize("same_birth", [True, False])
+def test_missing_cim_image_requires_matching_native_birth(installation, monkeypatch, same_birth):
+    payload, root = installation
+    run = MODULE._run
+    native_birth = "2026-01-01T00:00:00" if same_birth else "2026-01-01T00:00:01"
+    image = str(root / "versions" / "1.0.0" / "python.exe").replace("'", "''")
+    prelude = f"""
+function Get-CimInstance {{
+    [pscustomobject]@{{ProcessId={os.getpid()};ParentProcessId=0;Name='python.exe';
+        ExecutablePath='{str(sys.executable).replace("'", "''")}';CommandLine='fixture inspector';
+        CreationDate=[datetime]'2026-01-01T00:00:00'}}
+    [pscustomobject]@{{ProcessId=64123;ParentProcessId=0;Name='python.exe';
+        ExecutablePath='';CommandLine='fixture candidate';CreationDate=[datetime]'2026-01-01T00:00:00'}}
+    [pscustomobject]@{{ProcessId=$PID;ParentProcessId={os.getpid()};Name='pwsh.exe';
+        ExecutablePath='{str(HOST).replace("'", "''")}';CommandLine="fixture $module inspection";
+        CreationDate=[datetime]'2026-01-01T00:00:00'}}
+}}
+function Invoke-CimMethod {{
+    [pscustomobject]@{{ReturnValue=0;Sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value}}
+}}
+function Get-Process {{
+    $result=[pscustomobject]@{{StartTime=[datetime]'{native_birth}';Path='{image}'}}
+    $result | Add-Member -MemberType ScriptMethod -Name Dispose -Value {{ }}
+    return $result
+}}
+"""
+    monkeypatch.setattr(MODULE, "_run", lambda owner, argv: run(
+        owner, [*argv[:-1], prelude + argv[-1]],
+    ))
+    with pytest.raises(RuntimeError, match="Cannot inspect a current-user candidate process"):
+        MODULE.refuse_consumers(
+            payload, "agent-bridge", root, HOST, MODULE.profile_for(payload, "agent-bridge"),
+        )
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Actual packaged POSIX removal")

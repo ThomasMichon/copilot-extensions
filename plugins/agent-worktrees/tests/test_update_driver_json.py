@@ -372,3 +372,91 @@ def test_actual_empty_inventory_apply_uses_worker_and_retains_json(tmp_path, mon
     assert len(requests) == 1
     assert requests[0].spec.backend == "engine-reconcile-plugins"
     assert requests[0].state == "completed"
+
+
+@pytest.mark.parametrize("exit_code", [0, 2])
+def test_retained_dev_release_uses_finite_driver_and_actual_isolated_command(
+    tmp_path, monkeypatch, capsys, exit_code,
+):
+    import os
+    import sys
+    import sysconfig
+    import venv
+    import update_driver
+    from update_driver import core
+    from agent_procutil import direct_python
+
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    monkeypatch.delenv("UPDATE_DRIVER_WITNESS", raising=False)
+    root, queue = tmp_path / "runtime", tmp_path / "driver"
+    slot = root / "versions" / "dev"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    if os.name == "nt":
+        for launcher in python.parent.glob("*.exe"):
+            launcher.chmod(0o700)
+    site = slot / ("Lib/site-packages" if os.name == "nt" else
+                   f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages")
+    # The fixture command exercises the real adapter/driver process boundary,
+    # but never installs, restores or adopts a host runtime.
+    (site / "driver.pth").write_text(
+        f"import site; site.addsitedir({sysconfig.get_path('purelib')!r})\n", encoding="utf-8",
+    )
+    package = site / "agent_worktrees"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    payload = {"runtime_version": "original"} if not exit_code else {"error": "owner mismatch"}
+    (package / "__main__.py").write_text(
+        "import json,pathlib,sys\n"
+        "import update_driver\n"
+        f"assert pathlib.Path(sys.prefix).resolve() == pathlib.Path({str(slot)!r}).resolve()\n"
+        "assert sys.flags.isolated and sys.flags.dont_write_bytecode\n"
+        "assert sys.argv[1:] == ['dev-release', '--json']\n"
+        f"with update_driver.borrowed_custody(root=pathlib.Path({str(queue)!r})) as custody:\n"
+        "    custody.assert_owned()\n"
+        "    request = update_driver.status(custody.request_id, root=custody.root)\n"
+        f"    assert request.spec.source == {str(root.resolve())!r}\n"
+        f"    request.log_path.with_suffix('.result.json').write_text({json.dumps(payload)!r})\n"
+        f"raise SystemExit({exit_code})\n",
+        encoding="utf-8",
+    )
+    bootstrap = slot / ".runtime-bootstrap"
+    bootstrap.mkdir()
+    (bootstrap / "runtime_launcher.py").write_text(
+        "raise RuntimeError('immutable dev launcher must not run')\n", encoding="utf-8",
+    )
+    executable, environment = direct_python(str(python))
+    monkeypatch.setattr(boundary.sys, "prefix", str(slot))
+    monkeypatch.setattr(boundary.sys, "executable", str(python))
+    monkeypatch.setattr(boundary.cfg, "install_dir", lambda: root)
+    monkeypatch.setattr(boundary.cfg, "active_project", lambda: None)
+    monkeypatch.setattr(core, "default_root", lambda: queue)
+    monkeypatch.setattr(update_driver, "runtime_command", lambda *a, **k: pytest.fail("immutable bootstrap"))
+    monkeypatch.setattr(update_driver, "ensure_worker", lambda *a, **k: pytest.fail("background worker"))
+    assert boundary._run_request(
+        "dev-release", ["--json"], _args(), lambda _args: pytest.fail("not a participant"),
+        retained_dev=True,
+    ) == exit_code
+    assert json.loads(capsys.readouterr().out) == payload
+    request, = core.status(root=queue)
+    assert request.state == "completed" and request.exit_code == exit_code
+    assert request.runner.argv == (executable, "-I", "-B", "-m", "agent_worktrees", "dev-release", "--json")
+    assert dict(request.runner.env) == environment
+
+
+@pytest.mark.parametrize("fault", ["verb", "detached", "slot"])
+def test_retained_dev_execution_refuses_other_operations_before_enqueue(tmp_path, monkeypatch, capsys, fault):
+    import update_driver
+
+    monkeypatch.setattr(boundary.cfg, "install_dir", lambda: tmp_path)
+    monkeypatch.setattr(boundary.cfg, "active_project", lambda: None)
+    monkeypatch.setattr(boundary.sys, "prefix", str(tmp_path / "versions" / (
+        "numbered" if fault == "slot" else "dev"
+    )))
+    monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
+    monkeypatch.setattr(update_driver, "enqueue", lambda *a, **k: pytest.fail("invalid operation enqueued"))
+    assert boundary._run_request(
+        "stage-update" if fault == "verb" else "dev-release", ["--json"],
+        _args(detach=fault == "detached"), lambda _args: 0, retained_dev=True,
+    ) == 1
+    assert json.loads(capsys.readouterr().out)["reason"] == "update-driver"

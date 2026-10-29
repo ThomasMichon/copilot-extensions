@@ -198,7 +198,7 @@ if ($Action -eq 'publish-runtime-helpers' -and (
     throw 'Helper publication requires its existing admitted lifecycle.'
 }
 # === command-lifecycle: admission before staging ===
-if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision', 'stamp', 'uninstall', 'repair', 'dev', 'dev-release', 'publish-runtime-helpers')) {
+if ($Action -in @('install', 'update', 'provision', 'stamp', 'uninstall', 'repair', 'dev', 'dev-release', 'publish-runtime-helpers')) {
     $admissionProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT -and
         $env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) {
         $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(
@@ -208,20 +208,50 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
             $env:COPILOT_PROJECT_DIR)
     } else { $ExecutionContext.SessionState.Path.CurrentFileSystemLocation.ProviderPath }
     $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT = $admissionProject
-    # Admission and its shared human-output helper require Python 3.10+.
-    # Runtime construction independently selects its 3.11+ base interpreter.
+    $nativeDriverRequired = $Action -in @(
+        'install', 'update', 'provision', 'repair', 'dev', 'dev-release', 'uninstall'
+    ) -and $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1'
+    $minimumAdmissionMinor = if ($nativeDriverRequired) { 11 } else { 10 }
+    $admissionRequirement = "Python 3.$minimumAdmissionMinor+"
+    $admissionProbe = @'
+import json,sys
+from pathlib import Path
+if sys.version_info < (3,int(sys.argv[1])):
+    raise SystemExit(1)
+if sys.argv[2] == 'uninstall':
+    root = Path(sys.argv[3]).absolute()
+    boundaries = (root, root.resolve())
+    for value in (sys.argv[4], sys.executable, sys.prefix, sys.base_prefix,
+                  sys.exec_prefix, sys.base_exec_prefix,
+                  getattr(sys, '_base_executable', sys.executable)):
+        path = Path(value).absolute()
+        assert all(not candidate.is_relative_to(boundary)
+                   for candidate in (path, path.resolve(strict=True)) for boundary in boundaries)
+print(json.dumps(sys.executable, ensure_ascii=True))
+'@
+    $invokeAdmissionPython = {
+        param([string]$Candidate, [string[]]$Arguments, [ref]$ErrorOutput, [switch]$StreamOutput)
+        if ([IO.Path]::GetExtension($Candidate) -eq '.ps1') {
+            $quoted = @($Candidate) + $Arguments | ForEach-Object { "'" + ($_ -replace "'", "''") + "'" }
+            $command = '& ' + ($quoted -join ' ') + '; exit $LASTEXITCODE'
+            $Arguments = @('-NoLogo', '-NoProfile', '-NonInteractive', '-Command', $command)
+            $Candidate = (Get-Process -Id $PID).Path
+        }
+        if ($StreamOutput) {
+            Invoke-Hidden -FilePath $Candidate -ArgList $Arguments -StreamOutput
+        } else {
+            Invoke-Hidden -FilePath $Candidate -ArgList $Arguments -ErrorOutput $ErrorOutput
+        }
+    }
     $probeAdmissionPython = {
         param([string]$Candidate, [string[]]$Prefix = @())
         $previousErrorAction = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         try {
-            if ($Action -eq 'uninstall') {
-                $output = & $Candidate @Prefix -I -S -B -X utf8 `
-                    (Join-Path $PSScriptRoot 'uninstall-state.py') --probe-python $InstallDir 2>$null
-            } else {
-                $output = & $Candidate @Prefix -I -S -B -X utf8 -c `
-                    'import json,sys; sys.exit(1) if sys.version_info < (3, 10) else print(json.dumps(sys.executable, ensure_ascii=True))' 2>$null
-            }
+            $probeError = ''
+            $output = & $invokeAdmissionPython -Candidate $Candidate -ErrorOutput ([ref]$probeError) `
+                -Arguments (@($Prefix) + @('-I', '-S', '-B', '-X', 'utf8', '-c',
+                    $admissionProbe, [string]$minimumAdmissionMinor, $Action, $InstallDir, $Candidate))
             $code = $LASTEXITCODE
         } catch {
             return $null
@@ -246,7 +276,7 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
         (($PSScriptRoot -replace '\\', '/') -notmatch '/\.copilot/installed-plugins/')) {
         $env:COPILOT_PLUGIN_STAGED_FROM
     } else { $admissionPayload }
-    if (-not $env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) {
+    if (-not $ContextualInstall -and -not $env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) {
         $env:COPILOT_PLUGIN_STAGED_FROM = $null
     }
     $admissionPython = $null
@@ -256,7 +286,7 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
         }
         $admissionPython = & $probeAdmissionPython -Candidate $BootstrapPython
         if (-not $admissionPython) {
-            throw 'The supplied bootstrap Python must be a working Python 3.10+ executable.'
+            throw "The supplied bootstrap Python must be a working $admissionRequirement executable outside removable uninstall content."
         }
     }
     $admissionLauncher = if (-not $admissionPython -and $Action -ne 'uninstall') {
@@ -269,7 +299,10 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
             $inventoryPreviousErrorAction = $ErrorActionPreference
             $ErrorActionPreference = 'Continue'
             try {
-                $inventory = @(& $admissionLauncher.Source -0 2>&1)
+                $inventoryError = ''
+                $inventoryOutput = & $invokeAdmissionPython -Candidate $admissionLauncher.Source `
+                    -Arguments @('-0') -ErrorOutput ([ref]$inventoryError)
+                $inventory = @($inventoryOutput, $inventoryError)
                 $inventoryCode = $LASTEXITCODE
             } catch {
                 $inventory = @()
@@ -304,7 +337,9 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
             $listingPreference = $ErrorActionPreference
             $ErrorActionPreference = 'Continue'
             try {
-                $listed = @(& $launcher.Source -0p 2>$null)
+                $listingError = ''
+                $listed = @(& $invokeAdmissionPython -Candidate $launcher.Source `
+                    -Arguments @('-0p') -ErrorOutput ([ref]$listingError))
                 $listingCode = $LASTEXITCODE
             } catch {
                 $listed = @()
@@ -321,44 +356,73 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
             if ($admissionPython) { break }
         }
     }
-    if (-not $admissionPython) { throw 'Attributable runtime admission requires an existing Python 3.10+ executable.' }
-    $admissionArgs = @(
-        '-I', '-S', '-B', '-X', 'utf8', (Join-Path $admissionPayload 'scripts\command_binding.py'),
-        '--payload-root', $admissionPayload, '--plugin-id', 'agent-worktrees',
-        '--legacy-root', $InstallDir, '--source-payload-root', $admissionSource,
-        '--project-root', $admissionProject
-    )
-    $admissionOperation = if ($Action -eq 'uninstall') { 'teardown' } else { 'publish' }
-    if ($env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) {
-        & $admissionPython @admissionArgs --check-lifecycle --lifecycle-operation $admissionOperation
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    } else {
-        $admissionForward = @()
-        foreach ($key in $PSBoundParameters.Keys) {
-            $value = $PSBoundParameters[$key]
-            if ($value -is [System.Management.Automation.SwitchParameter]) {
-                if ($value.IsPresent) { $admissionForward += "-$key" }
-            } else {
-                $admissionForward += "-$key"
-                $admissionForward += [string]$value
-            }
-        }
-        if ($Action -eq 'stamp') { $admissionArgs += '--deferred-runtime' }
-        elseif ($Action -eq 'uninstall') { $admissionArgs += '--teardown' }
-        if ($Action -in @('install', 'update')) {
-            $admissionArgs += @('--human-operation', $Action.ToLowerInvariant())
-        }
-        $admissionPreviousErrorAction = $ErrorActionPreference
+    if (-not $admissionPython) { throw "Attributable runtime admission requires an existing $admissionRequirement executable outside removable uninstall content." }
+    if ($nativeDriverRequired) {
+        $driverArguments = @(
+            '-I', '-S', '-B', '-X', 'utf8', (Join-Path $admissionPayload 'scripts\runtime_install_driver.py'),
+            '--payload', $admissionPayload, '--root', $InstallDir,
+            '--shell', (Get-Process -Id $PID).Path, '--action', $Action.ToLowerInvariant()
+        )
+        if ($ProjectName) { $driverArguments += @('--project-name', $ProjectName) }
+        if ($BootstrapPython) { $driverArguments += @('--bootstrap-python', $BootstrapPython) }
+        if ($Owner) { $driverArguments += @('--owner', $Owner) }
+        if ($Force) { $driverArguments += '--force' }
+        if ($ZeroDowntime) { $driverArguments += '--zero-downtime' }
+        if ($ProvisionMissingRuntime) { $driverArguments += '--provision-missing-runtime' }
+        if ($RemoveConfig) { $driverArguments += '--remove-config' }
+        $driverParticipant = $env:AGENT_WORKTREES_NATIVE_INSTALLATION -eq '1'
+        if ($driverParticipant) { $driverArguments += '--check-native' }
+        $driverPreviousErrorAction = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         try {
-            & $admissionPython @admissionArgs --run-lifecycle -- `
-                (Get-Process -Id $PID).Path -NoLogo -NoProfile -ExecutionPolicy Bypass `
-                -File $PSCommandPath @admissionForward
-            $admissionExitCode = $LASTEXITCODE
+            & $invokeAdmissionPython -Candidate $admissionPython -Arguments $driverArguments -StreamOutput
+            $driverExitCode = $LASTEXITCODE
         } finally {
-            $ErrorActionPreference = $admissionPreviousErrorAction
+            $ErrorActionPreference = $driverPreviousErrorAction
         }
-        exit $admissionExitCode
+        if (-not $driverParticipant -or $driverExitCode -ne 0) { exit $driverExitCode }
+    }
+    if (-not $ContextualInstall) {
+        $admissionArgs = @(
+            '-I', '-S', '-B', '-X', 'utf8', (Join-Path $admissionPayload 'scripts\command_binding.py'),
+            '--payload-root', $admissionPayload, '--plugin-id', 'agent-worktrees',
+            '--legacy-root', $InstallDir, '--source-payload-root', $admissionSource,
+            '--project-root', $admissionProject
+        )
+        $admissionOperation = if ($Action -eq 'uninstall') { 'teardown' } else { 'publish' }
+        if ($env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) {
+            & $invokeAdmissionPython -Candidate $admissionPython -StreamOutput -Arguments (
+                $admissionArgs + @('--check-lifecycle', '--lifecycle-operation', $admissionOperation))
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        } else {
+            $admissionForward = @()
+            foreach ($key in $PSBoundParameters.Keys) {
+                $value = $PSBoundParameters[$key]
+                if ($value -is [System.Management.Automation.SwitchParameter]) {
+                    if ($value.IsPresent) { $admissionForward += "-$key" }
+                } else {
+                    $admissionForward += "-$key"
+                    $admissionForward += [string]$value
+                }
+            }
+            if ($Action -eq 'stamp') { $admissionArgs += '--deferred-runtime' }
+            elseif ($Action -eq 'uninstall') { $admissionArgs += '--teardown' }
+            if ($Action -in @('install', 'update')) {
+                $admissionArgs += @('--human-operation', $Action.ToLowerInvariant())
+            }
+            $admissionPreviousErrorAction = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                & $invokeAdmissionPython -Candidate $admissionPython -StreamOutput -Arguments (
+                    $admissionArgs + @('--run-lifecycle', '--',
+                        (Get-Process -Id $PID).Path, '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+                        '-File', $PSCommandPath) + $admissionForward)
+                $admissionExitCode = $LASTEXITCODE
+            } finally {
+                $ErrorActionPreference = $admissionPreviousErrorAction
+            }
+            exit $admissionExitCode
+        }
     }
 }
 # === end command-lifecycle: admission before staging ===
@@ -771,6 +835,18 @@ if ($ContextualInstall) {
     }
 }
 
+function Invoke-NativeRuntimeRemoval {
+    param([switch]$Check)
+    $arguments = @($driverArguments | Where-Object { $_ -ne '--check-native' })
+    $arguments += if ($Check) { '--check-removal' } else { '--remove-runtime' }
+    $removalError = ''
+    $output = & $invokeAdmissionPython -Candidate $admissionPython -Arguments $arguments `
+        -ErrorOutput ([ref]$removalError)
+    if ($removalError) { [Console]::Error.Write($removalError) }
+    if ($LASTEXITCODE -ne 0) { throw 'Native Worktrees removal refused; see the owning request diagnostic.' }
+    return $output
+}
+
 if ($Action -eq 'uninstall') {
     $uninstallArgs = @('-I', '-S', '-B', '-X', 'utf8',
         (Join-Path $PSScriptRoot 'uninstall-state.py'),
@@ -781,7 +857,14 @@ if ($Action -eq 'uninstall') {
     if ($ProjectName -and $ProjectName -ne 'agent-worktrees') {
         $uninstallArgs += @('--project-name', $ProjectName)
     }
-    $uninstallPreflight = @(& $admissionPython @uninstallArgs --check --check-consumers)
+    if ($nativeDriverRequired) {
+        $uninstallPreflight = @(Invoke-NativeRuntimeRemoval -Check)
+    } else {
+        $uninstallError = ''
+        $uninstallPreflight = @(& $invokeAdmissionPython -Candidate $admissionPython -Arguments (
+            $uninstallArgs + @('--check', '--check-consumers')) -ErrorOutput ([ref]$uninstallError))
+        if ($uninstallError) { [Console]::Error.Write($uninstallError) }
+    }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $uninstallStatus = ($uninstallPreflight -join "`n") | ConvertFrom-Json -ErrorAction Stop
     if ($uninstallStatus.status -notin @('absent', 'ready')) {
@@ -4090,7 +4173,8 @@ function Remove-Binstub {
             } else {
                 $PluginDir
             }
-            & $VenvPython -m agent_worktrees reconcile-binstubs --remove $ProjectName
+            & $invokeAdmissionPython -Candidate $VenvPython -Arguments @(
+                '-m', 'agent_worktrees', 'reconcile-binstubs', '--remove', $ProjectName) -StreamOutput
             if ($LASTEXITCODE -ne 0) {
                 Write-ServiceWarn 'Project binstub preserved (ownership check failed)'
             }
@@ -4245,7 +4329,8 @@ if ($Action -ne 'uninstall') {
 }
 
 if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision', 'stamp', 'uninstall', 'repair', 'dev', 'dev-release', 'publish-runtime-helpers')) {
-    & $admissionPython @admissionArgs --check-lifecycle --lifecycle-operation $admissionOperation
+    & $invokeAdmissionPython -Candidate $admissionPython -StreamOutput -Arguments (
+        $admissionArgs + @('--check-lifecycle', '--lifecycle-operation', $admissionOperation))
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
@@ -4429,12 +4514,27 @@ switch ($Action) {
 
     'uninstall' {
         Write-ServiceHeader "Uninstalling $ServiceName"
-        & $admissionPython @uninstallArgs --check --check-consumers
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        if ($nativeDriverRequired) {
+            Invoke-NativeRuntimeRemoval -Check
+        } else {
+            foreach ($name in @('windows-launch-broker.json', 'windows-launch-broker.pending.json')) {
+                try {
+                    [IO.File]::GetAttributes((Join-Path $InstallDir $name)) | Out-Null
+                } catch [IO.FileNotFoundException] { continue
+                } catch [IO.DirectoryNotFoundException] { continue }
+                throw 'Contained uninstall cannot remove an adopted Windows runtime.'
+            }
+            & $invokeAdmissionPython -Candidate $admissionPython -Arguments (
+                $uninstallArgs + @('--check', '--check-consumers')) -StreamOutput
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        }
 
         if ($HasProject) {
-            $projectPython = @(& $admissionPython -I -S -B -X utf8 `
-                (Join-Path $ScriptDir 'uninstall-state.py') --project-python $InstallDir $ProjectName)
+            $projectPythonError = ''
+            $projectPython = @(& $invokeAdmissionPython -Candidate $admissionPython -Arguments @(
+                '-I', '-S', '-B', '-X', 'utf8', (Join-Path $ScriptDir 'uninstall-state.py'),
+                '--project-python', $InstallDir, $ProjectName) -ErrorOutput ([ref]$projectPythonError))
+            if ($projectPythonError) { [Console]::Error.Write($projectPythonError) }
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             $VenvPython = ($projectPython -join "`n") | ConvertFrom-Json -ErrorAction Stop
         }
@@ -4475,8 +4575,13 @@ switch ($Action) {
             Write-ServiceChanged "Removed shortcuts"
         }
 
-        & $admissionPython @uninstallArgs --remove-runtime
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        if ($nativeDriverRequired) {
+            Invoke-NativeRuntimeRemoval
+        } else {
+            & $invokeAdmissionPython -Candidate $admissionPython -Arguments (
+                $uninstallArgs + @('--remove-runtime')) -StreamOutput
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        }
         Write-ServiceChanged 'Removed finite owned runtime content'
 
         if ($RemoveConfig) {

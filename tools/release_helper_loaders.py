@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import ast
+import hashlib
+import sys
 from collections import Counter
 from pathlib import PurePosixPath
 
@@ -57,6 +59,27 @@ _DYNAMIC_NAMESPACE_ESCAPES = {
     for attribute in ("__dict__", "__getattribute__", "__getattr__")
 }
 _DIRECT_EXEC = "@direct-builtin-exec"
+# These installed-slot actors resolve product inputs, not repository helpers.
+# Pin the complete signature/body AST, including path and receipt validation;
+# changed actors require explicit requalification, never a path-only exception.
+_INSTALLED_ACTORS = {
+    "libs/agent-procutil/src/agent_procutil/windows_broker_cell.py": (
+        "validate", "cb3f5d340bbd1a1ec274a5f9dc076ed1bc535c876afb736bb33ae5ebaaf26d74",
+        ("importlib", "os", "stat", "sys", "Path"),
+    ),
+    "libs/agent-procutil/src/agent_procutil/windows_broker_retention.py": (
+        "runtime_component", "e27fd235b40ce6dec13f48d908df90b75d0e47f6d4ecf67e6323ceb793401dd1",
+        ("importlib", "stat", "Path"),
+    ),
+}
+
+
+def _actor_digest(function: ast.FunctionDef) -> str:
+    # Python 3.13 changed dump's empty-list default; fingerprints retain them.
+    options = {"show_empty": True} if sys.version_info >= (3, 13) else {}
+    signature = ast.dump(function.args, **options)
+    body = ast.dump(ast.Module(body=function.body, type_ignores=[]), **options)
+    return hashlib.sha256((signature + "\n" + body).encode("utf-8")).hexdigest()
 
 
 def _spelling(node: ast.AST) -> str:
@@ -99,6 +122,25 @@ class _Discovery:
         self.actor_adapter: ast.FunctionDef | None = None
         self.actor_supervisor: ast.FunctionDef | None = None
         self.actor_calls: set[ast.Call] = set()
+        self.installed_actor: ast.FunctionDef | None = None
+
+    def installed_runtime_boundary(self) -> None:
+        contract = _INSTALLED_ACTORS.get(self.relative)
+        if contract is None:
+            return
+        name, digest, _ = contract
+        definitions = [
+            node for node in ast.walk(self.tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            and node.name == name
+        ]
+        if (
+            len(definitions) != 1 or not isinstance(definitions[0], ast.FunctionDef)
+            or self.parents[definitions[0]] is not self.tree
+            or definitions[0].decorator_list or _actor_digest(definitions[0]) != digest
+        ):
+            self.fail(self.tree, "installed runtime actor signature or body changed")
+        self.installed_actor = definitions[0]
 
     def fail(self, node: ast.AST, reason: str):
         raise UnitEvidenceError(
@@ -402,6 +444,13 @@ class _Discovery:
                 self.fail(scope, "external runtime adapter imports are rebound")
             self.handled.update(node for node in nodes if isinstance(node, ast.Call))
             return
+        if scope is self.installed_actor:
+            for name in _INSTALLED_ACTORS[self.relative][2]:
+                expected = "pathlib.Path" if name == "Path" else name
+                if aliases.get(name) != expected:
+                    self.fail(scope, "installed runtime actor imports are rebound")
+            self.handled.update(node for node in nodes if isinstance(node, ast.Call))
+            return
         if scope is self.actor_supervisor:
             if writes["args"] != 1 or any(
                 isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del))
@@ -570,6 +619,7 @@ class _Discovery:
         ):
             self.fail(self.tree, "self-file identity is rebound")
         self.runtime_boundary()
+        self.installed_runtime_boundary()
         self.scope(self.tree, {})
         for node in ast.walk(self.tree):
             if isinstance(node, (ast.Name, ast.Attribute)) and isinstance(node.ctx, ast.Load):
@@ -584,8 +634,8 @@ def dynamic_loads(tree: ast.Module, relative: str) -> set[str]:
     """Return bounded file-loader edges without importing or executing source.
 
     Self-file Path expressions and the exact promotion adapter yield source
-    edges. The exact private Windows guardian seam admits two external runtime
-    actor loads, not repository edges. Tools-only dynamic import/executable
+    edges. The exact Windows guardian and installed-slot actor seams admit
+    external runtime loads, not repository edges. Tools-only dynamic import/executable
     aliases are refused; direct builtin exec remains the parent guard's
     registered build-input boundary. Unsupported provenance raises
     UnitEvidenceError rather than silently omitting an implementation edge.

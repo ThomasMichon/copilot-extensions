@@ -312,6 +312,19 @@ Windows runtime builds use the snapshot's own dependency-policy helper for
 both the library pre-installs and the selected package extras. This attributes
 the copied sources without widening the caller's trusted roots or relaxing
 dependency seasoning; a missing snapshot helper aborts the build.
+On Windows, `install`, `update`, and `provision` enter the finite native
+installation driver before staging. After immutable-slot completion, while its
+construction retention remains attached, they adopt the installation's finite
+launch broker before selecting the runtime or reconciling services.
+`-NoService` skips broker adoption as well as coordinator/supervisor setup.
+`status`, `start`, `stop`, and `stamp` do not provision a broker; ordinary durable
+launches require prior adoption. Owned uninstall removes the broker contract
+before deleting runtime content and fails closed if removal is refused;
+`uninstall -DryRun` remains a preview. Retained-runtime `restore` uses the same
+native driver with its exact record digest, holds the retained assembly's lease
+and adopts before selection. Its already-complete slot must contain the
+qualified broker dependencies and retained bootstrap helpers; an older
+helper-less assembly refuses rather than being rebuilt or retrofitted.
 Delayed same-version local stamps reject a superseded snapshot candidate before
 publishing markers or launchers. POSIX
 retains its owning-payload pointer. Global compatibility first use primarily fetches and runs the

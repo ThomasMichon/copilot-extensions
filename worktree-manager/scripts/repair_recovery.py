@@ -22,6 +22,7 @@ def recover(payload: Path, *, as_json: bool) -> int:
         "agent-update-driver": "update_driver",
         "agent-procutil": "agent_procutil",
         "agent-single-instance-lease": "single_instance_lease",
+        "agent-zdd": "zdd",
     }
     sources: dict[str, Path] = {}
     for package in packages:

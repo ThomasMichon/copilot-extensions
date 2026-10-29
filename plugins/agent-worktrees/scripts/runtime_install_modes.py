@@ -15,6 +15,7 @@ import runtime_install as lifecycle
 import tomllib
 
 
+@lifecycle.install_driver.owned
 def run(
     root: Path,
     plugin: Path,
@@ -117,7 +118,7 @@ def run(
                 argv.append("--recover-adopted-manager")
             if owner is not None:
                 argv.extend(["--owner", str(owner)])
-            environment = dict(os.environ)
+            environment = lifecycle.install_driver.child_environment()
             for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
                 environment.pop(name, None)
             environment["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -140,6 +141,7 @@ def run(
             return json.loads(result_path.read_text(encoding="utf-8"))
 
 
+@lifecycle.install_driver.owned
 def run_owned(
     root: Path,
     plugin: Path,

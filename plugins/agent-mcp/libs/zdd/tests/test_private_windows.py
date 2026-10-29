@@ -379,12 +379,13 @@ def test_partial_transfers_use_one_deadline() -> None:
         channel.close()
 
 
-def test_close_failure_still_releases_process() -> None:
+@pytest.mark.parametrize("failed_handle", [11, 12])
+def test_close_failure_preserves_failed_handle_and_releases_other(failed_handle) -> None:
     api = FakeIO()
 
     def close(handle: int | None) -> None:
         api.closed.append(handle)
-        if handle == 11:
+        if handle == failed_handle:
             win.refuse()
 
     api.close = close
@@ -392,6 +393,12 @@ def test_close_failure_still_releases_process() -> None:
     with pytest.raises(PrivateIPCError, match="^private-ipc-io-failed$"):
         channel.close()
     assert api.closed == [11, 12]
+    assert channel._pipe == (11 if failed_handle == 11 else None)
+    assert channel._process == (12 if failed_handle == 12 else None)
+    api.close = lambda handle: api.closed.append(handle) if handle is not None else None
+    channel.close()
+    assert api.closed == [11, 12, failed_handle]
+    assert channel._pipe is channel._process is None
 
 
 def _self_identity() -> PeerIdentity:

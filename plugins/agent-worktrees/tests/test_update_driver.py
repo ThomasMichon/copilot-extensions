@@ -21,11 +21,12 @@ def _args(**values):
 
 
 def _run_runtime_owned(monkeypatch, argv, environment):
-    from agent_procutil.owned_process import run_owned
 
     with monkeypatch.context() as selected:
         for key, value in environment.items():
             selected.setenv(key, value)
+        from agent_procutil.owned_process import run_owned
+
         return run_owned(list(argv), timeout=20)
 
 
@@ -378,9 +379,10 @@ def test_actual_queued_engine_keeps_each_scope_and_original_invocation(tmp_path,
                 logs = home / ".copilot-extensions" / "update-driver"
                 pytest.fail(f"worker timeout: {[p.read_text() for p in logs.glob('*.log')]}: {error}")
             assert result.returncode == 0, result.stderr
-            for request in update_driver.status():
-                assert request.state == "completed", request.error
-                assert request.exit_code == 0, request.log_path.read_text(encoding="utf-8")
+            rows = update_driver.status(root=home / ".copilot-extensions" / "update-driver")
+            assert rows and all(row.state == "completed" and row.exit_code == 0 for row in rows), [
+                (row.state, row.exit_code, row.error, row.log_path.read_text()) for row in rows
+            ]
     if windows is not None:
         assert windows.surfaced == {}, windows.surfaced
         assert windows.focus_changes == {}, windows.focus_changes

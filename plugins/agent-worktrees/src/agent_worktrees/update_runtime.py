@@ -625,7 +625,7 @@ def _run_engine_installer(
     else:
         run = _run_human_installer(
             argv, label="agent-worktrees", receipt_owned=True,
-            cwd=plugin_dir, env=env, deadline_s=timeout,
+            cwd=_invocation_update_context() or plugin_dir, env=env, deadline_s=timeout,
             target_version=(target_version or reconcile.payload_version(plugin_dir)) if runtime_root else None,
             receipt=lambda: reconcile.runtime_deployed_version("agent-worktrees", root=runtime_root),
         )

@@ -84,7 +84,8 @@ construction or installed readiness.
 
 Both canonical installers use the shared installer engine for uv acquisition,
 venv/package retries and deploy manifests. Native installs keep the versioned
-primary CLI base-only for both roles. A host installs `[store,server]` once,
+primary CLI base-only for both roles, plus the local `[native-installer]`
+execution-driver closure on Windows. A host installs `[store,server]` once,
 in its required slot-owned server sibling. Both the primary CLI and any required
 server sibling must pass isolated CLI `--help` probes before fresh or retained
 activation, in addition to host dependency/server-import checks.
@@ -92,6 +93,23 @@ Host search, indexing, workers
 and service starts execute in that complete runtime, preserving original
 arguments and exit codes. A missing host runtime is reported explicitly rather
 than falling back to a client environment.
+
+Explicit native Windows `install`/`update`/`provision` adopts the primary CLI
+installation's finite launch broker after retained slot completion and before
+selection or lifecycle callbacks. `-NoService`, contained tests and POSIX do not
+register it. A completed slot without retained runtime helpers is not modified:
+select a distinct fresh generation instead. Owning uninstall removes the primary
+broker before deleting runtimes. Start/ensure and daemon spawn never provision
+this prerequisite. Normal installer engine ensure and the user-mode
+`engine-update` restart use the active primary CLI to manage the separate durable
+engine. An engine-only installation cannot perform that user-mode restart until
+the primary runtime is explicitly installed; refusal occurs before stopping the
+engine and never auto-installs a manager. Engine interpreter selection remains
+engine-owned. The generated task/logon engine launcher uses the engine-local
+CLI only for foreground `engine run`: it waits on the engine rather than
+requesting a detached launch, so it needs no engine-local broker. Direct
+engine-interpreter `engine start` is not this supported management path and
+does not gain broker adoption from the primary runtime.
 
 The legacy `agent-index mcp` stdio adapter is an HTTP client, not part of the
 host's `[store,server]` profile. It requires the explicit `[stdio-mcp]` extra

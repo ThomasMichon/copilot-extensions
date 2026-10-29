@@ -168,6 +168,20 @@ done
 export AGENT_SSH_ACTION="$ACTION"
 export AGENT_SSH_DRY_RUN="$DRY_RUN"
 
+if [[ "$ACTION" == uninstall && "$DRY_RUN" != 1 && -z "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" ]]; then
+    INSTALL_DIR="${INSTALL_DIR:-$HOME/.agent-ssh}"
+    source "$SCRIPT_DIR/uninstall-runtime.sh"
+    teardown_python="$(_uninstall_python)" || exit 1
+    teardown_project="${COPILOT_PROJECT_DIR:-$PWD}"
+    export COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT="$teardown_project"
+    teardown_arguments=(uninstall --install-dir "$INSTALL_DIR")
+    [[ "$FORCE" != 1 ]] || teardown_arguments+=(--force)
+    exec "$teardown_python" -I -S -B -X utf8 "$SCRIPT_DIR/command_binding.py" \
+        --payload-root "$PLUGIN_DIR" --plugin-id agent-ssh --legacy-root "$INSTALL_DIR" \
+        --source-payload-root "$PLUGIN_DIR" --project-root "$teardown_project" \
+        --teardown --run-lifecycle -- "$BASH" "$SCRIPT_DIR/install.sh" "${teardown_arguments[@]}"
+fi
+
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
