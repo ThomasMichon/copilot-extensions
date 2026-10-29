@@ -601,6 +601,15 @@ jobs:
           --test-file tests/test_update_entry_sources.py
           --test-file tests/test_update_entry_windows.py
           --test-file tests/native/test_update_entry_local_git.py
+      - name: Qualify MCP fresh and incremental construction through native adapters
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
+        run: >-
+          python tools/run-plugin-tests.py agent-mcp --allow-explicit-tiers
+          --test-file tests/test_source_install_transactions.py
+          --test-file tests/test_source_build.py
+          --test-file tests/test_bootstrap_stamp_selection.py
+          --test-file tests/test_source_manifest_publication.py
+          -k "footprint_routes or test_source_build or post_repair or (test_actual_manifest_writer and agent-mcp)"
   update-diagnostics-windows:
     if: ${{ inputs.update_diagnostics }}
     name: Update diagnostic contracts (Windows)

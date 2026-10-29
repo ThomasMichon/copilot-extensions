@@ -94,6 +94,17 @@ plugin-root interpolation contract and may run before or independently of
 session command-catalog context. That surface cannot consume the payload-local
 argv until the host provides a plugin-root-capable MCP launcher contract.
 
+### Constructing a replacement
+
+Install/provision uses the maintained footprint to choose compatible incremental
+construction or a fresh immutable candidate through the existing installer
+transaction. Missing/corrupt reuse evidence does not require a separate repair
+flag: an occupied target is preserved and the constructor chooses a distinct
+replacement generation. The original source identity remains pinned. This is
+construction admission, not permission to clear unknown content or proof of
+old-process retirement. Existing cutover, command ownership and publication
+checks still apply.
+
 ### Removing a legacy runtime
 
 Run `scripts/init.ps1 uninstall [-InstallDir PATH]` on Windows or

@@ -399,6 +399,10 @@ reuse/admission behavior is not an exception to the fresh-default revision.
   adopter, including complete producer-tree omission controls and promotion-safe
   version normalization. This does not qualify effect retirement, the remaining
   manifest portfolio or assembled fresh/incremental installation.
+- [x] Qualify Main bootstrap transport independently of Manager/service runtime
+  source policy through the actual Linux and Windows global entry points, including
+  explicit transport overrides, broken incumbents and older explicit-source callers.
+  Complete target freezing, fresh construction and macOS qualification remain open.
 - [x] Review the execution-owner clarification and bounded implementation plan.
 - [ ] Implement fresh-default normal convergence and [explicit repair modes](execution-driver.md#normal-and-forcerepair-operation): central desired targets, same-target debounce, one active installer and bounded known-runtime retirement without stale-marker or missing-recognizer vetoes. Preserve the [same-boot recovery requirement](execution-driver.md#live-cutover-recovery-correction), older-record history and unrelated services/data; no extra repair flag for normal fresh fallback or host/kernel restart prerequisite.
 - [x] Implement durable requests, compatible pending-request coalescing and attributable read-only status/results.
@@ -1133,5 +1137,39 @@ front-door families and the POSIX equivalents rather than widening required PR
 CI. Native POSIX execution, review/merge and the parent's complete construction/
 retirement/survival gates remain uncredited until independently observed.
 No installed runtime, maintenance hold, service or protected process was changed.
+
+#9507 merged as `cf87d5c8e2559a72f2a413a69d417ea7f10d6676` after exact-head
+Copilot approval with no findings, all required checks and native workflow
+`40811339020` passed. The final unit packet passed 2,619 tests (12 deselected).
+Native entry-point families passed 109 controls on Linux (70 platform skips)
+and 80 on Windows (99 platform skips), including actual local-Git acquisition.
+The first native run exposed fixture-only context and default-encoding
+assumptions; explicit temporary working-directory and UTF-8 reads fixed them,
+and the complete workflow rerun passed on both platforms. A metadata-triggered
+required-check transition was awaited through the canonical PR watcher before
+the managed merge. This is merged source, not a running-system rollout.
+
+The next integration connects footprint reuse/no-match decisions to the existing
+canonical construction and execution owner, initially for one addressed installed
+owner. Missing reuse evidence must select fresh construction without discarding
+its finite reset inventory or requiring a separate repair command. Actual effect
+settlement, one-writer custody, durable/config/protected preservation and the
+remaining manifest portfolio retain their independent parent acceptance gates.
+
+The first construction integration now passes MCP's maintained footprint into
+the existing attached native constructor, inside its original installer
+transaction. No-match and occupied unusable targets select an absent immutable
+replacement generation without rewriting the incumbent; a compatible selected
+same-input replacement remains reusable. Source identity stays independent of
+the physical generation. Local regression qualification passed 127 tests,
+with three native-POSIX FIFO cases explicitly unqualified on Windows; lint,
+module-size and install-contract checks passed. The optional native
+update-diagnostics lane now includes the same constructor controls on Linux
+and Windows. The required local unit packet passed 2,619 tests (12 deselected)
+after refreshing only the changed runtime source fingerprint in its existing
+admission manifest; node inventory and effect restrictions are unchanged.
+Native execution, provider checks and review/merge remain pending.
+This is not effect-reset, corrupt command-ownership recovery,
+old-owner silence or complete fresh-install qualification.
 
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.

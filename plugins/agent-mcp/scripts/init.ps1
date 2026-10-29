@@ -426,7 +426,7 @@ function Invoke-VersionedSlotClean {
     Assert-SourceRuntime
     if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = Get-BootstrapPython
+    $py = Get-BootstrapPython -ExternalOnly
     if (-not $py) { throw 'Construction requires a bootstrap Python interpreter' }
     if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
         $constructionError = ''
@@ -439,7 +439,12 @@ function Invoke-VersionedSlotClean {
     }
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
-        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
+        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir) `
+        -Footprint (Join-Path $PSScriptRoot 'uninstall-profile.json') -Plugin 'agent-mcp'
+    $script:SrcVersion = $script:RuntimeConstructionSession.Version
+    $script:VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
+    $script:VenvPython = Join-Path $VenvDir $(if ($env:OS -eq 'Windows_NT') { 'Scripts\python.exe' } else { 'bin/python' })
+    $script:LinkDir = $VenvDir
     Assert-SourceRuntime
 }
 
@@ -1112,10 +1117,10 @@ $manifest = [ordered]@{
     }
     venv           = ($LinkDir -replace '\\', '/')
     runtime        = 'python'
+    runtime_version = $SrcVersion
 }
 if ($script:SourceRuntimeIdentity) {
     $fields = $script:SourceRuntimeIdentity | ConvertFrom-Json
-    $manifest.runtime_version = $fields.runtime_version
     $manifest.runtime_source = $fields.runtime_source
 }
 $tmp = "$manifestPath.tmp"

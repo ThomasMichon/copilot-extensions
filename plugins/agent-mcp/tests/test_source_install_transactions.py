@@ -65,15 +65,27 @@ def _function(plugin: str, name: str, language: str) -> str:
     )
     match = re.search(pattern, text)
     assert match, name
-    return match.group()
+    return match.group().replace("$PSScriptRoot", "$ScriptDir")
 
 
-def _payload(tmp_path: Path, plugin: str, *, source: bool = True) -> tuple[Path, str]:
+def _payload(
+    tmp_path: Path, plugin: str, *, source: bool = True, construction_diagnostics: bool = False,
+) -> tuple[Path, str]:
     payload = tmp_path / "payload with spaces"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
     for path in (ROOT / "plugins" / plugin / "scripts").glob("versioned_runtime*.py"):
         shutil.copyfile(path, scripts / path.name)
+    if plugin == "agent-mcp":
+        for name in ("installer_engine_footprint.py", "uninstall-profile.json", "runtime_launcher.py"):
+            shutil.copyfile(ROOT / "plugins" / plugin / "scripts" / name, scripts / name)
+    if construction_diagnostics:
+        helper = scripts / "versioned_runtime.py"
+        helper.write_text(helper.read_text(encoding="utf-8").replace(
+            "    except Exception as exc:\n        print(f\"versioned_runtime: {exc}\", file=sys.stderr)",
+            "    except Exception as exc:\n        import traceback\n        traceback.print_exc()\n"
+            "        print(f\"versioned_runtime: {exc}\", file=sys.stderr)",
+        ), encoding="utf-8")
     shutil.copyfile(
         ROOT / "plugins" / plugin / "scripts" / "versioned_runtime_native.ps1",
         scripts / "versioned_runtime_native.ps1",
@@ -242,6 +254,7 @@ $data | ConvertTo-Json | Set-Content -LiteralPath $path -Encoding UTF8
 function Mutate {{ {mutate} }}
 function Start-RuntimeConstruction {{
     Rec 'LOCK'
+    $script:RuntimeConstructionSession = [pscustomobject]@{{ Version = $SrcVersion }}
     if ('{boundary}' -eq 'lock' -or '{boundary}' -eq 'reuse') {{ Mutate }}
     return ('{boundary}' -eq 'reuse')
 }}
@@ -270,6 +283,7 @@ mutate() {{ {mutate}
 }}
 _runtime_construction_begin() {{
     rec LOCK
+    _RUNTIME_CONSTRUCTION_VERSION="$SRC_VERSION"
     if [[ '{boundary}' == lock || '{boundary}' == reuse ]]; then mutate; fi
     _RUNTIME_CONSTRUCTION_REUSE=0
 }}
@@ -345,7 +359,11 @@ def test_native_selection_reuse_and_noneditable_snapshot(
     script = _setup(tmp_path, payload, plugin, language)
     if language == "ps1":
         script += f"""
-function Start-RuntimeConstruction {{ Rec 'REUSE'; return $true }}
+function Start-RuntimeConstruction {{
+    Rec 'REUSE'
+    $script:RuntimeConstructionSession = [pscustomobject]@{{ Version = $SrcVersion }}
+    return $true
+}}
 function Complete-RuntimeConstruction {{ param($PayloadHash) Rec 'COMPLETE' }}
 $ServiceName = 'fixture'
 $LocalBin = Join-Path $InstallDir 'bin'
@@ -365,7 +383,11 @@ Invoke-Stamp
 """
     else:
         script += f"""
-_runtime_construction_begin() {{ rec REUSE; _RUNTIME_CONSTRUCTION_REUSE=1; }}
+_runtime_construction_begin() {{
+    rec REUSE
+    _RUNTIME_CONSTRUCTION_VERSION="$SRC_VERSION"
+    _RUNTIME_CONSTRUCTION_REUSE=1
+}}
 _initialize_source_runtime
 [[ "$SRC_VERSION" == '{selected}' && "$PACKAGE_VERSION" == '{VERSION}' ]]
 _versioned_slot_clean
@@ -381,6 +403,133 @@ _stamp_source_snapshot
     assert (snap / "node_modules/hashed.txt").is_file()
     assert 'editable' not in (snap / "pyproject.toml").read_text()
     assert (snap / "libs/local-lib/src/hashed.txt").is_file()
+
+
+@pytest.mark.parametrize("language", ["ps1", "sh"])
+@pytest.mark.parametrize("condition", [
+    "current", "missing-deployment", "corrupt-completion", "completion-fifo", "fallback-directory",
+    "occupied-fallback", "oversized-desired", "invalid-venv-desired", "invalid-path-desired",
+])
+def test_native_mcp_footprint_routes_actual_construction_without_old_receipt_permission(
+    tmp_path: Path, language: str, condition: str,
+) -> None:
+    if language == "sh" and os.name == "nt":
+        pytest.skip("POSIX FIFO construction requires a native POSIX Python, not Git Bash with Windows Python")
+    if condition == "completion-fifo" and not hasattr(os, "mkfifo"):
+        pytest.skip("FIFO completion evidence requires native POSIX")
+    payload, selected = _payload(tmp_path, "agent-mcp", construction_diagnostics=True)
+    script = _setup(tmp_path, payload, "agent-mcp", language)
+    root = tmp_path / "install"
+    damaged_desired = condition.endswith("-desired")
+    incumbent_version = (
+        "1.2.2" if damaged_desired or condition in {"fallback-directory", "occupied-fallback"}
+        else selected
+    )
+    incumbent = root / "versions" / incumbent_version
+    incumbent.mkdir(parents=True)
+    (incumbent / "incumbent-data").write_bytes(b"unchanged")
+    (root / "current-version").write_text(incumbent_version, encoding="utf-8")
+    if condition == "fallback-directory":
+        (root / "last-known-good").mkdir()
+    if condition == "occupied-fallback":
+        occupied = root / "versions" / selected
+        occupied.mkdir()
+        (occupied / "unfinished").write_bytes(b"keep")
+        (root / "last-known-good").write_text(selected, encoding="utf-8")
+    if condition != "missing-deployment":
+        (root / "deploy-manifest.json").write_text(
+            '{"schema_version":3,"service":"agent-mcp"}', encoding="utf-8",
+        )
+    completion = incumbent / ".install-complete.json"
+    if condition == "completion-fifo":
+        os.mkfifo(completion)
+    else:
+        completion.write_text(
+            "{" if condition == "corrupt-completion" else json.dumps({
+                "version": incumbent_version, "completed_at": "fixture", "pid": 1,
+                "payload_hash": "a" * 64,
+            }), encoding="utf-8",
+        )
+    if damaged_desired:
+        desired = root / "versions" / selected
+        desired.mkdir()
+        marker = desired / completion.name
+        marker.write_text(json.dumps({
+            "version": selected, "completed_at": "fixture", "pid": 1, "payload_hash": "a" * 64,
+        }), encoding="utf-8")
+        if condition == "oversized-desired":
+            with marker.open("ab") as stream:
+                stream.write(b" " * 65537)
+        elif condition == "invalid-venv-desired":
+            (desired / "pyvenv.cfg").write_bytes(b"\xff")
+        else:
+            site = desired / "Lib" / "site-packages"
+            site.mkdir(parents=True)
+            (site / "invalid.pth").write_bytes(b"\xff")
+    before = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    if language == "ps1":
+        script += """
+function Get-PayloadHash { return ('a' * 64) }
+Initialize-SourceRuntime
+try {
+    [void](Invoke-VersionedSlotClean)
+    $chosen = $SrcVersion
+    [void](Invoke-VersionedSlotClean)
+    if ($chosen -ne $SrcVersion) { throw 'construction was planned twice' }
+    Assert-SourceRuntime
+    if (-not $script:RuntimeConstructionReuse) {
+        Set-Content -LiteralPath (Join-Path $VenvDir 'constructed') -Value 'new'
+        [void](Invoke-VersionedMarkComplete)
+    }
+    [IO.File]::WriteAllText((Join-Path $InstallDir 'chosen-version'), $SrcVersion)
+    [IO.File]::WriteAllText((Join-Path $InstallDir 'construction-mode'),
+        $script:RuntimeConstructionSession.Construction)
+} finally {
+    if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {
+        $pending = $script:RuntimeConstructionSession
+        try { Stop-RuntimeConstruction } catch {
+            if ($pending -and $pending.Errors.IsCompleted) {
+                [Console]::Error.WriteLine($pending.Errors.Result)
+            }
+            throw
+        }
+    }
+}
+"""
+    else:
+        script += """
+_payload_hash() { printf '%064d\\n' 0 | tr 0 a; }
+_initialize_source_runtime
+_versioned_slot_clean
+chosen="$SRC_VERSION"
+_versioned_slot_clean
+[[ "$chosen" == "$SRC_VERSION" ]]
+_assert_source_runtime
+if [[ "$_RUNTIME_CONSTRUCTION_REUSE" != 1 ]]; then
+    printf new > "$VENV_DIR/constructed"
+    _versioned_mark_complete
+fi
+printf '%s' "$SRC_VERSION" > "$INSTALL_DIR/chosen-version"
+printf '%s' "$_RUNTIME_CONSTRUCTION_MODE" > "$INSTALL_DIR/construction-mode"
+_runtime_construction_finish
+"""
+    result = _run(tmp_path, language, script)
+    assert result.returncode == 0, result.stdout + result.stderr
+    version = (root / "chosen-version").read_text(encoding="utf-8")
+    mode = (root / "construction-mode").read_text(encoding="utf-8")
+    if condition in {"current", "fallback-directory"}:
+        assert version == selected and mode == "incremental"
+    else:
+        assert version.startswith(selected + ".repair.") and mode == "fresh"
+        candidate = root / "versions" / version
+        assert (candidate / "constructed").is_file()
+        assert json.loads((candidate / ".install-complete.json").read_text())["version"] == version
+    assert {name: (root / name).read_bytes() for name in before} == before
+    if condition == "completion-fifo":
+        assert completion.is_fifo()
+    if condition == "fallback-directory":
+        assert (root / "last-known-good").is_dir()
+        assert (root / "versions" / selected / "constructed").is_file()
 
 
 @pytest.mark.parametrize("plugin", PLUGINS)
@@ -471,6 +620,7 @@ def test_codespaces_native_preinstall_accepts_noneditable_local_sources(
         variables = (
             "SshMgrDir", "CredRelayDir", "CfgMigrateDir", "ZddDir", "VenueCopilotDir",
             "SessionLivenessProbeDir", "SingleInstanceLeaseDir", "RemoteLoginShellDir",
+            "UpdateDriverDir",
         )
         script += "\n".join(
             f"${name} = Join-Path $PluginDir 'libs/local-lib'" for name in variables
@@ -500,6 +650,7 @@ Assert-SourceRuntime
             "SSH_MGR_DIR", "CRED_RELAY_DIR", "CFG_MIGRATE_DIR", "ZDD_DIR",
             "VENUE_COPILOT_DIR", "SESSION_LIVENESS_PROBE_DIR", "SINGLE_INSTANCE_LEASE_DIR",
             "REMOTE_LOGIN_SHELL_DIR",
+            "UPDATE_DRIVER_DIR",
         )
         script += "\n".join(f'{name}="$PLUGIN_DIR/libs/local-lib"' for name in variables)
         script += f"""
@@ -524,11 +675,11 @@ _assert_source_runtime
     assert [arguments[index + 1] for index in indices] == [
         "agent-ssh-manager", "agent-credential-relay", "agent-config-migrate", "agent-zdd",
         "agent-venue-copilot", "agent-session-liveness-probe", "agent-single-instance-lease",
-        "agent-remote-login-shell", "agent-codespaces",
+        "agent-remote-login-shell", "agent-update-driver", "agent-codespaces",
     ]
     assert [_quote(arguments[index + 2], language)[1:-1] for index in indices] == [
         _quote(payload / "libs/local-lib", language)[1:-1],
-    ] * 8 + [_quote(payload, language)[1:-1]]
+    ] * 9 + [_quote(payload, language)[1:-1]]
 
 
 @pytest.mark.parametrize("language", ["ps1", "sh"])

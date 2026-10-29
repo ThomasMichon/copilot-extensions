@@ -1,15 +1,17 @@
-"""Operational identity of an installed source-qualified runtime."""
+"""Operational identity of an installed source-qualified or repaired runtime."""
 from __future__ import annotations
 
 import re
 import sys
 from pathlib import Path
 
+_PACKAGE_VERSION = r"\d+\.\d+\.\d+(?:[.-]dev\d+)?(?:\+[A-Za-z0-9][A-Za-z0-9._-]*)?"
 _SOURCE_VERSION = re.compile(
-    r"(?P<package>\d+\.\d+\.\d+(?:[.-]dev\d+)?"
-    r"(?:\+[A-Za-z0-9][A-Za-z0-9._-]*)?)[.+]"
+    rf"(?P<package>{_PACKAGE_VERSION})[.+]"
     r"source\.(?:[0-9a-f]{40}|[0-9a-f]{64})\.[0-9a-f]{16}"
+    r"(?:\.repair\.[0-9a-f]{32})?"
 )
+_REPAIR_VERSION = re.compile(rf"(?P<package>{_PACKAGE_VERSION})[.+]repair\.[0-9a-f]{{32}}")
 
 
 def effective_runtime_version(
@@ -19,7 +21,7 @@ def effective_runtime_version(
     if candidate.parent.name != "versions" or "+" not in candidate.name:
         return package_version
     # Numeric hash components must retain their opaque leading zeroes.
-    match = _SOURCE_VERSION.fullmatch(candidate.name)
+    match = _SOURCE_VERSION.fullmatch(candidate.name) or _REPAIR_VERSION.fullmatch(candidate.name)
     if not match:
         return package_version
     package = package_version.lower().replace("-", ".").replace("_", ".")

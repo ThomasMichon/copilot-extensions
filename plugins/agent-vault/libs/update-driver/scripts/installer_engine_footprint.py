@@ -6,6 +6,7 @@ owners retain path, process, registration, publication and transaction custody.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Callable
 import hashlib
 import json
 import os
@@ -13,6 +14,7 @@ from pathlib import Path
 import re
 import stat
 from typing import Any
+import uuid
 
 
 SCHEMA = "copilot-extensions.installed-footprint"
@@ -43,6 +45,39 @@ class Recognition:
     @property
     def matched(self) -> bool:
         return self.recognizer is not None
+
+
+@dataclass(frozen=True)
+class ConstructionPlan:
+    version: str
+    mode: str
+    recognition: Recognition
+
+
+def plan_construction(
+    manifest: Manifest, root: Path, version: str, *,
+    admission: Callable[[Path, str], str],
+) -> ConstructionPlan:
+    """Choose reusable construction inputs, never cleanup or publication authority."""
+    if not isinstance(version, str) or not re.fullmatch(r"[0-9][A-Za-z0-9._+-]*", version):
+        raise FootprintError("Construction requires an immutable runtime version")
+    recognized = recognize(manifest, root)
+    if recognized.matched:
+        selected = _marker_text(root / "current-version").strip()
+        separator = "." if "+" in version else "+"
+        if re.fullmatch(re.escape(version + separator) + r"repair\.[0-9a-f]{32}", selected):
+            if admission(root, selected) == "reuse":
+                return ConstructionPlan(selected, "incremental", recognized)
+        decision = admission(root, version)
+        if decision == "reuse" or (
+            decision == "construct" and not os.path.lexists(root / "versions" / version)
+        ):
+            return ConstructionPlan(version, "incremental", recognized)
+    target = root / "versions" / version
+    if os.path.lexists(target):
+        separator = "." if "+" in version else "+"
+        version = f"{version}{separator}repair.{uuid.uuid4().hex}"
+    return ConstructionPlan(version, "fresh", recognized)
 
 
 def decode(text: str) -> Any:

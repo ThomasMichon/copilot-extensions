@@ -557,7 +557,7 @@ _enter_install_lock() {
 # === end install-transaction lock ===
 
 _bootstrap_python() {
-    if [[ -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
+    if [[ "${1:-}" != external && -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
     local candidate
     for candidate in python3 python; do
         if command -v "$candidate" >/dev/null 2>&1; then command -v "$candidate"; return 0; fi
@@ -679,14 +679,19 @@ _versioned_slot_clean() {
         printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
     }
     local vr="$SCRIPT_DIR/versioned_runtime.py" py helpers
-    py="$(_bootstrap_python)" || return 1
+    py="$(_bootstrap_python external)" || return 1
     [[ -n "$py" ]] || return 1
     if ! declare -F _runtime_construction_begin >/dev/null; then
         helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
         eval "$helpers"
     fi
     _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
-        "$(_payload_hash)" "$(basename "$LINK_DIR")" || return 1
+        "$(_payload_hash)" "$(basename "$LINK_DIR")" "" \
+        "$SCRIPT_DIR/uninstall-profile.json" agent-mcp || return 1
+    SRC_VERSION="$_RUNTIME_CONSTRUCTION_VERSION"
+    VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
+    VENV_PYTHON="$VENV_DIR/bin/python"
+    LINK_DIR="$VENV_DIR"
     _assert_source_runtime
 }
 
@@ -945,9 +950,11 @@ _source_kind() {
 # footprint (marketplace vs local) so deploys are auditable like the siblings.
 MANIFEST_PATH="$INSTALL_DIR/deploy-manifest.json"
 if [[ -z "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then _assert_source_runtime || exit 1; fi
-SOURCE_FIELDS=""
+SOURCE_FIELDS="\"runtime_version\": \"$SRC_VERSION\","
 if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
-    SOURCE_FIELDS="${SOURCE_RUNTIME_IDENTITY:1:${#SOURCE_RUNTIME_IDENTITY}-2},"
+    SOURCE_FIELDS="$("$VENV_PYTHON" -I -c 'import json,sys
+d=json.loads(sys.argv[1]); d["runtime_version"]=sys.argv[2]
+print(json.dumps(d)[1:-1] + ",")' "$SOURCE_RUNTIME_IDENTITY" "$SRC_VERSION")" || exit 1
 fi
 KIND="$(_source_kind "$SOURCE_MANIFEST_PATH")"
 if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then

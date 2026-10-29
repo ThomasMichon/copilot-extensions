@@ -292,18 +292,33 @@ profile_result={q('provider-exec' + chr(9) + runtime + chr(9) + native._quote(sl
 {_profile_mapping(language) if plugin == 'agent-containers' else ''}
 [[ "$VENV_DIR" == {q(slot)} ]]
 _assert_source_runtime
+VENV_PYTHON={q(sys.executable)}
 PAYLOAD_HASH="$({ '_payload_hash' if plugin in SHARED else "printf ''" })"
 """
 
 
-@pytest.mark.parametrize("plugin", PLUGINS)
+@pytest.mark.parametrize("plugin,repair", [(plugin, False) for plugin in PLUGINS] + [("agent-mcp", True)])
 @pytest.mark.parametrize("language", ["ps1", "sh"])
 def test_actual_manifest_writer_uses_precommit_source_facts(
-    tmp_path: Path, plugin: str, language: str,
+    tmp_path: Path, plugin: str, language: str, repair: bool,
 ) -> None:
     payload, fields = _payload(tmp_path, plugin)
     script = _setup(tmp_path, plugin, language, payload, fields)
     script += _prepare(plugin, language)
+    if repair:
+        suffix = ".repair." + "d" * 32
+        if language == "ps1":
+            script += (
+                f"\n$SrcVersion += '{suffix}'\n"
+                "$VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion\n"
+                "$LinkDir = $VenvDir\n"
+            )
+        else:
+            script += (
+                f'\nSRC_VERSION+="{suffix}"\n'
+                'VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"\n'
+                'LINK_DIR="$VENV_DIR"\n'
+            )
     if language == "ps1":
         selected_variable = "$profileResult.runtimeVersion" if plugin == "agent-containers" else "$SrcVersion"
         script += f"""
@@ -332,6 +347,8 @@ printf 'version = "9.9.9"' > "$PLUGIN_DIR/pyproject.toml"
     assert manifest["source"]["path"].replace("\\", "/") == owner.replace("\\", "/")
     assert manifest["source"]["kind"] == "local"
     expected = fields["runtime_version"]
+    if repair:
+        expected += suffix
     if plugin == "agent-containers":
         expected = native.IDENTITY.runtime_version(
             native.VERSION + "+provider-exec", "a" * 40, fields["runtime_source"]["assembly_hash"],
