@@ -55,6 +55,17 @@ placement is an explicit requirement; no option is a mandatory core dependency.
   credentials, organization policy or downstream coordination links.
 - **Activation:** Reviewed upstream code is not permission to enroll a live fleet,
   acquire capacity, change operator credentials or move an existing service.
+- **Retained Komodo substrate:** The [canonical substrate contract](komodo-substrate-lifecycle.md)
+  keeps #8860 under current campaign/deployment/adopter roles, the original
+  appointed `komodo_*` owner and existing operation/admission/node-journal,
+  client-release/installer, SSH/onboarding, credential/storage and workload
+  custodians. #9274 SDK source and #9338 fixed-profile source credit do not
+  complete actual official-image/adopter/Linux-runtime acceptance. The earlier
+  continuity SDK lane is not Manager/Core installation. No new implementer,
+  claim transfer, coordinator or competing workload writer is appointed.
+  Generic Taking is not a new ACK ceremony, and responsibility does not expire
+  by age. Normal reviewed delivery and full receiving readback precede any
+  separately supported source judgment.
 - **Logging slice:** `spinning-sprocket` owns Dispatch application diagnostics,
   local discovery and existing-owner idle maintenance under #8377. It does not
   modify #8370's installer-attempt capture or #6812's progress formatter.
@@ -423,6 +434,17 @@ Implementation sequencing below is **agent-recommended**:
 - [ ] Land truthful adoption, diagnostics and ownership docs; resolve or transfer
   every Plan and Validation Plan item before marking this effort Done.
 
+### Direct retained Komodo substrate acceptance
+
+- [ ] Directly retain and resolve every original/refined/inherited #8860 Plan
+  duty in [the canonical substrate contract](komodo-substrate-lifecycle.md#plan):
+  versioned adopter-owned selected references; independent actual first
+  installation and Core-unavailable recovery; preserving adoption and unchanged
+  repeat; health-gated update/failed candidate/data-compatible recovery; exact
+  native identities and UNKNOWN operation/resource responsibility. Preserve
+  delivered SDK/profile credit and every existing source appointment. This is
+  an **agent-recommended tracking amendment**, not a new runtime assignment.
+
 ## Validation Plan
 
 All entries are **agent-recommended implementation gates**.
@@ -481,6 +503,13 @@ All entries are **agent-recommended implementation gates**.
   without the manager; no new mandatory daemon or plugin merely for deployment.
 - [ ] Relevant tests, changefiles, documentation-impact review, automated review,
   real required CI and confirmed merges for each implementation slice.
+- [ ] Directly retain the COMPLETE matching [substrate Validation Plan](komodo-substrate-lifecycle.md#validation-plan)
+  for #8860 at its original evidence tier: actual selected official images and
+  authenticated Core/Periphery readiness, preserving existing identities/
+  credentials/database/volumes/workloads, unchanged rerun, compatible update/
+  candidate failure and independent recovery without a working Core. Source
+  fixtures, a count, SDK construction or old code slots alone do not prove
+  these native/adopter outcomes.
 
 ## Proposal
 
@@ -491,6 +520,19 @@ Runtime package/API details belong to the implementation contract after review,
 not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
+
+### 2026-10-28 - Direct retained substrate acceptance
+
+- Incorporated complete #8860 substrate Plan AND Validation directly into this
+  ROOT, retaining the existing canonical sub-plan, Participants/Coordination
+  and every source/resource custodian. Original Request, checked credit and
+  first unresolved gates remain unchanged.
+- Retained #9274 host SDK and #9338 finite fixed-profile source credit without
+  repeating those repairs or calling them official-image/adopter acceptance.
+  No code, native run, provider operation, deployment, source appointment,
+  administrative supersession or claim/resource release is performed here.
+  Source-file interface coordination and exact-resource live authorization
+  remain specific to their owners, not new all-parent or generic ACK vetoes.
 
 - #9183 merged the concrete retained-admission/API proposal as
   `dda0771bf792f61ab0dfd01d042c965b3535d11b` after exact-head Copilot approval,

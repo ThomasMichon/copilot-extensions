@@ -2166,6 +2166,44 @@ The following outcomes remain independently tracked:
   supervision owners retain custody. No venue, mux, session or live selection
   is contacted or changed by this intake.
 
+### Direct retained adoption reporting from #4304
+
+**Agent-recommended tracking amendment.** Preserve the complete original and
+current refined contract, existing engine registration/auth/hook, setup/Manager
+and source/resource custodians. Already-delivered branch protection is credit,
+not proof that adoption reporting is complete.
+
+#### Plan
+
+- [ ] **P4304-1:** Retain explicit adoption-owned default/protected-branch guard
+  OR equivalent cooperative hygiene, configured branch precedence,
+  PR/direct-push/base/singleton/break-glass semantics and auth-scheme readiness.
+- [ ] **P4304-2:** Complete installed/skipped/error reporting in adoption
+  output/doctor diagnostics: nonempty installed names, policy-disabled and
+  empty-result skipped reasons, caught native/install errors and explicit
+  refusal/unsupported outcomes.
+- [ ] **P4304-3:** Preserve idempotent foreign-hook chaining/arguments/failure
+  behavior and independent machine-local install/update versus explicitly
+  authorized ownership-aware repository integration; no new security guarantee
+  or adoption action.
+
+#### Local Validation
+
+- [ ] **V4304-1:** Exercise actual reporting owner with synthetic installed,
+  policy-disabled, empty result, exception/refusal and doctor/readiness cases;
+  errors cannot become a success receipt.
+- [ ] **V4304-2:** Retain existing branch/policy/hook/chaining/idempotence
+  controls and ownership-aware integration boundary at original scope; not
+  whole #5852, whole Manager or all-host/native qualification.
+
+#### Continuing Coordination
+
+Keep all engine registration/auth/hook, setup/Manager and original
+source/resource custodians. This Active ROOT's normal reviewed complete Plan,
+local AND global Validation, Coordination and Journal plus actual receiving
+readback precede any separate #4304 supersession. This amendment transfers no
+claim, appoints no executor and grants no adoption, implementation or rollout.
+
 ## Validation Plan
 
 - [ ] G1: Resolve EVERY directly retained #4096 original
@@ -2284,12 +2322,26 @@ The following outcomes remain independently tracked:
   continuing Coordination clause above at its finite supported consumer tier,
   preserving selected identity, valid defaults and actual attachment owners.
 
+- [ ] **G4304:** Resolve every directly retained #4304 Plan and local Validation
+  row, preserving guard-OR-equivalent alternatives, exact reporting outcomes,
+  existing branch/hook/auth semantics and the independent installed-versus-
+  repository-integration boundary under the same custodians. Administrative
+  intake is not an adoption action, security guarantee, whole #5852/Manager
+  completion or new all-host/native qualification.
+
 Administrative intake is not implementation, native/installed acceptance,
 rollout or unrelated parent completion. Each case preserves its original
 alternatives, refusal/compatibility conditions and source/consumer/native/build
 tiers without imposing every-host or native-on-every-leaf requirements.
 
 ## Coordination
+
+The direct #4304 reporting contract continues through this SAME Active ROOT's
+Plan, local AND actual global Validation, Journal and existing open bounded-
+source process under the incumbent engine/hook/auth/setup/Manager and resource
+owners. No tracker closure releases custody; any later administrative judgment
+requires actual reviewed delivery and full current receiving readback without
+changing literal source-specific holds or inventing a generic ACK gate.
 
 The direct retained #4096/#4098 acceptance continues through this SAME existing Active
 ROOT's Plan, own and actual global Validation, and Journal under the incumbent domain,
@@ -2384,6 +2436,18 @@ No product, native, credential, host, process, service or resource operation
 is authorized by tracker consolidation.
 
 ## Journal
+
+### 2026-10-28 - Direct retained adoption reporting
+
+- Added the complete #4304 reporting remainder directly to this existing
+  ROOT's Plan/local Validation, actual global Validation and continuing
+  Coordination, preserving original Request, status, participants, checked
+  credit and first unchecked gates.
+- Retained delivered branch/hook controls, guard OR equivalent hygiene,
+  installed/skipped/error/refusal reporting and ownership-aware integration
+  under the same source/resource custodians. This amendment performs no
+  adoption, native operation, implementation, claim release or source
+  disposition. Actual reviewed delivery/readback precede a separate judgment.
 
 ### 2026-10-25 - Installation and Updates bounded source delivered
 
