@@ -275,8 +275,8 @@ is read-only and refuses existing publication locks. Repair revalidates the
 exact manifest bytes, source and scope under the existing publication lock;
 it never borrows a live lease or recovers stale/foreign lock custody.
 Missing or foreign provenance, another payload/root/environment, already-bound
-ownership, completed or malformed reservations, namespaced policy and managed
-publication refusals remain protected.
+ownership, completed or malformed reservations, inherited context from another
+marketplace, namespaced policy and managed publication refusals remain protected.
 
 Repair replaces only the exact pending unattributed owner with the verified
 source-qualified owner. Other manifest fields and runtime/configuration files

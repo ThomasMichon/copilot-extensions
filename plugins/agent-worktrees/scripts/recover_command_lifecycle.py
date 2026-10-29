@@ -44,6 +44,10 @@ def _inspect(primitive: Any, arguments: dict[str, Any]) -> tuple[dict[str, Any],
         or Path(mode["runtimeRoot"]).resolve() != root.resolve()
     ):
         raise binding.CommandOwnershipConflict("Recovery requires admitted legacy installation policy.")
+    if mode["marketplaceId"] != provenance["marketplaceId"]:
+        raise binding.CommandOwnershipConflict(
+            "Recovery installation marketplace does not match resolved provenance."
+        )
     lifecycle = binding._load_lifecycle()
     lifecycle._publication(binding._rules(), primitive, arguments, lifecycle._purpose(binding._rules(), {}))
     old_owner = {

@@ -157,6 +157,26 @@ def test_enabled_installation_policy_refuses_legacy_recovery(interrupted):
     assert path.read_bytes() == before
 
 
+@pytest.mark.parametrize("repair", [False, True])
+def test_inherited_marketplace_mismatch_preserves_reservation(interrupted, monkeypatch, repair):
+    arguments, path = interrupted
+    plan = recovery.recover(primitive, **arguments)
+    resolve_mode = primitive.resolve_installation_mode
+
+    def other_marketplace(**kwargs):
+        return {**resolve_mode(**kwargs), "marketplaceId": "other--0123456789abcdef"}
+
+    monkeypatch.setattr(primitive, "resolve_installation_mode", other_marketplace)
+    before = path.read_bytes()
+    with pytest.raises(binding.CommandOwnershipConflict, match="marketplace.*provenance"):
+        recovery.recover(
+            primitive, **arguments,
+            expected_evidence=plan["expectedEvidence"] if repair else None,
+        )
+    assert path.read_bytes() == before
+    assert not binding._load_lifecycle()._lock(primitive, arguments).path.exists()
+
+
 def test_live_publication_lock_is_not_borrowed_or_removed(interrupted):
     arguments, path = interrupted
     plan = recovery.recover(primitive, **arguments)
