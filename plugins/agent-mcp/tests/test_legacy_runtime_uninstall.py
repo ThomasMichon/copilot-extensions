@@ -908,7 +908,11 @@ def test_bom_manifest_provenance_fallback(
         raise binding.SourceProvenanceUnavailable("fixture provenance unavailable")
 
     monkeypatch.setattr(binding, "publish_legacy_binding", unavailable)
-    monkeypatch.setattr(helper, "_load", lambda *args: binding)
+    original_load = helper._load
+    monkeypatch.setattr(
+        helper, "_load",
+        lambda name, filename: binding if filename == "command_binding.py" else original_load(name, filename),
+    )
     before = manifest.read_bytes()
     assert before.startswith(b"\xef\xbb\xbf")
     if lifecycle:
