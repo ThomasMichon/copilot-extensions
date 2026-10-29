@@ -14,6 +14,8 @@ the pin on the raised error's `process` attribute for the caller's cleanup.
 It never discovers targets, authorizes an update, signals a group, or replaces
 the caller's lifecycle/critical-connectivity policy. Other platforms refuse
 external pinning rather than falling back to numeric PID kills.
+Linux pause confirmation requires every thread in a stable task-group snapshot
+to be stopped; a stopped leader alone does not freeze a multithreaded parent.
 
 For an installer that can be killed while its incumbents are paused, use
 `agent_procutil.retirement_custody.RetirementCustody(root)` from the

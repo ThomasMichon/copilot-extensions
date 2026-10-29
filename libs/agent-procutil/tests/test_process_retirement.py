@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -20,8 +21,10 @@ def test_pause_rollback_and_confirmed_exit(tmp_path):
     progress = tmp_path / "progress"
     code = (
         "from pathlib import Path\n"
-        "import os,sys,time\n"
+        "import os,sys,time,threading\n"
         "p=Path(sys.argv[1])\n"
+        "for _ in range(4):\n"
+        " threading.Thread(target=lambda:time.sleep(60),daemon=True).start()\n"
         "print(os.getpid(),flush=True)\n"
         "while True:\n"
         " p.write_text(str(os.getpid())+':'+str(time.monotonic()))\n"
@@ -43,6 +46,13 @@ def test_pause_rollback_and_confirmed_exit(tmp_path):
             PinnedProcess(process.pid, identity + "1")
         with PinnedProcess(process.pid, identity) as pinned:
             pinned.pause()
+            if sys.platform.startswith("linux"):
+                tasks = list(Path(f"/proc/{process.pid}/task").iterdir())
+                assert len(tasks) >= 5
+                assert all(
+                    (task / "stat").read_text().rsplit(") ", 1)[1].split()[0]
+                    in {"T", "t"} for task in tasks
+                )
             before = progress.read_bytes()
             time.sleep(.05)
             assert progress.read_bytes() == before
@@ -74,3 +84,37 @@ def test_own_caller_cannot_be_pinned():
 def test_invalid_or_wrapping_pid_is_rejected_before_native_access(pid):
     with pytest.raises(ValueError, match="Invalid native process PID"):
         PinnedProcess(pid, "not a process authority")
+
+
+def test_linux_stopped_leader_does_not_prove_worker_threads_stopped(tmp_path):
+    from agent_procutil.process_retirement import _linux_threads_stopped
+
+    for tid, state in ((1, "T"), (2, "R")):
+        task = tmp_path / "task" / str(tid)
+        task.mkdir(parents=True)
+        (task / "stat").write_text(f"{tid} (fixture) {state} 0", encoding="ascii")
+    assert not _linux_threads_stopped(tmp_path)
+    (tmp_path / "task" / "2" / "stat").write_text("2 (fixture) T 0", encoding="ascii")
+    assert _linux_threads_stopped(tmp_path)
+
+
+def test_linux_thread_membership_must_settle_before_pause_confirmation(tmp_path, monkeypatch):
+    from agent_procutil.process_retirement import _linux_threads_stopped
+
+    tasks = tmp_path / "task"
+    (tasks / "1").mkdir(parents=True)
+    (tasks / "1" / "stat").write_text("1 (fixture) T 0", encoding="ascii")
+    original = Path.iterdir
+    reads = 0
+
+    def iterdir(path):
+        nonlocal reads
+        if path == tasks:
+            reads += 1
+            if reads == 2:
+                (tasks / "2").mkdir()
+                (tasks / "2" / "stat").write_text("2 (late) R 0", encoding="ascii")
+        return original(path)
+
+    monkeypatch.setattr(Path, "iterdir", iterdir)
+    assert not _linux_threads_stopped(tmp_path)

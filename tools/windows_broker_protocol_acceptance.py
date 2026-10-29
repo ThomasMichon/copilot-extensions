@@ -20,7 +20,9 @@ from contextlib import contextmanager
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from windows_broker_fixture import admit, fixture_environment
+from windows_broker_fixture import (
+    admit, fixture_environment, mcp_candidate_seed, prepare_bootstrap,
+)
 
 
 def imports(package_root: Path) -> None:
@@ -104,11 +106,15 @@ def native_adoption_program(root: Path, generation: str, *, plugin: str) -> tupl
     helper = controller_root(root) / ".runtime-bootstrap" / "versioned_runtime.py"
     native = scripts / "versioned_runtime_native.ps1"
     script = helper.parent / f"{plugin}-adopt.ps1"
+    version, seed = (
+        mcp_candidate_seed(root, generation, sys.executable)
+        if plugin == "agent-mcp" else (generation, "")
+    )
     program = (
         "$ErrorActionPreference='Stop'\nSet-StrictMode -Version 2\n"
         + f". {quote(native)}\n"
         + "$VersionedRuntime=$true\n$NoService=$false\n"
-        + f"$InstallDir={quote(root)}\n$SrcVersion={quote(generation)}\n"
+        + f"$InstallDir={quote(root)}\n$SrcVersion={quote(version)}\n"
         + f"$VenvDir={quote(root / 'versions' / generation)}\n$LinkDir=$VenvDir\n"
         + "$VenvPython=Join-Path $VenvDir 'Scripts\\python.exe'\n"
         + f"$ScriptDir={quote(helper.parent)}\n"
@@ -119,6 +125,7 @@ def native_adoption_program(root: Path, generation: str, *, plugin: str) -> tupl
         + "\n".join(functions)
         + "\ntry {\n[void](Invoke-VersionedSlotClean"
         + (" -PayloadHash ('a'*64)" if plugin == "agent-bridge" else "") + ")\n"
+        + seed
         + "if (-not (Invoke-VersionedMarkComplete -PayloadHash ('a'*64))) { throw 'Fixture completion failed' }\n"
         + "Invoke-RuntimeBrokerAdoption\n"
         + "} finally {\n"
@@ -609,10 +616,7 @@ def inspect(root: Path) -> dict[str, object]:
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
         )
     bootstrap = controller_root(root) / ".runtime-bootstrap"
-    bootstrap.mkdir(parents=True)
-    for helper in (source / "libs" / "versioned-runtime").glob("versioned_runtime*.py"):
-        shutil.copyfile(helper, bootstrap / helper.name)
-    shutil.copyfile(source / "libs" / "installer-engine" / "runtime_launcher.py", bootstrap / "runtime_launcher.py")
+    prepare_bootstrap(bootstrap)
     runtime_source = bootstrap / "versioned_runtime.py"
     spec = importlib.util.spec_from_file_location("fixture_runtime_gc", runtime_source)
     if spec is None or spec.loader is None:

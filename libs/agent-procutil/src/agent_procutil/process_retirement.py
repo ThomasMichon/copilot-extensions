@@ -17,6 +17,20 @@ class RetirementRefused(RuntimeError):
     """The original process cannot be pinned, paused or observed exiting."""
 
 
+def _linux_threads_stopped(process: Path) -> bool:
+    try:
+        tasks = set((process / "task").iterdir())
+        if not tasks:
+            return False
+        for task in tasks:
+            stat = (task / "stat").read_text(encoding="ascii")
+            if stat[stat.rindex(")") + 2:].split()[0] not in {"T", "t"}:
+                return False
+        return tasks == set((process / "task").iterdir())
+    except FileNotFoundError:
+        return False
+
+
 class PinnedProcess:
     """Pin one original identity and pause it while its owner closes a tree.
 
@@ -119,8 +133,7 @@ class PinnedProcess:
         self._paused = True
         deadline = time.monotonic() + timeout
         while not self.exited():
-            observed = status.read_text(encoding="ascii")
-            if observed[observed.rindex(")") + 2:].split()[0] in {"T", "t"}:
+            if _linux_threads_stopped(status.parent):
                 return
             if time.monotonic() >= deadline:
                 raise RetirementRefused(f"Process pause was not observed (pid={self.pid})")

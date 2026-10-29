@@ -37,6 +37,29 @@ def test_native_adoption_program_uses_copied_helpers_lexical_root(tmp_path, plug
     assert "$NoService=$false" in program
     assert "function Test-SourceRuntimeUnchanged {}" in program
     assert not helpers.is_relative_to(root)
+    if plugin == "agent-mcp":
+        assert "$SrcVersion='1.0'" in program
+        assert program.index("Invoke-VersionedSlotClean)") < program.index("Fixture candidate seeding")
+        assert program.index("Fixture candidate seeding") < program.index("if (-not (Invoke-VersionedMarkComplete")
+        assert "venv.EnvBuilder(with_pip=False).create(target)" in program
+
+
+def test_copied_bootstrap_has_the_real_mcp_footprint_without_ambient_imports(tmp_path):
+    bootstrap = tmp_path / "bootstrap"
+    protocol_probe.prepare_bootstrap(bootstrap)
+    code = (
+        "import json,sys;from pathlib import Path;"
+        "sys.path.insert(0,sys.argv[1]);import installer_engine_footprint as f;"
+        "root=Path(sys.argv[1]);"
+        "manifest=f.parse(f.decode((root/'uninstall-profile.json').read_text()),'agent-mcp');"
+        "assert manifest.effects['legacy-runtime-processes']['disposition']=='retire'"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", code, str(bootstrap)],
+        capture_output=True, text=True, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_native_adoption_program_refuses_an_unknown_plugin_before_reading_sources(tmp_path):

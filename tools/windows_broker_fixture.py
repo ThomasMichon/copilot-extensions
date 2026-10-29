@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
 
@@ -31,3 +32,39 @@ def fixture_environment(source: dict[str, str], *, control: bool) -> dict[str, s
             "SYSTEMDRIVE", "OS", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS",
         })
     return {name: value for name, value in source.items() if name.upper() in allowed}
+
+
+def prepare_bootstrap(bootstrap: Path) -> None:
+    source = Path(__file__).resolve().parents[1]
+    bootstrap.mkdir(parents=True)
+    for helper in (source / "libs" / "versioned-runtime").glob("versioned_runtime*.py"):
+        shutil.copyfile(helper, bootstrap / helper.name)
+    from installer_engine_ref import SUPPORT_FILES
+
+    for name in SUPPORT_FILES:
+        shutil.copyfile(source / "libs" / "installer-engine" / name, bootstrap / name)
+    shutil.copyfile(
+        source / "plugins" / "agent-mcp" / "scripts" / "uninstall-profile.json",
+        bootstrap / "uninstall-profile.json",
+    )
+    shutil.copyfile(
+        source / "libs" / "installer-engine" / "runtime_launcher.py",
+        bootstrap / "runtime_launcher.py",
+    )
+
+
+def mcp_candidate_seed(root: Path, generation: str, python: str) -> tuple[str, str]:
+    quote = lambda value: "'" + str(value).replace("'", "''") + "'"
+    code = (
+        "import shutil,sys,venv;from pathlib import Path;"
+        "target=Path(sys.argv[1]);venv.EnvBuilder(with_pip=False).create(target);"
+        "shutil.copytree(sys.argv[2],target/'Lib'/'site-packages',dirs_exist_ok=True)"
+    )
+    seed = (
+        "$seedError=''\n"
+        + f"Invoke-Hidden -FilePath {quote(python)} -ArgList @('-I','-c',"
+        + f"{quote(code)},$VenvDir,{quote(root / 'versions' / generation / 'Lib' / 'site-packages')}) "
+        + "-ErrorOutput ([ref]$seedError) | Out-Null\n"
+        + "if ($LASTEXITCODE -ne 0) { throw ('Fixture candidate seeding failed: '+$seedError) }\n"
+    )
+    return {"first": "1.0", "replacement": "2.0"}[generation], seed
