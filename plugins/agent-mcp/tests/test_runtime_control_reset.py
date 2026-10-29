@@ -173,8 +173,6 @@ def test_routing_only_endpoint_is_probed_before_deletion(
     role: str,
     live: bool,
 ) -> None:
-    if not live and os.name == "nt":
-        pytest.skip("Windows closed loopback ports can time out instead of confirming refusal")
     path = tmp_path / "active.json"
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -195,6 +193,42 @@ def test_routing_only_endpoint_is_probed_before_deletion(
             assert path.read_bytes() == before
         else:
             listener.close()
+            _reset(tmp_path)
+            assert not path.exists()
+
+
+@pytest.mark.parametrize("occupied", [False, True])
+def test_windows_timeout_requires_exclusive_kernel_endpoint_absence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    occupied: bool,
+) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows exclusive TCP bind required")
+    path = tmp_path / "active.json"
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+        if occupied:
+            listener.listen()
+        else:
+            listener.close()
+        path.write_text(
+            json.dumps({"active": {"bind": "127.0.0.1", "port": port}}),
+            encoding="utf-8",
+        )
+        before = path.read_bytes()
+
+        def timeout(*_args: object) -> None:
+            raise TimeoutError("synthetic loopback connection timeout")
+
+        monkeypatch.setattr(socket.socket, "connect", timeout)
+        if occupied:
+            with pytest.raises(OSError):
+                _reset(tmp_path)
+            assert path.read_bytes() == before
+            assert listener.getsockopt(socket.SOL_SOCKET, socket.SO_ACCEPTCONN) == 1
+        else:
             _reset(tmp_path)
             assert not path.exists()
 

@@ -101,6 +101,13 @@ def _listening(address: str | tuple[str, int]) -> bool:
         try:
             stream.connect(address)
         except OSError as error:
+            if os.name == "nt" and isinstance(address, tuple) and isinstance(error, TimeoutError):
+                # Windows can time out on a closed loopback port. Exclusive
+                # bind proves absence without treating that timeout as death.
+                with socket.socket(family, socket.SOCK_STREAM) as probe:
+                    probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                    probe.bind(address)
+                return False
             if isinstance(error, (ConnectionRefusedError, FileNotFoundError)) or error.errno in {
                 errno.ECONNREFUSED,
                 errno.ENOENT,

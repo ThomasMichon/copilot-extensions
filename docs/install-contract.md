@@ -2582,6 +2582,9 @@ The control home follows the forwarder's `AGENT_MCP_SERVE_SOCKET` override or
 default socket-home selection, not the code-root argument. Active and previous
 routing-only endpoints must also be idle; non-socket control names require
 ordinary unshared files, never listening socket artifacts.
+On Windows, a loopback connection timeout alone is not evidence of death:
+reset additionally requires a successful exclusive bind to that endpoint.
+An occupied or unverified bind preserves the controls and reports failure.
 Global commands and the final deployment record publish only after reset
 succeeds, so interrupted integration cannot gain incremental recognition from
 the candidate completion marker alone. MCP remains on-demand afterward.
