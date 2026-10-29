@@ -231,7 +231,7 @@ def test_retained_runtime_reuses_slot_without_construction_completion_or_gc(
             "function Test-ActivationSupersededNow { return $false }",
             "function Deploy-SelfProvisioningBinstub { Write-Host binstub }",
             "function Write-Manifest { Write-Host manifest }",
-            "function Invoke-RuntimeBrokerAdoption { param([switch]$Retained); if (-not $Retained) { throw 'missing retained mode' }; Write-Host adopted }",
+            "function Invoke-RuntimeBrokerAdoption { throw 'UNEXPECTED broker adoption' }",
             # Native Python only executes the health import; provide a tiny module.
             f"$VenvPython='{tmp_path / 'python.cmd' if os.name == 'nt' else tmp_path / 'python'}'",
             ps_function("Install-RetainedRuntime"),

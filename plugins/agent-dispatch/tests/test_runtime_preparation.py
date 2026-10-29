@@ -317,7 +317,7 @@ def test_real_runtime_boundary_omits_collection_only_when_preserving(
     assert result.returncode == 0, result.stdout + result.stderr
     assert (root / "current-version").read_text().strip() == target.runtime_version
     if ext == "ps1":
-        assert broker_log.read_text().splitlines() == ["broker"]
+        assert not broker_log.exists(), "Native installation must not register a broker"
     if preserve:
         assert not log.exists()
     else:

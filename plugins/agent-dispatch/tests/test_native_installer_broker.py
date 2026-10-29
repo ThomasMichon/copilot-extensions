@@ -1,4 +1,4 @@
-"""Pure native-install contracts and inert, mocked PowerShell adoption probes."""
+"""Native completion, publication and legacy-removal contracts."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ SCRIPTS = PLUGIN / "scripts"
 SOURCE = (SCRIPTS / "install.ps1").read_text(encoding="utf-8")
 OPTIONS = {
     "NoService", "NoSupervisor", "Interactive", "Purge", "Force",
-    "RequireGracefulCutover", "ZeroDowntime", "DryRun",
+    "RequireGracefulCutover", "PreserveSupervisors", "ZeroDowntime", "DryRun",
 }
 PWSH = shutil.which("pwsh") or shutil.which("powershell")
 pytestmark = pytest.mark.guard
@@ -88,20 +88,20 @@ def test_dispatch_admission_precedes_staging_and_excludes_pure_actions():
         )[0]
 
 
-def test_dispatch_completion_adopts_before_selection_and_callbacks():
+def test_dispatch_completion_precedes_selection_without_broker_adoption():
     assert "-RetainHelpers" in _function("Invoke-VersionedMarkComplete")
     install = _function("Install-Runtime")
     complete = install.index("if (-not (Invoke-VersionedMarkComplete))")
-    adopt = install.index("Invoke-RuntimeBrokerAdoption", complete)
-    assert complete < adopt < install.index("Invoke-SupervisorAudit -Event runtime-ready")
-    assert adopt < install.index("if (-not (Invoke-VersionedActivate))")
+    assert complete < install.index("Invoke-SupervisorAudit -Event runtime-ready")
+    assert complete < install.index("if (-not (Invoke-VersionedActivate))")
+    assert "BrokerAdoption" not in SOURCE
     assert "Stop-RuntimeConstruction" in SOURCE
     uninstall = _function("Invoke-Uninstall")
     assert uninstall.index("--remove-broker") < uninstall.index("Invoke-SupervisorsStop")
     assert uninstall.index("--remove-broker") < uninstall.index("Remove-AllSupervisorTasks")
     assert "Owned runtime broker removal failed; runtimes preserved" in uninstall
     restore = _function("Install-RetainedRuntime")
-    assert restore.index("Invoke-RuntimeBrokerAdoption -Retained") < restore.index("Invoke-VersionedActivate")
+    assert restore.index("Retained runtime failed its health gate") < restore.index("Invoke-VersionedActivate")
     assert "-RetainedRuntimeSha256 $RetainedRuntimeSha256" in SOURCE
 
 
@@ -116,70 +116,11 @@ def test_dispatch_snapshot_and_runtime_include_execution_driver():
 
 
 @pytest.mark.skipif(PWSH is None, reason="PowerShell unavailable")
-@pytest.mark.parametrize("platform,contained,no_service", [
-    ("Linux", "", "$false"), ("Windows_NT", "1", "$false"),
-    ("Windows_NT", "", "$true"),
-])
-def test_dispatch_suppressed_adoption_never_invokes_adapter(platform, contained, no_service):
-    _probe(_function("Invoke-RuntimeBrokerAdoption") + f"""
-$env:OS='{platform}'
-$env:COPILOT_EXTENSIONS_TEST_CONTAINED='{contained}'
-$NoService={no_service}
-function Invoke-Hidden {{ throw 'unexpected broker call' }}
-Invoke-RuntimeBrokerAdoption
-""")
-
-
-@pytest.mark.skipif(PWSH is None, reason="PowerShell unavailable")
-@pytest.mark.parametrize("complete,exited", [
-    ("$false", "$false"), ("$true", "$true"),
-])
-def test_dispatch_adoption_refuses_unretained_runtime(complete, exited):
-    _probe(_function("Invoke-RuntimeBrokerAdoption") + f"""
-$env:OS='Windows_NT'
-$env:COPILOT_EXTENSIONS_TEST_CONTAINED=''
-$NoService=$false
-$script:RuntimeConstructionSession=@{{Complete={complete};Process=@{{HasExited={exited}}}}}
-function Invoke-Hidden {{ throw 'unexpected broker call' }}
-try {{ Invoke-RuntimeBrokerAdoption; throw 'missing refusal' }} catch {{
-    $expected='Broker adoption requires attached complete-slot retention'
-    if ($_.Exception.Message -ne $expected) {{ throw }}
-}}
-""")
-
-
-@pytest.mark.skipif(PWSH is None, reason="PowerShell unavailable")
-def test_dispatch_adoption_uses_exact_completed_slot_and_checks_receipt():
-    output = _probe(_function("Invoke-RuntimeBrokerAdoption") + """
-$env:OS='Windows_NT'
-$env:COPILOT_EXTENSIONS_TEST_CONTAINED=''
-$NoService=$false
-$InstallDir='C:\\fixture\\dispatch'
-$VenvDir='C:\\fixture\\dispatch\\versions\\1.2.3'
-$VenvPython='C:\\fixture\\dispatch\\versions\\1.2.3\\Scripts\\python.exe'
-$script:RuntimeConstructionSession=@{Complete=$true;Process=@{HasExited=$false}}
-function Invoke-Hidden {
-    param($FilePath,$ArgList,[ref]$ErrorOutput)
-    $script:Captured=@{python=$FilePath;argv=$ArgList}
-    $global:LASTEXITCODE=0
-    return '{"adopted":true}'
-}
-Invoke-RuntimeBrokerAdoption
-$script:Captured | ConvertTo-Json -Compress
-""")
-    call = json.loads(output)
-    assert call["python"] == r"C:\fixture\dispatch\versions\1.2.3\Scripts\python.exe"
-    assert call["argv"][:7] == [
-        "-I", "-m", "update_driver.windows_broker",
-        "--runtime-root", r"C:\fixture\dispatch", "--slot",
-        r"C:\fixture\dispatch\versions\1.2.3",
-    ]
-    assert call["argv"][7] == "--execution-root"
-
-
-@pytest.mark.skipif(PWSH is None, reason="PowerShell unavailable")
 def test_dispatch_uninstall_removal_failure_precedes_service_and_runtime_changes():
-    _probe(_function("Invoke-Uninstall") + """
+    tail = _function("Invoke-Uninstall").split(
+        "$ownedProcesses = @(Get-DispatchUninstallProcesses)", 1,
+    )[1]
+    _probe("function Invoke-Uninstall {\n" + tail + """
 $env:OS='Windows_NT'
 $env:COPILOT_EXTENSIONS_TEST_CONTAINED=''
 $DryRun=$false
@@ -197,33 +138,28 @@ try { Invoke-Uninstall; throw 'missing refusal' } catch {
 
 
 @pytest.mark.skipif(PWSH is None, reason="PowerShell unavailable")
-def test_dispatch_retained_adoption_failure_precedes_selection_and_publication():
-    _probe(_function("Install-RetainedRuntime") + _function("Invoke-RuntimeBrokerAdoption") + """
+def test_dispatch_retained_health_failure_precedes_selection_and_publication():
+    _probe(_function("Install-RetainedRuntime") + """
 $env:OS='Windows_NT'
 $env:COPILOT_EXTENSIONS_TEST_CONTAINED=''
 $NoService=$false
 $InstallDir='C:\\fixture\\dispatch'
 $VenvDir='C:\\fixture\\dispatch\\versions\\1.2.3'
 $VenvPython='Invoke-FakePython'
-function Invoke-FakePython { $global:LASTEXITCODE=0 }
-function Invoke-Hidden {
-    param($FilePath,$ArgList,[ref]$ErrorOutput)
-    $ErrorOutput.Value='retained bootstrap unavailable'
-    $global:LASTEXITCODE=9
-    return ''
-}
+function Invoke-FakePython { $global:LASTEXITCODE=9 }
+function Invoke-RuntimeBrokerAdoption { throw 'unexpected broker adoption' }
 function Enter-PluginSnapshotLock { throw 'unexpected selection/publication' }
 try { Install-RetainedRuntime; throw 'missing refusal' } catch {
-    if ($_.Exception.Message -cne 'Runtime broker adoption failed: retained bootstrap unavailable') { throw }
+    if ($_.Exception.Message -cne 'Retained runtime failed its health gate; not activating') { throw }
 }
 """)
 
 
 @pytest.mark.skipif(PWSH is None, reason="PowerShell unavailable")
 @pytest.mark.parametrize("action", ["install", "update", "provision"])
-def test_dispatch_reused_complete_slot_adopts_before_real_action_callbacks(action):
+def test_dispatch_reused_complete_slot_selects_without_adoption_before_real_action_callbacks(action):
     functions = "\n".join(_function(name) for name in (
-        "Install-Runtime", "Invoke-VersionedMarkComplete", "Invoke-RuntimeBrokerAdoption",
+        "Install-Runtime", "Invoke-VersionedMarkComplete",
         "Invoke-Install", "Invoke-Update",
     ))
     entry = "Invoke-Update" if action == "update" else "Invoke-Install"
@@ -249,6 +185,7 @@ $script:InstallerDependencyPolicy='fixture-policy'
 $script:GlobalActivationLockTimeoutSeconds=1
 $script:Events=[Collections.Generic.List[string]]::new()
 function Assert-SourceRuntime {}
+function Assert-DispatchActions {}
 function Resolve-DispatchBasePython { return $null }
 function Test-Path { return $true }
 function Get-Content { return '' }
@@ -283,13 +220,7 @@ function Complete-RuntimeConstruction {
     $script:RuntimeConstructionSession.Complete=$true
     $script:Events.Add('complete')
 }
-function Invoke-Hidden {
-    param($FilePath,$ArgList,[ref]$ErrorOutput)
-    if ($ArgList[2] -ne 'update_driver.windows_broker') { throw 'unexpected adapter' }
-    $script:Events.Add('adopt')
-    $global:LASTEXITCODE=0
-    return '{"adopted":true}'
-}
+function Invoke-RuntimeBrokerAdoption { throw 'unexpected broker adoption' }
 function Invoke-VersionedActivate { $script:Events.Add('select'); return $true }
 function Test-ActivationSupersededNow { return $false }
 function Deploy-SelfProvisioningBinstub { $script:Events.Add('publish') }
@@ -307,6 +238,6 @@ function Install-SupervisorTask { $script:Events.Add('supervisor') }
 function Confirm-CoordinatorRunning { $script:Events.Add('confirm') }
 """ + entry + "\n$script:Events | ConvertTo-Json -Compress")
     assert json.loads(output) == [
-        "reuse", "complete", "adopt", "select", "publish",
+        "reuse", "complete", "select", "publish",
         "coordinator", "supervisor", "confirm",
     ]

@@ -619,22 +619,6 @@ function Invoke-VersionedMarkComplete {
     return $true
 }
 
-function Invoke-RuntimeBrokerAdoption {
-    if ($NoService -or $env:OS -ne 'Windows_NT' -or
-        $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1') { return }
-    if (-not $script:RuntimeConstructionSession -or -not $script:RuntimeConstructionSession.Complete -or
-        $script:RuntimeConstructionSession.Process.HasExited) {
-        throw 'Broker adoption requires attached complete-slot retention'
-    }
-    $diagnostic = ''
-    $result = Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', '-m', 'update_driver.windows_broker',
-        '--runtime-root', $InstallDir, '--slot', $VenvDir,
-        '--execution-root', (Join-Path $env:USERPROFILE '.copilot-extensions\update-driver')) `
-        -ErrorOutput ([ref]$diagnostic)
-    if ($LASTEXITCODE -ne 0) { throw "Runtime broker adoption failed: $diagnostic" }
-    $receipt = $result | ConvertFrom-Json
-    if (-not $receipt -or $receipt.adopted -ne $true) { throw 'Runtime broker adoption returned no receipt' }
-}
 # === end install-contract:v4 marker/toss helpers ===
 
 function Get-SourceKind {
@@ -881,7 +865,6 @@ function Install-Runtime {
     [void](Invoke-VersionedSlotClean)
     if ($script:RuntimeConstructionReuse) {
         if (-not (Invoke-VersionedMarkComplete)) { throw 'Retained runtime completion failed' }
-        Invoke-RuntimeBrokerAdoption
         if ($script:SourceRuntimeIdentity) {
             if (-not (Test-RuntimeHealthy)) { throw 'Retained runtime slot failed its health gate; not activating' }
             Assert-SourceRuntime
@@ -978,7 +961,6 @@ function Install-Runtime {
     Assert-SourceRuntime
     if ($VersionedRuntime) {
         if (-not (Invoke-VersionedMarkComplete)) { exit 1 }
-        Invoke-RuntimeBrokerAdoption
         if (-not (Invoke-VersionedActivate)) { exit 1 }
     }
     # Binstub + manifest resolve through the stable `.venv` link ($LinkPython /
