@@ -439,6 +439,8 @@ def test_required_source_closure_covers_current_package_and_every_sdk_fragment()
     binding = sys.modules["sdk_visibility_sources"]
     package = ROOT / "libs/agent-procutil/src/agent_procutil"
     assert set(binding.PACKAGE_FILES) == {path.name for path in package.glob("*.py")}
+    assert binding.PACKAGE_RESOURCES == ("windows_broker_task.ps1",)
+    assert all((package / name).is_file() for name in binding.PACKAGE_RESOURCES)
     syntax = ast.parse((ROOT / "libs/installation-context/installation_context.py").read_text())
     assignment = next(
         node for node in syntax.body
@@ -450,6 +452,9 @@ def test_required_source_closure_covers_current_package_and_every_sdk_fragment()
         "libs/installation-context/" + name for name in ast.literal_eval(assignment.value)
     }
     expected.add("libs/installation-context/shell-caller-owned.ps1")
+    expected.update(
+        "libs/agent-procutil/src/agent_procutil/" + name for name in binding.PACKAGE_RESOURCES
+    )
     assert expected <= set(binding.SDK_FILES)
     binding.require_sdk_sources(
         ROOT, [{"path": str(ROOT / name)} for name in binding.SDK_FILES],

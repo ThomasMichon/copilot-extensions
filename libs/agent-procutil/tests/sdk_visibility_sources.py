@@ -18,8 +18,12 @@ PACKAGE_FILES = (
     "_linux_pidfd.py", "_shell_caller_owned.py", "_windows_caller_owned.py",
     "_windows_parent_job.py", "daemon.py", "daemon_broker.py", "daemon_instances.py",
     "diagnostics.py", "interactive.py", "metrics.py", "metrics_accounting.py",
-    "native_child.py", "owned_process.py", "startup.py", "streaming.py", "wsl.py",
+    "native_child.py", "owned_process.py", "startup.py", "streaming.py",
+    "windows_broker_cell.py", "windows_broker_entry.py", "windows_broker_installation.py",
+    "windows_broker_native.py", "windows_broker_protocol.py", "windows_broker_retention.py",
+    "windows_task_broker.py", "wsl.py",
 )
+PACKAGE_RESOURCES = ("windows_broker_task.ps1",)
 FRAGMENT_FILES = (
     "base", "files", "source", "lock_recovery", "receipts", "snapshot",
     "runtime_slot_ownership", "runtime_slot_completion", "resolution", "guest_environment",
@@ -33,6 +37,7 @@ RUNNER_FILES = (
 SDK_FILES = (
     *(f"libs/agent-procutil/tests/{name}" for name in RUNNER_FILES),
     *(f"libs/agent-procutil/src/agent_procutil/{name}" for name in PACKAGE_FILES),
+    *(f"libs/agent-procutil/src/agent_procutil/{name}" for name in PACKAGE_RESOURCES),
     *(f"libs/installation-context/_installation_context_{name}.py" for name in FRAGMENT_FILES),
     "libs/installation-context/installation_context.py",
     "libs/installation-context/installation-context.ps1",
