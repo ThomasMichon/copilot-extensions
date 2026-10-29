@@ -462,11 +462,11 @@ function Invoke-VersionedMarkComplete {
 function Invoke-RuntimeOwnerSettlement {
     if (-not $VersionedRuntime -or $script:RuntimeConstructionSession.Construction -ne 'fresh') { return }
     $arguments = @('-I', (Join-Path $PSScriptRoot 'reap_versions.py'), '--root', $InstallDir,
-        '--link-name', '.venv', '--fresh')
+        '--link-name', '.venv', '--fresh', '--reset-control')
     if ($env:AGENT_MCP_NO_VERSION_REAP) { $arguments += '--check-only' }
     Invoke-Hidden -FilePath $VenvPython -ArgList $arguments | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Fresh MCP replacement could not settle its old runtime owners' }
-    Write-Ok 'Old MCP runtime owners settled'
+    if ($LASTEXITCODE -ne 0) { throw 'Fresh MCP replacement could not settle its old runtime owners and control state' }
+    Write-Ok 'Old MCP runtime owners and control state settled'
 }
 
 function Invoke-RuntimeBrokerAdoption {
@@ -1025,7 +1025,7 @@ if ($VersionedRuntime) {
 # used bridge, so this uses much shorter install-appropriate defaults
 # (still overridable, e.g. for a host with slow-starting upstream MCP
 # servers) via AGENT_MCP_CUTOVER_HEALTH_TIMEOUT / AGENT_MCP_CUTOVER_DRAIN_TIMEOUT.
-if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_CUTOVER) {
+if ($VersionedRuntime -and $script:RuntimeConstructionSession.Construction -ne 'fresh' -and -not $env:AGENT_MCP_NO_CUTOVER) {
     $cutoverHealthTimeout = if ($env:AGENT_MCP_CUTOVER_HEALTH_TIMEOUT) { $env:AGENT_MCP_CUTOVER_HEALTH_TIMEOUT } else { '15' }
     $cutoverDrainTimeout = if ($env:AGENT_MCP_CUTOVER_DRAIN_TIMEOUT) { $env:AGENT_MCP_CUTOVER_DRAIN_TIMEOUT } else { '30' }
     try {

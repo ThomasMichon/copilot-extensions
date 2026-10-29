@@ -105,6 +105,18 @@ construction admission, not permission to clear unknown content or proof of
 old-process retirement. Existing cutover, command ownership and publication
 checks still apply.
 
+On the fresh path, the installer skips ZDD, confirms displaced-process
+settlement and clears only declared disposable control state under the existing
+cutover, serve-instance and routing locks. The socket home can differ from the
+code root, including an explicit `AGENT_MCP_SERVE_SOCKET` override. Configuration,
+durable data, logs, unknown files and lock identities
+are preserved. A winning current daemon, live endpoint or uncertain passive
+owner makes reset incomplete without deleting its state. Deployment metadata
+is published only after reset and global-command publication; inconsistent
+deployment/current-generation evidence selects fresh construction on retry.
+MCP remains on-demand. This control reset does not collect old code slots or
+by itself prove that every old reactivation route has been retired.
+
 ### Removing a legacy runtime
 
 Run `scripts/init.ps1 uninstall [-InstallDir PATH]` on Windows or

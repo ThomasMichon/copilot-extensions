@@ -74,7 +74,12 @@ def plan_construction(
         ):
             return ConstructionPlan(version, "incremental", recognized)
     target = root / "versions" / version
-    if os.path.lexists(target):
+    try:
+        deployment = decode(_marker_text(root / "deploy-manifest.json"))
+        recorded = isinstance(deployment, dict) and deployment.get("runtime_version") == version
+    except (OSError, ValueError):
+        recorded = False
+    if recorded or os.path.lexists(target):
         separator = "." if "+" in version else "+"
         version = f"{version}{separator}repair.{uuid.uuid4().hex}"
     return ConstructionPlan(version, "fresh", recognized)
@@ -298,6 +303,7 @@ def recognize(manifest: Manifest, root: Path, *, footprint_revision: int = 1) ->
         complete = decode(_marker_text(complete_path))
         if (not isinstance(deployment, dict) or deployment.get("service") != manifest.plugin
                 or type(deployment.get("schema_version")) is not int
+                or deployment.get("runtime_version") != selected
                 or not isinstance(complete, dict)
                 or set(complete) - {"version", "completed_at", "pid", "payload_hash"}
                 or complete.get("version") != selected

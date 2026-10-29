@@ -332,8 +332,79 @@ echo CONTINUED
         assert (result.returncode == 0) == (exit_code == 0), result.stdout + result.stderr
         arguments = json.loads(observed.read_text(encoding="utf-8"))
         assert "--fresh" in arguments
+        assert "--reset-control" in arguments
         assert ("--check-only" in arguments) is no_reap
         assert ("CONTINUED" in result.stdout) == (exit_code == 0)
+
+
+@pytest.mark.parametrize("language", ["ps1", "sh"])
+@pytest.mark.parametrize("socket_override", [False, True])
+def test_native_fresh_settlement_resets_the_actual_distinct_control_home(
+    tmp_path: Path, language: str, socket_override: bool,
+) -> None:
+    scripts = tmp_path / "payload/scripts"
+    scripts.mkdir(parents=True)
+    roots = [ROOT / "plugins/agent-mcp/src"] + [
+        ROOT / "libs" / name / "src"
+        for name in ("single-instance-lease", "zdd", "agent-procutil", "update-driver")
+    ]
+    real_script = ROOT / "plugins/agent-mcp/scripts/reap_versions.py"
+    (scripts / "reap_versions.py").write_text(
+        "import runpy,sys\n"
+        f"sys.path[:0] = {list(map(str, roots))!r}\n"
+        f"runpy.run_path({str(real_script)!r}, run_name='__main__')\n", encoding="utf-8",
+    )
+    root = tmp_path / "code"
+    (root / "versions/2.0").mkdir(parents=True)
+    (root / "current-version").write_text("2.0", encoding="utf-8")
+    home = tmp_path / "data"
+    home.mkdir()
+    control_home = tmp_path / "sockets" if socket_override else home
+    control_home.mkdir(exist_ok=True)
+    if socket_override:
+        (home / "active.json").write_bytes(b"not the socket home")
+    (control_home / "active.json").write_bytes(b"{")
+    (control_home / "serve.sock.endpoint").write_bytes(b"corrupt")
+    (home / "configuration.json").write_bytes(b"keep")
+    (root / "active.json").write_bytes(b"not the control home")
+    q = lambda value: _quote(value, language)
+    if language == "ps1":
+        script = f"""
+$ErrorActionPreference='Stop'
+$VersionedRuntime=$true
+$script:RuntimeConstructionSession=[pscustomobject]@{{Construction='fresh'}}
+$ScriptDir={q(scripts)}
+$InstallDir={q(root)}
+$VenvPython={q(sys.executable)}
+function Write-Ok($value) {{ }}
+function Invoke-Hidden {{ param($FilePath,$ArgList) & $FilePath @ArgList; $global:LASTEXITCODE=$LASTEXITCODE }}
+{_function('agent-mcp', 'Invoke-RuntimeOwnerSettlement', language)}
+Invoke-RuntimeOwnerSettlement
+"""
+    else:
+        script = f"""
+set -euo pipefail
+VERSIONED_RUNTIME=1
+_RUNTIME_CONSTRUCTION_MODE=fresh
+SCRIPT_DIR={q(scripts)}
+INSTALL_DIR={q(root)}
+VENV_PYTHON={q(sys.executable)}
+_ok() {{ :; }}
+_fail() {{ echo "$*" >&2; }}
+{_function('agent-mcp', '_settle_runtime_owners', language)}
+_settle_runtime_owners || exit 1
+"""
+    result = _run(tmp_path, language, script, environment={
+        **os.environ, "AGENT_MCP_HOME": str(home), "AGENT_MCP_NO_VERSION_REAP": "",
+        "AGENT_MCP_SERVE_SOCKET": str(control_home / "serve.sock") if socket_override else "",
+    })
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (control_home / "active.json").exists()
+    assert not (control_home / "serve.sock.endpoint").exists()
+    if socket_override:
+        assert (home / "active.json").read_bytes() == b"not the socket home"
+    assert (home / "configuration.json").read_bytes() == b"keep"
+    assert (root / "active.json").read_bytes() == b"not the control home"
 
 
 @pytest.mark.parametrize("shell_name", ["pwsh", "powershell"])
@@ -353,7 +424,9 @@ def test_native_owner_settlement_best_effort_failures_use_an_available_warning(
             response = "$global:LASTEXITCODE=1; return ''"
             warning = "Version-reap incomplete"
         else:
-            begin = text.index("if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_CUTOVER)")
+            cutover = re.search(r"(?m)^if \(\$VersionedRuntime .*AGENT_MCP_NO_CUTOVER\) \{", text)
+            assert cutover
+            begin = cutover.start()
             fragment = text[begin:text.index("# agent-mcp-specific (NOT part", begin)]
             response = """return '{"skipped":false,"ok":false,"error":"fixture failure"}'"""
             warning = "Cutover attempted"
@@ -362,6 +435,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference='Stop'
 $WarningPreference='Stop'
 $VersionedRuntime=$true
+$script:RuntimeConstructionSession=[pscustomobject]@{{Construction='incremental'}}
 $VenvPython='fixture-only-unused'
 $InstallDir={_quote(tmp_path, 'ps1')}
 $env:AGENT_MCP_NO_CUTOVER=''
@@ -592,7 +666,8 @@ def test_native_mcp_footprint_routes_actual_construction_without_old_receipt_per
         (root / "deploy-manifest.json").write_bytes(b"{")
     elif condition not in {"missing-deployment", "pending-missing-deployment"}:
         (root / "deploy-manifest.json").write_text(
-            '{"schema_version":3,"service":"agent-mcp"}', encoding="utf-8",
+            json.dumps({"schema_version": 3, "service": "agent-mcp",
+                        "runtime_version": incumbent_version}), encoding="utf-8",
         )
     completion = incumbent / ".install-complete.json"
     if condition == "completion-fifo":

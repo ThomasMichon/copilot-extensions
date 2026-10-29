@@ -154,10 +154,10 @@ its existing owner; neither source work nor publication disables that hold.
 - [x] Qualify the direct runtime boundary against all actual caller-owned
   cleanup Jobs, including bounded tools and the restrictive shared-outer
   negative. No blanket any-Job rejection or immediate-Job-only escape claim.
-- [ ] Exercise stopped-resident concurrent Manager recovery, preserve
+- [x] Exercise stopped-resident concurrent Manager recovery, preserve
   singleton/current-roster ownership, and land source through ordinary review,
   consumer changefiles and CI.
-- [ ] Record runtime release separately and return installed adoption to the
+- [x] Record runtime release separately and return installed adoption to the
   existing deployment owner; no shared-host registration or rollout is implied.
 
 The guidance-only #9530 reached Main through #9531 as
@@ -260,19 +260,19 @@ the requested coordinated-background behavior.
 
 ### Normal-process follow-up (#9522; agent-recommended)
 
-- [ ] Guidance surfaces agree on normal native creation, independent visibility
+- [x] Guidance surfaces agree on normal native creation, independent visibility
   and ownership choices, retained cleanup-Job proof and explicit unsupported
   external restrictions; no unsupported runtime delivery claim.
-- [ ] Runtime controls distinguish launcher-owned Job dependence from arbitrary
+- [x] Runtime controls distinguish launcher-owned Job dependence from arbitrary
   Job membership, retain bounded descendants and refuse unproven escape from a
   shared outer cleanup owner.
-- [ ] Disposable native Windows qualification proves direct creation, exact
+- [x] Disposable native Windows qualification proves direct creation, exact
   native child custody, survival after every fixture-owned caller Job closes,
   the shared-outer negative, bounded cleanup and headlessness without COM,
   Task registration, UAC or modified external Job limits.
-- [ ] Actual concurrent installed Manager readers recover a stopped resident and
+- [x] Actual concurrent installed Manager readers recover a stopped resident and
   obtain one current roster under the unchanged deadlines and election owner.
-- [ ] Shared portable regression, consumer materialization, release changefiles
+- [x] Shared portable regression, consumer materialization, release changefiles
   and required review/CI pass; source qualification is not shared-host rollout.
 
 All detailed scenarios below are **agent-recommended** acceptance checks.
@@ -311,6 +311,68 @@ worker is insufficient. Machine-local request/status/log data never enters
 repository history.
 
 ## Journal
+
+### 2026-10-29 - Verify legitimate normal-process runtime release
+
+Automatic promotion
+[40901961398](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40901961398)
+passed candidate composition, source units, first-party artifact construction
+and attestation, exact candidate reuse, immutable source publication/readback
+and non-administrator exact-head merge. Generated #9554 merged at 15:41:31 UTC
+as Main `74285132aef3f69ba75a139d11e55655486b8739`. Its promotion receipt
+names the actual #9542 Dev merge `5dc91c68a41b83524e431933985bf3be9a4869f4`.
+No manual Main merge, administrator release bypass, forced retry or parallel
+controller was used.
+
+Read-only Git object comparison confirms all 16 changed runtime source blobs
+are identical to the reviewed Dev source, along with 144 materialized
+`agent_procutil` copies. Released Worktrees is `1.24.349-dev1`, Manager is
+`0.6.206-dev1` and Bridge is `0.9.212-dev1`; all 16 affected consumers have
+their pipeline-stamped release versions. This verifies generated Main content,
+not ancestry of the original Dev commit.
+
+The normal-process source/release follow-up #9522 is complete. Installed
+adoption and promoted running-state acceptance remain with the existing launch
+driver under #7694 and #6859; this parent effort stays Active. The normal
+unified update requires that owner's separate authorization. No update,
+registration, service restart, updater replay or deployment-hold change was
+performed or authorized by this source session.
+
+### 2026-10-29 - Merge qualified normal-process runtime repair
+
+#9542 merged to Dev as `5dc91c68a41b83524e431933985bf3be9a4869f4`
+at 15:25:21 UTC through managed completion. Final-head review 5700238656
+approved `6bbab26ffb7b07a264aa2d0eeae0cd5be5d6a1ca` with no open
+issues; all four inline threads are resolved and required CI 40898700235
+passes. The Maintainer review-rule exception omits only the additional
+CODEOWNER vote, not review assessment or required checks.
+
+Runtime/test source `9977600e626cb4c7b7838c0747382ec74daba06c`
+passed all three jobs in native run
+[40895126840](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40895126840):
+20 native admission/cleanup controls plus three metrics controls, two actual
+first-use logging controls, four packaged-Bridge controls and both native
+PowerShell post-caller owned-work cycles. The actual cold Worktrees/Manager
+consumer passed two Python survival cycles, the restrictive shared-outer
+negative through a contained replacement-environment intermediate, and both
+concurrent stopped-resident current-roster cycles. Every caller Job closed
+before same-resident health checks and canonical shutdown. Handoff preceded
+installer release by 1.547 seconds. All three native serving-slot retention
+controls, 211 finite-removal cases and the POSIX packet pass; five
+finite-removal cases retain explicit platform skips. Deadlines are unchanged.
+Final head `6bbab26ffb` changes only the Bridge test-source fingerprint and
+its nonsemantic reason; no runtime, fixture, workflow or frozen evidence bytes
+changed after qualification.
+
+The shared library passed 884 controls with 181 platform/environment skips,
+the packaged Bridge passed four controls, and installation contracts,
+materialization, lint and contribution-scoped size checks pass. These are
+source and disposable-host proofs, not a shared-host rollout. Ordinary
+review and Dev merge are complete; legitimate Main promotion and exact
+released-source verification remain the next slice. The existing deployment
+owner retains installed adoption and running-state acceptance under #7694
+and #6859. No shared-host update, registration, restart or updater replay is
+authorized.
 
 ### 2026-10-29 - Prefer normal detached creation and correct guidance first
 
