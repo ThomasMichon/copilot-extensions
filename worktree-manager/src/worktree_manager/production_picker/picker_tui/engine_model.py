@@ -6,6 +6,7 @@ import time
 
 from . import derive
 from .engine_helpers import ACTIVE_SPECS, BUTTON_SETS, DISPO_MARK, LIST_SPECS, SPINNER
+from .source_read_notices import worktree_reload_pending
 
 class PickerScreenModelMixin:
     def button_set(self):
@@ -80,6 +81,8 @@ class PickerScreenModelMixin:
         if not ok:
             return "disabled"
         if self.live:
+            if worktree_reload_pending(self):
+                return "loading"
             loader = self.loader
             if loader is None:
                 return "loading"
@@ -91,21 +94,47 @@ class PickerScreenModelMixin:
             return "ready"
         return "ready" if (time.monotonic() - self.t0) >= self.load_delay[i] else "loading"
     def ready_envs(self):
+        from .source_read_notices import has_worktree_snapshot
+
         out = set()
         for i, (label, m, e, ok) in enumerate(self.machines):
             tab = self.source_tabs[i] if self.source_tabs else {}
             if (
                 label != "All"
                 and tab.get("source_kind") in (None, "machine-ssh")
-                and self.machine_state(i) == "ready"
+                and (
+                    self.machine_state(i) == "ready"
+                    or has_worktree_snapshot(self, i, self.machine_state(i))
+                )
             ):
                 out.add((m, e))
         return out
+    def _source_read_connected(self, index):
+        tab = self.source_tabs[index] if self.source_tabs else {}
+        status = getattr(self.loader, "read_status_for_source", None)
+        if not tab.get("source_id") or not callable(status):
+            return False
+        evidence = status(tab["source_id"])
+        return bool(evidence.get("error")) and evidence.get("failure_kind") == "content"
+    def _source_read_error(self, index):
+        if not self.live or self.loader is None:
+            return None
+        tab = self.source_tabs[index] if self.source_tabs else {}
+        if tab.get("source_id") and callable(getattr(self.loader, "error_for_source", None)):
+            return self.loader.error_for_source(tab["source_id"])
+        if callable(getattr(self.loader, "error", None)):
+            return self.loader.error(*self.machines[index][1:3])
+        return None
     def ready_source_ids(self):
+        from .source_read_notices import has_worktree_snapshot
+
         return {
             tab.get("source_id")
             for i, tab in enumerate(self.source_tabs)
-            if i and tab.get("source_id") and self.machine_state(i) == "ready"
+            if i and tab.get("source_id") and (
+                self.machine_state(i) == "ready"
+                or has_worktree_snapshot(self, i, self.machine_state(i))
+            )
         }
     def spin(self):
         return SPINNER[self.frame % len(SPINNER)]

@@ -1705,7 +1705,7 @@ def test_manual_reload_admission_failure_keeps_diagnostic(monkeypatch):
 
     assert screen._setup_failed_epoch == screen._setup_epoch == 1
     assert screen._setup_applied_epoch == 0
-    assert screen._busy_label == "Load failed"
+    assert screen._busy_label is None
     assert screen.debug == "setup-failed: configuration unavailable"
 
 

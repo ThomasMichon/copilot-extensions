@@ -278,7 +278,7 @@ def test_current_feed_loader_reconnect_resolves_new_generation_without_empty_ove
         expected = "going away: update" if graceful else "without a going-away notice"
         assert expected in loader.error_for_source(source.source_id)
         assert loader.records()[0]["id"] == "one"
-        assert loader.records()[0]["title"].startswith("[stale]")
+        assert loader.records()[0]["raw"]["_availability"]["status"] == "stale"
         wait_until(lambda: loader.records()[0]["id"] == "two")
         assert len(calls) == 2
         assert loader.records()[0]["raw"]["_projection"]["generation"] == "b" * 32

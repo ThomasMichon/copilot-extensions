@@ -11,9 +11,10 @@ from .worktree_observation_contract import (
 
 
 class FeedUnavailable(ValueError):
-    def __init__(self, message: str, *, retry: bool = True) -> None:
+    def __init__(self, message: str, *, retry: bool = True, connected: bool = False) -> None:
         super().__init__(message)
         self.retry = retry
+        self.connected = connected
 
 
 class CurrentFeed:
@@ -59,7 +60,9 @@ class CurrentFeed:
                 or "update the engine" in message
                 or "unrecognized arguments" in message
             )
-            raise FeedUnavailable(message, retry=not fatal and error.get("retry", True))
+            raise FeedUnavailable(
+                message, retry=not fatal and error.get("retry", True), connected=True,
+            )
         if kind == "going-away":
             generation, cursor = frame.get("generation"), frame.get("cursor")
             if (

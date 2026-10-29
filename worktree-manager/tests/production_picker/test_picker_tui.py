@@ -551,6 +551,9 @@ def test_setup_uses_one_source_snapshot_for_tabs_and_loader():
         def records(self):
             return []
 
+        def counts(self):
+            return (0, 1, 0)
+
     def source_snapshot():
         nonlocal snapshot_calls
         snapshot_calls += 1
@@ -2667,6 +2670,7 @@ def test_embody_cli_internal_action_reports_transaction_failure(monkeypatch, res
     from worktree_manager.production_picker.picker_tui import engine_worktree_actions
     from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
 
+    monkeypatch.setattr(PickerScreen, "_prewarm_machine_key_map", lambda self: None)
     src = _fixture_source()
 
     async def run():

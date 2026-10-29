@@ -16,6 +16,13 @@ IDLE_TIMEOUT = 5.0
 MAX_LINE_CHARS = 80 * 1024
 
 
+class ReadFailure(str):
+    def __new__(cls, message, *, kind):
+        error = super().__new__(cls, message)
+        error.kind = kind
+        return error
+
+
 class _Watchdog:
     """One sleeping watchdog per held source, never a timer thread per row."""
 
@@ -72,6 +79,23 @@ def feed_argv(source):
 
 
 class CurrentFeedMixin:
+    def read_status_for_source(self, source_id):
+        """Presentation evidence only; a read failure never proves host liveness."""
+        with self._lock:
+            return {
+                "error": self._error.get(source_id),
+                "failure_kind": getattr(self._error.get(source_id), "kind", "unknown"),
+                "has_snapshot": (
+                    source_id in self._feed_complete
+                    or bool(self._records.get(source_id))
+                    or (
+                        self._state.get(source_id) == "ready"
+                        and source_id not in self._pinged_only
+                        and self._stream_incomplete.get(source_id) != self._gen.get(source_id, 0)
+                    )
+                ),
+            }
+
     def _feed_current(self, source, gen) -> bool:
         return not self._cancelled.is_set() and self._gen.get(source.cache_key, 0) == gen
 
@@ -106,20 +130,20 @@ class CurrentFeedMixin:
                 self._feed_complete.add(source.cache_key)
                 self._feed_backoff[source.cache_key] = 0.25
 
-    def _feed_error(self, source, gen, reason: str) -> None:
+    def _feed_error(self, source, gen, reason: str, *, kind: str = "connection") -> None:
         if source.local:
             reason = f"Local resident current-roster read failed: {reason}"
         with self._lock:
             if not self._feed_current(source, gen):
                 return
-            self._error[source.cache_key] = reason
+            self._error[source.cache_key] = ReadFailure(reason, kind=kind)
             has_snapshot = source.cache_key in self._feed_complete
             self._state[source.cache_key] = "ready" if has_snapshot else "failed"
             if has_snapshot:
                 records = []
                 for row in self._records[source.cache_key]:
                     raw = {**row["raw"], "_availability": {"status": "stale", "reason": reason}}
-                    records.append({**row, "raw": raw, "title": "[stale] " + row["title"].removeprefix("[stale] ")})
+                    records.append({**row, "raw": raw})
                 self._records[source.cache_key] = records
 
     def _feed_once(self, source, gen) -> str:
@@ -221,17 +245,22 @@ class CurrentFeedMixin:
             self._held_sources.add(source.cache_key)
         try:
             while self._feed_current(source, gen):
+                kind = "connection"
                 try:
                     reason = self._feed_once(source, gen)
                 except FeedUnavailable as exc:
-                    self._feed_error(source, gen, str(exc))
+                    kind = "content" if exc.connected else "connection"
                     if not exc.retry:
+                        self._feed_error(source, gen, str(exc), kind=kind)
                         return
                     reason = str(exc)
                 except (OSError, TypeError, ValueError, subprocess.SubprocessError) as exc:
-                    self._feed_error(source, gen, str(exc) or type(exc).__name__)
+                    self._feed_error(
+                        source, gen, str(exc) or type(exc).__name__,
+                        kind="content" if isinstance(exc, (TypeError, ValueError)) else "connection",
+                    )
                     return
-                self._feed_error(source, gen, reason)
+                self._feed_error(source, gen, reason, kind=kind)
                 with self._lock:
                     delay = self._feed_backoff.get(source.cache_key, 0.25)
                     self._feed_backoff[source.cache_key] = min(delay * 2, 5.0)

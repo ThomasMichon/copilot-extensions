@@ -844,7 +844,8 @@ def test_setup_live_async_records_failure():
     screen._setup_skeleton()
     screen._setup_live_async()
     assert "roster exploded" in screen.debug
-    assert screen._busy_label == "Load failed"
+    assert screen._busy_label is None
+    assert screen._setup_error == "roster exploded"
 
 
 def test_setup_live_async_reports_roster_failure_without_advisory_rows(monkeypatch):
@@ -885,7 +886,8 @@ def test_setup_live_async_reports_roster_failure_without_advisory_rows(monkeypat
 
     assert screen.data == []
     assert "roster exploded" in screen.debug
-    assert screen._busy_label == "Load failed"
+    assert screen._busy_label is None
+    assert screen._setup_error == "roster exploded"
 
 
 def test_failed_worker_handoff_never_mutates_ui_off_thread(monkeypatch):
