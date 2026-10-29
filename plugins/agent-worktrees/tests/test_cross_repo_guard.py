@@ -337,6 +337,46 @@ def test_discover_filters_non_delegated_and_pathless(monkeypatch, tmp_path):
     assert roots[0]["path"] == str(real)
 
 
+def test_discovery_uses_batched_registry_without_per_repo_cli(monkeypatch, tmp_path):
+    calls = []
+    rows = [
+        {"name": name, "delegate": "agent-bridge",
+         "registry": {"path": str(tmp_path / name)}, "locus": {"preferred": "local"}}
+        for name in ("one", "two")
+    ] + [{"name": "remote", "delegate": "agent-codespaces", "registry": None}]
+
+    def run(args, cwd):
+        calls.append(args[0])
+        assert args == ["list", "--json", "--repo", str(tmp_path)]
+        return json.dumps({"related": rows})
+
+    monkeypatch.setattr(guard, "_run_related", run)
+    roots, complete = guard._discover_guarded_roots(str(tmp_path))
+    assert complete
+    assert roots == [
+        {"name": row["name"], "delegate": row["delegate"],
+         "path": row["registry"]["path"], "locus": row["locus"]}
+        for row in rows[:2]
+    ]
+    assert calls == ["list"]
+
+
+@pytest.mark.parametrize("registry", [[], {}, {"path": 123}])
+def test_invalid_batched_registry_never_publishes_cache(monkeypatch, tmp_path, registry):
+    def run(args, cwd):
+        assert args[0] == "list"
+        return json.dumps({"related": [
+            {"name": "known", "delegate": "agent-bridge",
+             "registry": {"path": str(tmp_path / "known")}},
+            {"name": "bad", "delegate": "agent-bridge", "registry": registry},
+        ]})
+
+    monkeypatch.setattr(guard, "_run_related", run)
+    roots = guard.load_guarded_roots(str(tmp_path), tmp_path)
+    assert [row["name"] for row in roots] == ["known"]
+    assert not guard._cache_path(str(tmp_path), tmp_path).exists()
+
+
 def test_load_guarded_roots_cache_roundtrip(monkeypatch, tmp_path):
     home = tmp_path / "home"
     calls = {"n": 0}
@@ -526,8 +566,9 @@ def test_readonly_shell_skips_topology(monkeypatch, tmp_path, command):
     ) is None
 
 
+@pytest.mark.parametrize("batched", [False, True])
 def test_fallback_pre_reuses_cache_across_real_topology_subprocesses(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, batched
 ):
     spec = importlib.util.spec_from_file_location(
         "cache_test_hook_client", _GUARD_PATH.with_name("hook_client.py")
@@ -548,14 +589,16 @@ def test_fallback_pre_reuses_cache_across_real_topology_subprocesses(
     target = tmp_path / "delegated"
     counter = tmp_path / "calls.jsonl"
     cli = tmp_path / "topology.py"
+    listing = {"related": [{"name": "delegated", "delegate": "agent-bridge"}]}
+    if batched:
+        listing["related"][0]["registry"] = {"path": str(target)}
     cli.write_text(
         "import json, sys\n"
         "from pathlib import Path\n"
         f"with Path({str(counter)!r}).open('a') as log:\n"
         "    log.write(json.dumps(sys.argv[1:]) + '\\n')\n"
         "if sys.argv[2] == 'list':\n"
-        "    print(json.dumps({'related': ["
-        "{'name': 'delegated', 'delegate': 'agent-bridge'}]}))\n"
+        f"    print(json.dumps({listing!r}))\n"
         "else:\n"
         f"    print(json.dumps({{'registry': {{'path': {str(target)!r}}}}}))\n",
         encoding="utf-8",
@@ -566,7 +609,7 @@ def test_fallback_pre_reuses_cache_across_real_topology_subprocesses(
             _write("create", target / "never-written.txt", consumer), tmp_path
         )
         assert decision["permissionDecision"] == "deny"
-    assert len(counter.read_text().splitlines()) == 2
+    assert len(counter.read_text().splitlines()) == (1 if batched else 2)
     assert not (target / "never-written.txt").exists()
 
 
@@ -583,3 +626,56 @@ def test_selected_runtime_never_uses_ambient_binstub(monkeypatch, tmp_path, comp
     else:
         expected = None
     assert guard._runtime_argv(root, allow_legacy_fallback=False) == expected
+
+
+def test_guard_memoizes_actual_cli_listing_and_keeps_break_glass_live(monkeypatch, tmp_path):
+    import yaml
+
+    home = tmp_path / "home"
+    registry = home / ".agent-worktrees"
+    registry.mkdir(parents=True)
+    for key in ("HOME", "USERPROFILE", "AGENT_HOME"):
+        monkeypatch.setenv(key, str(home))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    consumer = tmp_path / "consumer"
+    (consumer / ".git").mkdir(parents=True)
+    config = consumer / ".copilot-extensions" / "agent-worktrees"
+    config.mkdir(parents=True)
+    config.joinpath("related.yaml").write_text(yaml.safe_dump({"related": {
+        name: {"delegate": {"via": "agent-bridge"}, "ownership": "owned"}
+        for name in ("one", "two")
+    }}), encoding="utf-8")
+    registry.joinpath("repos.yaml").write_text(yaml.safe_dump({"repos": {
+        name: {key: str(tmp_path / name) for key in ("windows", "linux", "wsl")}
+        for name in ("one", "two")
+    }}), encoding="utf-8")
+    counter = tmp_path / "calls.jsonl"
+    cli = tmp_path / "actual_cli.py"
+    cli.write_text(
+        "import json, runpy, sys\n"
+        "from pathlib import Path\n"
+        f"with Path({str(counter)!r}).open('a') as log:\n"
+        "    log.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+        "runpy.run_module('agent_worktrees', run_name='__main__')\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(guard, "_runtime_argv", lambda: [sys.executable, str(cli)])
+    for name in ("one", "two"):
+        decision = guard.decide(
+            _write("create", tmp_path / name / "never-written.txt", consumer),
+            env={}, home=home,
+        )
+        assert decision and decision["permissionDecision"] == "deny"
+    assert [json.loads(line)[:2] for line in counter.read_text().splitlines()] == [
+        ["related", "list"]
+    ]
+    grant = registry / "allow-edits.json"
+    grant.write_text(json.dumps({"grants": {
+        "one": {"expires_at_ms": (time.time() + 600) * 1000}
+    }}), encoding="utf-8")
+    payload = _write("edit", tmp_path / "one" / "never-written.txt", consumer)
+    assert guard.decide(payload, env={}, home=home) is None
+    grant.unlink()
+    assert guard.decide(payload, env={}, home=home)["permissionDecision"] == "deny"
+    assert len(counter.read_text().splitlines()) == 1
+    assert not (tmp_path / "one" / "never-written.txt").exists()
