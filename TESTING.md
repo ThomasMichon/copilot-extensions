@@ -48,6 +48,14 @@ boundary, not a full interactive Picker/desktop-session launch or installed
 host rollout. The legacy broker activation lane remains a separate explicit
 compatibility test, not a prerequisite or evidence for normal native startup.
 
+Update-driver's `test_native_lifetime.py -k queued_installer`, admitted with
+`UPDATE_DRIVER_NATIVE_LIFETIME=1`, separately exercises the real queued executor
+launching a disposable durable daemon. It pins the native identities before
+allowing installer completion, proves ordinary-child cleanup and post-Job
+daemon work, and retains the restrictive outer-Job negative. This is the queued
+installation lifetime boundary, not a substitute for complete Manager
+installation or installed-host health.
+
 Worktrees' `test_command_lifecycle_recovery.py` covers read-only inspection,
 evidence-bound pending-owner qualification, preservation of unrelated manifest
 and runtime state, changed source/evidence and policy refusals, and live
