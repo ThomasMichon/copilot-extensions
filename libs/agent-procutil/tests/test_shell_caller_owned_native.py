@@ -259,14 +259,24 @@ sys.exit(serve(
     owner_birth=birth_identity(int(sys.argv[3])), nonce="a" * 32,
 ))
 '''
+OFFER_GATE = r'''
+from pathlib import Path
+import time
+gate_deadline = time.monotonic() + 5
+while Path(_offer_gate).read_bytes() != b"1":
+    if time.monotonic() >= gate_deadline:
+        raise TimeoutError("native offer fixture did not release its cold child")
+    time.sleep(0.01)
+'''
 
 
 @pytest.mark.skipif(os.name != "nt", reason="actual Windows parent Job handle table")
 @pytest.mark.parametrize("mode", OFFER_MODES)
-def test_native_offer_failure_preserves_parent_handle_custody(mode):
+def test_native_offer_failure_preserves_parent_handle_custody(mode, tmp_path):
     import ctypes
     from ctypes import wintypes
 
+    from agent_procutil._daemon_instance_identity import birth_identity
     from agent_procutil._windows_parent_job import _api
 
     kernel = _api()
@@ -280,60 +290,88 @@ def test_native_offer_failure_preserves_parent_handle_custody(mode):
         assert kernel.GetProcessHandleCount(kernel.GetCurrentProcess(), ctypes.byref(count))
         return count.value
 
-    baseline = handle_count()
-    process = subprocess.Popen(
-        [sys.executable, "-I", "-S", "-B", "-c", OFFER_BODY,
-         str(ROOT / "libs/agent-procutil/src"), mode, str(os.getpid())],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        **no_window_kwargs(),
-    )
-    remote = None
-    try:
-        nonce = "a" * 32
-        decision = {
-            "no-permission": b"",
-            "wrong-permission": b"wrong\n",
-            "abort": ("offer:" + nonce + "\nabort:" + nonce + "\n").encode(),
-            "write-abort": ("offer:" + nonce + "\nabort:" + nonce + "\n").encode(),
-            "write-eof": ("offer:" + nonce + "\n").encode(),
-            "wrong-ack": ("offer:" + nonce + "\nwrong\n").encode(),
-            "missing-ack": ("offer:" + nonce + "\n").encode(),
-            "adopted": ("offer:" + nonce + "\n" + nonce + "\n").encode(),
-        }[mode]
-        stdout, stderr = process.communicate(decision, timeout=5)
-        if mode not in ("no-permission", "wrong-permission"):
-            wire = stderr.split(b"receipt:", 1)[1] if mode.startswith("write-") else stdout
-            receipt = json.loads(wire.splitlines()[0])
-            assert receipt["nonce"] == nonce and receipt["owner_pid"] == os.getpid()
-            assert receipt["job"]["parent_pid"] == os.getpid()
-            if mode not in ("abort", "write-abort"):
-                remote = receipt["job"]["parent_handle"]
-                flags = wintypes.DWORD()
-                assert kernel.GetHandleInformation(remote, ctypes.byref(flags)), (
-                    "unconfirmed adoption reclaimed the caller's still-owned handle"
-                )
-                assert flags.value & 1 == 0
-        if mode == "adopted":
-            assert process.returncode == 7, stderr
-            assert stdout.splitlines()[1:] == [
-                b"admitted", b"", ("__COPILOT_CALLER_EXIT_" + nonce + "=7").encode(),
-            ]
-            assert not stderr
-        else:
-            assert process.returncode != 0
-            assert b"admitted" not in stdout and b"__COPILOT_CALLER_EXIT_" not in stdout
-            if mode in ("write-eof", "wrong-ack", "missing-ack"):
-                assert b"Job adoption is unconfirmed" in stderr
-    finally:
-        if process.poll() is None:
-            process.kill()
-            process.wait(3)
-        for stream in (process.stdin, process.stdout, process.stderr):
-            stream.close()
-        process._handle.Close()
-        if remote is not None:
-            assert kernel.CloseHandle(remote)
-    assert handle_count() == baseline, "parent Job offer left an unsettled native handle"
+    parent_birth = birth_identity(os.getpid())
+    nonce = "a" * 32
+    decision = {
+        "no-permission": b"",
+        "wrong-permission": b"wrong\n",
+        "abort": ("offer:" + nonce + "\nabort:" + nonce + "\n").encode(),
+        "write-abort": ("offer:" + nonce + "\nabort:" + nonce + "\n").encode(),
+        "write-eof": ("offer:" + nonce + "\n").encode(),
+        "wrong-ack": ("offer:" + nonce + "\nwrong\n").encode(),
+        "missing-ack": ("offer:" + nonce + "\n").encode(),
+        "adopted": ("offer:" + nonce + "\n" + nonce + "\n").encode(),
+    }[mode]
+    gate_path = tmp_path / "offer-fixture.gate"
+    with (
+        (tmp_path / "offer-fixture.stdout").open("w+b") as output,
+        (tmp_path / "offer-fixture.stderr").open("w+b") as errors,
+        gate_path.open("w+b") as gate,
+    ):
+        gate.write(b"0")
+        gate.flush()
+        body = f"_offer_gate = {str(gate_path)!r}\n" + OFFER_GATE + OFFER_BODY
+        process = subprocess.Popen(
+            [sys.executable, "-I", "-S", "-B", "-c", body,
+             str(ROOT / "libs/agent-procutil/src"), mode, str(os.getpid())],
+            stdin=subprocess.PIPE, stdout=output, stderr=errors,
+            **no_window_kwargs(),
+        )
+        remote = None
+        try:
+            process.stdin.write(decision)
+            process.stdin.close()
+            # Hold the same fixture handles/references across the cold SDK call.
+            # File-backed capture creates no communicate() reader threads.
+            baseline = handle_count()
+            gate.seek(0)
+            gate.write(b"1")
+            gate.flush()
+            process.wait(timeout=5)
+            output.seek(0)
+            errors.seek(0)
+            stdout, stderr = output.read(), errors.read()
+            if mode not in ("no-permission", "wrong-permission"):
+                wire = stderr.split(b"receipt:", 1)[1] if mode.startswith("write-") else stdout
+                receipt = json.loads(wire.splitlines()[0])
+                assert receipt["nonce"] == nonce and receipt["owner_pid"] == os.getpid()
+                assert receipt["job"]["parent_pid"] == os.getpid()
+                assert receipt["job"]["parent_birth"] == parent_birth
+                if mode not in ("abort", "write-abort"):
+                    remote = receipt["job"]["parent_handle"]
+                    flags = wintypes.DWORD()
+                    assert kernel.GetHandleInformation(remote, ctypes.byref(flags)), (
+                        "unconfirmed adoption reclaimed the caller's still-owned handle"
+                    )
+                    assert flags.value & 1 == 0
+            if mode == "adopted":
+                assert process.returncode == 7, stderr
+                assert stdout.splitlines()[1:] == [
+                    b"admitted", b"", ("__COPILOT_CALLER_EXIT_" + nonce + "=7").encode(),
+                ]
+                assert not stderr
+            else:
+                assert process.returncode != 0
+                assert b"admitted" not in stdout and b"__COPILOT_CALLER_EXIT_" not in stdout
+                if mode in ("no-permission", "wrong-permission"):
+                    assert b"original caller did not acknowledge lifetime custody" in stderr
+                if mode in ("write-eof", "wrong-ack", "missing-ack"):
+                    assert b"Job adoption is unconfirmed" in stderr
+            assert handle_count() == baseline + int(remote is not None), (
+                "parent Job offer has an unexpected native handle balance"
+            )
+            if remote is not None:
+                handle, remote = remote, None
+                assert kernel.CloseHandle(handle)
+            assert handle_count() == baseline, "parent Job offer left an unsettled native handle"
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(3)
+            process.stdin.close()
+            process._handle.Close()
+            if remote is not None:
+                assert kernel.CloseHandle(remote)
 
 
 @pytest.mark.parametrize("host", HOSTS or [None])

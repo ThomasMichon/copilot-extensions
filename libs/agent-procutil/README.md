@@ -119,6 +119,12 @@ and stale-parent-birth controls test this building block, not that complete
 bootstrap contract. `test_shell_caller_owned_native.py` separately exercises the
 actual PowerShell SDK's callback completion, abrupt exit, original caller death
 and runspace cancellation, observing pinned descendants before test cleanup.
+Its native offer controls hold preallocated fixture process/I/O resources
+constant across a separately gated cold SDK invocation. Raw parent-handle counts
+must show exactly the correlated offered Job, if any, and return to the same
+baseline after that known Job closes, before fixture disposal. This avoids
+attributing subprocess setup or reader-thread resources to the SDK; it does not
+permit a tolerance, warmup, garbage-collection workaround or unknown-handle close.
 
 ### Existing compiled entrypoints
 

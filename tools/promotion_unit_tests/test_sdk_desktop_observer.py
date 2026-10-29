@@ -825,6 +825,36 @@ def test_native_offer_fixture_names_original_pipe_owner_not_interpreter_launcher
     assert ast.dump(spawn.args[0].elts[-1]) == ast.dump(
         ast.parse("str(os.getpid())", mode="eval").body,
     )
+    capture = {item.arg: item.value for item in spawn.keywords}
+    assert ast.dump(capture["stdout"]) == ast.dump(ast.Name(id="output", ctx=ast.Load()))
+    assert ast.dump(capture["stderr"]) == ast.dump(ast.Name(id="errors", ctx=ast.Load()))
+    baseline = next(
+        node for node in ast.walk(fixture) if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "baseline" for target in node.targets)
+    )
+    release = next(
+        node for node in ast.walk(fixture) if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute) and node.func.attr == "write"
+        and isinstance(node.func.value, ast.Name) and node.func.value.id == "gate"
+        and node.args and isinstance(node.args[0], ast.Constant) and node.args[0].value == b"1"
+    )
+    assert spawn.lineno < baseline.lineno < release.lineno
+    assert not any(
+        isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "communicate" for node in ast.walk(fixture)
+    )
+    settled = next(
+        node for node in ast.walk(fixture) if isinstance(node, ast.Assert)
+        and isinstance(node.test, ast.Compare) and len(node.test.comparators) == 1
+        and isinstance(node.test.comparators[0], ast.Name)
+        and node.test.comparators[0].id == "baseline"
+    )
+    fixture_close = next(
+        node for node in ast.walk(fixture) if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute) and node.func.attr == "Close"
+        and isinstance(node.func.value, ast.Attribute) and node.func.value.attr == "_handle"
+    )
+    assert settled.lineno < fixture_close.lineno
 
 
 @pytest.mark.parametrize("change", [

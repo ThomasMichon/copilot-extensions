@@ -221,6 +221,15 @@ establish a pass. These controls are distinct from source/argument compatibility
 interpreter prerequisite, and desktop visibility qualification. Native platform
 skips do not qualify another platform. Actor-free admission/framing and
 pipe-bound Job controls live in `tools/promotion_unit_tests/test_shell_caller_owned.py`.
+The eight native offer cases create their file-backed capture, cold-child gate
+and process/I/O fixtures before taking the parent-handle baseline. Those fixture
+resources stay held through the SDK operation and exact Job-handle balance checks;
+there are no `communicate` reader threads in that measured interval. The child
+cannot invoke the SDK until the baseline gate opens. Existing permission/ACK/abort
+bytes and case identities are unchanged; no count offset or tolerance is applied.
+`test_offer_fixture_contract.py` separately checks that sequencing, all eight
+branches and leak/noninheritance refusal with native dependency doubles, plus a
+bounded Linux gate control. It does not qualify Windows.
 The separate Linux-only `test_shell_completion_native.py` checks actual
 returned and abrupt exits with both zero and nonzero statuses. It requires the
 callback-return witness independently of the reaped status and does not
