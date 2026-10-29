@@ -3,6 +3,7 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-10-28 - Real qualification venue and Picker presentation inflow](<journal/2026/10.28 real-venue-picker-inflow.md>)
 - [2026-10-28 - Seven further receiving contracts proposed](<journal/2026/10.28 last-seven-receiving-proposal.md>)
 - [2026-10-28 - First ten oldest receiving relationships proposed](<journal/2026/10.28 first-ten-receiving-proposal.md>)
 - [2026-10-28 - Eight receiving-contract consolidations and bounded owner inflow](<journal/2026/10.28 receiving-contract-dispositions.md>)
