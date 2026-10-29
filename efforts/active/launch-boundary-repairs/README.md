@@ -69,7 +69,7 @@ authorize a shared runtime rollout, service restart or live venue retry.
 ### Phase 1 - Review and ownership
 
 - [x] Land this proposal after the repository's required review and CI.
-- [ ] Check current source, claims and open PRs for every repair; record already
+- [x] Check current source, claims and open PRs for every repair; record already
   fixed, intentional and evidence-dependent items without speculative edits.
 
 ### Phase 2 - Explicit failure and diagnostic preservation
@@ -91,38 +91,43 @@ authorize a shared runtime rollout, service restart or live venue retry.
   owner, preserving denial before launch effects and avoiding a second evaluator.
 - [ ] Verify and repair present-but-unhealthy guest preparation using the owning
   health/repair contract; do not merely add another command-existence check.
-- [ ] Reconcile relay SSH and namespace discovery deadlines with their enclosing
-  budgets and current progress contract. Prove slow healthy and failed cases;
-  do not inflate constants or shorten an existing healthy allowance blindly.
-- [ ] Address remaining Git/PATH requirements cooperatively with #9322 and other
-  active owners; do not open a competing implementation.
-- [ ] Account for monitor ownership/readiness and drain admission-lock timing
-  against #5512 and the documented drain contract, not a local replacement design.
+- [x] Deferred to `#8051`: compose relay/SSH progress and independent process
+  budgets, including the actual preparation consumer's slow-healthy and failure
+  qualification. Exact evidence and acceptance were posted on that objective.
+  Namespace latency/result distinctions remain with `#5761`. No constants were
+  inflated or healthy allowances shortened as a substitute.
+- [x] Deferred to `#9322`: remaining Windows spawned-command PATH integration
+  stays with that PR's author. Its inherited/explicit-environment contract was
+  checked; no competing implementation or Git-installation bypass was added.
+- [x] Deferred to `#5512`: monitor exclusivity, exit-awareness and serving
+  ownership remain with the existing restart owner. The drain budget deliberately
+  starts after admission closure; changing it is not an established defect.
+  Client timeout still does not acknowledge daemon cancellation.
 
 ### Phase 4 - Delivery and disposition
 
 - [ ] Land each eligible source repair with mandatory changefiles, required CI
   and real current-head reviews; finalize its dedicated source worktree.
-- [ ] Record the disposition of every intake area, including exact external
+- [x] Record the disposition of every intake area, including exact external
   owners or missing evidence for items not safely implementable here.
 - [ ] Close this source effort only when every implementation and validation
   item is resolved or explicitly transferred to a named tracked objective.
 
 ## Validation Plan
 
-- [ ] Add focused red/green regressions for each changed behavior.
-- [ ] Exercise the real affected consumer boundary in an isolated integration
+- [x] Add focused red/green regressions for each changed behavior.
+- [x] Exercise the real affected consumer boundary in an isolated integration
   control, including refusal propagation and unchanged success behavior.
-- [ ] Prove refusal details survive the owned-delivery parser and detached-launch
+- [x] Prove refusal details survive the owned-delivery parser and detached-launch
   consumer; keep typed/deferred/unconfirmed/lost pending-seed reporting unchanged,
   and prove refusal or uncertain acknowledgement does not authorize replay.
-- [ ] Exercise fresh-guest and present-but-unhealthy preparation in disposable
+- [x] Exercise fresh-guest and present-but-unhealthy preparation in disposable
   fixtures where practical; never use a shared guest as an implicit test target.
-- [ ] Run changed-plugin tests through the canonical contained runner, focused
+- [x] Run changed-plugin tests through the canonical contained runner, focused
   Ruff checks and applicable install-contract/generated-asset checks.
-- [ ] Account explicitly for native Windows/POSIX and clean-room qualification;
+- [x] Account explicitly for native Windows/POSIX and clean-room qualification;
   a mocked result is not live or installed acceptance evidence.
-- [ ] Record reasons for any skipped external lane. Live service mutation,
+- [x] Record reasons for any skipped external lane. Live service mutation,
   installed rollout and venue retries remain outside this source-only scope.
 - [ ] Verify provider merge state and managed finalization for every opened PR.
 
@@ -168,3 +173,45 @@ depends on the mere existence of one of these source defects.
   so a fresh-machine installer scenario is not applicable. Validation ran on
   native Windows; native POSIX and live installed service behavior are not
   claimed. No external service was restarted or updated for qualification.
+
+### 2026-10-29 - Repair candidates and intake disposition
+
+- Source candidates are open, not delivered: #9543 (restart exit status), #9545
+  (fixed refusal reasons), #9547 (retained sanitized diagnostics), #9548
+  (provisionless canonical guest policy) and #9549 (actual guest command health
+  and existing-installer repair). Implementation checkboxes remain open until
+  their respective reviewed source changes merge.
+- #9545 passed 85 shared-library cases with three POSIX-dependent skips, 125
+  CodeSpace cases, 63 container cases, two SSH consumer controls and six focused
+  parser edge cases. Real parser output reaches provider results without raw
+  errors or new replay authority; unknown acknowledgement retains custody.
+- #9547 passed 57 readiness/logging/extension cases. Its actual file-handler
+  control retains the sanitized failure after ordinary control deregistration;
+  success remains silent and cancellation rejects late acknowledgement.
+- #9548 passed the full 73-case policy portfolio before tier annotation. Final
+  explicit packets pass 39 focused policy cases and 65 hosting/preparation
+  cases; default packets pass 33/63 with six/two new actors skipped. Isolated
+  Python without site packages exercises the real canonical reader, denies
+  malformed/false/context-selected policy and cleans its temporary archive.
+- #9549 passed all 132 detached-consumer cases, including seven T3 actors
+  executing the actual constructed Bash command in disposable homes. Failure
+  reaches neither trust-folder nor launch effects; default collection skips
+  those actors. Its first CI run caught the source module crossing the
+  thousand-line cap; the preparation constant moved to the existing startup
+  owner rather than widening the cap, and all 132 cases passed again.
+- Focused Ruff, all 13 plugin install-contract checks and whitespace checks
+  pass for the candidates. Diagnostic contract fingerprints/fixtures were
+  checked where applicable. These are native Windows source/component checks,
+  including Git Bash shell controls, not native POSIX runtime qualification.
+  Fresh disposable readers/synthetic tool homes do not qualify full package
+  acquisition, installed-runtime reconstruction or live CodeSpace startup.
+  Those external lanes require authority absent from this source-only task.
+- Transferred relay/SSH progress-budget implementation and consumer validation
+  to the existing two-clock objective #8051, with exact retry/timeout evidence
+  in its coordination comment. #5761 retains namespace latency and result
+  distinctions. #9322 retains its author's PATH integration; #5512 retains
+  monitor ownership, with #5453/#6389's lifecycle acceptance unchanged.
+  Intentional drain timing and the existing pending-seed helper are not fixes.
+- Current-head reviews, required CI, actual merge and managed finalization
+  remain delivery gates. Repeated review waits without a verdict do not
+  authorize a bypass. No installed system or retained worker was changed.
