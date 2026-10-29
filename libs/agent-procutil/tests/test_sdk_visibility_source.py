@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import runpy
 import shutil
 import subprocess
 import sys
@@ -216,3 +217,87 @@ print(json.dumps({'mode': mode, 'case_count': 16, 'pytest_exit': code}), flush=T
         assert json.loads(result.stdout.splitlines()[-1]) == {
             "mode": mode, "case_count": 16, "pytest_exit": 0,
         }
+
+
+def test_all_four_packets_retain_tmp_evidence_until_reconciliation(tmp_path: Path) -> None:
+    sdk = tmp_path / "synthetic-sdk"
+    module = sdk / "libs/agent-procutil/tests/test_shell_caller_owned_native.py"
+    module.parent.mkdir(parents=True)
+    module.write_text(
+        "import json\n"
+        "import pytest\n"
+        "def record(tmp_path, request):\n"
+        "    (tmp_path / 'ready.json').write_text(json.dumps({'name': request.node.name}))\n"
+        "@pytest.mark.parametrize('host', ['powershell.exe', 'pwsh.exe'])\n"
+        "@pytest.mark.parametrize('composition', ['path', 'test-venv'])\n"
+        "@pytest.mark.parametrize('mode', ['completed', 'abrupt', 'caller-exit', 'cancel'])\n"
+        "@pytest.mark.parametrize('cycle', [0, 1])\n"
+        "def test_sdk_scope_retires_before_observer_cleanup("
+        "tmp_path, request, host, composition, mode, cycle):\n"
+        "    record(tmp_path, request)\n"
+        "@pytest.mark.parametrize('mode', ["
+        "'no-permission', 'wrong-permission', 'abort', 'write-abort', "
+        "'write-eof', 'wrong-ack', 'missing-ack', 'adopted'])\n"
+        "def test_native_offer_failure_preserves_parent_handle_custody(tmp_path, request, mode):\n"
+        "    record(tmp_path, request)\n"
+        "@pytest.mark.parametrize('host', ['powershell.exe', 'pwsh.exe'])\n"
+        "@pytest.mark.parametrize('failure', ['eof', 'malformed'])\n"
+        "def test_startup_receipt_failure_releases_input_before_waiting_for_worker("
+        "tmp_path, request, failure, host):\n"
+        "    record(tmp_path, request)\n",
+    )
+    namespace = runpy.run_path(str(RUNNER))
+    contract = sys.modules["sdk_visibility_cases"]
+    sdk_nodes = [
+        str(module) + "::" + f"{contract.FUNCTION}[{cycle}-{mode}-{composition}-{host}]"
+        for cycle in (0, 1)
+        for mode in ("completed", "abrupt", "caller-exit", "cancel")
+        for composition in ("path", "test-venv")
+        for host in ("powershell.exe", "pwsh.exe")
+    ]
+    packets = [
+        sdk_nodes[:16], sdk_nodes[16:],
+        [str(module) + "::" + f"{contract.OFFER_FUNCTION}[{mode}]" for mode in contract.OFFER_MODES],
+        [
+            str(module) + "::" + f"{contract.STARTUP_FUNCTION}[{failure}-{host}]"
+            for failure in ("eof", "malformed")
+            for host in ("powershell.exe", "pwsh.exe")
+        ],
+    ]
+    contract.validate_case_packets(sdk, packets)
+    output, temporary = tmp_path / "output", tmp_path / "shared-packet-temp"
+    output.mkdir()
+    temporary.mkdir()
+    (output / "pytest.ini").write_text("")
+    environment = {
+        **os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+        "TMPDIR": str(temporary), "TMP": str(temporary), "TEMP": str(temporary),
+        "PYTEST_DEBUG_TEMPROOT": str(temporary),
+        "PYTEST_ADDOPTS": "-o tmp_path_retention_count=0 -o tmp_path_retention_policy=failed",
+    }
+    script = """
+import json, sys
+arguments = json.loads(sys.argv[1])
+assert [
+    arguments[index + 1] for index, value in enumerate(arguments) if value == '-o'
+] == ['tmp_path_retention_count=4', 'tmp_path_retention_policy=all']
+import pytest
+raise SystemExit(pytest.main(arguments))
+"""
+    retained: dict[Path, bytes] = {}
+    expected: set[str] = set()
+    for index, nodes in enumerate(packets):
+        arguments = namespace["native_arguments"](sdk, output, nodes, index)
+        result = subprocess.run(
+            [sys.executable, "-I", "-B", "-c", script, json.dumps(arguments)],
+            capture_output=True, text=True, timeout=20, env=environment,
+            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert all(path.read_bytes() == data for path, data in retained.items())
+        expected.update(node.partition("::")[2] for node in nodes)
+        retained = {path: path.read_bytes() for path in temporary.rglob("ready.json")}
+        assert len(retained) == len(expected)
+        assert {json.loads(data)["name"] for data in retained.values()} == expected
+    assert len(retained) == 44
+    assert namespace["verify_native_junit"](output, sdk, packets)["case_count"] == 44

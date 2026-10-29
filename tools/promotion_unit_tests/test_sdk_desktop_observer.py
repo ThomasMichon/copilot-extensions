@@ -796,6 +796,9 @@ def test_native_scope_never_includes_the_synthetic_fixture_controls(tmp_path):
         assert arguments[-len(nodes):] == nodes
         assert arguments.count("-x") == 1 and "--noconftest" in arguments
         assert arguments[arguments.index("--rootdir") + 1] == str(sdk)
+        assert [
+            arguments[offset + 1] for offset, value in enumerate(arguments) if value == "-o"
+        ] == ["tmp_path_retention_count=4", "tmp_path_retention_policy=all"]
         assert "--junitxml=" + str(output / f"native-{index + 1:02}.xml") in arguments
 
 

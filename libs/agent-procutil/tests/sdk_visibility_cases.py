@@ -94,6 +94,7 @@ def native_arguments(sdk: Path, output: Path, nodes: list[str], packet: int) -> 
         "-q", "-x", "--noconftest", "-p", "no:cacheprovider",
         "--rootdir", str(sdk),
         "-c", str(output / "pytest.ini"),
+        "-o", "tmp_path_retention_count=4", "-o", "tmp_path_retention_policy=all",
         "--junitxml=" + str(output / f"native-{packet + 1:02}.xml"), *nodes,
     ]
 

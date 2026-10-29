@@ -283,6 +283,14 @@ most 16 cases, retires inside that same observer and writes its own exact
 literal JUnit; all four reports must cover the declared matrix. Calibration is
 never repeated to partition tests, and the original whole deadline is not
 rearmed between workers.
+The canonical arguments explicitly retain all four pytest temporary sessions,
+including failed cases, so the fourth packet cannot prune the first SDK
+packet's closed publications before final reconciliation. The policy is
+`tmp_path_retention_count=4` and `tmp_path_retention_policy=all`, passed as
+literal command options rather than inherited configuration. The cold-source
+regression runs four real pytest sessions over synthetic cases with one shared
+temporary root and verifies that all earlier evidence survives. It is not
+native SDK or desktop acceptance.
 Each worker sets `--rootdir` to the verified SDK tree while keeping its empty
 configuration file in the output directory. Without that explicit root,
 pytest can assign an empty filesystem node ID to an individually selected
