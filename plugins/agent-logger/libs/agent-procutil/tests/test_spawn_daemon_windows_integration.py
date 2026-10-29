@@ -102,7 +102,9 @@ try:
         result["returncode"] = proc.wait(timeout=5)
         result["poll"] = proc.poll()
 except agent_procutil.DaemonSpawnError as exc:
-    result = {"daemon_spawn_error": str(exc), "cause": str(exc.__cause__)}
+    result = {"daemon_spawn_error": str(exc), "cause": str(exc.__cause__),
+              "cleanup_confirmed": exc.cleanup_confirmed,
+              "admission_sent": exc.admission_sent}
 except BaseException:
     result = {"error": traceback.format_exc()}
 with open(spec["result"], "w", encoding="utf-8") as fh:
@@ -267,7 +269,7 @@ def _console_python() -> str:
 def _run_cycle(
     tmp_path: Path, cycle: int, console_children: bool, kernel32,
     *, allow_breakaway: bool = True, terminate: bool = False, redirector: bool = False,
-    venv: bool = False, finite_worker: bool = False,
+    venv: bool = False, finite_worker: bool = False, expect_refused: bool = False,
 ) -> None:
     root = tmp_path / f"cycle-{cycle}"
     workdir = root / "home with spaces"
@@ -321,11 +323,16 @@ def _run_cycle(
         result = _read_json(result_path)
         assert result is not None, "parent did not record a result"
         if "daemon_spawn_error" in result:
+            if expect_refused:
+                assert result["cleanup_confirmed"] and not result["admission_sent"]
+                assert not (state / "status.jsonl").exists()
+                return
             if not allow_breakaway:
                 pytest.fail(result["daemon_spawn_error"] + "; " + result.get("cause", ""))
             pytest.skip(
                 "this runner's own Job forbids breakaway: " + result["daemon_spawn_error"]
             )
+        assert not expect_refused, "strict caller cleanup unexpectedly admitted an escaping daemon"
         assert "pid" in result, result.get("error")
         if venv:
             worker = result["worker"]
@@ -473,8 +480,8 @@ def test_broker_direct_venv_controls_worker_pid_and_preserves_imports(tmp_path, 
     assert observer.focus_changes == {}, f"foreground transitions: {observer.focus_changes}"
 
 
-def test_finite_worker_outlives_caller_job_then_closes_control_record(tmp_path, monkeypatch):
-    # Keep the explicit test-owner lease; only exercise real outside-Job launch.
+def test_finite_worker_cannot_escape_strict_caller_job(tmp_path, monkeypatch):
+    # Positive durability belongs to the disposable permissive-launcher lane.
     assert os.environ.get("COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT")
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     user32, kernel32, callback_type = _configure_win32()
@@ -482,7 +489,7 @@ def test_finite_worker_outlives_caller_job_then_closes_control_record(tmp_path, 
         for cycle in range(_CYCLES):
             _run_cycle(
                 tmp_path, cycle, True, kernel32, allow_breakaway=False,
-                finite_worker=True,
+                finite_worker=True, expect_refused=True,
             )
     assert observer.surfaced == {}
     assert observer.focus_changes == {}

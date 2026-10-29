@@ -145,13 +145,13 @@ its existing owner; neither source work nor publication disables that hold.
 
 - [x] Review the original activation proposal in #9523; retain its history and
   the failed #9526 qualification rather than calling that candidate delivered.
-- [ ] Land the general spawn-guidance correction first and verify legitimate
+- [x] Land the general spawn-guidance correction first and verify legitimate
   promotion to Main, separately from any runtime change.
-- [ ] Amend and review the [normal-process direction](windows-launch-broker.md#normal-process-direction)
+- [x] Amend and review the [normal-process direction](windows-launch-broker.md#normal-process-direction)
   before implementing the runtime repair: ordinary native headless/detached
   creation, explicit launcher-owned Job scopes and no automatic COM, Task
   Scheduler or UAC fallback.
-- [ ] Qualify the direct runtime boundary against all actual caller-owned
+- [x] Qualify the direct runtime boundary against all actual caller-owned
   cleanup Jobs, including bounded tools and the restrictive shared-outer
   negative. No blanket any-Job rejection or immediate-Job-only escape claim.
 - [ ] Exercise stopped-resident concurrent Manager recovery, preserve
@@ -159,6 +159,53 @@ its existing owner; neither source work nor publication disables that hold.
   consumer changefiles and CI.
 - [ ] Record runtime release separately and return installed adoption to the
   existing deployment owner; no shared-host registration or rollout is implied.
+
+The guidance-only #9530 reached Main through #9531 as
+`d93a7fd482561760201cb479f27e1622f1dd1506`; this is not the runtime fix.
+The operator subsequently selected `owned-cleanup-scopes`, explicitly limiting
+the native runtime lifetime guarantee to every tracked launcher-owned Job
+rather than arbitrary unknown external supervisors. The concrete
+[ownership mechanism](windows-launch-broker.md#selected-runtime-ownership-contract)
+retains the restrictive shared-outer negative and the separate deployment hold.
+
+Runtime candidate #9542 qualified source
+`96feb3a0396f6d38f8f45b07d636c9f20aca3f9d` in
+[run 40856274752](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40856274752):
+two native Python survival cycles, the restrictive shared-outer negative,
+two native PowerShell post-caller owned-work cycles, actual cold Worktrees
+and Manager construction, and two concurrent stopped-resident Manager
+current-roster cycles all passed. Every reader Job closed before resident
+health rechecks and canonical shutdown. Automatic handoff preceded the held
+installer gate by 1.437 seconds. All three native installer-retention controls
+and 211 finite-removal cases passed, with five platform skips; POSIX passed.
+This is not a release or installed-host rollout.
+
+Further hosted qualification isolated a discarded operating-system
+prerequisite in the credential-free fixture: its environment omitted
+`PSModulePath`, causing cold native PowerShell command discovery to stall.
+Restoring only that native module path preserves credential filtering and
+the fresh private profile. Run
+[40869393791](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40869393791)
+passed all 18 native admission/cleanup controls, including opaque argument
+fidelity, and both production post-caller owned-work cycles. Neither the
+30-second caller limit nor the 15-second handshake limit changed. The
+unsuccessful resume, serialization and progress alternatives and temporary
+diagnostic probes are removed. A separate live-supervisor artifact test now
+uses the store's existing bounded lock acquisition instead of racing renewal.
+The final clean runtime source `f0223457b60fc4b79ff19ec535f15bdd0263f7be`
+passed all three jobs in
+[run 40870443339](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40870443339):
+18 native admission/cleanup controls, two native PowerShell post-caller
+owned-work cycles, the nested-Job Python survival/refusal packet, actual
+cold Worktrees/Manager construction, and two concurrent stopped-resident
+Manager/current-roster cycles. Every caller Job closed before same-resident
+health rechecks; canonical shutdown settled cleanup. Automatic handoff
+preceded installer release by 1.297 seconds. All three native installer
+serving-slot retention controls, 211 finite-removal cases and the POSIX
+packet passed (five finite-removal platform skips). Ordinary review,
+source merge and Main release remain open; no installed rollout is implied.
+The concrete ownership contract received independent design critique before
+runtime implementation.
 
 ### Phase 1 - Reviewed contract
 - [x] Land this plan through ordinary review before implementation.

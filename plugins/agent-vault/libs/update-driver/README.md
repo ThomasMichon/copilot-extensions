@@ -1064,6 +1064,10 @@ stderr, so diagnostics can identify and observe that exact owner even if the
 caller disappears; this still does not certify ordinary queue acceptance.
 They do not move installation into the caller. Launch-only
 acknowledgement remains the default for existing native clients.
+On Windows, acknowledgement `log` remains the receipt stream;
+`diagnostic_log` names a separate root-owned stdout/stderr file. Native
+bootstrap failures use inherited stderr rather than reopening that writable
+handle. `-Wait` relays both logs without changing ordinary receipt semantics.
 
 Vault's bootstrap first reads its existing deployment/version/selected-runtime
 markers. A healthy runtime, selected cell or active bootstrap killswitch stays

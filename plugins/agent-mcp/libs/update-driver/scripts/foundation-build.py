@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 import tempfile
 from pathlib import Path
@@ -70,10 +69,6 @@ def construct(
                 ):
                     raise FoundationInputError("foundation admission changed before selection")
                 runtime.activate(target, version, link_free=True)
-                if os.name == "nt" and os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1":
-                    from update_driver.windows_broker import adopt
-
-                    adopt(target, candidate.slot, root=root)
                 return candidate.slot
 
 

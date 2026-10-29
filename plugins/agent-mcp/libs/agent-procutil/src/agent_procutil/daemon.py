@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import importlib
 import os
 import subprocess
 import time
@@ -21,9 +22,10 @@ def spawn_brokered_daemon(
     import agent_procutil as pu
 
     try:
-        from .windows_task_broker import spawn
+        # Minimal remote hosts omit this installed-only legacy adapter.
+        spawn = importlib.import_module(".windows_task_broker", __package__).spawn
     except ModuleNotFoundError as error:
-        if error.name != "zdd":
+        if error.name not in {"zdd", f"{__package__}.windows_task_broker"}:
             raise
         raise pu.DaemonSpawnError(
             "Windows launch broker: owning installation requires windows-broker support",
@@ -109,11 +111,11 @@ def spawn_daemon(
     header. ``env_overrides`` layers over ``env`` (the current environment by
     default). Extra creation flags may add only priority/error-mode policy.
 
-    On Windows, a caller already in a Job or breakaway denial uses its installed
-    consumer's adopted finite broker; the returned handle controls the actual daemon. If that
-    fails, raise ``DaemonSpawnError`` unless ``contained_fallback`` explicitly
-    accepts the caller's shorter lifetime. ``breakaway=False`` and contained
-    test mode never invoke the broker. POSIX uses a new session.
+    Windows durable children start suspended, with explicit breakaway, and must
+    escape every tracked launcher-owned cleanup Job before resume. Ambient
+    external Job membership is not a caller-lifetime claim. No broker is
+    activated. ``contained_fallback`` explicitly accepts the caller's shorter
+    lifetime after a settled refusal. POSIX uses a new session.
     """
     import agent_procutil as pu
 
@@ -193,6 +195,8 @@ def spawn_daemon(
                 process_created=True, process_identity=identity,
             )
             failure.instance_receipt = receipt
+            if not settled:
+                failure.process = process
             raise failure from error
         process.instance_receipt = receipt
         return process
@@ -213,6 +217,18 @@ def spawn_daemon(
 
         stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         write_logs(pu._daemon_log_header(stamp, cwd_path, command[0], display))
+
+        def reserve():
+            try:
+                return reserve_instance(instance, environment=child_env)
+            except Exception as error:
+                code = getattr(error, "errno", None)
+                write_logs(
+                    f"{stamp} spawn_daemon: instance-reservation-failed; "
+                    f"type={type(error).__name__}; errno={code if type(code) is int else None}\n".encode()
+                )
+                raise
+
         popen_kwargs = {
             "cwd": cwd_path,
             "env": child_env,
@@ -222,106 +238,104 @@ def spawn_daemon(
             "close_fds": True,
         }
         flags = kwargs.get("creationflags", 0)
-        needs_broker = False
-        if flags & pu._CREATE_BREAKAWAY_FROM_JOB:
-            from .daemon_broker import caller_in_job
+        durable_windows = bool(flags & pu._CREATE_BREAKAWAY_FROM_JOB)
+        if pu._is_windows():
+            from . import _job_scopes
 
-            needs_broker = caller_in_job()
-        if needs_broker:
-            note = "spawn_daemon: caller Job lifetime requires verified outside-Job launch"
-        else:
-            receipt = reserve_instance(instance, environment=child_env)
-            child_env.update(instance_environment(receipt))
+            scope_environment = _job_scopes.child_environment(child_env)
+            child_env = scope_environment.copy()
+            popen_kwargs["env"] = child_env
+        if durable_windows:
+            child_env.pop(_job_scopes.ENVIRONMENT_KEY, None)
+            kwargs["creationflags"] = flags | pu._CREATE_SUSPENDED
+        receipt = reserve()
+        child_env.update(instance_environment(receipt))
+        process = None
+        creation_attempted = False
+        creation_refused = False
+        resume_attempted = False
+
+        def create():
+            nonlocal creation_attempted, creation_refused
+            creation_attempted, creation_refused = True, False
             try:
-                process = subprocess.Popen(command, **popen_kwargs, **kwargs)  # noqa: S603
-            except OSError as exc:
-                if not pu._breakaway_denied(exc, kwargs):
-                    refused()
-                    raise
-                if not refused():
-                    failure = pu.DaemonSpawnError(
-                        "direct refusal reservation could not be settled",
-                        process_created=False, admission_sent=False,
-                    )
-                    failure.instance_receipt = receipt
-                    raise failure from exc
-                note = "spawn_daemon: the caller's Job object forbids breakaway"
-            else:
-                return commit(process)
-        flags &= ~pu._CREATE_BREAKAWAY_FROM_JOB
-        write_logs(f"{stamp} {note}; trying Windows lifetime broker\n".encode())
-        def log_failure(phase, error):
-            codes = {
-                name: value if type(value := getattr(error, name, None)) is int else None
-                for name in ("errno", "winerror")
-            }
-            write_logs(
-                f"{stamp} spawn_daemon: {phase}; type={type(error).__name__}; "
-                f"errno={codes['errno']}; winerror={codes['winerror']}\n".encode()
-            )
+                return subprocess.Popen(command, **popen_kwargs, **kwargs)  # noqa: S603
+            except (OSError, ValueError, TypeError):
+                creation_refused = True
+                raise
 
         try:
-            receipt = reserve_instance(instance, environment=child_env)
-            child_env.update(instance_environment(receipt))
-        except Exception as error:
-            log_failure("instance-reservation-failed", error)
-            raise
-        write_logs(f"{stamp} spawn_daemon: instance-reserved; broker-admission-starting\n".encode())
-        try:
-            process = spawn_brokered_daemon(
-                command, cwd=cwd_path, env=child_env, creationflags=flags,
-                log_path=log_file, stderr_log_path=err_file,
-                instance_receipt=receipt,
-            )
-            process.instance_receipt = receipt
-            return process
-        except pu.DaemonSpawnError as broker_error:
-            settled = False
-            if broker_error.cleanup_confirmed:
-                if broker_error.process_created is False:
-                    settled = refused()
-                elif broker_error.process_created is True:
-                    settled = failed(
-                        broker_error.process_identity, exited=True,
-                        admission_possible=broker_error.admission_sent,
-                    )
+            if durable_windows:
+                # Query handles must close before resume: inherited handles
+                # would defeat the caller's KILL_ON_JOB_CLOSE ownership.
+                with _job_scopes.query_scopes(scope_environment) as verify:
+                    process = create()
+                    verify(process._handle)
+                resume_attempted = True
+                if not pu._resume_suspended_process(process.pid):
+                    raise OSError("failed to resume verified daemon")
             else:
-                failed(broker_error.process_identity, exited=False, admission_possible=True)
-            if not contained_fallback or not settled:
-                if not broker_error.cleanup_confirmed:
-                    outcome = "partial launch cleanup unconfirmed"
-                elif broker_error.process_created is False:
-                    outcome = "daemon not started" + ("" if settled else "; reservation held")
-                elif settled:
-                    outcome = "unadmitted child exit confirmed"
-                else:
-                    outcome = "creation or startup effects held"
-                write_logs(f"{stamp} {note}; broker failed; {outcome}\n".encode())
-                if not broker_error.cleanup_confirmed:
-                    write_logs(
-                        f"{stamp} spawn_daemon: cleanup uncertain; contained retry refused\n".encode()
-                    )
+                process = create()
+        except BaseException as error:
+            if (
+                process is None and creation_attempted and not creation_refused
+            ):
+                write_logs(
+                    f"{stamp} spawn_daemon: creation-outcome-unknown; "
+                    f"type={type(error).__name__}; reservation retained\n".encode()
+                )
+                raise
+            if not durable_windows:
+                refused()
+                raise
+            identity = created_process_identity(process) if process is not None else None
+            cleanup_confirmed = process is None
+            if process is not None:
+                try:
+                    process.kill()
+                    process.wait(timeout=5)
+                    cleanup_confirmed = True
+                except (OSError, subprocess.SubprocessError):
+                    pass
+                settled = failed(identity, exited=cleanup_confirmed, admission_possible=resume_attempted)
+            else:
+                settled = refused()
+            if (
+                process is None and creation_attempted and settled
+                and not pu._breakaway_denied(error, kwargs)
+            ):
+                raise
+            if not isinstance(error, (OSError, ValueError)) and cleanup_confirmed and settled:
+                raise
+            denied = process is None and creation_attempted and pu._breakaway_denied(error, kwargs)
+            reason = (
+                "the caller's Job object forbids breakaway; daemon not started" if denied
+                else "native daemon launch could not escape launcher-owned cleanup Jobs"
+            )
+            write_logs(
+                f"{stamp} spawn_daemon: {reason}; "
+                f"cleanup_confirmed={cleanup_confirmed}; reservation_settled={settled}\n".encode()
+            )
+            if not contained_fallback or not cleanup_confirmed or not settled:
                 failure = pu.DaemonSpawnError(
-                    f"{note}; Windows lifetime broker failed; {outcome}",
-                    cleanup_confirmed=broker_error.cleanup_confirmed,
-                    process_created=broker_error.process_created,
-                    admission_sent=broker_error.admission_sent,
-                    process_identity=broker_error.process_identity,
+                    reason,
+                    cleanup_confirmed=cleanup_confirmed, process_created=process is not None,
+                    admission_sent=resume_attempted, process_identity=identity,
                 )
                 failure.instance_receipt = receipt
-                raise failure from broker_error
-        except Exception as error:
-            log_failure("broker-admission-failed", error)
-            raise
-        note += "; broker failed; starting the daemon inside it (contained_fallback)"
-        pu.log.warning("%s (%s)", note, command[0])
-        write_logs(f"{stamp} {note}\n".encode())
-        kwargs["creationflags"] = flags
-        receipt = reserve_instance(instance, environment=child_env)
-        child_env.update(instance_environment(receipt))
-        try:
-            process = subprocess.Popen(command, **popen_kwargs, **kwargs)  # noqa: S603
-        except OSError:
-            refused()
-            raise
+                if not cleanup_confirmed:
+                    failure.process = process
+                raise failure from error
+            note = "spawn_daemon: explicit contained_fallback accepts caller-owned lifetime"
+            pu.log.warning("%s (%s)", note, command[0])
+            write_logs(f"{stamp} {note}\n".encode())
+            child_env.update(scope_environment)
+            kwargs["creationflags"] = flags & ~pu._CREATE_BREAKAWAY_FROM_JOB
+            receipt = reserve()
+            child_env.update(instance_environment(receipt))
+            try:
+                process = create()
+            except OSError:
+                refused()
+                raise
         return commit(process)

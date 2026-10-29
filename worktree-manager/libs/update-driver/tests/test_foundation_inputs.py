@@ -185,25 +185,20 @@ def test_builder_uses_fixed_retained_canonical_recipe_under_borrowed_custody(
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows owning adoption")
-def test_builder_adopts_only_after_selection_under_live_driver_custody(
+def test_native_builder_selects_without_task_adoption(
     builder, construction, source, area, monkeypatch,
 ):
-    from update_driver import participant_environment, windows_broker
+    from update_driver import windows_broker
+    from unittest.mock import Mock
 
     _, events = construction
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
 
-    def adopt(runtime_root, slot, **kwargs):
-        assert events[-1][0] == "selected"
-        assert participant_environment()
-        assert kwargs["root"] == area / "state"
-        assert runtime_root == area / "state" / "foundation"
-        assert slot == runtime_root / "versions" / ("foundation-" + inspect(source).digest)
-        events.append("adopted")
-
-    monkeypatch.setattr(windows_broker, "adopt", adopt)
+    adoption = Mock(side_effect=AssertionError("normal construction must not adopt a Task"))
+    monkeypatch.setattr(windows_broker, "adopt", adoption)
     execute(builder, source, area, monkeypatch)
-    assert events[-2:] == ["adopted", "released"]
+    assert events[-2][0] == "selected" and events[-1] == "released"
+    adoption.assert_not_called()
 
 
 def test_contained_construction_never_adopts_an_os_registration(

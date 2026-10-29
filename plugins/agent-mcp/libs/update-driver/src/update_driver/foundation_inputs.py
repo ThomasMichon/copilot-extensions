@@ -132,18 +132,6 @@ def check_health() -> None:
     ):
         if any(not files(package).joinpath(name).is_file() for name in names):
             raise FoundationInputError("foundation is missing native custody assets")
-    if os.name == "nt":
-        from agent_procutil import windows_broker_installation, windows_task_broker
-        import zdd
-
-        if (
-            not callable(windows_broker_installation.registration)
-            or not callable(windows_task_broker.reconcile)
-            or not files(agent_procutil).joinpath("windows_broker_entry.py").is_file()
-            or not files(agent_procutil).joinpath("windows_broker_task.ps1").is_file()
-            or not files(zdd).joinpath("private_windows_native.py").is_file()
-        ):
-            raise FoundationInputError("foundation is missing Windows broker assets")
 
 
 if __name__ == "__main__":

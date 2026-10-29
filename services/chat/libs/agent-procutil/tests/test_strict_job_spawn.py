@@ -8,7 +8,7 @@ import os
 import subprocess
 import sys
 import time
-from unittest.mock import Mock
+from unittest.mock import ANY, Mock
 
 import pytest
 from test_agent_procutil import _FakeKernel32
@@ -63,7 +63,7 @@ def test_failed_strict_assignment_never_resumes_and_confirms_exit(monkeypatch):
         pu.spawn_sync_in_kill_on_close_job(
             ["fixture"], require_job=True, allow_breakaway=False,
         )
-    assign.assert_called_once_with(123, allow_breakaway=False)
+    assign.assert_called_once_with(123, allow_breakaway=False, name=ANY)
     process.kill.assert_called_once_with()
     process.wait.assert_called_once_with(timeout=5)
     resume.assert_not_called()

@@ -381,14 +381,8 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
     monkeypatch.setattr(driver.engine, "_prepare_installed", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(driver.engine, "_verify_installed", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(driver, "_load_installed", lambda _slot: None)
-    adopted = []
-
     def adopt(requested, slot):
-        assert authority == ["enter", "leave"]
-        assert driver.runtime.current_version(root) == "1.0.0"
-        assert requested == root and slot.name == "2.0.0"
-        assert driver.runtime.gc(root) == []
-        adopted.append(slot)
+        pytest.fail("normal construction must not adopt a Task")
 
     monkeypatch.setattr(driver.install_driver, "adopt_broker", adopt)
     monkeypatch.setattr(driver, "_monitor_identity", lambda _root: None)
@@ -409,7 +403,6 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
         assert result["runtime_version"] == "2.0.0"
         assert driver.runtime.current_version(root) == "2.0.0"
     assert previous.is_dir()
-    assert len(adopted) == 1
     assert authority == ["enter", "leave", "enter", "cutover-released", "leave"]
     for version in ("1.0.0", "2.0.0"):
         with driver.runtime._kernel_lease(root, version, kind="retention", shared=False, timeout=0):

@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import sys
+import ctypes
+import os
 from pathlib import Path
 import pytest
 
 LIB = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(LIB / "src"))
+
+
+@pytest.fixture(autouse=True)
+def portable_windows_api_fakes(monkeypatch):
+    if os.name != "nt":
+        monkeypatch.setattr(ctypes, "get_last_error", lambda: 0, raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -37,4 +45,5 @@ def declared_mock_daemon(tmp_path, monkeypatch, request):
             )
         return original(*args, **kwargs)
     monkeypatch.setattr(pu, "spawn_daemon", launch)
+    monkeypatch.setattr(pu, "_resume_suspended_process", lambda pid: True)
     monkeypatch.setattr(store, "bind_process", lambda *_a, **_kw: None)

@@ -313,15 +313,23 @@ def spawn(argv: list[str], **kwargs):
     import msvcrt
     from agent_procutil.owned_process import OwnedCleanupError
 
-    environment = _environment_block(kwargs.get("env"))
+    from . import _job_scopes
+
+    job_name = _job_scopes.new_name()
+    environment = _environment_block(
+        _job_scopes.child_environment(kwargs.get("env"), append=job_name),
+    )
     cwd = os.fspath(kwargs["cwd"]) if kwargs.get("cwd") is not None else None
     if cwd is not None and (not isinstance(cwd, str) or "\0" in cwd):
         raise ValueError("native child working directory must be NUL-free text")
     kernel = _api()
-    handle = kernel.CreateJobObjectW(None, None)
+    handle = kernel.CreateJobObjectW(None, job_name)
     if not handle:
         raise ctypes.WinError(ctypes.get_last_error())
-    job = JobHandle(handle)
+    if ctypes.get_last_error() == 183:
+        kernel.CloseHandle(handle)
+        raise OSError("owned Job identity already exists")
+    job = JobHandle(handle, name=job_name)
     process = None
     info = _ProcessInfo()
     streams = []

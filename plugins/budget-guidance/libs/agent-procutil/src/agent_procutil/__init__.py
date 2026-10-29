@@ -30,21 +30,12 @@ exact creation flags) can't drift between copies:
   windowless, escapes the caller's Job object / session, runs from an
   explicit durable ``cwd``, and appends its stdout/stderr to a log file.
 
-Both are no-ops off Windows (``no_window_kwargs`` -> ``{}``; ``detached_kwargs``
--> ``start_new_session=True``), so call sites stay platform-agnostic::
+Off Windows, ``no_window_kwargs`` is empty and ``detached_kwargs`` selects a
+new session; call sites stay platform-agnostic.
 
-    subprocess.run(cmd, capture_output=True, **no_window_kwargs())
-    subprocess.Popen(
-        [windowless_python(), "-m", "my_daemon"],
-        **detached_kwargs(breakaway=True),
-    )
-
-Most consumers reference this canonical source via a `uv`-editable
-pointer in dev, materialized into a real per-plugin copy at release; at
-least one consumer (`agent-worktrees`, per its own self-contained
-build-surface requirement) ships a real local copy in dev too -- see
-this package's own ``README.md`` § Vendoring for the mechanism, and
-``tools/check-vendored-libs-sync.py`` for the enforcement.
+Development uses canonical editable references; release materializes consumer
+copies. See ``README.md`` for vendoring and
+``tools/check-vendored-libs-sync.py`` for source consistency.
 
 Synchronous imports do not load asyncio. Accessing the async spawn helper
 loads its implementation; the asyncio module attribute remains available for
@@ -57,9 +48,11 @@ import ctypes
 import logging
 import math
 import os
+import re
 import subprocess
 import sys
 import time
+import uuid
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, BinaryIO
 
@@ -93,6 +86,8 @@ _PROCESS_SET_QUOTA = 0x0100
 _PROCESS_TERMINATE = 0x0001
 _PROCESS_SUSPEND_RESUME = 0x0800
 _ERROR_ACCESS_DENIED = 5
+_JOB_SCOPES_ENV = "COPILOT_EXTENSIONS_OWNED_JOB_SCOPES"
+_JOB_SCOPE_NAME = re.compile(r"Local\\ce-owned-job-[0-9a-f]{32}\Z")
 
 log = logging.getLogger("agent-procutil")
 
@@ -123,17 +118,53 @@ def _is_windows() -> bool:
     return os.name == "nt"
 
 
-class JobHandle:
-    """Owned Windows Job Object handle.
+def _new_job_name() -> str:
+    return "Local\\ce-owned-job-" + uuid.uuid4().hex
 
-    Keep an instance alive as long as its assigned child process should be
-    tied to this owner. Closing it releases the handle; with
-    ``JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`` that also terminates any process
-    still assigned to the job. Off Windows callers never receive one.
+
+def _job_scope_names(environment) -> tuple[str, ...]:
+    value = environment.get(_JOB_SCOPES_ENV)
+    if value is None:
+        return ()
+    if not isinstance(value, str) or len(value) > 4096:
+        raise ValueError("invalid owned Job scope metadata")
+    names = value.split(";")
+    if (
+        len(names) > 64 or len(set(names)) != len(names)
+        or any(_JOB_SCOPE_NAME.fullmatch(name) is None for name in names)
+    ):
+        raise ValueError("invalid owned Job scope metadata")
+    return tuple(names)
+
+
+def _job_child_environment(environment=None, *, append: str | None = None) -> dict[str, str]:
+    child = dict(os.environ if environment is None else environment)
+    names = list(_job_scope_names(os.environ))
+    for key in tuple(child):
+        if key.upper() == _JOB_SCOPES_ENV:
+            names.extend(_job_scope_names({_JOB_SCOPES_ENV: child.pop(key)}))
+    names = list(dict.fromkeys(names))
+    if append is not None:
+        names.append(append)
+    if names:
+        child[_JOB_SCOPES_ENV] = ";".join(names)
+        _job_scope_names(child)
+    return child
+
+
+def _publish_job_scope(name: str) -> None:
+    os.environ[_JOB_SCOPES_ENV] = _job_child_environment(append=name)[_JOB_SCOPES_ENV]
+
+
+class JobHandle:
+    """Own a Windows Job for its assigned child's bounded lifetime.
+    Closing a KILL_ON_JOB_CLOSE Job terminates remaining members.
+    Non-Windows callers never receive a Job owner.
     """
 
-    def __init__(self, handle: Any) -> None:
+    def __init__(self, handle: Any, *, name: str | None = None) -> None:
         self._handle = handle
+        self.name = name
 
     @property
     def handle(self) -> Any:
@@ -311,7 +342,7 @@ def _log_job_failure(operation: str) -> None:
 
 
 def _assign_suspended_to_kill_on_close_job(
-    pid: int, *, allow_breakaway: bool = True,
+    pid: int, *, allow_breakaway: bool = True, name: str | None = None,
 ) -> JobHandle | None:
     """Assign a newly-created suspended ``pid`` to this owner's kill-on-close Job.
 
@@ -333,10 +364,13 @@ def _assign_suspended_to_kill_on_close_job(
         kernel32 = _kernel32()
         _configure_job_api(kernel32)
 
-        job = kernel32.CreateJobObjectW(None, None)
+        name = name or _new_job_name()
+        job = kernel32.CreateJobObjectW(None, name)
         if not job:
             _log_job_failure("CreateJobObjectW")
             return None
+        if ctypes.get_last_error() == 183:
+            raise OSError("owned Job identity already exists")
 
         limit_info = _build_job_extended_limit_info()()
         limit_info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
@@ -364,7 +398,9 @@ def _assign_suspended_to_kill_on_close_job(
             _log_job_failure("AssignProcessToJobObject")
             return None
 
-        owned = JobHandle(job)
+        owned = JobHandle(job, name=name)
+        if pid == os.getpid():
+            _publish_job_scope(name)
         job = None
         return owned
     except Exception:
@@ -454,32 +490,21 @@ def spawn_sync_in_kill_on_close_job(
     """Synchronous (``subprocess.Popen``) counterpart to
     :func:`spawn_in_kill_on_close_job`, for callers that cannot use ``asyncio``.
 
-    Mirrors the same containment contract: on Windows the child is created
-    with ``CREATE_SUSPENDED``, assigned to a kill-on-close Job Object, and then
-    resumed, with no gap between creation and assignment in which it (or a
-    descendant it spawns) could escape the job. A caller that later needs to
-    forcibly terminate the whole process tree -- e.g. after its own
-    ``communicate(timeout=...)`` raises ``subprocess.TimeoutExpired`` -- should
-    call ``job_handle.close()``, which (via
-    ``JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE``) kills every process still in the
-    job, not just the immediate child. A plain ``proc.kill()`` on Windows only
-    terminates that immediate child: any grandchildren it spawned (a `.cmd`
-    shim re-execing `python.exe`, a `pwsh.exe` wrapper invoking `git`/`copilot`,
-    etc.) survive, can keep the stdout/stderr pipes open, and leave a
-    subsequent ``communicate()`` blocked indefinitely even though the direct
-    child is already dead -- exactly the failure mode that left a real
-    self-update sweep tick alive-but-stuck for over a day in practice.
+    Windows creates the child suspended, assigns its named kill-on-close Job
+    and propagates the complete cleanup-scope chain before resume. Keep the
+    returned Job handle until child cleanup finishes. Close/terminate that Job
+    for whole-tree cleanup: ``proc.kill()`` alone leaves grandchildren alive,
+    possibly keeping captured pipes open.
 
     With ``require_job=True``, failed Windows Job assignment kills the still
     suspended child before it can launch descendants and raises explicitly.
     ``allow_breakaway=False`` prohibits descendants from escaping this Job and
     rejects an explicit CREATE_BREAKAWAY_FROM_JOB flag on the initial child.
     The default permits explicit breakaway, preserving legacy daemon semantics.
-    Otherwise, if job creation or assignment fails, the child still runs (resumed) and is
-    returned with ``job_handle=None`` so existing cleanup paths remain in
-    charge -- containment is a best-effort hardening layer, not a hard
-    dependency for the child to execute at all. Off Windows this is a plain
-    ``subprocess.Popen`` call returning ``(process, None)``.
+    Otherwise failed assignment resumes the child with ``job_handle=None``;
+    existing cleanup remains responsible. Its unresolved scope metadata
+    prevents descendants claiming verified daemon escape. Off Windows this is
+    plain ``Popen`` returning ``(process, None)``.
     Process-creation OS errors are ``SyncProcessLaunchError`` instances;
     subsequent containment or cleanup errors retain their original types.
     """
@@ -498,6 +523,10 @@ def spawn_sync_in_kill_on_close_job(
             raise kind(error) from error
 
     spawn_kwargs = dict(kwargs)
+    job_name = _new_job_name()
+    spawn_kwargs["env"] = _job_child_environment(
+        spawn_kwargs.get("env"), append=job_name,
+    )
     spawn_kwargs["creationflags"] = (
         int(spawn_kwargs.get("creationflags", 0)) | _CREATE_SUSPENDED
     )
@@ -510,9 +539,11 @@ def spawn_sync_in_kill_on_close_job(
     try:
         pid = process.pid
         if allow_breakaway:
-            job_handle = _assign_suspended_to_kill_on_close_job(pid)
+            job_handle = _assign_suspended_to_kill_on_close_job(pid, name=job_name)
         else:
-            job_handle = _assign_suspended_to_kill_on_close_job(pid, allow_breakaway=False)
+            job_handle = _assign_suspended_to_kill_on_close_job(
+                pid, allow_breakaway=False, name=job_name,
+            )
         if job_handle is None and (require_job or not allow_breakaway):
             process.kill()
             process.wait(timeout=5)

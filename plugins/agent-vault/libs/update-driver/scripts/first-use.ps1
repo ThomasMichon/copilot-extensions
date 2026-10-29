@@ -258,19 +258,22 @@ if ($Mode -ceq 'launch') {
     New-NativeExecutionDirectory -Root $Root
     $log = Join-Path $Root ('first-use-' + [Guid]::NewGuid().ToString('N') + '.log')
     [IO.File]::Open($log, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read).Dispose()
+    $diagnosticLog = Join-Path $Root ('process-' + [IO.Path]::GetFileName($log))
+    [IO.File]::Open($diagnosticLog, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read).Dispose()
     $worker = Start-NativeDaemon -Script $PSCommandPath -Arguments @(
         $Root, $Payload, $RuntimeRoot, $Project, 'owner', $source, $log, $ServiceMode, $InstallerAction
-    ) -WorkingDirectory $Project -LogPath $log
+    ) -WorkingDirectory $Project -LogPath $diagnosticLog
     try {
         $acknowledgement = @{
-            launched = $true; log = $log; pid = $worker.Id
+            launched = $true; log = $log; diagnostic_log = $diagnosticLog; pid = $worker.Id
             created = $worker.StartTime.ToUniversalTime().ToFileTimeUtc()
         } | ConvertTo-Json -Compress
         if ($Wait) {
             [Console]::Error.WriteLine("[installation-driver] launch acknowledgement: $acknowledgement")
             $worker.WaitForExit()
             $code = $worker.ExitCode
-            Get-Content -LiteralPath $log -Encoding UTF8 | ForEach-Object { [Console]::Error.WriteLine($_) }
+            Get-Content -LiteralPath @($log, $diagnosticLog) -Encoding UTF8 |
+                ForEach-Object { [Console]::Error.WriteLine($_) }
             exit $code
         }
         # This is launch acknowledgement, never a durable ordinary-request receipt.

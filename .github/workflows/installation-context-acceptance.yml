@@ -92,7 +92,7 @@ on:
         type: boolean
         default: false
       windows_broker_consumers:
-        description: Real cold Worktrees installation and maintenance in a disposable Windows profile
+        description: Normal native Job lifetime, cold Worktrees and Manager recovery without Task adoption
         type: boolean
         default: false
 
@@ -1017,7 +1017,7 @@ jobs:
     steps: *ssh-snapshot-native-steps
 
   windows-broker-portable:
-    if: ${{ inputs.windows_broker_probe && !inputs.watch_owner && !inputs.dispatch_delegation }}
+    if: ${{ (inputs.windows_broker_probe || inputs.windows_broker_consumers) && !inputs.watch_owner && !inputs.dispatch_delegation }}
     name: Broker portable and native POSIX regression
     runs-on: ubuntu-latest
     timeout-minutes: 6
@@ -1048,6 +1048,7 @@ jobs:
           python tools/run-plugin-tests.py agent-procutil --allow-explicit-tiers
           --test-file tests/test_daemon_broker.py
           --test-file tests/test_daemon_spawn_failures.py
+          --test-file tests/test_job_scopes.py
           --test-file tests/test_daemon_instances_linux.py
           --test-file tests/test_native_daemon_shell.py
           --timeout 120 --plugin-timeout 240
@@ -1091,9 +1092,62 @@ jobs:
             ${{ runner.temp }}/ce-broker-probe-*/protocol-result.json
           if-no-files-found: error
 
+  windows-native-process:
+    if: ${{ inputs.windows_broker_consumers && !inputs.watch_owner && !inputs.dispatch_delegation }}
+    name: Native PowerShell owned-process lifetime (disposable Windows)
+    runs-on: windows-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Contained native admission and fresh-profile controls
+        env:
+          PROCUTIL_NATIVE_DAEMON_LIFETIME: "1"
+        shell: pwsh
+        run: >-
+          python tools/run-plugin-tests.py agent-procutil
+          --test-file tests/test_native_daemon.py
+          --test-file tests/test_native_daemon_cleanup.py
+          --test-file tests/test_metrics_native.py
+          --allow-explicit-tiers --timeout 120 --plugin-timeout 300
+      - name: Native first-use receipt and redirected-output logging
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_native.py
+          --allow-explicit-tiers -k "actual_native_supervisor_forwards and provision and stock_case"
+          --timeout 120 --plugin-timeout 180
+      - name: Packaged Bridge native helper and optional-adapter closure
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: >-
+          python tools/run-plugin-tests.py agent-bridge
+          --test-file tests/test_session_host.py
+          --allow-explicit-tiers -k session_host_bundle
+          --timeout 120 --plugin-timeout 180
+      - name: Native PowerShell post-caller owned-work lifetime
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: python tools/windows_normal_process_lifetime.py --ephemeral-ci-consent --native-shell-only
+      - name: Retain native admission and cleanup diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-native-process-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/ce-broker-probe-native-*/native-result.json
+            ${{ runner.temp }}/ce-broker-probe-native-*/native-*/*.log
+          if-no-files-found: error
+
   windows-broker-consumers:
     if: ${{ (inputs.windows_broker_probe || inputs.windows_broker_consumers) && !inputs.watch_owner && !inputs.dispatch_delegation }}
-    name: Real Worktrees broker consumers (disposable Windows)
+    name: Normal native Worktrees and Manager consumers (disposable Windows)
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
@@ -1104,9 +1158,18 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
-      - name: Real cold construction, automatic maintenance and manual exclusion
+      - name: Direct Job lifetime, cold construction and concurrent Manager recovery
+        id: consumers
         shell: pwsh
         run: python tools/windows_broker_consumer_acceptance.py --ephemeral-ci-consent
+      - name: Real installer serving-slot retention controls
+        if: ${{ !cancelled() && steps.consumers.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          foreach ($state in @('live', 'absent', 'stale')) {
+            python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_python_runtime_install.py -k "real_installer and $state" --timeout 300 --plugin-timeout 600
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
       - name: Prepare the bounded native removal controls
         id: finite-tooling
         if: ${{ !cancelled() }}
@@ -1131,6 +1194,8 @@ jobs:
             ${{ runner.temp }}/ce-broker-probe-consumers-*/desktop.json
             ${{ runner.temp }}/ce-broker-probe-consumers-*/command-*.log
             ${{ runner.temp }}/ce-broker-probe-consumers-*/command-*-requests.json
+            ${{ runner.temp }}/ce-broker-probe-consumers-*/native-*/**/*.log
+            ${{ runner.temp }}/ce-broker-probe-consumers-*/native-*/*.log
           if-no-files-found: error
 
   watch-owner-native-linux:
