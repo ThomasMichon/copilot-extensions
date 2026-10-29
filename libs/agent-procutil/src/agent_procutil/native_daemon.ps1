@@ -259,6 +259,7 @@ function Start-NativeDaemon {
         [string]$RegistryRoot = $env:COPILOT_EXTENSIONS_DAEMON_REGISTRY
     )
     if ($env:OS -ne 'Windows_NT') { throw 'Native PowerShell daemon admission requires Windows.' }
+    $ProgressPreference = 'SilentlyContinue'
     foreach ($path in @($Script, $WorkingDirectory, $script:NativeDaemonSource)) {
         if (-not [IO.Path]::IsPathRooted($path) -or [IO.Path]::GetFullPath($path) -ne $path) {
             throw 'Native daemon paths must be fully qualified and normalized.'
@@ -310,6 +311,7 @@ function Start-NativeDaemon {
     $diagnosticLiteral = "'" + ($LogPath + '.entry.log').Replace("'", "''") + "'"
     $body = @"
 `$ErrorActionPreference = 'Stop'
+`$ProgressPreference = 'SilentlyContinue'
 [IO.File]::WriteAllText($diagnosticLiteral, "native-daemon-stage:script-entry``n")
 `$d = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$data')) | ConvertFrom-Json
 [IO.File]::AppendAllText($diagnosticLiteral, "native-daemon-stage:decoded``n")
