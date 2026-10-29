@@ -43,6 +43,13 @@ def _fixture(tmp_path, plugin):
         REPO / "plugins" / plugin / "scripts" / "bootstrap-check.sh",
         scripts / "bootstrap-check.sh",
     )
+    if plugin == "agent-dispatch":
+        canonical = REPO / "plugins" / plugin
+        shutil.copyfile(canonical / "scripts/action_controls.py", scripts / "action_controls.py")
+        shutil.copytree(
+            canonical / "src", payload / "src",
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
     (payload / "plugin.json").write_text(
         json.dumps({"name": plugin, "version": VERSION}), encoding="utf-8",
     )
@@ -110,6 +117,7 @@ def _environment(home):
         if not key.startswith(("AGENT_RT_", "COPILOT_EXTENSIONS_", "COPILOT_PLUGIN_"))
     }
     env["HOME"] = str(home)
+    env.pop("BOOTSTRAP_KILLSWITCH_STATE_FILE", None)
     return env
 
 
@@ -293,6 +301,19 @@ def test_existing_bootstrap_admission_and_output(tmp_path, plugin, case):
         assert _children(home) == ["stamp"]
     else:
         assert _children(home) == []
+
+
+@NATIVE
+def test_dispatch_action_admission_remains_authoritative_in_fixture(tmp_path: Path) -> None:
+    payload, home, root = _fixture(tmp_path, "agent-dispatch")
+    (root / "action-controls.json").write_text(
+        json.dumps({"automatic-runtime-reconcile": {"disabled": True, "reason": "fixture hold"}}),
+        encoding="utf-8",
+    )
+    result, _ = _hook(payload, home)
+    assert result.returncode == 3
+    assert "fixture hold" in result.stderr
+    assert _children(home) == []
 
 
 @NATIVE
