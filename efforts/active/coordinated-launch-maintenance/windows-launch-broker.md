@@ -199,9 +199,19 @@ CI/promotion enforcement remain the separate parent gate.
   The existing strict shell interpreter-custody check rejects the hosted
   tool-cache mode `0777`; the fixture selects and verifies the owned OS
   interpreter (`0755`) rather than weakening that production guard._
-- [ ] Reconcile documentation, source guards and all consumer changefiles.
+- [x] Reconcile documentation, source guards and all consumer changefiles.
   Merge only after required review and CI, with no unresolved lifetime finding.
-- [ ] Observe promotion separately. Before installed rollout, obtain the
+  _#7833 merged as `e58ba45041ca533d4a97ebee478195ce23462eeb`. Final-head
+  CI 40797280463 and all three native lanes in 40797339663 pass; review
+  5691634979 has no open findings and all ten threads are resolved. Actual
+  installed Manager concurrent-reader recovery and canonical removal are
+  included. This is source/disposable-host qualification, not installed rollout._
+- [x] Observe promotion separately.
+  _Automatic run 40798872550 and generated #9486 publish Main
+  `2aa36e8f4d853024c9f18b4309efb5e6e4fd2a8b`; Worktrees is
+  `1.24.338-dev1`, with all three final runtime correction modules matching
+  the reviewed source by Git blob identity._
+- [ ] Before installed rollout, obtain the
   deployment authorization and obey the existing installation owner/holds.
   No source merge or mock registration is a running-state qualification.
 
