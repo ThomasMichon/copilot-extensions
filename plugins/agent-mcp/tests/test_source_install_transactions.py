@@ -336,6 +336,46 @@ echo CONTINUED
         assert ("CONTINUED" in result.stdout) == (exit_code == 0)
 
 
+@pytest.mark.parametrize("shell_name", ["pwsh", "powershell"])
+@pytest.mark.parametrize("phase", ["incremental-reap", "cutover"])
+def test_native_owner_settlement_best_effort_failures_use_an_available_warning(
+        tmp_path: Path, monkeypatch, shell_name: str, phase: str,
+) -> None:
+        host = shutil.which(shell_name)
+        if not host:
+            pytest.skip(f"Native {shell_name} unavailable")
+        monkeypatch.setattr(sys.modules[__name__], "_host", lambda _: host)
+        text = (ROOT / "plugins/agent-mcp/scripts/init.ps1").read_text(encoding="utf-8")
+        loggers = "\n".join(re.findall(r"(?m)^function Write-(?:Ok|Skip)\b[^\n]*$", text))
+        if phase == "incremental-reap":
+            begin = text.index("    $ReapScript = Join-Path")
+            fragment = text[begin:text.index("    # Collect the now-idle", begin)]
+            response = "$global:LASTEXITCODE=1; return ''"
+            warning = "Version-reap incomplete"
+        else:
+            begin = text.index("if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_CUTOVER)")
+            fragment = text[begin:text.index("# agent-mcp-specific (NOT part", begin)]
+            response = """return '{"skipped":false,"ok":false,"error":"fixture failure"}'"""
+            warning = "Cutover attempted"
+        script = f"""
+Set-StrictMode -Version 2.0
+$ErrorActionPreference='Stop'
+$WarningPreference='Stop'
+$VersionedRuntime=$true
+$VenvPython='fixture-only-unused'
+$InstallDir={_quote(tmp_path, 'ps1')}
+$env:AGENT_MCP_NO_CUTOVER=''
+function Invoke-Hidden {{ param($FilePath,$ArgList) {response} }}
+{loggers}
+{fragment}
+Write-Output 'CONTINUED'
+"""
+        result = _run(tmp_path, "ps1", script)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "CONTINUED" in result.stdout
+        assert warning in result.stdout
+
+
 @pytest.mark.parametrize("plugin", PLUGINS)
 @pytest.mark.parametrize("language", ["ps1", "sh"])
 @pytest.mark.parametrize("boundary", ["admission", "lock", "build", "reuse"])

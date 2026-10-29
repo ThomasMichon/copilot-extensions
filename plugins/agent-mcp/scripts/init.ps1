@@ -1042,7 +1042,7 @@ if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_CUTOVER) {
             } elseif ($cutoverResult.ok) {
                 Write-Ok "Cut over the live serve daemon to the new version (routing flipped; old drained + retired)"
             } else {
-                Write-Warn "Cutover attempted -- $($cutoverResult.error)"
+                Write-Warning "Cutover attempted -- $($cutoverResult.error)" -WarningAction Continue
             }
         }
     } catch { Write-Skip "Cutover skipped ($($_.Exception.Message))" }
@@ -1068,7 +1068,7 @@ if ($VersionedRuntime -and $script:RuntimeConstructionSession.Construction -ne '
             $stale = ($reaped | ForEach-Object { ($_ -split ':', 2)[0] } | Sort-Object -Unique) -join ', '
             Write-Ok "Reaped $($reaped.Count) stale-version process(es) from: $stale"
         }
-    } catch { Write-Warn "Version-reap incomplete ($($_.Exception.Message))" }
+    } catch { Write-Warning "Version-reap incomplete ($($_.Exception.Message))" -WarningAction Continue }
     # Collect the now-idle stale version *directories* the reap above freed. The
     # process-reap alone leaves the dirs on disk (the primitive's gc deliberately
     # protects any slot a live process runs from), so without this step stale
