@@ -416,11 +416,16 @@ reuse/admission behavior is not an exception to the fresh-default revision.
   failed-inspection resume, exact exit confirmation and native fresh-path failure
   propagation on Windows/Linux. Preserve protected/current/excluded scope; keep
   disposable-state reset, old-code retirement and installed-host acceptance separate.
-- [ ] **Agent-recommended bounded control-state reset:** implement the
+- [x] **Agent-recommended bounded control-state reset:** implement the
   [MCP reset ordering, existing-lock custody and retry-consistency slice](fresh-default-installation.md#bounded-mcp-control-state-reset---agent-recommended)
   after its proposal clears review. Preserve winning current owners,
   configuration/durable/foreign state and incremental handoff; keep old-code
   collection and complete reactivation prevention open.
+- [ ] **Agent-recommended bounded displaced-code retirement:** review and
+  implement the [MCP code, retention-handoff and restart-route slice](fresh-default-installation.md#bounded-mcp-displaced-code-retirement---agent-recommended)
+  through the same fresh installer owner. Preserve the selected candidate,
+  independent lease owners, durable/unknown/protected state and incremental
+  behavior; do not substitute ordinary best-effort GC or whole-uninstall.
 - [x] Qualify Main bootstrap transport independently of Manager/service runtime
   source policy through the actual Linux and Windows global entry points, including
   explicit transport overrides, broken incumbents and older explicit-source callers.
@@ -1003,11 +1008,16 @@ implementation, rollout or parent completion is declared.
   original-parent survival, pause rollback and explicit no-reap refusal without
   depending on an old deployment receipt. This does not close full reset or
   the independently authorized critical-connectivity/installed-survival gates.
-- [ ] **Agent-recommended bounded control-state reset:** qualify the
+- [x] **Agent-recommended bounded control-state reset:** qualify the
   [native reset and contention matrix](fresh-default-installation.md#bounded-mcp-control-state-reset---agent-recommended),
   including failed-reset retry remaining fresh, actual winner-state preservation,
   distinct control/code roots and post-reset on-demand serving. This is not
   full displaced-code silence, installed survival or all-tool/Manager adoption.
+- [ ] **Agent-recommended bounded displaced-code retirement:** qualify the
+  [native removal, custody and retry controls](fresh-default-installation.md#bounded-mcp-displaced-code-retirement---agent-recommended),
+  including actual old-code/restart-route absence, selected runtime health,
+  attached retention handoff, competing-owner preservation and interrupted
+  fresh retries. This does not close installed survival or the remaining portfolio.
 - [ ] **Critical connectivity:** resolve the [route/removal matrix and retention acceptance](connectivity-retention.md), distinguishing provisioning code from actual SSH/Gateway transport and protecting its complete live/reconnect dependency closure. Force or purge cannot bypass it; credential relays can be removed. Source audit/vision alignment is not installed survival proof.
 
 - [ ] **Disposable services and shared maintenance hold:** resolve the [YAML banner implementation/validation sequence](maintenance-banner.md#implementation-and-validation-sequence). Prove the same applicable banner blocks actual automatic updates/reprovisioning and explains agent standby, including Manager, queued execution and missing catalog tools. Retain durable state and independently hosted session continuity, native 30-minute polling and no self-repair during an explained hold; source text, an unrelated kill switch or a merged vision is not acceptance.
@@ -1316,5 +1326,35 @@ contract. Its Plan and Validation items remain open until implementation and
 native qualification merge. Old-code collection, complete reactivation
 prevention and every installed/portfolio/survival acceptance gate remain open.
 No deployment, maintenance hold or host cleanup is authorized by this proposal.
+
+### 2026-10-29 - Qualified MCP control reset and retry consistency
+
+#9553 merged as `f39fdc789e1406c52506b78f1c8b1520c684ccc3` after Copilot
+approved exact head `181ae83d858e130ffcfe6dc3de75fd3cab73737a` with no active
+issues. Required checks, including source attribution after the final
+description edit, passed before managed merge. The source worktree reconciled
+to the verified squash boundary without replaying post-merge commits.
+
+Native workflow `40904358897` passed on Windows and Linux at that exact head.
+The retirement/reset packets passed 79 and 82 tests respectively, including
+Windows dead-routing recovery rather than skipping it; the construction/native
+adapter packets also passed. The combined local reset/footprint packet passed
+83 tests with three POSIX-only socket-type skips.
+
+Fresh reset now preserves winning owners, socket-home overrides, live routing
+and sidecar endpoints, lock identities and durable/foreign content. Windows
+timeouts require a successful exclusive endpoint bind before absence is
+established. Routing ports/PIDs and duplicate fields follow the actual client
+parser. Fresh construction cannot reuse the recorded deployment generation
+even when its old slot is absent, so completion/activation without successful
+integration cannot make the retry incremental.
+
+Only the bounded control-reset Plan and Validation items close. The next
+agent-recommended proposal addresses declared displaced code and restart
+routes, including the constructor's own predecessor-retention handoff.
+Old-code silence, the remaining manifest portfolio, assembled entry points,
+macOS, same-existing-data all-tool/Manager adoption and live session/transport
+survival remain open. No installed cleanup, rollout, service stop, maintenance
+hold or protected-process action ran; a source merge is not deployed-state proof.
 
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.
