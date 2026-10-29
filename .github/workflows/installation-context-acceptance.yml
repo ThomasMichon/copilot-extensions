@@ -608,7 +608,8 @@ jobs:
           --test-file tests/test_source_install_transactions.py
           --test-file tests/test_source_build.py
           --test-file tests/test_bootstrap_stamp_selection.py
-          -k "footprint_routes or test_source_build or post_repair"
+          --test-file tests/test_source_manifest_publication.py
+          -k "footprint_routes or test_source_build or post_repair or (test_actual_manifest_writer and agent-mcp)"
   update-diagnostics-windows:
     if: ${{ inputs.update_diagnostics }}
     name: Update diagnostic contracts (Windows)

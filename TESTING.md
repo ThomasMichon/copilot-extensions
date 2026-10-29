@@ -3,7 +3,8 @@
 The optional `update_diagnostics` lane also runs MCP's focused
 `test_source_install_transactions.py -k footprint_routes` controls and
 `test_source_build.py` operational-identity and
-`test_bootstrap_stamp_selection.py -k post_repair` session-readiness checks through the
+`test_bootstrap_stamp_selection.py -k post_repair` session-readiness checks,
+plus MCP's actual source/repair manifest serializers, through the
 canonical contained plugin runner on native Linux and Windows. They exercise
 the actual attached constructor and both native shell adapters with compatible,
 missing-deployment and corrupt-completion fixtures, source identity preservation
