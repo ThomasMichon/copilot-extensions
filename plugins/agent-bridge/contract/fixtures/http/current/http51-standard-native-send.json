@@ -1910,8 +1910,8 @@
       "sha256": "98a839dcf60825c58f00ad771b58e174de789f7ea2c4fec46bc37fe8234564ce"
     },
     "plugins/agent-bridge/src/agent_bridge/native_send_admission.py": {
-      "blob": "0b2fda9db93ffb5e8090256b421dbc7be3a539d7",
-      "sha256": "4564a5a4c46dd62a21d1d105bdcf579b2b003623e8c967a491474e9240204e99"
+      "blob": "290f09e0bf7eed1e6f18a9307d240f7c672d86a5",
+      "sha256": "8afb6d2907c781365693fee95f4cc99fc5d624e507b5d449836a241ac2e736f3"
     },
     "plugins/agent-bridge/src/agent_bridge/native_turn_transport.py": {
       "blob": "0e2729de7cec66b882626d8379103a827b2d4a0f",
@@ -2698,8 +2698,8 @@
       "sha256": "c04f8bd5df6d6e69eb35413bc4e99db347ef571030f91e09b188bdd4d1f3c51e"
     },
     "plugins/agent-bridge/tests/test_http51_capture_probes.py": {
-      "blob": "c2973c4c5c68731ab26d9cf847e6a6bc044419ab",
-      "sha256": "a2de07534358f8ca7a4432fa424a80e153221f55c1e1915c2f93816e87df1cfb"
+      "blob": "319ac79bd8323c8b2d47f4ef7d7e6181fd66b221",
+      "sha256": "44f958f8f147e16ae9ba00dbf68f440def43be30fd78a5f0da00eee03612510d"
     },
     "plugins/agent-bridge/tests/test_live_inbox_runtime.py": {
       "blob": "942cf585e13d20435822296e0681c9b76b77f8c4",
@@ -2714,8 +2714,8 @@
       "sha256": "2602317a92559363de5fa5d80b5ac0436161383c79d251d153d8b713413bda96"
     },
     "plugins/agent-bridge/tests/test_native_send_admission.py": {
-      "blob": "e8334d577e5b237cde923e3458992fba498ee0a1",
-      "sha256": "c0f89d9cbf3cb43be5044350c7df70f9bb4fadb361980d5f1da3722bc10681ad"
+      "blob": "7b90318d91d55959b094e713aa8db3d5cc253390",
+      "sha256": "a57374ecaa3ef65e43690c95d208ea302e4a3bd371d04f3dc6ec17e24e4d3d06"
     },
     "plugins/agent-bridge/tests/test_session_host.py": {
       "blob": "57281ef210afb57f2444ca3fbb4d98a93a46738f",
@@ -2748,6 +2748,10 @@
     "tools/accumulate_bumps.py": {
       "blob": "e5ddf5afe8c1e80caea234d8e786f04ea7e93216",
       "sha256": "64055cbc51a33c70882ea3e6ed863ec8b34c8bdb8b3b77c297d44e6cd08eecf0"
+    },
+    "tools/agent_bridge_contract_families.py": {
+      "blob": "026fc8bdd3e2b687b3c311e9c57a205b63b91579",
+      "sha256": "71fbb14f54a438b412a7338727284a125eb17d8ecb10bb0ebfbdc236e9370b38"
     },
     "tools/agent_bridge_contract_git.py": {
       "blob": "c6e4ad54309a0a2e486fae019a4bbd3a55af40c3",
@@ -2806,8 +2810,8 @@
       "sha256": "3e70c4bfd512395d7387a368e5612c65cdd1cdbd617c4e8476c976705bffbe0e"
     },
     "tools/bridge_http51_evidence.py": {
-      "blob": "3ce79db3780ba77cecc7e5e9bdc5c3b80f6d1c4a",
-      "sha256": "88d8fd01e6b7d078ebb0121ffc2e181cdf6996b2b91abfed3258d450d7eb44d2"
+      "blob": "c94cf6de10b16c9ac14754c6ae1891dffbd67927",
+      "sha256": "b0df391b7f1f8db988c0d5a38945dafebe34fefe41851d0053480fb424216919"
     },
     "tools/bridge_http_retained_evidence.py": {
       "blob": "3c3f2949b5cbd95dfc8c0af23ce995522721c9a9",
@@ -2866,8 +2870,8 @@
       "sha256": "5eb39b6273af7bec09e54c4168967a17f3c3d1e7b57d196cc1dac4763529555f"
     },
     "tools/check-agent-bridge-contracts.py": {
-      "blob": "03379ca3f25e6e74178a27e050931ee54a785e66",
-      "sha256": "dffe0701acd70ddde6cb4c0bbabd9920b251040fa5d5e5849118ca4849321b47"
+      "blob": "5602f65d173204466ffd8726243260e0066b7791",
+      "sha256": "50923bdfe15c45915a28f5bf5503581cd24e3dff23d918db5de23990ca706c11"
     },
     "tools/check-asyncio-timeout-handlers.py": {
       "blob": "e8068553a81c0dfc4f4f95a7595faf2bf745ef40",
@@ -4274,7 +4278,7 @@
       "sha256": "ae65db0f90938124b3695c082c3e65cffeeef39c0ac7697e1baa00bcd58e1909"
     }
   },
-  "execution_closure_sha256": "e6455a9d4fcfea608a839e337fe1d4c5465461fc2f68ecee82838308f25cb32f",
+  "execution_closure_sha256": "448519fc079728440c101dd6b16092ae07e68e1318acc4e482537d4fcbb6b006",
   "runtime_binding_policy": "every-owned-interpreter-source-and-entrypoint-v1",
   "runtime_roles": [
     "observer"
@@ -4302,11 +4306,13 @@
   ],
   "input_sha256": "793657e7a7883a5749ab4c7ba559543971cf830cba710fd7bfa4d85effe29109",
   "checked_probes": {
-    "test_http51_capture_actual_observations": 2
+    "test_http51_capture_actual_observations": 2,
+    "test_concurrent_stopped_retries_reconcile_after_actual_resume_state_race": 1,
+    "test_failed_resume_without_a_matching_receipt_remains_a_failure": 1
   },
   "scope": "model-free native-send ASGI/journal evidence; not SDK/native qualification",
   "captured_from": {
-    "commit": "1703e94dd6c8d43703dfccff5495dfbb08dcb911",
+    "commit": "295ec3ed0542323ed53f5ac4b7fbbdb91d031300",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 51,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
