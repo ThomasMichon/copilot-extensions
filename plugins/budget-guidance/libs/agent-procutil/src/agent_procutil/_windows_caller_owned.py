@@ -309,12 +309,15 @@ def _environment_block(environment):
 
 
 def spawn(argv: list[str], **kwargs):
-    """Create the target in its strict Job atomically, before it can run."""
+    """Create the target in its caller-owned Job atomically, before it can run."""
     import msvcrt
     from agent_procutil.owned_process import OwnedCleanupError
 
     from . import _job_scopes
 
+    allow_breakaway = kwargs.get("allow_breakaway", False)
+    if type(allow_breakaway) is not bool:
+        raise ValueError("allow_breakaway must be a boolean")
     job_name = _job_scopes.new_name()
     environment = _environment_block(
         _job_scopes.child_environment(kwargs.get("env"), append=job_name),
@@ -336,6 +339,8 @@ def spawn(argv: list[str], **kwargs):
     try:
         limit = _build_job_extended_limit_info()()
         limit.BasicLimitInformation.LimitFlags = 0x2000
+        if allow_breakaway:
+            limit.BasicLimitInformation.LimitFlags |= 0x0800
         if not kernel.SetInformationJobObject(
             handle, 9, ctypes.byref(limit), ctypes.sizeof(limit),
         ):

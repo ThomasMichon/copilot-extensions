@@ -53,6 +53,100 @@ def window_observer():
     return module._WindowObserver(user, kernel, callback)
 
 
+def pin_fixture_process(pid, birth, label):
+    from agent_procutil.daemon_broker import WindowsDaemonProcess
+    from agent_procutil._daemon_instance_identity import _windows_birth
+
+    process = WindowsDaemonProcess(pid, [label])
+    try:
+        assert _windows_birth(process._handle) == birth, "fixture process birth changed"
+    except BaseException:
+        process.close()
+        raise
+    return process
+
+
+def test_fixture_identity_mismatch_closes_without_termination(monkeypatch):
+    from unittest.mock import Mock
+    from agent_procutil import daemon_broker, _daemon_instance_identity
+
+    process = Mock()
+    monkeypatch.setattr(daemon_broker, "WindowsDaemonProcess", lambda *_args: process)
+    monkeypatch.setattr(_daemon_instance_identity, "_windows_birth", lambda _handle: "different")
+    with pytest.raises(AssertionError, match="birth changed"):
+        pin_fixture_process(123, "original", "unverified")
+    process.close.assert_called_once_with()
+    process.kill.assert_not_called()
+    process.wait.assert_not_called()
+
+
+@pytest.mark.parametrize("restrictive_outer", [False, True])
+def test_queued_installer_detaches_daemon_but_retires_ordinary_children(area, restrictive_outer):
+    console, python_env = pu.direct_python(sys.executable)
+    script = Path(__file__).with_name("fixture_native_lifetime.py").resolve()
+    root = area / "queue"
+    root.mkdir()
+    env = {**source_environment(), **python_env}
+    env.pop("COPILOT_EXTENSIONS_TEST_CONTAINED", None)
+    env["COPILOT_EXTENSIONS_DAEMON_REGISTRY"] = str(area / "instances")
+    request = enqueue(
+        RequestSpec("native-installation", repair=True),
+        runner=TrustedRunner(
+            (console, str(script), "product-daemon", str(root), console, "production"),
+            str(area), timeout=15, env=(("PYTHONPATH", env["PYTHONPATH"]),),
+        ), root=root,
+    )
+    with window_observer() as observation:
+        with (area / "worker.log").open("wb") as log:
+            worker, job = pu.spawn_sync_in_kill_on_close_job(
+                [console, "-m", "update_driver", "worker", "--root", str(root)],
+                cwd=area, env=env, require_job=True, allow_breakaway=not restrictive_outer,
+                stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                **pu.no_window_kwargs(),
+            )
+        ordinary = daemon = None
+        try:
+            observe_until(lambda: (root / "product-result.json").exists())
+            result = json.loads((root / "product-result.json").read_text())
+            ordinary = pin_fixture_process(
+                result["ordinary"], result["ordinary_birth"], "bounded-installation-child",
+            )
+            if result["admitted"]:
+                daemon = pin_fixture_process(
+                    result["daemon"], result["daemon_birth"], "durable-installed-daemon",
+                )
+            (root / "product-continue").write_text("identities pinned", encoding="ascii")
+            assert worker.wait(timeout=15) == 0, (area / "worker.log").read_text()
+            assert wait(request.id, root=root, timeout=1).exit_code == 0
+            ordinary.wait(timeout=5)
+            job.close()
+            if restrictive_outer:
+                assert not result["admitted"] and result["cleanup_confirmed"]
+                assert not (root / "daemon-ready").exists()
+            else:
+                assert result["admitted"], request.log_path.read_text()
+                observe_until(lambda: (root / "daemon-ready").exists())
+                scopes = json.loads((root / "daemon-ready").read_text())["scopes"]
+                assert set(scopes).isdisjoint(result["caller_scopes"])
+                assert daemon.poll() is None
+                (root / "daemon-continue").write_text("installer Job closed", encoding="ascii")
+                assert daemon.wait(timeout=5) == 0
+                assert (root / "daemon-completed").read_text() == "post-installer work"
+        finally:
+            if job.handle:
+                job.terminate_and_wait(5)
+            worker.wait(timeout=5)
+            for process in (ordinary, daemon):
+                if process is not None:
+                    try:
+                        if process.poll() is None:
+                            process.kill()
+                        process.wait(timeout=5)
+                    finally:
+                        process.close()
+        assert observation.surfaced == {} and observation.focus_changes == {}
+
+
 @pytest.mark.parametrize("mode", ["production", "contained"])
 def test_native_worker_survives_submitter_job_only_in_production(area, mode):
     from agent_procutil.daemon_broker import WindowsDaemonProcess

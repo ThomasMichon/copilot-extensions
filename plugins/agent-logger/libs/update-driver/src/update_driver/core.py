@@ -686,7 +686,7 @@ class Transaction:
 
 def _execute(transaction: Transaction) -> int:
     import agent_procutil
-    from agent_procutil.owned_process import run_caller_owned
+    from agent_procutil.owned_process import run_installation_owned
 
     request = transaction.request
     witness = transaction.participant_env()
@@ -697,7 +697,7 @@ def _execute(transaction: Transaction) -> int:
         str(transaction.root), request.id, witness["UPDATE_DRIVER_WITNESS"],
         str(Path(agent_procutil.__file__).resolve()),
     ]
-    result = run_caller_owned(
+    result = run_installation_owned(
         command, timeout=request.runner.timeout,
         max_stdout_bytes=65536, max_stderr_bytes=65536,
         on_settled=transaction._confirm_native_settlement,

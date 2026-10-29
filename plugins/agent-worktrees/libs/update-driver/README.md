@@ -37,6 +37,13 @@ no environment variable silently replaces that authority. A product worker may
 call `drain(root=...)`, or use the finite `python -m update_driver worker`
 entrypoint. No command/runner submission CLI exists.
 
+The canonical executor uses procutil's explicit installation-owned process
+boundary. Bounded installer descendants remain caller-owned; on Windows only
+explicitly durable product daemons can leave its cleanup Job through native
+breakaway. A restrictive external Job still refuses escape, and contained tests
+retain strict cleanup. Completion confirms the installer scope, not termination
+of independently owned service daemons. There is no Task, COM or UAC fallback.
+
 New Windows queue directories are created atomically with the actual process
 TokenUser as owner and protected, inheritable FullControl for that account,
 SYSTEM and Administrators. Elevated execution therefore does not leave a

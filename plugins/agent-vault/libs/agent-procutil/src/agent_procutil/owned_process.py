@@ -410,12 +410,15 @@ def _run_owned(
     on_settled: Callable[[], None] | None = None,
     cwd: str | os.PathLike | None = None,
     env: dict[str, str] | None = None,
+    allow_daemon_breakaway: bool = False,
 ) -> subprocess.CompletedProcess:
     if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("native child timeout must be finite and positive")
     windows = os.name == "nt"
     if type(inherit_process_group) is not bool:
         raise ValueError("inherit_process_group must be a boolean")
+    if type(allow_daemon_breakaway) is not bool:
+        raise ValueError("allow_daemon_breakaway must be a boolean")
     if inherit_process_group:
         require_contained_worker()
     if not windows:
@@ -429,7 +432,7 @@ def _run_owned(
         from agent_procutil._windows_caller_owned import spawn
 
     process, job = spawn(
-        argv, require_job=True, allow_breakaway=False,
+        argv, require_job=True, allow_breakaway=allow_daemon_breakaway,
         stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
         stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
         stderr=subprocess.PIPE if capture else subprocess.DEVNULL,
@@ -550,4 +553,23 @@ def run_caller_owned(
         on_settled=on_settled,
         **({"cwd": cwd} if cwd is not None else {}),
         **({"env": env} if env is not None else {}),
+    )
+
+
+def run_installation_owned(
+    argv: list[str], *, timeout: float, max_stdout_bytes: int, max_stderr_bytes: int,
+    on_settled: Callable[[], None] | None = None,
+) -> subprocess.CompletedProcess:
+    """Own a trusted installer, allowing explicitly detached product daemons.
+
+    Ordinary descendants remain in the cleanup Job. Only a daemon's explicit
+    breakaway can leave it; an external restrictive Job is never bypassed.
+    """
+    from agent_procutil import contained_test_mode
+    from agent_procutil._caller_owned import run
+
+    return run(
+        argv, timeout=timeout, max_stdout_bytes=max_stdout_bytes,
+        max_stderr_bytes=max_stderr_bytes, input_text=None, capture=True,
+        on_settled=on_settled, allow_daemon_breakaway=not contained_test_mode(),
     )
