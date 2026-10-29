@@ -202,6 +202,29 @@ def test_routing_only_endpoint_is_probed_before_deletion(
             assert not path.exists()
 
 
+@pytest.mark.parametrize("duplicate", ["active", "port"])
+def test_reset_preserves_live_routes_accepted_by_the_client_json_parser(
+    tmp_path: Path, duplicate: str,
+) -> None:
+    path = tmp_path / "active.json"
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        port = listener.getsockname()[1]
+        if duplicate == "active":
+            record = json.dumps({"bind": "127.0.0.1", "port": port})
+            text = '{"active":null,"active":' + record + "}"
+        else:
+            text = '{"active":{"bind":"127.0.0.1","port":1,"port":' + str(port) + "}}"
+        path.write_text(text, encoding="utf-8")
+        endpoint = routing.read_active_endpoint(tmp_path, verify_listener=False)
+        assert endpoint is not None and endpoint.port == port
+        before = path.read_bytes()
+        with pytest.raises(RuntimeError, match="live MCP routing"):
+            _reset(tmp_path)
+        assert path.read_bytes() == before
+
+
 @pytest.mark.parametrize("occupied", [False, True])
 def test_windows_timeout_requires_exclusive_kernel_endpoint_absence(
     tmp_path: Path,

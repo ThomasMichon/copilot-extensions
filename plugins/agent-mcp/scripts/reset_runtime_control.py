@@ -130,7 +130,7 @@ def _require_idle_routes(path: Path, rows: dict[int, dict]) -> None:
     if path.stat().st_size > 65536:
         raise RuntimeError("MCP routing table exceeds its reset inspection budget")
     try:
-        table = footprint.decode(footprint._marker_text(path))
+        table = json.loads(footprint._marker_text(path))
     except (ValueError, UnicodeError):
         return
     if not isinstance(table, dict):
