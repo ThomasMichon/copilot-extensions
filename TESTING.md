@@ -12,6 +12,13 @@ boundary, not a full interactive Picker/desktop-session launch or installed
 host rollout. The existing activation lane retains the shared-outer negative
 control and positive desktop-observer canary.
 
+Worktrees' `test_command_lifecycle_recovery.py` covers read-only inspection,
+evidence-bound pending-owner qualification, preservation of unrelated manifest
+and runtime state, changed source/evidence and policy refusals, and live
+publication-lock custody. Its Windows subprocess control runs the shipped helper
+against disposable payload/runtime roots before ordinary lifecycle publication;
+it is not installed-host rollout or service-convergence evidence.
+
 `tools/test_runtime_profile_bundle.py` checks the repeatable exact-profile
 transport producer, actual command invocation, canonical consumer readback,
 determinism, source independence, aggregate storage and refusal/cleanup paths.

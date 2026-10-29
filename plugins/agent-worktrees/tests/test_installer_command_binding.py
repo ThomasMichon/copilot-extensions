@@ -15,6 +15,7 @@ pytestmark = pytest.mark.guard
 
 @pytest.fixture
 def owned_install(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
+    (tmp_path / ".git").mkdir()
     payload = tmp_path / ".copilot/installed-plugins/example/agent-worktrees"
     package = payload / "src/agent_worktrees"
     package.mkdir(parents=True)
