@@ -11,7 +11,7 @@ import sys
 import time
 import tempfile
 import traceback
-import re
+import base64
 
 from windows_broker_fixture import admit, fixture_environment
 
@@ -168,21 +168,39 @@ def _qualify_native_shell(root: Path, environment, pu) -> list[dict]:
                     raise RuntimeError("native shell did not complete owned work after caller cleanup")
                 cycles.append({"caller_job_closed": True, "post_close_owned_work_completed": True})
             except subprocess.TimeoutExpired as error:
-                pids = {process.pid}
-                diagnostic = directory / "daemon.log"
-                if diagnostic.exists():
-                    pids.update(int(value) for value in re.findall(
-                        r"resumed process pid=(\d+)", diagnostic.read_text(errors="replace"),
-                    ))
-                try:
-                    chains = subprocess.run(
-                        [sys.executable, str(Path(__file__).with_name("windows_native_wait_chain.py")),
-                         *(str(pid) for pid in sorted(pids))],
-                        capture_output=True, text=True, timeout=10, **pu.no_window_kwargs(),
+                for label, keys in (
+                    ("base", set()),
+                    ("module-path", {"PSMODULEPATH"}),
+                    ("user-context", {"USERNAME", "USERDOMAIN", "USERDNSDOMAIN"}),
+                ):
+                    sample = directory / (label + ".probe.log")
+                    script = (
+                        f"[IO.File]::WriteAllText({literal(sample)}, 'entered'); "
+                        f". {literal(native)}; "
+                        f"[IO.File]::AppendAllText({literal(sample)}, ' helper-ready')"
                     )
-                    print("native startup wait chains:", chains.returncode, chains.stdout, chains.stderr, flush=True)
-                except subprocess.TimeoutExpired:
-                    print("native startup wait-chain diagnostic timed out", flush=True)
+                    probe_env = {
+                        **env, **{key: value for key, value in os.environ.items() if key.upper() in keys},
+                    }
+                    probe, probe_job = pu.spawn_sync_in_kill_on_close_job(
+                        [str(shell), "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand",
+                         base64.b64encode(script.encode("utf-16le")).decode("ascii")],
+                        env=probe_env, cwd=directory, require_job=True, allow_breakaway=False,
+                        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                        **pu.no_window_kwargs(),
+                    )
+                    try:
+                        try:
+                            output, stderr = probe.communicate(timeout=8)
+                            result = {"exit": probe.returncode, "stdout": output.decode(errors="replace"),
+                                      "stderr": stderr.decode(errors="replace")}
+                        except subprocess.TimeoutExpired:
+                            result = {"timeout": True}
+                        print("native helper environment control:", label, result,
+                              sample.read_text() if sample.exists() else "no script entry", flush=True)
+                    finally:
+                        probe_job.terminate_and_wait(5)
+                        probe.wait(timeout=5)
                 details = "\n".join(
                     path.name + ":\n" + path.read_text(encoding="utf-8", errors="replace")[-8192:]
                     for path in directory.glob("*.log")

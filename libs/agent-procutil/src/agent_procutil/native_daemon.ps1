@@ -52,8 +52,8 @@ namespace CopilotExtensions {
         private static extern bool TerminateProcess(IntPtr process, uint code);
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
-        [DllImport("ntdll.dll")]
-        private static extern int NtResumeProcess(IntPtr process);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern uint ResumeThread(IntPtr thread);
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool SetHandleInformation(SafeFileHandle handle, uint mask, uint flags);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -86,24 +86,6 @@ namespace CopilotExtensions {
             private IntPtr handle;
             public readonly uint Pid;
             internal Child(IntPtr process, uint pid) { handle = process; Pid = pid; }
-            public void Describe(string log) {
-                var result = new StringBuilder("native-daemon-state:pid=" + Pid);
-                using (var process = Process.GetProcessById((int)Pid)) {
-                    if (process.HasExited) result.Append(" exited=").Append(process.ExitCode);
-                    else {
-                        result.Append(" cpu-ms=").Append(process.TotalProcessorTime.TotalMilliseconds);
-                        foreach (ProcessThread thread in process.Threads) {
-                            using (thread) {
-                                result.Append("\nthread=").Append(thread.Id).Append(" state=").Append(thread.ThreadState);
-                                if (thread.ThreadState == System.Diagnostics.ThreadState.Wait)
-                                    result.Append(" wait=").Append(thread.WaitReason);
-                            }
-                        }
-                    }
-                }
-                using (var output = new FileStream(log, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
-                    Stage(output, result.ToString());
-            }
             public bool Stop() {
                 if (WaitForSingleObject(handle, 0) == 0) return true;
                 Check(TerminateProcess(handle, 125));
@@ -194,9 +176,9 @@ namespace CopilotExtensions {
                         Check(CloseHandle(queries[i]));
                         queries[i] = IntPtr.Zero;
                     }
-                    int status = NtResumeProcess(child.Process);
-                    if (status != 0) throw new IOException("native daemon resume failed: NTSTATUS " + status);
-                    Stage(output, "resumed process pid=" + child.Pid);
+                    uint suspended = ResumeThread(child.Thread);
+                    Check(suspended != UInt32.MaxValue);
+                    Stage(output, "resumed count=" + suspended + " pid=" + child.Pid);
                     Check(CloseHandle(child.Thread));
                     child.Thread = IntPtr.Zero;
                 }
@@ -311,7 +293,7 @@ function Start-NativeDaemon {
         [IO.Pipes.PipeTransmissionMode]::Byte, [IO.Pipes.PipeOptions]::Asynchronous,
         4096, 4096, $security
     )
-    $description = [Management.Automation.PSSerializer]::Serialize(@{
+    $description = @{
         script = $Script
         arguments = @($Arguments)
         helper = $script:NativeDaemonSource
@@ -323,15 +305,13 @@ function Start-NativeDaemon {
         registry = $receipt.registry_root
         instances = $instances
         working = $WorkingDirectory
-    })
+    } | ConvertTo-Json -Compress
     $data = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($description))
     $diagnosticLiteral = "'" + ($LogPath + '.entry.log').Replace("'", "''") + "'"
     $body = @"
 `$ErrorActionPreference = 'Stop'
 [IO.File]::WriteAllText($diagnosticLiteral, "native-daemon-stage:script-entry``n")
-`$d = [Management.Automation.PSSerializer]::Deserialize(
-    [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$data'))
-)
+`$d = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$data')) | ConvertFrom-Json
 [IO.File]::AppendAllText($diagnosticLiteral, "native-daemon-stage:decoded``n")
 try {
     [Console]::Error.WriteLine('native-daemon-stage:bootstrap')
@@ -379,7 +359,7 @@ try {
         )
         [IO.File]::WriteAllText(($LogPath + '.parent.log'), "native-daemon-stage:launcher-returned`n")
         if (-not $connected.AsyncWaitHandle.WaitOne(15000)) {
-            $launcher.Describe($LogPath)
+            [IO.File]::AppendAllText(($LogPath + '.parent.log'), "native-daemon-stage:admission-timeout`n")
             throw 'Native daemon did not reach admission.'
         }
         $server.EndWaitForConnection($connected)
