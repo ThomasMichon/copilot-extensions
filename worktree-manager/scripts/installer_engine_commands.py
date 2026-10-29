@@ -296,7 +296,8 @@ def _simple(payload: Path, root: Path, product: str, module: str) -> dict[str, t
 
 
 def _templates(payload: Path, root: Path, product: str, *,
-               publisher_root: Path | None = None) -> dict[str, tuple[str, ...]]:
+               publisher_root: Path | None = None,
+               home: Path | None = None) -> dict[str, tuple[str, ...]]:
     module = product.replace("-", "_")
     if product in _SIMPLE:
         return _simple(payload, root, product, module)
@@ -330,7 +331,7 @@ def _templates(payload: Path, root: Path, product: str, *,
             "__QUALIFIED_SOURCE__": qualified,
         }) for qualified in ("$false", "$true"))
         cmd = _render_ps(ps, "cmd", {
-            "__PS1__": str(Path.home() / ".local" / "bin" / (product + ".ps1")),
+            "__PS1__": str((home or Path.home()) / ".local" / "bin" / (product + ".ps1")),
         })
     elif product == "agent-dispatch":
         bash = tuple(_printf(sh, (p, r + "/bin/runtime-gate.sh")) + _sh(sh, "STUBEOF")
@@ -408,7 +409,7 @@ def _text(value: str) -> str:
 
 def owned_local_names(
     payload: Path, root: Path, module: str, contents: dict[str, str],
-    *, publisher_root: Path | None = None,
+    *, publisher_root: Path | None = None, home: Path | None = None,
 ) -> tuple[str, ...]:
     """Return only exact current legacy command names owned by this installation.
 
@@ -436,16 +437,17 @@ def owned_local_names(
         raise RuntimeError("Malformed trusted command payload manifest") from exc
     if not isinstance(manifest, dict) or manifest.get("name") != product:
         raise ValueError(f"Command payload manifest does not identify {product}")
-    templates = _templates(payload, root, product)
+    home = home or Path.home()
+    templates = _templates(payload, root, product, home=home)
     if publisher_root is not None and product in {
         "agent-bridge", "agent-dispatch", "agent-containers",
     }:
         if (not publisher_root.is_absolute() or ".." in publisher_root.parts
                 or any(char in str(publisher_root) for char in "\r\n\0")):
             raise ValueError("Installed command publisher must be an absolute non-traversing path")
-        installed = _templates(payload, root, product, publisher_root=publisher_root)
+        installed = _templates(payload, root, product, publisher_root=publisher_root, home=home)
         templates = {name: bodies + installed.get(name, ()) for name, bodies in templates.items()}
-    if product in _DEFAULT_ONLY and root != Path.home() / ("." + product):
+    if product in _DEFAULT_ONLY and root != home / ("." + product):
         return ()
     selected = {
         name for name, text in contents.items()

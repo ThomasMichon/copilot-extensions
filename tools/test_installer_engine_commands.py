@@ -286,6 +286,19 @@ def test_wrong_root_is_retained(product):
     assert owned(product, dict(fixtures(product)), root=Path.home() / "another-installation") == ()
 
 
+@pytest.mark.parametrize("product", ("agent-bridge", "agent-dispatch", "agent-worktrees"))
+def test_resolved_profile_home_controls_default_roots_and_cmd_peer(tmp_path, product):
+    home = tmp_path / "resolved-profile"
+    root = home / ("." + product)
+    contents = {
+        name: text.replace(str(Path.home() / ".local" / "bin"), str(home / ".local" / "bin"))
+        for name, text in fixtures(product, root)
+    }
+    arguments = (REPO / "plugins" / product, root, product.replace("-", "_"), contents)
+    assert set(MODULE.owned_local_names(*arguments, home=home)) == set(contents)
+    assert MODULE.owned_local_names(*arguments) == ()
+
+
 @pytest.mark.parametrize("product", PRODUCTS)
 def test_wrong_module_is_an_explicit_error(product):
     other = "agent_bridge" if product != "agent-bridge" else "agent_vault"

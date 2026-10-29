@@ -44,6 +44,20 @@ def test_json_reader_still_refuses_invalid_native_documents(
     module = _load_module()
     path = tmp_path / "deploy-manifest.json"
     path.write_bytes(content)
-    with pytest.raises(module.InstallationContextError):
+    with pytest.raises(module.MalformedDeploymentManifest):
         module.read_deployment_manifest(path)
     assert path.read_bytes() == content
+
+
+def test_deployment_storage_failure_is_not_malformed_json(tmp_path, monkeypatch) -> None:
+    module = _load_module()
+    path = tmp_path / "deploy-manifest.json"
+    path.write_text("{}")
+
+    def unreadable(*args, **kwargs):
+        raise PermissionError("fixture storage failure")
+
+    monkeypatch.setattr(module, "_read_regular_file", unreadable)
+    with pytest.raises(module.InstallationContextError, match="storage failure") as raised:
+        module.read_deployment_manifest(path)
+    assert not isinstance(raised.value, module.MalformedDeploymentManifest)

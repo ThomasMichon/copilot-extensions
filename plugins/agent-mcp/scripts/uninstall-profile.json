@@ -165,6 +165,67 @@
         "changed": ["producers:scripts", "producers:src"],
         "retired": []
       }
+    },
+    {
+      "revision": 3,
+      "snapshot": {
+        "profile": {
+          "version": 1,
+          "root_entries": ["versions", ".venv", "snapshots", "current-version", "last-known-good", "running-version.json", "deploy-manifest.json", "payload-dir", "stamped-version", ".provision-status"],
+          "bin_entries": ["resolve-runtime.ps1", "resolve-runtime.sh"],
+          "script_entries": [],
+          "local_bin_entries": ["agent-mcp", "agent-mcp.cmd", "agent-mcp.ps1"],
+          "module": "agent_mcp"
+        },
+        "effects": {
+          "vendored-tool": {
+            "kind": "runtime-state", "scope": "runtime-root",
+            "entries": ["tool"], "disposition": "reset"
+          },
+          "resident-processes": {
+            "kind": "process", "scope": "installation",
+            "entries": ["agent_mcp", "identity-bound-owned-descendants"], "disposition": "retire"
+          },
+          "runtime-control": {
+            "kind": "runtime-state", "scope": "runtime-root",
+            "entries": ["serve.sock", "serve.sock.endpoint", "serve-g{generation}.sock", "serve-g{generation}.sock.endpoint", "serve-control-{pid}.token", "active.json"],
+            "disposition": "reset"
+          },
+          "registrations": {
+            "kind": "registration", "scope": "installation",
+            "entries": [], "disposition": "retire"
+          },
+          "shared-path": {
+            "kind": "shared-environment", "scope": "user-environment",
+            "entries": ["PATH:{user-home}/.local/bin"], "disposition": "preserve"
+          },
+          "coordination": {
+            "kind": "preserved-state", "scope": "runtime-root",
+            "entries": [".install.lock", ".install.lock.pid", ".install.lock.pid.reap", ".install-stage", ".provision.lock", ".construction-leases", ".retention-leases", ".publication-leases", "active.lock", "service-instance-leases"],
+            "disposition": "preserve"
+          },
+          "configuration-and-data": {
+            "kind": "preserved-state", "scope": "runtime-root",
+            "entries": ["bridges", "overrides", "token-cache", "materialized", "logs", "serve.log", "serve-g{generation}.log", "unknown-contents"],
+            "disposition": "preserve"
+          }
+        },
+        "recognizers": {
+          "legacy-complete-v1": {
+            "kind": "versioned-runtime-v1", "footprint": [1, 1],
+            "deployment_schema": [3, 3], "completion_contract": [1, 1]
+          }
+        },
+        "producers": {
+          "scripts": "5743d9003c8adf81277ad702847eeef269b02aa8ca53c045436efe97021aef77",
+          "src": "bc105c7f586800030974daeda7a65667a62a3cbc8bd4efa0accb071bbac1a684"
+        }
+      },
+      "delta": {
+        "introduced": [],
+        "changed": ["producers:scripts"],
+        "retired": []
+      }
     }
   ]
 }

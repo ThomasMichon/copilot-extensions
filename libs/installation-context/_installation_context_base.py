@@ -95,6 +95,10 @@ class InstallationContextError(ValueError):
     """Raised when installation identity or ownership cannot be proven."""
 
 
+class MalformedDeploymentManifest(InstallationContextError):
+    """Ordinary, stably read deployment bytes are not a JSON document."""
+
+
 class _FileIdentityChanged(InstallationContextError):
     """A file changed during observation; never a malformed or unreadable file."""
 
@@ -285,7 +289,10 @@ def _rename_directory_no_replace(source: Path, destination: Path) -> None:
     )
 
 
-def _read_json_document(path: str | os.PathLike[str], *, encoding: str) -> Any:
+def _read_json_document(
+    path: str | os.PathLike[str], *, encoding: str,
+    malformed_error: type[InstallationContextError] = InstallationContextError,
+) -> Any:
     canonical = canonical_path(path, must_exist=True)
     try:
         content, validated_stat = _read_regular_file(
@@ -293,10 +300,13 @@ def _read_json_document(path: str | os.PathLike[str], *, encoding: str) -> Any:
             label="JSON document",
             require_stable_identity=True,
         )
-        value = json.loads(
-            content.decode(encoding),
-            object_pairs_hook=_reject_duplicate_keys,
-        )
+        try:
+            value = json.loads(
+                content.decode(encoding),
+                object_pairs_hook=_reject_duplicate_keys,
+            )
+        except (UnicodeError, json.JSONDecodeError, InstallationContextError) as error:
+            raise malformed_error(f"Invalid JSON in '{canonical}': {error}") from error
         _cache_validated_file_digest(canonical, content, validated_stat)
         return value
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
@@ -308,7 +318,9 @@ def read_json(path: str | os.PathLike[str]) -> Any:
 
 
 def read_deployment_manifest(path: str | os.PathLike[str]) -> Any:
-    return _read_json_document(path, encoding="utf-8-sig")
+    return _read_json_document(
+        path, encoding="utf-8-sig", malformed_error=MalformedDeploymentManifest,
+    )
 
 
 def _utc_now() -> str:

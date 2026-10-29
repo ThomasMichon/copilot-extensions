@@ -150,15 +150,19 @@ class PreparedRuntimeSource:
         try:
             if path.is_symlink() or (path.exists() and not path.is_file()):
                 raise ValueError("Source deployment receipt must be an ordinary file")
-            manifest = json.loads(
-                path.read_text(encoding="utf-8"), object_pairs_hook=strict_json_object,
-            )
-        except FileNotFoundError:
+            content = path.read_text(encoding="utf-8-sig")
+        except (FileNotFoundError, UnicodeError):
+            return None
+        try:
+            manifest = json.loads(content, object_pairs_hook=strict_json_object)
+        except ValueError:
             return None
         if not isinstance(manifest, dict):
-            raise ValueError("Source deployment receipt must be an object")
+            return None
         fields = json.loads(self.identity)
-        if manifest.get("service") != fields["runtime_source"]["plugin"]:
+        if manifest.get("service") is None:
+            return None
+        if manifest["service"] != fields["runtime_source"]["plugin"]:
             raise ValueError("Source deployment receipt names another runtime")
         if json.dumps(manifest.get("runtime_source"), sort_keys=True) != json.dumps(
             fields["runtime_source"], sort_keys=True,
@@ -171,8 +175,8 @@ class PreparedRuntimeSource:
         if marker.is_symlink() or (marker.exists() and not marker.is_file()):
             raise ValueError("Source runtime selector must be an ordinary file")
         try:
-            selected = marker.read_text(encoding="utf-8").strip()
-        except FileNotFoundError:
+            selected = marker.read_text(encoding="utf-8-sig").strip()
+        except (FileNotFoundError, UnicodeError):
             return None
         if not (
             selected == expected_version

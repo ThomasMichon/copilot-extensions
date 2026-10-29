@@ -85,8 +85,44 @@ def test_source_selection_does_not_skip_on_matching_package(selected, kind, monk
 
 
 @pytest.mark.parametrize("kind", ["engine", "module", "registered"])
+@pytest.mark.parametrize("content", [b"{", b'{"value":"\xff"}', b"[]",
+                                   b'{"service":"agent-worktrees","service":"agent-worktrees"}'])
+def test_unrecognized_source_receipt_plans_reconstruction_without_writes(selected, kind, content):
+    owner, _, runtime, source = selected
+    runtime.mkdir()
+    path = runtime / "deploy-manifest.json"
+    path.write_bytes(content)
+    step = plan(kind, owner, source)
+    assert not step.blocked and step.status == ""
+    assert path.read_bytes() == content
+    assert list(runtime.iterdir()) == [path]
+
+
+@pytest.mark.parametrize("kind", ["engine", "module", "registered"])
+@pytest.mark.parametrize("fault", ["storage", "foreign-service", "directory"])
+def test_source_recovery_retains_unrecoverable_receipt_gates(selected, kind, fault, monkeypatch):
+    owner, _, runtime, source = selected
+    runtime.mkdir()
+    path = runtime / "deploy-manifest.json"
+    if fault == "directory":
+        path.mkdir()
+    else:
+        path.write_text('{"service":"another-plugin"}' if fault == "foreign-service" else "{")
+    if fault == "storage":
+        original = Path.read_text
+
+        def unreadable(target, *args, **kwargs):
+            if target == path:
+                raise PermissionError("fixture storage failure")
+            return original(target, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", unreadable)
+    assert plan(kind, owner, source).blocked
+
+
+@pytest.mark.parametrize("kind", ["engine", "module", "registered"])
 @pytest.mark.parametrize("change", [
-    "none", "commit", "tree", "selector", "version", "slot", "venv", "completion",
+    "none", "commit", "tree", "selector", "version", "slot", "venv", "completion", "service",
 ])
 def test_only_complete_selected_source_receipt_skips(selected, kind, change):
     owner, artifact, runtime, source = selected
@@ -98,6 +134,8 @@ def test_only_complete_selected_source_receipt_skips(selected, kind, change):
         "version": source.version, "completed_at": "2026-01-01T00:00:00Z", "pid": os.getpid(),
     }))
     manifest.update(service="agent-worktrees", venv=str(slot))
+    if change == "service":
+        manifest.pop("service")
     if change in {"commit", "tree"}:
         manifest["runtime_source"][f"source_{change}"] = "c" * 40
     if change == "version":

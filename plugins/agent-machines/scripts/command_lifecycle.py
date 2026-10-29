@@ -91,6 +91,7 @@ def _owner(binding: Any, primitive: Any, arguments: dict[str, Any]) -> dict[str,
             raise binding.CommandOwnershipConflict(
                 f"Unattributed legacy runtime mutation refused: {decision['probeReason']}."
             )
+        _recovery_commands(binding, primitive, arguments)
         # This is only a mutation reservation, not normalized source identity
         # or selectable installation ownership.
         return {
@@ -101,15 +102,78 @@ def _owner(binding: Any, primitive: Any, arguments: dict[str, Any]) -> dict[str,
     return {key: value for key, value in receipt.items() if key != "payloadRoot"}
 
 
-def _reservation(
-    binding: Any, primitive: Any, root: Path, owner: dict[str, Any],
+def _recovery_commands(binding: Any, primitive: Any, arguments: dict[str, Any]) -> None:
+    mode_arguments = arguments.get("mode_arguments") or {}
+    _, home = primitive._current_environment(
+        environment=arguments.get("environment") or os.environ,
+        **{key: mode_arguments.get(key) for key in ("os_profile", "platform", "wsl_distro")},
+    )
+    directory = home / ".local" / "bin"
+    if not os.path.lexists(directory):
+        return
+    payload = Path(arguments["payload_root"])
+    helper = payload / "scripts" / "installer_engine_uninstall.py"
+    spec = importlib.util.spec_from_file_location("_command_recovery_inventory", helper)
+    if spec is None or spec.loader is None:
+        raise binding.CommandOwnershipConflict("Command recovery inventory is unavailable.")
+    inventory = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = inventory
+    spec.loader.exec_module(inventory)
+    declaration = payload / "scripts" / "uninstall-profile.json"
+    profile = inventory.profile_for(
+        payload, arguments["plugin_id"], declaration if os.path.lexists(declaration) else None,
+    )
+    inventory._plain(directory)
+    contents = {}
+    for name in profile.local_bin_entries:
+        path = directory / name
+        if os.path.lexists(path):
+            inventory._plain(path, file=True)
+            contents[name] = path.read_text(encoding="utf-8-sig")
+    if not contents:
+        return
+    _, owned = inventory._local_bindings(
+        payload, Path(arguments["legacy_root"]), profile, home=home,
+        deployment=incumbent_manifest(binding, primitive, arguments),
+    )
+    if set(owned) != contents.keys():
+        raise binding.CommandOwnershipConflict(
+            "Unrecognized global commands cannot be replaced without incumbent ownership."
+        )
+
+
+def incumbent_manifest(
+    binding: Any, primitive: Any, arguments: dict[str, Any],
 ) -> dict[str, Any]:
-    path = root / "deploy-manifest.json"
-    manifest = getattr(
-        primitive, "read_deployment_manifest", primitive.read_json,
-    )(path) if path.exists() else {
-        "schema_version": 3, "service": owner["pluginId"],
-    }
+    """Recover missing layout evidence, not foreign owners or storage failures."""
+    path = Path(arguments["legacy_root"]) / "deploy-manifest.json"
+    manifest: Any = {}
+    if os.path.lexists(path):
+        if path.is_symlink() or not path.is_file():
+            raise binding.CommandOwnershipConflict("The legacy deploy manifest is not an owned file.")
+        try:
+            manifest = getattr(
+                primitive, "read_deployment_manifest", primitive.read_json,
+            )(path)
+        except getattr(primitive, "MalformedDeploymentManifest", ()):
+            manifest = {}
+        except (primitive.InstallationContextError, OSError, ValueError) as error:
+            raise binding.CommandOwnershipConflict(
+                f"Cannot validate incumbent command ownership: {error}"
+            ) from error
+    if not isinstance(manifest, dict):
+        manifest = {}
+    if manifest.get("service") not in (None, arguments["plugin_id"]):
+        raise binding.CommandOwnershipConflict("The legacy deploy manifest is not owned by this plugin.")
+    return manifest
+
+
+def _reservation(
+    binding: Any, primitive: Any, arguments: dict[str, Any], owner: dict[str, Any],
+) -> dict[str, Any]:
+    manifest = incumbent_manifest(binding, primitive, arguments)
+    if manifest.get("service") != owner["pluginId"]:
+        manifest = {key: value for key, value in manifest.items() if key != "schema_version"}
     previous = manifest.get("commandLifecycle")
     if previous is not None and (
         not isinstance(previous, dict)
@@ -123,7 +187,9 @@ def _reservation(
             "The runtime lifecycle reservation belongs to another owner or is invalid."
         )
     return {
-        **manifest, "commandLifecycle": {"version": 1, "state": "pending", "owner": owner},
+        # A reservation cannot supply missing recognizer evidence.
+        **manifest, "service": owner["pluginId"],
+        "commandLifecycle": {"version": 1, "state": "pending", "owner": owner},
     }
 
 
@@ -151,7 +217,7 @@ class LifecycleLease:
             or _owner(self.binding, self.primitive, self.arguments) != self.owner
         ):
             raise self.binding.CommandOwnershipConflict("Runtime lifecycle admission changed.")
-        _reservation(self.binding, self.primitive, Path(self.arguments["legacy_root"]), self.owner)
+        _reservation(self.binding, self.primitive, self.arguments, self.owner)
         _publication(self.binding, self.primitive, self.arguments, self.purpose)
 
     def assert_operation(self, operation: str) -> None:
@@ -251,13 +317,13 @@ def legacy_lifecycle(
     # Refuse obvious foreign ownership without creating even a lock directory;
     # admission is repeated after acquisition to close the concurrent-writer race.
     _publication(binding, primitive, arguments, purpose)
-    _reservation(binding, primitive, root, _owner(binding, primitive, arguments))
+    _reservation(binding, primitive, arguments, _owner(binding, primitive, arguments))
     with _lock(
         primitive, arguments,
         timeout_seconds=None if deadline is None else max(0, deadline - time.monotonic()),
     ) as lock:
         owner = _owner(binding, primitive, arguments)
-        manifest = _reservation(binding, primitive, root, owner)
+        manifest = _reservation(binding, primitive, arguments, owner)
         _publication(binding, primitive, arguments, purpose)
         primitive._atomic_write_json(
             lock.owner_path, {**lock._owner(), "runtimeDeployment": purpose}, lock=lock,

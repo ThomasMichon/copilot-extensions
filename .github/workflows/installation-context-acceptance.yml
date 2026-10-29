@@ -610,6 +610,19 @@ jobs:
           --test-file tests/test_bootstrap_stamp_selection.py
           --test-file tests/test_source_manifest_publication.py
           -k "footprint_routes or test_source_build or post_repair or (test_actual_manifest_writer and agent-mcp)"
+      - name: Qualify fresh command metadata and pending-owner recovery
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation --allow-explicit-tiers
+          --test-file tests/test_command_lifecycle.py
+          --test-file tests/test_command_binding.py
+          -k "unrecognized or recovered_manifest or manifest_recovery or recovery_inventory or initialized_host or native_teardown"
+      - name: Qualify prepared-source malformed-receipt reconstruction
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers
+          --test-file tests/test_update_runtime_source.py
+          -k "unrecognized_source_receipt or source_recovery or only_complete_selected"
   update-diagnostics-windows:
     if: ${{ inputs.update_diagnostics }}
     name: Update diagnostic contracts (Windows)

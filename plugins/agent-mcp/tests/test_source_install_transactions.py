@@ -5,6 +5,7 @@ Both plugins share the test matrix; no production plugin imports its sibling.
 """
 from __future__ import annotations
 
+from contextlib import nullcontext
 import importlib.util
 import json
 import os
@@ -178,6 +179,38 @@ def _run(tmp_path: Path, language: str, script: str) -> subprocess.CompletedProc
         timeout=60, check=False,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
+
+
+def _recovery_owner(payload: Path, home: Path, root: Path) -> tuple:
+    settings = home / ".copilot/settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(json.dumps({
+        "extraKnownMarketplaces": {
+            "example": {"source": {"source": "github", "repo": "Example/Plugins"}},
+        },
+    }), encoding="utf-8")
+    modules = []
+    for name, path in (
+        ("native_recovery_context", ROOT / "libs/installation-context/installation_context.py"),
+        ("native_recovery_binding", ROOT / "libs/payload-invocation/command_binding.py"),
+    ):
+        spec = importlib.util.spec_from_file_location(name, path)
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+        modules.append(module)
+    primitive, binding = modules
+    current_environment = primitive._current_environment
+    primitive._current_environment = lambda **arguments: current_environment(
+        **{**arguments, "os_profile": home},
+    )
+    arguments = {
+        "payload_root": payload, "plugin_id": "agent-mcp", "legacy_root": root,
+        "project_root": home,
+        "environment": {**os.environ, "HOME": str(home), "USERPROFILE": str(home)},
+    }
+    return binding, primitive, arguments
 
 
 def _setup(tmp_path: Path, payload: Path, plugin: str, language: str) -> str:
@@ -409,6 +442,7 @@ _stamp_source_snapshot
 @pytest.mark.parametrize("condition", [
     "current", "missing-deployment", "corrupt-completion", "completion-fifo", "fallback-directory",
     "occupied-fallback", "oversized-desired", "invalid-venv-desired", "invalid-path-desired",
+    "pending-missing-deployment", "pending-corrupt-deployment",
 ])
 def test_native_mcp_footprint_routes_actual_construction_without_old_receipt_permission(
     tmp_path: Path, language: str, condition: str,
@@ -418,6 +452,11 @@ def test_native_mcp_footprint_routes_actual_construction_without_old_receipt_per
     if condition == "completion-fifo" and not hasattr(os, "mkfifo"):
         pytest.skip("FIFO completion evidence requires native POSIX")
     payload, selected = _payload(tmp_path, "agent-mcp", construction_diagnostics=True)
+    recovering = condition.startswith("pending-")
+    if recovering:
+        installed = tmp_path / "home/.copilot/installed-plugins/example/agent-mcp"
+        shutil.copytree(payload, installed)
+        payload = installed
     script = _setup(tmp_path, payload, "agent-mcp", language)
     root = tmp_path / "install"
     damaged_desired = condition.endswith("-desired")
@@ -436,7 +475,9 @@ def test_native_mcp_footprint_routes_actual_construction_without_old_receipt_per
         occupied.mkdir()
         (occupied / "unfinished").write_bytes(b"keep")
         (root / "last-known-good").write_text(selected, encoding="utf-8")
-    if condition != "missing-deployment":
+    if condition == "pending-corrupt-deployment":
+        (root / "deploy-manifest.json").write_bytes(b"{")
+    elif condition not in {"missing-deployment", "pending-missing-deployment"}:
         (root / "deploy-manifest.json").write_text(
             '{"schema_version":3,"service":"agent-mcp"}', encoding="utf-8",
         )
@@ -513,7 +554,22 @@ printf '%s' "$SRC_VERSION" > "$INSTALL_DIR/chosen-version"
 printf '%s' "$_RUNTIME_CONSTRUCTION_MODE" > "$INSTALL_DIR/construction-mode"
 _runtime_construction_finish
 """
-    result = _run(tmp_path, language, script)
+    authority = nullcontext()
+    if recovering:
+        binding, primitive, arguments = _recovery_owner(payload, tmp_path / "home", root)
+        authority = binding._load_lifecycle().legacy_lifecycle(
+            binding._rules(), primitive, **arguments,
+        )
+    with authority as lease:
+        if recovering:
+            pending = json.loads((root / "deploy-manifest.json").read_text())
+            assert pending.get("schema_version") != 3
+            lease.assert_owned()
+        result = _run(tmp_path, language, script)
+        if recovering and result.returncode == 0:
+            binding.write_legacy_manifest(
+                primitive, {"schema_version": 3, "service": "agent-mcp"}, **arguments,
+            )
     assert result.returncode == 0, result.stdout + result.stderr
     version = (root / "chosen-version").read_text(encoding="utf-8")
     mode = (root / "construction-mode").read_text(encoding="utf-8")
@@ -524,6 +580,9 @@ _runtime_construction_finish
         candidate = root / "versions" / version
         assert (candidate / "constructed").is_file()
         assert json.loads((candidate / ".install-complete.json").read_text())["version"] == version
+    if recovering:
+        before.pop(Path("deploy-manifest.json"), None)
+        assert binding.resolve_command_binding(primitive, **arguments)["status"] == "selected"
     assert {name: (root / name).read_bytes() for name in before} == before
     if condition == "completion-fifo":
         assert completion.is_fifo()

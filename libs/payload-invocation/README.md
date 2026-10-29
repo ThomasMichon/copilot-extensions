@@ -126,6 +126,20 @@ the reservation and cannot produce a selected binding. Native children borrow
 only a matching live, same-host token whose source and runtime root are
 revalidated; environment-variable presence alone never admits mutation.
 Successful publication marks the reservation `complete`.
+Missing or syntactically corrupt legacy deployment metadata does not veto
+construction. Its stably read bytes are distinguished from storage/identity
+errors, which still refuse admission. Recovery uses the existing finite
+removal profile and exact native command recognizer, including Index's dedicated
+launcher matcher, against the resolved profile home to protect incumbent global
+commands; edited or foreign-root commands are not implicitly replaced. Intact
+incumbent publisher paths remain literal matching data for relocated payloads,
+not executable sources or a substitute for command ownership. A pending
+reservation never supplies missing footprint-recognizer evidence: only final
+publication installs a complete schema-3 deployment. A failed recovery retains
+its pending source owner, so another source cannot take over a partial build.
+Explicit foreign service, binding, reservation, policy and cell evidence still
+refuses mutation. Prepared-source currentness likewise treats missing or
+malformed deployment bytes as not current, without swallowing storage errors.
 Deferred `stamp` holds the same admission lock but neither reserves an
 unfinished runtime build nor publishes new selectable ownership. First-use
 `provision` performs the runtime-building transaction.
