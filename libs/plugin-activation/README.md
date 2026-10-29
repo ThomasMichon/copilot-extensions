@@ -113,6 +113,10 @@ Optional legacy-container directories are bound even when empty;
 legacy `remotes/origin` or `branches/origin` definitions retain real Git probes
 instead of reusing a result with an untracked URL source.
 Access-time changes from reading files do not invalidate otherwise equal inputs.
+Windows uses native handle-bound file IDs and `FILE_BASIC_INFO.ChangeTime`, not
+Python stat creation time, to detect in-place rewrites even when mtime is restored.
+Unavailable/uncertain native change stamps retain fresh Git probes. Native handles
+are closed on both successful and refused observations; no extra process is launched.
 
 This memo does not persist activation, settings, topology or policy decisions:
 registries, activation settings and marketplace/provider evidence are still read

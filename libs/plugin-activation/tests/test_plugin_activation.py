@@ -1447,7 +1447,8 @@ def test_project_identity_memo_unit_failed_probe(tmp_path, monkeypatch, timeout)
 
 
 
-def test_registered_identity_memo_rejects_a_b_a_config_probe(tmp_path, monkeypatch):
+@pytest.mark.parametrize("rewrite", ["replace", "in-place-restored-mtime"])
+def test_registered_identity_memo_rejects_a_b_a_config_probe(tmp_path, monkeypatch, rewrite):
     repo = tmp_path / "repo"
     expected = "https://github.com/example/demo.git"
     wrong = "https://github.com/other/demo.git"
@@ -1462,12 +1463,16 @@ def test_registered_identity_memo_rejects_a_b_a_config_probe(tmp_path, monkeypat
     def transient_match(root, *args):
         if args != ("remote", "get-url", "origin"):
             return original(root, *args)
-        _git(repo, "remote", "set-url", "origin", expected)
+        if rewrite == "replace":
+            _git(repo, "remote", "set-url", "origin", expected)
+        else:
+            config.write_bytes(initial.replace(wrong.encode(), expected.encode()))
         try:
             return original(root, *args)
         finally:
             config.write_bytes(initial)
-            os.utime(config, ns=(config.stat().st_atime_ns, initial_time + 1_000_000_000))
+            final_time = initial_time if rewrite == "in-place-restored-mtime" else initial_time + 1_000_000_000
+            os.utime(config, ns=(config.stat().st_atime_ns, final_time))
 
     monkeypatch.setattr(resolver, "_git", transient_match)
     assert "demo@local" in resolve_active_plugins(home=tmp_path).active
@@ -1508,6 +1513,7 @@ def _synthetic_identity_input_files(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "lstat", synthetic_stat)
     monkeypatch.setattr(Path, "read_bytes", synthetic_read)
     monkeypatch.setattr(_project_identity, "_owned_directory", lambda *_: True)
+    monkeypatch.setattr(_project_identity, "_windows_write_version", lambda _: ())
     return root, config, executable
 
 
@@ -1635,3 +1641,67 @@ def test_registered_identity_memo_reprobes_changed_legacy_origin(tmp_path, legac
     assert "demo@local" in resolve_active_plugins(home=tmp_path).active
     set_legacy(wrong)
     assert resolve_active_plugins(home=tmp_path).active == {}
+
+
+def test_project_identity_memo_unit_native_write_version(tmp_path, monkeypatch):
+    from plugin_activation import _project_identity
+
+    root, _config, executable = _synthetic_identity_input_files(tmp_path, monkeypatch)
+    state = [1]
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(_project_identity, "os", SimpleNamespace(name="nt", path=os.path))
+    monkeypatch.setattr(_project_identity, "_windows_write_version", lambda _: (state[0],))
+    before = _project_identity.identity_inputs(root, "expected", str(executable))
+    state[0] += 1
+    after = _project_identity.identity_inputs(root, "expected", str(executable))
+    assert before is not None and after is not None and before != after
+
+    def unavailable(_):
+        raise PermissionError("synthetic native change-stamp refusal")
+
+    monkeypatch.setattr(_project_identity, "_windows_write_version", unavailable)
+    assert _project_identity.identity_inputs(root, "expected", str(executable)) is None
+
+
+@pytest.mark.parametrize("failure", ["none", "open", "query", "uncertain", "reparse", "close"])
+def test_project_identity_memo_unit_windows_handle_cleanup(monkeypatch, failure):
+    import ctypes
+    from types import SimpleNamespace
+    from plugin_activation import _project_identity
+
+    class Basic(ctypes.Structure):
+        _fields_ = [("changed", ctypes.c_int64), ("attributes", ctypes.c_uint32)]
+
+    class Identity(ctypes.Structure):
+        _fields_ = [("volume", ctypes.c_uint64), ("id", ctypes.c_ubyte * 16)]
+
+    closed = []
+
+    def query(_handle, kind, output, _size):
+        if failure == "query":
+            return False
+        info = output._obj
+        if kind == 0:
+            info.changed = 0 if failure == "uncertain" else 123
+            info.attributes = 0x400 if failure == "reparse" else 0
+        else:
+            info.volume = 5
+            info.id[0] = 7
+        return True
+
+    def close(handle):
+        closed.append(handle)
+        return failure != "close"
+
+    kernel = SimpleNamespace(
+        CreateFileW=lambda *_: ctypes.c_void_p(-1).value if failure == "open" else 42,
+        GetFileInformationByHandleEx=query, CloseHandle=close,
+    )
+    monkeypatch.setattr(_project_identity, "_windows_file_api", lambda: (kernel, Basic, Identity))
+    if failure == "none":
+        assert _project_identity._windows_write_version(Path("synthetic")) == (5, 7, 123)
+    else:
+        with pytest.raises(OSError):
+            _project_identity._windows_write_version(Path("synthetic"))
+    assert closed == ([] if failure == "open" else [42])
