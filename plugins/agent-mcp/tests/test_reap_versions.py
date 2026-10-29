@@ -363,15 +363,18 @@ def test_reap_matches_normalized_current(tmp_path, owners, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "state,threads,later_threads,later_birth,flags",
-    [("Z", 1, 1, 200, 0), ("Z", 2, 2, 200, 0), ("Z", 1, 2, 200, 0),
-     ("R", 1, 1, 200, 0), ("Z", 1, 1, 201, 0),
-     ("S", 1, 1, 200, 0x00200000), ("S", 1, 1, 201, 0x00200000),
-     ("S", 1, 1, 200, 0x00000040)],
+    "state,threads,later_threads,later_birth,flags,failure",
+    [("Z", 1, 1, 200, 0, None), ("Z", 2, 2, 200, 0, None),
+     ("Z", 1, 2, 200, 0, None), ("R", 1, 1, 200, 0, None),
+     ("Z", 1, 1, 201, 0, None), ("S", 1, 1, 200, 0x00200000, None),
+     ("S", 1, 1, 201, 0x00200000, None), ("S", 1, 1, 200, 0x00000040, None),
+     ("Z", 2, 2, 200, 0, "image"), ("Z", 1, 1, 200, 0, "image"),
+     ("Z", 1, 1, 201, 0, "image"), ("Z", 2, 2, 200, 0, "cmdline"),
+     ("Z", 2, 2, 200, 0, "identity")],
 )
 def test_linux_empty_command_census_requires_confirmed_group_exit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str, threads: int,
-    later_threads: int, later_birth: int, flags: int,
+    later_threads: int, later_birth: int, flags: int, failure: str | None,
 ) -> None:
     proc = tmp_path / "proc"
 
@@ -386,7 +389,7 @@ def test_linux_empty_command_census_requires_confirmed_group_exit(
         (directory / "stat").write_text(
             stat(pid, "R" if pid == 100 else state, 1 if pid == 100 else threads, pid),
         )
-        (directory / "cmdline").write_bytes(command)
+        (directory / "cmdline").write_bytes(b"runtime\0" if pid == 200 and failure else command)
     original_read = Path.read_text
     reads = 0
 
@@ -395,14 +398,29 @@ def test_linux_empty_command_census_requires_confirmed_group_exit(
         if path == proc / "200/stat":
             reads += 1
             if reads == 2:
+                if failure == "identity":
+                    raise FileNotFoundError(path)
                 return stat(200, state, later_threads, later_birth)
         return original_read(path, *args, **kwargs)
 
+    original_bytes = Path.read_bytes
+
+    def read_bytes(path: Path) -> bytes:
+        if failure == "cmdline" and path == proc / "200/cmdline":
+            raise FileNotFoundError(path)
+        return original_bytes(path)
+
+    def readlink(path: Path) -> str:
+        if failure == "image" and path == proc / "200/exe":
+            raise FileNotFoundError(path)
+        return "/usr/bin/python"
+
     monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
     monkeypatch.setattr(rv.inspection, "Path", lambda path: proc if str(path) == "/proc" else Path(path))
     monkeypatch.setattr(rv.inspection, "os", SimpleNamespace(
         name="posix", getuid=lambda: proc.stat().st_uid, getpid=lambda: 100,
-        fsdecode=os.fsdecode, readlink=lambda path: "/usr/bin/python",
+        fsdecode=os.fsdecode, readlink=readlink,
     ))
     monkeypatch.setattr(rv.inspection, "sys", SimpleNamespace(platform="linux"))
 
@@ -420,8 +438,9 @@ def test_linux_empty_command_census_requires_confirmed_group_exit(
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Native Linux thread-group census")
+@pytest.mark.parametrize("exit_phase", ["before-census", "during-image-read"])
 def test_real_dead_main_thread_cannot_hide_a_live_runtime(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exit_phase: str,
 ) -> None:
     interpreter = tmp_path / "versions/1.0/bin/python"
     interpreter.parent.mkdir(parents=True)
@@ -439,16 +458,30 @@ def test_real_dead_main_thread_cannot_hide_a_live_runtime(
         assert process.stdout.readline().strip() == "ready"
         rows = rv._inspect(tmp_path)
         assert rv._version(rows[process.pid], tmp_path, {"1.0", "2.0"}) == "1.0"
-        process.stdin.write("x")
-        process.stdin.flush()
         proc = Path(f"/proc/{process.pid}")
-        deadline = time.monotonic() + 5
-        while (proc / "cmdline").read_bytes() and time.monotonic() < deadline:
-            time.sleep(.005)
-        assert (proc / "cmdline").read_bytes() == b""
-        fields = (proc / "stat").read_text().rsplit(") ", 1)[1].split()
-        assert fields[0] == "Z" and int(fields[17]) > 1
-        assert process.poll() is None
+
+        def exit_main() -> None:
+            process.stdin.write("x")
+            process.stdin.flush()
+            deadline = time.monotonic() + 5
+            while (proc / "cmdline").read_bytes() and time.monotonic() < deadline:
+                time.sleep(.005)
+            assert (proc / "cmdline").read_bytes() == b""
+            fields = (proc / "stat").read_text().rsplit(") ", 1)[1].split()
+            assert fields[0] == "Z" and int(fields[17]) > 1
+            assert process.poll() is None
+
+        if exit_phase == "before-census":
+            exit_main()
+        else:
+            original_readlink = os.readlink
+
+            def readlink(path: Path) -> str:
+                if path == proc / "exe":
+                    exit_main()
+                return original_readlink(path)
+
+            monkeypatch.setattr(rv.inspection.os, "readlink", readlink)
         monkeypatch.setattr(rv, "current_version", lambda *a: "2.0")
         with pytest.raises(rv.inspection.UninstallRefused, match="live tasks"):
             rv.reap_stale(tmp_path, fresh=True)

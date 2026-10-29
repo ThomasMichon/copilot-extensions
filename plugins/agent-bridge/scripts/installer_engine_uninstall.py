@@ -698,6 +698,23 @@ def _controllers(rows: list[dict[str, Any]], payload: Path, root: Path,
     return verified, redirectors
 
 
+def _linux_require_skippable(directory: Path, created: int | None) -> None:
+    try:
+        status = (directory / "stat").read_text()
+    except (FileNotFoundError, ProcessLookupError):
+        return
+    fields = status[status.rfind(")") + 2:].split()
+    if created is not None and int(fields[19]) != created:
+        raise UninstallRefused("Process identity changed during inspection")
+    if int(fields[6]) & 0x00200000:  # PF_KTHREAD: no userspace runtime.
+        return
+    # A zombie leader can still own live workers even after exe disappears.
+    if fields[0] not in {"Z", "X", "x"} or int(fields[17]) != 1:
+        raise UninstallRefused(
+            "Cannot fully inspect a current-user process with live tasks"
+        )
+
+
 def inspect_processes(payload: Path, root: Path, shell: str, profile: Profile, *,
                       descendants: bool = False) -> list[dict[str, Any]]:
     """Observe current-user consumers; observation never grants stop authority."""
@@ -712,6 +729,7 @@ def inspect_processes(payload: Path, root: Path, shell: str, profile: Profile, *
         for directory in Path("/proc").iterdir():
             if not directory.name.isdigit():
                 continue
+            created = None
             try:
                 if directory.stat().st_uid != os.getuid():
                     continue
@@ -722,18 +740,7 @@ def inspect_processes(payload: Path, root: Path, shell: str, profile: Profile, *
                 argv = [os.fsdecode(value) for value in (directory / "cmdline").read_bytes().split(b"\0") if value]
                 command = " ".join(argv)
                 if not command:
-                    later = (directory / "stat").read_text()
-                    observed = later[later.rfind(")") + 2:].split()
-                    if int(observed[19]) != created:
-                        raise UninstallRefused("Process identity changed during inspection")
-                    if int(observed[6]) & 0x00200000:  # PF_KTHREAD: no userspace runtime.
-                        continue
-                    # A zombie leader can still own live worker threads; its
-                    # empty cmdline and unavailable exe do not prove group exit.
-                    if observed[0] not in {"Z", "X", "x"} or int(observed[17]) != 1:
-                        raise UninstallRefused(
-                            "Cannot inspect a current-user process with live tasks and an empty command line"
-                        )
+                    _linux_require_skippable(directory, created)
                     continue
                 incomplete = False
                 try:
@@ -763,6 +770,7 @@ def inspect_processes(payload: Path, root: Path, shell: str, profile: Profile, *
                     row["inspectionIncomplete"] = incomplete
                 rows.append(row)
             except (FileNotFoundError, ProcessLookupError):
+                _linux_require_skippable(directory, created)
                 continue
             except PermissionError as error:
                 raise UninstallRefused("Cannot inspect a current-user process") from error
