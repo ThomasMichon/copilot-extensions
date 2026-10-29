@@ -145,12 +145,16 @@ def _clean_git_env() -> dict[str, str]:
 _GIT_WHICH_CACHE: dict[str, str | None] = {}
 
 
-def _git(root: Path, *args: str) -> str:
+def _git_executable() -> str | None:
     # picker-performance-and-responsiveness Phase 4: cached -- PATH can't
     # change mid-process, but a cold boot calls this ~17-18 times.
     if "git" not in _GIT_WHICH_CACHE:
         _GIT_WHICH_CACHE["git"] = shutil.which("git")
-    git = _GIT_WHICH_CACHE["git"]
+    return _GIT_WHICH_CACHE["git"]
+
+
+def _git(root: Path, *args: str) -> str:
+    git = _git_executable()
     if not git:
         raise FileNotFoundError("git")
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)

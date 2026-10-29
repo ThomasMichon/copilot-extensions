@@ -2619,7 +2619,22 @@
         "tools/promotion_unit_tests/test_owned_workspace.py::test_bridge_capability_requires_actual_origin_and_nonblocking_creation_mode",
         "tools/promotion_unit_tests/test_owned_workspace.py::test_bridge_receiving_result_is_usable_while_linkage_is_pending_but_not_unknown_creation",
         "tools/promotion_unit_tests/test_release_helper_loaders.py::test_installed_slot_actors_have_exact_closed_runtime_boundaries[windows_broker_cell.py]",
-        "tools/promotion_unit_tests/test_release_helper_loaders.py::test_installed_slot_actors_have_exact_closed_runtime_boundaries[windows_broker_retention.py]"
+        "tools/promotion_unit_tests/test_release_helper_loaders.py::test_installed_slot_actors_have_exact_closed_runtime_boundaries[windows_broker_retention.py]",
+        "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_work_counts[cold]",
+        "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_work_counts[warm]",
+        "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_work_counts[changed]",
+        "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_failed_probe[False]",
+        "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_failed_probe[True]",
+        "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_a_b_a_write_metadata[file]",
+        "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_a_b_a_write_metadata[directory]",
+        "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_rejects_legacy_origin[remotes]",
+        "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_rejects_legacy_origin[branches]",
+        "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_a_b_a_write_metadata[ancestor]",
+        "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_native_write_version",
+        "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_windows_handle_cleanup[none]",
+        "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_windows_handle_cleanup[open]",
+        "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_windows_handle_cleanup[query]",
+        "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_windows_handle_cleanup[close]"
     ],
     "sources": {
         "tools/core_python_artifacts.py": "cfeae35bfee4537022e1026ffae498b61b23508426a676d9dc09ca8ab8d4b4a0",
@@ -2714,11 +2729,11 @@
         "libs/plugin-activation/src/plugin_activation/_installed_root.py": "93c40bc1f100f2f387b52054b9608a15ff44351756593649e6f9e76aecd25a25",
         "libs/plugin-activation/src/plugin_activation/_marketplace_root.py": "d9784513ce12b8a4b91ddd8954b59827d6aef670cf1f81956a5c7784436dec35",
         "libs/plugin-activation/src/plugin_activation/_memo.py": "51ead94e92b79de776c06d65cb99fe138555f26fc4ee3b00bef9ba0aa41d763c",
-        "libs/plugin-activation/src/plugin_activation/_project_roots.py": "fd994cd589725af01ae30a8f7ecfbecb5c965f2ec6ca558c537051dcc4976998",
+        "libs/plugin-activation/src/plugin_activation/_project_roots.py": "5bff0c9d20a32b4f41e2f4c1ed4d2f3703f7d6f99349da9dc15bc3fdb6ccb7fe",
         "libs/plugin-activation/src/plugin_activation/_remote_identity.py": "b3583a89a6ada86ec7c852962ead510bc23ad37af61f336d27358080b7e5044a",
         "libs/plugin-activation/src/plugin_activation/bare_anchor.py": "44cb83e8986f765c4483ce77c7e2103a01a2f0dbfbe86ddc5ee5065a4100bc6c",
         "libs/plugin-activation/src/plugin_activation/preservation.py": "788d476de96bcb313b287ed64df0002e1813636536f3c89e8b4d45f24b223935",
-        "libs/plugin-activation/src/plugin_activation/resolver.py": "bf55a83d0f069a748f4ac0623b0f2849156ab1bd784cc50e487e46a885182a82",
+        "libs/plugin-activation/src/plugin_activation/resolver.py": "e916aa0623892165c6ec1ca4fee447fe440f4dab207abbb7bd82cc12d34bf249",
         "libs/plugin-activation/src/plugin_activation/state.py": "40b7079af2bc5813ae42ccfb650cb0f7ac3ae13a67965a46feab99ede3272d0f",
         "libs/plugin-activation/tests/test_preservation.py": "91d46757d8af89c5685bba1556484dc9b26cbd026eec34658098617dc686c898",
         "libs/plugin-resolve/src/plugin_resolve/__init__.py": "7a414c817ed46966d24a0ccc2e52de102ec209f86df1ba9107070ab80b99c2c7",
@@ -2812,7 +2827,7 @@
         "tools/promotion_unit_contract.py": "b3cca1f9c380c9bef62884d7d989bf31867460c71e6aab353d9fc4f02676df68",
         "tools/promotion_unit_effects.py": "dd6f9737871e9bc6f2ae98f180529e6b5d48479df625f97326a882cfafbfc991",
         "tools/promotion_unit_packet.py": "5a3cbec7ff1aec49b587b09a54a53e05d283c399db8ade3c3e0c74f1cb20e73b",
-        "tools/promotion_unit_tests/test_activation_preservation.py": "c47127d627a51e3d531fe6db4d6b1d194100fda573fc6bf4c984ccf155f1baeb",
+        "tools/promotion_unit_tests/test_activation_preservation.py": "15f3535d663d7d23fd0f118a0ded4a93f6fd91271e0c3ea5f918365852938d26",
         "tools/promotion_unit_tests/test_candidate_units.py": "01180db4491c1d943987e75700287b71cf00ecb40a68b9d6b183bb88e726abfc",
         "tools/promotion_unit_tests/test_chat_collaboration.py": "c0cb983e6dfd36ee892f825797c7be9de124626544f958f09d0179a81c8b9fbe",
         "tools/promotion_unit_tests/test_ci_contract.py": "d24684884fea8325a767605cd8895401c74eb8e7d62ddceeb70f1d5a5845cf61",
@@ -2950,7 +2965,9 @@
         "libs/zdd/src/zdd/private_peer.py": "b1737ad4eb91727caef79e68fd6046f88349b09e11f4930b8e7ca136a5428be2",
         "libs/zdd/src/zdd/private_protocol.py": "b693ed29912fb5f17c982ef7ed1a6b7a20e4354023a7628b8cff190017f34001",
         "libs/zdd/src/zdd/private_windows.py": "358dac30bf8d7f4cdcc212dec8cacb187c8e00b43fe2591ef4fff7e0fa418e1d",
-        "libs/zdd/src/zdd/private_windows_native.py": "80df5f71f4962a64eb96670a15511cdfddc50e989cc667271642c442613fab9d"
+        "libs/zdd/src/zdd/private_windows_native.py": "80df5f71f4962a64eb96670a15511cdfddc50e989cc667271642c442613fab9d",
+        "libs/plugin-activation/src/plugin_activation/_project_identity.py": "8eeee3be5ee73113e8d6cd3642ecb6ba6eb163c25c14033a102c86462d808578",
+        "libs/plugin-activation/tests/test_plugin_activation.py": "e72b654bf73e0672b6303a0cc3cd34c21b89abc95204e3abf20a45c4f1304638"
     },
     "coverage_targets": [
         "tools/core_runtime_profile.py",
@@ -3093,7 +3110,9 @@
         "plugins/agent-worktrees/src/agent_worktrees/tracking_allocation_write.py",
         "plugins/agent-worktrees/src/agent_worktrees/create_destination.py",
         "plugins/agent-worktrees/src/agent_worktrees/allocation_run.py",
-        "plugins/agent-bridge/src/agent_bridge/owned_workspace.py"
+        "plugins/agent-bridge/src/agent_bridge/owned_workspace.py",
+        "libs/plugin-activation/src/plugin_activation/_project_roots.py",
+        "libs/plugin-activation/src/plugin_activation/_project_identity.py"
     ],
     "max_seconds": 300
 }
