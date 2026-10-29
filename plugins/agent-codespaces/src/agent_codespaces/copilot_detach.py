@@ -795,7 +795,11 @@ def cmd_detach(
             if delivery_result.status == "refused":
                 owner.record_pending_delivery(args.name, plan["tenant"], None)
                 pending_delivery = False
-                return _fail("owned seed was not admitted after plugin readiness", plan)
+                detail = f" ({delivery_result.reason})" if delivery_result.reason else ""
+                return _fail(
+                    "owned seed was not admitted after plugin readiness" + detail, plan,
+                    refusal_reason=delivery_result.reason,
+                )
             seed_delivery_status = "bridge"
             ok = True  # Admission owns the running task even if receipt settlement loses its reply.
             from venue_copilot.refs import settle_deferred_seed

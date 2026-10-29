@@ -205,13 +205,15 @@ def test_preparation_runs_under_the_existing_keeper_before_native_launch(seams, 
 
 def test_owned_readiness_failure_is_not_a_success_or_an_ordinary_ref_send(seams, monkeypatch, capsys):
     attempted = []
-    from venue_copilot.refs import owned_result
     def refuse(sid, note, **kwargs):
         attempted.append(kwargs)
-        return dataclasses.replace(owned_result(
-            False, session_id=sid, operation=kwargs["operation"], note=note,
-            context=kwargs["prepared_context"],
-        ), status="refused")
+        return _real_deliver_note(
+            sid, note, **kwargs,
+            run=lambda *a, **k: types.SimpleNamespace(returncode=69, stdout=json.dumps({
+                "owned_delivery_version": 1, "admission_status": "not_admitted",
+                "reason": "plugins_not_ready", "error": "private readiness detail",
+            })),
+        )
     monkeypatch.setattr("venue_copilot.refs.deliver_note",
                         refuse)
     assert detach.cmd_detach(
@@ -219,7 +221,10 @@ def test_owned_readiness_failure_is_not_a_success_or_an_ordinary_ref_send(seams,
     ) == 1
     assert len(attempted) == 1 and attempted[0]["min_daemon_protocol"] == 41
     assert attempted[0]["prepared_context"]["version"] == 1
-    assert json.loads(capsys.readouterr().out)["ok"] is False
+    report = json.loads(capsys.readouterr().out)
+    assert report["ok"] is False and report["refusal_reason"] == "plugins_not_ready"
+    assert "plugins_not_ready" in report["error"]
+    assert "private readiness detail" not in json.dumps(report)
     assert any("tmux kill-session" in value for value in seams.run)
 
 
