@@ -60,7 +60,7 @@ def _native_imports():
 
 owner = _load("unit_shell_caller_owner", "_shell_caller_owned.py")
 with _native_imports():
-    parent_job = _load("unit_shell_parent_job", "_windows_parent_job.py")
+    parent_job = _load("agent_procutil._unit_shell_parent_job", "_windows_parent_job.py")
 
 
 @pytest.mark.parametrize("code", [0, 1, 7, 255])
@@ -415,7 +415,9 @@ def test_offer_cleanup_failure_never_retries_a_remote_numeric_handle(
     assert calls.count("reclaim") == 1
 
 
-@pytest.mark.parametrize("failure", ["", "birth", "pipe", "duplicate", "assign", "close-local"])
+@pytest.mark.parametrize("failure", [
+    "", "birth", "pipe", "duplicate", "assign", "scope-publication", "close-local",
+])
 @pytest.mark.parametrize("offered", [False, True])
 def test_real_pipe_transfer_core_retains_one_original_owner(monkeypatch, failure, offered):
     calls = []
@@ -435,12 +437,29 @@ def test_real_pipe_transfer_core_retains_one_original_owner(monkeypatch, failure
         output._obj.value = 404 if options & 1 else 303
         return result("reclaim" if options & 1 else "duplicate", failure != "duplicate")
 
+    scope_name = "Local\\ce-owned-job-" + "0" * 32
+
+    def create_job(security, name):
+        assert name == scope_name
+        return result("create", 202)
+
+    def publish_scope(name):
+        assert name == scope_name
+        result("publish-scope")
+        if failure == "scope-publication":
+            raise OSError("scope publication failed")
+
+    package = ModuleType("agent_procutil")
+    package._job_scopes = SimpleNamespace(
+        new_name=lambda: scope_name, publish_current=publish_scope,
+    )
+    monkeypatch.setitem(sys.modules, "agent_procutil", package)
     kernel = SimpleNamespace(
         OpenProcess=lambda rights, inherit, pid: result("open", 101),
         GetCurrentProcess=lambda: -1,
         GetNamedPipeServerProcessId=pipe,
         WaitForSingleObject=lambda handle, timeout: result("live", 0x102),
-        CreateJobObjectW=lambda security, name: result("create", 202),
+        CreateJobObjectW=create_job,
         SetInformationJobObject=lambda *args: result("limits"),
         DuplicateHandle=duplicate,
         AssignProcessToJobObject=lambda *args: result("assign", failure != "assign"),
@@ -468,7 +487,7 @@ def test_real_pipe_transfer_core_retains_one_original_owner(monkeypatch, failure
             assert "create" not in calls
         if failure == "assign":
             assert "reclaim" in calls
-        if failure == "close-local":
+        if failure in ("scope-publication", "close-local"):
             assert ("reclaim" in calls) == offered
     else:
         transferred = transfer(
@@ -483,5 +502,5 @@ def test_real_pipe_transfer_core_retains_one_original_owner(monkeypatch, failure
             transferred.accept()
         assert calls == [
             "open", "pipe", "live", "create", "limits", "duplicate",
-            "live", "assign", "close", "close",
+            "live", "assign", "publish-scope", "close", "close",
         ]
