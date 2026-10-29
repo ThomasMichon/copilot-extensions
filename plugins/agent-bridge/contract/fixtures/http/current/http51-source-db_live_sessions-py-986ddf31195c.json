@@ -1,0 +1,20 @@
+{
+  "evidence_family": "http51-unchanged-source-link-v1",
+  "preserved_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http50-source-db_live_sessions-py-986ddf31195c.json",
+    "sha256": "9c997f8c338a7e2ae5d4062238032287696f6ec78bc03ae7c7893693e64b7b39"
+  },
+  "advertisement_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http51-standard-native-send.json",
+    "sha256": "ceb362de1587dea84c1aaef2b6e7b9c1ca1183cd23ec020ba2b9ec2d3aed3e2c"
+  },
+  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "captured_from": {
+    "commit": "295ec3ed0542323ed53f5ac4b7fbbdb91d031300",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 51,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/db_live_sessions.py",
+    "source_git_blob": "92e997f849d1926e317884315ca02de92c183588",
+    "source_sha256": "69319f446dd3c1365cbf6a6f0a11e7ff567c80adf8001f2633118f940747b013"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "evidence_family": "http51-unchanged-source-link-v1",
+  "preserved_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http50-source-loop_governance-py-706d7faba090.json",
+    "sha256": "83f6d7f050f1d66a617d27ab80698532f973482005c3b6c292a51a49b7c2de78"
+  },
+  "advertisement_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http51-standard-native-send.json",
+    "sha256": "ceb362de1587dea84c1aaef2b6e7b9c1ca1183cd23ec020ba2b9ec2d3aed3e2c"
+  },
+  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "captured_from": {
+    "commit": "295ec3ed0542323ed53f5ac4b7fbbdb91d031300",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 51,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/loop_governance.py",
+    "source_git_blob": "09fa770e780b3a536dbf3c0c74868d37ebd1c886",
+    "source_sha256": "83fa3527c7a060c2f5c1451a22e7bf3ca0cbb2d7b4c3affe115552eb8b0a24eb"
+  }
+}

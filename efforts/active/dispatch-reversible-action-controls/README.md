@@ -115,7 +115,7 @@ worker termination or cross-plugin rollout.
 - [x] Resolve required action policy before active-state publication; check
       current denial again at consequential boundaries. Freeze only one action
       attempt, not the daemon lifetime. Each later poll/retry is a fresh check.
-- [ ] Keep explicit preparation separate from adoption using existing runtime
+- [x] Keep explicit preparation separate from adoption using existing runtime
       ownership primitives; do not claim a new transactional rollback protocol.
       Keep the current constructor and canonical construction/retention helper;
       coordinate any shared primitive change with #6820 rather than mutating
@@ -128,8 +128,10 @@ worker termination or cross-plugin rollout.
 
 - [x] Add changefiles, update the owning documentation and pass the relevant
       bounded tests, lint, install-contract and required repository gates.
-- [x] Merge reviewed implementation and verify the actual released `main`
-      content, not ancestry or package-version assumptions alone.
+- [x] Merge reviewed implementation through the required source gates.
+- [x] Verify the actual released `main` content includes the final preparation
+      and native-driver integration adapter, not only the preceding controls.
+      Verify implementation bytes, not ancestry or package versions alone.
 - [ ] Under the installation owner's separate rollout authority, qualify
       installed commands and running consumers. An old process cannot acquire
       support merely because a new state file exists.
@@ -718,3 +720,58 @@ Initial tests must prove the current gap before adding the guards.
   The new revision still requires independent review and native qualification;
   the preceding revision's approval is not carried forward. The effort remains
   Active and no installed/running adoption is claimed.
+
+### 2026-10-28 - Preparation adapter merged; final release remains open
+
+- #9423 merged as `7206432bda763ba9141937d4f05bca40fc949a28` after the
+  independent current-head review reported no open issues and all required
+  checks passed. Its pending-native observation was resolved by actual
+  exact-head Windows run `40803244331`: installer 169, policy 178 and worker 21
+  passed, with 36 explicit platform skips, at `f283ec163d`.
+- The metadata check initially observed a concurrent description edit; the
+  stable description's new checks passed normally. The first merge attempt
+  then saw the required gate as expected while a newer CI generation was still
+  completing. That generation succeeded and the next managed merge succeeded;
+  no required check, finding or branch conflict was bypassed.
+- Re-read the complete Plan and Validation Plan. Close the source preparation
+  item, not the remaining installed-consumer criteria. Canonical post-merge
+  reconciliation retained source recovery history and aligned the worktree
+  with the confirmed squash merge.
+- Next: follow containing Dev CI and existing automatic promotion, verify the
+  released implementation, then qualify the actual selected installer and
+  resident consumers before controlled adoption. The effort remains Active.
+
+### 2026-10-28 - Final adapter release verified; rollout not claimed
+
+- Containing Dev CI `40803935426` passed. Existing promotion `40804276273`
+  qualified and published source `7206432bda` before landing the immutable
+  release `f594ca2d41d3586158f536b6892e8146cb8d0ffb`.
+- Dispatch is released as `0.18.145-dev1`, with aligned payload/runtime
+  metadata. Compared all 435 implementation files in that release and current
+  Main `0b497701dc30`: 432 are byte-identical to reviewed source; the only
+  differences are the two expected local-engine loader rewrites and regenerated
+  PowerShell output hash. Both materialized engines match reviewed canonical
+  source and the actual released entrypoint matches its declaration.
+- This closes the final source-release item, not installed or running
+  qualification. Next is fresh selected-installer and resident custody/support
+  qualification before authorized controlled adoption. No suite-wide update,
+  production worker launch or installed-consumer success is claimed.
+
+### 2026-10-28 - Controlled Linux adoption and one ordinary review qualified
+
+- The existing execution owner's explicitly authorized repair request acquired
+  only the selected Dispatch payload while retaining shared automatic-update
+  inhibition. The normal request's refusal was recorded rather than hidden.
+- Actual native preparation completed the released `0.18.146-dev1` candidate
+  with all 19 recorded active file states and both residents unchanged. Strict
+  graceful coordinator adoption then completed without restart fallback;
+  supervisor identity, its retained `.140` runtime, lane overrides and shared
+  inhibition remained intact.
+- One existing ordinary review task genuinely claimed/started and posted a
+  candidate-fenced verdict. Its same native conversation continued after an
+  explicitly approved source-precondition repair; neither task recreation nor
+  a synthetic worker supplied this evidence.
+- The finite launch was not rearmed and the standing pool was not enabled.
+  This qualifies that Linux adoption and one real review case, not native
+  Windows installation, automatic pool handback or the remaining live
+  clear/re-enable validation matrix. The effort remains Active.

@@ -1,0 +1,20 @@
+{
+  "evidence_family": "http51-unchanged-source-link-v1",
+  "preserved_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http50-source-live_inbox_runtime-py-ede420a99a49.json",
+    "sha256": "02d2c30c21f227e4ce19129df4a5f747ad5943f0580080a42d94d3b553b7efa5"
+  },
+  "advertisement_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http51-standard-native-send.json",
+    "sha256": "ceb362de1587dea84c1aaef2b6e7b9c1ca1183cd23ec020ba2b9ec2d3aed3e2c"
+  },
+  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "captured_from": {
+    "commit": "295ec3ed0542323ed53f5ac4b7fbbdb91d031300",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 51,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/live_inbox_runtime.py",
+    "source_git_blob": "323e2edc388cb0a50f6b19610395077e2714eaaa",
+    "source_sha256": "e10e77e5a0333b6c6bd2d85338cf530d5565013bfb0d1f2425c5b11b4569d451"
+  }
+}

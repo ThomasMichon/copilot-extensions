@@ -154,12 +154,18 @@ def run_send(args: Any, send: Callable[[Any], None]) -> None:
     except StartupObservationError as exc:
         print(f"[UNKNOWN] {exc}", file=sys.stderr, flush=True)
         if as_json:
-            emit({
+            payload = {
                 "outcome": "unknown", "target": target, "retryable": False,
                 "clock": exc.clock,
                 "reason": exc.reason or f"startup_{exc.clock}_timeout", "phase": exc.phase,
                 "elapsed_s": round(exc.elapsed, 3),
-            })
+            }
+            if (
+                getattr(args, "expected_native_session_id", None) is not None
+                and getattr(args, "idempotency_key", None) is not None
+            ):
+                payload["idempotency_key"] = args.idempotency_key
+            emit(payload)
         sys.exit(70)
     except SendRefused as refused:
         refused.target = refused.target or target

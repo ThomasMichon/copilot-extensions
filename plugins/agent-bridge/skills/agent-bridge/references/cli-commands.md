@@ -96,6 +96,12 @@ ID, or a **live interactive session** (delivered as an attributed
 `<agent-message>` envelope). See
 [agent-messages.md](agent-messages.md) for the receive/reply convention.
 
+For an exact ACP follow-up, the same command accepts
+`--expected-native-session-id <native-id> --idempotency-key <operation-key>`.
+Bridge owns the native admission and strict context-preserving resume; callers
+do not supply startup invocation JSON. See the [native follow-up contract](../../../docs/delegation-contract.md#exact-native-follow-ups-through-ordinary-send)
+for support discovery, retry receipts and the current busy/queue limits.
+
 **Typed outcomes.** `<agent-bridge catalog argv[0]> --json send ...` prints exactly one JSON
 document on stdout for every classified outcome (progress text goes to
 stderr), always with an `outcome`.
