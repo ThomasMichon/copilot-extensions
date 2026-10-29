@@ -133,7 +133,8 @@ def _recovery_commands(binding: Any, primitive: Any, arguments: dict[str, Any]) 
     if not contents:
         return
     _, owned = inventory._local_bindings(
-        payload, Path(arguments["legacy_root"]), profile, home=home, deployment={},
+        payload, Path(arguments["legacy_root"]), profile, home=home,
+        deployment=incumbent_manifest(binding, primitive, arguments),
     )
     if set(owned) != contents.keys():
         raise binding.CommandOwnershipConflict(

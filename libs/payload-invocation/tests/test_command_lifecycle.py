@@ -367,6 +367,63 @@ def test_manifest_recovery_admits_only_exact_existing_global_commands(
         assert {item.name: item.read_bytes() for item in directory.iterdir()} == before_commands
 
 
+@pytest.mark.parametrize("plugin", ["agent-bridge", "agent-dispatch", "agent-containers"])
+@pytest.mark.parametrize("mutation", ["none", "edited", "foreign-publisher"])
+def test_manifest_recovery_retains_relocated_publisher_as_template_data(
+    binding_fixture: dict, plugin: str, mutation: str,
+) -> None:
+    fixture = binding_fixture
+    binding, primitive = fixture["binding"], fixture["primitive"]
+    home = fixture["home"]
+    payload = fixture["payload"].with_name(plugin)
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    runtime = home / ("." + plugin)
+    runtime.mkdir()
+    fixture.update(payload=payload, legacy=runtime)
+    fixture["arguments"].update(payload_root=payload, legacy_root=runtime, plugin_id=plugin)
+    _write(payload / "plugin.json", {"name": plugin})
+    for name in ("installer_engine_uninstall.py", "installer_engine_commands.py"):
+        shutil.copyfile(ROOT / "libs/installer-engine" / name, scripts / name)
+    profile = ROOT / "plugins" / plugin / "scripts/uninstall-profile.json"
+    if profile.is_file():
+        shutil.copyfile(profile, scripts / profile.name)
+    action = "init" if plugin == "agent-containers" else "install"
+    for suffix in ("sh", "ps1"):
+        name = f"{action}.{suffix}"
+        shutil.copyfile(ROOT / "plugins" / plugin / "scripts" / name, scripts / name)
+    publisher = home / "unavailable-original-publisher"
+    writers = _load(ROOT / "tools/test_installer_engine_commands.py", "recovery_native_writers")
+    directory = home / ".local/bin"
+    directory.mkdir(parents=True)
+    for name, body in writers.fixtures(plugin, runtime, publisher=publisher):
+        body = body.replace(str(Path.home() / ".local/bin"), str(home / ".local/bin"))
+        (directory / name).write_text(
+            body + ("\n# edited\n" if mutation == "edited" else ""), encoding="utf-8",
+        )
+    _write(runtime / "deploy-manifest.json", {
+        "schema_version": 3, "service": plugin,
+        "source": {"path": str(publisher if mutation != "foreign-publisher" else home / "foreign")},
+    })
+    before = _snapshot(home)
+    commands_before = {path.name: path.read_bytes() for path in directory.iterdir()}
+    lifecycle = binding._load_lifecycle()
+    if mutation != "none":
+        with pytest.raises(binding.CommandOwnershipConflict, match="global commands"):
+            with lifecycle.legacy_lifecycle(binding._rules(), primitive, **fixture["arguments"]):
+                pytest.fail("Edited or foreign publisher commands were admitted")
+        assert _snapshot(home) == before
+    else:
+        with lifecycle.legacy_lifecycle(binding._rules(), primitive, **fixture["arguments"]) as lease:
+            lease.assert_owned()
+            binding.write_legacy_manifest(
+                primitive, {"schema_version": 3, "service": plugin}, **fixture["arguments"],
+            )
+        assert _resolve(fixture)["status"] == "selected"
+        assert {path.name: path.read_bytes() for path in directory.iterdir()} == commands_before
+    assert not publisher.exists()
+
+
 def test_recovery_inventory_is_not_imported_before_source_admission(binding_fixture: dict) -> None:
     fixture = binding_fixture
     binding, primitive = fixture["binding"], fixture["primitive"]
@@ -694,7 +751,7 @@ def _native_fixture(fixture: dict, shell: str, action: str = "provision") -> lis
         if action == "uninstall":
             uninstall = source.split("    uninstall)\n", 1)[1].split("    start)\n", 1)[0]
             preflight = 'if [[ "$__aw_action" == uninstall ]]; then' + source.split(
-                'if [[ "$__aw_action" == uninstall ]]; then', 1,
+                '\nif [[ "$__aw_action" == uninstall ]]; then', 1,
             )[1].split("# === install-contract:v4 self-stage", 1)[0]
             program += (
                 "\n__aw_remove_config=$REMOVE_CONFIG\n__aw_project_name=''\n"
