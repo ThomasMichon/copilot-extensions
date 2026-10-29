@@ -128,7 +128,7 @@ def birth_identity(pid: int, *, include_exited: bool = False) -> str:
             process.close()
     if sys.platform.startswith("linux"):
         try:
-            data = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+            data = Path(f"/proc/{pid}/stat").read_text(encoding="ascii", errors="surrogateescape")
             fields = data[data.rindex(")") + 2:].split()
             if not include_exited and fields[0] == "Z":
                 raise ProcessLookupError(pid)

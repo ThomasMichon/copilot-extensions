@@ -13,7 +13,7 @@ agent-zdd = { path = "../zdd" }
 # "procutil") to prevent dependency-confusion; the import module is
 # ``agent_procutil``. Mirrors agent-config-migrate / agent-ssh-manager.
 name = "agent-procutil"
-version = "0.1.4-dev1"
+version = "0.1.5-dev1"
 description = "Shared Windows-headless / detached process-spawn kwargs for Copilot CLI plugins"
 readme = "README.md"
 license = "MIT"
@@ -43,6 +43,7 @@ metrics = ["psutil>=7.0"]
 # Explicitly adopted Windows brokers reuse the canonical private native pipe.
 # No sibling plugin or transport is required by ordinary process operations.
 windows-broker = ["agent-zdd>=0.1.0.dev7; sys_platform == 'win32'"]
+retirement-custody = ["agent-zdd>=0.1.0.dev7"]
 dev = [
     "agent-zdd>=0.1.0.dev7",
     "pytest>=9.1.1",

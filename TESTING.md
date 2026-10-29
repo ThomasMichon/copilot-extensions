@@ -12,6 +12,18 @@ and unchanged incumbent bytes. The POSIX FIFO adapter requires native POSIX
 Python; Git Bash feeding a Windows Python is not qualified. These controls do
 not perform full installation, old-owner retirement or installed-host rollout.
 
+The same optional lane separately executes MCP's `test_reap_versions.py` and
+procutil's `test_process_retirement.py` and `test_retirement_custody.py` on Windows and Linux. A real synthetic
+tree (including Windows-owned headless console hosts) must exit through retained
+kernel identities while its original parent survives. Native pause/rollback
+and both shell adapters' fresh-failure propagation are distinct controls.
+Abrupt caller death after its first native pause must resume the original target,
+settle the finite custodian, and leave the observing parent alive. A separate
+hosted Linux control in `tools/retirement_custody_acceptance.py` closes an actual
+caller process group twice, with the custodian outside that group.
+These process witnesses do not qualify disposable-state reset, old-code removal,
+critical transport survival, full installed acceptance or rollout.
+
 The opt-in Windows broker consumer lane also constructs the actual Manager
 runtime through its canonical installer in the credential-free disposable
 profile. Two concurrent current-roster
@@ -2171,6 +2183,12 @@ and active requests must coalesce, and distinct project contexts and unsets
 must complete sequentially before the finite worker exits. These are synthetic
 products, not a real Manager update, maintenance rollout or controller activation.
 An incomplete worker phase cannot report confirmed overall cleanup.
+The same adopted fixture runs `retirement_custody_acceptance.qualify`:
+two actual caller Job deaths after native pause must resume the original
+external target and settle the outside-caller-Job custodian. Queries name both
+nested caller Jobs; the helper's separate disposable expiry Job remains enabled.
+A contained-mode negative control must keep the helper inside both caller Jobs. The existing desktop
+witness covers all three cycles; none qualifies an installed-host teardown.
 It also terminates a separate publishing interpreter without Python cleanup
 after Task replacement and after configuration publication. Each control must
 leave durable intent, refuse ordinary launch admission, and restore the prior

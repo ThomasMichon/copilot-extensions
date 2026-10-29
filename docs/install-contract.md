@@ -2556,9 +2556,52 @@ payload/source separately from an admitted exact repair suffix, then require
 that selected completed slot rather than a healthy fallback. The shared POSIX
 readiness fragment uses the same read-only identity helper for Bridge and
 Dispatch; PowerShell keeps ordinary package readiness Python-free.
-This construction boundary does not execute the reset descriptors, establish
-old-process silence, relax command ownership, or complete fresh publication
-through corrupt deployment metadata. Those remain native lifecycle obligations.
+Fresh construction now requires MCP's finite incumbent-process settlement after
+activation, separately from completion and best-effort graceful handoff. The
+reaper reuses the native current-user census, binds exact kernel births and pins
+Windows process handles or Linux pidfds. It pauses admitted parents while closing
+their descendant trees, refuses protected/current/excluded or uninspectable
+children, then waits for every pinned member's exit. Failed pre-termination
+inspection resumes the paused members. It never uses PID files, numeric tree
+kills or process-group signals as retirement authority. Fresh mode also covers
+known legacy `.venv`, `venv` and `tool` launch paths without an old deployment
+receipt. A disabled version-reap override requests check-only admission: it cannot
+report remaining old owners as settled. Incremental callers retain best-effort
+behavior but report unconfirmed retirement as incomplete.
+
+The reaper uses procutil's optional
+[`RetirementCustody`](../libs/agent-procutil/README.md) finite-worker API so
+installer death cannot strand its externally paused originals. The worker
+retains the native pins outside the production caller's cleanup boundary;
+lost caller custody resumes remaining originals rather than authorizing further
+termination. It reuses the already-adopted Windows broker, never installs a
+broker or requires a legacy runtime receipt to gain update permission.
+
+An identity disappearing before its tree is frozen is unconfirmed settlement,
+not success. Exited pins never seed later PID ancestry, every paused member's
+executable protection is rechecked, and an excluded root missing from census
+refuses retirement. Linux descendant observation may retain partial rows for
+unrelated nondumpable tasks; selected roots/children must remain fully inspected.
+An empty Linux command line is skipped only after a same-birth, single-thread
+zombie/dead-group observation or a positive `PF_KTHREAD` kernel-task flag.
+A zombie main thread with surviving userspace workers
+refuses census instead of hiding a potentially active runtime.
+Missing command-line, executable or identity files use the same group-exit
+proof; a leader exiting between reads cannot bypass it through a file-not-found
+exception.
+Kernel stat parsing preserves opaque task-name bytes, including non-UTF-8
+names, without weakening birth, state or thread-membership checks.
+The ordinary non-signaling uninstall census retains its existing strictness.
+Current-slot protection covers both image and launch path, including new
+descendants and same-birth execs. Retirement retains the canonical publication
+lease so another compliant publisher cannot change the selected generation
+during that scope.
+
+External pinned retirement is supported on Windows and Linux; another platform
+with a live old owner refuses rather than substituting PID-only termination.
+This bounded process boundary does not clear disposable control state, remove
+old code/reactivation routes, or qualify installed-host survival. The complete
+manifest-driven reset remains a native lifecycle obligation.
 
 `tools/check-install-contract.py` checks this first adopter's complete
 `scripts` and `src` producer trees, including added/removed files, with
@@ -2572,8 +2615,8 @@ producer. A producer change must carry its manifest revision and delta;
 published history is compared with the local publication merge-base, PR base, or CI push
 parent rather than trusting a rewritten baseline. Source digests are omission
 checks, not a signing or runtime-authorization protocol. This initial data
-provider does not yet select fresh construction, clear its additional effects
-or integrate recognition with the update driver.
+provider alone neither executes effects nor grants update permission; native
+construction and process settlement consume the applicable parts separately.
 
 Worktrees uses its existing whole-action command lifecycle and the standard
 self-stage/re-exec path. Its pre-stage admission returns early for a genuinely

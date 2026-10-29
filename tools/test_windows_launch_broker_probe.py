@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import io
 import os
 from pathlib import Path
@@ -14,6 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 import windows_broker_protocol_acceptance as protocol_probe
+import windows_broker_fixture as broker_fixture
 import windows_launch_broker_probe as probe
 from windows_broker_desktop import DesktopWitness
 from windows_broker_cell_acceptance import qualify as qualify_cell
@@ -37,6 +39,123 @@ def test_native_adoption_program_uses_copied_helpers_lexical_root(tmp_path, plug
     assert "$NoService=$false" in program
     assert "function Test-SourceRuntimeUnchanged {}" in program
     assert not helpers.is_relative_to(root)
+    if plugin == "agent-mcp":
+        assert "$SrcVersion='1.0'" in program
+        assert program.index("Invoke-VersionedSlotClean)") < program.index("Fixture candidate seeding")
+        assert program.index("Fixture candidate seeding") < program.index("if (-not (Invoke-VersionedMarkComplete")
+        assert "venv.EnvBuilder(with_pip=False).create(target)" in program
+
+
+def test_copied_bootstrap_has_the_real_mcp_footprint_without_ambient_imports(tmp_path):
+    bootstrap = tmp_path / "bootstrap"
+    protocol_probe.prepare_bootstrap(bootstrap)
+    code = (
+        "import json,sys;from pathlib import Path;"
+        "sys.path.insert(0,sys.argv[1]);import installer_engine_footprint as f;"
+        "root=Path(sys.argv[1]);"
+        "manifest=f.parse(f.decode((root/'uninstall-profile.json').read_text()),'agent-mcp');"
+        "assert manifest.effects['legacy-runtime-processes']['disposition']=='retire'"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", code, str(bootstrap)],
+        capture_output=True, text=True, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("memberships", [(False, False), (True, True), (True, False)])
+def test_retirement_topology_checks_each_caller_job_not_a_helpers_own_lease(memberships):
+    observed = []
+
+    class Api:
+        def IsProcessInJob(self, process, job, output):
+            assert process == 42
+            observed.append(job)
+            output._obj.value = memberships[job - 1]
+            return True
+
+    jobs = [SimpleNamespace(handle=1), SimpleNamespace(handle=2)]
+    result = broker_fixture.caller_job_memberships(Api(), SimpleNamespace(_handle=42), jobs)
+    assert result == list(memberships)
+    assert observed == [1, 2]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Job query")
+def test_native_leased_helper_can_belong_to_a_different_job(tmp_path, monkeypatch):
+    import agent_procutil as pu
+    from agent_procutil.daemon_broker import _kernel32, _outside_job
+    from agent_procutil.daemon_instances import daemon_test_lifecycle
+    from agent_procutil.retirement_custody import RetirementCustody
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
+    jobs = []
+    with daemon_test_lifecycle(
+        owner="contained-retirement-job-query", registry_root=tmp_path / "instances",
+    ) as environment:
+        for key, value in environment.items():
+            monkeypatch.setenv(key, value)
+        try:
+            for _ in range(2):
+                broker_fixture.make_job(pu, jobs)
+            with RetirementCustody(tmp_path) as custody:
+                child = custody._process
+                assert not _outside_job(child)
+                assert broker_fixture.caller_job_memberships(_kernel32(), child, jobs) == [False, False]
+        finally:
+            for job in jobs:
+                job.close()
+
+
+@pytest.fixture
+def recovery_slots(tmp_path, monkeypatch):
+    source = Path(protocol_probe.__file__).resolve().parents[1] / "libs" / "versioned-runtime"
+    spec = importlib.util.spec_from_file_location("broker_fixture_gc_under_test", source / "versioned_runtime.py")
+    runtime = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, runtime)
+    spec.loader.exec_module(runtime)
+    root = tmp_path / "runtime"
+    for name in ("first", "replacement", "1.0", "control"):
+        slot = root / "versions" / name
+        slot.mkdir(parents=True)
+        (slot / "canary").write_text(name, encoding="ascii")
+        runtime.mark_complete(root, name, payload_hash="a" * 64)
+    runtime._leases.replace_runtime_references(
+        root, "fixture/recovery", ["first", "replacement"], expected=[],
+    )
+    return runtime, root
+
+
+def test_recovery_collection_accepts_other_disposable_constructor_candidates(recovery_slots):
+    runtime, root = recovery_slots
+    collected = broker_fixture.collect_generations(
+        runtime, root, retired=("control",), retained=("first", "replacement"),
+    )
+    assert collected == ["1.0", "control"]
+    for name in ("first", "replacement"):
+        assert (root / "versions" / name / "canary").read_text(encoding="ascii") == name
+
+
+@pytest.mark.parametrize("failure", ["retired-recovery", "missed-control", "unusable-recovery"])
+def test_recovery_collection_cannot_hide_a_broken_retention_control(recovery_slots, monkeypatch, failure):
+    runtime, root = recovery_slots
+    original = runtime.gc
+
+    def collect(path):
+        result = original(path)
+        if failure == "retired-recovery":
+            result.append("first")
+        elif failure == "missed-control":
+            result.remove("control")
+        return result
+
+    monkeypatch.setattr(runtime, "gc", collect)
+    if failure == "unusable-recovery":
+        monkeypatch.setattr(runtime, "check_admission", lambda *_a, **_kw: "construct")
+    with pytest.raises(RuntimeError, match="preserve usable recovery"):
+        broker_fixture.collect_generations(
+            runtime, root, retired=("control",), retained=("first", "replacement"),
+        )
 
 
 def test_native_adoption_program_refuses_an_unknown_plugin_before_reading_sources(tmp_path):

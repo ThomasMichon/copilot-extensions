@@ -701,6 +701,7 @@ def test_standalone_native_engine_uses_existing_sync_owner(fake_repo, monkeypatc
     consumer.mkdir()
     for name in (
         "installer_engine_uninstall.py", "installer_engine_uninstall_darwin.py",
+        "installer_engine_uninstall_windows.py",
         "installer_engine_footprint.py",
         "installer_engine_uninstall_controllers.py",
         "installer_engine_commands.py", "installer_engine_stop.py",

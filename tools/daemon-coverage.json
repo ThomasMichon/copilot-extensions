@@ -336,6 +336,7 @@
       "t:clean-room/scenarios/plugin-process-hygiene-convergence/fixtures/plugin_process_hygiene_convergence.py::_spawn::Popen": 1
     },
     "caller-contained": {
+      "t:retirement_custody_acceptance.py::qualify::Popen": 2,
       "r:plugins/agent-worktrees/scripts/pre-tool-hook.ps1::<script>::Process.Start": 1,
       "t:windows_broker_protocol_acceptance.py::negative_topology::Popen": 1,
       "t:windows_launch_broker_probe.ps1::<script>::Process.Start": 1,

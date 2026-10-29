@@ -459,6 +459,16 @@ function Invoke-VersionedMarkComplete {
     return $true
 }
 
+function Invoke-RuntimeOwnerSettlement {
+    if (-not $VersionedRuntime -or $script:RuntimeConstructionSession.Construction -ne 'fresh') { return }
+    $arguments = @('-I', (Join-Path $PSScriptRoot 'reap_versions.py'), '--root', $InstallDir,
+        '--link-name', '.venv', '--fresh')
+    if ($env:AGENT_MCP_NO_VERSION_REAP) { $arguments += '--check-only' }
+    Invoke-Hidden -FilePath $VenvPython -ArgList $arguments | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Fresh MCP replacement could not settle its old runtime owners' }
+    Write-Ok 'Old MCP runtime owners settled'
+}
+
 function Invoke-RuntimeBrokerAdoption {
     if ($env:OS -ne 'Windows_NT' -or $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1') { return }
     if (-not $script:RuntimeConstructionSession -or -not $script:RuntimeConstructionSession.Complete -or
@@ -1032,7 +1042,7 @@ if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_CUTOVER) {
             } elseif ($cutoverResult.ok) {
                 Write-Ok "Cut over the live serve daemon to the new version (routing flipped; old drained + retired)"
             } else {
-                Write-Warn "Cutover attempted -- $($cutoverResult.error)"
+                Write-Warning "Cutover attempted -- $($cutoverResult.error)" -WarningAction Continue
             }
         }
     } catch { Write-Skip "Cutover skipped ($($_.Exception.Message))" }
@@ -1044,19 +1054,21 @@ if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_CUTOVER) {
 # leaves "two runtime versions resident". Best-effort; opt out with
 # AGENT_MCP_NO_VERSION_REAP. Runs via the new slot's own python, so it is
 # attributed to the current version and never reaps itself.
-if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_VERSION_REAP) {
+Invoke-RuntimeOwnerSettlement
+if ($VersionedRuntime -and $script:RuntimeConstructionSession.Construction -ne 'fresh' -and -not $env:AGENT_MCP_NO_VERSION_REAP) {
     $ReapScript = Join-Path $PSScriptRoot 'reap_versions.py'
     try {
         # Use the plain (one 'version:pid' per line) output, not --json: under this
         # script's Set-StrictMode 2.0, an empty ConvertFrom-Json array collapses so
         # a later .Count throws. @(...) of the lines is always a countable array.
-        $reapLines = (Invoke-Hidden -FilePath $VenvPython -ArgList @($ReapScript, '--root', $InstallDir, '--link-name', '.venv')) -split "`r?`n"
+        $reapLines = (Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', $ReapScript, '--root', $InstallDir, '--link-name', '.venv')) -split "`r?`n"
+        if ($LASTEXITCODE -ne 0) { throw 'Old MCP runtime retirement was not confirmed' }
         $reaped = @($reapLines | Where-Object { $_ -and $_.ToString().Trim() })
         if ($reaped.Count -gt 0) {
             $stale = ($reaped | ForEach-Object { ($_ -split ':', 2)[0] } | Sort-Object -Unique) -join ', '
             Write-Ok "Reaped $($reaped.Count) stale-version process(es) from: $stale"
         }
-    } catch { Write-Skip "Version-reap skipped ($($_.Exception.Message))" }
+    } catch { Write-Warning "Version-reap incomplete ($($_.Exception.Message))" -WarningAction Continue }
     # Collect the now-idle stale version *directories* the reap above freed. The
     # process-reap alone leaves the dirs on disk (the primitive's gc deliberately
     # protects any slot a live process runs from), so without this step stale

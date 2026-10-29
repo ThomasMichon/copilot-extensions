@@ -185,8 +185,9 @@ def test_unusable_marker_paths_select_no_match(tmp_path: Path, condition: str) -
         except OSError:
             pytest.skip("native symlink creation unavailable")
     manifest = subject.parse(_record(), "agent-mcp")
+    inventory = deepcopy(manifest.profile)
     assert not subject.recognize(manifest, root).matched
-    assert manifest.history[0]["profile"] == manifest.profile
+    assert manifest.profile == inventory
 
 
 @pytest.mark.parametrize("mutation", ("omitted-delta", "rewritten-history", "unsafe-producer", "disposable-data"))
