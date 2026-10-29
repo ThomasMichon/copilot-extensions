@@ -180,13 +180,21 @@ installer gate by 1.437 seconds. All three native installer-retention controls
 and 211 finite-removal cases passed, with five platform skips; POSIX passed.
 This is not a release or installed-host rollout.
 
-The same run exposed an aggregate item timeout in the added contained
-private-profile test. Its two cycles are now independently bounded cases,
-and its environment preserves the actual test-lifecycle context. Neither
-the 30-second caller limit nor the 15-second handshake limit changed.
-The corrected local cases pass; the final hosted gate remains required
-before source merge. The concrete ownership contract received independent
-design critique before runtime implementation.
+Further hosted qualification isolated a discarded operating-system
+prerequisite in the credential-free fixture: its environment omitted
+`PSModulePath`, causing cold native PowerShell command discovery to stall.
+Restoring only that native module path preserves credential filtering and
+the fresh private profile. Run
+[40869393791](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40869393791)
+passed all 18 native admission/cleanup controls, including opaque argument
+fidelity, and both production post-caller owned-work cycles. Neither the
+30-second caller limit nor the 15-second handshake limit changed. The
+unsuccessful resume, serialization and progress alternatives and temporary
+diagnostic probes are removed. A separate live-supervisor artifact test now
+uses the store's existing bounded lock acquisition instead of racing renewal.
+The final clean candidate remains gated on hosted acceptance and ordinary
+review before source merge. The concrete ownership contract received
+independent design critique before runtime implementation.
 
 ### Phase 1 - Reviewed contract
 - [x] Land this plan through ordinary review before implementation.

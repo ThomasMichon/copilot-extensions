@@ -176,9 +176,8 @@ namespace CopilotExtensions {
                         Check(CloseHandle(queries[i]));
                         queries[i] = IntPtr.Zero;
                     }
-                    uint suspended = ResumeThread(child.Thread);
-                    Check(suspended != UInt32.MaxValue);
-                    Stage(output, "resumed count=" + suspended + " pid=" + child.Pid);
+                    Check(ResumeThread(child.Thread) != UInt32.MaxValue);
+                    Stage(output, "resumed");
                     Check(CloseHandle(child.Thread));
                     child.Thread = IntPtr.Zero;
                 }
@@ -307,15 +306,11 @@ function Start-NativeDaemon {
         working = $WorkingDirectory
     } | ConvertTo-Json -Compress
     $data = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($description))
-    $diagnosticLiteral = "'" + ($LogPath + '.entry.log').Replace("'", "''") + "'"
     $body = @"
 `$ErrorActionPreference = 'Stop'
-[IO.File]::WriteAllText($diagnosticLiteral, "native-daemon-stage:script-entry``n")
 `$d = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$data')) | ConvertFrom-Json
-[IO.File]::AppendAllText($diagnosticLiteral, "native-daemon-stage:decoded``n")
 try {
     [Console]::Error.WriteLine('native-daemon-stage:bootstrap')
-    [IO.File]::AppendAllText($diagnosticLiteral, "native-daemon-stage:console-ready``n")
     . `$d.helper
     [Console]::Error.WriteLine('native-daemon-stage:peer-ready')
     `$pipe = New-Object IO.Pipes.NamedPipeClientStream(
@@ -357,11 +352,7 @@ try {
         $launcher = [CopilotExtensions.NativeDaemonAdmission]::Start(
             $shell, $commandArgs, $WorkingDirectory, $LogPath, $contained
         )
-        [IO.File]::WriteAllText(($LogPath + '.parent.log'), "native-daemon-stage:launcher-returned`n")
-        if (-not $connected.AsyncWaitHandle.WaitOne(15000)) {
-            [IO.File]::AppendAllText(($LogPath + '.parent.log'), "native-daemon-stage:admission-timeout`n")
-            throw 'Native daemon did not reach admission.'
-        }
+        if (-not $connected.AsyncWaitHandle.WaitOne(15000)) { throw 'Native daemon did not reach admission.' }
         $server.EndWaitForConnection($connected)
         $frame = Read-NativeDaemonFrame -Pipe $server -Length 4
         $actualPid = [CopilotExtensions.NativeDaemonAdmission]::PipeProcess($server, $true)
