@@ -215,3 +215,31 @@ depends on the mere existence of one of these source defects.
 - Current-head reviews, required CI, actual merge and managed finalization
   remain delivery gates. Repeated review waits without a verdict do not
   authorize a bypass. No installed system or retained worker was changed.
+
+### 2026-10-29 - Review correction and branch maintenance
+
+- Addressed the #9548 login-environment finding at `cf387cd18`. The
+  provisionless reader now uses the installed probe's `bash -lc`
+  initialization while retaining isolated Python, stdin archive transport
+  and the exact missing-receiver predicate.
+- A disposable real-Bash consumer supplies an explicit context only through
+  login initialization, with the installed receiver absent. Before the fix it
+  reaches the preparation trap; afterward it refuses before preparation.
+  The updated hosting/preparation packet passes all 66 cases. Focused Ruff,
+  all 13 install-contract checks and whitespace checks pass. The Maintainer
+  accepted this correction, explicitly retaining the separate Copilot and
+  CI gates; it is not merged or qualified against a live guest.
+- Rebased #9547 at `8d95cfff2` after a contract-registry conflict with `dev`.
+  The resolution preserves the latest registry and immutable provenance,
+  changing only the existing readiness source fingerprint and its
+  implementation-only classification. The diagnostics implementation and
+  wire fixtures are unchanged by this branch maintenance.
+- The rebased readiness/logging packet passes all 56 cases; contract
+  validation passes for two contracts and 814 fixtures. Full current-head
+  CI passes. Fresh Maintainer confirmation was requested after the rebase;
+  the earlier approval is not treated as a current-head review.
+- All five repair PRs remain open. No Copilot-authored verdict has arrived
+  after bounded waits and explicit requests, and the missing review was
+  escalated on #9520. Maintainer conceptual approvals and green CI do not
+  replace that gate. Implementation and finalization checkboxes remain
+  open; no installed update, repair, restart or live venue retry occurred.
