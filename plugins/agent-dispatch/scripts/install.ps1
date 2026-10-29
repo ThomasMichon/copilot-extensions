@@ -4515,11 +4515,6 @@ function Invoke-Uninstall {
     }
 
     $ownedProcesses = @(Get-DispatchUninstallProcesses)
-    if (-not $DryRun -and $env:OS -eq 'Windows_NT' -and
-        $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1') {
-        & $driverPython @driverArguments --remove-broker
-        if ($LASTEXITCODE -ne 0) { throw 'Owned runtime broker removal failed; runtimes preserved' }
-    }
     if ($DryRun) {
         Write-Host '[dry-run] would stop supervisors + retire supervisor processes'
         if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
@@ -4546,6 +4541,10 @@ function Invoke-Uninstall {
                     throw 'Owned Dispatch daemon did not stop'
                 }
             }
+        }
+        if ($env:OS -eq 'Windows_NT' -and $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1') {
+            & $driverPython @driverArguments --remove-broker
+            if ($LASTEXITCODE -ne 0) { throw 'Owned runtime broker removal failed; runtimes preserved' }
         }
         Remove-AllSupervisorTasks
         Write-Ok 'Embody supervisor tasks removed'

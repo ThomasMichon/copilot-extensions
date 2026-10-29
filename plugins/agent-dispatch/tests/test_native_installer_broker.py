@@ -97,7 +97,7 @@ def test_dispatch_completion_precedes_selection_without_broker_adoption():
     assert "BrokerAdoption" not in SOURCE
     assert "Stop-RuntimeConstruction" in SOURCE
     uninstall = _function("Invoke-Uninstall")
-    assert uninstall.index("--remove-broker") < uninstall.index("Invoke-SupervisorsStop")
+    assert uninstall.index("Stop-Process") < uninstall.index("--remove-broker")
     assert uninstall.index("--remove-broker") < uninstall.index("Remove-AllSupervisorTasks")
     assert "Owned runtime broker removal failed; runtimes preserved" in uninstall
     restore = _function("Install-RetainedRuntime")
@@ -116,25 +116,52 @@ def test_dispatch_snapshot_and_runtime_include_execution_driver():
 
 
 @pytest.mark.skipif(PWSH is None, reason="PowerShell unavailable")
-def test_dispatch_uninstall_removal_failure_precedes_service_and_runtime_changes():
+@pytest.mark.parametrize("removal_exit", [0, 19])
+def test_dispatch_uninstall_stops_owned_coordinator_before_removal_admission(removal_exit):
     tail = _function("Invoke-Uninstall").split(
         "$ownedProcesses = @(Get-DispatchUninstallProcesses)", 1,
     )[1]
-    _probe("function Invoke-Uninstall {\n" + tail + """
+    output = _probe("function Invoke-Uninstall {\n" + tail + """
 $env:OS='Windows_NT'
 $env:COPILOT_EXTENSIONS_TEST_CONTAINED=''
 $DryRun=$false
 $driverPython='Invoke-Refuse'
 $driverArguments=@()
-function Invoke-Refuse { $global:LASTEXITCODE=19 }
-function Invoke-SupervisorsStop { throw 'unexpected supervisor stop' }
-function Remove-AllSupervisorTasks { throw 'unexpected task removal' }
+$script:Events=[Collections.Generic.List[string]]::new()
+$script:Live=$true
+$row=[pscustomobject]@{ProcessId=601;CreationDate='fixture-birth';CommandLine='owned coordinator'}
+$ownedProcesses=@($row)
+function Get-CimInstance { if ($script:Live) { return $row } }
+function Stop-Process {
+    param($Id)
+    if ($Id -ne 601) { throw 'unexpected process identity' }
+    $script:Live=$false
+    $script:Events.Add('stop-coordinator')
+}
+function Wait-Process {}
+function Invoke-Refuse {
+    if ($script:Live) { throw 'broker removal admitted with a live coordinator' }
+    $script:Events.Add('remove-broker')
+    $global:LASTEXITCODE=REMOVAL_EXIT
+}
+function Invoke-SupervisorsStop { $script:Events.Add('stop-supervisors') }
+function Remove-AllSupervisorTasks {
+    $script:Events.Add('remove-tasks')
+    throw 'fixture teardown boundary'
+}
 function Remove-Item { throw 'unexpected file removal' }
 try { Invoke-Uninstall; throw 'missing refusal' } catch {
-    $expected='Owned runtime broker removal failed; runtimes preserved'
+    $expected=if (REMOVAL_EXIT -ne 0) {
+        'Owned runtime broker removal failed; runtimes preserved'
+    } else { 'fixture teardown boundary' }
     if ($_.Exception.Message -ne $expected) { throw }
 }
-""")
+$script:Events | ConvertTo-Json -Compress
+""".replace("REMOVAL_EXIT", str(removal_exit)))
+    assert json.loads(output) == [
+        "stop-supervisors", "stop-coordinator", "remove-broker",
+        *(["remove-tasks"] if removal_exit == 0 else []),
+    ]
 
 
 @pytest.mark.skipif(PWSH is None, reason="PowerShell unavailable")
