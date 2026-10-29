@@ -55,6 +55,7 @@ def native_source(area):
             "dependencies = " + json.dumps(sorted(dependencies)), "[tool.uv.sources]",
         ]
         for dependency in sorted(dependencies):
+            dependency = dependency.split(";", 1)[0].strip()
             target = next(key for key, value in PACKAGES.items() if value[0] == dependency)
             lines.append(f'{dependency} = {{ path = "../{target}", editable = true }}')
         (package / "pyproject.toml").write_text("\n".join(lines), encoding="utf-8")

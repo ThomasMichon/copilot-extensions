@@ -71,6 +71,31 @@ function Set-CopilotPersistentEnvironmentVariable {
 }
 # === end install-contract:test-persistent-environment ===
 
+if ($Action -eq 'uninstall' -and -not $DryRun -and
+    -not $env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) {
+    if (-not $InstallDir) { $InstallDir = Join-Path $env:USERPROFILE '.agent-ssh' }
+    $InstallDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallDir)
+    . (Join-Path $PSScriptRoot 'uninstall-runtime.ps1')
+    $teardownPython = Get-UninstallPython
+    if (-not $teardownPython) { throw 'Uninstall requires an existing external Python; nothing removed' }
+    $teardownPayload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    $teardownProject = if ($env:COPILOT_PROJECT_DIR) {
+        $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($env:COPILOT_PROJECT_DIR)
+    } else { $ExecutionContext.SessionState.Path.CurrentFileSystemLocation.ProviderPath }
+    $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT = $teardownProject
+    $forward = @('-Action', 'uninstall', '-InstallDir', $InstallDir)
+    if ($Force) { $forward += '-Force' }
+    Invoke-Hidden -FilePath $teardownPython -ArgList (@(
+        '-I', '-S', '-B', '-X', 'utf8', (Join-Path $PSScriptRoot 'command_binding.py'),
+        '--payload-root', $teardownPayload, '--plugin-id', 'agent-ssh',
+        '--legacy-root', $InstallDir, '--source-payload-root', $teardownPayload,
+        '--project-root', $teardownProject, '--teardown', '--run-lifecycle', '--',
+        (Get-Process -Id $PID).Path, '-NoProfile', '-NonInteractive',
+        '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath
+    ) + $forward) -StreamOutput
+    exit $LASTEXITCODE
+}
+
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges

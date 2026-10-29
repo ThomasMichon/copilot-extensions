@@ -27,6 +27,40 @@ def test_context_manager(tmp_path: Path):
         assert lock_path(tmp_path).exists()
     assert not lock.held
 
+def test_require_owned_remains_valid_inside_borrowed_callback(tmp_path: Path):
+    with CutoverLock(tmp_path) as lock:
+        lock.require_owned()
+        with lock.borrow():
+            lock.require_owned()
+        lock.require_owned()
+    with pytest.raises(RuntimeError, match="no acquiring execution"):
+        lock.require_owned()
+
+
+def test_require_owned_refuses_foreign_execution_before_touching_lock(tmp_path: Path, monkeypatch):
+    import threading
+
+    with CutoverLock(tmp_path) as lock:
+        pid = os.getpid()
+        with monkeypatch.context() as patch:
+            patch.setattr(os, "getpid", lambda: pid + 1)
+            with pytest.raises(RuntimeError, match="another process"):
+                lock.require_owned()
+        failures = []
+
+        def foreign_thread():
+            try:
+                lock.require_owned()
+            except RuntimeError as exc:
+                failures.append(str(exc))
+
+        thread = threading.Thread(target=foreign_thread)
+        thread.start()
+        thread.join(timeout=2)
+        assert not thread.is_alive()
+        assert failures == ["cutover guard belongs to another thread"]
+        lock.require_owned()
+
 
 def test_records_own_pid(tmp_path: Path):
     with CutoverLock(tmp_path):

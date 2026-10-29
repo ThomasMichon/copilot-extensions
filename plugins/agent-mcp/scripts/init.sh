@@ -769,7 +769,8 @@ for _lib_entry in \
     'credential-relay:agent-credential-relay' \
     'agent-procutil:agent-procutil' \
     'single-instance-lease:agent-single-instance-lease' \
-    'zdd:agent-zdd'; do
+    'zdd:agent-zdd' \
+    'update-driver:agent-update-driver'; do
     _lib_dir_name="${_lib_entry%%:*}"
     _lib_pkg_name="${_lib_entry#*:}"
     _lib_path="$PLUGIN_DIR/libs/$_lib_dir_name"

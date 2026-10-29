@@ -143,6 +143,28 @@ class GitHubProvider:
         tail = url.rstrip("/").rsplit("/", 1)[-1] if url else ""
         return int(tail) if tail.isdigit() else None
 
+    def get_publication_labels(self, repo, number, *, api_base="", token=None):
+        args = ["gh", "api", f"repos/{repo}/issues/{number}/labels", "--paginate", "--slurp"]
+        proc = run_cli(args, env=self._env(token, host=self.authority_endpoint(api_base)))
+        if proc.returncode:
+            raise ProviderError(f"Publication-label read failed: {proc.stderr.strip()}")
+        data = json.loads(proc.stdout)
+        if not isinstance(data, list) or any(not isinstance(page, list) for page in data):
+            raise ProviderError("Malformed publication-label pages")
+        data = [item for page in data for item in page]
+        if not isinstance(data, list) or any(
+                not isinstance(item, dict) or not isinstance(item.get("name"), str) for item in data):
+            raise ProviderError("Malformed publication-label response")
+        return tuple(item["name"] for item in data)
+
+    def add_publication_labels(self, repo, number, labels, *, api_base="", token=None):
+        args = ["gh", "api", "--method", "POST", f"repos/{repo}/issues/{number}/labels"]
+        for label in labels:
+            args.extend(["-f", f"labels[]={label}"])
+        proc = run_cli(args, env=self._env(token, host=self.authority_endpoint(api_base)))
+        if proc.returncode:
+            raise ProviderError(f"Publication-label addition failed: {proc.stderr.strip()}")
+
     def get_pull(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> PullResult:

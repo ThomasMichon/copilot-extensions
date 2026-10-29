@@ -17,7 +17,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'init', 'stamp', 'provision', 'uninstall')]
+    [ValidateSet('install', 'init', 'stamp', 'provision', 'uninstall', 'broker-remove')]
     [string]$Action = 'install',
     [string]$InstallDir,
     [switch]$Force
@@ -67,6 +67,29 @@ function Copy-InstallerStageDirectory {
 }
 # === end install-contract:v4 payload-copy ===
 . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+
+if ($env:OS -eq 'Windows_NT' -and
+    $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1' -and
+    $Action -in @('install', 'init', 'provision', 'broker-remove')) {
+    $driverPayload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    $driverRoot = if ($InstallDir) { [IO.Path]::GetFullPath($InstallDir) }
+        else { Join-Path $env:USERPROFILE '.agent-mcp' }
+    $driverOptions = @()
+    if ($Force) { $driverOptions += 'Force' }
+    $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
+        -Plugin 'agent-mcp' -Action $Action -Options $driverOptions
+    if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
+    $driverPython = $driverEntry.Python
+    $driverArguments = $driverEntry.Arguments
+}
+if ($Action -eq 'broker-remove') {
+    if ($env:OS -ne 'Windows_NT' -or $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1') {
+        throw 'Owned broker removal requires an uncontained Windows installer'
+    }
+    & $driverPython @driverArguments --remove-broker
+    if ($LASTEXITCODE -ne 0) { throw 'Owned runtime broker removal failed; runtimes preserved' }
+    return
+}
 
 # === install-contract:test-persistent-environment -- keep byte-identical across installers ===
 function Get-CopilotPersistentEnvironmentVariable {
@@ -427,8 +450,24 @@ function Invoke-VersionedMarkComplete {
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
     }
-    Complete-RuntimeConstruction -PayloadHash $actualHash
+    Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers
     return $true
+}
+
+function Invoke-RuntimeBrokerAdoption {
+    if ($env:OS -ne 'Windows_NT' -or $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1') { return }
+    if (-not $script:RuntimeConstructionSession -or -not $script:RuntimeConstructionSession.Complete -or
+        $script:RuntimeConstructionSession.Process.HasExited) {
+        throw 'Broker adoption requires attached complete-slot retention'
+    }
+    $diagnostic = ''
+    $result = Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', '-m', 'update_driver.windows_broker',
+        '--runtime-root', $InstallDir, '--slot', $VenvDir,
+        '--execution-root', (Join-Path $env:USERPROFILE '.copilot-extensions\update-driver')) `
+        -ErrorOutput ([ref]$diagnostic)
+    if ($LASTEXITCODE -ne 0) { throw "Runtime broker adoption failed: $diagnostic" }
+    $receipt = $result | ConvertFrom-Json
+    if (-not $receipt -or $receipt.adopted -ne $true) { throw 'Runtime broker adoption returned no receipt' }
 }
 # === end install-contract:v4 marker/toss helpers ===
 
@@ -873,14 +912,15 @@ Remove-ConsoleTrampolines -VenvDir $VenvDir
 # `agent-credential-relay`/`agent-procutil`/`agent-single-instance-lease`
 # are `uv`-editable canonical references (vendor-pointer-generalization
 # effort, Phase 1: no local copy in a dev checkout at all); `agent-zdd` is
-# a real local copy. All 4 are `[tool.uv.sources]` workspace path deps, so
+# a real local copy. These and the execution driver are workspace path deps, so
 # when `uv` is unavailable the fallback below (bare `python -m pip
 # install`) cannot resolve any of them without this explicit preinstall.
 foreach ($lib in @(
     @{ Dir = 'credential-relay'; Pkg = 'agent-credential-relay' },
     @{ Dir = 'agent-procutil'; Pkg = 'agent-procutil' },
     @{ Dir = 'single-instance-lease'; Pkg = 'agent-single-instance-lease' },
-    @{ Dir = 'zdd'; Pkg = 'agent-zdd' }
+    @{ Dir = 'zdd'; Pkg = 'agent-zdd' },
+    @{ Dir = 'update-driver'; Pkg = 'agent-update-driver' }
 )) {
     $libDir = Join-Path $PluginDir "libs\$($lib.Dir)"
     if (-not (Test-Path (Join-Path $libDir 'pyproject.toml'))) {
@@ -937,6 +977,7 @@ if ($VersionedRuntime) {
         throw "Fresh runtime slot failed its health gate (versions/$SrcVersion)"
     }
     if (-not (Invoke-VersionedMarkComplete)) { throw 'Runtime construction completion failed' }
+    Invoke-RuntimeBrokerAdoption
     # Source manifest inputs are captured before activation.
     if ($script:SourceRuntimeIdentity) {
         $sourceManifestGit = Get-GitInfo -Path (Split-Path -Parent (Split-Path -Parent $sourceManifestPath))

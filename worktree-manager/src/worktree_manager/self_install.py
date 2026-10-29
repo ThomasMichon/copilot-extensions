@@ -27,6 +27,7 @@ import subprocess
 import sys
 import time
 import uuid
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -532,7 +533,7 @@ def _write_marker(root: Path, version: str) -> None:
 # _swap_in_staged_slot) have no other caller in this module and are not
 # re-exported here -- reach them via `self_install_payload` directly if ever
 # needed.
-from .self_install_payload import _copy_payload
+from .self_install_payload import _copy_payload, _safe_extract
 
 
 class _CutoverLockBusy(Exception):
@@ -760,6 +761,11 @@ def _complete_candidate(
             _write_control_plane_provider_manifest(payload, root=root)
 
     installer = _runtime_installer()
+    if before_publish is not None:
+        before_publish()
+    # Broker reconciliation takes its own retention/publication leases. Validate
+    # source ownership before it mutates, then revalidate at frontdoor publication.
+    installer.adopt_broker(root, slot)
     installer.activate(
         root, slot.name, expected=previous, before_publish=publish_frontdoors,
         after_publish=(lambda: after_activate(slot))
@@ -818,7 +824,11 @@ def self_install(
             ("python", _base_python), ("uv", _uv), ("wheel_inputs", _wheel_inputs),
             ("local_packages", _local_packages), ("validate_candidate", _validate_candidate),
         ) if value is not None}
-        with installer.candidate(pd, r, assemble=_copy_payload, **candidate_options) as ready:
+        with ExitStack() as custody:
+            if os.name == "nt" and os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1":
+                if custody.enter_context(installer._installation_custody()) is None:
+                    raise RuntimeError("Manager construction requires live installation custody")
+            ready = custody.enter_context(installer.candidate(pd, r, assemble=_copy_payload, **candidate_options))
             slot = ready.slot
             return _complete_candidate(
                 ready, pd, r, previous=previous,
@@ -855,69 +865,6 @@ def _clear_dir(d: Path) -> None:
                 child.unlink()
             except OSError:
                 pass
-
-
-def _safe_extract(tf, dest: Path) -> None:
-    """Extract a tar into ``dest``, refusing anything that would escape it.
-
-    A hand-rolled path-only pre-check computed against ``getmembers()``
-    BEFORE any extraction happens cannot catch a classic tar symlink
-    attack -- a symlink member (``evil -> /tmp/outside``) followed by a
-    second member using it as a path prefix (``evil/payload.py``) --
-    because at pre-check time neither path exists on disk yet, so a
-    lexical ``.resolve()`` sees no symlink to follow and both members
-    pass; only DURING a batch extractall's own sequential write does the
-    second member actually traverse through the just-created symlink and
-    land outside ``dest`` entirely.
-
-    Fixed by extracting ONE member at a time, validating each immediately
-    before extracting it (not the whole batch up front): by the time a
-    later member (``evil/payload.py``) is checked, an earlier symlink
-    member (``evil``) has ALREADY been written to disk in a prior
-    iteration of this same loop, so ``.resolve()`` follows the REAL
-    symlink now sitting there and correctly detects the escape --
-    reproducing the safety property of stdlib's ``filter="data"``
-    (available only since Python 3.12, backported to some but not all
-    supported-version patch releases) without depending on it, since this
-    project declares ``requires-python = \">=3.10\"`` and a raw
-    ``filter=\"data\"`` call would raise ``TypeError`` on an
-    unpatched 3.10/3.11 host, breaking the documented git-optional
-    tarball fallback instead of updating."""
-    import warnings
-
-    dest = dest.resolve()
-    for member in tf.getmembers():
-        target = (dest / member.name).resolve()
-        if target != dest and dest not in target.parents:
-            raise OSError(f"unsafe path in tarball: {member.name}")
-        # Hardlinks, device files, fifos, etc. are refused outright by the
-        # member-type check below -- only a symlink's own target needs
-        # validating here.
-        if member.issym():
-            if os.path.isabs(member.linkname):
-                raise OSError(f"{member.name} is a link to an absolute path")
-            # Resolve the link's OWN target relative to where it will
-            # live (target.parent), the same way the filesystem would --
-            # this is what actually catches the sequential-traversal
-            # attack: a later member's own target path (checked above)
-            # only escapes visibly once THIS check has forced the
-            # symlink's resolved destination to be validated too.
-            link_dest = (target.parent / member.linkname).resolve()
-            if link_dest != dest and dest not in link_dest.parents:
-                raise OSError(f"{member.name} is a link escaping the destination")
-        if not (member.isreg() or member.isdir() or member.issym()):
-            raise OSError(
-                f"refusing to extract {member.name}: unsupported member type "
-                "(only regular files, directories, and symlinks are allowed)"
-            )
-        with warnings.catch_warnings():
-            # Every member here is already validated by hand above,
-            # independent of Python's own filter= mechanism (unavailable
-            # on this project's older supported Python versions) --
-            # silence the resulting "no filter given" DeprecationWarning
-            # rather than leaving noise in every real self-update run.
-            warnings.simplefilter("ignore", DeprecationWarning)
-            tf.extract(member, dest)  # noqa: S202 - each member validated immediately above
 
 
 def _fetch_via_tarball(staging: Path, url: str, *, timeout: int = 180) -> None:

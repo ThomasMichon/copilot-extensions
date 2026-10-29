@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-index"
-version = "0.10.142-dev1"
+version = "0.10.143-dev1"
 description = "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem."
 readme = "README.md"
 license = "MIT"
@@ -48,9 +48,12 @@ agent-zdd = { path = "libs/zdd" }
 # manually in sync -- only a real `main`-branch release
 # (tools/materialize_main.py) ever gets a real local copy.
 agent-procutil = { path = "libs/agent-procutil" }
+agent-update-driver = { path = "libs/update-driver" }
+agent-single-instance-lease = { path = "libs/single-instance-lease" }
 agent-dropin-registry = { path = "libs/dropin-registry" }
 
 [project.optional-dependencies]
+native-installer = ["agent-update-driver"]
 fleet = ["fleet-manager[auth]>=0.1.0.dev1"]
 store = [
     # The indexing + vector-store stack: reads/writes the LanceDB store and chunks

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,6 +40,159 @@ class CleanupOperations:
     _ownership_key: Callable[[Path, str], object]
     _construction_owners: object
     _remove_slot: Callable[..., bool]
+
+
+def require_immutable_environment(
+    slot: Path, *, error_type: type[RuntimeError], read_json: Callable[[Path], object],
+) -> None:
+    """Inspect installed files without executing a candidate's Python or hooks.
+
+    Non-Python slots remain supported. Python slots may use the base interpreter,
+    but their installed packages and path hooks must not refer outside the slot.
+    Historical published slots are diagnosed, never repaired by this check.
+    """
+    base = slot.resolve()
+
+    def ordinary(path: Path) -> None:
+        info = path.lstat()
+        if (
+            not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode))
+            or getattr(info, "st_file_attributes", 0) & 0x400
+        ):
+            raise error_type(f"Installed runtime content must be ordinary files, not redirected: {path}")
+
+    config = slot / "pyvenv.cfg"
+    if os.path.lexists(config):
+        ordinary(config)
+        for line in config.read_text(encoding="utf-8-sig").splitlines():
+            key, separator, value = line.partition("=")
+            if separator and key.strip().casefold() == "include-system-site-packages":
+                if value.strip().casefold() != "false":
+                    raise error_type("Deployed Python must not include system site-packages")
+
+    sites = [slot / "Lib" / "site-packages"]
+    for name in ("lib", "lib64"):
+        library = slot / name
+        if os.path.lexists(library):
+            if not library.resolve().is_relative_to(base):
+                raise error_type(f"Installed library path escapes its runtime: {library}")
+            sites.extend(library.glob("python*/site-packages"))
+    seen = set()
+    for site in sites:
+        if not os.path.lexists(site):
+            continue
+        resolved = site.resolve()
+        if not resolved.is_relative_to(base):
+            raise error_type(f"Installed site-packages escapes its runtime: {site}")
+        ordinary(site)
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+
+        def walk_error(error: OSError) -> None:
+            raise error
+
+        for directory, directories, files in os.walk(site, onerror=walk_error):
+            parent = Path(directory)
+            for name in directories + files:
+                path = parent / name
+                ordinary(path)
+                if name.casefold().endswith(".egg-link") or name.casefold().startswith("__editable__"):
+                    raise error_type(f"Editable installation is not deployable: {path}")
+            for name in files:
+                path = parent / name
+                if name.casefold() == "direct_url.json" and parent.name.casefold().endswith(".dist-info"):
+                    try:
+                        origin = read_json(path)
+                    except ValueError as exc:
+                        raise error_type(f"Invalid installed origin metadata: {path}") from exc
+                    if not isinstance(origin, dict) or not isinstance(origin.get("dir_info", {}), dict):
+                        raise error_type(f"Invalid installed origin metadata: {path}")
+                    editable = origin.get("dir_info", {}).get("editable", False)
+                    if editable is not False:
+                        raise error_type(f"Editable installation is not deployable: {path}")
+                if parent != site or not name.casefold().endswith(".pth"):
+                    continue
+                for line in path.read_text(encoding="utf-8-sig").splitlines():
+                    line = line.rstrip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if line.startswith(("import ", "import\t")):
+                        # These are the standard UV and setuptools bootstrap hooks.
+                        # Unknown executable hooks cannot prove source independence.
+                        if name == "_virtualenv.pth" and line == "import _virtualenv":
+                            if (site / "_virtualenv.py").is_file():
+                                continue
+                        if name == "distutils-precedence.pth" and line == (
+                            "import os; var = 'SETUPTOOLS_USE_DISTUTILS'; "
+                            "enabled = os.environ.get(var, 'local') == 'local'; "
+                            "enabled and __import__('_distutils_hack').add_shim();"
+                        ) and (site / "_distutils_hack" / "__init__.py").is_file():
+                            continue
+                        raise error_type(f"Unverified executable installed path hook: {path}")
+                    if not (site / line).resolve().is_relative_to(base):
+                        raise error_type(f"Installed path hook escapes its runtime: {path}")
+
+
+def retain_helpers(slot: Path, *, complete: bool, context_source: Path | None = None) -> None:
+    """Retain the canonical helper bundle before publishing an immutable slot."""
+    source = Path(__file__).resolve().parent
+    names = (
+        "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_source.py",
+        "versioned_runtime_construction.py", "versioned_runtime_publication.py",
+    )
+    contents = {}
+    for name in names:
+        path = source / name
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise RuntimeError("Runtime retention helper source must be an ordinary file")
+        contents[name] = path.read_bytes()
+    bootstrap = slot / ".runtime-bootstrap"
+    if not complete:
+        bootstrap.mkdir()
+    info = bootstrap.lstat()
+    if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+        raise RuntimeError("Runtime retention helpers require an ordinary directory")
+    for name, content in contents.items():
+        path = bootstrap / name
+        if complete:
+            info = path.lstat()
+            if (
+                not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400
+                or path.read_bytes() != content
+            ):
+                raise RuntimeError("Completed runtime retention helpers differ from their source")
+        else:
+            with path.open("xb") as stream:
+                stream.write(content)
+    if context_source is not None:
+        directory = bootstrap / "installation-context"
+        if not complete:
+            directory.mkdir()
+        info = directory.lstat()
+        if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise RuntimeError("Cell retention helpers require an ordinary directory")
+        sources = [
+            (context_source, "installation_context.py"),
+            *((path, path.name) for path in sorted(context_source.parent.glob("_installation_context_*.py"))),
+        ]
+        for source_path, name in sources:
+            info = source_path.lstat()
+            if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+                raise RuntimeError("Cell retention helper source must be an ordinary file")
+            content = source_path.read_bytes()
+            target = directory / name
+            if complete:
+                info = target.lstat()
+                if (
+                    not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400
+                    or target.read_bytes() != content
+                ):
+                    raise RuntimeError("Completed cell retention helpers differ from their source")
+            else:
+                with target.open("xb") as stream:
+                    stream.write(content)
 
 
 def discard_failed_candidate(runtime: CleanupOperations, root: Path, version: str, *,
@@ -217,8 +371,13 @@ def construction_session(runtime: RuntimeOperations, root: Path, version: str, *
                 if command == "complete":
                     if request.get("payload_hash") != payload_hash:
                         raise RuntimeError("payload changed during construction; completion refused")
+                    retain = request.get("retain_helpers", False)
+                    if type(retain) is not bool:
+                        raise ValueError("Runtime retention selection must be a boolean")
+                    if retain:
+                        retain_helpers(runtime.version_dir(root, version), complete=complete)
+                    runtime.mark_complete(root, version, payload_hash=payload_hash, dev_owner=dev_owner)
                     if not complete:
-                        runtime.mark_complete(root, version, payload_hash=payload_hash, dev_owner=dev_owner)
                         retained.enter_context(runtime.retention_lease(
                             root, version, payload_hash=payload_hash,
                         ))
@@ -476,11 +635,12 @@ function script:Start-RuntimeConstruction {
     }
     return $reuse
 }
-function script:Complete-RuntimeConstruction([string]$PayloadHash) {
+function script:Complete-RuntimeConstruction([string]$PayloadHash, [switch]$RetainHelpers) {
     $session = $script:RuntimeConstructionSession
     if (-not $session) { throw 'Completion requires attached construction ownership' }
     $session.Process.StandardInput.WriteLine(
-        (@{command='complete'; payload_hash=$PayloadHash} | ConvertTo-Json -Compress)
+        (@{command='complete'; payload_hash=$PayloadHash; retain_helpers=[bool]$RetainHelpers} |
+            ConvertTo-Json -Compress)
     )
     $session.Process.StandardInput.Flush()
     $line = $session.Process.StandardOutput.ReadLine()

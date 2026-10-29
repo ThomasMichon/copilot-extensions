@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -12,6 +13,7 @@ SCRIPTS = SOURCE / "scripts"
 sys.path[:0] = [
     str(SCRIPTS), str(SOURCE / "src"), str(SOURCE.parent / "agent-procutil" / "src"),
     str(SOURCE.parent / "single-instance-lease" / "src"),
+    str(SOURCE.parent / "zdd" / "src"),
 ]
 
 from update_driver import borrowed_custody  # noqa: E402
@@ -68,6 +70,10 @@ def construct(
                 ):
                     raise FoundationInputError("foundation admission changed before selection")
                 runtime.activate(target, version, link_free=True)
+                if os.name == "nt" and os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1":
+                    from update_driver.windows_broker import adopt
+
+                    adopt(target, candidate.slot, root=root)
                 return candidate.slot
 
 

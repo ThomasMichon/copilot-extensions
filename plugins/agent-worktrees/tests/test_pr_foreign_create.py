@@ -87,6 +87,31 @@ def _foreign_resolution(
 
 
 class TestCreateForeignPrFromBranch:
+    @pytest.mark.parametrize("reuse", [False, True])
+    def test_explicit_origin_uses_target_binding_and_preserves_create_labels(
+        self, monkeypatch, _tracking_setup, reuse,
+    ):
+        _, wid = _tracking_setup
+        monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug",
+                            lambda *_: _foreign_resolution(labels=("create-only",)))
+        pull = _FakePull(url="https://example/owner/other-repo/pull/9", number=9)
+        backend = _FakeProvider(result=pull, existing=pull if reuse else None)
+        current = ["unrelated"]
+        backend.get_publication_labels = lambda *a, **k: tuple(current)
+        backend.add_publication_labels = lambda repo, number, labels, **k: current.extend(labels)
+        monkeypatch.setattr(providers, "get_provider", lambda _: backend)
+        monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
+        result = pr_foreign_create.create_foreign_pr_from_branch(
+            wid, _config(), target_repo="owner/other-repo", from_branch="fork:topic",
+            title="fixture", publication_origin="control-plane",
+            publication_labels=("source:control-plane",),
+        )
+        assert result["publication_labels"]["ok"] and result["number"] == 9
+        assert current == ["unrelated", "source:control-plane"]
+        assert len(backend.calls) == (0 if reuse else 1)
+        if not reuse:
+            assert backend.calls[0][0].labels == ("create-only",)
+
     def test_unregistered_target_fails_honestly(self, monkeypatch, _tracking_setup):
         _tracking_d, wid = _tracking_setup
         monkeypatch.setattr(

@@ -94,6 +94,47 @@ def _finite_owner():
     return owner
 
 
+def cleanup(*, payload_root: Path, plugin_id: str, root: Path, shell: str,
+            profile: Path | None = None, check_consumers: bool = False,
+            remove_runtime: bool = False, purge: bool = False,
+            project_name: str | None = None, controller_custody=None) -> dict:
+    check_under_custody(root=root, payload_root=payload_root, plugin_id=plugin_id)
+    if project_name:
+        project_python(root, project_name)
+    owner = _finite_owner()
+    controls = {} if controller_custody is None else {"controller_custody": controller_custody}
+    if purge:
+        # Unknown-only roots are absent to finite removal, not to a purge.
+        owner._root(payload_root, root)
+        selected = owner.profile_for(payload_root, plugin_id, profile)
+        if root.exists():
+            if controller_custody is None:
+                owner.refuse_consumers(payload_root, plugin_id, root, owner._host(shell), selected)
+            else:
+                runtime = owner._load(payload_root / "scripts" / "versioned_runtime.py")
+                binding = owner._load(payload_root / "scripts" / "command_binding.py")
+                ownership = (binding, binding._load_primitive(payload_root))
+                targets = owner._targets(payload_root, plugin_id, root, selected, runtime)
+                with owner._custody(payload_root, plugin_id, root, ownership, targets, runtime) as lease:
+                    owner.refuse_consumers(
+                        payload_root, plugin_id, root, owner._host(shell), selected,
+                        **controls, lifecycle_lease=lease,
+                    )
+    result = owner.cleanup(
+        payload_root, plugin_id, root, shell, profile=profile,
+        remove_runtime=remove_runtime, check_consumers=check_consumers, **controls,
+    )
+    if result["status"] == "absent":
+        selected = owner.profile_for(payload_root, plugin_id, profile)
+        _, commands = owner._local_bindings(payload_root, root, selected)
+        if commands:
+            raise RuntimeError(
+                "Owned global/update command footprint remains without runtime ownership "
+                "evidence; command files preserved, nothing removed"
+            )
+    return result
+
+
 def main() -> int:
     if len(sys.argv) == 3 and sys.argv[1] == "--probe-python":
         try:
@@ -124,37 +165,13 @@ def main() -> int:
     action.add_argument("--remove-runtime", action="store_true")
     arguments = parser.parse_args()
     try:
-        check_under_custody(root=arguments.root, payload_root=arguments.payload_root,
-                           plugin_id=arguments.plugin_id)
-        if arguments.project_name:
-            project_python(arguments.root, arguments.project_name)
-        owner = _finite_owner()
-        if arguments.purge:
-            # Unknown-only roots are absent to finite removal, not to a purge.
-            owner._root(arguments.payload_root, arguments.root)
-            selected = owner.profile_for(
-                arguments.payload_root, arguments.plugin_id, arguments.profile,
-            )
-            if arguments.root.exists():
-                owner.refuse_consumers(
-                    arguments.payload_root, arguments.plugin_id, arguments.root,
-                    owner._host(arguments.shell), selected,
-                )
-        result = owner.cleanup(
-            arguments.payload_root, arguments.plugin_id, arguments.root, arguments.shell,
+        result = cleanup(
+            payload_root=arguments.payload_root, plugin_id=arguments.plugin_id,
+            root=arguments.root, shell=arguments.shell,
             profile=arguments.profile, remove_runtime=arguments.remove_runtime,
-            check_consumers=arguments.check_consumers,
+            check_consumers=arguments.check_consumers, purge=arguments.purge,
+            project_name=arguments.project_name,
         )
-        if result["status"] == "absent":
-            selected = owner.profile_for(
-                arguments.payload_root, arguments.plugin_id, arguments.profile,
-            )
-            _, commands = owner._local_bindings(arguments.payload_root, arguments.root, selected)
-            if commands:
-                raise RuntimeError(
-                    "Owned global/update command footprint remains without runtime ownership "
-                    "evidence; command files preserved, nothing removed"
-                )
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
         print(f"Runtime uninstall refused: {error}", file=sys.stderr)
         return 1

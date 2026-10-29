@@ -46,6 +46,68 @@ def test_cutover_refuses_active_route_under_cutover_lock(tmp_path: Path) -> None
     assert spawned == []
 
 
+@pytest.mark.parametrize("selection", ["missing", "different", "matching"])
+def test_expected_predecessor_is_checked_before_spawn(tmp_path, selection):
+    expected = routing.Endpoint("127.0.0.1", 61001, 101, "old", 7, "123456")
+    selected = {
+        "missing": None,
+        "different": routing.Endpoint("127.0.0.1", 61003, 103, "old", 8, "654321"),
+        "matching": expected,
+    }[selection]
+    spawned = []
+
+    class Routing:
+        def read_table(self, _root):
+            return {"active": expected.to_dict()}
+
+        def read_active_endpoint(self, _root):
+            return selected
+
+        def reap_stale_active(self, *_args, **_kwargs):
+            pass
+
+    def spawn(port):
+        spawned.append(port)
+        raise RuntimeError("expected selection reached spawn")
+
+    orch = CutoverOrchestrator(
+        tmp_path, bind="127.0.0.1", version="new",
+        spawn_passive=spawn, health_check=lambda *_: True, make_client=lambda _: None,
+        pick_free_port=lambda: 61002, refuse_old=lambda _: None,
+        routing_mod=Routing(), expected_old=expected,
+    )
+    if selection == "matching":
+        with pytest.raises(RuntimeError, match="expected selection reached spawn"):
+            orch.run()
+        assert spawned == [61002]
+    else:
+        result = orch.run()
+        assert not result.ok
+        assert "selected predecessor differs" in result.error
+        assert spawned == []
+        assert not (tmp_path / "cutover.json").exists()
+
+
+def test_expected_predecessor_requires_publication_guard(tmp_path):
+    with pytest.raises(ValueError, match="publication refusal guard"):
+        CutoverOrchestrator(
+            tmp_path, bind="127.0.0.1", version="new",
+            spawn_passive=lambda _: None, health_check=lambda *_: True,
+            make_client=lambda _: None, pick_free_port=lambda: 61002,
+            expected_old=routing.Endpoint("127.0.0.1", 61001, 101),
+        )
+
+
+def test_publication_notification_requires_an_observed_predecessor(tmp_path):
+    with pytest.raises(ValueError, match="publication notification requires"):
+        CutoverOrchestrator(
+            tmp_path, bind="127.0.0.1", version="new",
+            spawn_passive=lambda _: None, health_check=lambda *_: True,
+            make_client=lambda _: None, pick_free_port=lambda: 61002,
+            on_published=lambda _: None,
+        )
+
+
 def test_cutover_refuses_forward_published_during_health_wait(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
     routing.publish_active(

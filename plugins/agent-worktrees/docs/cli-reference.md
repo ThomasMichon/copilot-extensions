@@ -725,6 +725,11 @@ head is audited as `unknown` with an explicit reconciliation warning. Never
 repeat a push while its outcome is unknown. Inspect the provider and remote first.
 See the worktree skill's PR workflow reference for retention and restore guidance.
 
+`create-pr` and `push-changes` additionally accept explicit
+`--publication-origin ID` and repeated `--publication-label LABEL`.
+`pr-publication-labels` attaches/repairs that metadata without another create
+or push. See [publication-origin labels](pr-publication-labels.md).
+
 Networked actor-specific commands resolve a shared **effective actor profile**:
 configured/base `PRConfig` + live provider permission + a matching GitHub
 `pr.roles` override. Thus a conservative base can become `pr-self-merge` for a

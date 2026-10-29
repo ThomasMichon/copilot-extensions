@@ -892,7 +892,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # --- dev-release / dev-status (mutable-dev-slot, #3376 Phase 2) ---
     # `dev-claim`/`slot`/`activate` stay installer-time only (they need this
-    # worktree's own checkout to build the editable slot); a *release* must
+    # worktree's source to build an immutable generation); a *release* must
     # work even when the operator is no longer standing in a source checkout
     # (e.g. reacting to an `agent-worktrees finalize` warning) -- see
     # docs/patterns/mutable-dev-slot.md "Runtime accessibility". Both verbs

@@ -105,6 +105,56 @@ def test_capture_does_not_claim_an_unselected_manifest(tmp_path: Path, retained:
         retained.capture(root, manager)
 
 
+def test_restore_checks_admitted_record_bytes_before_inspection(
+    tmp_path: Path, retained: Any, monkeypatch: pytest.MonkeyPatch, capsys,
+) -> None:
+    record = tmp_path / "record.json"
+    record.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", [
+        "retained_runtime.py", "inspect", "--root", str(tmp_path),
+        "--record", str(record), "--expected-record-sha256", "0" * 64,
+    ])
+    monkeypatch.setattr(retained, "validate", lambda *args: pytest.fail("changed input inspected"))
+    assert retained.main() == 1
+    assert "changed after admission" in capsys.readouterr().err
+
+
+def test_restore_pins_original_bytes_and_digest_for_native_reentry(
+    tmp_path: Path, retained: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import hashlib
+
+    root, _payload, slot, manager = installation(tmp_path, retained)
+    record = retained.capture(root, manager)
+    original = json.dumps(record, indent=2).encode("utf-8") + b"\n"
+    record_path = tmp_path / "input.json"
+    record_path.write_bytes(original)
+
+    def child(command, **kwargs):
+        pinned = Path(command[command.index("-RetainedRuntime") + 1])
+        assert pinned != record_path and pinned.read_bytes() == original
+        assert command[-2:] == ["-RetainedRuntimeSha256", hashlib.sha256(original).hexdigest()]
+        assert kwargs["env"][retained.OWNER_ENV] == str(os.getpid())
+        record_path.write_bytes(b"changed caller input")
+        assert pinned.read_bytes() == original
+        assert manager.gc(root, protect_pids=False) == []
+        assert slot.exists()
+        return 0
+
+    monkeypatch.setattr(retained.subprocess, "call", child)
+    assert retained.restore(root, record_path, record, manager, "ps1", "powershell.exe", original) == 0
+
+
+def test_restore_cannot_lease_one_assembly_and_pin_another(
+    tmp_path: Path, retained: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, _payload, _slot, manager = installation(tmp_path, retained)
+    record = retained.capture(root, manager)
+    monkeypatch.setattr(retained.subprocess, "call", lambda *args, **kwargs: pytest.fail("unbound child"))
+    with pytest.raises(ValueError, match="do not match"):
+        retained.restore(root, tmp_path / "record.json", record, manager, "ps1", "powershell.exe", b"{}")
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX child controller; PowerShell lifecycle is tested separately")
 def test_restore_holds_real_retention_and_pins_input_until_child_returns(
     tmp_path: Path, retained: Any, monkeypatch: pytest.MonkeyPatch,
@@ -155,6 +205,7 @@ def test_retained_runtime_reuses_slot_without_construction_completion_or_gc(
             f"INSTALL_DIR={shlex.quote(tmp_path.as_posix())}; LOCAL_BIN=$INSTALL_DIR/bin",
             f"VENV_PYTHON={shlex.quote(python.as_posix())}; LINK_PYTHON=$VENV_PYTHON",
             "SRC_VERSION=1.0.0; VERSIONED_RUNTIME=1; FORCE=1; RETAINED_RUNTIME=record",
+            sh_function("_ensure_runtime"),
             "_step() { :; }; _ok() { :; }; _skip() { :; }; _fail() { echo \"$1\"; }",
             "_versioned_current() { echo 2.0.0; }",
             "_versioned_mark_complete() { echo UNEXPECTED-COMPLETION; return 99; }",
@@ -166,8 +217,8 @@ def test_retained_runtime_reuses_slot_without_construction_completion_or_gc(
             "_activation_superseded_now() { return 1; }",
             "deploy_binstub() { echo binstub; }; _write_manifest() { echo manifest; }",
             "_runtime_publication_discard() { :; }; _register_pivot() { :; }",
+            "COPILOT_EXT_NO_FLOCK=0; flock() { :; }",
             "_supervisor_audit() { :; }",
-            sh_function("_ensure_runtime"),
             "_ensure_runtime",
         ])
     else:
@@ -180,6 +231,7 @@ def test_retained_runtime_reuses_slot_without_construction_completion_or_gc(
             "function Test-ActivationSupersededNow { return $false }",
             "function Deploy-SelfProvisioningBinstub { Write-Host binstub }",
             "function Write-Manifest { Write-Host manifest }",
+            "function Invoke-RuntimeBrokerAdoption { param([switch]$Retained); if (-not $Retained) { throw 'missing retained mode' }; Write-Host adopted }",
             # Native Python only executes the health import; provide a tiny module.
             f"$VenvPython='{tmp_path / 'python.cmd' if os.name == 'nt' else tmp_path / 'python'}'",
             ps_function("Install-RetainedRuntime"),
@@ -189,7 +241,10 @@ def test_retained_runtime_reuses_slot_without_construction_completion_or_gc(
         python = tmp_path / ("python.cmd" if os.name == "nt" else "python")
         python.write_text("@exit /b 0\r\n" if os.name == "nt" else "#!/bin/sh\nexit 0\n", encoding="utf-8")
         python.chmod(0o755)
-    result = _run(tmp_path, shell, script)
+    try:
+        result = _run(tmp_path, shell, script)
+    except subprocess.TimeoutExpired as error:
+        pytest.fail(f"Retained {shell} fixture timed out: stdout={error.stdout!r}; stderr={error.stderr!r}")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "UNEXPECTED" not in result.stdout
     assert all(word in result.stdout.splitlines() for word in ("selected", "binstub", "manifest"))

@@ -118,7 +118,34 @@ def rewrite_nested_uv_editable_entry(
 
 
 def materialize_nested_uv_editable_refs(
-    dest_lib_dir: Path, *, canonical_root: Path, dest_root: Path,
+    dest_lib_dir: Path, *, canonical_root: Path, dest_root: Path, _verified: set[Path] | None = None,
+) -> tuple[list[str], set[str]]:
+    """Materialize the complete sibling closure, including shared edges and cycles."""
+    log: list[str] = []
+    materialized: set[str] = set()
+    pending = [dest_lib_dir]
+    # The caller just copied the initial canonical tree. Only this invocation's
+    # verified copies may differ from canonical after their manifest rewrite.
+    verified = {path.resolve() for path in (_verified or ())}
+    processed = verified - {dest_lib_dir.resolve()}
+    verified.add(dest_lib_dir.resolve())
+    while pending:
+        current = pending.pop()
+        identity = current.resolve()
+        if identity in processed:
+            continue
+        processed.add(identity)
+        entries, libraries = _materialize_direct_uv_editable_refs(
+            current, canonical_root=canonical_root, dest_root=dest_root, verified=verified,
+        )
+        log.extend(entries)
+        materialized.update(libraries)
+        pending.extend(current.parent / name for name in sorted(libraries))
+    return log, materialized
+
+
+def _materialize_direct_uv_editable_refs(
+    dest_lib_dir: Path, *, canonical_root: Path, dest_root: Path, verified: set[Path],
 ) -> tuple[list[str], set[str]]:
     """After copying a canonical lib's own tree into ``dest_lib_dir``, fix
     up any `uv`-editable canonical-reference entry THAT LIB ITSELF
@@ -255,7 +282,7 @@ def materialize_nested_uv_editable_refs(
                     "directory -- refusing"
                 )
                 continue
-            if not uer.lib_tree_matches(nested_canonical, nested_dest):
+            if nested_dest.resolve() not in verified and not uer.lib_tree_matches(nested_canonical, nested_dest):
                 log.append(
                     f"SKIP {nested_dest}: already exists but does not "
                     "match canonical -- refusing"
@@ -274,6 +301,7 @@ def materialize_nested_uv_editable_refs(
                 log.append(f"SKIP {nested_dest}: {where} is a symlink -- refusing")
                 continue
             shutil.copytree(nested_canonical, nested_dest, ignore=_ignore)
+        verified.add(nested_dest.resolve())
         error = rewrite_nested_uv_editable_entry(
             pyproject=dest_pyproject, name=nested_name, raw_path=nested_raw_path,
         )

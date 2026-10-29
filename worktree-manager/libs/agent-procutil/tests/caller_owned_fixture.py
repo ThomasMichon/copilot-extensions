@@ -173,7 +173,8 @@ def main() -> None:
     from agent_procutil.owned_process import OutputLimitExceeded, run_caller_owned
 
     _write(root, "caller", {
-        "self": identity(), "package": agent_procutil.__file__, "prefix": sys.prefix,
+        "self": identity(), "parent": identity(os.getppid()),
+        "package": agent_procutil.__file__, "prefix": sys.prefix,
     })
     if mode == "suspended":
         from agent_procutil import _windows_caller_owned
@@ -225,9 +226,11 @@ def main() -> None:
     for name in ("target", "leaf"):
         record = json.loads((root / f"{name}.json").read_text(encoding="utf-8"))
         observed.extend((record["self"], record["parent"]))
-    outcome["settled_before_result"] = all(
-        _exited(expected) for expected in observed if expected["pid"] != os.getpid()
-    )
+    outcome["unsettled"] = [
+        expected["pid"] for expected in observed
+        if expected["pid"] != os.getpid() and not _exited(expected)
+    ]
+    outcome["settled_before_result"] = not outcome["unsettled"]
     _write(root, "result", outcome)
     print(json.dumps(outcome), flush=True)
 

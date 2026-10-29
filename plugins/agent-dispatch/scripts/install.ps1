@@ -71,6 +71,7 @@ param(
     [switch]$Force,
     [switch]$RequireGracefulCutover,
     [string]$RetainedRuntime,
+    [string]$RetainedRuntimeSha256,
 
     # DEPRECATED / no-op (Thread B): the graceful zdd cutover
     # (Invoke-CoordinatorCutover) is already the DEFAULT on `update` whenever a
@@ -126,8 +127,32 @@ if ($Action -eq 'restore') {
     if (-not $RetainedRuntime -or $NoService -or $NoSupervisor) {
         throw 'restore requires -RetainedRuntime and full coordinator/supervisor reconciliation'
     }
-} elseif ($RetainedRuntime) {
+} elseif ($RetainedRuntime -or $RetainedRuntimeSha256) {
     throw '-RetainedRuntime is valid only with restore'
+}
+
+. (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+
+if ($env:OS -eq 'Windows_NT' -and
+    $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1' -and
+    $Action -in @('install', 'update', 'provision', 'uninstall', 'restore') -and
+    -not ($Action -eq 'uninstall' -and $DryRun)) {
+    $driverPayload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    $driverRoot = if ($InstallDir) { [IO.Path]::GetFullPath($InstallDir) }
+        else { Join-Path $env:USERPROFILE '.agent-dispatch' }
+    $driverOptions = @()
+    foreach ($name in @('NoService', 'NoSupervisor', 'Interactive', 'Purge', 'Force',
+        'RequireGracefulCutover', 'ZeroDowntime', 'DryRun')) {
+        if ($PSBoundParameters.ContainsKey($name) -and [bool]$PSBoundParameters[$name]) {
+            $driverOptions += $name
+        }
+    }
+    $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
+        -Plugin 'agent-dispatch' -Action $Action -Options $driverOptions `
+        -RetainedRuntime $RetainedRuntime -RetainedRuntimeSha256 $RetainedRuntimeSha256
+    if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
+    $driverPython = $driverEntry.Python
+    $driverArguments = $driverEntry.Arguments
 }
 
 # Raise the shared self-stage watchdog's deadline for THIS plugin specifically,
@@ -900,8 +925,27 @@ function Invoke-VersionedMarkComplete {
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
     }
-    Complete-RuntimeConstruction -PayloadHash $actualHash
+    Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers
     return $true
+}
+
+function Invoke-RuntimeBrokerAdoption {
+    param([switch]$Retained)
+    if ($NoService -or $env:OS -ne 'Windows_NT' -or
+        $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1') { return }
+    if (-not $Retained -and
+        (-not $script:RuntimeConstructionSession -or -not $script:RuntimeConstructionSession.Complete -or
+         $script:RuntimeConstructionSession.Process.HasExited)) {
+        throw 'Broker adoption requires attached complete-slot retention'
+    }
+    $diagnostic = ''
+    $result = Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', '-m', 'update_driver.windows_broker',
+        '--runtime-root', $InstallDir, '--slot', $VenvDir,
+        '--execution-root', (Join-Path $env:USERPROFILE '.copilot-extensions\update-driver')) `
+        -ErrorOutput ([ref]$diagnostic)
+    if ($LASTEXITCODE -ne 0) { throw "Runtime broker adoption failed: $diagnostic" }
+    $receipt = $result | ConvertFrom-Json
+    if (-not $receipt -or $receipt.adopted -ne $true) { throw 'Runtime broker adoption returned no receipt' }
 }
 # === end install-contract:v4 marker/toss helpers ===
 
@@ -1283,6 +1327,7 @@ function Materialize-DispatchSnapshot {
     param([string]$SnapshotDir, [string]$PluginDir)
     $utf8 = New-Object System.Text.UTF8Encoding($false)
     $libraries = [ordered]@{
+        'agent-update-driver' = 'update-driver'
         'agent-zdd' = 'zdd'
         'agent-procutil' = 'agent-procutil'
         'agent-dropin-registry' = 'dropin-registry'
@@ -1711,6 +1756,7 @@ function Install-RetainedRuntime {
     $slotOk = ($LASTEXITCODE -eq 0)
     $ErrorActionPreference = $prevEAP
     if (-not $slotOk) { throw 'Retained runtime failed its health gate; not activating' }
+    Invoke-RuntimeBrokerAdoption -Retained
     $mutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -TimeoutSeconds $script:GlobalActivationLockTimeoutSeconds
     try {
         if (-not (Invoke-VersionedActivate)) { throw 'Retained runtime activation failed' }
@@ -1910,6 +1956,7 @@ function Install-Runtime {
         @{ Dir = 'plugin-resolve'; Pkg = 'agent-plugin-resolve'; Display = 'plugin-resolve' },
         @{ Dir = 'single-instance-lease'; Pkg = 'agent-single-instance-lease'; Display = 'single-instance-lease' },
         @{ Dir = 'agent-procutil'; Pkg = 'agent-procutil'; Display = 'agent-procutil' },
+        @{ Dir = 'update-driver'; Pkg = 'agent-update-driver'; Display = 'update-driver' },
         @{ Dir = 'worktree-identity'; Pkg = 'agent-worktree-identity'; Display = 'worktree-identity' },
         @{ Dir = 'process-telemetry'; Pkg = 'agent-process-telemetry'; Display = 'process-telemetry' },
         @{ Dir = 'plugin-activation'; Pkg = 'agent-plugin-activation'; Display = 'plugin-activation' }
@@ -1958,6 +2005,7 @@ function Install-Runtime {
     # agent-procutil is exactly one of these.
     $StaleCacheRefreshPackages = @(
         'agent-dispatch',
+        'agent-update-driver',
         'agent-procutil',
         'agent-zdd',
         'agent-dropin-registry',
@@ -2097,6 +2145,7 @@ function Install-Runtime {
             exit 1
         }
         if (-not (Invoke-VersionedMarkComplete)) { exit 1 }
+        Invoke-RuntimeBrokerAdoption
         Invoke-SupervisorAudit -Event runtime-ready -Reason import-health-gate -Outcome ok
         if (-not (Invoke-VersionedActivate)) { exit 1 }
         # The supersession check and the shared publication it protects
@@ -2226,7 +2275,8 @@ function Write-Manifest {
         $nativeError = ''
         $text = Invoke-Hidden -FilePath $VenvPython -ArgList @(
             '-I', '-B', (Join-Path $ScriptDir 'retained_runtime.py'), 'manifest',
-            '--root', $InstallDir, '--record', $RetainedRuntime
+            '--root', $InstallDir, '--record', $RetainedRuntime,
+            '--expected-record-sha256', $RetainedRuntimeSha256
         ) -ErrorOutput ([ref]$nativeError)
         if ($LASTEXITCODE -ne 0) { throw "Retained manifest validation failed: $text$nativeError" }
         Publish-FileAtomically -Path (Join-Path $InstallDir 'payload-dir') -Content "$PluginDir`n" -Encoding $utf8NoBom
@@ -3769,6 +3819,10 @@ function Install-SupervisorTask {
     if ($NoSupervisor -or $NoService) {
         $reason = if ($NoSupervisor) { 'explicit-no-supervisor' } else { 'explicit-client-only' }
         Invoke-SupervisorAudit -Event selection -Reason $reason -Name $SupervisorTaskName -Outcome skipped
+        if ($env:OS -eq 'Windows_NT' -and $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1') {
+            & $driverPython @driverArguments --remove-broker
+            if ($LASTEXITCODE -ne 0) { throw 'Owned broker removal failed; runtimes preserved' }
+        }
         Remove-AllSupervisorTasks
         Invoke-SupervisorAudit -Event service-reconcile -Reason sequence-complete -Name $SupervisorTaskName -Outcome $(if ($script:SupervisorReconcileFailed) { 'fail' } else { 'ok' })
         Write-Skip 'Embody supervisor skipped (client-only / -NoSupervisor)'
@@ -4556,7 +4610,6 @@ $script:InstallerLifecycleOutcome = 'fail'
 $installerActionRefusal = $null
 try {
 $ScriptDir = $PSScriptRoot
-. (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 . (Join-Path $PSScriptRoot 'source-runtime.ps1')
 $PackageVersion = $SrcVersion
 $script:SourceRuntimeIdentity = $null
@@ -4570,7 +4623,8 @@ if ($Action -eq 'restore') {
         $result = Invoke-Hidden -FilePath $restorePython -ArgList @(
             '-I', '-B', (Join-Path $ScriptDir 'retained_runtime.py'), 'restore',
             '--root', $InstallDir, '--record', $RetainedRuntime, '--shell', 'ps1',
-            '--shell-executable', (Get-Process -Id $PID).Path
+            '--shell-executable', (Get-Process -Id $PID).Path,
+            '--expected-record-sha256', $RetainedRuntimeSha256
         ) -ErrorOutput ([ref]$nativeError)
         $restoreExit = $LASTEXITCODE
         if ($result) { [Console]::Out.Write($result) }
@@ -4581,7 +4635,8 @@ if ($Action -eq 'restore') {
     $nativeError = ''
     $restored = Invoke-Hidden -FilePath $restorePython -ArgList @(
         '-I', '-B', (Join-Path $ScriptDir 'retained_runtime.py'), 'inspect',
-        '--root', $InstallDir, '--record', $RetainedRuntime
+        '--root', $InstallDir, '--record', $RetainedRuntime,
+        '--expected-record-sha256', $RetainedRuntimeSha256
     ) -ErrorOutput ([ref]$nativeError)
     if ($LASTEXITCODE -ne 0) { throw "Retained runtime validation failed: $restored$nativeError" }
     $restored = $restored | ConvertFrom-Json

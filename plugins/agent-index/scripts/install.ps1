@@ -82,7 +82,7 @@ function Get-FiniteUninstallPython {
     param([Parameter(Mandatory)][string]$InstallRoot)
     $probe = @'
 import sys
-assert sys.version_info >= (3, 10)
+assert sys.version_info >= (3, 11)
 from pathlib import Path
 root = Path(sys.argv[1]).absolute()
 assert ".." not in root.parts
@@ -131,7 +131,7 @@ function Invoke-IndexFiniteUninstall {
     # This admission also runs before the installer's normal native-helper import.
     . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
     $python = Get-FiniteUninstallPython -InstallRoot $Root
-    if (-not $python) { throw 'Index uninstall requires an existing external Python 3.10+ outside runtime and prefix closure' }
+    if (-not $python) { throw 'Native install and uninstall require an existing external Python 3.11+ outside runtime and prefix closure' }
     $helper = Join-Path $PSScriptRoot 'installer_engine_uninstall.py'
     if (-not (Test-Path -LiteralPath $helper -PathType Leaf)) {
         $helper = Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer_engine_uninstall.py'
@@ -144,6 +144,27 @@ function Invoke-IndexFiniteUninstall {
     ) -ErrorOutput ([ref]$nativeError)
     if ($LASTEXITCODE -ne 0) { throw "Index finite runtime uninstall refused: $nativeError" }
     if ($output) { Write-Host $output.Trim() }
+}
+
+. (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+if ($env:OS -eq 'Windows_NT' -and
+    $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1' -and
+    $Action -in @('install', 'update', 'provision', 'uninstall') -and
+    -not ($Action -eq 'uninstall' -and $DryRun)) {
+    $driverPayload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    $driverRoot = if ($InstallDir) { [IO.Path]::GetFullPath($InstallDir) }
+        else { Join-Path $env:USERPROFILE '.agent-index' }
+    $driverOptions = @()
+    foreach ($name in @('NoService', 'Purge', 'Force', 'ZeroDowntime', 'AllowTaskElevation', 'DryRun')) {
+        if ($PSBoundParameters.ContainsKey($name) -and [bool]$PSBoundParameters[$name]) {
+            $driverOptions += $name
+        }
+    }
+    $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
+        -Plugin 'agent-index' -Action $Action -Options $driverOptions
+    if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
+    $driverPython = $driverEntry.Python
+    $driverArguments = $driverEntry.Arguments
 }
 
 if ($InstallDir) {
@@ -1090,8 +1111,30 @@ function Invoke-VersionedMarkComplete {
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
     }
-    Complete-RuntimeConstruction -PayloadHash $actualHash
+    if ($script:RuntimeConstructionReuse -and
+        -not (Test-Path -LiteralPath (Join-Path $VenvDir '.runtime-bootstrap') -PathType Container)) {
+        throw 'Completed primary runtime lacks retained helpers; select a distinct fresh runtime generation'
+    }
+    Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers
     return $true
+}
+
+function Invoke-RuntimeBrokerAdoption {
+    if ($NoService -or $env:OS -ne 'Windows_NT' -or
+        $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1') { return }
+    if (-not $script:RuntimeConstructionSession -or -not $script:RuntimeConstructionSession.Complete -or
+        $script:RuntimeConstructionSession.Process.HasExited -or
+        $script:RuntimeConstructionSession.Key -cne "$InstallDir/$SrcVersion") {
+        throw 'Primary broker adoption requires attached complete-slot retention'
+    }
+    $diagnostic = ''
+    $result = Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', '-m', 'update_driver.windows_broker',
+        '--runtime-root', $InstallDir, '--slot', $VenvDir,
+        '--execution-root', (Join-Path $env:USERPROFILE '.copilot-extensions\update-driver')) `
+        -ErrorOutput ([ref]$diagnostic)
+    if ($LASTEXITCODE -ne 0) { throw "Primary runtime broker adoption failed: $diagnostic" }
+    $receipt = $result | ConvertFrom-Json
+    if (-not $receipt -or $receipt.adopted -ne $true) { throw 'Primary runtime broker adoption returned no receipt' }
 }
 # === end install-contract:v4 marker/toss helpers ===
 
@@ -1670,6 +1713,21 @@ function Install-Runtime {
     $installRole = Get-ActivationRole
     if ($installRole -eq 'unconfigured') { $installRole = Get-MachineRole }
     $pkgSpec = "$PluginDir"
+    if ($env:OS -eq 'Windows_NT') {
+        $driverPackages = @()
+        foreach ($name in @('zdd', 'agent-procutil', 'single-instance-lease', 'update-driver')) {
+            $source = Resolve-VendoredLib -LibName $name
+            if (-not $source) { throw "Native installer driver dependency source is unavailable: $name" }
+            $driverPackages += $source
+        }
+        if ($script:UvCommand) {
+            Invoke-IndexUvPipInstall --python $VenvPython @driverPackages --quiet | Out-Null
+        } else {
+            & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython @driverPackages 2>&1 | Out-Null
+        }
+        if ($LASTEXITCODE -ne 0) { throw 'Native installer driver dependencies failed provisioning' }
+        $pkgSpec = "$PluginDir[native-installer]"
+    }
     if ($script:UvCommand) {
         $out = Invoke-IndexUvPipInstall --python $VenvPython $pkgSpec | Out-String
     } else {
@@ -1727,6 +1785,7 @@ function Install-Runtime {
             Write-Fail "Runtime completion marker was not published for versions/$SrcVersion -- not activating"
             exit 1
         }
+        Invoke-RuntimeBrokerAdoption
     }
 
     if (-not (Publish-IndexRuntime)) {
@@ -2040,9 +2099,17 @@ function Restart-EngineDaemon {
         Start-ScheduledTask -TaskName $EngineTaskName -ErrorAction SilentlyContinue
         Write-Ok "Engine daemon restarted via task: $EngineTaskName"
     } elseif (Test-Path $EngineVenvPython) {
-        & $EngineVenvPython -I -X utf8 -m agent_index engine stop 2>&1 | Out-Host
+        # As in ensure, the current primary CLI manages the independently
+        # selected engine interpreter; an engine-only install is not a manager.
+        $managePy = Get-ActiveSlotPython
+        if (-not (Test-Path $managePy)) {
+            throw 'Primary index runtime not installed -- explicitly install it before restarting the engine; engine runtime preserved'
+        }
+        & $managePy -I -X utf8 -m agent_index engine stop 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'Primary index runtime failed to stop the engine' }
         Start-Sleep -Seconds 1
-        & $EngineVenvPython -I -X utf8 -m agent_index engine start 2>&1 | Out-Host
+        & $managePy -I -X utf8 -m agent_index engine start --strict 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'Primary index runtime failed to restart the engine' }
         Write-Ok 'Engine daemon restarted (user-mode, new engine runtime loaded)'
     } else {
         Write-Skip 'Engine runtime not provisioned -- restart skipped'
@@ -2050,6 +2117,9 @@ function Restart-EngineDaemon {
 }
 
 function Write-EngineFiles {
+    # The engine-local CLI below is foreground-only (task/logon supervision),
+    # not the detached launch manager. Ensure/restart use the primary CLI whose
+    # imported procutil owns its broker; the engine slot needs no adoption here.
     if (-not (Test-Path $EngineEnvFile)) {
         [System.IO.File]::WriteAllText($EngineEnvFile, "# agent-index engine daemon environment`nAGENT_INDEX_ENGINE_HOST=127.0.0.1`nAGENT_INDEX_ENGINE_PORT=8421`n", $utf8NoBom)
         Write-Ok "Engine env: $EngineEnvFile"
@@ -2666,6 +2736,8 @@ function Materialize-IndexSnapshot {
         'agent-zdd' = 'zdd'
         'agent-procutil' = 'agent-procutil'
         'agent-dropin-registry' = 'dropin-registry'
+        'agent-single-instance-lease' = 'single-instance-lease'
+        'agent-update-driver' = 'update-driver'
     }
     $project = Join-Path $SnapshotDir 'pyproject.toml'
     $text = [IO.File]::ReadAllText($project)
@@ -2834,6 +2906,10 @@ function Invoke-Uninstall {
         return
     }
     Invoke-Stop
+    if ($env:OS -eq 'Windows_NT' -and $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1') {
+        & $driverPython @driverArguments --remove-broker
+        if ($LASTEXITCODE -ne 0) { throw 'Owned primary broker removal failed; runtimes preserved' }
+    }
     Remove-LogonAutostart -Name $TaskName
     Remove-LogonAutostart -Name $EngineTaskName
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
@@ -2871,7 +2947,6 @@ if ($Action -ne 'status' -and
     $transactionMutex = Enter-IndexStampLock -Scope 'Transaction' -TimeoutSeconds $transactionTimeout
 }
 $ScriptDir = $PSScriptRoot
-. (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 . (Join-Path $PSScriptRoot 'source-runtime.ps1')
 $PackageVersion = $SrcVersion
 $script:SourceRuntimeIdentity = $null

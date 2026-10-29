@@ -87,6 +87,14 @@ on:
         description: Qualify bounded native macOS runtime removal and process inspection
         type: boolean
         default: false
+      windows_broker_probe:
+        description: Synthetic on-demand task experiment on this disposable Windows runner only
+        type: boolean
+        default: false
+      windows_broker_consumers:
+        description: Real cold Worktrees installation and maintenance in a disposable Windows profile
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -238,7 +246,7 @@ jobs:
           --timeout 120 --plugin-timeout 240 --test-timeout 30
 
   derived-diagnostics-posix:
-    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal }}
+    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal && !inputs.windows_broker_probe && !inputs.windows_broker_consumers }}
     name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: ubuntu-latest
     timeout-minutes: 4
@@ -259,7 +267,7 @@ jobs:
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
 
   derived-diagnostics-windows:
-    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal }}
+    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal && !inputs.windows_broker_probe && !inputs.windows_broker_consumers }}
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: windows-latest
     timeout-minutes: 4
@@ -971,6 +979,123 @@ jobs:
     env:
       AGENT_SSH_WINDOWS_VISIBILITY: "1"
     steps: *ssh-snapshot-native-steps
+
+  windows-broker-portable:
+    if: ${{ inputs.windows_broker_probe && !inputs.watch_owner && !inputs.dispatch_delegation }}
+    name: Broker portable and native POSIX regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Select the owned native shell lifecycle interpreter
+        run: |
+          python - <<'PY'
+          import os, pathlib, shutil, stat
+          original = pathlib.Path(shutil.which("python3")).resolve()
+          selected = pathlib.Path(shutil.which("python3", path="/usr/bin:/bin")).resolve()
+          for name, path in (("hosted-toolcache", original), ("native-shell", selected)):
+              info = path.stat()
+              print(name, "owner", info.st_uid, "mode", oct(stat.S_IMODE(info.st_mode)))
+          info = selected.stat()
+          assert info.st_uid in (0, os.getuid()) and not stat.S_IMODE(info.st_mode) & 0o6022
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as stream:
+              stream.write("COPILOT_EXTENSIONS_DAEMON_PYTHON=" + str(selected) + "\n")
+          PY
+      - name: Portable process contracts and actual POSIX lifetime
+        run: >-
+          python tools/run-plugin-tests.py agent-procutil --allow-explicit-tiers
+          --test-file tests/test_daemon_broker.py
+          --test-file tests/test_daemon_spawn_failures.py
+          --test-file tests/test_daemon_instances_linux.py
+          --test-file tests/test_native_daemon_shell.py
+          --timeout 120 --plugin-timeout 240
+      - name: Actual finite execution and participant lifetime
+        run: >-
+          python tools/run-plugin-tests.py update-driver --allow-explicit-tiers
+          --test-file tests/test_core.py
+          --test-file tests/test_process.py
+          --test-file tests/test_native_lifetime.py
+          --test-file tests/test_foundation_inputs.py
+          --timeout 120 --plugin-timeout 240
+      - name: Strict copied Codespaces package recipe and retry contract
+        run: >-
+          python tools/run-plugin-tests.py agent-codespaces --allow-explicit-tiers
+          --test-file tests/test_installer_engine_adoption.py
+          -k library_install_order_retry_and_errors
+          --timeout 120 --plugin-timeout 240 --test-timeout 90
+
+  windows-broker-probe:
+    if: ${{ inputs.windows_broker_probe && !inputs.watch_owner && !inputs.dispatch_delegation }}
+    name: Synthetic Windows broker activation (not deployment qualification)
+    runs-on: windows-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Probe only the explicitly authorized ephemeral runner
+        shell: pwsh
+        run: .\tools\windows_launch_broker_probe.ps1 -EphemeralCiConsent
+      - name: Retain native observations and cleanup outcome
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-broker-activation-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/ce-broker-probe-*/result.json
+            ${{ runner.temp }}/ce-broker-probe-*/protocol-result.json
+          if-no-files-found: error
+
+  windows-broker-consumers:
+    if: ${{ (inputs.windows_broker_probe || inputs.windows_broker_consumers) && !inputs.watch_owner && !inputs.dispatch_delegation }}
+    name: Real Worktrees broker consumers (disposable Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Real cold construction, automatic maintenance and manual exclusion
+        shell: pwsh
+        run: python tools/windows_broker_consumer_acceptance.py --ephemeral-ci-consent
+      - name: Prepare the bounded native removal controls
+        id: finite-tooling
+        if: ${{ !cancelled() }}
+        run: python tools/seasoned_uv.py --uv uv -- --system pytest pytest-timeout packaging pyyaml
+      - name: Complete native finite removal portfolio
+        if: ${{ !cancelled() && steps.finite-tooling.outcome == 'success' }}
+        env:
+          PYTEST_ADDOPTS: --timeout=90
+        run: >-
+          python -m pytest -q --durations=10
+          tools/test_installer_engine_uninstall.py
+          tools/test_runtime_uninstall_process.py
+          tools/test_uninstall_path_candidates.py
+      - name: Retain actual consumer results and canonical cleanup
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-broker-consumers-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/ce-broker-probe-consumers-*/consumer-result.json
+            ${{ runner.temp }}/ce-broker-probe-consumers-*/cleanup.json
+            ${{ runner.temp }}/ce-broker-probe-consumers-*/desktop.json
+            ${{ runner.temp }}/ce-broker-probe-consumers-*/command-*.log
+            ${{ runner.temp }}/ce-broker-probe-consumers-*/command-*-requests.json
+          if-no-files-found: error
 
   watch-owner-native-linux:
     if: ${{ inputs.watch_owner }}

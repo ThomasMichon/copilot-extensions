@@ -143,6 +143,85 @@ def test_blocked_input_obeys_absolute_timeout_and_original_command():
     assert caught.value.timeout == 0.5
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows bounded pipe timeout evidence")
+def test_windows_timeout_retains_bounded_raw_partial_streams_after_retirement():
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        _run(
+            "import os,time;os.write(1,b'partial\\xff');"
+            "os.write(2,b'phase\\r\\n');time.sleep(60)",
+            timeout=5,
+        )
+    assert caught.value.stdout == b"partial\xff"
+    assert caught.value.stderr == b"phase\r\n"
+    assert "partial\xff" not in str(caught.value)
+    assert "phase\r\n" not in str(caught.value)
+
+
+def test_windows_timeout_after_stream_eof_retains_raw_bytes():
+    def expired():
+        raise subprocess.TimeoutExpired(["fixture"], 1)
+
+    process = SimpleNamespace(
+        stdin=None, stdout=io.BytesIO(b"partial\xff"), stderr=io.BytesIO(b"phase\r\n"),
+        poll=expired, wait=lambda **kwargs: 0, retire_job=lambda job, timeout: None,
+    )
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        ownership._communicate_windows_bounded(
+            process, object(), input_text=None, deadline=time.monotonic() + 5,
+            argv=["fixture"], timeout=1, capture_limits=(32, 32),
+        )
+    assert caught.value.output == b"partial\xff"
+    assert caught.value.stderr == b"phase\r\n"
+    assert "partial" not in str(caught.value)
+    assert "phase" not in str(caught.value)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell nested live stdin contract")
+def test_nested_powershell_json_input_reaches_eof_while_outer_stdin_stays_open(tmp_path):
+    from agent_procutil import spawn_sync_in_kill_on_close_job
+
+    powershell = Path(os.environ["SystemRoot"]) / r"System32\WindowsPowerShell\v1.0\powershell.exe"
+    source = str(Path(ownership.__file__).resolve().parents[1])
+    request = json.dumps({"config": {"value": "x" * 1000}})
+    script = tmp_path / "reader.ps1"
+    script.write_text(
+        "[Console]::Error.WriteLine('input');"
+        "$v=[Console]::In.ReadToEnd()|ConvertFrom-Json;"
+        "[Console]::Out.Write($v.config.value.Length)",
+        encoding="utf-8",
+    )
+    code = (
+        f"import sys;sys.path.insert(0,{source!r});"
+        "from agent_procutil.owned_process import run_caller_owned;"
+        "assert sys.stdin.readline()=='launch\\n';"
+        f"r=run_caller_owned([{str(powershell)!r},'-NoProfile','-NonInteractive','-File',"
+        f"{str(script)!r}],"
+        f"input_text={request!r},timeout=5,max_stdout_bytes=4096,max_stderr_bytes=4096);"
+        "assert r.returncode==0,r.stderr;print(r.stdout,flush=True)"
+    )
+    env = {
+        key: value for key, value in os.environ.items()
+        if key.upper() in {"SYSTEMROOT", "WINDIR", "TEMP", "TMP", "PATH", "COMSPEC"}
+    }
+    process, job = spawn_sync_in_kill_on_close_job(
+        [sys.executable, "-I", "-c", code], env=env,
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        require_job=True, allow_breakaway=False, text=True, encoding="utf-8",
+        creationflags=0x08000000,
+    )
+    try:
+        process.stdin.write("launch\n")
+        process.stdin.flush()
+        process.wait(timeout=10)
+        assert process.returncode == 0, process.stderr.read()
+        assert process.stdout.read().strip() == "1000"
+    finally:
+        job.terminate_and_wait(2)
+        process.wait(timeout=2)
+        for stream in (process.stdin, process.stdout, process.stderr):
+            stream.close()
+
+
 @native_execution
 def test_child_closing_stdin_early_preserves_result():
     result = _run(
@@ -169,6 +248,7 @@ def test_windows_input_errors_distinguish_early_closure_from_failure(number, bou
     process = SimpleNamespace(
         stdin=Input(), stdout=io.BytesIO(b"closed"), stderr=io.BytesIO(),
         poll=lambda: 7, wait=lambda **kwargs: 7,
+        retire_job=lambda job, timeout: job.terminate_and_wait(timeout),
     )
     job = SimpleNamespace(terminate_and_wait=lambda timeout: None)
 
@@ -386,6 +466,9 @@ def test_windows_cleanup_failure_is_explicit_and_not_retried():
 
         def wait(self, timeout):
             return 0
+
+        def retire_job(self, job, timeout):
+            job.terminate_and_wait(timeout)
 
     class Job:
         attempts = 0

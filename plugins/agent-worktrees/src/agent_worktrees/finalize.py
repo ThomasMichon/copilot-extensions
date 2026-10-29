@@ -237,12 +237,16 @@ def push_changes(
     rewrite_pr: bool = False,
     break_glass_reason: str | None = None,
     confirm_break_glass: str | None = None,
+    publication_origin: str | None = None,
+    publication_labels: tuple[str, ...] = (),
 ) -> bool:
     """Publish through the configured PR/direct flow, preserving failed work.
 
     Explicit recovery validates source-bound operator confirmation first;
     ordinary publication never opts into recovery or unsquashed fallback.
     """
+    from . import pr_publication_labels
+    config = pr_publication_labels.activate(config, publication_origin, publication_labels)
     repo = config.default_repo
     anchor = repo.anchor
     worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)
@@ -269,6 +273,8 @@ def push_changes(
             )
             return False
     branch = _worktree_branch(record, worktree_id)
+    if explicit_rewrite:
+        pr_publication_labels.validate_scope(repo.pr, record.active_pr() if record else None)
 
     from .pr_break_glass import publish_recovery
     recovery = publish_recovery(
@@ -705,6 +711,8 @@ def _push_changes_pr(
         return False
 
     if repo.pr.head_scheme == "refspec":
+        from .pr_publication_labels import validate_scope
+        validate_scope(repo.pr, record.active_pr() or record.pr)
         return _push_changes_pr_refspec(
             worktree_id, config, record, wt_branch, worktree_path, lock_path,
             dry_run=dry_run, reconciled_source=reconciled_source,
@@ -743,6 +751,8 @@ def _push_changes_pr(
         feature = head
         pushed_pr = next((p for p in record.prs if p.branch == feature), record.pr)
 
+    from .pr_publication_labels import validate_scope
+    validate_scope(repo.pr, pushed_pr)
     if not feature:
         output.err("PR mode: no tracked PR feature branch to update.")
         return False

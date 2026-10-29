@@ -27,6 +27,7 @@ def source(area):
             "dependencies = " + json.dumps(sorted(dependencies)), "[tool.uv.sources]",
         ]
         for dependency in sorted(dependencies):
+            dependency = dependency.split(";", 1)[0].strip()
             target = next(key for key, value in PACKAGES.items() if value[0] == dependency)
             lines.append(f'{dependency} = {{ path = "../{target}", editable = true }}')
         (root / "pyproject.toml").write_text("\n".join(lines), encoding="utf-8")
@@ -49,6 +50,20 @@ def test_fixed_closure_is_location_independent_and_ignores_generated_cruft(sourc
     assert inspect(source) == first
     (source / "source.py").write_text("changed\n")
     assert inspect(source).digest != first.digest
+
+
+def test_current_real_package_manifests_admit_the_optional_broker_source(source):
+    repository = Path(__file__).resolve().parents[3]
+    for directory in PACKAGES:
+        shutil.copyfile(
+            repository / "libs" / directory / "pyproject.toml",
+            source.parent / directory / "pyproject.toml",
+        )
+    assert len(inspect(source).packages) == len(PACKAGES)
+    manifest = source.parent / "agent-procutil" / "pyproject.toml"
+    manifest.write_text(manifest.read_text().replace('path = "../zdd"', 'path = "../foreign"'))
+    with pytest.raises(FoundationInputError, match="fixed sibling"):
+        inspect(source)
 
 
 @pytest.mark.parametrize("directory", list(PACKAGES))
@@ -167,6 +182,41 @@ def test_builder_uses_fixed_retained_canonical_recipe_under_borrowed_custody(
     assert candidate[2]["health_callable"] == "check_health"
     assert ("selected", version, {"link_free": True}) in events
     assert not list((area / "state" / "foundation").glob("inputs-*"))
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows owning adoption")
+def test_builder_adopts_only_after_selection_under_live_driver_custody(
+    builder, construction, source, area, monkeypatch,
+):
+    from update_driver import participant_environment, windows_broker
+
+    _, events = construction
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+
+    def adopt(runtime_root, slot, **kwargs):
+        assert events[-1][0] == "selected"
+        assert participant_environment()
+        assert kwargs["root"] == area / "state"
+        assert runtime_root == area / "state" / "foundation"
+        assert slot == runtime_root / "versions" / ("foundation-" + inspect(source).digest)
+        events.append("adopted")
+
+    monkeypatch.setattr(windows_broker, "adopt", adopt)
+    execute(builder, source, area, monkeypatch)
+    assert events[-2:] == ["adopted", "released"]
+
+
+def test_contained_construction_never_adopts_an_os_registration(
+    builder, construction, source, area, monkeypatch,
+):
+    from update_driver import windows_broker
+    from unittest.mock import Mock
+
+    adoption = Mock(side_effect=AssertionError("contained adoption"))
+    monkeypatch.setattr(windows_broker, "adopt", adoption)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
+    execute(builder, source, area, monkeypatch)
+    adoption.assert_not_called()
 
 
 @pytest.mark.parametrize("phase", ["freeze", "construct"])

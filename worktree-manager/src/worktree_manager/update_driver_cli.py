@@ -8,6 +8,7 @@ import os
 import re
 import sys
 from contextlib import contextmanager
+from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -31,6 +32,7 @@ def handoff_environment(args: list[str]) -> dict[str, str]:
         (args[0] == "update" and "--auth-report" not in args)
         or (args[0] == "stage-update" and "--indicator-state" not in args)
         or (args[0] == "reconcile-plugins" and "--apply" in args and "--check-update" not in args)
+        or (args[0] == "self-install" and "--apply" in args)
     ):
         from update_driver import participant_environment
 
@@ -130,12 +132,13 @@ def source_identity() -> dict[str, object]:
 
 
 def request_context() -> dict[str, str]:
-    from .engine_client import ENGINE_ARGV_ENV, inherited_engine_command
-
     context = {key: os.environ[key] for key in _CONTEXT_KEYS if key in os.environ}
-    accepted = inherited_engine_command()
-    if accepted is not None:
-        context[ENGINE_ARGV_ENV] = json.dumps(accepted)
+    if f"{__package__}.engine_client" in sys.modules:
+        from .engine_client import ENGINE_ARGV_ENV, inherited_engine_command
+
+        accepted = inherited_engine_command()
+        if accepted is not None:
+            context[ENGINE_ARGV_ENV] = json.dumps(accepted)
     return context
 
 
@@ -201,6 +204,35 @@ def _report(request, *, as_json: bool) -> None:
             print(request.error, file=sys.stderr)
         if summary["recovery_authority"]:
             print(f"Repair release: {summary['recovery_authority']}; cleanup remains unconfirmed.")
+
+
+def self_install_request(operation: Callable[[], int]) -> int:
+    """Explicit installation uses the same native finite driver as bootstrap."""
+    import update_driver as driver
+
+    from .self_install import _runtime_installer, default_root, running_payload_dir
+
+    with _runtime_installer()._installation_custody() as custody:
+        if custody is not None:
+            return operation()
+        argv, environment = driver.runtime_command("worktree_manager", ["self-install", "--apply"])
+        root = str(default_root().resolve())
+        context = {**request_context(), "WORKTREE_MANAGER_ROOT": root}
+        request = driver.enqueue(
+            driver.RequestSpec(
+                "manager-self-install", ("--apply",), project=root,
+                cwd=str(running_payload_dir()), source=_source_key(), context=tuple(context.items()),
+            ),
+            runner=driver.TrustedRunner(
+                argv, str(running_payload_dir()), env=tuple(environment.items()), context_keys=_CONTEXT_KEYS,
+            ),
+        )
+        driver.drain()
+        result = driver.wait(request.id, output=sys.stdout)
+        if result.state != "completed" or result.exit_code is None:
+            _report(result, as_json=False)
+            return 1
+        return result.exit_code
 
 
 def cmd_update_request(rest: list[str]) -> int:

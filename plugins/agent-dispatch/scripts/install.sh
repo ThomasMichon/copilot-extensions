@@ -1092,6 +1092,7 @@ _ensure_runtime() {
     # agent-procutil is exactly one of these.
     _STALE_CACHE_REFRESH_PACKAGES=(
         agent-dispatch
+        agent-update-driver
         agent-procutil
         agent-zdd
         agent-dropin-registry

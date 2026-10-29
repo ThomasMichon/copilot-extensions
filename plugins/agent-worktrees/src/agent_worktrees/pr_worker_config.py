@@ -11,6 +11,7 @@ from urllib.parse import quote, urlsplit
 from .config import RepoConfig
 from .pr_observation_config import ObservationConfig, parse_observation
 from .pr_publication_config import PublicationChecksConfig, _ssh_url, parse_publication_checks
+from .pr_publication_labels import origin_dict
 
 
 def _publication(policy: PublicationChecksConfig) -> dict:
@@ -115,7 +116,7 @@ def export_config(
     ):
         raise ValueError("worker policy needs --base <configured-remote>/<branch>")
     publication = repo.pr.publication_checks
-    if publication is None:
+    if publication is None and repo.pr.publication_origin is None:
         raise ValueError("this repository has no configured publication checks")
     pr = {
         key: getattr(repo.pr, key) for key in (
@@ -128,7 +129,8 @@ def export_config(
         api_base=_export_endpoint(repo.pr),
         hold_labels=list(repo.pr.hold_labels),
         wip_title_prefixes=list(repo.pr.wip_title_prefixes),
-        publication_checks=_publication(publication),
+        publication_checks=_publication(publication) if publication else None,
+        publication_origin=origin_dict(repo.pr.publication_origin),
         observation=_observation(repo.pr.observation),
     )
     if (

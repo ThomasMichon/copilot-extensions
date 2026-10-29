@@ -1690,6 +1690,34 @@ binstub  ~/.local/bin/<name>.ps1 (+ .cmd fallback)  →  signed venv python -m
 write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
 ```
 
+Non-editable applies to the complete deployed dependency graph, including
+explicit development generations. Canonical source references may use
+`editable = true` to locate libraries in a source checkout; deployment must
+still install noneditable wheel content rather than references to those source
+directories. The canonical installer dependency CLI
+refuses explicit editable operands and non-copy link modes, and supplies
+`--no-editable --link-mode copy` to UV. The Python constructor enforces
+`--no-editable`, verifies installed origins and permits ordinary immutable
+wheel-cache hardlinks as described in the source-wheel cache contract below.
+Completion rejects symlink/reparse redirection, editable origins and escaping
+path hooks, not an ordinary file merely having another hardlink. Cache content
+is never modified in place; cache retirement unlinks its own names without
+invalidating installed files. Never refresh an existing completed
+editable environment in place: construct and qualify a distinct immutable slot,
+then perform the authorized selection/cutover. These rules do not authorize a
+host migration or waive an adopter's construction and lifecycle acceptance.
+
+The shared completion publisher also inspects the installed environment without
+executing its interpreter or import hooks. Both new completion and completed-slot
+reuse refuse editable origin metadata, editable finders, egg links, linked package
+files, system site-packages, and path hooks that escape the slot. Executable `.pth`
+hooks must be the exact supported UV or setuptools bootstrap with its installed
+module present; unknown executable hooks refuse rather than running to discover
+their effect. Completed-slot refusal reports `health-repair-required` and preserves
+its contents and the active selector. This is deployment admission, not permission
+to rewrite a published environment or a replacement for installed-origin and
+lifecycle qualification.
+
 > **Immutable-versioned layout (dotfiles #581 — the default; enforced).** The
 > `~/.<runtime>/.venv` above is really an **immutable, versioned** layout: each
 > version is built into `~/.<runtime>/versions/<version>/`, and the active one is
@@ -1726,6 +1754,11 @@ its content under retention; candidate and rollback owners retain references
 through cutover/drain or rollback settlement. Canonical cleanup takes
 construction, exclusive retention, then selector-publication ownership and
 rechecks selectors before deleting; activation shares the same protection.
+An external lifecycle that must survive installer death additionally publishes
+owner-scoped durable generation references before changing its registration.
+Cleanup preserves those generations until that owner confirms publication,
+recovery or removal and explicitly shrinks its references; process-local
+retention alone does not protect an interrupted external registration.
 The install-contract guard executes a small fresh-root lifetime/reclamation
 probe as well as checking byte-identical fan-out. See
 [`versioned-runtime`](../libs/versioned-runtime/README.md) for the exact API,
@@ -1733,6 +1766,16 @@ ordering, storage-failure behavior, and installer-adoption boundary. Shipping
 this helper does not itself enroll an old shell installer's build lifetime.
 Installation-cell provenance/receipt governance and its receipt-only
 reservation release remain independently binding.
+
+The attached PowerShell completion adapter accepts `-RetainHelpers` when an
+installer needs a source-independent installed launch component. It retains the
+canonical runtime companions and `runtime_launcher.py` inside
+`.runtime-bootstrap` before publishing completion and transferring to retention.
+A completed reuse verifies those exact helper bytes without writing or repairing
+them. Missing, linked or changed helper evidence refuses completion. Bridge uses
+this boundary before its driver-owned Windows broker adoption and before
+selection or launch callbacks; removal retains the adopted action until its
+owned registration is confirmed gone.
 
 Read-only helper execution must not mutate the admitted payload. The runtime
 primitive loads its canonical sidecar source directly without creating or
@@ -2529,8 +2572,23 @@ checks and enumerate all available PATH candidates. An activated removable
 venv, broken first executable or physical alias cannot hide a later eligible
 external interpreter. Windows legacy adapters enumerate installed launcher
 targets without asking the launcher to provision one.
-Windows finite selectors require Python 3.10+ and treat a candidate launch
-failure as rejection of that candidate, not an abort of the remaining search.
+Broker-capable Windows native install and uninstall share the construction
+driver's existing Python 3.11+ bootstrap prerequisite. Their uninstall selectors
+require an external interpreter outside the removable runtime and prefix/base
+closure; they never provision one to remove an installation. Other finite
+selectors retain their existing Python floor. A candidate launch failure rejects
+that candidate, not the remaining search.
+
+Before removing its broker, the native installer retains execution-driver and
+whole-install custody, completes structural admission and stops only its
+identity-verified services. `--admit-removal` then checks current consumers under
+the canonical runtime/snapshot/redirect custody without deleting code or
+stopping any process. That finite check releases generation/publication leases
+before the installation owner removes the broker, whose removal takes its own
+leases. Runtime deletion rechecks admission under custody and refuses while an
+adopted or pending broker configuration remains. CodeSpaces still refuses an
+existing Connection Owner task or live/reconnect transport; broker removal does
+not bypass that admission or retire those unrelated obligations.
 
 CodeSpaces' native POSIX whole-action transaction can use an existing `flock`
 capability on the same persistent install inode without Python, including cold
@@ -4489,6 +4547,13 @@ policy, admit unfinished lifecycle evidence, or grant ordinary source publishers
 permission to copy an incumbent receipt.
 Both legacy lock paths forward the caller's remaining wait budget; ordinary
 lifecycle admission consumes that same budget before acquisition.
+
+On Windows, release from `versions/dev` holds the selected slot's shared
+retention lease while the canonical finite execution driver drains and settles
+the request. Its isolated caller-owned executor uses that retained interpreter
+directly; it does not start a detached worker or send the mutable slot through
+the generic immutable-runtime launcher. Numbered-slot invocation and the
+generic launcher's refusal of `dev` remain unchanged.
 
 Reuse also runs an isolated installed-origin health probe under retention. Its
 historical, non-editable local origin remains attributable to this runtime's

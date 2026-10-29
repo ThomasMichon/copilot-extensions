@@ -907,6 +907,22 @@ Ordinary `install`, `provision`, and `update` construct a numbered runtime once,
 reuse exact healthy content, or refuse drift. `-Force` / `--force` reconciles
 configuration; it never authorizes rewriting a completed numbered slot.
 
+On Windows, explicit native construction joins the suite execution driver's
+live custody before taking legacy or namespaced publication locks. A cold
+explicit invocation submits its fixed installer operation to that same finite
+driver; it does not install from a daemon-launch fallback. The source driver
+uses the declared dependency closure and Python 3.11+; no sibling runtime is
+required. Live authentication and publication tickets remain inherited, never
+journaled. The internal Python construction/settlement APIs require that owner.
+
+A retained, completed numbered candidate adopts its finite, user-scoped
+on-demand launch broker before helper publication, Manager recovery or monitor
+activation. Unsupported registration fails explicitly without elevation.
+Application rollback does not roll back that independently retained broker
+action. Mutable `dev` slots never become broker actions. Contained tests do not
+register Tasks, and the ordinary daemon-launch default remains unchanged pending
+the separate consumer and lifetime qualification gates.
+
 Both native installers also expose `repair`, `dev`, and `dev-release`:
 
 ```powershell

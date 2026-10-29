@@ -413,6 +413,17 @@ cannot leave an unassigned suspended target.
 Input writing and bounded output draining remain deadline-supervised together;
 the Job must report zero active processes and pipe workers must settle before
 completion or an output-limit error.
+Zero active accounting alone is not a member-handle exit witness. Retirement
+pins current members before termination and waits for their native exit within
+the same cleanup budget. Birth counters fence the census; an unstable census,
+late unpinned birth, failed query or unconfirmed member exit remains a cleanup
+error, never a successful partial completion.
+Unconfirmed retirement retains its query Job and pinned member handles on the
+cleanup error's Job owner. The retained Windows process's
+`retire_job(error.job, timeout)` retries those same native exit witnesses;
+it does not substitute a fresh census after the original Job handle closed.
+An incomplete census or an unpinned birth remains a failure, not a retry that
+silently discards unknown descendants.
 Worker setup and startup stay inside that boundary, including interruption
 before a launched thread has assigned its identity.
 Normal early stdin closure preserves the target's result; unexpected input
@@ -664,6 +675,13 @@ or the independent monotonic hard maximum; it is not evidence that a cached
 lease expired. Linux shell collection budgets can exceed 300 seconds, while
 each CLI process-stop attempt remains capped at 300 seconds.
 
+**Windows qualification hold:** the source routes broker-required Python daemon
+launches through the consumer's explicitly adopted finite Task Scheduler
+implementation below, not the legacy WMI fallback. Direct ordinary launch and
+contained behavior remain unchanged. Complete consumer, maintenance, desktop,
+promotion and installed-rollout qualification remain separate gates; this source
+integration does not authorize an installed change.
+
 A long-lived daemon (one started by an installer, a hook, a CLI or a cutover
 and meant to outlive it) launches through one primitive instead of hand-built
 `Popen` kwargs:
@@ -696,17 +714,17 @@ It composes the helpers above, so its flags never drift from them:
   accept the breakaway flag while retaining a caller-owned ancestor lifetime.
   A successful `CreateProcess` is not escape proof. A failed Job-membership
   query refuses the launch rather than assuming an uncontained caller.
-  When direct creation denies breakaway (`ERROR_ACCESS_DENIED`),
-  the shared launcher uses a bounded, windowless WMI bootstrap outside that
-  Job. Its bootstrap uses the actual base interpreter with WMI's supported
-  detached-process flag, not a venv redirector or a console window. It passes
-  the original argv, cwd, complete environment, creation policy
-  and split log paths over an authenticated, one-use loopback channel; neither
-  credentials nor shell-interpolated daemon arguments go on the broker command
-  line or into temporary files. The actual daemon is staged suspended, its
-  native process handle is adopted and its independent lifetime checked, then
-  it is resumed. Failed uncommitted launches are reaped before a retry.
-  Cleanup branches run independently and preserve `DaemonSpawnError`;
+  When direct creation denies breakaway (`ERROR_ACCESS_DENIED`), the same
+  adopted finite broker handles the launch. Its fixed installed action uses
+  the direct base interpreter, not a venv redirector. The original argv, cwd,
+  complete environment, creation policy and split log paths cross the
+  authenticated native pipe only; credentials never become Task arguments,
+  discovery data or temporary launch files. The actual daemon is staged
+  suspended, its native process handle is transferred and its absence from
+  every Job checked before resume. A shared ancestor Job is not inferred away
+  by checking only the caller's immediate Job. Missing broker support, missing
+  adoption and pending installer recovery refuse without provisioning or a
+  WMI fallback. Cleanup branches preserve `DaemonSpawnError`;
   `cleanup_confirmed=False` reports uncertain process exit and prohibits even
   an explicitly requested contained retry.
   The returned handle names the **actual daemon**, not PowerShell, WMI or a
@@ -748,6 +766,96 @@ or session, e.g. `CREATE_NEW_CONSOLE` or `CREATE_BREAKAWAY_FROM_JOB`) raises
 `ValueError` on every platform, so a caller cannot reopen a console or defeat
 `breakaway=False` and contained test mode. Interpreter selection stays with
 the caller (`windowless_python()` / `windowless_python_env()`).
+
+### Explicit finite Windows broker
+
+`windows_task_broker` supplies a consumer-owned on-demand Scheduled Task
+implementation. It requires the optional `windows-broker` extra, which reuses
+`agent-zdd`'s stdlib-only private native transport. Ordinary process operations
+retain no runtime dependencies and need no sibling plugin or service.
+
+Only the consumer's canonical installer, under its existing execution driver,
+calls `reconcile` with its validated installation identity, private durable root
+and already-qualified immutable runtime. Registration has no triggers, saved
+password, elevation or network listener. Installed action and cwd cannot point
+into a payload, checkout or session. Missing adoption fails explicitly; normal
+launches never install or repair it. Update drains finite accepted transactions
+without stopping them; stop/uninstall disable admission and report that already
+transferred child control remains the consumer's responsibility.
+
+`windows_broker_installation.registration(root, slot)` is the fixed numbered
+installation factory: identity derives from the normalized durable root, and
+the action uses that complete immutable slot's direct base `pythonw.exe` and
+installed `agent_procutil/windows_broker_entry.py`. The canonical interpreter
+selector bypasses the Windows venv redirector; the fixed entrypoint supplies its
+own installed import directory without a saved environment. The slot's canonical
+completion validator is used; mutable dev slots, missing helpers and linked
+paths refuse. `load(root)` reads that root's adoption without trusting ambient
+owner/config hints or repairing it. The explicit Task client's `spawn` calls
+`load_current()`, binding discovery to this module's fixed installed
+`versions/<generation>/Lib/site-packages/agent_procutil` location. It does not
+use `sys.prefix` (which can name the base interpreter under `-S`), the caller's
+cwd or owner/config environment variables. Source, vendored and linked import
+layouts refuse; a newer consumer slot may still use its installation's retained
+older broker action. Discovery never registers, repairs or activates a Task.
+Installation adapters use
+`update_driver.windows_broker.adopt` under actual inherited execution custody.
+The broker-required branch of `spawn_daemon` uses this same installed client;
+it imports optional native-transport support only when that branch is required.
+Direct ordinary process operations and POSIX launches remain stdlib-only.
+
+`reconcile` records credential-free publication intent before changing the Task
+or adopted configuration. While that record exists, ordinary launches refuse
+with `installer recovery required`; they never repair it. The next explicitly
+owned installer can call `recover` (also called at the start of `reconcile`)
+to restore the original action, enabled state and configuration. Recovery
+accepts only the recorded old/new action and configuration, refuses foreign
+state and keeps its record if restoration cannot be confirmed. Repeated
+adoption failure preserves a pre-existing Task rather than uninstalling it.
+The canonical execution driver must own mutation and settle its interrupted
+execution fences first. This record introduces no second mutation lock or
+automatic request replay. Both immutable generations must remain retained
+until publication or recovery removes the record. For canonical numbered
+installations, adoption publishes owner-scoped `runtime-references.json`
+barriers through the action slot's installed retention helper **before** Task
+mutation. Canonical GC and candidate removal honor those barriers after the
+installer process dies. Recovery shrinks them only after restoring Task and
+configuration and removing pending intent. A missing canonical helper or
+malformed reference evidence refuses rather than falling back to a process-local pin.
+`uninstall` confirms owned Task removal before removing adoption metadata and
+releasing that owner's barriers; an interrupted removal can be retried without
+touching another registration. Non-versioned independent installations retain
+their own immutable-action lifecycle and have no canonical slot collector.
+These are process-crash
+recovery semantics, not a claim of power-loss atomicity across Task Scheduler
+and filesystem storage.
+
+Each activation supplies only a fresh pipe rendezvous and public caller
+PID/birth metadata through Task Scheduler. The client pins the actual scheduler
+instance, checks its executable and authenticates that process as the native
+pipe creator before sending argv or environment. Owner-only local pipes reject
+other users and remote clients. The actual child is staged suspended and must
+be outside **every** Job. The client duplicates its native control handle
+through the already-pinned broker process, checks PID/birth/principal and Job
+membership, and adopts it before resume. A lost or ambiguous acknowledgement
+is a failed transaction with explicit cleanup state, not permission to launch
+another copy. Failed retirement retains retryable custody and blocks new work.
+
+The finite instance stays alive until the client's final commit and pipe close;
+the caller joins only that broker, not its resident. Independent custody before
+finite exit is the exemption from a resident broker's graceful-cutover contract.
+Containing tests refuse activation. The disposable native lane separately records
+which installer and normal-launch adapters it actually exercised; that evidence
+does not qualify full cold construction, every maintenance consumer, interactive
+desktop visibility, promotion or deployment.
+
+Scheduler failures expose only fixed phase names, a numeric native HRESULT
+and bounded same-machine monotonic elapsed milliseconds when available.
+JSON-cmdlet discovery and conversion have distinct phase markers; missing or
+invalid timing is `unobserved`. The last observed phase is not proof that the
+operation stalled there. Diagnostics never disclose launch arguments,
+environment values, registration contents or arbitrary native exception text.
+These measurements do not extend activation or cleanup deadlines.
 
 A child that must not outlive the process that spawned it is spawned inside a
 kill-on-close Windows Job Object:

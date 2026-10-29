@@ -8,6 +8,8 @@ from pathlib import Path
 import re
 import shutil
 import sys
+from contextlib import contextmanager
+from types import SimpleNamespace
 
 import pytest
 
@@ -675,6 +677,62 @@ def test_uninstall_adapter_refuses_base_closure(monkeypatch, tmp_path):
         adapter.external_python(root)
 
 
+@pytest.mark.parametrize("obstacle", ["legacy-lib", "base-exec-prefix"])
+def test_in_process_policy_refuses_before_finite_owner(monkeypatch, tmp_path, obstacle):
+    adapter = _load(SCRIPTS / "uninstall-state.py")
+    root = tmp_path / "runtime"
+    if obstacle == "legacy-lib":
+        (root / "lib").mkdir(parents=True)
+        (root / "lib/custom").write_bytes(b"retained")
+    else:
+        monkeypatch.setattr(sys, "base_exec_prefix", str(root / "base"))
+    monkeypatch.setattr(adapter, "_finite_owner", lambda: pytest.fail("guard was bypassed"))
+    with pytest.raises(RuntimeError, match="legacy lib|base closure"):
+        adapter.cleanup(payload_root=PLUGIN, plugin_id="agent-worktrees", root=root,
+                        shell="unused", controller_custody=object(), check_consumers=True)
+
+
+def test_in_process_purge_forwards_teardown_lease_before_absent_cleanup(monkeypatch, tmp_path):
+    adapter = _load(SCRIPTS / "uninstall-state.py")
+    root = tmp_path / "runtime"
+    root.mkdir()
+    (root / "unknown").write_bytes(b"preserved until the explicit purge")
+    driver, lease, primitive = object(), object(), object()
+    binding = SimpleNamespace(_load_primitive=lambda payload: primitive)
+    phases = []
+
+    @contextmanager
+    def custody(payload, plugin, selected, ownership, targets, runtime):
+        assert payload == PLUGIN and plugin == "agent-worktrees" and selected == root
+        assert ownership == (binding, primitive)
+        phases.append("custody")
+        yield lease
+        phases.append("released")
+
+    def consumers(*args, **kwargs):
+        assert kwargs == {"controller_custody": driver, "lifecycle_lease": lease}
+        phases.append("consumers")
+
+    def finite(*args, **kwargs):
+        assert kwargs["controller_custody"] is driver and kwargs["check_consumers"]
+        phases.append("finite")
+        return {"status": "absent"}
+
+    owner = SimpleNamespace(
+        _root=lambda *args: None, profile_for=lambda *args: object(), _host=lambda value: value,
+        _load=lambda path: binding if path.name == "command_binding.py" else object(),
+        _targets=lambda *args: (), _custody=custody, refuse_consumers=consumers,
+        cleanup=finite, _local_bindings=lambda *args: (root, ()),
+    )
+    monkeypatch.setattr(adapter, "_finite_owner", lambda: owner)
+    assert adapter.cleanup(
+        payload_root=PLUGIN, plugin_id="agent-worktrees", root=root, shell="unused",
+        controller_custody=driver, check_consumers=True, purge=True,
+    ) == {"status": "absent"}
+    assert phases == ["custody", "consumers", "released", "finite"]
+    assert (root / "unknown").is_file()
+
+
 def test_profile_matches_native_publication_declarations(monkeypatch):
     profile = json.loads((SCRIPTS / "uninstall-profile.json").read_text())
     monkeypatch.syspath_prepend(str(SCRIPTS))
@@ -701,9 +759,13 @@ def test_pre_admission_precedes_identical_standard_stage(suffix):
         return text[text.index(start):text.index(end) + len(end)]
 
     assert block(source) == block(reference)
-    assert source.index("--check --check-consumers") < source.index(start)
-    assert source.index("absent", source.index("--check --check-consumers")) < source.index(start)
-    assert "--remove-runtime" not in source[:source.index(start)]
+    check = "--check --check-consumers" if suffix == "sh" else "$uninstallPreflight ="
+    assert source.index(check) < source.index(start)
+    assert source.index("absent", source.index(check)) < source.index(start)
+    if suffix == "ps1":
+        assert "$uninstallPreflight = @(Invoke-NativeRuntimeRemoval -Check)" in source[:source.index(start)]
+    else:
+        assert "--remove-runtime" not in source[:source.index(start)]
 
 
 @pytest.mark.parametrize("suffix", ["sh", "ps1"])

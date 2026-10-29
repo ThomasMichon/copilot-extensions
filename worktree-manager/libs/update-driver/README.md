@@ -425,7 +425,7 @@ Deleting control files or rotating roots is not recovery.
 On Windows, the packaged `update_driver/foundation.ps1` provides the same
 progress protocol without Python. Load the canonical native operation lock
 first. `Start-NativeFoundationProgress -Custody <held-object> -Root <execution-root>
--Plugin <absolute-update-driver-source>` hashes the fixed three-sibling
+-Plugin <absolute-update-driver-source>` hashes the fixed four-sibling
 non-generated inventory and publishes running progress under that exact lock.
 `Get-NativeFoundationProgress -Root <execution-root>` is read-only; it returns
 the validated JSON record or no record. It rejects duplicate/unknown fields,
@@ -495,10 +495,10 @@ operation edits or initializes a queue. The same cold-only queue/sidecar refusal
 applies before native admission.
 
 `native_foundation_source_digest` and `freeze_native_foundation_source` use the
-same UTF-8, byte-sorted three-package inventory as Python and PowerShell,
+same UTF-8, byte-sorted four-package inventory as Python and PowerShell,
 including both canonical installer-engine variants. Freezing requires a new
 destination inside the execution root, which cannot be inside a source package.
-Both the root and destination must remain outside all three source packages,
+Both the root and destination must remain outside all four source packages,
 including when the execution root is an ancestor of the selected sources.
 It rechecks the original and frozen inventories under custody. These Linux
 helpers do **not** launch a producer, acquire prerequisites, settle child groups,
@@ -514,7 +514,7 @@ and outcome. This is an internal foundation-construction front door, not a
 plugin provisioning request or an arbitrary-argv installer.
 
 The producer holds the same FD 9 flock before staging, freezes the fixed
-three-package source closure, and acquires pinned uv/private managed Python
+four-package source closure, and acquires pinned uv/private managed Python
 through the existing installer-engine helper. It does not require Python or
 uv on PATH. The native acquisition guardian keeps its direct session child
 alive through Bash's deliberate exec of that private interpreter.
@@ -571,12 +571,16 @@ observation. Stalled handshakes expire independently. Async I/O retains its
 task-owned wait handle through completion/cancellation even after a deadline.
 
 `scripts/foundation-build.py` constructs only this library plus the canonical
-`agent-procutil` and `single-instance-lease` sibling packages. The fixed
+`agent-procutil`, `single-instance-lease` and `zdd` sibling packages. The fixed
 manifests, local references and complete non-generated source inventory must
 match admission. This raw-source closure is identical in shape on development
 and materialized payloads. Existing installer-engine/versioned-runtime sync
 owners supply its byte-identical construction helpers; Manager and plugin
 runtimes are not dependencies.
+
+The Windows dependency metadata declares `agent-zdd` only on Windows; the
+fixed source inventory includes its stdlib-only transport on every platform
+so native and Python admission hash the same complete construction inputs.
 
 The internal participant requires a live borrowed execution witness and
 matching running foundation progress **before staging**. It consumes the
@@ -602,6 +606,79 @@ venv and are not removed by this participant.
 The construction participant itself does not acquire a bootstrap interpreter,
 write admission/completion records or modify a plugin publisher. The separate
 Windows producer below owns those earlier construction stages.
+
+### Driver-owned Windows broker adoption
+
+After Windows foundation selection settles, the same construction participant
+calls `update_driver.windows_broker.adopt(runtime_root, slot, root=execution_root)`.
+It requires an authenticated inherited or already-scoped witness for the exact
+execution root and registers its execution obligation with that same owner.
+Both native PowerShell and Python witnesses support nested begin/end scopes;
+disconnecting with an open scope prevents successful witness disposal and
+later admission. No independent mutation lock, installer queue or forced
+recovery is introduced.
+
+An installer running the selected installed interpreter can invoke the same
+adapter across its existing process boundary:
+
+```text
+python -I -m update_driver.windows_broker --runtime-root <installation-root> --slot <immutable-slot> --execution-root <driver-root>
+```
+
+All three paths are explicit. The entry point accepts no command recipe,
+requires the same live inherited witness, and reports `{"adopted": true}` only
+after reconciliation completes. Missing custody, contained execution and an
+invalid installation refuse without provisioning another execution owner.
+This entry point is for owning installers, never an ordinary spawn fallback.
+
+Adoption validates the fixed immutable action paths, recovers pending broker
+publication, loads the prior owned registration and reconciles under that
+custody. It runs outside the runtime publication lease. A retained, qualified
+candidate may be adopted before application selector publication so the first
+activation callback already has its launch prerequisite. The broker's durable
+runtime ownership is independent of application selection or rollback.
+A crash after selection
+but before adoption does not discard a prior action: its durable runtime
+reference remains until explicit adoption/recovery settles. Missing first
+adoption is an explicit launch prerequisite, not a foreground-worker fallback.
+Contained construction never adopts an OS registration, and direct contained
+adoption refuses before reading installation state.
+
+Foundation construction adopts after its own selection. The Windows Manager
+installer adopts before its first publication callback through the fixed
+installed entry above. Its explicit cold bootstrap and `self-install --apply`
+drive the existing finite native executor, while inherited/scoped callers
+join their owner. Ordinary `ensure_worker` failure still never falls back to
+foreground execution. Other consumer installers and the normal daemon-launch
+default remain separate migration and qualification gates.
+
+The Windows Worktrees installer similarly adopts a retained numbered candidate
+before helper publication, recovery or monitor activation. Its explicit native
+entry takes driver custody before legacy or namespaced publication leases; a
+cold caller submits only the fixed installation recipe to the same finite
+executor. A reentry marker selects a live-witness check, never authorizes
+mutation by itself. Scoped installer children re-export the current witness;
+source-only fixtures reconstruct their own import graph after the Manager
+intentionally strips parent Python overrides. Mutable development slots are
+not broker actions. Full construction, live maintenance and desktop consumers
+remain distinct qualification obligations.
+
+Bridge and Codespaces use the canonical payload-local `installer_driver.py`
+adapter and shared native entry helper for their fixed Windows
+install/update/provision recipes. The adapter
+binds source, installation root and native options, joins raw or scoped custody,
+and requires a live witness on native reentry before self-staging. Its attached
+construction owner retains the canonical helper/launcher bundle before
+completion; a reused slot is verified without writes. Installed broker adoption
+then precedes selection and service callbacks; Bridge keeps its existing rollback
+boundary. Codespaces retains the previous numbered broker action during explicit
+development-generation use and restores it through the deployed release helper.
+This adapter is not a generic command runner, and neither it nor
+`ensure_worker` provisions a missing broker during ordinary launch.
+Its uninstall path calls `windows_broker.remove` under the same live owner,
+retains the adopted action through native removal, and refuses pending
+publication or uncertain cleanup before runtime deletion. Dry-run is read-only
+with respect to both the driver and application installation.
 
 `tests/test_native_participant.py` exercises the real stock-PowerShell owner
 against unchanged Python participants: simultaneous joins, consumed environment,
@@ -632,7 +709,7 @@ rejected before control-directory creation. New control roots use the same
 TokenUser-owned protected inheritable ACL as the Python queue, and existing
 permissions are never migrated.
 
-After publishing progress, native source freezing copies only the fixed three
+After publishing progress, native source freezing copies only the fixed four
 packages into the operation's private bootstrap tree. Both the copy and the
 original must match the admitted inventory before any acquisition helper runs.
 The fixed owned acquisition child loads that frozen canonical
@@ -1016,7 +1093,7 @@ stamp rather than hook return. Its native admission wrapper still owns the
 single empty JSON response, and the guidance hook remains independent.
 
 Vault declares this library through the existing canonical `uv` source and
-release materializer. Its self-contained payload carries the fixed three-sibling
+release materializer. Its self-contained payload carries the fixed four-sibling
 foundation closure under `libs/`, including the canonical acquisition helpers.
 No installed sibling plugin, Manager, PATH Python or alternate downloader is
 required. Commands use the default per-user execution root, not a plugin-specific

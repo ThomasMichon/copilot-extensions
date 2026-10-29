@@ -188,9 +188,13 @@ $VenvPython = {quote(home / 'unqualified-missing-python')}
 $admissionPython = {quote(sys.executable)}
 $ProjectName = 'fixture'
 function Write-ServiceWarn($message) {{ [Console]::Out.WriteLine($message) }}
+. {quote(payload / 'scripts/versioned_runtime_native.ps1')}
 """
+        start = source.index("    $invokeAdmissionPython = {")
+        end = source.index("\n    $probeAdmissionPython =", start)
+        prefix += source[start:end]
     assert "--project-python" in body
-    assert "reconcile-binstubs --remove" in body
+    assert "reconcile-binstubs" in body and "--remove" in body
     script = home / f"project-probe.{suffix}"
     script.write_text(prefix + body + ("\nexit 0\n" if shell != "bash" else "\n"), encoding="utf-8")
     executable = _host(shell)

@@ -82,6 +82,7 @@ def test_origin_verifier_normalizes_wheel_names_but_preserves_directory_names(
 def test_deployed_release_uses_whole_operation_without_owner_checkout(tmp_path, monkeypatch):
     import sys
 
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
     root = tmp_path / "runtime"
     slot = root / "versions" / "dev"
     slot.mkdir(parents=True)

@@ -1,6 +1,6 @@
 """Fresh bootstrap retains candidate custody through transactional daemon activation."""
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import json
 import os
 from pathlib import Path
@@ -55,6 +55,8 @@ def constructed_update(tmp_path, monkeypatch):
             state.active = False
 
     monkeypatch.setattr(installer, "candidate", candidate)
+    monkeypatch.setattr(installer, "_execution_driver", lambda payload: None)
+    monkeypatch.setattr(installer, "_installation_custody", lambda: nullcontext(object()))
     monkeypatch.setattr(self_install, "needs_install", lambda *args: True)
     monkeypatch.setattr(self_install, "clean_legacy_artifacts", lambda *args: [])
     monkeypatch.setattr(self_install, "_deploy_binstubs", lambda: ())

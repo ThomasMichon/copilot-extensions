@@ -39,14 +39,17 @@ def admission(tmp_path: Path):
         "'python':sys.executable,'arguments':sys.argv[1:],'no_site':sys.flags.no_site}))\n",
         encoding="utf-8",
     )
+    shutil.copyfile(SCRIPTS / "versioned_runtime_native.ps1", scripts / "versioned_runtime_native.ps1")
     source = (SCRIPTS / "install.ps1").read_text(encoding="utf-8")
     body = source.split(
         "# === command-lifecycle: admission before staging ===\n", 1,
     )[1].split("# === end command-lifecycle: admission before staging ===", 1)[0]
     program = (
-        "param([string]$BootstrapPython='')\n"
+        "param([string]$BootstrapPython='',[string]$ProjectName='',[string]$Owner='',"
+        "[switch]$Force,[switch]$ZeroDowntime,[switch]$ProvisionMissingRuntime,[switch]$RemoveConfig)\n"
         "Set-StrictMode -Version Latest\n"
         "$ErrorActionPreference='Stop'\n$ContextualInstall=$false\n"
+        ". (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')\n"
         "$Action='update'\n$InstallDir=Join-Path $env:USERPROFILE 'never-created'\n"
         "function Get-Command {\n"
         "param($Name,$CommandType,$ErrorAction,[switch]$All)\n"
@@ -67,7 +70,7 @@ def admission(tmp_path: Path):
         "sys.version_info=(3,9,5)\n"
         "args=sys.argv[1:]\n"
         "if '-c' in args:\n"
-        " code=args[args.index('-c')+1];exec(code)\n"
+        " index=args.index('-c');code=args[index+1];sys.argv=['-c',*args[index+2:]];exec(code)\n"
         "else:\n"
         " while args and args[0].startswith('-'):\n"
         "  flag=args.pop(0)\n"
@@ -82,17 +85,26 @@ def admission(tmp_path: Path):
     return tmp_path, script, home, receipt, old
 
 
-def _run(admission, host: str, candidates: dict, explicit: Path | None = None):
+def _run(
+    admission, host: str, candidates: dict, explicit: Path | None = None,
+    *, native_driver: bool = False, participant: bool = False,
+):
     root, script, home, receipt, _ = admission
     environment = {
         key: value for key, value in os.environ.items()
         if not key.startswith(("COPILOT_", "AGENT_", "PYTHON"))
     }
     environment.update(
+        COPILOT_EXTENSIONS_TEST_CONTAINED="0" if native_driver else "1",
         HOME=str(home), USERPROFILE=str(home),
         APPDATA=str(home / "appdata"), LOCALAPPDATA=str(home / "localappdata"),
         TEST_CANDIDATES=json.dumps(candidates), TEST_RECEIPT=str(receipt),
+        TEST_DRIVER_RECEIPT=str(home / "driver.json"),
     )
+    if participant:
+        environment["AGENT_WORKTREES_NATIVE_INSTALLATION"] = "1"
+    if native_driver:
+        environment["COPILOT_PLUGIN_STAGED_FROM"] = str(root / "original-payload")
     result = subprocess.run(
         [host, "-NoLogo", "-NoProfile", "-File", str(script),
          *(["-BootstrapPython", str(explicit)] if explicit else [])],
@@ -101,6 +113,37 @@ def _run(admission, host: str, candidates: dict, explicit: Path | None = None):
     )
     assert not (home / "never-created").exists()
     return result, json.loads(receipt.read_text()) if receipt.exists() else None
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native installer router")
+@pytest.mark.parametrize("host", HOSTS)
+@pytest.mark.parametrize("contextual", [False, True])
+@pytest.mark.parametrize("participant", [False, True])
+def test_driver_precedes_legacy_or_contextual_publication(
+    admission, host, contextual, participant,
+):
+    _root, script, home, _receipt, _old = admission
+    (script.parent / "runtime_install_driver.py").write_text(
+        "import json,os,sys\nfrom pathlib import Path\n"
+        "Path(os.environ['TEST_DRIVER_RECEIPT']).write_text(json.dumps({"
+        "'arguments':sys.argv[1:],'staged':os.environ.get('COPILOT_PLUGIN_STAGED_FROM')}))\n",
+        encoding="utf-8",
+    )
+    if contextual:
+        script.write_text(
+            script.read_text(encoding="utf-8").replace("$ContextualInstall=$false", "$ContextualInstall=$true"),
+            encoding="utf-8",
+        )
+    result, binding = _run(
+        admission, host, {}, explicit=Path(sys.executable),
+        native_driver=True, participant=participant,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    driver = json.loads((home / "driver.json").read_text())
+    assert ("--check-native" in driver["arguments"]) is participant
+    assert driver["arguments"][driver["arguments"].index("--action") + 1] == "update"
+    assert (binding is not None) is (participant and not contextual)
+    assert driver["staged"] == (str(admission[0] / "original-payload") if contextual else None)
 
 
 @pytest.mark.parametrize("host", HOSTS)
@@ -198,6 +241,41 @@ def test_explicit_missing_python_is_not_ignored(admission, host):
     assert result.returncode != 0
     assert "existing absolute executable" in result.stderr
     assert receipt is None
+
+
+@pytest.mark.parametrize("host", HOSTS)
+@pytest.mark.parametrize("action", ["install", "uninstall"])
+def test_native_mutation_requires_python311_before_driver_admission(admission, host, action):
+    supported = admission[0] / "python310.ps1"
+    supported.write_text(
+        admission[4].read_text(encoding="utf-8").replace(
+            "sys.version_info=(3,9,5)", "sys.version_info=(3,10,9)",
+        ),
+        encoding="utf-8",
+    )
+    script = admission[1]
+    script.write_text(
+        script.read_text(encoding="utf-8").replace("$Action='update'", f"$Action='{action}'"),
+        encoding="utf-8",
+    )
+    result, receipt = _run(admission, host, {}, supported, native_driver=True)
+    assert result.returncode != 0
+    assert "Python 3.11+" in result.stderr and receipt is None
+    assert not (admission[2] / "driver.json").exists()
+
+
+@pytest.mark.parametrize("host", HOSTS)
+def test_uninstall_refuses_a_bootstrap_prefix_selected_for_removal(admission, host):
+    script = admission[1]
+    source = script.read_text(encoding="utf-8").replace("$Action='update'", "$Action='uninstall'")
+    source = source.replace(
+        "$InstallDir=Join-Path $env:USERPROFILE 'never-created'",
+        f"$InstallDir={_quote(sys.base_prefix)}",
+    )
+    script.write_text(source, encoding="utf-8")
+    result, receipt = _run(admission, host, {}, Path(sys.executable))
+    assert result.returncode != 0 and receipt is None
+    assert "outside removable uninstall content" in result.stderr
 
 
 @pytest.mark.parametrize("host", HOSTS)
