@@ -11,11 +11,31 @@ PACKAGE = "1.2.3-dev4"
 SOURCE = f"{PACKAGE}+source.{'0' * 39}1.{'0' * 15}2"
 
 
-def test_installed_source_slot_advertises_exact_identity(tmp_path: Path) -> None:
-    prefix = tmp_path / "versions" / SOURCE
+@pytest.mark.parametrize("suffix", ["", ".repair." + "a" * 32, ".repair." + "b" * 32])
+def test_installed_source_slot_advertises_exact_identity(tmp_path: Path, suffix: str) -> None:
+    selected = SOURCE + suffix
+    prefix = tmp_path / "versions" / selected
     assert effective_runtime_version(
         "1.2.3.dev4", prefix=prefix, module_path=prefix / "lib" / "source_build.py",
-    ) == SOURCE
+    ) == selected
+
+
+@pytest.mark.parametrize("suffix", [".repair.short", ".repair." + "g" * 32])
+def test_malformed_repair_slot_does_not_claim_source_identity(tmp_path: Path, suffix: str) -> None:
+    prefix = tmp_path / "versions" / (SOURCE + suffix)
+    assert effective_runtime_version(
+        PACKAGE, prefix=prefix, module_path=prefix / "lib" / "source_build.py",
+    ) == PACKAGE
+
+
+@pytest.mark.parametrize("package", [PACKAGE, "1.2.3+provider-exec"])
+@pytest.mark.parametrize("repair", ["a" * 32, "b" * 32])
+def test_release_repair_slot_advertises_exact_identity(tmp_path: Path, package: str, repair: str) -> None:
+    selected = package + ("." if "+" in package else "+") + "repair." + repair
+    prefix = tmp_path / "versions" / selected
+    assert effective_runtime_version(
+        package, prefix=prefix, module_path=prefix / "lib" / "source_build.py",
+    ) == selected
 
 
 @pytest.mark.parametrize("version", ["1.2.3-dev4", "9.0.0"])

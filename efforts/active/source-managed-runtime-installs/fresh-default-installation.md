@@ -43,12 +43,13 @@ authorize a concrete host cleanup, rollout, service stop or maintenance hold.
 ## Existing seams and bounded changes - agent-recommended
 
 The existing global `agent-worktrees-update-entry.ps1` / `.sh` interceptors
-already fetch the Main Manager bootstrap, with local `[source] repo/ref`
-selection, before old-runtime resolution. Their source parsing and
-`--repair-update` dispatch are integration points to reconcile, not a reason
-to create another updater. Existing source-policy configuration remains valid;
-an environment override must have one defined precedence and retain the same
-addressed installation rather than silently selecting a new root.
+now fetch the Main Manager bootstrap before old-runtime resolution.
+`WORKTREE_MANAGER_BOOTSTRAP_REPO` / `WORKTREE_MANAGER_BOOTSTRAP_REF` explicitly
+override that transport; the bootstrap itself reads local `[source] repo/ref`
+policy through its internal `--bootstrap-update` mode. Existing explicit
+`--repair-update` dispatch remains supported. Runtime-source configuration does
+not redirect Main transport. Continue through this same bootstrap and addressed
+installation, not another updater or a silently selected new root.
 
 The canonical installers already have immutable completion/current-selection
 markers, source-qualified receipts and selective runtime-removal primitives.

@@ -3,7 +3,7 @@ function Get-SourceRuntimeIdentity {
         [string]$Payload = $PluginDir,
         [string]$ExpectedVersion = ''
     )
-    $py = Get-BootstrapPython
+    $py = Get-BootstrapPython -ExternalOnly
     if (-not $py) { throw 'Source runtime validation requires a bootstrap Python interpreter' }
     $arguments = @('-I', '-B', (Join-Path $ScriptDir 'versioned_runtime_source.py'),
         '--payload', $Payload, '--package-version', $PackageVersion,
@@ -25,6 +25,7 @@ function Get-SourceRuntimeIdentity {
 
 function Initialize-SourceRuntime {
     $script:PackageVersion = $SrcVersion
+    $script:SourceRuntimeVersion = $SrcVersion
     $script:SourceRuntimeIdentity = $null
     $metadata = Join-Path $PluginDir 'runtime-source.json'
     try {
@@ -36,6 +37,7 @@ function Initialize-SourceRuntime {
     }
     $script:SourceRuntimeIdentity = Get-SourceRuntimeIdentity
     $script:SrcVersion = ($SourceRuntimeIdentity | ConvertFrom-Json).runtime_version
+    $script:SourceRuntimeVersion = $SrcVersion
     $script:VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
     $script:VenvPython = if ($env:OS -eq 'Windows_NT') {
         Join-Path $VenvDir 'Scripts\python.exe'
@@ -48,7 +50,7 @@ function Initialize-SourceRuntime {
 function Assert-SourceRuntime {
     if ($script:SourceRuntimeIdentity -or
         (Test-Path -LiteralPath (Join-Path $PluginDir 'runtime-source.json'))) {
-        $identity = Get-SourceRuntimeIdentity -ExpectedVersion $SrcVersion
+        $identity = Get-SourceRuntimeIdentity -ExpectedVersion $script:SourceRuntimeVersion
         if ($identity -ne $script:SourceRuntimeIdentity) {
             throw 'Source runtime identity changed after runtime selection; refusing publication'
         }
@@ -59,7 +61,7 @@ function Assert-SourceSnapshot {
     param([Parameter(Mandatory)][string]$Snapshot)
     Assert-SourceRuntime
     if ($script:SourceRuntimeIdentity) {
-        $identity = Get-SourceRuntimeIdentity -Payload $Snapshot -ExpectedVersion $SrcVersion
+        $identity = Get-SourceRuntimeIdentity -Payload $Snapshot -ExpectedVersion $script:SourceRuntimeVersion
         if ($identity -ne $script:SourceRuntimeIdentity) {
             throw 'Stamped source snapshot failed identity validation; redirects were not published'
         }
@@ -69,11 +71,11 @@ function Assert-SourceSnapshot {
 
 function Publish-SourceSnapshot {
     Assert-SourceRuntime
-    $py = Get-BootstrapPython
+    $py = Get-BootstrapPython -ExternalOnly
     if (-not $py) { throw 'Source snapshot publication requires a bootstrap Python interpreter' }
     $arguments = @('-I', '-B', (Join-Path $ScriptDir 'versioned_runtime_source.py'),
         '--payload', $PluginDir, '--package-version', $PackageVersion,
-        '--plugin', 'agent-mcp', '--expected-runtime-version', $SrcVersion,
+        '--plugin', 'agent-mcp', '--expected-runtime-version', $script:SourceRuntimeVersion,
         '--expected-source-identity', $script:SourceRuntimeIdentity,
         '--snapshot-root', $InstallDir)
     $nativeError = ''

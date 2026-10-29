@@ -62,6 +62,10 @@ def damage(slot, site, case, tmp_path):
         (site / "_virtualenv.pth").write_text("import _virtualenv; import editable\n")
     elif case == "system-site-packages":
         (slot / "pyvenv.cfg").write_text("include-system-site-packages = true\n")
+    elif case == "invalid-venv-encoding":
+        (slot / "pyvenv.cfg").write_bytes(b"\xff")
+    elif case == "invalid-path-encoding":
+        (site / "sample.pth").write_bytes(b"\xff")
     else:
         raise AssertionError(case)
 
@@ -70,6 +74,7 @@ def damage(slot, site, case, tmp_path):
     "editable-origin", "editable-origin-case", "invalid-origin", "invalid-editable-type", "egg-link",
     "editable-finder", "external-path", "relative-external-path", "executable-hook",
     "fake-virtualenv-hook", "modified-virtualenv-hook", "system-site-packages",
+    "invalid-venv-encoding", "invalid-path-encoding",
 ])
 @pytest.mark.parametrize("published", [False, True])
 def test_refuse_nonimmutable_environment_without_rewriting(installed, tmp_path, case, published):
@@ -147,13 +152,21 @@ def test_cached_wheel_hardlinks_survive_cache_retirement(installed, tmp_path, pu
     assert runtime.check_admission(root, "2.0", payload_hash="same") == runtime.ADMIT_REUSE
 
 
-def test_metadata_io_failure_is_not_absence(installed, monkeypatch):
-    root, _slot, site = installed
+@pytest.mark.parametrize("metadata", ["origin", "config", "path"])
+def test_metadata_io_failure_is_not_absence(installed, monkeypatch, metadata):
+    root, slot, site = installed
+    target = {
+        "origin": site / "sample-1.0.dist-info" / "direct_url.json",
+        "config": slot / "pyvenv.cfg",
+        "path": site / "sample.pth",
+    }[metadata]
+    if metadata == "path":
+        target.write_text("# valid path metadata\n")
     runtime.mark_complete(root, "2.0", payload_hash="same")
     original = Path.read_text
 
     def denied(path, *args, **kwargs):
-        if path == site / "sample-1.0.dist-info" / "direct_url.json":
+        if path == target:
             raise PermissionError("metadata denied")
         return original(path, *args, **kwargs)
 

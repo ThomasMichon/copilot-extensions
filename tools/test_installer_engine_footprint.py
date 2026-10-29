@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -95,15 +96,76 @@ def test_historical_match_is_not_compared_to_the_incoming_revision(tmp_path: Pat
     assert change["introduced"] == ["root_entries:new-generated-file"]
     assert change["retired"] == ["bin_entries:resolve-runtime.ps1"]
     assert change["changed"] == ["effects:runtime-control"]
-    record["history"].append({"revision": 2, "snapshot": incoming, "delta": change})
+    revision = len(record["history"]) + 1
+    record["history"].append({"revision": revision, "snapshot": incoming, "delta": change})
     subject.require_append_only(_record(), record, "agent-mcp")
     manifest = subject.parse(record, "agent-mcp")
     _seed(tmp_path)
-    assert manifest.revision == 2
+    assert manifest.revision == revision
     assert "resolve-runtime.ps1" in manifest.history[0]["profile"]["bin_entries"]
     assert "resolve-runtime.ps1" not in manifest.profile["bin_entries"]
     assert subject.recognize(manifest, tmp_path).matched
-    assert not subject.recognize(manifest, tmp_path, footprint_revision=2).matched
+    assert not subject.recognize(manifest, tmp_path, footprint_revision=revision).matched
+
+
+@pytest.mark.parametrize("condition", ("cold", "compatible", "missing", "corrupt", "conflict"))
+def test_construction_plan_uses_fresh_without_rewriting_unusable_inputs(
+    tmp_path: Path, condition: str,
+) -> None:
+    root = tmp_path / "runtime"
+    if condition != "cold":
+        _seed(root)
+    if condition == "missing":
+        (root / "deploy-manifest.json").unlink()
+    if condition == "corrupt":
+        (root / "versions/1.2.3/.install-complete.json").write_bytes(b"{")
+    before = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    calls = []
+
+    def admission(observed: Path, version: str) -> str:
+        calls.append((observed, version))
+        return "content-conflict" if condition == "conflict" else "reuse"
+
+    plan = subject.plan_construction(subject.parse(_record(), "agent-mcp"), root, "1.2.3", admission=admission)
+    assert plan.mode == ("incremental" if condition == "compatible" else "fresh")
+    if condition in {"cold", "compatible"}:
+        assert plan.version == "1.2.3"
+    else:
+        assert plan.version.startswith("1.2.3+repair.")
+        assert not os.path.lexists(root / "versions" / plan.version)
+    assert bool(calls) is (condition in {"compatible", "conflict"})
+    assert {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
+
+
+def test_recognized_replacement_reuses_the_same_qualified_target(tmp_path: Path) -> None:
+    _seed(tmp_path)
+    selected = "1.2.3+repair." + "a" * 32
+    (tmp_path / "versions/1.2.3").rename(tmp_path / "versions" / selected)
+    (tmp_path / "current-version").write_text(selected, encoding="utf-8")
+    marker = tmp_path / "versions" / selected / ".install-complete.json"
+    record = json.loads(marker.read_text())
+    record["version"] = selected
+    marker.write_text(json.dumps(record), encoding="utf-8")
+    plan = subject.plan_construction(
+        subject.parse(_record(), "agent-mcp"), tmp_path, "1.2.3",
+        admission=lambda root, version: "reuse" if version == selected else "health-repair-required",
+    )
+    assert plan.version == selected and plan.mode == "incremental"
+
+
+def test_occupied_incomplete_fallback_selects_distinct_construction(tmp_path: Path) -> None:
+    _seed(tmp_path)
+    target = tmp_path / "versions/1.2.2"
+    target.mkdir()
+    (target / "unfinished").write_bytes(b"keep")
+    (tmp_path / "last-known-good").write_text("1.2.2", encoding="utf-8")
+    plan = subject.plan_construction(
+        subject.parse(_record(), "agent-mcp"), tmp_path, "1.2.2",
+        admission=lambda root, version: "construct",
+    )
+    assert plan.mode == "fresh" and plan.version.startswith("1.2.2+repair.")
+    assert not (tmp_path / "versions" / plan.version).exists()
+    assert (target / "unfinished").read_bytes() == b"keep"
 
 
 @pytest.mark.parametrize("condition", ("oversized", "hardlinked", "symlinked"))
@@ -181,6 +243,104 @@ def test_native_mcp_adapter_consumes_the_manifest_profile() -> None:
     assert profile.local_bin_entries == tuple(expected["local_bin_entries"])
 
 
+@pytest.mark.parametrize("unusable", ["completion", "selector"])
+def test_fresh_plan_runs_the_existing_constructor_and_keeps_broken_incumbent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unusable: str,
+) -> None:
+    root = tmp_path / "runtime"
+    _seed(root)
+    old = root / ("versions/1.2.3/.install-complete.json" if unusable == "completion" else "current-version")
+    old.write_bytes(b"{")
+    selection = (root / "current-version").read_bytes()
+    spec = importlib.util.spec_from_file_location("footprint_constructor_test", PAYLOAD / "scripts/versioned_runtime.py")
+    assert spec is not None and spec.loader is not None
+    runtime = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runtime)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(
+        json.dumps({"command": "complete", "payload_hash": "a" * 64}) + "\n"
+        + '{"command":"settled"}\n',
+    ))
+    assert runtime.construction_session(
+        root, "1.2.3", payload_hash="a" * 64, footprint=PATH, plugin="agent-mcp",
+    ) == 0
+    fresh = [path for path in (root / "versions").iterdir() if path.name != "1.2.3"]
+    assert len(fresh) == 1
+    assert runtime.is_complete(root, fresh[0].name, expect_hash="a" * 64)
+    assert old.read_bytes() == b"{"
+    assert (root / "current-version").read_bytes() == selection
+
+
+@pytest.mark.parametrize("unusable", ["directory", "oversize"])
+def test_footprint_constructor_skips_unusable_fallback_completion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unusable: str,
+) -> None:
+    root = tmp_path / "runtime"
+    _seed(root)
+    fallback = root / "versions/1.2.2/.install-complete.json"
+    fallback.parent.mkdir()
+    if unusable == "directory":
+        fallback.mkdir()
+    else:
+        fallback.write_bytes(b" " * 65537)
+    (root / "last-known-good").write_text("1.2.2", encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("fallback_constructor_test", PAYLOAD / "scripts/versioned_runtime.py")
+    assert spec is not None and spec.loader is not None
+    runtime = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runtime)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(
+        json.dumps({"command": "complete", "payload_hash": "a" * 64}) + "\n"
+        + '{"command":"settled"}\n',
+    ))
+    assert runtime.construction_session(
+        root, "1.2.4", payload_hash="a" * 64, footprint=PATH, plugin="agent-mcp",
+    ) == 0
+    assert runtime.is_complete(root, "1.2.4", expect_hash="a" * 64)
+    assert (root / "last-known-good").read_text() == "1.2.2"
+    assert fallback.is_dir() if unusable == "directory" else fallback.stat().st_size == 65537
+
+
+@pytest.mark.parametrize("damage", ["oversized-marker", "invalid-config", "invalid-path"])
+def test_actual_admission_repairs_noncurrent_target_without_changing_incumbents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str,
+) -> None:
+    root = tmp_path / "runtime"
+    _seed(root)
+    desired = root / "versions/1.2.4"
+    desired.mkdir()
+    marker = desired / ".install-complete.json"
+    content = json.dumps({
+        "version": "1.2.4", "completed_at": "fixture", "pid": 1, "payload_hash": "a" * 64,
+    }).encode()
+    marker.write_bytes(content + b" " * (65536 - len(content)))
+    spec = importlib.util.spec_from_file_location("damaged_target_test", PAYLOAD / "scripts/versioned_runtime.py")
+    assert spec is not None and spec.loader is not None
+    runtime = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runtime)
+    assert runtime.check_admission(root, "1.2.4", payload_hash="a" * 64) == runtime.ADMIT_REUSE
+    if damage == "oversized-marker":
+        marker.write_bytes(marker.read_bytes() + b" ")
+        assert not runtime.is_complete(root, "1.2.4")
+    elif damage == "invalid-config":
+        (desired / "pyvenv.cfg").write_bytes(b"\xff")
+    else:
+        site = desired / "Lib/site-packages"
+        site.mkdir(parents=True)
+        (site / "invalid.pth").write_bytes(b"\xff")
+    before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    assert runtime.check_admission(root, "1.2.4", payload_hash="a" * 64) == runtime.ADMIT_HEALTH_REPAIR_REQUIRED
+    monkeypatch.setattr(sys, "stdin", io.StringIO(
+        json.dumps({"command": "complete", "payload_hash": "a" * 64}) + "\n"
+        + '{"command":"settled"}\n',
+    ))
+    assert runtime.construction_session(
+        root, "1.2.4", payload_hash="a" * 64, footprint=PATH, plugin="agent-mcp",
+    ) == 0
+    fresh = [p for p in (root / "versions").iterdir() if p.name not in {"1.2.3", "1.2.4"}]
+    assert len(fresh) == 1 and fresh[0].name.startswith("1.2.4+repair.")
+    assert runtime.is_complete(root, fresh[0].name, expect_hash="a" * 64)
+    assert {name: (root / name).read_bytes() for name in before} == before
+
+
 def test_generated_package_metadata_is_not_a_source_producer(tmp_path: Path) -> None:
     source = tmp_path / "src/agent_mcp"
     source.mkdir(parents=True)
@@ -229,6 +389,10 @@ def test_source_guard_checks_published_history(monkeypatch: pytest.MonkeyPatch) 
     previous = _record()
     previous["history"][0]["snapshot"]["effects"]["runtime-control"]["entries"].append("lost-old-control")
     previous["history"][0]["delta"] = subject.delta(None, previous["history"][0]["snapshot"])
+    for index in range(1, len(previous["history"])):
+        previous["history"][index]["delta"] = subject.delta(
+            previous["history"][index - 1]["snapshot"], previous["history"][index]["snapshot"],
+        )
     monkeypatch.setattr(guard, "_baseline", lambda *args: json.dumps(previous))
     problems = guard.check(ROOT)
     assert len(problems) == 1
@@ -237,8 +401,11 @@ def test_source_guard_checks_published_history(monkeypatch: pytest.MonkeyPatch) 
 
 def test_changed_producer_scope_cannot_hide_new_output(monkeypatch: pytest.MonkeyPatch) -> None:
     record = _record()
-    record["history"][0]["snapshot"]["producers"] = {"scripts/init.sh": "0" * 64}
-    record["history"][0]["delta"] = subject.delta(None, record["history"][0]["snapshot"])
+    record["history"][-1]["snapshot"]["producers"] = {"scripts/init.sh": "0" * 64}
+    record["history"][-1]["delta"] = subject.delta(
+        record["history"][-2]["snapshot"] if len(record["history"]) > 1 else None,
+        record["history"][-1]["snapshot"],
+    )
     original = Path.read_text
     monkeypatch.setattr(
         Path, "read_text",

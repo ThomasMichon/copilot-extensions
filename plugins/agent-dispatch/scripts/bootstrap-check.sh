@@ -122,23 +122,8 @@ sys.path.insert(0, sys.argv[1])
 payload, manifest = pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])
 current, name = sys.argv[4:]
 deployment = json.loads(manifest.read_text(encoding="utf-8-sig"))
-receipt = payload / "runtime-source.json"
-fields = {}
-if receipt.exists() or receipt.is_symlink() or deployment.get("runtime_source") is not None:
-    from versioned_runtime_source import manifest_fields, read_source_identity
-    fields = manifest_fields(read_source_identity(payload, current, plugin=name))
-    if deployment.get("runtime_source") != fields.get("runtime_source"):
-        raise ValueError("Payload and deployment source identities differ")
-expected = fields.get("runtime_version", deployment.get("runtime_version", current))
-if deployment.get("runtime_version", expected) != expected:
-    raise ValueError("Deployment generation does not match the payload")
-if expected != current:
-    from versioned_runtime_source import package_version
-    if package_version(expected) != current or (
-        ("+source." in expected or ".source." in expected) and not fields
-    ):
-        raise ValueError("Deployment package version does not match the payload")
-print(expected)
+from versioned_runtime_readiness import deployment_runtime_version
+print(deployment_runtime_version(payload, current, name, deployment))
 EXPECTED_SLOT
 )" || expected_slot=""
   # Legacy installations have no selector. A link must not hide a broken or
