@@ -21,6 +21,7 @@ than disabling updates or starting an independent updater for every launch.
 | Launch driver | Design, implementation, review, release and qualified acceptance | Managed source `welded-circuit`; #7694 |
 | Broker repair | Follow-up #6859 bug and native qualification prerequisite | Managed source `whirring-doohickey`; same launch driver |
 | Broker design | Source-only lifecycle amendment and review | Managed source `tinkling-cylinder`; same launch driver |
+| Desktop activation follow-up | Interactive-token source migration and qualification; no deployment ownership | Managed source `rusty-buckle`; #9522 |
 
 ## Coordination
 
@@ -121,6 +122,30 @@ execution driver's lifetime refusals and does not authorize installed rollout.
 
 ## Plan
 
+### Desktop activation follow-up (#9522)
+
+Operator direction, verbatim:
+
+> We need to do something that isn't the S4U task model, to achieve the same goal
+
+The operator selected `interactive-token`: an on-demand task using the existing
+interactive user logon. This changes source intent, not the existing deployment
+hold or central deployment ownership. The following implementation and validation
+decomposition is **agent-recommended**.
+
+- [ ] Review the [interactive-token amendment](windows-launch-broker.md#interactive-token-desktop-activation)
+  before implementation.
+- [ ] Replace S4U registration and normal admission with the existing interactive
+  token contract, including explicit unavailable behavior without an eligible
+  logon; do not fall back to passwords, S4U, elevation or another service.
+- [ ] Migrate only fully verified, owned legacy registrations through the
+  canonical installer, preserving finite transactions, rollback and retained
+  generations. Foreign or altered registrations continue to refuse.
+- [ ] Qualify the actual Windows broker and Manager recovery boundary, then land
+  source/tests/docs and all affected consumer changefiles through review and CI.
+- [ ] Record release separately and transfer installed adoption to the existing
+  deployment owner; this follow-up does not register tasks or update shared hosts.
+
 ### Phase 1 - Reviewed contract
 - [x] Land this plan through ordinary review before implementation.
 - [x] Coordinate the bounded scope on #6812/#6820 without taking over their owners.
@@ -172,6 +197,21 @@ the requested coordinated-background behavior.
 
 ## Validation Plan
 
+### Interactive-token follow-up (#9522; agent-recommended)
+
+- [ ] Portable controls cover matching interactive principal admission, S4U
+  refusal on ordinary activation, narrowly owned installer migration, foreign
+  refusal and failed-update rollback that restores the prior logon contract.
+- [ ] Disposable native Windows qualification proves existing-token activation,
+  exact native child custody, survival after every caller Job closes, the
+  shared-outer negative, bounded cleanup and zero attributable window/focus
+  effects. Missing interactive-logon capability is a prerequisite failure, not
+  a successful or silently substituted S4U run.
+- [ ] Actual concurrent installed Manager readers recover a stopped resident and
+  obtain one current roster under the unchanged deadlines and election owner.
+- [ ] Shared portable regression, consumer materialization, release changefiles
+  and required review/CI pass; source qualification is not shared-host rollout.
+
 All detailed scenarios below are **agent-recommended** acceptance checks.
 
 - [x] Unit tests cover queue equivalence, distinct contexts, stronger requests,
@@ -208,6 +248,16 @@ worker is insufficient. Machine-local request/status/log data never enters
 repository history.
 
 ## Journal
+
+### 2026-10-29 - Propose existing-token desktop activation
+
+- Claimed #9522 after the operator rejected S4U and selected an existing
+  interactive token as the replacement availability contract.
+- Reuse the canonical finite broker, installer, native custody and qualification
+  lanes from #7833; do not add another launcher, supervisor or deployment owner.
+- Plan-only proposal. The existing deployment inhibition and installed adoption
+  hold remain intact; no registration, source implementation or rollout is
+  claimed by this entry.
 
 ### 2026-10-29 - Verify legitimate promotion; retain installed acceptance
 
