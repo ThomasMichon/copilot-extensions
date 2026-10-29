@@ -228,7 +228,15 @@ def test_real_shell_json_values_and_legacy_metadata_compatibility(tmp_path):
         "epoch": "/Date(0)/",
         "text": "quote'\"\\\n\t",
     }
-    payloads = [values, {"nested": {"__type": "ordinary-data", "value": values}}]
+    raw_payloads = [
+        json.dumps(values),
+        '{"__type":null,"value":42}',
+        '{"nested":{"__type":null,"value":42}}',
+        r'{"epoch":"\/Date(0)\/","offset":"\/Date(0+0500)\/"}',
+        '{"small":1e-100,"big":1.234567890123456789e30,'
+        '"long":0.12345678901234567890123456789}',
+        json.dumps({"nested": {"__type": "ordinary-data", "value": values}}),
+    ]
     seen = []
 
     def decide(kind, payload, deadline):
@@ -245,51 +253,49 @@ def test_real_shell_json_values_and_legacy_metadata_compatibility(tmp_path):
         )
         harness = tmp_path / "values.ps1"
         escaped = str(SCRIPT).replace("'", "''")
-        commands = [
-            "$ErrorActionPreference='Stop'",
-            f". '{escaped}'",
-            "function Get-Command { throw 'a client/CLI child was requested' }",
-        ]
-        reference = [
-            "$ErrorActionPreference='Stop'",
-            "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false,$true)",
-        ]
-        for payload in payloads:
-            raw = json.dumps(payload).replace("'", "''")
-            reference.extend([
-                f"$request=ConvertFrom-Json -InputObject '{raw}'",
-                "$wire=ConvertTo-Json -InputObject $request -Depth 100 -Compress",
-                "[Console]::Out.WriteLine($wire)",
-                "$reply=ConvertFrom-Json -InputObject $wire",
-                "[Console]::Out.WriteLine((ConvertTo-Json -InputObject $reply -Depth 100 -Compress))",
-            ])
-            commands.extend(
-                [f"Invoke-PostToolHook -Raw '{raw}'", "[Console]::Out.WriteLine()"]
-            )
-        harness.write_text("\n".join(commands) + "\n", encoding="utf-8")
         env = os.environ.copy()
         env["USERPROFILE"] = str(tmp_path)
         env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
-        result = subprocess.run(
-            [shell, "-NoProfile", "-NonInteractive", "-File", str(harness)],
-            capture_output=True, text=True, encoding="utf-8", env=env, timeout=15,
-            **no_window_kwargs(),
-        )
-        assert result.returncode == 0, result.stderr
-        assert result.stderr == ""
         reference_harness = tmp_path / "legacy-json.ps1"
-        reference_harness.write_text("\n".join(reference) + "\n", encoding="utf-8")
-        legacy = subprocess.run(
-            [shell, "-NoProfile", "-NonInteractive", "-File", str(reference_harness)],
-            capture_output=True, text=True, encoding="utf-8", env=env, timeout=15,
-            **no_window_kwargs(),
-        )
-        assert legacy.returncode == 0, legacy.stderr
-        assert legacy.stderr == ""
-        expected = [json.loads(line) for line in legacy.stdout.splitlines()]
-        assert len(expected) == 2 * len(payloads)
-        assert [json.loads(line) for line in result.stdout.splitlines()] == expected[1::2]
-        assert seen == [("postToolUse", payload) for payload in expected[::2]]
+        expected_requests = []
+        for payload in raw_payloads:
+            raw = payload.replace("'", "''")
+            harness.write_text(
+                "$ErrorActionPreference='Stop'\n"
+                f". '{escaped}'\n"
+                "function Get-Command { throw 'a client/CLI child was requested' }\n"
+                f"Invoke-PostToolHook -Raw '{raw}'\n",
+                encoding="utf-8",
+            )
+            reference_harness.write_text(
+                "$ErrorActionPreference='Stop'\n"
+                "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false,$true)\n"
+                f"$request=ConvertFrom-Json -InputObject '{raw}'\n"
+                "$wire=ConvertTo-Json -InputObject $request -Depth 100 -Compress\n"
+                "[Console]::Out.WriteLine($wire)\n"
+                "$reply=ConvertFrom-Json -InputObject $wire\n"
+                "[Console]::Out.WriteLine((ConvertTo-Json -InputObject $reply -Depth 100 -Compress))\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [shell, "-NoProfile", "-NonInteractive", "-File", str(harness)],
+                capture_output=True, text=True, encoding="utf-8", env=env, timeout=15,
+                **no_window_kwargs(),
+            )
+            assert result.returncode == 0, result.stderr
+            assert result.stderr == ""
+            legacy = subprocess.run(
+                [shell, "-NoProfile", "-NonInteractive", "-File", str(reference_harness)],
+                capture_output=True, text=True, encoding="utf-8", env=env, timeout=15,
+                **no_window_kwargs(),
+            )
+            assert legacy.returncode == 0, legacy.stderr
+            assert legacy.stderr == ""
+            expected = [json.loads(line) for line in legacy.stdout.splitlines()]
+            assert len(expected) == 2
+            assert json.loads(result.stdout) == expected[1], payload
+            expected_requests.append(("postToolUse", expected[0]))
+        assert seen == expected_requests
     finally:
         server.close()
 
