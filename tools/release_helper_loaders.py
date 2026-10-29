@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import sys
 from collections import Counter
 from pathlib import PurePosixPath
 
@@ -63,19 +64,21 @@ _DIRECT_EXEC = "@direct-builtin-exec"
 # changed actors require explicit requalification, never a path-only exception.
 _INSTALLED_ACTORS = {
     "libs/agent-procutil/src/agent_procutil/windows_broker_cell.py": (
-        "validate", "c14942dbc9cd35f705110f080d5369bc5ee8623802002e8904b8594659667f31",
+        "validate", "cb3f5d340bbd1a1ec274a5f9dc076ed1bc535c876afb736bb33ae5ebaaf26d74",
         ("importlib", "os", "stat", "sys", "Path"),
     ),
     "libs/agent-procutil/src/agent_procutil/windows_broker_retention.py": (
-        "runtime_component", "12ec512d53b9ddb82bbbd90321f74c30adc35c4fc6fc7a44e505c9f8c2b5401d",
+        "runtime_component", "e27fd235b40ce6dec13f48d908df90b75d0e47f6d4ecf67e6323ceb793401dd1",
         ("importlib", "stat", "Path"),
     ),
 }
 
 
 def _actor_digest(function: ast.FunctionDef) -> str:
-    signature = ast.dump(function.args)
-    body = ast.dump(ast.Module(body=function.body, type_ignores=[]))
+    # Python 3.13 changed dump's empty-list default; fingerprints retain them.
+    options = {"show_empty": True} if sys.version_info >= (3, 13) else {}
+    signature = ast.dump(function.args, **options)
+    body = ast.dump(ast.Module(body=function.body, type_ignores=[]), **options)
     return hashlib.sha256((signature + "\n" + body).encode("utf-8")).hexdigest()
 
 

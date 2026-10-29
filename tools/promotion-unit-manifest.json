@@ -2875,7 +2875,7 @@
         "tools/qualify_promotion_candidate.py": "b060a7656f88d32f6f3457d323f192e08af55b8d8a4d9a6c52a6530a17d11b80",
         "tools/release_controller_contract.py": "c7ae2b51563a37f4290ff1fe42f19ba337ae363c82ea5ed329eb63b078e20f78",
         "tools/release_controller_shell.py": "ee579b2867686ea3788e1c22ea9e9c796a3849683988197f87055bef6cce426f",
-        "tools/release_helper_loaders.py": "94def24bccd3b62bbde36f3d93d323d54620d82cb14b6501b9ad428ad8098487",
+        "tools/release_helper_loaders.py": "1f12f3996b519e96393b491e51cd86c1b2580dfc06b0b2277cfb1b1aa614b4a2",
         "tools/reuse_promotion_artifacts.py": "4fbd66d0f624a6b3eaca3ffbaf3058a09d3236d6240ea1304eddf26d0daa2a74",
         "tools/run-promotion-unit-tests.py": "e0ca288cd47480fd123c9920e6be8a5a4745c72bcc61c276221d7b89d080b804",
         "tools/runtime_profile.py": "3e2a25c54d9767c1757e2f8a2db42abd2bb0e51765e230d77f5582a4116221d0",

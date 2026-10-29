@@ -205,6 +205,34 @@ repository history.
 
 ## Journal
 
+### 2026-10-28 - Preserve validated unready recovery and portable AST identity
+
+The reconciled all-three run 40792231745 passes at `a18b633de8`, including the
+actual installed Manager reader and canonical removal. Required CI identifies
+a Python-version difference in AST rendering rather than a changed installed
+actor: Python 3.13 omits optional empty lists by default, while the required
+Python 3.12 lane includes them. Fingerprints now retain those fields explicitly.
+All 202 loader controls pass, and the actual Python 3.12 interpreter admits
+both pinned actor bodies without weakening the exact-body boundary.
+
+Review 5691288450 correctly identifies a second first-publication interval:
+after admitted launch, a reachable resident can return a well-formed `unready`
+error before its first roster exists. Validation now preserves that distinct
+type; only an already-admitted recovery continues polling within its unchanged
+half-second deadline. Malformed, incompatible and other live errors remain
+terminal. Four explicit first-reply controls cover that distinction through the
+CLI error frame and missing advisory path. The full roster/feed packet passes
+115 tests in 19.29 seconds including preparation and cleanup. An earlier run
+missed the guarded CLI's two-second startup boundary while another test command
+shared its rebuilding environment; the isolated warmed rerun retains every
+deadline and passes. The earlier failure remains non-passing evidence.
+
+These source corrections still require final hosted qualification and CI.
+Review 5691343499 additionally identifies the Windows `dev-release` invocation
+using an immutable numbered-slot launcher from `versions/dev`; that lifecycle
+entry must be corrected and qualified before fresh review or merge. Shared-host
+rollout, adoption, restarts and updater replay remain unauthorized.
+
 ### 2026-10-28 - Reconcile the current publication base before CI
 
 The provider reports a real merge conflict after the latest gate fixes, so

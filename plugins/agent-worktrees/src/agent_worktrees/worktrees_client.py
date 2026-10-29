@@ -23,6 +23,10 @@ class ResidentRecoveryPending(ProjectionUnavailable):
     """An admitted recovery has not published its first usable roster yet."""
 
 
+class _ResidentUnready(ProjectionUnavailable):
+    """A validated resident error reports that its first roster is not ready."""
+
+
 def __getattr__(name: str):
     if name == "monitor":
         from . import status_monitor_runtime
@@ -56,6 +60,8 @@ def validate_result(result: dict, request: dict) -> dict:
             raise ProjectionUnavailable("malformed resident current-roster error")
         if error.get("code") == "invalid-request":
             raise ProjectionError(error["message"])
+        if error["code"] == "unready":
+            raise _ResidentUnready(f"unready: {error['message']}")
         raise ProjectionUnavailable(f"{error.get('code')}: {error['message']}")
     rows, head = result.get("worktrees"), result.get("projection")
     if not isinstance(rows, list) or not isinstance(head, dict):
@@ -189,6 +195,9 @@ def read_current(request: dict, *, recover: bool = True) -> dict:
                 try:
                     return _resident(request)
                 except (ConnectionError, FileNotFoundError):
+                    time.sleep(0.05)
+                except _ResidentUnready as recovery_error:
+                    unavailable = str(recovery_error)
                     time.sleep(0.05)
                 except ProjectionError:
                     raise
