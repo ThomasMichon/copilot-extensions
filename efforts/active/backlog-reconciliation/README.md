@@ -247,6 +247,14 @@ outcomes from agent-recommended research and prioritization mechanics.
   The latest complete census is 925 whole issues, 196 above 729; all four
   departures are verified own original-cohort folds, with no new arrivals
   or external departures in that observation.
+- [ ] _(Agent-recommended)_ Deliver the [next ten finite command and
+  assurance relationships](receiving-next-ten.md) through ordinary review,
+  actual merge and complete current readback before separate source judgments.
+  Six direct Plan/local-or-global Validation/Coordination contracts under
+  four existing ROOTs preserve #609/#810/#2567/#4056/#4395/#4464; four
+  credited sources retain their individual disposition or remaining-work
+  boundaries without duplicate implementation. Draft status, existing first
+  unchecked gates and all source/resource custodians remain unchanged.
 - [ ] Refresh live and original-cohort metrics, append journal checkpoints, and
   continue graph-backed consolidation with creation-oldest-first coverage until
   at most 729 issues remain.
