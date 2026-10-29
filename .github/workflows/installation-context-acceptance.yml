@@ -609,7 +609,21 @@ jobs:
           --test-file tests/test_source_build.py
           --test-file tests/test_bootstrap_stamp_selection.py
           --test-file tests/test_source_manifest_publication.py
-          -k "footprint_routes or test_source_build or post_repair or (test_actual_manifest_writer and agent-mcp)"
+          -k "footprint_routes or owner_settlement or test_source_build or post_repair or (test_actual_manifest_writer and agent-mcp)"
+      - name: Qualify MCP identity-pinned runtime tree retirement
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
+        run: >-
+          python tools/run-plugin-tests.py agent-mcp --allow-explicit-tiers
+          --test-file tests/test_reap_versions.py
+      - name: Qualify native process pause rollback and exit proof
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
+        run: >-
+          python tools/run-plugin-tests.py agent-procutil --allow-explicit-tiers
+          --test-file tests/test_process_retirement.py
+          --test-file tests/test_retirement_custody.py
+      - name: Qualify retirement custody after actual Linux caller group death
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' && runner.os == 'Linux' }}
+        run: python tools/retirement_custody_acceptance.py --ephemeral-ci-consent
       - name: Qualify fresh command metadata and pending-owner recovery
         if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
         run: >-

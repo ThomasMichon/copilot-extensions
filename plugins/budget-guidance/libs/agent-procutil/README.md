@@ -4,6 +4,35 @@ Shared **Windows-headless / detached / bounded-owned** process primitives for
 Copilot CLI plugins. One vendored helper keeps launch flags and finite child
 containment consistent instead of reimplementing them in each consumer.
 
+`agent_procutil.process_retirement.PinnedProcess` is a finite external-process
+primitive for application-owned incumbent retirement on Windows and Linux.
+It validates the original birth against a retained process handle/pidfd,
+can pause that identity while the application closes its owned descendant
+scope, and confirms exit on that same kernel object. Context exit resumes
+a still-live process paused by the transaction; unconfirmed resume retains
+the pin on the raised error's `process` attribute for the caller's cleanup.
+It never discovers targets, authorizes an update, signals a group, or replaces
+the caller's lifecycle/critical-connectivity policy. Other platforms refuse
+external pinning rather than falling back to numeric PID kills.
+Linux pause confirmation requires every thread in a stable task-group snapshot
+to be stopped; a stopped leader alone does not freeze a multithreaded parent.
+
+For an installer that can be killed while its incumbents are paused, use
+`agent_procutil.retirement_custody.RetirementCustody(root)` from the
+`retirement-custody` extra, and obtain context-managed pins with
+`custody.pin(pid, birth)`. One attributed finite worker owns the actual pins
+outside the production caller's Windows Jobs or Linux process group. Windows
+uses the already-adopted launch broker and authenticated private pipe; Linux
+inherits one anonymous socketpair and the original caller's pidfd. The worker
+never discovers targets or adds update authority. Caller death, a closed
+lifeline, or a 30-second idle deadline resumes all remaining originals before
+worker exit. Normal close confirms kernel exit and settles the instance record.
+An ambiguous native resume retains the live pin without blindly repeating
+Windows suspend-count changes; the worker waits for that original's exit and
+the caller reports unsettled custody. No hard-kill cleanup is permitted while
+live paused pins remain. Contained tests do not escape their enclosing cleanup
+boundary; they are not evidence of production Job-death survival.
+
 `agent_procutil.diagnostics` also supplies the pure, bounded subprocess
 diagnostic parser/redactor originally owned by Bridge's resolver. Bridge retains
 its compatibility exports and retry policy; Dispatch can use

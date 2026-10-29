@@ -405,6 +405,17 @@ reuse/admission behavior is not an exception to the fresh-default revision.
   identity, incumbent bytes and selected-generation readiness; malformed or
   oversized old completion/environment evidence selects non-reuse. This does
   not close command-ownership recovery, reset effects or old-owner silence.
+- [x] **Agent-recommended bounded metadata recovery:** qualify fresh construction
+  and command publication with missing/corrupt deployment metadata under the
+  existing lifecycle owner. Preserve pending source custody without inventing
+  reuse evidence, exact Index/native launcher recognition, intact relocated
+  publisher matching and foreign/edited/storage-error refusal on Windows/Linux.
+  Keep actual reset effects, displaced-owner silence and portfolio acceptance open.
+- [ ] **Agent-recommended bounded incumbent-process settlement:** qualify MCP's
+  original-birth native process pins, parent-first pause and descendant closure,
+  failed-inspection resume, exact exit confirmation and native fresh-path failure
+  propagation on Windows/Linux. Preserve protected/current/excluded scope; keep
+  disposable-state reset, old-code retirement and installed-host acceptance separate.
 - [x] Qualify Main bootstrap transport independently of Manager/service runtime
   source policy through the actual Linux and Windows global entry points, including
   explicit transport overrides, broken incumbents and older explicit-source callers.
@@ -976,7 +987,17 @@ implementation, rollout or parent completion is declared.
 
 ## Validation Plan
 - [ ] **Fresh-default orchestration:** resolve the [public-entry-point and construction-path matrix](fresh-default-installation.md#validation-plan): global project update interception, upstream Main/default and explicit overrides, cold/broken old runtime, compatible incremental/ZDD and missing/incompatible recognition reaching mostly fresh installation under the same execution owner. Receipts must not become update permission.
+- [x] **Agent-recommended bounded metadata recovery:** native Windows/Linux
+  construction under pending missing/corrupt receipts publishes selectable
+  ownership without changing incumbent slot/data bytes. Exact and relocated
+  native launchers remain recognized; edited/foreign commands and storage
+  failures remain no-write refusals. This is not reset or old-owner-silence proof.
 - [ ] **Footprint evolution:** real installer-produced artifacts and process/registration effects match maintained manifests; installed-footprint changes without matching inventory/deltas fail validation. Qualify historical reset descriptors separately from incremental contract support, preserve unknown/foreign and durable/protected content, and prove displaced code cannot serve or reactivate.
+- [ ] **Agent-recommended bounded incumbent-process settlement:** real synthetic
+  Windows/Linux trees and native shell adapters confirm old root/child exits,
+  original-parent survival, pause rollback and explicit no-reap refusal without
+  depending on an old deployment receipt. This does not close full reset or
+  the independently authorized critical-connectivity/installed-survival gates.
 - [ ] **Critical connectivity:** resolve the [route/removal matrix and retention acceptance](connectivity-retention.md), distinguishing provisioning code from actual SSH/Gateway transport and protecting its complete live/reconnect dependency closure. Force or purge cannot bypass it; credential relays can be removed. Source audit/vision alignment is not installed survival proof.
 
 - [ ] **Disposable services and shared maintenance hold:** resolve the [YAML banner implementation/validation sequence](maintenance-banner.md#implementation-and-validation-sequence). Prove the same applicable banner blocks actual automatic updates/reprovisioning and explains agent standby, including Manager, queued execution and missing catalog tools. Retain durable state and independently hosted session continuity, native 30-minute polling and no self-repair during an explained hold; source text, an unrelated kill switch or a merged vision is not acceptance.
@@ -1205,5 +1226,36 @@ execution, identity-bound displaced effects and reactivation prevention, the
 remaining manifest portfolio, macOS and assembled public-entry/live survival
 acceptance remain open. No host rollout, maintenance hold, service or protected
 process was changed; merged source is not deployed-state proof.
+
+### 2026-10-29 - Fresh-path metadata and command-owner recovery
+
+#9533 merged as `318809886f29d17a9e533f340d61c9edd44552d7` after an
+exact-head Copilot approval with no active findings and required CI success.
+Native workflow `40836786937` passed on
+`cbbdeb6aad583147975468d3ece234a3a79a668b`: command-metadata recovery,
+pending ownership and teardown controls passed 37 tests on each platform
+(two platform skips each); MCP construction passed 52 tests on Linux
+(seven skips) and 40 on Windows (19 skips); prepared-source reconstruction
+passed 48 tests on each platform. The required local unit packet passed
+2,619 tests (12 deselected). The broader matcher/removal/lifecycle packet
+passed 904 tests with verified bounded-runner cleanup.
+
+Malformed ordinary deployment bytes now differ from genuine storage/identity
+errors. Missing/corrupt receipts no longer block construction or supply false
+incremental evidence; failed recovery retains its pending source owner.
+Review fixes reuse Index's existing launcher matcher with the resolved home
+and preserve intact incumbent publisher paths as literal matching data across
+payload relocation. Edited/foreign commands and explicit foreign ownership,
+policy and cell evidence still refuse mutation. The Linux teardown fixture
+now extracts the actual top-level preflight rather than an earlier `elif`.
+
+The parent remains Active. The next bounded integration is the maintained
+MCP reset inventory's actual known-runtime/effect settlement through the same
+installer and execution owner, with durable/protected preservation and
+displaced-owner/registration silence proved independently of candidate markers.
+Remaining manifests, assembled public entry points, macOS, all-tool/Manager
+same-data transition and live session/connectivity survival remain open.
+No host rollout, maintenance hold, service or protected process was changed;
+merged source does not establish released or installed state.
 
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.

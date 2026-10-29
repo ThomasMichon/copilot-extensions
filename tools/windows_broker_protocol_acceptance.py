@@ -20,7 +20,10 @@ from contextlib import contextmanager
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from windows_broker_fixture import admit, fixture_environment
+from windows_broker_fixture import (
+    admit, close_job, collect_generations, fixture_environment, make_job,
+    mcp_candidate_seed, prepare_bootstrap,
+)
 
 
 def imports(package_root: Path) -> None:
@@ -104,11 +107,15 @@ def native_adoption_program(root: Path, generation: str, *, plugin: str) -> tupl
     helper = controller_root(root) / ".runtime-bootstrap" / "versioned_runtime.py"
     native = scripts / "versioned_runtime_native.ps1"
     script = helper.parent / f"{plugin}-adopt.ps1"
+    version, seed = (
+        mcp_candidate_seed(root, generation, sys.executable)
+        if plugin == "agent-mcp" else (generation, "")
+    )
     program = (
         "$ErrorActionPreference='Stop'\nSet-StrictMode -Version 2\n"
         + f". {quote(native)}\n"
         + "$VersionedRuntime=$true\n$NoService=$false\n"
-        + f"$InstallDir={quote(root)}\n$SrcVersion={quote(generation)}\n"
+        + f"$InstallDir={quote(root)}\n$SrcVersion={quote(version)}\n"
         + f"$VenvDir={quote(root / 'versions' / generation)}\n$LinkDir=$VenvDir\n"
         + "$VenvPython=Join-Path $VenvDir 'Scripts\\python.exe'\n"
         + f"$ScriptDir={quote(helper.parent)}\n"
@@ -119,6 +126,7 @@ def native_adoption_program(root: Path, generation: str, *, plugin: str) -> tupl
         + "\n".join(functions)
         + "\ntry {\n[void](Invoke-VersionedSlotClean"
         + (" -PayloadHash ('a'*64)" if plugin == "agent-bridge" else "") + ")\n"
+        + seed
         + "if (-not (Invoke-VersionedMarkComplete -PayloadHash ('a'*64))) { throw 'Fixture completion failed' }\n"
         + "Invoke-RuntimeBrokerAdoption\n"
         + "} finally {\n"
@@ -519,30 +527,6 @@ def interrupt_publication(
             stream.close()
 
 
-def make_job(pu, owners):
-    api = pu._kernel32()
-    pu._configure_job_api(api)
-    handle = api.CreateJobObjectW(None, None)
-    if not handle:
-        raise ctypes.WinError(ctypes.get_last_error())
-    owner = pu.JobHandle(handle)
-    owners.append(owner)
-    limits = pu._build_job_extended_limit_info()()
-    limits.BasicLimitInformation.LimitFlags = pu._JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-    if not api.SetInformationJobObject(
-        handle, pu._JobObjectExtendedLimitInformation, ctypes.byref(limits),
-        ctypes.sizeof(limits),
-    ):
-        raise ctypes.WinError(ctypes.get_last_error())
-    return owner
-
-
-def close_job(pu, owner):
-    if not pu._kernel32().CloseHandle(owner.handle):
-        raise ctypes.WinError(ctypes.get_last_error())
-    owner._handle = None
-
-
 def negative_topology(root, pu, processes, children, jobs):
     from agent_procutil import DaemonSpawnError
     from agent_procutil.daemon_broker import _kernel32 as process_api
@@ -609,10 +593,7 @@ def inspect(root: Path) -> dict[str, object]:
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
         )
     bootstrap = controller_root(root) / ".runtime-bootstrap"
-    bootstrap.mkdir(parents=True)
-    for helper in (source / "libs" / "versioned-runtime").glob("versioned_runtime*.py"):
-        shutil.copyfile(helper, bootstrap / helper.name)
-    shutil.copyfile(source / "libs" / "installer-engine" / "runtime_launcher.py", bootstrap / "runtime_launcher.py")
+    prepare_bootstrap(bootstrap)
     runtime_source = bootstrap / "versioned_runtime.py"
     spec = importlib.util.spec_from_file_location("fixture_runtime_gc", runtime_source)
     if spec is None or spec.loader is None:
@@ -684,6 +665,10 @@ def inspect(root: Path) -> dict[str, object]:
         if first_status.get("configured") is not True:
             raise RuntimeError("fixture adoption was not configured")
         result["negative_topology"] = negative_topology(root, pu, callers, children, jobs)
+        from retirement_custody_acceptance import qualify as qualify_retirement
+
+        result["retirement_started"] = True
+        result["retirement"] = qualify_retirement(root, packages, pu)
         for cycle in range(2):
             if cycle == 1:
                 previous = config
@@ -747,8 +732,9 @@ def inspect(root: Path) -> dict[str, object]:
                         raise RuntimeError("fixture crashed installer lost runtime references")
                     control = "gc-control-" + phase
                     (root / "versions" / control).mkdir()
-                    if runtime.gc(root) != [control]:
-                        raise RuntimeError("fixture collector reclaimed a recovery generation")
+                    collect_generations(
+                        runtime, root, retired=(control,), retained=("first", "replacement"),
+                    )
                     try:
                         task_adapter.load(config.config_path, config.installation)
                     except pu.DaemonSpawnError as error:
@@ -768,10 +754,13 @@ def inspect(root: Path) -> dict[str, object]:
                 result["publication_crash_recovery"] = recovery_controls
                 if (
                     runtime._leases.read_runtime_references(root).get(config.owner) != ["replacement"]
-                    or runtime.gc(root) != ["first"]
-                    or packages.exists()
                 ):
                     raise RuntimeError("fixture old action generation was not retired after recovery")
+                collect_generations(
+                    runtime, root, retired=("first",), retained=("replacement",),
+                )
+                if packages.exists():
+                    raise RuntimeError("fixture old action package content survived collection")
                 result["crash_surviving_generation_retention"] = True
                 result["replaced_action_removed_before_second_cycle"] = True
                 task_operation("stop", config, Deadline(15))
@@ -905,6 +894,7 @@ def inspect(root: Path) -> dict[str, object]:
         cleanup = (
             (not result.get("update_worker_started") or "update_worker" in result)
             and (not result.get("cell_started") or "cell" in result)
+            and (not result.get("retirement_started") or "retirement" in result)
         )
         for child in children:
             if child._handle is not None:

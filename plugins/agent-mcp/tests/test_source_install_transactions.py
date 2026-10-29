@@ -167,7 +167,9 @@ _fixture_shutil.copytree = _fixture_copy
 """)
 
 
-def _run(tmp_path: Path, language: str, script: str) -> subprocess.CompletedProcess[str]:
+def _run(
+    tmp_path: Path, language: str, script: str, *, environment: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     host = _host(language)
     harness = tmp_path / f"native.{language}"
     harness.write_text(script, encoding="utf-8")
@@ -176,7 +178,7 @@ def _run(tmp_path: Path, language: str, script: str) -> subprocess.CompletedProc
     ]
     return subprocess.run(
         args, cwd=tmp_path, capture_output=True, text=True, encoding="utf-8",
-        timeout=60, check=False,
+        timeout=60, check=False, env=environment,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
 
@@ -261,6 +263,117 @@ source "$SCRIPT_DIR/source-runtime.sh"
 {_function(plugin, '_versioned_slot_clean', language)}
 {_function(plugin, '_versioned_mark_complete', language)}
 """
+
+
+@pytest.mark.parametrize("language", ["ps1", "sh"])
+@pytest.mark.parametrize("mode,exit_code,no_reap", [
+    ("incremental", 1, False), ("fresh", 0, False),
+    ("fresh", 1, False), ("fresh", 1, True),
+])
+def test_native_fresh_owner_settlement_failure_is_not_best_effort(
+    tmp_path: Path, language: str, mode: str, exit_code: int, no_reap: bool,
+) -> None:
+    scripts = tmp_path / "payload/scripts"
+    scripts.mkdir(parents=True)
+    observed = tmp_path / "arguments.json"
+    ambient = tmp_path / "ambient" / "agent_procutil"
+    ambient.mkdir(parents=True)
+    tripwire = tmp_path / "ambient-imported"
+    (ambient / "__init__.py").write_text(
+        f"from pathlib import Path\nPath({str(tripwire)!r}).write_text('unexpected')\n"
+        "raise RuntimeError('ambient retirement primitive must not load')\n", encoding="utf-8",
+    )
+    (scripts / "reap_versions.py").write_text(
+        "import json,sys\nfrom pathlib import Path\nimport agent_procutil\n"
+        f"Path({str(observed)!r}).write_text(json.dumps(sys.argv[1:]))\n"
+        f"sys.exit({exit_code})\n", encoding="utf-8",
+    )
+    q = lambda value: _quote(value, language)
+    if language == "ps1":
+        script = f"""
+Set-StrictMode -Version 2.0
+$ErrorActionPreference='Stop'
+$VersionedRuntime=$true
+$script:RuntimeConstructionSession=[pscustomobject]@{{Construction='{mode}'}}
+$ScriptDir={q(scripts)}
+$InstallDir={q(tmp_path / 'install')}
+$VenvPython={q(sys.executable)}
+$env:AGENT_MCP_NO_VERSION_REAP='{1 if no_reap else ""}'
+function Write-Ok($value) {{ }}
+function Invoke-Hidden {{ param($FilePath,$ArgList) & $FilePath @ArgList; $global:LASTEXITCODE=$LASTEXITCODE }}
+{_function('agent-mcp', 'Invoke-RuntimeOwnerSettlement', language)}
+Invoke-RuntimeOwnerSettlement
+Write-Output 'CONTINUED'
+"""
+    else:
+        script = f"""
+set -euo pipefail
+VERSIONED_RUNTIME=1
+_RUNTIME_CONSTRUCTION_MODE='{mode}'
+SCRIPT_DIR={q(scripts)}
+INSTALL_DIR={q(tmp_path / 'install')}
+VENV_PYTHON={q(sys.executable)}
+AGENT_MCP_NO_VERSION_REAP='{1 if no_reap else ""}'
+_ok() {{ :; }}
+_fail() {{ echo "$*" >&2; }}
+{_function('agent-mcp', '_settle_runtime_owners', language)}
+_settle_runtime_owners || exit 1
+echo CONTINUED
+"""
+    result = _run(
+        tmp_path, language, script,
+        environment={**os.environ, "PYTHONPATH": str(ambient.parent)},
+    )
+    assert not tripwire.exists()
+    if mode == "incremental":
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not observed.exists()
+    else:
+        assert (result.returncode == 0) == (exit_code == 0), result.stdout + result.stderr
+        arguments = json.loads(observed.read_text(encoding="utf-8"))
+        assert "--fresh" in arguments
+        assert ("--check-only" in arguments) is no_reap
+        assert ("CONTINUED" in result.stdout) == (exit_code == 0)
+
+
+@pytest.mark.parametrize("shell_name", ["pwsh", "powershell"])
+@pytest.mark.parametrize("phase", ["incremental-reap", "cutover"])
+def test_native_owner_settlement_best_effort_failures_use_an_available_warning(
+        tmp_path: Path, monkeypatch, shell_name: str, phase: str,
+) -> None:
+        host = shutil.which(shell_name)
+        if not host:
+            pytest.skip(f"Native {shell_name} unavailable")
+        monkeypatch.setattr(sys.modules[__name__], "_host", lambda _: host)
+        text = (ROOT / "plugins/agent-mcp/scripts/init.ps1").read_text(encoding="utf-8")
+        loggers = "\n".join(re.findall(r"(?m)^function Write-(?:Ok|Skip)\b[^\n]*$", text))
+        if phase == "incremental-reap":
+            begin = text.index("    $ReapScript = Join-Path")
+            fragment = text[begin:text.index("    # Collect the now-idle", begin)]
+            response = "$global:LASTEXITCODE=1; return ''"
+            warning = "Version-reap incomplete"
+        else:
+            begin = text.index("if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_CUTOVER)")
+            fragment = text[begin:text.index("# agent-mcp-specific (NOT part", begin)]
+            response = """return '{"skipped":false,"ok":false,"error":"fixture failure"}'"""
+            warning = "Cutover attempted"
+        script = f"""
+Set-StrictMode -Version 2.0
+$ErrorActionPreference='Stop'
+$WarningPreference='Stop'
+$VersionedRuntime=$true
+$VenvPython='fixture-only-unused'
+$InstallDir={_quote(tmp_path, 'ps1')}
+$env:AGENT_MCP_NO_CUTOVER=''
+function Invoke-Hidden {{ param($FilePath,$ArgList) {response} }}
+{loggers}
+{fragment}
+Write-Output 'CONTINUED'
+"""
+        result = _run(tmp_path, "ps1", script)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "CONTINUED" in result.stdout
+        assert warning in result.stdout
 
 
 @pytest.mark.parametrize("plugin", PLUGINS)
