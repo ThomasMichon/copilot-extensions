@@ -4548,6 +4548,13 @@ permission to copy an incumbent receipt.
 Both legacy lock paths forward the caller's remaining wait budget; ordinary
 lifecycle admission consumes that same budget before acquisition.
 
+On Windows, release from `versions/dev` holds the selected slot's shared
+retention lease while the canonical finite execution driver drains and settles
+the request. Its isolated caller-owned executor uses that retained interpreter
+directly; it does not start a detached worker or send the mutable slot through
+the generic immutable-runtime launcher. Numbered-slot invocation and the
+generic launcher's refusal of `dev` remain unchanged.
+
 Reuse also runs an isolated installed-origin health probe under retention. Its
 historical, non-editable local origin remains attributable to this runtime's
 frozen-input staging root even after that build's snapshot is removed. Failed

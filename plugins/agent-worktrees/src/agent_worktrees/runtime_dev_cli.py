@@ -88,8 +88,20 @@ def cmd_dev_release(args: argparse.Namespace) -> int:
         return code
 
     buffer = io.StringIO()
-    with redirect_stdout(buffer):
-        code = _run_request("dev-release", flags, execution, execute)
+    try:
+        lifecycle = _lifecycle()
+        root, slot = cfg.install_dir().resolve(), Path(sys.prefix).resolve()
+        if slot.parent != root / "versions":
+            raise RuntimeError("Dev release must execute from this installation's retained slot")
+        # The mutable dev slot cannot use the immutable launcher's admission.
+        # Keep its code pinned until the canonical caller-owned drain settles.
+        with lifecycle.runtime.retention_lease(root, slot.name):
+            with redirect_stdout(buffer):
+                code = _run_request(
+                    "dev-release", flags, execution, execute, retained_dev=slot.name == "dev",
+                )
+    except (OSError, ValueError, RuntimeError, ImportError) as error:
+        return _error(args, error)
     text = buffer.getvalue()
     if getattr(args, "json", False):
         output.write_real_stdout(text)

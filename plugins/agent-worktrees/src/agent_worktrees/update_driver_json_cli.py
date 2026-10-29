@@ -54,6 +54,7 @@ def _publish_result(request, text: str) -> None:
 
 def _run_request(
     verb: str, flags: list[str], args: argparse.Namespace, execute, *, emit_json: bool = True,
+    retained_dev: bool = False,
 ) -> int:
     import update_driver as driver
 
@@ -92,9 +93,19 @@ def _run_request(
             source=str(cfg.install_dir().resolve()), context=update_driver_cli._request_context(),
         )
         project_args = ["--project", project] if project else []
-        command, environment = driver.runtime_command(
-            "agent_worktrees", [*project_args, verb, *flags],
-        )
+        invocation = [*project_args, verb, *flags]
+        if retained_dev:
+            if (
+                verb != "dev-release" or getattr(args, "detach", False)
+                or Path(sys.prefix).resolve() != cfg.install_dir().resolve() / "versions" / "dev"
+            ):
+                raise driver.StateError("retained dev execution is limited to foreground dev-release")
+            from agent_procutil import direct_python
+
+            executable, environment = direct_python(sys.executable)
+            command = (executable, "-I", "-B", "-m", "agent_worktrees", *invocation)
+        else:
+            command, environment = driver.runtime_command("agent_worktrees", invocation)
         request = driver.enqueue(
             spec, runner=driver.TrustedRunner(
                 command, str(cwd), env=tuple(environment.items()),
@@ -102,11 +113,15 @@ def _run_request(
             ),
         )
         print(f"Update request {request.id}; log: {request.log_path}", file=sys.stderr)
-        worker, environment = driver.runtime_command("update_driver", ["worker"])
-        worker_process = driver.ensure_worker(worker, env={
-            **os.environ, **environment, "GIT_TERMINAL_PROMPT": "0",
-            "GH_PROMPT_DISABLED": "1", "GCM_INTERACTIVE": "never",
-        })
+        worker_process = None
+        if retained_dev:
+            driver.drain()
+        else:
+            worker, environment = driver.runtime_command("update_driver", ["worker"])
+            worker_process = driver.ensure_worker(worker, env={
+                **os.environ, **environment, "GIT_TERMINAL_PROMPT": "0",
+                "GH_PROMPT_DISABLED": "1", "GCM_INTERACTIVE": "never",
+            })
         if getattr(args, "detach", False):
             if emit_json:
                 print(json.dumps({

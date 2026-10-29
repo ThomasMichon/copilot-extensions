@@ -205,6 +205,33 @@ repository history.
 
 ## Journal
 
+### 2026-10-28 - Keep dev release inside retained foreground custody
+
+Review 5691343499 identifies a real immutable-launcher mismatch: Windows
+release invoked from `versions/dev` cannot use the numbered-slot bootstrap.
+The installed public entry now retains its selected slot throughout dispatch
+and settlement. Only foreground `dev-release` from this installation's exact
+dev slot constructs the direct isolated interpreter command. The existing
+finite driver's normal caller-owned executor drains it synchronously, with
+the same queue, participant witness, native settlement and JSON result.
+Neither another worker nor a new lifecycle owner is introduced. Generic
+bootstrap refusal of mutable dev, numbered-slot dispatch, original-owner
+validation and original-only dependency restoration remain intact.
+
+The canonical Windows packet passes 74 controls in 120.06 seconds including
+preparation and cleanup. Two uncontained disposable dev-venv cases execute the
+actual generated command through the real driver and native child custody,
+covering both success and the original nonzero JSON result; a deliberately
+refusing immutable bootstrap and forbidden background-worker call prove
+neither path was used. Public-entry controls cover lease lifetime and failed
+retention before dispatch. Invalid command, slot and detach attempts never
+enqueue. Lint and all 13 installation contracts pass.
+
+This is a finite installed-command boundary, not a full native dev build and
+rollback, interactive Picker launch or shared-host rollout. Final hosted
+broker/consumer qualification, required CI and a fresh review remain open.
+No shared-host installation, adoption, restart or updater replay is authorized.
+
 ### 2026-10-28 - Preserve validated unready recovery and portable AST identity
 
 The reconciled all-three run 40792231745 passes at `a18b633de8`, including the

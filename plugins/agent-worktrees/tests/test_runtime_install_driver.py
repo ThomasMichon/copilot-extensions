@@ -94,15 +94,30 @@ def test_public_dev_release_uses_the_existing_json_execution_boundary(
     tmp_path, monkeypatch, capsys, as_json,
 ):
     import argparse
+    from contextlib import contextmanager
     from agent_worktrees import runtime_dev_cli, update_driver_json_cli
 
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     owner = tmp_path / "absent-owner"
+    root = tmp_path / "runtime"
+    slot = root / "versions" / "dev"
+    monkeypatch.setattr(runtime_dev_cli.sys, "prefix", str(slot))
+    monkeypatch.setattr(runtime_dev_cli.cfg, "install_dir", lambda: root)
     seen = []
 
-    def run(verb, flags, args, execute):
+    @contextmanager
+    def retain(requested, version):
+        assert requested == root and version == "dev"
+        seen.append("retained")
+        try:
+            yield slot
+        finally:
+            seen.append("released")
+
+    def run(verb, flags, args, execute, *, retained_dev):
         assert verb == "dev-release" and flags == ["--json", "--owner", str(owner)]
         assert args.json is True and args.owner == owner
+        assert retained_dev and seen == ["retained"]
         seen.append(verb)
         return execute(args)
 
@@ -111,6 +126,9 @@ def test_public_dev_release_uses_the_existing_json_execution_boundary(
         return 0
 
     monkeypatch.setattr(update_driver_json_cli, "_run_request", run)
+    monkeypatch.setattr(runtime_dev_cli, "_lifecycle", lambda: SimpleNamespace(
+        runtime=SimpleNamespace(retention_lease=retain),
+    ))
     monkeypatch.setattr(runtime_dev_cli, "_cmd_dev_release", release)
     with runtime_dev_cli.output.capture_json_output() as captured:
         assert runtime_dev_cli.cmd_dev_release(argparse.Namespace(owner=owner, json=as_json)) == 0
@@ -119,7 +137,32 @@ def test_public_dev_release_uses_the_existing_json_execution_boundary(
         assert json.loads(output)["runtime_version"] == "1.2.3"
     else:
         assert "current-version -> 1.2.3" in output
-    assert seen == ["dev-release"]
+    assert seen == ["retained", "dev-release", "released"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows installed dev-release entry")
+def test_public_dev_release_reports_retention_failure_as_json(tmp_path, monkeypatch):
+    import argparse
+    from contextlib import contextmanager
+    from agent_worktrees import runtime_dev_cli, update_driver_json_cli
+
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    root = tmp_path / "runtime"
+    monkeypatch.setattr(runtime_dev_cli.sys, "prefix", str(root / "versions" / "dev"))
+    monkeypatch.setattr(runtime_dev_cli.cfg, "install_dir", lambda: root)
+
+    @contextmanager
+    def retain(*args):
+        raise RuntimeError("retention unavailable")
+        yield
+
+    monkeypatch.setattr(runtime_dev_cli, "_lifecycle", lambda: SimpleNamespace(
+        runtime=SimpleNamespace(retention_lease=retain),
+    ))
+    monkeypatch.setattr(update_driver_json_cli, "_run_request", lambda *a, **k: pytest.fail("unretained execution"))
+    with runtime_dev_cli.output.capture_json_output() as captured:
+        assert runtime_dev_cli.cmd_dev_release(argparse.Namespace(json=True)) == 1
+    assert json.loads(captured.getvalue())["error"] == "retention unavailable"
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native installation")
