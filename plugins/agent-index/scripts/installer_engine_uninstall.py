@@ -722,6 +722,16 @@ def inspect_processes(payload: Path, root: Path, shell: str, profile: Profile, *
                 argv = [os.fsdecode(value) for value in (directory / "cmdline").read_bytes().split(b"\0") if value]
                 command = " ".join(argv)
                 if not command:
+                    later = (directory / "stat").read_text()
+                    observed = later[later.rfind(")") + 2:].split()
+                    if int(observed[19]) != created:
+                        raise UninstallRefused("Process identity changed during inspection")
+                    # A zombie leader can still own live worker threads; its
+                    # empty cmdline and unavailable exe do not prove group exit.
+                    if observed[0] not in {"Z", "X", "x"} or int(observed[17]) != 1:
+                        raise UninstallRefused(
+                            "Cannot inspect a current-user process with live tasks and an empty command line"
+                        )
                     continue
                 incomplete = False
                 try:

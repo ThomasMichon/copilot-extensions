@@ -5,9 +5,11 @@ import importlib.util
 import os
 import subprocess
 import sys
+import time
 from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -358,6 +360,102 @@ def test_reap_matches_normalized_current(tmp_path, owners, monkeypatch):
     monkeypatch.setattr(rv, "current_version", lambda *a: "1-0")
     assert rv.reap_stale(tmp_path)[0]["pid"] == 222
     assert owners["terminated"] == [222]
+
+
+@pytest.mark.parametrize(
+    "state,threads,later_threads,later_birth",
+    [("Z", 1, 1, 200), ("Z", 2, 2, 200), ("Z", 1, 2, 200),
+     ("R", 1, 1, 200), ("Z", 1, 1, 201)],
+)
+def test_linux_empty_command_census_requires_confirmed_group_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str, threads: int,
+    later_threads: int, later_birth: int,
+) -> None:
+    proc = tmp_path / "proc"
+
+    def stat(pid: int, status: str, count: int, birth: int) -> str:
+        fields = [status, "0", *(["0"] * 15), str(count), "0", str(birth)]
+        return f"{pid} (fixture) " + " ".join(fields)
+
+    for pid, command in ((100, b"inspector\0"), (200, b"")):
+        directory = proc / str(pid)
+        (directory / "task").mkdir(parents=True)
+        (directory / "stat").write_text(
+            stat(pid, "R" if pid == 100 else state, 1 if pid == 100 else threads, pid),
+        )
+        (directory / "cmdline").write_bytes(command)
+    original_read = Path.read_text
+    reads = 0
+
+    def read(path: Path, *args, **kwargs) -> str:
+        nonlocal reads
+        if path == proc / "200/stat":
+            reads += 1
+            if reads == 2:
+                return stat(200, state, later_threads, later_birth)
+        return original_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.setattr(rv.inspection, "Path", lambda path: proc if str(path) == "/proc" else Path(path))
+    monkeypatch.setattr(rv.inspection, "os", SimpleNamespace(
+        name="posix", getuid=lambda: proc.stat().st_uid, getpid=lambda: 100,
+        fsdecode=os.fsdecode, readlink=lambda path: "/usr/bin/python",
+    ))
+    monkeypatch.setattr(rv.inspection, "sys", SimpleNamespace(platform="linux"))
+
+    def census() -> list[dict]:
+        return rv.inspection.inspect_processes(SCRIPTS.parent, tmp_path, "", None, descendants=True)
+
+    if later_birth != 200:
+        with pytest.raises(rv.inspection.UninstallRefused, match="identity changed"):
+            census()
+    elif state != "Z" or later_threads != 1:
+        with pytest.raises(rv.inspection.UninstallRefused, match="live tasks"):
+            census()
+    else:
+        assert [row["pid"] for row in census()] == [100]
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Native Linux thread-group census")
+def test_real_dead_main_thread_cannot_hide_a_live_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    interpreter = tmp_path / "versions/1.0/bin/python"
+    interpreter.parent.mkdir(parents=True)
+    interpreter.symlink_to(getattr(sys, "_base_executable", sys.executable))
+    process = subprocess.Popen(
+        [str(interpreter), "-c",
+         "import ctypes,sys,threading,time\n"
+         "threading.Thread(target=lambda:time.sleep(60)).start()\n"
+         "print('ready',flush=True)\n"
+         "sys.stdin.read(1)\n"
+         "ctypes.CDLL(None).pthread_exit(None)\n"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+    )
+    try:
+        assert process.stdout.readline().strip() == "ready"
+        rows = rv._inspect(tmp_path)
+        assert rv._version(rows[process.pid], tmp_path, {"1.0", "2.0"}) == "1.0"
+        process.stdin.write("x")
+        process.stdin.flush()
+        proc = Path(f"/proc/{process.pid}")
+        deadline = time.monotonic() + 5
+        while (proc / "cmdline").read_bytes() and time.monotonic() < deadline:
+            time.sleep(.005)
+        assert (proc / "cmdline").read_bytes() == b""
+        fields = (proc / "stat").read_text().rsplit(") ", 1)[1].split()
+        assert fields[0] == "Z" and int(fields[17]) > 1
+        assert process.poll() is None
+        monkeypatch.setattr(rv, "current_version", lambda *a: "2.0")
+        with pytest.raises(rv.inspection.UninstallRefused, match="live tasks"):
+            rv.reap_stale(tmp_path, fresh=True)
+        assert process.poll() is None
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+        process.stdin.close()
+        process.stdout.close()
 
 
 def test_real_tree_exit_spares_original_parent(tmp_path):

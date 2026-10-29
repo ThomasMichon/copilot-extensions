@@ -2582,6 +2582,9 @@ not success. Exited pins never seed later PID ancestry, every paused member's
 executable protection is rechecked, and an excluded root missing from census
 refuses retirement. Linux descendant observation may retain partial rows for
 unrelated nondumpable tasks; selected roots/children must remain fully inspected.
+An empty Linux command line is skipped only after a same-birth, single-thread
+zombie/dead-group observation. A zombie main thread with surviving workers
+refuses census instead of hiding a potentially active runtime.
 The ordinary non-signaling uninstall census retains its existing strictness.
 Current-slot protection covers both image and launch path, including new
 descendants and same-birth execs. Retirement retains the canonical publication
