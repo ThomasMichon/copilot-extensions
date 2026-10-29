@@ -39,6 +39,7 @@ SPEC = common.EvidenceSpec(
     (("NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION", 51),
      ("RETAINED_INBOX_PROTOCOL_VERSION", 48), ("RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION", 49),
      ("RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION", 50)),
+    scope=SCOPE,
 )
 baseline = partial(common.baseline, SPEC)
 source_snapshot = partial(common.source_snapshot, SPEC)
