@@ -107,6 +107,24 @@ Invariants are **must-always-hold contracts between a vision and the code** — 
 narrow set of properties a change may never quietly break. They are the enforceable
 core of the principles above; a reviewer checks a change against these.
 
+- **Circumstantial hooks preserve event-time responsibility.** Instruction
+  injection is a circumstance-based skill, not a replacement startup snapshot.
+  Acquire reusable input-bound facts, evaluate the current trigger cheaply and
+  intervene contextually. Each hook names its purpose, exposure/freshness,
+  scoped acknowledgement and invalidation, violation versus dependency outcomes,
+  agent-readable recovery, bounded retry cost and inner/outer deadline plus
+  owned cleanup. Default to fail open when absent/broken backing suite prevents
+  ordinary evaluation, retaining inspection and recovery. Exceptions require a
+  documented protected action/prerequisite, positive applicability from available
+  trusted inputs independent of missing helpers, bounded errors and reachable
+  recovery; suite absence is not applicability proof. Preserve confirmed policy
+  violations and unknown lifecycle outcomes
+  and one active implementation per event through any transition. See
+  [circumstantial hook contracts](circumstantial-hook-contracts.md). (Serves
+  *Vision harness-guidance* `circumstance-based-intervention`,
+  `reusable-facts-current-decisions`, `bounded-actionable-hook-failures` and
+  *Vision agent-worktrees* cooperative write-guard responsibility.)
+
 - **CLI and service contracts tolerate declared version skew.** A changed
   independently deployed boundary declares contract support separately from
   package versions against the executable runtime or running peer. Preserve
@@ -345,11 +363,11 @@ core of the principles above; a reviewer checks a change against these.
   §Features/self-auditing-drop-in-composition* and
   §Behaviors/stale-drop-ins-are-inert-and-legible*; see
   [`drop-in-registry-hygiene.md`](drop-in-registry-hygiene.md).)
-- **Depended-on guidance never relies solely on `sessionStart`
+- **Depended-on ambient session guidance never relies solely on `sessionStart`
   `additionalContext` composition.** Multi-hook `additionalContext` aggregation
   is empirically unreliable -- sessions have been observed where no
   contributor's output reached the model at all, not just a last-writer-wins
-  loss. Guidance a harness genuinely depends on must be delivered through a
+  loss. Ambient session guidance a harness depends on must be delivered through a
   checked-in static pointer projection plus an output-free `sessionStart` hook
   side effect that writes session-scoped content to
   `~/.copilot/session-state/<sessionId>/instructions/<plugin>/<topic>.instructions.md`,
@@ -395,6 +413,7 @@ the exemplars, and the vision it serves):
 |---------|---------|
 | [in-picker-device-authorization](in-picker-device-authorization.md) | Existing provider-owned device authentication through summary-conditioned actions and the shared nonblocking Manager modal; safety boundaries, SSH use and bounded candidate consumers |
 | [runtime-agent-plugin](runtime-agent-plugin.md) | The complete “add an `agent-*` plugin” path: choose the smallest runtime shape, implement the cross-platform install contract, generate payload-local commands, wire attributable bootstrap/glossary hooks, write skills against logical commands, and add service/provider ownership without dynamic initial-context snapshots |
+| [circumstantial-hook-contracts](circumstantial-hook-contracts.md) | Binding hook responsibilities and the plugin-delivered practical contract: fact exposure, event-time intervention, acknowledgement, failure/retry behavior and whole-path cleanup budgets |
 | [session-scoped-dynamic-guidance](session-scoped-dynamic-guidance.md) | The primary delivery path for guidance a harness depends on: a checked-in static pointer projection plus a `sessionStart` hook side effect that writes per-session dynamic content to `~/.copilot/session-state/<sessionId>/instructions/<plugin>/<topic>.instructions.md`, avoiding unreliable `additionalContext` aggregation entirely |
 | [worktree-scoped-dynamic-guidance](worktree-scoped-dynamic-guidance.md) | Local-first stable guidance: enabled-payload-authenticated gitignored caches, concise checked-in selectors, lock-owned non-auto-loaded reviewed fallbacks, explicit inline decision kernels, and per-source completeness receipts; the inline catch-all recovers late/unpaired bodies without mistaking file existence for model admission |
 | [context-handoff-lifecycle](context-handoff-lifecycle.md) | How a stored continuation becomes a successor-owned session without losing prompt fidelity, moving the head early, trusting a reused PID, depending on effort/knowledge state, or crossing an ambient/lossy command boundary |

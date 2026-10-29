@@ -298,6 +298,13 @@ enforcement. Config lives in policy, user-level `~/.copilot/hooks/*.json` (or
 plugin-declared `hooks.json`. Cloud agent reads only `.github/hooks/*.json` from
 the cloned repository.
 
+Before authoring or changing a hook, read
+[the circumstantial hook contract](references/circumstantial-hooks.md): purpose,
+fact exposure/freshness, event-time trigger, contextual delivery, acknowledgement,
+error/retry semantics and whole-path deadline/cleanup budgets. Injection hooks
+are circumstance-based skills, not startup-only reminders. Existing required
+guards and host-specific output composition remain independent obligations.
+
 ### Config format
 
 ```json
@@ -404,11 +411,16 @@ Two further consequences shape how a plugin author writes hooks:
   The hook's **process CWD is therefore not the session target**: read `cwd` and
   `sessionId` from the JSON payload on stdin, and use `COPILOT_PROJECT_DIR` when
   the repository root is needed. Guard the resolved script with `Test-Path` /
-  `[ -f ]`, diagnose a missing root or script to stderr, and emit `{}` so a
-  partial install fails open. A deployed runtime sidecar under `~/.<tool>/bin/`
-  remains appropriate when the hook intentionally calls runtime code rather
-  than payload code. Keep it under the perf budget below; do expensive work in
-  a background process and have the hook read a cheap state file.
+  `[ -f ]` and classify a missing root or script under the hook's explicit
+  error contract. If an absent, uninstalled or broken backing suite prevents
+  evaluation, default to fail open and preserve inspection/recovery. A required
+  installation exception must positively match its documented protected action
+  from trusted inputs without the missing helper; absence alone is not proof.
+  Preserve confirmed policy outcomes without inventing successful evaluation.
+  Stderr alone does not establish agent-readable remediation. Use the existing
+  runtime owner's supported selection and recovery behavior for sidecars.
+  Reuse canonical input-bound facts; move optional costly discovery through an
+  existing owner outside the hot path, never an ad hoc background process.
 - **ACP is trust-gated.** Repo-scoped plugin hooks need a persisted-trusted cwd;
   user-scoped hooks do not. Repository `.github/hooks` do not load over ACP; use the runtime-context reference below and keep the static fail-safe.
 
@@ -419,6 +431,11 @@ Use that matrix whenever a plugin script needs both its payload location and the
 repository Copilot is targeting.
 
 ### sessionStart dynamic guidance
+
+This section covers ambient session context, not a replacement for circumstantial
+event-time detection and intervention. Precompute only facts stable under their
+input/invalidation contract; current authority and each occurrence are evaluated
+when the event happens.
 
 `sessionStart` is the declarative replacement for a deployed
 `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` instructions dir: a command hook reads the
@@ -568,6 +585,11 @@ design rationale remains in the copilot-extensions repository's
   one** final JSON object (progress lines `{"type":"progress",...}` are stripped
   first; two decision objects concatenate into invalid JSON and are ignored).
   Other events ignore stdout.
-- **Stderr:** debug logging, ignored. **Exit code:** 0 = success.
-- **Performance:** hooks run synchronously and block the agent -- keep them under
-  5 seconds; background expensive work.
+- **Stderr:** diagnostic logging, not guaranteed agent-readable remediation.
+  Use a verified event/host response field for actionable failures. **Exit code:**
+  0 = process success, not proof of guidance delivery or policy satisfaction.
+- **Performance:** declare an explicit positive finite native `timeoutSec` and
+  budget inner work below the host deadline with response and owned-descendant
+  cleanup reserve. Bound total first-attempt/retry cost; do not use a watchdog
+  as the latency target or spawn detached work to evade it. Follow the portable
+  [hook contract](references/circumstantial-hooks.md).
