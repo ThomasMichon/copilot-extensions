@@ -302,11 +302,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.reset_control:
             if not args.fresh:
                 raise RetirementRefused("Control reset requires the fresh construction path")
-            from agent_mcp.sockio import default_socket_path
+            from agent_mcp.forward import _serve_handle
             from reset_runtime_control import reset_control
 
             reaped = reset_control(
-                default_socket_path().parent, settle=settle, inspect=lambda: _inspect(args.root),
+                Path(_serve_handle(None)).parent, settle=settle, inspect=lambda: _inspect(args.root),
             )
         else:
             reaped = settle()

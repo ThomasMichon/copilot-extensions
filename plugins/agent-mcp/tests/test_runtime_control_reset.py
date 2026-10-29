@@ -149,6 +149,94 @@ def test_socket_link_reset_never_removes_its_foreign_target(tmp_path: Path) -> N
     assert target.read_bytes() == b"keep"
 
 
+@pytest.mark.parametrize(
+    "name", ["active.json", "serve-control-999999.token", "serve.sock.endpoint"]
+)
+def test_non_socket_control_names_never_unlink_a_foreign_socket(tmp_path: Path, name: str) -> None:
+    if os.name == "nt" or not hasattr(socket, "AF_UNIX"):
+        pytest.skip("Native POSIX socket file type required")
+    path = tmp_path / name
+    with socket.socket(socket.AF_UNIX) as listener:
+        listener.bind(str(path))
+        listener.listen()
+        with pytest.raises(RuntimeError, match="Unsafe"):
+            _reset(tmp_path)
+        assert path.is_socket()
+        with socket.socket(socket.AF_UNIX) as client:
+            client.connect(str(path))
+
+
+@pytest.mark.parametrize("role", ["active", "previous"])
+@pytest.mark.parametrize("live", [False, True])
+def test_routing_only_endpoint_is_probed_before_deletion(
+    tmp_path: Path,
+    role: str,
+    live: bool,
+) -> None:
+    if not live and os.name == "nt":
+        pytest.skip("Windows closed loopback ports can time out instead of confirming refusal")
+    path = tmp_path / "active.json"
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        if live:
+            listener.listen()
+        path.write_text(
+            json.dumps(
+                {
+                    role: {"bind": "127.0.0.1", "port": listener.getsockname()[1]},
+                }
+            ),
+            encoding="utf-8",
+        )
+        before = path.read_bytes()
+        if live:
+            with pytest.raises(RuntimeError, match="live MCP routing"):
+                _reset(tmp_path)
+            assert path.read_bytes() == before
+        else:
+            listener.close()
+            _reset(tmp_path)
+            assert not path.exists()
+
+
+def test_uncertain_routing_probe_preserves_all_control_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "active.json"
+    path.write_text(json.dumps({"active": {"bind": "127.0.0.1", "port": 1234}}), encoding="utf-8")
+    (tmp_path / "serve.sock.endpoint").write_bytes(b"keep")
+    before = path.read_bytes()
+
+    def uncertain(address: str | tuple[str, int]) -> bool:
+        raise TimeoutError("probe did not establish endpoint death")
+
+    monkeypatch.setattr(subject, "_listening", uncertain)
+    with pytest.raises(TimeoutError):
+        _reset(tmp_path)
+    assert path.read_bytes() == before
+    assert (tmp_path / "serve.sock.endpoint").read_bytes() == b"keep"
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        {"bind": "example.invalid", "port": 1234},
+        {"pid": os.getpid()},
+    ],
+)
+def test_uncertain_or_live_pid_routing_owner_is_preserved(
+    tmp_path: Path,
+    endpoint: dict,
+) -> None:
+    path = tmp_path / "active.json"
+    path.write_text(json.dumps({"active": endpoint}), encoding="utf-8")
+    before = path.read_bytes()
+    with pytest.raises(RuntimeError, match="routing"):
+        _reset(tmp_path, rows={os.getpid(): {"argv": [sys.executable]}})
+    assert path.read_bytes() == before
+
+
 @pytest.mark.asyncio
 async def test_real_serve_starts_after_reset_and_survives_losing_reset(tmp_path: Path) -> None:
     from agent_mcp.ipc import request_via_socket

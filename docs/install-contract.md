@@ -2578,7 +2578,10 @@ before resetting declared control files. A live current owner or endpoint,
 uncertain passive scope or unsafe path makes reset incomplete without deleting
 that state. Reset preserves configuration, durable state, logs, unknown entries
 and lock-file identities; it never runs whole-uninstall or collects old code.
-The control home follows MCP socket-home selection, not the code-root argument.
+The control home follows the forwarder's `AGENT_MCP_SERVE_SOCKET` override or
+default socket-home selection, not the code-root argument. Active and previous
+routing-only endpoints must also be idle; non-socket control names require
+ordinary unshared files, never listening socket artifacts.
 Global commands and the final deployment record publish only after reset
 succeeds, so interrupted integration cannot gain incremental recognition from
 the candidate completion marker alone. MCP remains on-demand afterward.

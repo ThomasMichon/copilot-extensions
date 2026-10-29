@@ -108,7 +108,8 @@ checks still apply.
 On the fresh path, the installer skips ZDD, confirms displaced-process
 settlement and clears only declared disposable control state under the existing
 cutover, serve-instance and routing locks. The socket home can differ from the
-code root. Configuration, durable data, logs, unknown files and lock identities
+code root, including an explicit `AGENT_MCP_SERVE_SOCKET` override. Configuration,
+durable data, logs, unknown files and lock identities
 are preserved. A winning current daemon, live endpoint or uncertain passive
 owner makes reset incomplete without deleting its state. Deployment metadata
 is published only after reset and global-command publication; inconsistent

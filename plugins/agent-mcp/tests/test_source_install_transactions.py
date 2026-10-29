@@ -338,8 +338,9 @@ echo CONTINUED
 
 
 @pytest.mark.parametrize("language", ["ps1", "sh"])
+@pytest.mark.parametrize("socket_override", [False, True])
 def test_native_fresh_settlement_resets_the_actual_distinct_control_home(
-    tmp_path: Path, language: str,
+    tmp_path: Path, language: str, socket_override: bool,
 ) -> None:
     scripts = tmp_path / "payload/scripts"
     scripts.mkdir(parents=True)
@@ -358,8 +359,12 @@ def test_native_fresh_settlement_resets_the_actual_distinct_control_home(
     (root / "current-version").write_text("2.0", encoding="utf-8")
     home = tmp_path / "data"
     home.mkdir()
-    (home / "active.json").write_bytes(b"{")
-    (home / "serve.sock.endpoint").write_bytes(b"corrupt")
+    control_home = tmp_path / "sockets" if socket_override else home
+    control_home.mkdir(exist_ok=True)
+    if socket_override:
+        (home / "active.json").write_bytes(b"not the socket home")
+    (control_home / "active.json").write_bytes(b"{")
+    (control_home / "serve.sock.endpoint").write_bytes(b"corrupt")
     (home / "configuration.json").write_bytes(b"keep")
     (root / "active.json").write_bytes(b"not the control home")
     q = lambda value: _quote(value, language)
@@ -391,10 +396,13 @@ _settle_runtime_owners || exit 1
 """
     result = _run(tmp_path, language, script, environment={
         **os.environ, "AGENT_MCP_HOME": str(home), "AGENT_MCP_NO_VERSION_REAP": "",
+        "AGENT_MCP_SERVE_SOCKET": str(control_home / "serve.sock") if socket_override else "",
     })
     assert result.returncode == 0, result.stdout + result.stderr
-    assert not (home / "active.json").exists()
-    assert not (home / "serve.sock.endpoint").exists()
+    assert not (control_home / "active.json").exists()
+    assert not (control_home / "serve.sock.endpoint").exists()
+    if socket_override:
+        assert (home / "active.json").read_bytes() == b"not the socket home"
     assert (home / "configuration.json").read_bytes() == b"keep"
     assert (root / "active.json").read_bytes() == b"not the control home"
 

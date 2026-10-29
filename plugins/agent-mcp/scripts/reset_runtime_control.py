@@ -79,23 +79,65 @@ def _controls(home: Path, patterns: list[str]) -> list[Path]:
         if (
             getattr(value, "st_file_attributes", 0) & 0x400
             or value.st_nlink != 1
-            or not (stat.S_ISREG(value.st_mode) or stat.S_ISSOCK(value.st_mode))
+            or not (
+                stat.S_ISREG(value.st_mode)
+                or (path.name.endswith(".sock") and stat.S_ISSOCK(value.st_mode))
+            )
         ):
             raise RuntimeError(f"Unsafe MCP control artifact: {path.name}")
     return sorted(paths)
 
 
 def _listening(address: str | tuple[str, int]) -> bool:
-    family = socket.AF_UNIX if isinstance(address, str) else socket.AF_INET
+    family = (
+        socket.AF_UNIX
+        if isinstance(address, str)
+        else socket.AF_INET6
+        if address[0] == "::1"
+        else socket.AF_INET
+    )
     with socket.socket(family, socket.SOCK_STREAM) as stream:
         stream.settimeout(0.25)
         try:
             stream.connect(address)
         except OSError as error:
-            if error.errno in {errno.ECONNREFUSED, errno.ENOENT, errno.ENOTSOCK}:
+            if isinstance(error, (ConnectionRefusedError, FileNotFoundError)) or error.errno in {
+                errno.ECONNREFUSED,
+                errno.ENOENT,
+                errno.ENOTSOCK,
+            }:
                 return False
             raise
         return True
+
+
+def _require_idle_routes(path: Path, rows: dict[int, dict]) -> None:
+    if path.stat().st_size > 65536:
+        raise RuntimeError("MCP routing table exceeds its reset inspection budget")
+    try:
+        table = footprint.decode(footprint._marker_text(path))
+    except (ValueError, UnicodeError):
+        return
+    if not isinstance(table, dict):
+        return
+    for role in ("active", "previous"):
+        endpoint = table.get(role)
+        if not isinstance(endpoint, dict):
+            continue
+        pid = endpoint.get("pid")
+        if type(pid) is int and pid in rows:
+            raise RuntimeError("A live process still owns MCP routing state")
+        port = endpoint.get("port")
+        if type(port) is not int or not 0 < port < 65536:
+            continue
+        bind = endpoint.get("bind")
+        if bind is not None and not isinstance(bind, str):
+            raise RuntimeError("An uncertain MCP routing endpoint prevents control reset")
+        host = routing.Endpoint(bind=bind or "", port=port).client_host
+        if host not in {"127.0.0.1", "::1"}:
+            raise RuntimeError("An uncertain MCP routing endpoint prevents control reset")
+        if _listening((host, port)):
+            raise RuntimeError("A live MCP routing endpoint prevents control reset")
 
 
 def _require_idle(home: Path, paths: list[Path], rows: dict[int, dict]) -> None:
@@ -123,7 +165,9 @@ def _require_idle(home: Path, paths: list[Path], rows: dict[int, dict]) -> None:
         token = re.fullmatch(r"serve-control-([1-9][0-9]*)\.token", path.name)
         if token and int(token[1]) in rows:
             raise RuntimeError(f"A live process still owns MCP control state: {path.name}")
-        if path.name.endswith(".sock") and path.is_socket() and hasattr(socket, "AF_UNIX"):
+        if path.name == "active.json":
+            _require_idle_routes(path, rows)
+        elif path.name.endswith(".sock") and path.is_socket() and hasattr(socket, "AF_UNIX"):
             if _listening(str(path)):
                 raise RuntimeError("A live MCP socket prevents control reset")
         elif path.name.endswith(".endpoint"):
