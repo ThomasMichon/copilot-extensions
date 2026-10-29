@@ -225,6 +225,14 @@ def producer_digest(payload: Path, relative: str) -> str:
         _plain_file(candidate)
         name = local.as_posix().encode("utf-8")
         content = candidate.read_bytes().replace(b"\r\n", b"\n")
+        if (len(local.parts) == 3 and local.parts[0] == "src"
+                and candidate.name in {"__init__.py", "_build_info.py"}):
+            # Promotion owns these version literals, not the surrounding code.
+            content = re.sub(
+                rb'^(\s*(?:__version__|_FALLBACK_VERSION)\s*(?::\s*str\s*)?=\s*["\'])'
+                rb'[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?(["\'])',
+                rb'\g<1><release-version>\g<2>', content, flags=re.MULTILINE,
+            )
         digest.update(len(name).to_bytes(8, "big") + name)
         digest.update(len(content).to_bytes(8, "big") + content)
     if not paths or not path.exists():

@@ -2533,6 +2533,9 @@ a health result. No new installed receipt is required.
 `scripts` and `src` producer trees, including added/removed files, with
 LF-normalized content digests. The manifest itself and Python bytecode caches
 and generated egg-info metadata are excluded, matching materialization.
+Promotion-owned `__version__`/`_FALLBACK_VERSION` literals in
+`src/*/__init__.py` and `src/*/_build_info.py` are normalized; all surrounding
+code remains covered.
 Coverage cannot be narrowed to selected files to hide a new
 producer. A producer change must carry its manifest revision and delta;
 published history is compared with the local publication merge-base, PR base, or CI push
