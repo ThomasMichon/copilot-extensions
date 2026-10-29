@@ -360,6 +360,10 @@ Repair-child launches explicitly forward standard input, output and error to
 the existing caller handles while retaining hidden native children and their
 completion custody. Redirected diagnostics must reach the durable request log,
 not disappear behind an exit code.
+Engine repair reasserts and explicitly exports the current driver's scoped
+participant witness before entering either publication boundary. Consuming the
+incoming environment witness does not authorize an unadmitted replacement
+driver; a lost owner refuses before publication or child execution.
 
 Engine repair tolerates transient Windows payload-directory sharing contention
 without stopping live sessions or disabling their hooks. A completed native
