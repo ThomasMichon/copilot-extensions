@@ -30,21 +30,12 @@ exact creation flags) can't drift between copies:
   windowless, escapes the caller's Job object / session, runs from an
   explicit durable ``cwd``, and appends its stdout/stderr to a log file.
 
-Both are no-ops off Windows (``no_window_kwargs`` -> ``{}``; ``detached_kwargs``
--> ``start_new_session=True``), so call sites stay platform-agnostic::
+Off Windows, ``no_window_kwargs`` is empty and ``detached_kwargs`` selects a
+new session; call sites stay platform-agnostic.
 
-    subprocess.run(cmd, capture_output=True, **no_window_kwargs())
-    subprocess.Popen(
-        [windowless_python(), "-m", "my_daemon"],
-        **detached_kwargs(breakaway=True),
-    )
-
-Most consumers reference this canonical source via a `uv`-editable
-pointer in dev, materialized into a real per-plugin copy at release; at
-least one consumer (`agent-worktrees`, per its own self-contained
-build-surface requirement) ships a real local copy in dev too -- see
-this package's own ``README.md`` § Vendoring for the mechanism, and
-``tools/check-vendored-libs-sync.py`` for the enforcement.
+Development uses canonical editable references; release materializes consumer
+copies. See ``README.md`` for vendoring and
+``tools/check-vendored-libs-sync.py`` for source consistency.
 
 Synchronous imports do not load asyncio. Accessing the async spawn helper
 loads its implementation; the asyncio module attribute remains available for
@@ -498,32 +489,21 @@ def spawn_sync_in_kill_on_close_job(
     """Synchronous (``subprocess.Popen``) counterpart to
     :func:`spawn_in_kill_on_close_job`, for callers that cannot use ``asyncio``.
 
-    Mirrors the same containment contract: on Windows the child is created
-    with ``CREATE_SUSPENDED``, assigned to a kill-on-close Job Object, and then
-    resumed, with no gap between creation and assignment in which it (or a
-    descendant it spawns) could escape the job. A caller that later needs to
-    forcibly terminate the whole process tree -- e.g. after its own
-    ``communicate(timeout=...)`` raises ``subprocess.TimeoutExpired`` -- should
-    call ``job_handle.close()``, which (via
-    ``JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE``) kills every process still in the
-    job, not just the immediate child. A plain ``proc.kill()`` on Windows only
-    terminates that immediate child: any grandchildren it spawned (a `.cmd`
-    shim re-execing `python.exe`, a `pwsh.exe` wrapper invoking `git`/`copilot`,
-    etc.) survive, can keep the stdout/stderr pipes open, and leave a
-    subsequent ``communicate()`` blocked indefinitely even though the direct
-    child is already dead -- exactly the failure mode that left a real
-    self-update sweep tick alive-but-stuck for over a day in practice.
+    Windows creates the child suspended, assigns its named kill-on-close Job
+    and propagates the complete cleanup-scope chain before resume. Keep the
+    returned Job handle until child cleanup finishes. Close/terminate that Job
+    for whole-tree cleanup: ``proc.kill()`` alone leaves grandchildren alive,
+    possibly keeping captured pipes open.
 
     With ``require_job=True``, failed Windows Job assignment kills the still
     suspended child before it can launch descendants and raises explicitly.
     ``allow_breakaway=False`` prohibits descendants from escaping this Job and
     rejects an explicit CREATE_BREAKAWAY_FROM_JOB flag on the initial child.
     The default permits explicit breakaway, preserving legacy daemon semantics.
-    Otherwise, if job creation or assignment fails, the child still runs (resumed) and is
-    returned with ``job_handle=None`` so existing cleanup paths remain in
-    charge -- containment is a best-effort hardening layer, not a hard
-    dependency for the child to execute at all. Off Windows this is a plain
-    ``subprocess.Popen`` call returning ``(process, None)``.
+    Otherwise failed assignment resumes the child with ``job_handle=None``;
+    existing cleanup remains responsible. Its unresolved scope metadata
+    prevents descendants claiming verified daemon escape. Off Windows this is
+    plain ``Popen`` returning ``(process, None)``.
     Process-creation OS errors are ``SyncProcessLaunchError`` instances;
     subsequent containment or cleanup errors retain their original types.
     """

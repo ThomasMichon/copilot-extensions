@@ -36,7 +36,7 @@ def _worker(root: Path) -> None:
     from agent_procutil import _job_scopes
     from agent_procutil._daemon_instance_identity import birth_identity
 
-    python, python_env = pu.direct_python()
+    python, python_env = pu.direct_python(sys.executable)
     ordinary = subprocess.Popen(
         [python, "-c", "import time; time.sleep(120)"],
         env={**os.environ, **python_env},
@@ -74,7 +74,7 @@ def _launcher(root: Path, environment) -> None:
     admit(root.parent, True)
     import agent_procutil as pu
 
-    python, python_env = pu.direct_python()
+    python, python_env = pu.direct_python(sys.executable)
     with (root / "worker.log").open("wb") as log:
         process, job = pu.spawn_sync_in_kill_on_close_job(
             [python, str(Path(__file__).resolve()), "--worker", str(root)],
@@ -182,7 +182,7 @@ def qualify(root: Path, environment: dict[str, str]) -> dict:
     from agent_procutil._daemon_instance_identity import _windows_birth
 
     cycles = []
-    python, python_env = pu.direct_python()
+    python, python_env = pu.direct_python(sys.executable)
     for cycle, restrictive in enumerate((False, False, True), 1):
         directory = root / f"native-lifetime-{cycle}"
         directory.mkdir()
