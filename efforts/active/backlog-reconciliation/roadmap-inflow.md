@@ -10,6 +10,9 @@ Later assessments: [installation-owner boundaries](roadmap-inflow-late-owner.md)
 and [cold fixtures/optional image metadata](roadmap-inflow-fixtures.md).
 The later [native UV argument assessment](roadmap-inflow-uv-arguments.md)
 retains #9489's scoped compatibility and non-editable-source obligations.
+The [real-venue and Picker presentation assessments](roadmap-inflow-venue-picker.md)
+retain #9493/#9495's P2 proposals and existing source/qualification custody;
+neither is a missing-foundation or native-completion claim.
 
 **Status:** Bounded inflow groups are independently admitted outside the
 frozen 682-assignment roster. The first #9412/#9413/#9414 group uses

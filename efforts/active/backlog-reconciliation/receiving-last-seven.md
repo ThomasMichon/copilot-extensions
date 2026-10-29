@@ -5,13 +5,23 @@
 Parent: [Backlog Reconciliation](README.md), Phase 2.
 Prior unit: [first ten receiving relationships](receiving-first-ten.md).
 
-**Status:** Authored additive Plan, actual global Validation, continuing
-Coordination and Journal proposals under five existing efforts. Normal review,
-actual merged-file readback and separate source-specific judgments remain.
-No issue disposition or technical completion is claimed. In particular,
+**Status:** #9502 actually merged additive Plan, actual global Validation,
+continuing Coordination and Journal contracts under five existing efforts.
+Complete current receiving readback and separate whole-source judgments
+supported four guarded administrative folds: #3944/#3945/#4016/#4028.
+#3367/#4055/#4229 and keeper #1266 remain open and unchanged. These are
+tracking outcomes, not technical completion, owner transfer or claim release.
+In particular,
 #4229's original incumbent-assignee whole-mapping acceptance remains unmet:
 its proposed keeper #1266 body amendment remains unapplied and #4229 stays
 standalone.
+
+**Reviewed delivery:** merged at 2026-10-29 02:46:43 UTC
+(2026-10-28 19:46:43 PDT) as
+`bf3c97c84f34eebc795746ce21e1f38a8e552bb3`, following exact-head Copilot
+approval with no open issues, no review threads and required green checks.
+All twelve published files matched the audited authored bytes. The entire
+parent README was re-read after merge and remains Active.
 
 These are _(agent-recommended)_ tracking amendments from four independently
 admitted studies. Whole original/refined requirements and directly inherited
@@ -48,24 +58,40 @@ unchanged and are not blamed on artifact storage.
 
 Publication of this document does not accept a missing source-specific
 receipt, perform a native experiment, authorize runtime changes or release
-claims. Any later administrative fold requires a separate complete receiving
-readback and literal-condition judgment, with whole-record guards and actual
-provider-state verification. #4229 is explicitly not eligible on the basis
-of this proposal.
+claims. Complete readback covered all five ROOTs and five direct annexes,
+followed by all 28 whole original/refinement texts for the seven origins
+and keeper. Separate literal-condition judgments, fresh whole-record guards,
+public explanation readback and final provider-state verification preceded
+the four administrative folds; the
+[follow-through register](roadmap-follow-through.md#four-further-folds-after-seven-contract-receiving-readback)
+records their actual outcomes.
+
+#3367 retains its owner's explicit keep-open disposition for catchable
+unavailable-error acceptance after local mitigation. #4055 retains its
+specific all-original-facts/actual-caller-branches condition; the new Plan
+preserves that work but supplies no current real-caller qualification.
+Its Draft effort is not a new veto or whole-broker gate. #4229 remains
+standalone because its specifically required assignee receipt is still
+unmet, not because of a new universal ACK requirement. The held #1266
+keeper and all substantive/source/resource custodians remain unchanged.
 
 ## Campaign state
 
-The last complete provider observation remains **929 open issues** at
-2026-10-29 02:23:39 UTC (2026-10-28 19:23:39 PDT): 674 creator-eligible and
-255 excluded, or 696 original-cohort and 233 inflow. These proposals do not
-change that count; it remains 200 above the fixed 729 guidance checkpoint.
+The complete provider observation is **925 open issues** at
+2026-10-29 02:54:41 UTC (2026-10-28 19:54:41 PDT): 670 creator-eligible and
+255 excluded, or 692 original-cohort and 233 inflow. The prior 929
+observation lost exactly the four verified original-cohort wrappers and
+gained no arrivals; no external departure receives campaign credit.
+It remains 196 above the fixed 729 guidance checkpoint.
 The prior four verified oldest-source administrative folds and six retained
 sources are recorded separately in the first-ten register.
 
-Later eligible #9493/#9495 are under a separately bounded inflow study;
-their titles or arrival do not establish priority, an implementation gap or
-an accepted effort home. The wider roadmap, provisional decisions and
-ongoing graph/inflow reconciliation remain open.
+Later eligible #9493/#9495 now have independently admitted bounded P2
+research proposals: real matching user-systemd venue/cleanup qualification
+and finite Picker pending/error/stale presentation under their actual
+existing owners. The studies are not accepted receiving scope, new missing
+implementations or native/UI completion. The wider roadmap, provisional
+decisions and ongoing graph/inflow reconciliation remain open.
 
 See also: [follow-through](roadmap-follow-through.md),
 [sequencing](roadmap-sequencing.md), and [bounded inflow](roadmap-inflow.md).

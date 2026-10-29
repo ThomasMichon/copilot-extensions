@@ -528,3 +528,60 @@ older nominations under the existing charter. Their studies, continuing
 inflow/provisional work, six-hour backstop and all outside obligations
 remain open. The completed first-ten document/judgment slice is not the
 campaign's completion gate.
+
+## Four further folds after seven-contract receiving readback
+
+#9502 actually merged at **2026-10-29 02:46:43 UTC
+(2026-10-28 19:46:43 PDT)** as
+`bf3c97c84f34eebc795746ce21e1f38a8e552bb3`, following exact-head Copilot
+approval with no open issues, zero threads and required green CI. All
+twelve published files matched their audited authored bytes. The complete
+parent README was re-read and remains Active.
+
+Actual current readback covered five complete receiving ROOTs and five
+strict annexes, preserving incumbent status, Request, Participants,
+checked credit, first unresolved Plan/global Validation gates, Journal
+and the prior #9496 contracts. All 28 whole original/refinement texts for
+the seven sources and keeper were read before separate literal-condition
+judgments.
+
+| Source | Complete retained receiving lane | Public explanation; verified `not_planned` closure |
+|---|---|---|
+| #3944 | Full-Harness Startup Reliability: one notification renders once, repaint terminates, Loading ends AND native input/seed is usable; legitimate diagnostics preserved | [Explanation](https://github.com/ThomasMichon/copilot-extensions/issues/3944#issuecomment-6486551656); 02:51:50 UTC (19:51:50 PDT) |
+| #3945 | Full-Harness Startup Reliability: intended initial initialization AND first interactive seed/no unintended second Loading, with legitimate later reloads retained | [Explanation](https://github.com/ThomasMichon/copilot-extensions/issues/3945#issuecomment-6486558634); 02:52:20 UTC (19:52:20 PDT) |
+| #4016 | Remote ACP Host Ownership: all five peer-delegation outcomes and thirteen inherited capability/Tier1/Tier2 clauses, ACP fidelity AND CodeSpace sleep/bootstrap; external client-only custody stays separate | [Explanation](https://github.com/ThomasMichon/copilot-extensions/issues/4016#issuecomment-6486565899); 02:52:51 UTC (19:52:51 PDT) |
+| #4028 | Remote ACP Host Ownership: actual measured LAUNCH_ACP elapsed/stage reaches the caller before an earlier outer deadline masks it, distinct from configured budgets and whole cold performance | [Explanation](https://github.com/ThomasMichon/copilot-extensions/issues/4028#issuecomment-6486573126); 02:53:18 UTC (19:53:18 PDT) |
+
+UTC dates are October 29 and PDT dates October 28. Each fresh full-roster
+and whole-record guard preceded publication, each explanation was read
+back before closure, and only its own comment delta was admitted. Original
+bodies, assignees, prior comments and edit metadata remained unchanged;
+final whole-record/provider-state/reason audits verified all four.
+These are administrative duplicate-tracker outcomes, not technical fixes,
+implementation appointments, claim releases or native/installed acceptance.
+
+Three sources remain open and unchanged under actual conditions:
+#3367's owner expressly retained the catchable unavailable-error ask after
+local mitigation; #4055 requires all original facts and actual caller
+branches covered with source/native/installed evidence separate; #4229
+requires the incumbent #1266 assignee's complete mapping acceptance,
+which remains unmet. The keeper #1266 and held AHP lane also remain open.
+The keeper-body draft remains unapplied. Draft bookkeeping, file
+authorship and corpus credit supply no missing receipt, and no new
+universal ACK, every-host or whole-parent gate is introduced.
+
+The independently admitted complete census at **2026-10-29 02:54:41 UTC
+(2026-10-28 19:54:41 PDT)** is **925 whole open**: 670 creator-eligible,
+255 excluded, 692 original-cohort and 233 inflow. Twelve raw responses,
+ten pages, unique IDs and the stable full eleven-member roster were
+checked. Exactly four own original-cohort folds explain the change from
+929, with no arrivals or external departures. The 766 baseline-cohort
+issues not currently open are not all campaign closure credit.
+
+The fixed whole checkpoint remains 729, **196 issues away**.
+Independently admitted #9493/#9495 bounded P2 proposals retain a real
+matching-systemd venue/cleanup gap and finite Picker presentation work
+with existing source/async/native custody and credit. They do not prove
+new missing foundations, accepted effort reception or native/UI success.
+The same four researchers, ongoing inflow/provisional roadmap work,
+six-hour backstop and outside obligations remain with the Active campaign.
