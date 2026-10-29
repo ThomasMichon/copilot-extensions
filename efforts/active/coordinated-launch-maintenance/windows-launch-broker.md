@@ -80,6 +80,44 @@ present that runtime repair as already available.
 Source/release/installed proofs remain distinct. The central deployment hold
 and ownership are unchanged.
 
+#### Selected runtime ownership contract
+
+The operator selected `owned-cleanup-scopes`: verify every tracked
+launcher-owned cleanup Job, without claiming escape from arbitrary external
+supervisors. This explicitly supersedes the earlier requirement to prove
+unknown external Job ancestry. An ambient Job alone is neither a rejection
+nor evidence of caller-dependent lifetime.
+
+The concrete mechanism is **agent-recommended**:
+
+- Give each canonical producer-owned Job a fresh native name and propagate
+  the complete ordered scope-name chain into its suspended child. Names are
+  discovery identities, not inherited handles or application authority.
+  Keep the actual kill-on-close handle exclusively with its existing owner.
+- Cover synchronous and asynchronous bounded producers and self-assigned
+  worker/test containment. Preserve strict non-breakaway policy wherever
+  already selected; ordinary descendants still die with their owner.
+- Durable launch uses ordinary native headless creation with explicit
+  breakaway and a suspended child. Open query-only handles to every declared
+  cleanup Job, verify the child is absent from each exact Job, and close those
+  temporary handles before resuming it. Never inherit Job handles into the
+  daemon. Missing/malformed scopes or failed native checks refuse admission.
+- Clear escaped scope metadata in the admitted daemon's environment.
+  A shared restrictive outer Job remains in the propagated chain even when
+  the immediate Job permits breakaway; admission must refuse that child.
+- Preserve process/instance custody and confirmed cleanup on refusal.
+  Native creation denial remains explicit. Normal startup never activates,
+  registers or automatically falls back to COM, a Scheduled Task or UAC.
+  Contained tests and explicit contained-lifetime calls remain contained.
+- Remove mandatory Task adoption from normal constructors while preserving
+  exact-owned legacy removal/recovery. Do not silently remove an existing
+  registration or change deployed installations.
+
+Qualify both native lifetime cycles and the actual stopped-resident
+concurrent Manager/current-roster consumer, with bounded controls and the
+restrictive shared-outer negative. Ordinary review, CI, source merge and Main
+promotion remain required before notifying deployment owners.
+
 ### Interactive-token desktop activation
 
 **Superseded:** retained as the reviewed history of #9523 and the unmerged

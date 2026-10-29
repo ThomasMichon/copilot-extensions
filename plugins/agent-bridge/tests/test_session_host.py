@@ -3134,6 +3134,7 @@ def test_session_host_bundle_preserves_procutil_and_portable_receiver_closures(t
             sys.executable, "-I", "-S", "-c",
             "import sys;sys.path.insert(0,sys.argv[1]);"
             "import agent_procutil.daemon_instances;"
+            "import agent_procutil._windows_caller_owned;"
             "import agent_bridge.hosting_policy as policy;"
             "import agent_bridge.session_host.launcher;"
             "assert callable(policy.require_path_hosting);print('both-closures-ok')",
@@ -3143,6 +3144,35 @@ def test_session_host_bundle_preserves_procutil_and_portable_receiver_closures(t
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "both-closures-ok"
+
+
+def test_session_host_bundle_optional_legacy_adapter_refuses_without_full_installation(tmp_path):
+    import zipfile
+    from agent_procutil import no_window_kwargs
+    from agent_bridge.session_host import bundle
+
+    archive, _digest = bundle.build_session_host_bundle(tmp_path / "bundle")
+    with zipfile.ZipFile(archive) as contents:
+        assert "agent_procutil/windows_task_broker.py" not in contents.namelist()
+    program = (
+        "import sys;sys.path.insert(0,sys.argv[1]);"
+        "from agent_procutil import DaemonSpawnError;"
+        "from agent_procutil.daemon import spawn_brokered_daemon;"
+        "\ntry:"
+        "\n spawn_brokered_daemon(['fixture'],cwd=sys.argv[2],env={},creationflags=0,"
+        "log_path=sys.argv[3],stderr_log_path=None)"
+        "\nexcept DaemonSpawnError as error:"
+        "\n assert error.process_created is False"
+        "\n assert 'windows-broker support' in str(error)"
+        "\n print('optional-adapter-refused')"
+        "\nelse: raise AssertionError('uninstalled legacy adapter activated')"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", program, str(archive), str(tmp_path), str(tmp_path / "log")],
+        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "optional-adapter-refused"
 
 
 def _bundle_policy_owner(tmp_path, monkeypatch, *, allowed=True):

@@ -21,6 +21,30 @@ from windows_broker_desktop import DesktopWitness
 from windows_broker_cell_acceptance import qualify as qualify_cell
 import windows_broker_consumer_acceptance as consumer_probe
 import windows_broker_picker_acceptance as picker_probe
+import windows_normal_process_lifetime as normal_probe
+
+
+@pytest.mark.parametrize("birth", ["expected", "reused"])
+def test_native_fixture_pins_birth_before_granting_cleanup_custody(monkeypatch, birth):
+    child = Mock(_handle=123)
+    monkeypatch.setitem(sys.modules, "agent_procutil", SimpleNamespace(__path__=[]))
+    monkeypatch.setitem(
+        sys.modules, "agent_procutil.daemon_broker",
+        SimpleNamespace(WindowsDaemonProcess=Mock(return_value=child)),
+    )
+    monkeypatch.setitem(
+        sys.modules, "agent_procutil._daemon_instance_identity",
+        SimpleNamespace(_windows_birth=lambda handle: birth),
+    )
+    if birth == "expected":
+        assert normal_probe._verified_process(321, "expected", "fixture") is child
+        child.close.assert_not_called()
+    else:
+        with pytest.raises(RuntimeError, match="identity changed"):
+            normal_probe._verified_process(321, "expected", "fixture")
+        child.close.assert_called_once_with()
+    child.kill.assert_not_called()
+    child.wait.assert_not_called()
 
 
 @pytest.mark.parametrize("plugin", sorted(protocol_probe.NATIVE_PLUGINS))
@@ -452,6 +476,7 @@ def test_protocol_caller_preserves_os_profile_context_but_never_arbitrary_creden
         "USERPROFILE": r"C:\fixture-profile",
         "LocalAppData": r"C:\fixture-profile\AppData\Local",
         "ProgramFiles": r"C:\Program Files",
+        "PSModulePath": r"C:\Windows\System32\WindowsPowerShell\v1.0\Modules",
         "GITHUB_TOKEN": "must-not-cross",
         "UNRELATED_CREDENTIAL": "must-not-cross",
     }

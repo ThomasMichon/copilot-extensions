@@ -2659,8 +2659,8 @@
         "fleet-manager/tests/test_host_profile.py": "37448c7b4dc138a8234556cee32872b4d4ddbb123ab5ef4dba6cc47b497eb298",
         "fleet-manager/tests/test_trusted_systemd_profile.py": "f5e02393ac409efd446073d68c36bc56930f9522fb14d0d7d40c975987609354",
         "libs/agent-procutil/setup.py": "fc307f6a4c180344b0f95a8f31d7db63747e56549d55bd32221f3185a89e39b1",
-        "libs/agent-procutil/src/agent_procutil/__init__.py": "8138b44223df2f5849c165033c9b503060cea5b80665879a240294cb3dd32aef",
-        "libs/agent-procutil/src/agent_procutil/_async.py": "1f5ba1ec9b2cdf5608e446f5f334c1989a7e71dbc7dd515c158cf26c26c5fb71",
+        "libs/agent-procutil/src/agent_procutil/__init__.py": "5b53884c3fd30775d8a42ffb9fb007fdfb77061549f59a92e19e130416d7d46b",
+        "libs/agent-procutil/src/agent_procutil/_async.py": "1f7bcc621579282062a2d5117daed8a9f0201f4d2c4b44105328a5cd71ccbd26",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_child.py": "081933f7f8512827ff9fe0800a3bf226b0d4a757114e9b7060b63081b5aea644",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_identity.py": "2a45a4d16a5990a3ed1e0fe85fa92f598304aa1a2c6d3999fc7c30a70d0a9c31",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_owner.py": "cefaa53b33187c2ee4cacc3e1179116fbe03e182b43b73f1d87152205a522942",
@@ -2668,7 +2668,7 @@
         "libs/agent-procutil/src/agent_procutil/_darwin_caller_owned.py": "4dfafcc9944e429d3c1c83525d30379c2f02473d12c4031433cf7fe4f6906974",
         "libs/agent-procutil/src/agent_procutil/_interpreter.py": "0fe387814f80638c27f4d12c7bb1c2122abaeb2b4c71b75402d471e3940f92c7",
         "libs/agent-procutil/src/agent_procutil/_linux_pidfd.py": "cfb80912e44db7f98efe911ad57dd38f0fa5eb5a28e4e7b91da8206431871560",
-        "libs/agent-procutil/src/agent_procutil/daemon.py": "cdfd24ecdc3bc25a0104caadb704470785458954128b161ae319f148694ff028",
+        "libs/agent-procutil/src/agent_procutil/daemon.py": "9121eb565bafb0f7dbdca0cc926c03bf7adabbb50e9585b380a128c1963507ed",
         "libs/agent-procutil/src/agent_procutil/daemon_broker.py": "4a8034bfa07af5f56a382f93a45f5082e4d5b0f387f58084420d5019bde8f289",
         "libs/agent-procutil/src/agent_procutil/daemon_instances.py": "e5780dd000be04931e5b1075c5ae0e8fc47915dd343289f6f51557082e676965",
         "libs/agent-procutil/src/agent_procutil/diagnostics.py": "c5e3c4e15f1e853c4da3a2916514dbc50b743272b54223780fae6262bd3dc113",
@@ -2953,7 +2953,7 @@
         "plugins/agent-machines/src/agent_machines/git_config_transaction.py": "5b054f3f2c2270672c55bab7de114e5e05541235d94553c4c1de2a06b26fe38d",
         "tools/promotion_unit_tests/test_git_config_transaction.py": "d47c4b32c9ccbffdda2cc3813ae66871970a068be44fddcbde5449230db4da2b",
         "libs/agent-procutil/src/agent_procutil/_caller_owned.py": "88ac2fafdd89e568993477ac3670537caa8eccd539e3c821e8879c383e2f19f9",
-        "libs/agent-procutil/src/agent_procutil/_windows_caller_owned.py": "ffdefa5b420693bb8b16b397d172972e31d28b71d8583942e90c3cf213212388",
+        "libs/agent-procutil/src/agent_procutil/_windows_caller_owned.py": "3ed80a063284d801a25518ce4b15175a5c84e9b82170917f85da126e8bc90790",
         "libs/agent-procutil/src/agent_procutil/owned_process.py": "e4e19105f40d3eb78370334ae52d20524a75bb4f53639a456bef77331261bc23",
         "libs/agent-procutil/src/agent_procutil/windows_broker_cell.py": "eaecb72de5977740e505cd63fcd8641578a3410331859d6933e0d8fe8ef31f72",
         "libs/agent-procutil/src/agent_procutil/windows_broker_installation.py": "633bd532bf44365fc4540cdfc632e9f93c039f1662fb824f1c674b4299665abd",
@@ -2967,7 +2967,8 @@
         "libs/zdd/src/zdd/private_windows.py": "358dac30bf8d7f4cdcc212dec8cacb187c8e00b43fe2591ef4fff7e0fa418e1d",
         "libs/zdd/src/zdd/private_windows_native.py": "80df5f71f4962a64eb96670a15511cdfddc50e989cc667271642c442613fab9d",
         "libs/plugin-activation/src/plugin_activation/_project_identity.py": "8eeee3be5ee73113e8d6cd3642ecb6ba6eb163c25c14033a102c86462d808578",
-        "libs/plugin-activation/tests/test_plugin_activation.py": "e72b654bf73e0672b6303a0cc3cd34c21b89abc95204e3abf20a45c4f1304638"
+        "libs/plugin-activation/tests/test_plugin_activation.py": "e72b654bf73e0672b6303a0cc3cd34c21b89abc95204e3abf20a45c4f1304638",
+        "libs/agent-procutil/src/agent_procutil/_job_scopes.py": "5f83fbbd838bbbf837b55cd714a75432ef05d44c8d76119adcac172d0f0d4d21"
     },
     "coverage_targets": [
         "tools/core_runtime_profile.py",

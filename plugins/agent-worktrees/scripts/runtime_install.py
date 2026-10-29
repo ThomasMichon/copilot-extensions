@@ -623,8 +623,6 @@ def settle_candidate(
             custody.enter_context(runtime.retention_lease(root, previous))
         print(f"Runtime {version}: verifying publication under its own interpreter", flush=True)
         _load_installed(lifecycle_slot if lifecycle_slot is not None else candidate_slot)
-        if version != runtime.DEV_VERSION:
-            install_driver.adopt_broker(root, candidate_slot)
         if recover_adopted_manager:
             from agent_worktrees.manager_recovery import recover
 

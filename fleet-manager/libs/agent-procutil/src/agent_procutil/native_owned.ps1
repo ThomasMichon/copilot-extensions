@@ -5,6 +5,10 @@ using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Collections;
+using System.Collections.Generic;
+using System.Text;
+using System.Text.RegularExpressions;
 using System.Runtime.InteropServices;
 using System.Threading;
 using Microsoft.Win32.SafeHandles;
@@ -49,7 +53,7 @@ namespace CopilotExtensions {
             public long User, Kernel, PeriodUser, PeriodKernel;
             public uint Faults, Total, Active, Terminated;
         }
-        [DllImport("kernel32.dll", SetLastError = true)]
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern IntPtr CreateJobObject(IntPtr attributes, string name);
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool SetInformationJobObject(IntPtr job, int kind, ref Limits limits, uint length);
@@ -103,6 +107,30 @@ namespace CopilotExtensions {
             } while (elapsed.ElapsedMilliseconds < milliseconds);
             return false;
         }
+        private static string ChildEnvironment(string scope) {
+            const string key = "COPILOT_EXTENSIONS_OWNED_JOB_SCOPES";
+            var current = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (DictionaryEntry item in Environment.GetEnvironmentVariables())
+                current[(string)item.Key] = (string)item.Value;
+            string inherited;
+            current.TryGetValue(key, out inherited);
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            if (inherited != null) {
+                if (inherited.Length == 0 || inherited.Length > 4096)
+                    throw new ArgumentException("invalid owned Job scopes");
+                foreach (string name in inherited.Split(';')) {
+                    if (!Regex.IsMatch(name, @"\ALocal\\ce-owned-job-[0-9a-f]{32}\z") || !names.Add(name))
+                        throw new ArgumentException("invalid owned Job scopes");
+                }
+            }
+            string chain = inherited == null ? scope : inherited + ";" + scope;
+            if (names.Count >= 64 || chain.Length > 4096)
+                throw new ArgumentException("owned Job scope limit exceeded");
+            current[key] = chain;
+            var block = new StringBuilder();
+            foreach (var item in current) block.Append(item.Key).Append('=').Append(item.Value).Append('\0');
+            return block.Append('\0').ToString();
+        }
 
         public static int Run(string executable, string arguments, string cwd, string log, int timeout) {
             if (timeout <= 0 || timeout > 7200000)
@@ -112,13 +140,18 @@ namespace CopilotExtensions {
                     !String.Equals(Path.GetFullPath(path), path, StringComparison.OrdinalIgnoreCase))
                     throw new ArgumentException("native process paths must be fully qualified and normalized");
             }
-            IntPtr job = IntPtr.Zero, attributes = IntPtr.Zero, handles = IntPtr.Zero, jobs = IntPtr.Zero;
+            IntPtr job = IntPtr.Zero, attributes = IntPtr.Zero, handles = IntPtr.Zero, jobs = IntPtr.Zero,
+                environment = IntPtr.Zero;
             bool initialized = false, assigned = false, settled = false;
             Exception primary = null;
             ProcessInfo child = new ProcessInfo();
             try {
-                job = CreateJobObject(IntPtr.Zero, null);
+                string scope = @"Local\ce-owned-job-" + Guid.NewGuid().ToString("N");
+                string childEnvironment = ChildEnvironment(scope);
+                job = CreateJobObject(IntPtr.Zero, scope);
+                int jobError = Marshal.GetLastWin32Error();
                 Check(job != IntPtr.Zero);
+                if (jobError == 183) throw new IOException("owned Job scope identity already exists");
                 var limits = new Limits();
                 limits.Basic.Flags = 0x2000; // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, never BREAKAWAY_OK.
                 Check(SetInformationJobObject(job, 9, ref limits, (uint)Marshal.SizeOf(typeof(Limits))));
@@ -151,8 +184,9 @@ namespace CopilotExtensions {
                     startup.Info.Output = startup.Info.Error = output.SafeFileHandle.DangerousGetHandle();
                     startup.Attributes = attributes;
                     var command = new System.Text.StringBuilder("\"" + executable + "\" " + arguments);
+                    environment = Marshal.StringToHGlobalUni(childEnvironment);
                     Check(CreateProcess(executable, command, IntPtr.Zero, IntPtr.Zero, true,
-                        0x08080004, IntPtr.Zero, cwd, ref startup, out child));
+                        0x08080404, environment, cwd, ref startup, out child));
                     // JOB_LIST assigns atomically at creation, before any resume/death gap.
                     assigned = true;
                     if (ResumeThread(child.Thread) == UInt32.MaxValue)
@@ -197,6 +231,7 @@ namespace CopilotExtensions {
                 if (attributes != IntPtr.Zero) Marshal.FreeHGlobal(attributes);
                 if (handles != IntPtr.Zero) Marshal.FreeHGlobal(handles);
                 if (jobs != IntPtr.Zero) Marshal.FreeHGlobal(jobs);
+                if (environment != IntPtr.Zero) Marshal.FreeHGlobal(environment);
                 if (closeError != null)
                     throw new NativeOwnedProcessException("native custody handle close failed",
                         primary == null ? closeError : new AggregateException(primary, closeError), settled);

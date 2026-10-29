@@ -337,6 +337,8 @@
     },
     "caller-contained": {
       "t:retirement_custody_acceptance.py::qualify::Popen": 2,
+      "t:windows_normal_process_lifetime.py::_launcher::spawn_daemon": 1,
+      "t:windows_normal_process_lifetime.py::_worker::Popen": 1,
       "r:plugins/agent-worktrees/scripts/pre-tool-hook.ps1::<script>::Process.Start": 1,
       "t:windows_broker_protocol_acceptance.py::negative_topology::Popen": 1,
       "t:windows_launch_broker_probe.ps1::<script>::Process.Start": 1,
@@ -399,6 +401,7 @@
       "t:clean-room/scenarios/agent-bridge-concurrent-relay/fixtures/relay_collision_probe.py::_check_live_occupant_ephemeral_fallback::start_server": 1
     },
     "native": {
+      "t:windows_normal_process_lifetime.py::_worker::spawn_daemon": 1,
       "t:windows_broker_protocol_acceptance.py::caller::spawn_daemon": 1,
       "t:windows_launch_broker_probe.py::broker::Popen": 1,
       "r:plugins/agent-bridge/scripts/install.ps1::<script>::Start-Process": 3,

@@ -153,7 +153,7 @@ def test_contained_fallback_keeps_the_stderr_log(tmp_path, fake_popen, monkeypat
 
     _, (_, retry) = fake_popen.calls
     assert retry["stderr"].name == str(err_log)
-    assert "starting the daemon inside it" in err_log.read_text(encoding="utf-8")
+    assert "accepts caller-owned lifetime" in err_log.read_text(encoding="utf-8")
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX file modes do not apply on Windows")

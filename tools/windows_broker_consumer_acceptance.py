@@ -1,4 +1,4 @@
-"""Real maintenance consumers in an explicitly admitted disposable Windows profile."""
+"""Normal native maintenance/Manager consumers in a disposable Windows profile."""
 
 from __future__ import annotations
 
@@ -37,9 +37,6 @@ def qualify(root: Path) -> dict:
     import agent_procutil as pu
     from agent_procutil.owned_process import run_caller_owned
     from update_driver import core
-    from agent_procutil import windows_broker_installation as installation
-    from agent_procutil import windows_task_broker as broker
-    from zdd.private_protocol import Deadline
     from windows_broker_desktop import DesktopWitness
     import prepare_runtime_source as preparation
 
@@ -49,6 +46,7 @@ def qualify(root: Path) -> dict:
     environment = fixture_environment(dict(os.environ), control=True)
     environment.update(
         HOME=str(profile), USERPROFILE=str(profile), AGENT_HOME=str(profile),
+        HOMEDRIVE=profile.drive, HOMEPATH=str(profile)[len(profile.drive):],
         APPDATA=str(profile / "AppData" / "Roaming"),
         LOCALAPPDATA=str(profile / "AppData" / "Local"),
         UV_PYTHON=sys.executable, UV_PYTHON_DOWNLOADS="never",
@@ -75,13 +73,26 @@ def qualify(root: Path) -> dict:
         raise RuntimeError("real consumer qualification requires native PowerShell, Git and UV")
     commands = 0
 
-    def run(arguments, *, cwd=None, timeout=300):
+    def run(arguments, *, cwd=None, timeout=300, durable_launches=False):
         nonlocal commands
         commands += 1
-        result = run_caller_owned(
-            arguments, env=environment, cwd=cwd or root, timeout=timeout,
-            max_stdout_bytes=1024 * 1024, max_stderr_bytes=1024 * 1024,
-        )
+        if durable_launches:
+            process, job = pu.spawn_sync_in_kill_on_close_job(
+                arguments, env=environment, cwd=cwd or root, require_job=True,
+                allow_breakaway=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, encoding="utf-8", **pu.no_window_kwargs(),
+            )
+            try:
+                stdout, stderr = process.communicate(timeout=timeout)
+                result = subprocess.CompletedProcess(arguments, process.returncode, stdout, stderr)
+            finally:
+                job.terminate_and_wait(5)
+                process.wait(timeout=5)
+        else:
+            result = run_caller_owned(
+                arguments, env=environment, cwd=cwd or root, timeout=timeout,
+                max_stdout_bytes=1024 * 1024, max_stderr_bytes=1024 * 1024,
+            )
         (root / f"command-{commands}.log").write_text(
             result.stdout + result.stderr, encoding="utf-8",
         )
@@ -151,22 +162,21 @@ def qualify(root: Path) -> dict:
     witness.start()
     cleanup = {}
     outcome = {}
-    config = None
-    manager_config = None
     command = None
     registered = []
     try:
-        # No contained-test switch: the real installer owns cold construction and Task adoption.
-        run(lifecycle("agent-worktrees", "provision"), cwd=projects[0])
+        from windows_normal_process_lifetime import qualify as qualify_lifetime
+
+        lifetime = qualify_lifetime(root, environment)
+        run(lifecycle("agent-worktrees", "provision"), cwd=projects[0], durable_launches=True)
         version = (runtime / "current-version").read_text().strip()
         slot = runtime / "versions" / version
         interpreter = slot / "Scripts" / "python.exe"
         manifest = json.loads((runtime / "deploy-manifest.json").read_text())
         if Path(manifest["venv"]) != slot:
             raise RuntimeError("cold Worktrees construction did not publish its actual runtime")
-        config = installation.registration(runtime, slot)
-        if not broker.task_operation("inspect", config, Deadline(10))["installed"]:
-            raise RuntimeError("cold Worktrees installation did not adopt its broker")
+        if (runtime / "windows-launch-broker.json").exists():
+            raise RuntimeError("cold native Worktrees unexpectedly adopted a Task")
         command = [str(interpreter), "-I", "-B", "-X", "utf8", "-m", "agent_worktrees"]
         for index, project in enumerate(projects):
             name = f"broker-fixture-{index}"
@@ -179,7 +189,7 @@ def qualify(root: Path) -> dict:
         def submit(arguments, project):
             process, job = pu.spawn_sync_in_kill_on_close_job(
                 [*command, *arguments], cwd=project, env=environment,
-                require_job=True, allow_breakaway=False, stdin=subprocess.DEVNULL,
+                require_job=True, allow_breakaway=True, stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
                 **pu.no_window_kwargs(),
             )
@@ -256,19 +266,19 @@ def qualify(root: Path) -> dict:
             raise RuntimeError("a later request began before the prior mutation settled")
         from windows_broker_picker_acceptance import qualify as qualify_picker
 
-        run(lifecycle("worktree-manager", "install"), cwd=projects[0])
+        run(lifecycle("worktree-manager", "install"), cwd=projects[0], durable_launches=True)
         manager_version = (manager_runtime / "current-version").read_text().strip()
         manager_slot = manager_runtime / "versions" / manager_version
-        manager_config = installation.registration(manager_runtime, manager_slot)
-        if not broker.task_operation("inspect", manager_config, Deadline(10))["installed"]:
-            raise RuntimeError("cold Manager construction did not adopt its broker")
+        if (manager_runtime / "windows-launch-broker.json").exists():
+            raise RuntimeError("cold native Manager unexpectedly adopted a Task")
         picker = qualify_picker(
             root, runtime, command, projects, manager_slot=manager_slot,
             environment=environment, run=run, procutil=pu,
         )
         outcome = {
             "cold_actual_worktrees_construction": True,
-            "cold_installer_broker_adoption": True,
+            "normal_native_creation_without_task_adoption": True,
+            "native_lifetime": lifetime,
             "automatic_real_peer_construction": True,
             "handoff_before_installer_release_seconds": handoff_seconds,
             "equivalent_requests_coalesced": True, "distinct_scopes_completed": True,
@@ -319,26 +329,6 @@ def qualify(root: Path) -> dict:
                     raise RuntimeError(f"{name} canonical uninstall retained its deployed manifest")
             except Exception as error:
                 cleanup[name] = str(error)
-        for component, captured in (("broker-task", config), ("manager-broker-task", manager_config)):
-            if captured is None:
-                continue
-            try:
-                # Removal deleted the entrypoint. Inspect the captured owned definition
-                # through the canonical read-only native adapter, never activation admission.
-                inspection = run_caller_owned([
-                    str(Path(os.environ["SystemRoot"]) / r"System32\WindowsPowerShell\v1.0\powershell.exe"),
-                    "-NoProfile", "-NonInteractive", "-File",
-                    str(Path(broker.__file__).with_name("windows_broker_task.ps1")),
-                    "-Action", "inspect",
-                ], env=environment, timeout=10, max_stdout_bytes=65536, max_stderr_bytes=65536,
-                    input_text=json.dumps({"config": captured.task()}))
-                if inspection.returncode:
-                    raise RuntimeError("owned Task absence inspection failed: " + inspection.stderr[-4096:])
-                cleanup[component] = json.loads(inspection.stdout) == {
-                    "installed": False, "accepting": False,
-                }
-            except Exception as error:
-                cleanup[component] = str(error)
         (root / "cleanup.json").write_text(json.dumps(cleanup), encoding="utf-8")
         desktop = witness.finish()
         (root / "desktop.json").write_text(json.dumps({
@@ -346,8 +336,7 @@ def qualify(root: Path) -> dict:
         }), encoding="utf-8")
         expected = {
             "requests": True, "projects": True, "agent-ssh": True,
-            "agent-worktrees": True, "broker-task": True,
-            "worktree-manager": True, "manager-broker-task": True,
+            "agent-worktrees": True, "worktree-manager": True,
         }
         if any(value is not True for value in cleanup.values()) or (not body_failed and cleanup != expected):
             raise RuntimeError("real consumer cleanup was not confirmed: " + json.dumps(cleanup))

@@ -11,7 +11,9 @@ if ($Mode -eq 'submit') {
         -Arguments @('worker', $Root, $Helper, $Custody) -WorkingDirectory $Root `
         -LogPath (Join-Path $Root 'worker.log')
     try {
-        [IO.File]::WriteAllText((Join-Path $Root 'worker.json'), (@{ pid = $worker.Id } | ConvertTo-Json))
+        [IO.File]::WriteAllText((Join-Path $Root 'worker.json'), (@{
+            pid = $worker.Id; birth = [CopilotExtensions.DaemonInstanceNative]::Birth($worker)
+        } | ConvertTo-Json))
     } finally {
         $worker.Dispose()
     }

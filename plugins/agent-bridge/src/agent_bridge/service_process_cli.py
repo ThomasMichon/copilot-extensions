@@ -395,11 +395,11 @@ def _launch_bridge_daemon(argv: list[str], *, display: str, contained_last_resor
     """Start a bridge daemon through ``spawn_daemon``; return its process handle.
 
     The daemon breaks away from the caller's Job and runs from the install root
-    with ``agent-bridge.log`` and a separate ``agent-bridge-err.log``. When the
-    caller's Job forbids breakaway on Windows, the WMI broker re-parents the
-    daemon outside it instead. Only when that also fails, and the caller
-    accepts a daemon that dies with its Job (``contained_last_resort``), is it
-    started inside the Job; otherwise the launch failure is raised.
+    with ``agent-bridge.log`` and a separate ``agent-bridge-err.log``. Canonical
+    native admission verifies escape from tracked caller cleanup
+    Jobs. A caller may explicitly accept its shorter Job lifetime with
+    ``contained_last_resort`` after a settled refusal; direct starts and
+    passive generations do not accept that fallback.
     """
     core = _core()
     root = os.path.abspath(core._INSTALL_DIR)

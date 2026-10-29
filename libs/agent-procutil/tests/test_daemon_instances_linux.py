@@ -275,7 +275,7 @@ time.sleep(30)
     from agent_procutil._daemon_instance_identity import path_identity
     device, inode = path_identity(artifact)
     try:
-        with store._locked(receipt) as path:
+        with store._locked(receipt, wait_seconds=1) as path:
             row = store._read(path)
             row.update(
                 artifact_count="1", artifact_0_path=str(artifact),

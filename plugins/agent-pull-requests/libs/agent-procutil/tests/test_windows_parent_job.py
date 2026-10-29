@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_procutil import _windows_parent_job as owner
+from agent_procutil import _windows_parent_job as owner, _job_scopes
 
 
 class Kernel:
@@ -67,6 +67,8 @@ def native(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     monkeypatch.setattr(owner, "_windows_birth", lambda handle: "windows:12" if handle == 101 else "windows:34")
     monkeypatch.setattr(ctypes, "WinError", lambda *args: OSError("native API failed"), raising=False)
     monkeypatch.setattr(ctypes, "get_last_error", lambda: 5, raising=False)
+    monkeypatch.setattr(_job_scopes, "new_name", lambda: "Local\\ce-owned-job-" + "0" * 32)
+    monkeypatch.setattr(_job_scopes, "publish_current", lambda name: None)
     return SimpleNamespace(kernel=kernel, pid=os.getppid())
 
 
@@ -81,7 +83,7 @@ def test_parent_alone_retains_the_strict_job_before_return(native: SimpleNamespa
     assert native.kernel.calls == [
         ("open-parent", 0x1000 | 0x100000 | 0x40, False, native.pid),
         ("wait-parent", 101, 0),
-        ("create-job", None, None),
+        ("create-job", None, "Local\\ce-owned-job-" + "0" * 32),
         ("set-limits", 202, 9, ctypes.sizeof(native.kernel.limits)),
         ("duplicate-parent", -1, 202, 101, 0, False, 2),
         ("wait-parent", 101, 0),

@@ -1,4 +1,4 @@
-"""Bridge service and cutover share the canonical daemon lifetime broker."""
+"""Bridge service and cutover delegate the canonical native lifetime policy."""
 
 from __future__ import annotations
 
@@ -14,95 +14,63 @@ from agent_bridge import __main__ as m
 
 
 @pytest.fixture()
-def breakaway_refused(monkeypatch, tmp_path):
+def native_launch(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
-    calls = []
-
-    def popen(argv, **kwargs):
-        calls.append(kwargs.get("creationflags", 0))
-        if kwargs.get("creationflags", 0) & 0x01000000:
-            error = OSError("Access is denied")
-            error.winerror = 5
-            raise error
-        return Mock(pid=77)
-
     monkeypatch.setattr(m, "_INSTALL_DIR", str(tmp_path))
-    monkeypatch.setattr(agent_procutil, "_is_windows", lambda: True)
-    monkeypatch.setattr(agent_procutil.subprocess, "Popen", popen)
-    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     monkeypatch.setattr(m, "_daemon_launch_argv", lambda: ["py", "-m", "agent_bridge", "start"])
-    return calls
+    launch = Mock(return_value=Mock(pid=1234))
+    monkeypatch.setattr(m, "spawn_daemon", launch)
+    return launch
 
 
-def test_spawn_detached_uses_shared_broker_when_breakaway_refused(
-    monkeypatch, breakaway_refused, tmp_path,
-):
-    process = Mock(pid=1234)
-    launch = Mock(return_value=process)
-    monkeypatch.setattr(daemon, "spawn_brokered_daemon", launch)
+def test_spawn_detached_uses_shared_native_policy(native_launch, tmp_path):
+    assert m._spawn_detached_daemon() is native_launch.return_value
 
-    assert m._spawn_detached_daemon() is process
-
-    assert len(breakaway_refused) == 1
-    launch.assert_called_once()
-    kwargs = launch.call_args.kwargs
+    native_launch.assert_called_once()
+    kwargs = native_launch.call_args.kwargs
     assert kwargs["cwd"] == str(tmp_path)
     assert kwargs["log_path"] == str(tmp_path / "agent-bridge.log")
     assert kwargs["stderr_log_path"] == str(tmp_path / "agent-bridge-err.log")
-    assert not kwargs["creationflags"] & 0x01000000
+    assert kwargs["console_children"] is True
+    assert kwargs["contained_fallback"] is True
 
 
-def test_spawn_detached_falls_back_to_contained_only_after_broker_failure(
-    monkeypatch, breakaway_refused, tmp_path,
-):
-    launch = Mock(side_effect=agent_procutil.DaemonSpawnError("fixture broker failure"))
-    monkeypatch.setattr(daemon, "spawn_brokered_daemon", launch)
+def test_shared_native_failure_is_not_replayed_by_service_adapter(native_launch):
+    native_launch.side_effect = agent_procutil.DaemonSpawnError("unconfirmed native cleanup")
+    with pytest.raises(agent_procutil.DaemonSpawnError):
+        m._spawn_detached_daemon()
 
-    m._spawn_detached_daemon()
-
-    first, second = breakaway_refused
-    assert first & 0x01000000
-    assert not second & 0x01000000
-    launch.assert_called_once()
-    err = (tmp_path / "agent-bridge-err.log").read_text(encoding="utf-8")
-    assert "broker failed" in err and "contained_fallback" in err
+    native_launch.assert_called_once()
 
 
-def test_passive_generation_never_falls_back_to_contained(monkeypatch, breakaway_refused):
-    launch = Mock(side_effect=agent_procutil.DaemonSpawnError("fixture broker failure"))
-    monkeypatch.setattr(daemon, "spawn_brokered_daemon", launch)
+def test_passive_generation_never_falls_back_to_contained(native_launch):
+    native_launch.side_effect = agent_procutil.DaemonSpawnError("native admission refused")
     with pytest.raises(agent_procutil.DaemonSpawnError):
         m._launch_bridge_daemon(
             ["py", "-m", "agent_bridge", "start", "--passive"],
             display="agent-bridge passive generation", contained_last_resort=False,
         )
-    assert len(breakaway_refused) == 1
+    native_launch.assert_called_once()
+    assert native_launch.call_args.kwargs["contained_fallback"] is False
 
 
-def test_passive_generation_preserves_actual_brokered_handle(monkeypatch, breakaway_refused):
-    process = Mock(pid=4321)
-    monkeypatch.setattr(daemon, "spawn_brokered_daemon", Mock(return_value=process))
+def test_passive_generation_preserves_actual_native_handle(native_launch):
     result = m._launch_bridge_daemon(
         ["py"], display="agent-bridge passive generation", contained_last_resort=False,
     )
-    assert result is process
+    assert result is native_launch.return_value
+    assert native_launch.call_args.kwargs["contained_fallback"] is False
 
 
-def test_other_spawn_errors_are_not_masked_by_the_broker(monkeypatch, tmp_path):
-    monkeypatch.setattr(m, "_INSTALL_DIR", str(tmp_path))
-    monkeypatch.setattr(
-        agent_procutil.subprocess, "Popen",
-        Mock(side_effect=FileNotFoundError("missing executable")),
-    )
-    launch = Mock()
-    monkeypatch.setattr(daemon, "spawn_brokered_daemon", launch)
+def test_other_spawn_errors_are_not_masked_by_service_adapter(native_launch):
+    native_launch.side_effect = FileNotFoundError("missing executable")
     with pytest.raises(FileNotFoundError):
         m._spawn_detached_argv(["missing.exe"])
-    launch.assert_not_called()
+    native_launch.assert_called_once()
 
 
-def test_shared_broker_receives_anchored_roots_and_unmodified_argv(
-    monkeypatch, breakaway_refused, tmp_path,
+def test_shared_native_policy_receives_anchored_roots_and_unmodified_argv(
+    monkeypatch, native_launch, tmp_path,
 ):
     from agent_bridge.install_paths import CONFIG_DIR_ENV, INSTALL_DIR_ENV
 
@@ -111,31 +79,23 @@ def test_shared_broker_receives_anchored_roots_and_unmodified_argv(
     monkeypatch.setenv(INSTALL_DIR_ENV, "root")
     monkeypatch.setenv(CONFIG_DIR_ENV, "configuration")
     argv = ["py", "spaces & 'quotes'", "unicode-\u65e5", ""]
-    launch = Mock(return_value=Mock(pid=123))
-    monkeypatch.setattr(daemon, "spawn_brokered_daemon", launch)
-
     m._spawn_detached_argv(argv)
 
-    assert launch.call_args.args[0] == argv
-    kwargs = launch.call_args.kwargs
-    assert kwargs["env"][INSTALL_DIR_ENV] == str(tmp_path / "root")
-    assert kwargs["env"][CONFIG_DIR_ENV] == str(tmp_path / "configuration")
+    assert native_launch.call_args.args[0] == argv
+    kwargs = native_launch.call_args.kwargs
+    assert kwargs["env_overrides"][INSTALL_DIR_ENV] == str(tmp_path / "root")
+    assert kwargs["env_overrides"][CONFIG_DIR_ENV] == str(tmp_path / "configuration")
     assert kwargs["cwd"] == str(tmp_path / "root")
 
 
-def test_spawn_detached_happy_path_never_calls_broker(monkeypatch, tmp_path):
-    monkeypatch.setattr(m, "_INSTALL_DIR", str(tmp_path))
-    monkeypatch.setattr(agent_procutil, "_is_windows", lambda: True)
-    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
-    popen, launch = Mock(), Mock()
-    monkeypatch.setattr(agent_procutil.subprocess, "Popen", popen)
-    monkeypatch.setattr(daemon, "spawn_brokered_daemon", launch)
+def test_spawn_detached_happy_path_never_calls_broker(monkeypatch, native_launch):
+    legacy = Mock(side_effect=AssertionError("automatic legacy activation"))
+    monkeypatch.setattr(daemon, "spawn_brokered_daemon", legacy)
 
     m._spawn_detached_argv(["py"])
 
-    launch.assert_not_called()
-    assert popen.call_args.kwargs["creationflags"] == 0x08000000 | 0x01000000
-    assert popen.call_args.kwargs["cwd"] == str(tmp_path)
+    legacy.assert_not_called()
+    native_launch.assert_called_once()
 
 
 @pytest.mark.parametrize("passive", [False, True])

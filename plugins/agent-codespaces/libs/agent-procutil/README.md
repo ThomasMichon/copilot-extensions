@@ -100,23 +100,22 @@ Dot-source `native_daemon.ps1` from the resolved, attributable payload and use
 -WorkingDirectory <absolute-directory> -LogPath <absolute-diagnostic-file>`.
 Every path must be fully qualified and normalized; drive-relative and
 current-drive-rooted Windows paths refuse before activation or log opening.
-It uses the existing Windows WMI lifetime-broker mechanism. WMI rejects
-`CREATE_NO_WINDOW`, and a detached stock PowerShell can exit before evaluating
-its command; a headless `conhost` supplies the native console without opening
-a visible window. A current-user-only, bounded named-pipe handshake checks
-both actual endpoint PIDs. The worker independently verifies that it is
-outside every Job before running its entry point, and the parent pins that
-actual worker's handle before acknowledgement, not the broker or console PID.
-There is no inherited-lifetime fallback.
+It uses ordinary native `CREATE_NO_WINDOW` creation with explicit breakaway
+and a suspended child. Before resume, the parent verifies absence from every
+tracked launcher-owned cleanup Job and closes the temporary query handles.
+A current-user-only, bounded named-pipe handshake checks both actual endpoint
+PIDs against the retained native child identity. No WMI, COM, Scheduled Task,
+UAC or automatic inherited-lifetime fallback participates.
 
 The result is a `System.Diagnostics.Process`; keep it for observation and
 dispose it afterward. Spawn/admission is not application readiness or
 installation completion. `LogPath` records bootstrap failures; the entry point
 owns its continuing progress/result log. A
 `NativeDaemonSpawnException.CleanupConfirmed` value of false preserves
-uncertainty, including a lost CIM response after actual creation or a lost
-return after acknowledgement; only an explicit refusal or observed cleanup
-clears that uncertainty. Callers must
+uncertainty, including failed native cleanup or a lost return after
+acknowledgement; only an explicit refusal or observed cleanup clears that
+uncertainty. `RetainedChild` preserves native custody after unconfirmed cleanup
+for an explicit bounded `Stop()` retry followed by `Dispose()`. Callers must
 consult their durable operation state rather than retrying installation.
 With `COPILOT_EXTENSIONS_TEST_CONTAINED=1`, the same handshake uses an ordinary
 windowless child and deliberately retains the caller's Job.
@@ -704,12 +703,11 @@ or the independent monotonic hard maximum; it is not evidence that a cached
 lease expired. Linux shell collection budgets can exceed 300 seconds, while
 each CLI process-stop attempt remains capped at 300 seconds.
 
-**Windows qualification hold:** the source routes broker-required Python daemon
-launches through the consumer's explicitly adopted finite Task Scheduler
-implementation below, not the legacy WMI fallback. Direct ordinary launch and
-contained behavior remain unchanged. Complete consumer, maintenance, desktop,
-promotion and installed-rollout qualification remain separate gates; this source
-integration does not authorize an installed change.
+Windows startup uses ordinary native creation and verifies the tracked
+launcher-owned cleanup scopes described below. Legacy Task components remain
+available only for explicit owned recovery/removal; normal constructors no
+longer adopt them. Source qualification, Main release and authorized installed
+rollout remain separate states.
 
 A long-lived daemon (one started by an installer, a hook, a CLI or a cutover
 and meant to outlive it) launches through one primitive instead of hand-built
@@ -735,37 +733,25 @@ It composes the helpers above, so its flags never drift from them:
   and layer `extra_env` into the child environment. This bypasses Windows venv
   redirectors so process control names the actual worker while retaining its
   venv imports. Opaque executable commands are not rewritten by `spawn_daemon`.
-- **Escapes the caller.** `breakaway=True` (default) adds
-  `CREATE_BREAKAWAY_FROM_JOB` on Windows so a kill-on-close Job around the
-  caller (an installer or updater) does not kill the new daemon; POSIX gets a
-  new session. A Windows caller already in a Job uses the broker before
-  starting the daemon: nested Jobs, including a venv redirector's Job, can
-  accept the breakaway flag while retaining a caller-owned ancestor lifetime.
-  A successful `CreateProcess` is not escape proof. A failed Job-membership
-  query refuses the launch rather than assuming an uncontained caller.
-  When direct creation denies breakaway (`ERROR_ACCESS_DENIED`), the same
-  adopted finite broker handles the launch. Its fixed installed action uses
-  the direct base interpreter, not a venv redirector. The original argv, cwd,
-  complete environment, creation policy and split log paths cross the
-  authenticated native pipe only; credentials never become Task arguments,
-  discovery data or temporary launch files. The actual daemon is staged
-  suspended, its native process handle is transferred and its absence from
-  every Job checked before resume. A shared ancestor Job is not inferred away
-  by checking only the caller's immediate Job. Missing broker support, missing
-  adoption and pending installer recovery refuse without provisioning or a
-  WMI fallback. Cleanup branches preserve `DaemonSpawnError`;
-  `cleanup_confirmed=False` reports uncertain process exit and prohibits even
-  an explicitly requested contained retry.
-  The returned handle names the **actual daemon**, not PowerShell, WMI or a
-  console wrapper, and supports `pid`, `poll()`, `wait(timeout=...)`,
-  `terminate()` and `kill()`. Brokerage has a 30-second launch deadline with a
-  bounded cleanup wait. If both direct breakaway and brokerage fail,
-  `DaemonSpawnError` (an `OSError`) is raised and the daemon log records why.
-  A caller for which the shorter lifetime still beats no daemon may explicitly
-  pass `contained_fallback=True`; only after brokerage fails is that degraded
-  launch attempted, with a warning and a log entry. `breakaway=False` and
-  contained test mode never invoke the broker. Such contained daemons die when
-  the caller's Job closes.
+- **Escapes tracked caller cleanup.** `breakaway=True` (default) requests native
+  breakaway and starts the Windows child suspended. Canonical Job producers
+  assign fresh `Local\ce-owned-job-<uuid>` names and propagate the complete
+  semicolon-separated chain in `COPILOT_EXTENSIONS_OWNED_JOB_SCOPES`, including
+  strict outer scopes. Explicit child environment replacement cannot drop
+  tracked ancestors. The daemon must be absent from every exact named Job,
+  not merely its caller's immediate Job. Missing/malformed scopes or failed
+  queries refuse admission. Temporary noninheritable query handles close
+  before resume; only the original owners retain continuing Job handles.
+  The daemon's environment drops the escaped chain. A retained restrictive
+  outer Job is refused even when an inner Job permits breakaway.
+  This guarantees escape from tracked launcher-owned cleanup scopes, not
+  arbitrary unknown external supervisors; ambient Job membership alone is not
+  a rejection. Native creation denial does not activate another mechanism.
+  Unconfirmed exit retains process custody on `DaemonSpawnError.process` and
+  prohibits replay. Only a settled refusal permits an explicitly requested
+  `contained_fallback=True`, with a warning and log entry accepting the shorter
+  lifetime. Explicit `breakaway=False` and contained tests stay contained.
+  The returned `Popen` controls the actual daemon. POSIX uses a new session.
 - **Explicit cwd.** `cwd` must be an existing absolute directory and must not be
   inside an `installed-plugins` payload, either as given or once symlinks and
   junctions are resolved (`<runtime>/current -> .../installed-plugins/...` is
@@ -827,11 +813,10 @@ use `sys.prefix` (which can name the base interpreter under `-S`), the caller's
 cwd or owner/config environment variables. Source, vendored and linked import
 layouts refuse; a newer consumer slot may still use its installation's retained
 older broker action. Discovery never registers, repairs or activates a Task.
-Installation adapters use
+Legacy explicit installation/recovery can use
 `update_driver.windows_broker.adopt` under actual inherited execution custody.
-The broker-required branch of `spawn_daemon` uses this same installed client;
-it imports optional native-transport support only when that branch is required.
-Direct ordinary process operations and POSIX launches remain stdlib-only.
+Normal constructors and `spawn_daemon` do not invoke it or this Task client.
+Ordinary process operations remain stdlib-only.
 
 `reconcile` records credential-free publication intent before changing the Task
 or adopted configuration. While that record exists, ordinary launches refuse

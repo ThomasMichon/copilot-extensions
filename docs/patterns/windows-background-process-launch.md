@@ -103,7 +103,9 @@ and identities. `IsProcessInJob(child, NULL)` reports membership in some Job,
 not whether the launcher owns that Job or will terminate the child. Conversely,
 escaping the immediate Job does not prove independence from a shared outer
 kill-on-close Job. A NULL-job limit query does not describe the complete
-hierarchy. Unknown ownership is not a successful durability proof.
+hierarchy. The supported runtime contract verifies every tracked
+launcher-owned cleanup scope; it makes no escape claim for arbitrary unknown
+external supervisors.
 
 Prove the supported launch topology by closing every fixture-owned caller
 cleanup Job after admission. The daemon must survive, bounded controls must die
@@ -119,39 +121,26 @@ it is not a silent fallback or an excuse to relax cleanup checks.
 
 ### Existing finite-broker compatibility path
 
-The currently implemented `spawn_daemon` Job branch uses the installed
-consumer's adopted finite broker before launching. That implementation is not
-proof that all Job-associated callers require a broker, and this guidance
-change does not claim the direct-path runtime repair is already delivered.
-Its fixed immutable action
-uses the actual base interpreter, so a venv redirector cannot change the identity
-being adopted. It receives launch data through an authenticated native pipe,
-stages the actual child suspended, and transfers a pinned native process
-handle and binds the daemon instance receipt to that suspended child's birth
-identity before granting resume. A failed receipt commit retires the child
-without sending admission; ambiguous acknowledgement retains creation,
-admission and native-identity evidence instead of permitting replay.
-Shell interpolation, credential-bearing command lines,
-temporary launch files and wrapper PIDs are not part of this contract.
-That existing broker contract requires the suspended resident outside every Job,
-not merely absent from the caller's immediate Job. This is a conservative
-compatibility admission rule, not the general definition of a detached process.
-Scheduler provenance and native process identity bind the
-finite broker independently of the caller; another immediate Job under a shared
-outer cleanup Job is not escape proof. Missing adoption, optional native support
-or completed installer recovery refuses explicitly. Ordinary launch never
-registers, repairs or updates the component, and never falls back to WMI.
-The caller receives the actual daemon's PID and exit/control methods.
-An uncommitted failed launch is reaped before retry; both direct and broker
-failure produce `DaemonSpawnError`, never an apparently successful contained
-daemon. Independent cleanup branches preserve that failure type. If process
-exit cannot be confirmed, the error carries `cleanup_confirmed=False` and no
-contained retry is permitted.
+`spawn_daemon` now uses ordinary suspended native creation. Canonical Job
+producers propagate their complete named-scope chain; admission verifies the
+child against every exact retained Job object, closes temporary query handles
+before resume, and clears escaped metadata. No Job handles are inherited.
+Native creation denial, missing scope identities and a retained restrictive
+outer Job refuse explicitly without broker activation.
+
+The explicit finite Task broker remains for owned legacy recovery/removal.
+Its older outside-every-Job contract is not the ordinary launch path, and normal
+constructors no longer require Task adoption. This neither removes an existing
+registration automatically nor changes deployment authority.
+
+The caller receives the actual daemon's process control. An uncommitted failed
+launch is reaped before retry. Unconfirmed exit retains native custody and
+`cleanup_confirmed=False`; no contained retry is permitted.
 A caller for which the degraded lifetime is still better than no daemon may
-opt in to `contained_fallback=True`: only after broker failure does the daemon
+opt in to `contained_fallback=True`: only after a settled native refusal does the daemon
 start inside the caller's Job, with a warning and log entry. That daemon does
 not outlive the Job. Explicit `breakaway=False` and contained test mode never
-invoke the broker.
+escape containment.
 Contained tests deliberately suppress escape and retain process-tree cleanup.
 They still carry instance ownership. A `daemon_test_lifecycle` scope supplies
 runner-owned renewal and exact cleanup: 10-minute renewable leases and a
@@ -165,12 +154,8 @@ environment delivery, split logs and foreground/window observation. The
 broker-only handle-control case proves timeout, termination and actual exit
 status rather than polling an unrelated wrapper.
 
-**Windows qualification hold:** the source routes broker-required Python daemon
-launches through the consumer's explicitly adopted finite Task Scheduler
-implementation below, not the legacy WMI fallback. Direct ordinary launch and
-contained behavior remain unchanged. Complete consumer, maintenance, desktop,
-promotion and installed-rollout qualification remain separate gates; this source
-integration does not authorize an installed change.
+Native direct-lifetime, actual Manager recovery, Main promotion and installed
+rollout remain distinct evidence gates. A source change authorizes no deployment.
 
 PowerShell `Start-Process` and .NET `CreateNoWindow` provide no Job-escape
 promise. A one-shot installer should call the service's common user-mode ensure
@@ -214,7 +199,7 @@ check into recurring self-SSH process churn.
   `plugins/*/transports/*/scripts/install*.ps1`) may not start a process with
   `Start-Process` of `conhost`: that child stays in the installer's Job. Start
   a daemon now through its user-mode ensure path (built on `spawn_daemon`), or
-  WMI `Win32_Process.Create` for a PowerShell-only daemon; a child the caller
+  `Start-NativeDaemon` for a PowerShell-only daemon; a child the caller
   deliberately owns (a foreground supervisor that waits on it, a warned last
   resort) carries `# daemon-spawn: allow <reason>` on the statement or the
   comment line directly above it.
