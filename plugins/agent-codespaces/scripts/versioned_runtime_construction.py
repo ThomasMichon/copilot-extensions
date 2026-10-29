@@ -76,6 +76,12 @@ def require_immutable_environment(
     """
     base = slot.resolve()
 
+    def text_lines(path: Path) -> list[str]:
+        try:
+            return path.read_text(encoding="utf-8-sig").splitlines()
+        except UnicodeError as exc:
+            raise error_type(f"Invalid installed text metadata: {path}") from exc
+
     def ordinary(path: Path) -> None:
         info = path.lstat()
         if (
@@ -87,7 +93,7 @@ def require_immutable_environment(
     config = slot / "pyvenv.cfg"
     if os.path.lexists(config):
         ordinary(config)
-        for line in config.read_text(encoding="utf-8-sig").splitlines():
+        for line in text_lines(config):
             key, separator, value = line.partition("=")
             if separator and key.strip().casefold() == "include-system-site-packages":
                 if value.strip().casefold() != "false":
@@ -136,7 +142,7 @@ def require_immutable_environment(
                         raise error_type(f"Editable installation is not deployable: {path}")
                 if parent != site or not name.casefold().endswith(".pth"):
                     continue
-                for line in path.read_text(encoding="utf-8-sig").splitlines():
+                for line in text_lines(path):
                     line = line.rstrip()
                     if not line or line.startswith("#"):
                         continue

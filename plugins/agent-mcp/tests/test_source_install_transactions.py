@@ -408,7 +408,7 @@ _stamp_source_snapshot
 @pytest.mark.parametrize("language", ["ps1", "sh"])
 @pytest.mark.parametrize("condition", [
     "current", "missing-deployment", "corrupt-completion", "completion-fifo", "fallback-directory",
-    "occupied-fallback",
+    "occupied-fallback", "oversized-desired", "invalid-venv-desired", "invalid-path-desired",
 ])
 def test_native_mcp_footprint_routes_actual_construction_without_old_receipt_permission(
     tmp_path: Path, language: str, condition: str,
@@ -420,7 +420,11 @@ def test_native_mcp_footprint_routes_actual_construction_without_old_receipt_per
     payload, selected = _payload(tmp_path, "agent-mcp", construction_diagnostics=True)
     script = _setup(tmp_path, payload, "agent-mcp", language)
     root = tmp_path / "install"
-    incumbent_version = "1.2.2" if condition in {"fallback-directory", "occupied-fallback"} else selected
+    damaged_desired = condition.endswith("-desired")
+    incumbent_version = (
+        "1.2.2" if damaged_desired or condition in {"fallback-directory", "occupied-fallback"}
+        else selected
+    )
     incumbent = root / "versions" / incumbent_version
     incumbent.mkdir(parents=True)
     (incumbent / "incumbent-data").write_bytes(b"unchanged")
@@ -446,6 +450,22 @@ def test_native_mcp_footprint_routes_actual_construction_without_old_receipt_per
                 "payload_hash": "a" * 64,
             }), encoding="utf-8",
         )
+    if damaged_desired:
+        desired = root / "versions" / selected
+        desired.mkdir()
+        marker = desired / completion.name
+        marker.write_text(json.dumps({
+            "version": selected, "completed_at": "fixture", "pid": 1, "payload_hash": "a" * 64,
+        }), encoding="utf-8")
+        if condition == "oversized-desired":
+            with marker.open("ab") as stream:
+                stream.write(b" " * 65537)
+        elif condition == "invalid-venv-desired":
+            (desired / "pyvenv.cfg").write_bytes(b"\xff")
+        else:
+            site = desired / "Lib" / "site-packages"
+            site.mkdir(parents=True)
+            (site / "invalid.pth").write_bytes(b"\xff")
     before = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
     if language == "ps1":
         script += """

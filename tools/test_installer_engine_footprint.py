@@ -299,6 +299,48 @@ def test_footprint_constructor_skips_unusable_fallback_completion(
     assert fallback.is_dir() if unusable == "directory" else fallback.stat().st_size == 65537
 
 
+@pytest.mark.parametrize("damage", ["oversized-marker", "invalid-config", "invalid-path"])
+def test_actual_admission_repairs_noncurrent_target_without_changing_incumbents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str,
+) -> None:
+    root = tmp_path / "runtime"
+    _seed(root)
+    desired = root / "versions/1.2.4"
+    desired.mkdir()
+    marker = desired / ".install-complete.json"
+    content = json.dumps({
+        "version": "1.2.4", "completed_at": "fixture", "pid": 1, "payload_hash": "a" * 64,
+    }).encode()
+    marker.write_bytes(content + b" " * (65536 - len(content)))
+    spec = importlib.util.spec_from_file_location("damaged_target_test", PAYLOAD / "scripts/versioned_runtime.py")
+    assert spec is not None and spec.loader is not None
+    runtime = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runtime)
+    assert runtime.check_admission(root, "1.2.4", payload_hash="a" * 64) == runtime.ADMIT_REUSE
+    if damage == "oversized-marker":
+        marker.write_bytes(marker.read_bytes() + b" ")
+        assert not runtime.is_complete(root, "1.2.4")
+    elif damage == "invalid-config":
+        (desired / "pyvenv.cfg").write_bytes(b"\xff")
+    else:
+        site = desired / "Lib/site-packages"
+        site.mkdir(parents=True)
+        (site / "invalid.pth").write_bytes(b"\xff")
+    before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    assert runtime.check_admission(root, "1.2.4", payload_hash="a" * 64) == runtime.ADMIT_HEALTH_REPAIR_REQUIRED
+    monkeypatch.setattr(sys, "stdin", io.StringIO(
+        json.dumps({"command": "complete", "payload_hash": "a" * 64}) + "\n"
+        + '{"command":"settled"}\n',
+    ))
+    assert runtime.construction_session(
+        root, "1.2.4", payload_hash="a" * 64, footprint=PATH, plugin="agent-mcp",
+    ) == 0
+    fresh = [p for p in (root / "versions").iterdir() if p.name not in {"1.2.3", "1.2.4"}]
+    assert len(fresh) == 1 and fresh[0].name.startswith("1.2.4+repair.")
+    assert runtime.is_complete(root, fresh[0].name, expect_hash="a" * 64)
+    assert {name: (root / name).read_bytes() for name in before} == before
+
+
 def test_generated_package_metadata_is_not_a_source_producer(tmp_path: Path) -> None:
     source = tmp_path / "src/agent_mcp"
     source.mkdir(parents=True)

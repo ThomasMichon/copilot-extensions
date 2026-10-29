@@ -1723,7 +1723,9 @@ def check_admission(root: Path, version: str, *, payload_hash: str | None) -> st
         # function's health-repair-required contract entirely.
         with os.fdopen(marker_fd, "rb") as fh:
             marker_fd = None  # fdopen now owns the fd
-            marker_bytes = fh.read()
+            marker_bytes = fh.read(65537)
+        if len(marker_bytes) > 65536:
+            return ADMIT_HEALTH_REPAIR_REQUIRED
     finally:
         if marker_fd is not None:
             os.close(marker_fd)
