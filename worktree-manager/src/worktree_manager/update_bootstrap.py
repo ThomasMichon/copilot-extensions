@@ -376,6 +376,8 @@ def _wait(command: list[str], environment: dict[str, str], cwd: Path) -> int:
 
 def _invoke(installation: _Installation, action: str, environment: dict[str, str]) -> int:
     """The supported CLI validates ownership, mints a capability, and holds custody."""
+    from update_driver import participant_environment
+
     artifact = installation.artifact or installation.payload
     if os.name == "nt":
         host = shutil.which("pwsh") or shutil.which("powershell.exe")
@@ -419,7 +421,7 @@ def _invoke(installation: _Installation, action: str, environment: dict[str, str
         "--project-root", str(Path.cwd()),
         "--run-lifecycle", "--managed-deployment", "--", *native,
     ]
-    child = dict(environment)
+    child = {**environment, **participant_environment()}
     # Ownership locators retain the incumbent even when a separate prepared
     # artifact supplies the native installer and frozen build inputs.
     child["COPILOT_PLUGIN_ROOT"] = str(installation.payload)

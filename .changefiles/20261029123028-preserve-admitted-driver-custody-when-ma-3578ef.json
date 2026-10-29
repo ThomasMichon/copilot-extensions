@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve admitted driver custody when Manager launches engine repair",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
