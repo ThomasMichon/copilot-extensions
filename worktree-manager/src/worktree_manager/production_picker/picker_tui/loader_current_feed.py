@@ -16,6 +16,13 @@ IDLE_TIMEOUT = 5.0
 MAX_LINE_CHARS = 80 * 1024
 
 
+class ReadFailure(str):
+    def __new__(cls, message, *, kind):
+        error = super().__new__(cls, message)
+        error.kind = kind
+        return error
+
+
 class _Watchdog:
     """One sleeping watchdog per held source, never a timer thread per row."""
 
@@ -72,10 +79,37 @@ def feed_argv(source):
 
 
 class CurrentFeedMixin:
+    def _publish_source_records(self, source, records):
+        """Publish a complete roster and its incarnation under the caller's lock."""
+        self._records[source.cache_key] = records
+        self._state[source.cache_key] = "ready"
+        self._error[source.cache_key] = ""
+        self._feed_complete[source.cache_key] = source.instance_id
+
+    def read_status_for_source(self, source_id):
+        """Presentation evidence only; a read failure never proves host liveness."""
+        with self._lock:
+            source = next((item for item in self._all_sources if item.cache_key == source_id), None)
+            return {
+                "error": self._error.get(source_id),
+                "failure_kind": getattr(self._error.get(source_id), "kind", "unknown"),
+                "instance_id": source.instance_id if source is not None else None,
+                "has_snapshot": source is not None and (
+                        self._feed_complete.get(source_id) == source.instance_id
+                        or (not source.instance_id and (
+                            bool(self._records.get(source_id)) or (
+                                self._state.get(source_id) == "ready"
+                                and source_id not in self._pinged_only
+                                and self._stream_incomplete.get(source_id) != self._gen.get(source_id, 0)
+                            )
+                        ))
+                ),
+            }
+
     def _feed_current(self, source, gen) -> bool:
         return not self._cancelled.is_set() and self._gen.get(source.cache_key, 0) == gen
 
-    def _feed_commit(self, source, gen, rows) -> None:
+    def _feed_commit(self, source, gen, rows, *, availability=None) -> None:
         derive.NOW = _dt.datetime.now()
         with self._lock:
             previous = {row["id"]: row for row in self._records.get(source.cache_key, [])}
@@ -88,8 +122,8 @@ class CurrentFeedMixin:
             } == {key: value for key, value in row.items() if key != "_projection"}:
                 records.append({**old, **derive.time_fields(row), "raw": row})
                 continue
-            records.append(derive.norm(
-                row, source.machine, source.env,
+            normalized = derive.norm(
+                {**row, "_availability": None}, source.machine, source.env,
                 source_kind=source.source_kind, source_id=source.source_id,
                 source_label=source.source_label,
                 source_metadata={
@@ -97,29 +131,32 @@ class CurrentFeedMixin:
                     "instance_id": source.instance_id, "venue": dict(source.venue),
                 },
                 source_capabilities=source.capabilities,
-            ))
+            )
+            records.append({**normalized, "raw": row})
         with self._lock:
             if self._feed_current(source, gen):
-                self._records[source.cache_key] = records
-                self._state[source.cache_key] = "ready"
-                self._error[source.cache_key] = ""
-                self._feed_complete.add(source.cache_key)
+                self._publish_source_records(source, records)
+                available = availability or (rows[0].get("_availability") if rows else None)
+                self._error[source.cache_key] = (
+                    ReadFailure(available.get("reason") or "Resident refresh is unavailable", kind="content")
+                    if available and available.get("status") == "stale" else ""
+                )
                 self._feed_backoff[source.cache_key] = 0.25
 
-    def _feed_error(self, source, gen, reason: str) -> None:
+    def _feed_error(self, source, gen, reason: str, *, kind: str = "connection") -> None:
         if source.local:
             reason = f"Local resident current-roster read failed: {reason}"
         with self._lock:
             if not self._feed_current(source, gen):
                 return
-            self._error[source.cache_key] = reason
-            has_snapshot = source.cache_key in self._feed_complete
+            self._error[source.cache_key] = ReadFailure(reason, kind=kind)
+            has_snapshot = self._feed_complete.get(source.cache_key) == source.instance_id
             self._state[source.cache_key] = "ready" if has_snapshot else "failed"
             if has_snapshot:
                 records = []
                 for row in self._records[source.cache_key]:
                     raw = {**row["raw"], "_availability": {"status": "stale", "reason": reason}}
-                    records.append({**row, "raw": raw, "title": "[stale] " + row["title"].removeprefix("[stale] ")})
+                    records.append({**row, "raw": raw})
                 self._records[source.cache_key] = records
 
     def _feed_once(self, source, gen) -> str:
@@ -166,7 +203,7 @@ class CurrentFeedMixin:
                 if frame.get("type") in {"begin", "update"}:
                     watchdog.arm(INITIAL_TIMEOUT)
                 if rows is not None:
-                    self._feed_commit(source, gen, rows)
+                    self._feed_commit(source, gen, rows, availability=receiver.availability)
                     watchdog.arm(IDLE_TIMEOUT)
                 elif frame.get("type") == "heartbeat":
                     watchdog.arm(IDLE_TIMEOUT)
@@ -177,11 +214,15 @@ class CurrentFeedMixin:
             if watchdog.expired:
                 raise FeedUnavailable(
                     "current-roster feed missed its startup/publication/heartbeat deadline",
+                    connected=receiver.head is not None or receiver._begin is not None,
                 )
             errors.join(timeout=0.1)
             error = "".join(stderr).strip()
             if "unrecognized arguments" in error or "update the engine" in error:
-                raise FeedUnavailable("engine lacks --follow/worktrees-feed-v1; update the engine", retry=False)
+                raise FeedUnavailable(
+                    "engine lacks --follow/worktrees-feed-v1; update the engine",
+                    retry=False, connected=True,
+                )
             raise FeedUnavailable(error or "current-roster feed disconnected without a going-away notice")
         finally:
             watchdog.close()
@@ -207,7 +248,7 @@ class CurrentFeedMixin:
                     return "cancelled"
                 rows = receiver.receive(frame)
                 if rows is not None:
-                    self._feed_commit(source, gen, rows)
+                    self._feed_commit(source, gen, rows, availability=receiver.availability)
                 if receiver.notice is not None:
                     return f"resident going away: {receiver.notice}"
             return "cancelled"
@@ -221,17 +262,22 @@ class CurrentFeedMixin:
             self._held_sources.add(source.cache_key)
         try:
             while self._feed_current(source, gen):
+                kind = "connection"
                 try:
                     reason = self._feed_once(source, gen)
                 except FeedUnavailable as exc:
-                    self._feed_error(source, gen, str(exc))
+                    kind = "content" if exc.connected else "connection"
                     if not exc.retry:
+                        self._feed_error(source, gen, str(exc), kind=kind)
                         return
                     reason = str(exc)
                 except (OSError, TypeError, ValueError, subprocess.SubprocessError) as exc:
-                    self._feed_error(source, gen, str(exc) or type(exc).__name__)
+                    self._feed_error(
+                        source, gen, str(exc) or type(exc).__name__,
+                        kind="content" if isinstance(exc, (TypeError, ValueError)) else "connection",
+                    )
                     return
-                self._feed_error(source, gen, reason)
+                self._feed_error(source, gen, reason, kind=kind)
                 with self._lock:
                     delay = self._feed_backoff.get(source.cache_key, 0.25)
                     self._feed_backoff[source.cache_key] = min(delay * 2, 5.0)

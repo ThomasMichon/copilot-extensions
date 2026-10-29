@@ -76,7 +76,7 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin):
         except Exception:
             kind, nrows = None, -1
         wt = tuple(sorted(self.wt_sel.ids)) if hasattr(self, "wt_sel") else ()
-        from .source_read_notices import failed_worktree_reads
+        from .source_read_notices import worktree_read_feedback
         return (W, H, self.sel, self.top, self._data_top, kind, self.htab,
                 self.machine_idx, self.btn_idx, getattr(self, "pcol", 0),
                 nrows, wt, getattr(self, "pulse", 0),
@@ -85,7 +85,7 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin):
                 getattr(self, "include_maintenance", False),
                 getattr(self, "debug", None),
                 self.cmd_mode, self.list_view.query, self.list_view.sort_index,
-                tuple(failed_worktree_reads(self)) if kind == "worktrees" else ())
+                tuple(worktree_read_feedback(self)) if kind == "worktrees" else ())
     def _build_body_split(self, width, sel=None):
         """Return ``(chrome_vrows, data_vrows)`` for the current pivot -- the
         fixed machine-scope + button chrome vs the scrolling data -- by driving
@@ -319,7 +319,9 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin):
             elif state == "loading":
                 marker, marker_style = self.spin(), C_LOAD
             elif state == "failed":
-                marker, marker_style = "WT✗", C_WARN
+                marker, marker_style = self._source_failure_marker(i)
+            elif self._source_read_error(i):
+                marker, marker_style = "~", C_DIM
             else:
                 marker, marker_style = "✓", C_READY
             t.append(marker, style=self._hl(marker_style, sel, focused))
@@ -347,7 +349,9 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin):
             elif state == "loading":
                 mk, mkb = self.spin(), C_LOAD
             elif state == "failed":
-                mk, mkb = "WT✗", C_WARN
+                mk, mkb = self._source_failure_marker(i)
+            elif self._source_read_error(i):
+                mk, mkb = "~", C_DIM
             else:
                 mk, mkb = "✓", C_READY
             t.append(mk, style=self._hl(mkb, sel, focused))

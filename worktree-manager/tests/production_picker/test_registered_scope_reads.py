@@ -820,13 +820,14 @@ def test_terminal_registered_error_footer_does_not_claim_global_loading():
 def test_source_failure_and_recovery_repaint_native_empty_body(monkeypatch):
     from textual.widgets import OptionList
     monkeypatch.setattr(PickerScreen, "_tick", lambda self: None)
-    status = {"state": "ready", "reason": ""}
+    status = {"state": "loading", "reason": ""}
 
     async def run():
         app = PickerApp(_fixture_source(), live=False)
         async with app.run_test(size=(118, 30)) as pilot:
             await pilot.pause()
             screen = app.query_one(PickerScreen)
+            assert await asyncio.to_thread(screen._ensure_setup_completion_event().wait, 3)
             screen.live = True
             screen.data = []
             screen.machine_idx = 1
@@ -848,7 +849,7 @@ def test_source_failure_and_recovery_repaint_native_empty_body(monkeypatch):
             screen.refresh()
             await pilot.pause()
             assert "fixture initial current-read deadline" in body()
-            assert "Reachability/liveness unknown" in body()
+            assert "Worktrees could not load" in body()
             status.update(state="ready", reason="")
             screen.refresh()
             await pilot.pause()
