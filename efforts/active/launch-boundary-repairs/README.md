@@ -40,9 +40,10 @@ service as a side effect of source work.
 #9520 records a bounded repair intake. Current source still admits a guest
 repository through an already-installed Worktrees receiver before plugin
 preparation; relay readiness makes SSH calls with a five-second timeout; failed
-readiness observations have no retained diagnostic outcome; the shared pending
-seed helper omits some refusal details; monitor restart prints spawn failure
-while returning zero.
+readiness observations have no retained diagnostic outcome; the shared
+owned-delivery parser and detached-launch refusal consumer omit some refusal
+details; monitor restart prints spawn failure while returning zero. The normal
+typed/deferred/unconfirmed/lost pending-seed helper is not a repair target.
 
 Installer activation already has launch-health gates. Those gates do not prove
 that a guest preparation path validates a command it finds. Likewise, a
@@ -76,8 +77,10 @@ authorize a shared runtime rollout, service restart or live venue retry.
 - [ ] Make monitor restart report a real spawn failure through its exit status;
   preserve disabled/already-current behavior and existing installer advisory
   handling. Do not equate spawning with acquired ownership or serving readiness.
-- [ ] Preserve the shared seed helper's structured refusal outcome through its
-  actual consumers, without granting resend or replacement authority.
+- [ ] Preserve structured refusal details through the shared owned-delivery
+  parser and detached-launch refusal consumer, without granting resend or
+  replacement authority. Preserve the normal pending-seed helper's existing
+  typed/deferred/unconfirmed/lost behavior.
 - [ ] Retain bounded, sanitized failed readiness observations through ordinary
   control cleanup, reusing the existing storage owner and retention machinery.
   Preserve control cancellation and successful cleanup semantics.
@@ -110,6 +113,9 @@ authorize a shared runtime rollout, service restart or live venue retry.
 - [ ] Add focused red/green regressions for each changed behavior.
 - [ ] Exercise the real affected consumer boundary in an isolated integration
   control, including refusal propagation and unchanged success behavior.
+- [ ] Prove refusal details survive the owned-delivery parser and detached-launch
+  consumer; keep typed/deferred/unconfirmed/lost pending-seed reporting unchanged,
+  and prove refusal or uncertain acknowledgement does not authorize replay.
 - [ ] Exercise fresh-guest and present-but-unhealthy preparation in disposable
   fixtures where practical; never use a shared guest as an implicit test target.
 - [ ] Run changed-plugin tests through the canonical contained runner, focused
@@ -137,3 +143,11 @@ depends on the mere existence of one of these source defects.
 - Existing PATH and monitor/discovery owners are preserved explicitly.
 - No source repair, installed update, service restart or live venue retry has
   occurred as part of this proposal.
+
+### 2026-10-29 - Plan clarification
+
+- Applied the supplemental guidance on #9521: Context, Phase 2 and focused
+  validation now name the owned-delivery parser and detached-launch refusal
+  consumer, explicitly preserving the unrelated pending-seed helper.
+- The guidance is not Maintainer acceptance. Implementation still awaits the
+  proposal's required acceptance, current-head review and CI.
