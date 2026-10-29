@@ -10,6 +10,29 @@ Git acquisition cache paths are not productive native marketplace roots.
 Installed-only payloads marked `acp_only_sources` cannot claim settings-only CLI
 registration without an original marketplace declaration.
 
+## Guest tool readiness
+
+After repository admission and plugin preparation, detached startup checks the
+actual `agent-worktrees --help` command before trust-folder, project-registration
+or native-launch effects. This loads Worktrees' full command surface; finding a
+binstub or reading its version alone is not a runtime-health check.
+
+Legacy guest preparation uses the owning payload's installer: `install` for a
+missing command and `repair` for a present command that fails this check. Repair
+keeps that installer's distinct-generation, health and publication rules; this
+caller neither rebuilds a completed slot in place nor changes a version marker.
+It checks the command again after preparation. Installer failure, missing
+installer, failed post-check or failed Bridge payload installation stops startup
+with a visible error. An explicit installation context never falls back to this
+legacy installation/repair path; its selected installation must be prepared by
+its owner. This is local command health, not serving or model readiness.
+
+The actual constructed-command controls use private synthetic tools under the
+contained runner and are opt-in T3, not automatic unit-only CI:
+`python tools/run-plugin-tests.py agent-codespaces --test-file tests/test_copilot_detach.py -k venue_tooling --allow-explicit-tiers`.
+They exercise the shell consumer's allow/refuse ordering, not a real remote
+installation, shared guest or installed-host rollout.
+
 ## No owned TTY seed
 
 Repository hosting eligibility is checked inside the selected guest checkout,
