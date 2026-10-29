@@ -395,6 +395,10 @@ reuse/admission behavior is not an exception to the fresh-default revision.
   inventories and incremental marker/version/contract ranges, plus historical
   footprint deltas. Make installed-footprint changes carry manifest/migration
   updates and validation against omitted artifacts or unsupported reuse.
+- [x] Land the bounded shared footprint/history provider and first MCP finite-inventory
+  adopter, including complete producer-tree omission controls and promotion-safe
+  version normalization. This does not qualify effect retirement, the remaining
+  manifest portfolio or assembled fresh/incremental installation.
 - [x] Review the execution-owner clarification and bounded implementation plan.
 - [ ] Implement fresh-default normal convergence and [explicit repair modes](execution-driver.md#normal-and-forcerepair-operation): central desired targets, same-target debounce, one active installer and bounded known-runtime retirement without stale-marker or missing-recognizer vetoes. Preserve the [same-boot recovery requirement](execution-driver.md#live-cutover-recovery-correction), older-record history and unrelated services/data; no extra repair flag for normal fresh fallback or host/kernel restart prerequisite.
 - [x] Implement durable requests, compatible pending-request coalescing and attributable read-only status/results.
@@ -1097,5 +1101,37 @@ bootstrap routing, driver integration, the remaining suite/Manager manifests,
 cross-platform assembled entry points and actual installed survival/adoption
 remain open under the same owners and authorization gates. No live cleanup,
 runtime update, service action or maintenance hold was performed.
+
+#9499 merged as `6fa86779c07f38db08a6db656efb26249b993989` after exact-head
+Copilot approval and all required checks passed. Both duplicate promotion-version
+findings are fixed and resolved. The final source passes 32 focused footprint
+controls, the 13-plugin install contract and the required 2,619-test unit packet.
+Generated packaging metadata is excluded consistently with materialization;
+only promotion-owned source-version literals are normalized, leaving surrounding
+producer code covered. The next slice separates Main bootstrap transport from
+independently selected Manager/service runtime sources at the existing global
+update interceptor and canonical bootstrap. The broad footprint and fresh-default
+Plan/Validation rows remain open.
+
+### 2026-10-28 - Bootstrap transport and runtime-source separation
+
+The existing global update interceptors now select Main bootstrap transport
+independently of Manager's runtime `[source]` policy. Explicit bootstrap repo/ref
+environment overrides affect only the initial acquisition. The canonical
+bootstrap owns the strict local source reader and forwards the ordinary update
+through its existing installer/driver path; the old explicit-source bootstrap
+form remains supported. Service-runtime policy stays separate, including the
+shared `[runtime_source]` table, and relative local sources are anchored before
+staging changes the working directory.
+
+Isolated Windows controls exercise real local-Git acquisition and the assembled
+global/installed-project front doors in Windows PowerShell and PowerShell Core.
+They retain exact source pins, original arguments/exit status, malformed-policy
+refusal before effects, old explicit callers and broken-runtime independence.
+The existing optional native update-diagnostics workflow now includes these
+front-door families and the POSIX equivalents rather than widening required PR
+CI. Native POSIX execution, review/merge and the parent's complete construction/
+retirement/survival gates remain uncredited until independently observed.
+No installed runtime, maintenance hold, service or protected process was changed.
 
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.

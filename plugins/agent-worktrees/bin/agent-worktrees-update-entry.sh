@@ -83,62 +83,13 @@ _aw_update_entry() (
         printf '%s\n' '[agent-worktrees] selected Manager is not registered.' >&2
         exit 126
     fi
-    # Publication-owned bootstrap defaults, not selected-runtime state.
+    # Bootstrap transport is independent of the runtime source read by bootstrap.
     _repo='https://github.com/ThomasMichon/copilot-extensions.git'
     _ref='main'
-    # Match bootstrap's source-config contract, but refuse unrepresentable values
-    # instead of silently fetching canonical code for an explicit source choice.
-    if [ -f "$_root/config.toml" ]; then
-        _source="$(awk '
-            function value(text, quote, out, i, c, e, tail) {
-                quote = substr(text, 1, 1)
-                if (quote != "\"" && quote != sprintf("%c", 39)) exit 1
-                for (i = 2; i <= length(text); i++) {
-                    c = substr(text, i, 1)
-                    if (c == quote) {
-                        tail = substr(text, i + 1)
-                        if (tail !~ /^[[:space:]]*(#.*)?$/ || out == "") exit 1
-                        return out
-                    }
-                    if (c ~ /[[:cntrl:]]/) exit 1
-                    if (quote == "\"" && c == "\\") {
-                        e = substr(text, ++i, 1)
-                        if (e != "\\" && e != "\"") exit 1
-                        c = e
-                    }
-                    out = out c
-                }
-                exit 1
-            }
-            /^[[:space:]]*\[/ {
-                insrc = ($0 ~ /^[[:space:]]*\[source\][[:space:]]*(#.*)?$/)
-                if ($0 ~ /source/ && !insrc) exit 1
-                if (insrc && source_seen++) exit 1
-                next
-            }
-            !insrc && /^[[:space:]]*["\047]?source["\047]?[[:space:].=]/ { exit 1 }
-            insrc && /^[[:space:]]*(repo|ref)[[:space:]]*=/ {
-                line=$0
-                sub(/^[[:space:]]*/, "", line)
-                key=line; sub(/[[:space:]]*=.*/, "", key)
-                sub(/^[^=]*=[[:space:]]*/, "", line)
-                if (seen[key]++) exit 1
-                print key "=" value(line)
-                next
-            }
-            insrc && $0 !~ /^[[:space:]]*(#.*)?$/ { exit 1 }
-            ' "$_root/config.toml")" || {
-                printf '%s\n' '[agent-worktrees] source config cannot be safely read by the shell bootstrap.' >&2
-                exit 126
-            }
-        while IFS= read -r _line; do
-            case "$_line" in repo=*) _repo="${_line#*=}" ;; ref=*) _ref="${_line#*=}" ;; esac
-        done <<EOF
-$_source
-EOF
-    fi
-    case "$_repo" in ""|-*) printf '%s\n' '[agent-worktrees] invalid configured Git source.' >&2; exit 126 ;; esac
-    case "$_ref" in ""|-*) printf '%s\n' '[agent-worktrees] invalid configured Git ref.' >&2; exit 126 ;; esac
+    _repo="${WORKTREE_MANAGER_BOOTSTRAP_REPO-$_repo}"
+    _ref="${WORKTREE_MANAGER_BOOTSTRAP_REF-$_ref}"
+    case "$_repo" in ""|-*|*[[:cntrl:]]*) printf '%s\n' '[agent-worktrees] invalid bootstrap transport source.' >&2; exit 126 ;; esac
+    case "$_ref" in ""|-*|*[[:cntrl:]]*) printf '%s\n' '[agent-worktrees] invalid bootstrap transport ref.' >&2; exit 126 ;; esac
     _url=""
     case "$_repo" in
         https://github.com/*)
@@ -200,9 +151,9 @@ EOF
         fi
     fi
     if [ "$_has_project" = 1 ]; then
-        bash "$_bootstrap" --repair-update "$_repo" "$_ref" update --project "$_project" "$@"
+        bash "$_bootstrap" --bootstrap-update update --project "$_project" "$@"
     else
-        bash "$_bootstrap" --repair-update "$_repo" "$_ref" update "$@"
+        bash "$_bootstrap" --bootstrap-update update "$@"
     fi
     exit $?
 )

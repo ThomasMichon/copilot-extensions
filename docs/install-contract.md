@@ -1239,28 +1239,37 @@ bootstrap rather than assigning empty values, and restores both their original
 values and absence afterward. A present empty `GIT_DIR` still redirects Git.
 
 The registered Manager root (or the existing explicit root/default when no
-provider is registered) is preserved. Its durable `config.toml` `[source]`
-overrides select the repository and ref; missing fields use the publication-owned
-defaults in the shell entry, checked against the supported Manager bootstrap
-defaults. Selection never reads `current-version`, an installed payload, or
-`source_config.py`: a missing/corrupt selected runtime cannot disable recovery.
-This is the existing config-over-bootstrap-defaults contract, not a second
-configuration authority. Source overrides are not rewritten, and an alternate
-selected control-plane provider is not replaced.
+provider is registered) is preserved. The shell entry fetches the published
+Main bootstrap by default. Explicit `WORKTREE_MANAGER_BOOTSTRAP_REPO` and
+`WORKTREE_MANAGER_BOOTSTRAP_REF` environment values override only that transport;
+an omitted field keeps its canonical default, and an empty, option-shaped or
+control-containing value is refused. Manager's durable `config.toml` `[source]`
+does not redirect this first fetch. The downloaded bootstrap reads that policy
+once to select the Manager runtime repository/ref; absent fields keep its
+canonical defaults. Service-runtime, marketplace-cell and test selections retain
+their existing downstream owners and environment.
+Neither selection reads `current-version`, an installed payload, or
+`source_config.py`: a missing/corrupt selected runtime cannot disable bootstrap.
+Runtime-source config is not rewritten, and an alternate selected control-plane
+provider is not replaced.
 
 GitHub sources with portable raw URLs retain the direct-download fast path.
 Other SSH, HTTPS, file, absolute or relative local Git sources use a fresh
 `git init`/exact-ref fetch/detached checkout in private per-attempt scratch, then
 invoke that checkout's ordinary `worktree-manager/bootstrap.sh` or `.ps1`.
 Relative filesystem sources are anchored before Git changes directories.
-A failed raw download may retry **only the same configured Git source**, using
+A failed raw download may retry **only the same bootstrap-transport Git source**, using
 normal Git credentials. No arbitrary-host raw URL is invented. Missing Git or
 native acquisition failures are explicit failures, not canonical-source
 fallbacks. Repository-routing environment variables are cleared without
-discarding credential/SSH inputs. The shell reader supports basic and literal
-quoted values, including escaped quotes/backslashes emitted by `source set`;
-unsupported/malformed explicit syntax fails visibly before acquisition and is
-distinct from broken-runtime recovery.
+discarding credential/SSH inputs. The canonical bootstrap's source reader
+supports basic and literal quoted values, including escaped quotes/backslashes
+emitted by `source set`; unsupported/malformed runtime policy fails visibly
+before prerequisite acquisition, staging or installation. An interceptor invokes
+`--bootstrap-update update ...` without substituting its transport source for runtime
+policy. The older `--repair-update <repo> <ref> update ...` form remains accepted
+for older callers. An explicitly overridden bootstrap must support the new
+source-free form; there is no fallback to installed runtime code on rejection.
 
 Windows scratch is created atomically with a protected DACL, owner equal to
 `WindowsIdentity.GetCurrent().User`, and explicit inheritable FullControl for

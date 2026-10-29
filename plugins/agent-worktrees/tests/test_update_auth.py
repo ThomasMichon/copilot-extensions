@@ -1844,10 +1844,10 @@ def test_helper_diagnostics_preserve_a_trailing_empty_reset():
     assert chain == []
 
 
-def test_unsupported_explicit_source_reports_a_structured_decline(capsys):
+def test_unsupported_explicit_source_reports_a_structured_decline(capsys, tmp_path):
     args = argparse.Namespace(
         auth_source=["https://git.example.test/team/repo%20name"],
-        auth_cwd=None,
+        auth_cwd=str(tmp_path),
         auth_non_repository=False,
         no_anchor_sync=True,
         auth_environment=True,
