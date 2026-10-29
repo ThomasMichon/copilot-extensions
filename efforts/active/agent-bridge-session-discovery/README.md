@@ -43,6 +43,24 @@ needed for the initial phases (server-side same-machine listing is local;
 the cross-machine lookup phase reuses the existing peer-bridge mesh
 transport agent-bridge already has for `send`/`create`).
 
+## Coordination
+
+<!-- backlog-reconciliation:7556:first-ten:Coordination -->
+
+### Continuing source-specific #60 custody
+
+- **R60-C1:** Existing registry mutation/state/purge custody remains with #60; discovery
+  planning/mesh roles retain lookup/presentation. #1045 inspection and #3966 Dispatch
+  owner GC remain independent interfaces, not replacement owners or whole receiving
+  targets. No source/resource appointment is made.
+
+- **R60-C2:** Preserve #60's precise registry-liveness canonical obligations and
+  existing holder. Paper coverage, a historical ship line or generic Taking does not
+  establish technical completion or release custody. A future administrative source
+  judgment must separately establish complete requirement-preserving reception and
+  respect actual source conditions; it does not require inventing native completion,
+  a new ACK or an all-parent gate.
+
 ## Context
 
 Filed as [copilot-extensions#2530](https://github.com/ThomasMichon/copilot-extensions/issues/2530)
@@ -234,6 +252,42 @@ merge happens.
       description needs a concrete-capability note (no vision revision
       expected — this closes existing feature intent).
 
+<!-- backlog-reconciliation:7556:first-ten:Plan -->
+
+### Direct retained acceptance from #60
+
+_Agent-recommended additive tracking proposal; original source requirements,
+alternatives, finite proof tiers and custody remain binding._
+
+These rows retain work rather than certify it complete. Existing Request,
+Status, Participants, Plan, global Validation, Journal, checked credit and
+first unresolved gates remain intact. Review of this amendment is document
+intake only, not implementation, native/installed proof, source closure,
+owner reassignment or claim/resource release. A separate source judgment
+must preserve each literal source-specific hold; no generic ACK, every-host
+or whole-parent completion gate is added.
+
+#### Source #60
+
+- [ ] **R60-P1:** Retain the complete #60 registry truth contract through the incumbent
+  registry owner: fresh, still-live/wedged, proved-dead and unavailable/unknown process
+  evidence remain distinct. A lapsed heartbeat, invalid PID, unavailable Windows probe
+  or remote observation is not death, expiry or purge authority. Qualify the original
+  native boundary without reimplementing credited POSIX source.
+
+- [ ] **R60-P2:** Preserve wedged nonfreshness for ownership/steering and revival on
+  re-registration. Discovery/inspection may consume state; observer presence, cache or
+  lookup failure must not change reapability or logical ownership.
+
+- [ ] **R60-P3:** Preserve legitimate expired/taken-over grace-window row purge and
+  never purge wedged rows. Unknown process evidence cannot first misclassify a live row
+  as dead. Registry-row cleanup is not process/resource termination permission.
+
+- [ ] **R60-P4:** Preserve default live+wedged API/CLI state filtering and explicit
+  include_dead/--all debug access. Keep the STATE axis independent of the existing
+  PROJECT axis: unfiltered no-flag/--all-projects behavior, explicit --project
+  narrowing, labels and elevated merge retain their current contract.
+
 ## Validation Plan
 
 - [ ] `agent-bridge sessions --all-projects` / `agent-bridge live-sessions
@@ -254,6 +308,30 @@ merge happens.
 - [ ] Existing `agents --all-projects` / `machines --all-projects` behavior
       is unchanged (no regression from touching `_listing_project`/
       `_PROJECT_CONSUMING_VERBS`).
+
+<!-- backlog-reconciliation:7556:first-ten:Validation -->
+
+### Global validation of retained #60
+
+#### Source #60
+
+- [ ] **R60-V1:** Qualify original Windows/native process evidence and POSIX regression
+  with fresh, still-alive/wedged, proved-dead, invalid and unavailable/remote-unknown
+  cases. UNKNOWN never becomes death or purge/release/steer authority; source/helper
+  tests do not replace the original native tier.
+
+- [ ] **R60-V2:** Show wedged nonfreshness and revival, including repeated registration
+  and changed/unavailable observation, without observer cursor/ownership mutation or
+  substituting Dispatch GC.
+
+- [ ] **R60-V3:** Show correctly classified expired/taken-over rows purge under the
+  existing grace rule, wedged rows never purge and uncertain liveness does not enter the
+  dead-row path by heartbeat age alone.
+
+- [ ] **R60-V4:** Cross actual API/CLI default/include_dead/--all state controls with
+  existing default/all-projects/explicit-project/elevated-merge contract.
+  Project-unfiltered must not become state-unfiltered; preserve current default output
+  and supported debug access.
 
 ## Proposal
 
@@ -293,3 +371,9 @@ and there is no cross-machine same-repo lookup verb. Note that the
 CLI-level scoping/labeling and the missing cross-machine fan-out verb, not a
 project-siloed data model. Effort created; submitting for the review gate
 before implementing Phase 1.
+
+<!-- backlog-reconciliation:7556:first-ten:Journal -->
+
+### 2026-10-28 - Additive retained #60 contract proposal
+
+Added direct per-source Plan, actual global Validation and continuing custody rows after whole-record and complete receiving-document research. Normal review and current complete receiving readback remain publication gates; this entry records authored tracking only, not a future merge or source disposition. All incumbent finite source/design/release/native credits remain at their actual tiers, with original alternatives, unknowns, source-specific holds and existing source/resource custodians preserved. No implementation, operational effect or claim release is authorized. The campaign's receiving register records delivery and later source judgments separately.

@@ -63,6 +63,16 @@ survival; neither substitutes for the other.
   This effort integrates standby with session survival; it does not introduce
   a second banner, scheduler, updater or maintenance authority.
 
+<!-- backlog-reconciliation:7556:first-ten:Coordination -->
+
+### Continuing source-specific #566 custody
+
+- **C.566.complete-retention:** Keep the ACTUAL incumbent Bridge/Session
+  Host/SSH/mesh/elevated provider, environment/worker preparation, relay/auth/forwarding
+  and native validation agency. The receiving ROOT author/driver is not appointed
+  executor by this document. Concrete overlapping source edits retain their original
+  agreement/safety boundaries; no blanket ACK, silence consent or age expiry is added.
+
 ## Context
 
 - The earlier exit-output repair was released and installed. This effort
@@ -366,6 +376,174 @@ retains the operator's wording.
 - [ ] Re-read every Plan/Validation item, promote durable truth to owner docs,
   settle owned test/PR resources, mark Done and archive through normal review.
 
+<!-- backlog-reconciliation:7556:first-ten:Plan -->
+
+### Direct retained acceptance from #566
+
+_Agent-recommended additive tracking proposal; original source requirements,
+alternatives, finite proof tiers and custody remain binding._
+
+These rows retain work rather than certify it complete. Existing Request,
+Status, Participants, Plan, global Validation, Journal, checked credit and
+first unresolved gates remain intact. Review of this amendment is document
+intake only, not implementation, native/installed proof, source closure,
+owner reassignment or claim/resource release. A separate source judgment
+must preserve each literal source-specific hold; no generic ACK, every-host
+or whole-parent completion gate is added.
+
+#### Source #566
+
+- [ ] **P.566.all-original-boundaries:** All originally scoped local, SSH/mesh and local
+  AND remote elevated command dispatch uses a survivable far-side Session Host/execution
+  leg under the existing target agency. Qualified modern provider behavior can satisfy
+  the original semantics; no obsolete class filename or search-silence absence rule is
+  added.
+
+- [ ] **P.566.far-side-identity-and-forwarding:** Preserve far-side Host provisioning
+  and exact target user/privilege/CWD/environment/identity, reattachable control reach
+  and original -L control/-R credential forwarding semantics. Transport loss, daemon
+  restart or relay expiry cannot cancel the Host's accepted in-flight work merely by
+  closing front-owned stdio.
+
+- [ ] **P.566.detach-and-obligations:** Client detach/reconnect, native conversation,
+  remote worktree and accepted work survive without child/session recreation, duplicate
+  bodies or discarded unresolved obligations; use the existing lifecycle/relay/provider
+  owners.
+
+- [ ] **P.566.classic-until-qualified:** Retire each classic SSH/command front-owned
+  path only after its actual supported replacement boundary is qualified.
+  Immediate2446/2106/2397/2398 diagnostics remain independently actionable; broader
+  migration or the whole installation effort is NOT their completion prerequisite.
+
+- [ ] **P.566.finite-credit-and-independent-lanes:** Credit587 local/CodeSpace and
+  current finite wrapper/native/release foundations without calling them the whole
+  remote/elevated matrix. Keep fresh2446 versus590 resume, direct2106/2397 remote ACP
+  versus2437 same-machine AHP, and2398 worker preparation/cold-budget policy separately
+  scored.
+
+- [ ] **P.566.retained-union:** Retain the complete CURRENT566 original, BOTH current
+  refinements and admitted directly inherited contract, including every20 retained
+  checklist clauses, all original OR/AND, native scenarios/budgets,
+  provider/source/resource holders and historical receiving conditions at their ORIGINAL
+  scope. No generic ACK, age release or unconditional standalone-token veto is invented.
+
+- [ ] **P.566.inherited-01:** Exercise the registered Windows local base-repo elevated
+  target through its real elevated relay and environment-script preparation, retaining
+  both bare and qualified agent aliases. Distinguish first Connection closed, later
+  immediate Internal error, and genuinely fresh zero-turn attempts from the separate
+  #590 auto-resume case.
+
+- [ ] **P.566.inherited-02:** Persist bounded, sanitized causal evidence for environment
+  setup, elevated relay/registration, child/host startup, ACP initialize and
+  protocol/version compatibility. Surface the underlying stage-7 exception or child/host
+  failure in the caller-visible failure, not only Internal error; do not mislabel an
+  immediate failure as a timeout or credential problem without evidence.
+
+- [ ] **P.566.inherited-03:** Qualify long-idle, generation-skew and
+  post-alignment/restart conditions. The original version alignment and restarts did not
+  cure the failure; detect any actual re-registration/health prerequisite explicitly
+  rather than prescribing speculative reinstallation/restart or silently reauthorizing
+  elevation.
+
+- [ ] **P.566.inherited-04:** A healthy target launches and receives its first prompt; a
+  failed target leaves truthful inspectable state, explicit cleanup/retained ownership
+  and an authorized recovery route. Cover no-wait and same-target retries without
+  duplicate bodies or discarded obligations.
+
+- [ ] **P.566.inherited-05:** Preserve elevated privileges, working directory,
+  environment-script output/error handling, exact target identity and
+  local-versus-remote ownership through the eventual host-backed replacement. Keep
+  native installed qualification separate from generic ACP diagnostic tests and ordinary
+  local/CodeSpace hosting proof.
+
+- [ ] **P.566.inherited-06:** Do not merge this evidence with #2106/#2397's remote
+  Windows SSH initialize/first-turn incidents or infer a common root cause from
+  LAUNCH_ACP. Keep #566's complete local/remote SSH/elevated lifetime and
+  detach-without-destroying-work obligations intact; retire the classic path only after
+  every replacement boundary is qualified.
+
+- [ ] **P.566.inherited-07:** Through the actual configured SSH-ready remote Windows
+  entrypoint, establish ACP handshake, deliver the initial multi-line/no-wait prompt and
+  reach running/idle OR persist a concrete truthful resumable startup failure. Preserve
+  the original created/failed session, not a manually recreated replacement.
+
+- [ ] **P.566.inherited-08:** Correlate SSH transport, worker/environment preparation,
+  child/host start, actual initialize request AND response, session/new and first prompt
+  with bounded persisted timings, connection/exit evidence and redacted child stderr.
+  Mere process liveness, ordinary prompt-mode success, generic parse enrichment or a
+  different provider's LAUNCH_ACP label is not ACP success.
+
+- [ ] **P.566.inherited-09:** Diagnose both original failure shapes on supported native
+  remote Windows CLI/host versions, including first touch and re-entry. Record an
+  external capability/version defect explicitly if outside owned code. AHP,
+  local/CodeSpace hosting or a fixture transport cannot substitute for direct remote ACP
+  evidence.
+
+- [ ] **P.566.inherited-10:** Complete initialize within the applicable reviewed budget
+  OR fail with a concrete stage/cause diagnostic. Preserve separate
+  initialize/session-new bounds; distinguish immediate closed connection from timeout.
+  Do not mask silence by widening limits, speculative reinstall/restart or restarting
+  authentication after SSH/login already succeeded.
+
+- [ ] **P.566.inherited-11:** Preserve surviving
+  Host/native-conversation/remote-worktree obligations and actual target/source
+  identity. Reconcile authoritative state before retry/resume; do not drop a failed
+  session, duplicate a child or release unresolved ownership merely to make the next
+  attempt healthy.
+
+- [ ] **P.566.inherited-12:** Qualify cancellation, late initialize response and
+  provisioned retry without manual session replacement, retaining successful first
+  prompt or truthful failure/cleanup/retained custody. Keep source/test definitions,
+  historical results, native installed qualification and actual runtime effect separate.
+
+- [ ] **P.566.inherited-13:** Preserve immediate diagnostics independently of the wider
+  SshSpawner/ElevatedSpawner migration. Keep the existing functioning process-owned
+  SSH/command path until its actual replacement boundary is qualified; do not make all
+  #566 work a gate for resolving this finite incident or discard its legacy behavior
+  prematurely.
+
+- [ ] **P.566.inherited-14:** Keep every inherited #2397 row and every existing
+  #566/#2446 row complete and independently scored. No unchanged owner/hold expires, and
+  this checklist grants no SSH/native/socket/model/elevation/service/credential or
+  environment operation.
+
+- [ ] **P.566.inherited-15:** Provide/reuse one worker-side preflight/provisioning
+  interface that reports the COMPLETE missing prerequisite set before dependent
+  dispatch: package/feed configuration, runtime tooling, repository-local runtime
+  installation, repository trust and CLI sign-in. Distinguish missing, unavailable,
+  unknown, denied and ready per prerequisite through its actual owner; do not stop after
+  the first later-stage failure or silently certify a partial report.
+
+- [ ] **P.566.inherited-16:** Reuse actual requirement/preparation and selected-loadout
+  readiness contracts. A staged bundle import or enabled-plugin observation is a useful
+  narrower partial, not the full worker report. Do not authenticate every optional
+  component, guess a missing dependency from every closure or automatically
+  install/restart after an unknown failure.
+
+- [ ] **P.566.inherited-17:** Distinguish successful SSH transport, prepared
+  worker/runtime/trust/auth state, Host readiness, ACP initialize and session/new.
+  Preserve separate phase timing and caller-visible cause; local Host-bind budget is not
+  a remote worker contract, and source metadata is not runtime readiness.
+
+- [ ] **P.566.inherited-18:** Establish target-class/observed warm-versus-cold scaling
+  OR an evidenced reviewed default policy sufficient for healthy cold Windows workers
+  with the supported large plugin set. Preserve the original alternative; do not invent
+  a numeric threshold, widen every timeout, mask hung initialize or weaken existing
+  test/containment limits.
+
+- [ ] **P.566.inherited-19:** Qualify actual supported cold and warm remote Windows
+  entrypoints, missing/malformed/denied prerequisites, slow healthy startup and real
+  stage stalls with bounded source/platform/phase evidence. Preserve actual
+  provider/trust/account/installation identity and explicit unavailable capacity rather
+  than counting parser or bundle-only fixtures as native installed proof.
+
+- [ ] **P.566.inherited-20:** Keep immediate preflight and diagnostic work independently
+  actionable before completion of the broader SSH/elevated host-spawner migration.
+  Preserve existing working fallback and all native/failed-session/remote-worktree
+  custody; no session recreation, duplicate child or owner release is implied.
+
+Current bounded #9470/#9479 literal-forwarding and blanket-renderer-removal credit remains as recorded above. This intake does not restore the eliminated renderer-admission fence or introduce a renderer-capability handshake; full Manager/live survival and distinct remote/elevated acceptance remain separate.
+
 ## Validation Plan
 
 All detailed controls below are **agent-recommended** ways to prove the
@@ -467,6 +645,225 @@ operator's installation-survival contract.
   closure/restoration is migration evidence, while the replacement's later
   same-process survival is installation-independence evidence. Manual scrub
   never deletes runtime state or configuration.
+
+<!-- backlog-reconciliation:7556:first-ten:Validation -->
+
+### Global validation of retained #566
+
+#### Source #566
+
+- [ ] **V.566.all-original-boundaries:** Qualify the COMPLETE matching Plan clause at
+  its ORIGINAL scope, alternatives, supported native venue and finite bounds; preserve
+  current finite credit and same source/resource custody: All originally scoped local,
+  SSH/mesh and local AND remote elevated command dispatch uses a survivable far-side
+  Session Host/execution leg under the existing target agency. Qualified modern provider
+  behavior can satisfy the original semantics; no obsolete class filename or
+  search-silence absence rule is added.
+
+- [ ] **V.566.far-side-identity-and-forwarding:** Qualify the COMPLETE matching Plan
+  clause at its ORIGINAL scope, alternatives, supported native venue and finite bounds;
+  preserve current finite credit and same source/resource custody: Preserve far-side
+  Host provisioning and exact target user/privilege/CWD/environment/identity,
+  reattachable control reach and original -L control/-R credential forwarding semantics.
+  Transport loss, daemon restart or relay expiry cannot cancel the Host's accepted
+  in-flight work merely by closing front-owned stdio.
+
+- [ ] **V.566.detach-and-obligations:** Qualify the COMPLETE matching Plan clause at its
+  ORIGINAL scope, alternatives, supported native venue and finite bounds; preserve
+  current finite credit and same source/resource custody: Client detach/reconnect,
+  native conversation, remote worktree and accepted work survive without child/session
+  recreation, duplicate bodies or discarded unresolved obligations; use the existing
+  lifecycle/relay/provider owners.
+
+- [ ] **V.566.classic-until-qualified:** Qualify the COMPLETE matching Plan clause at
+  its ORIGINAL scope, alternatives, supported native venue and finite bounds; preserve
+  current finite credit and same source/resource custody: Retire each classic
+  SSH/command front-owned path only after its actual supported replacement boundary is
+  qualified. Immediate2446/2106/2397/2398 diagnostics remain independently actionable;
+  broader migration or the whole installation effort is NOT their completion
+  prerequisite.
+
+- [ ] **V.566.finite-credit-and-independent-lanes:** Qualify the COMPLETE matching Plan
+  clause at its ORIGINAL scope, alternatives, supported native venue and finite bounds;
+  preserve current finite credit and same source/resource custody: Credit587
+  local/CodeSpace and current finite wrapper/native/release foundations without calling
+  them the whole remote/elevated matrix. Keep fresh2446 versus590 resume,
+  direct2106/2397 remote ACP versus2437 same-machine AHP, and2398 worker
+  preparation/cold-budget policy separately scored.
+
+- [ ] **V.566.retained-union:** Qualify the COMPLETE matching Plan clause at its
+  ORIGINAL scope, alternatives, supported native venue and finite bounds; preserve
+  current finite credit and same source/resource custody: Retain the complete CURRENT566
+  original, BOTH current refinements and admitted directly inherited contract, including
+  every20 retained checklist clauses, all original OR/AND, native scenarios/budgets,
+  provider/source/resource holders and historical receiving conditions at their ORIGINAL
+  scope. No generic ACK, age release or unconditional standalone-token veto is invented.
+
+- [ ] **V.566.inherited-01:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: Exercise the registered Windows local
+  base-repo elevated target through its real elevated relay and environment-script
+  preparation, retaining both bare and qualified agent aliases. Distinguish first
+  Connection closed, later immediate Internal error, and genuinely fresh zero-turn
+  attempts from the separate #590 auto-resume case.
+
+- [ ] **V.566.inherited-02:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: Persist bounded, sanitized causal evidence
+  for environment setup, elevated relay/registration, child/host startup, ACP initialize
+  and protocol/version compatibility. Surface the underlying stage-7 exception or
+  child/host failure in the caller-visible failure, not only Internal error; do not
+  mislabel an immediate failure as a timeout or credential problem without evidence.
+
+- [ ] **V.566.inherited-03:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: Qualify long-idle, generation-skew and
+  post-alignment/restart conditions. The original version alignment and restarts did not
+  cure the failure; detect any actual re-registration/health prerequisite explicitly
+  rather than prescribing speculative reinstallation/restart or silently reauthorizing
+  elevation.
+
+- [ ] **V.566.inherited-04:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: A healthy target launches and receives its
+  first prompt; a failed target leaves truthful inspectable state, explicit
+  cleanup/retained ownership and an authorized recovery route. Cover no-wait and
+  same-target retries without duplicate bodies or discarded obligations.
+
+- [ ] **V.566.inherited-05:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: Preserve elevated privileges, working
+  directory, environment-script output/error handling, exact target identity and
+  local-versus-remote ownership through the eventual host-backed replacement. Keep
+  native installed qualification separate from generic ACP diagnostic tests and ordinary
+  local/CodeSpace hosting proof.
+
+- [ ] **V.566.inherited-06:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: Do not merge this evidence with #2106/#2397's
+  remote Windows SSH initialize/first-turn incidents or infer a common root cause from
+  LAUNCH_ACP. Keep #566's complete local/remote SSH/elevated lifetime and
+  detach-without-destroying-work obligations intact; retire the classic path only after
+  every replacement boundary is qualified.
+
+- [ ] **V.566.inherited-07:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: Through the actual configured SSH-ready
+  remote Windows entrypoint, establish ACP handshake, deliver the initial
+  multi-line/no-wait prompt and reach running/idle OR persist a concrete truthful
+  resumable startup failure. Preserve the original created/failed session, not a
+  manually recreated replacement.
+
+- [ ] **V.566.inherited-08:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: Correlate SSH transport, worker/environment
+  preparation, child/host start, actual initialize request AND response, session/new and
+  first prompt with bounded persisted timings, connection/exit evidence and redacted
+  child stderr. Mere process liveness, ordinary prompt-mode success, generic parse
+  enrichment or a different provider's LAUNCH_ACP label is not ACP success.
+
+- [ ] **V.566.inherited-09:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: Diagnose both original failure shapes on
+  supported native remote Windows CLI/host versions, including first touch and re-entry.
+  Record an external capability/version defect explicitly if outside owned code. AHP,
+  local/CodeSpace hosting or a fixture transport cannot substitute for direct remote ACP
+  evidence.
+
+- [ ] **V.566.inherited-10:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: Complete initialize within the applicable
+  reviewed budget OR fail with a concrete stage/cause diagnostic. Preserve separate
+  initialize/session-new bounds; distinguish immediate closed connection from timeout.
+  Do not mask silence by widening limits, speculative reinstall/restart or restarting
+  authentication after SSH/login already succeeded.
+
+- [ ] **V.566.inherited-11:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: Preserve surviving
+  Host/native-conversation/remote-worktree obligations and actual target/source
+  identity. Reconcile authoritative state before retry/resume; do not drop a failed
+  session, duplicate a child or release unresolved ownership merely to make the next
+  attempt healthy.
+
+- [ ] **V.566.inherited-12:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: Qualify cancellation, late initialize
+  response and provisioned retry without manual session replacement, retaining
+  successful first prompt or truthful failure/cleanup/retained custody. Keep source/test
+  definitions, historical results, native installed qualification and actual runtime
+  effect separate.
+
+- [ ] **V.566.inherited-13:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: Preserve immediate diagnostics independently
+  of the wider SshSpawner/ElevatedSpawner migration. Keep the existing functioning
+  process-owned SSH/command path until its actual replacement boundary is qualified; do
+  not make all #566 work a gate for resolving this finite incident or discard its legacy
+  behavior prematurely.
+
+- [ ] **V.566.inherited-14:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: Keep every inherited #2397 row and every
+  existing #566/#2446 row complete and independently scored. No unchanged owner/hold
+  expires, and this checklist grants no
+  SSH/native/socket/model/elevation/service/credential or environment operation.
+
+- [ ] **V.566.inherited-15:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: Provide/reuse one worker-side
+  preflight/provisioning interface that reports the COMPLETE missing prerequisite set
+  before dependent dispatch: package/feed configuration, runtime tooling,
+  repository-local runtime installation, repository trust and CLI sign-in. Distinguish
+  missing, unavailable, unknown, denied and ready per prerequisite through its actual
+  owner; do not stop after the first later-stage failure or silently certify a partial
+  report.
+
+- [ ] **V.566.inherited-16:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: Reuse actual requirement/preparation and
+  selected-loadout readiness contracts. A staged bundle import or enabled-plugin
+  observation is a useful narrower partial, not the full worker report. Do not
+  authenticate every optional component, guess a missing dependency from every closure
+  or automatically install/restart after an unknown failure.
+
+- [ ] **V.566.inherited-17:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: Distinguish successful SSH transport,
+  prepared worker/runtime/trust/auth state, Host readiness, ACP initialize and
+  session/new. Preserve separate phase timing and caller-visible cause; local Host-bind
+  budget is not a remote worker contract, and source metadata is not runtime readiness.
+
+- [ ] **V.566.inherited-18:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: Establish target-class/observed
+  warm-versus-cold scaling OR an evidenced reviewed default policy sufficient for
+  healthy cold Windows workers with the supported large plugin set. Preserve the
+  original alternative; do not invent a numeric threshold, widen every timeout, mask
+  hung initialize or weaken existing test/containment limits.
+
+- [ ] **V.566.inherited-19:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: Qualify actual supported cold and warm remote
+  Windows entrypoints, missing/malformed/denied prerequisites, slow healthy startup and
+  real stage stalls with bounded source/platform/phase evidence. Preserve actual
+  provider/trust/account/installation identity and explicit unavailable capacity rather
+  than counting parser or bundle-only fixtures as native installed proof.
+
+- [ ] **V.566.inherited-20:** Qualify the COMPLETE matching Plan clause at its ORIGINAL
+  scope, alternatives, supported native venue and finite bounds; preserve current finite
+  credit and same source/resource custody: Keep immediate preflight and diagnostic work
+  independently actionable before completion of the broader SSH/elevated host-spawner
+  migration. Preserve existing working fallback and all
+  native/failed-session/remote-worktree custody; no session recreation, duplicate child
+  or owner release is implied.
+
+- [ ] **GV.566.complete-retention:** Complete EVERY matching retained 566
+  Plan/Validation clause, complete original/refined/inherited union and continuing
+  source/resource conditions at the ORIGINAL finite scope. Preserve all incumbent ROOT
+  Plan/Validation/Request/Participants/checked credit/Journal. This paper intake is not
+  technical completion, native/release/installed proof, source closure or claim
+  transfer.
 
 ## Proposal
 
@@ -2322,3 +2719,9 @@ Manager launch qualification remain open.
   daemon, or activate a fleet update as a side effect of that investigation.
 - This same worktree continues the effort and is not finalized. No host
   installation, service or native conversation was changed.
+
+<!-- backlog-reconciliation:7556:first-ten:Journal -->
+
+### 2026-10-28 - Additive retained #566 contract proposal
+
+Added direct per-source Plan, actual global Validation and continuing custody rows after whole-record and complete receiving-document research. Normal review and current complete receiving readback remain publication gates; this entry records authored tracking only, not a future merge or source disposition. All incumbent finite source/design/release/native credits remain at their actual tiers, with original alternatives, unknowns, source-specific holds and existing source/resource custodians preserved. No implementation, operational effect or claim release is authorized. The campaign's receiving register records delivery and later source judgments separately.
