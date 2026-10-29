@@ -66,6 +66,12 @@ lean `install.{ps1,sh} provision` path and then dispatches. For normal ongoing
 updates, use `agent-worktrees update`; it refreshes payloads and reconciles
 runtimes rather than requiring hand-run `copilot plugin update` plus init.
 
+Git commit, branch and dirty-state provenance is collected only when the
+payload is inside a working tree. A staged payload beneath Git metadata, a
+bare repository or a payload outside a repository has unknown Git provenance;
+it does not inherit the containing repository's revision. Actual Git lookup
+or status failures inside a working tree still refuse provisioning.
+
 Runtime source fingerprints exclude generated `.egg-info` and `.dist-info`
 metadata beneath package source roots. Building a wheel therefore does not
 make unchanged source appear different on the next update. Real source and
