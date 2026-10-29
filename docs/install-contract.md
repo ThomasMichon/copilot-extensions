@@ -2575,6 +2575,10 @@ executable protection is rechecked, and an excluded root missing from census
 refuses retirement. Linux descendant observation may retain partial rows for
 unrelated nondumpable tasks; selected roots/children must remain fully inspected.
 The ordinary non-signaling uninstall census retains its existing strictness.
+Current-slot protection covers both image and launch path, including new
+descendants and same-birth execs. Retirement retains the canonical publication
+lease so another compliant publisher cannot change the selected generation
+during that scope.
 
 External pinned retirement is supported on Windows and Linux; another platform
 with a live old owner refuses rather than substituting PID-only termination.

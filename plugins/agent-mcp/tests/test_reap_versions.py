@@ -255,6 +255,42 @@ def test_protected_late_child_resumes_without_termination(tmp_path, owners, monk
     assert owners["resumed"] == [112, 111]
 
 
+def test_late_current_slot_child_is_not_paused_or_terminated(tmp_path, owners, monkeypatch):
+    original = rv._inspect
+
+    def inspect(root):
+        if owners["paused"]:
+            owners["rows"][333] = _row(333, 112, tmp_path / "versions/2.0/bin/python")
+        return original(root)
+
+    monkeypatch.setattr(rv, "_inspect", inspect)
+    with pytest.raises(rv.RetirementRefused, match="protected"):
+        rv.reap_stale(tmp_path)
+    assert owners["paused"] == [111, 112]
+    assert owners["terminated"] == []
+    assert owners["resumed"] == [112, 111]
+
+
+@pytest.mark.parametrize("when", ["initial", "after-pause"])
+def test_current_image_cannot_be_hidden_by_stale_argv0(tmp_path, owners, monkeypatch, when):
+    original = rv._inspect
+
+    def inspect(root):
+        if when == "initial" or owners["paused"]:
+            owners["rows"][111]["image"] = str(tmp_path / "versions/2.0/bin/python")
+        return original(root)
+
+    monkeypatch.setattr(rv, "_inspect", inspect)
+    if when == "initial":
+        assert rv.reap_stale(tmp_path) == []
+        assert owners["paused"] == []
+    else:
+        with pytest.raises(rv.RetirementRefused, match="protected"):
+            rv.reap_stale(tmp_path)
+        assert owners["resumed"] == [112, 111]
+    assert owners["terminated"] == []
+
+
 @pytest.mark.parametrize("name", [".venv", "venv", "tool"])
 def test_fresh_recovery_settles_known_legacy_without_old_receipt(tmp_path, owners, name):
     owners["rows"][111]["argv"] = [str(tmp_path / name / "bin/python")]

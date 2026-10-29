@@ -8,6 +8,7 @@ PID files, signals a process group, or treats a stop request as confirmed exit.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 from contextlib import ExitStack
 import json
 import os
@@ -20,7 +21,8 @@ import installer_engine_footprint as footprint
 from agent_procutil._daemon_instance_identity import birth_identity
 from agent_procutil.process_retirement import PinnedProcess, RetirementRefused
 from versioned_runtime import (
-    CURRENT_LINK, VERSIONS_DIR, _norm_version, _slot_of_path, current_version, list_versions,
+    CURRENT_LINK, VERSIONS_DIR, _norm_version, _publication_lease, _slot_of_path,
+    current_version, list_versions,
 )
 
 
@@ -52,9 +54,15 @@ def _legacy_entries(root: Path) -> tuple[str, ...]:
 
 def _version(
     row: dict, root: Path, versions: set[str], *, legacy_entries: tuple[str, ...] = (),
+    current: str | None = None,
 ) -> str | None:
     arguments = inspection._arguments(row)
-    for candidate in (arguments[0] if arguments else None, row["image"]):
+    paths = (arguments[0] if arguments else None, row["image"])
+    if current is not None:
+        selected = {current, *(value for value in versions if _norm_version(value) == _norm_version(current))}
+        if any(_slot_of_path(path, str(root / VERSIONS_DIR), selected) for path in paths):
+            return current
+    for candidate in paths:
         found = _slot_of_path(candidate, str(root / VERSIONS_DIR), versions)
         if found:
             return found
@@ -80,10 +88,10 @@ def _protected(row: dict) -> bool:
     )
 
 
-def _require_retirable(row: dict) -> None:
+def _require_retirable(row: dict, current_owner: Callable[[dict], bool] | None = None) -> None:
     if row.get("inspectionIncomplete") or not row.get("image"):
         raise RetirementRefused(f"A selected process cannot be fully inspected (pid={row['pid']})")
-    if _protected(row):
+    if _protected(row) or (current_owner is not None and current_owner(row)):
         raise RetirementRefused("A stale MCP tree contains a protected session or transport")
 
 
@@ -131,13 +139,13 @@ def _descendants(rows: dict[int, dict], selected: set[int]) -> set[int]:
 
 def _retire(
     root: Path, rows: dict[int, dict], targets: set[int], protected: set[int], *,
-    check_only: bool,
+    check_only: bool, current_owner: Callable[[dict], bool] | None = None,
 ) -> set[int]:
     scope = _descendants(rows, targets)
     if scope & protected:
         raise RetirementRefused("A stale MCP tree contains a protected session or transport")
     for pid in scope:
-        _require_retirable(rows[pid])
+        _require_retirable(rows[pid], current_owner)
     if check_only and targets:
         raise RetirementRefused("Old MCP owners remain while version reaping is explicitly disabled")
     retired = set()
@@ -176,14 +184,14 @@ def _retire(
                 row = later.get(pid)
                 if row is None or _birth(row) != pin.birth:
                     raise RetirementRefused(f"Pinned process inspection is unavailable (pid={pid})")
-                _require_retirable(row)
+                _require_retirable(row, current_owner)
             added = _descendants(later, set(pinned)) - scope
             if not added:
                 break
             if added & protected:
                 raise RetirementRefused("A stale MCP tree gained a protected session or transport")
             for pid in added:
-                _require_retirable(later[pid])
+                _require_retirable(later[pid], current_owner)
             scope.update(added)
             rows.update({pid: later[pid] for pid in added})
         else:
@@ -214,7 +222,7 @@ def reap_stale(
     legacy_entries = _legacy_entries(root) if fresh else ()
     classified = {
         pid: version for pid, row in rows.items()
-        if (version := _version(row, root, versions, legacy_entries=legacy_entries))
+        if (version := _version(row, root, versions, legacy_entries=legacy_entries, current=current))
     }
     stale = {
         pid: version for pid, version in classified.items()
@@ -244,10 +252,20 @@ def reap_stale(
         targets[pid] = version
     if not targets:
         return []
-    _retire(root, rows, set(targets), protected, check_only=check_only)
+
+    def current_owner(row: dict) -> bool:
+        if current_version(root, link_name) != current:
+            raise RetirementRefused("Current runtime selection changed during retirement")
+        version = _version(row, root, versions, legacy_entries=legacy_entries, current=current)
+        return version is not None and _norm_version(version) == _norm_version(current)
+
+    with _publication_lease(root):
+        if current_version(root, link_name) != current:
+            raise RetirementRefused("Current runtime selection changed before retirement")
+        _retire(root, rows, set(targets), protected, check_only=check_only, current_owner=current_owner)
     remaining = _inspect(root)
     if any(
-        (version := _version(row, root, versions, legacy_entries=legacy_entries))
+        (version := _version(row, root, versions, legacy_entries=legacy_entries, current=current))
         and _norm_version(version) != _norm_version(current) and pid not in protected
         for pid, row in remaining.items()
     ):
