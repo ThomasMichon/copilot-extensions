@@ -28,7 +28,7 @@ import { homedir } from "node:os";
 import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { fileURLToPath } from "node:url";
-import { createPythonPolicy, createResidentPreToolHook } from "./resident-pre-tool.mjs";
+import { createPythonPolicy, createResidentPreToolHook, selectResidentPreToolHooks } from "./resident-pre-tool.mjs";
 
 // Coalesce bursts of intent updates: flush at most once per this interval.
 // A long turn re-reports intent repeatedly; the trailing-edge flush keeps the
@@ -206,15 +206,16 @@ function maybeNudgeDisposition(longTurn = false) {
   }
 }
 
-// Explicit pilot only: capability approval does not disable the command hook.
-const policyPython = process.env.AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON;
+// The same launch-time mode gates command entries before any policy work.
 const scriptsRoot = fileURLToPath(new URL("../../scripts/", import.meta.url));
-const residentHooks = policyPython ? {
-  onPreToolUse: createResidentPreToolHook({
+const residentHooks = selectResidentPreToolHooks({
+  createHook: () => createResidentPreToolHook({
     scriptsRoot,
-    invokePolicy: createPythonPolicy({ scriptsRoot, python: policyPython }),
+    invokePolicy: createPythonPolicy({
+      scriptsRoot, python: process.env.AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON,
+    }),
   }),
-} : undefined;
+});
 
 const session = await joinSession({
   onPermissionRequest: approveAll,
