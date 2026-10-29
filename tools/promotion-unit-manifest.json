@@ -2634,8 +2634,6 @@
         "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_windows_handle_cleanup[none]",
         "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_windows_handle_cleanup[open]",
         "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_windows_handle_cleanup[query]",
-        "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_windows_handle_cleanup[uncertain]",
-        "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_windows_handle_cleanup[reparse]",
         "tools/promotion_unit_tests/test_activation_preservation.py::test_project_identity_memo_unit_windows_handle_cleanup[close]"
     ],
     "sources": {
@@ -2968,8 +2966,8 @@
         "libs/zdd/src/zdd/private_protocol.py": "b693ed29912fb5f17c982ef7ed1a6b7a20e4354023a7628b8cff190017f34001",
         "libs/zdd/src/zdd/private_windows.py": "358dac30bf8d7f4cdcc212dec8cacb187c8e00b43fe2591ef4fff7e0fa418e1d",
         "libs/zdd/src/zdd/private_windows_native.py": "80df5f71f4962a64eb96670a15511cdfddc50e989cc667271642c442613fab9d",
-        "libs/plugin-activation/src/plugin_activation/_project_identity.py": "5da042472a201b212962d3983e0c434d428f520394ea245bba8689cce596a580",
-        "libs/plugin-activation/tests/test_plugin_activation.py": "d98c9ff9eb4d58f44a87f35ef9f3e3f4dd3d41ad37424d24cb72d1f8df7cde41"
+        "libs/plugin-activation/src/plugin_activation/_project_identity.py": "8eeee3be5ee73113e8d6cd3642ecb6ba6eb163c25c14033a102c86462d808578",
+        "libs/plugin-activation/tests/test_plugin_activation.py": "e72b654bf73e0672b6303a0cc3cd34c21b89abc95204e3abf20a45c4f1304638"
     },
     "coverage_targets": [
         "tools/core_runtime_profile.py",

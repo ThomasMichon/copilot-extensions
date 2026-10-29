@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ctypes
 import hashlib
 import json
 import logging
@@ -28,6 +27,7 @@ def _regular(info: os.stat_result, *, directory: bool = False) -> bool:
 
 @lru_cache(maxsize=1)
 def _windows_file_api():
+    import ctypes
     from ctypes import wintypes
 
     class BasicInfo(ctypes.Structure):
@@ -50,24 +50,31 @@ def _windows_file_api():
     kernel.GetFileInformationByHandleEx.restype = wintypes.BOOL
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
     kernel.CloseHandle.restype = wintypes.BOOL
-    return kernel, BasicInfo, FileId
+    def open_file(path):
+        handle = kernel.CreateFileW(str(path), 0x80, 7, None, 3, 0x02200000, None)
+        if handle == ctypes.c_void_p(-1).value:
+            raise OSError("project identity write-version handle unavailable")
+        return handle
 
-
-def _windows_write_version(path: Path) -> tuple[int, ...]:
-    kernel, basic_type, id_type = _windows_file_api()
-    handle = kernel.CreateFileW(str(path), 0x80, 7, None, 3, 0x02200000, None)
-    if handle == ctypes.c_void_p(-1).value:
-        raise OSError("project identity write-version handle unavailable")
-    try:
-        basic, identity = basic_type(), id_type()
+    def read_version(handle):
+        basic, identity = BasicInfo(), FileId()
         for kind, info in ((0, basic), (18, identity)):
             if not kernel.GetFileInformationByHandleEx(handle, kind, ctypes.byref(info), ctypes.sizeof(info)):
                 raise OSError("project identity write-version query unavailable")
         if basic.changed <= 0 or basic.attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
             raise OSError("project identity write-version evidence uncertain")
         return identity.volume, int.from_bytes(bytes(identity.id), "little"), basic.changed
+
+    return open_file, read_version, kernel.CloseHandle
+
+
+def _windows_write_version(path: Path) -> tuple[int, ...]:
+    open_file, read_version, close = _windows_file_api()
+    handle = open_file(path)
+    try:
+        return read_version(handle)
     finally:
-        if not kernel.CloseHandle(handle):
+        if not close(handle):
             raise OSError("project identity write-version handle close failed")
 
 

@@ -2749,7 +2749,7 @@ snapshots, refused transactions, restoration, injected contention and real
 symlink assertions execute on Linux without changing production or test bodies.
 The same adapter additionally re-exports only the six explicit
 `test_project_identity_memo_unit_*` functions from `test_plugin_activation.py`
-(seventeen cases, including parameterization). They call the canonical registered-root resolver
+(fifteen cases, including parameterization). They call the canonical registered-root resolver
 with synthetic registry/input evidence and a substituted Git boundary, proving
 zero Git probes for an unchanged memo, fresh work on a miss/input change, and no
 positive publication for failed or uncertain probes. A synthetic source-file

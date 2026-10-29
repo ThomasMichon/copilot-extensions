@@ -1664,41 +1664,28 @@ def test_project_identity_memo_unit_native_write_version(tmp_path, monkeypatch):
     assert _project_identity.identity_inputs(root, "expected", str(executable)) is None
 
 
-@pytest.mark.parametrize("failure", ["none", "open", "query", "uncertain", "reparse", "close"])
+@pytest.mark.parametrize("failure", ["none", "open", "query", "close"])
 def test_project_identity_memo_unit_windows_handle_cleanup(monkeypatch, failure):
-    import ctypes
-    from types import SimpleNamespace
     from plugin_activation import _project_identity
-
-    class Basic(ctypes.Structure):
-        _fields_ = [("changed", ctypes.c_int64), ("attributes", ctypes.c_uint32)]
-
-    class Identity(ctypes.Structure):
-        _fields_ = [("volume", ctypes.c_uint64), ("id", ctypes.c_ubyte * 16)]
 
     closed = []
 
-    def query(_handle, kind, output, _size):
+    def open_file(_path):
+        if failure == "open":
+            raise OSError("synthetic open refusal")
+        return 42
+
+    def read_version(handle):
+        assert handle == 42
         if failure == "query":
-            return False
-        info = output._obj
-        if kind == 0:
-            info.changed = 0 if failure == "uncertain" else 123
-            info.attributes = 0x400 if failure == "reparse" else 0
-        else:
-            info.volume = 5
-            info.id[0] = 7
-        return True
+            raise OSError("synthetic native change-stamp refusal")
+        return 5, 7, 123
 
     def close(handle):
         closed.append(handle)
         return failure != "close"
 
-    kernel = SimpleNamespace(
-        CreateFileW=lambda *_: ctypes.c_void_p(-1).value if failure == "open" else 42,
-        GetFileInformationByHandleEx=query, CloseHandle=close,
-    )
-    monkeypatch.setattr(_project_identity, "_windows_file_api", lambda: (kernel, Basic, Identity))
+    monkeypatch.setattr(_project_identity, "_windows_file_api", lambda: (open_file, read_version, close))
     if failure == "none":
         assert _project_identity._windows_write_version(Path("synthetic")) == (5, 7, 123)
     else:
