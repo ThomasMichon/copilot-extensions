@@ -12,6 +12,7 @@ from .engine_helpers import _DEFAULT_HOST_COLS, _DEFAULT_TARGET_ENVS, start_load
 from .inbox import ensure_inbox
 from .selection import ListSelection
 from .source_identity import local_key
+from .source_read_notices import retained_worktree_scope, worktree_read_feedback, worktree_reload_pending
 from .. import update_stage
 from ... import picker_review
 
@@ -363,7 +364,7 @@ class PickerScreenRuntimeMixin:
                 busy=self._busy_label,
             )
         self.pulse = (self.frame // 5) % 2
-        busy = False
+        busy = worktree_reload_pending(self)
         # A background action (_run_bg) drives the footer spinner: keep the tick
         # at full fps so it animates.
         if self._busy_label:
@@ -704,8 +705,10 @@ class PickerScreenRuntimeMixin:
 
     def _apply_setup_payload(self, payload: _SetupPayload) -> None:
         """Install a collected setup/reload payload. UI-thread only."""
-        if self.debug == "loading":
+        selected_source = retained_worktree_scope(self, payload.source_tabs)
+        if getattr(self, "_busy_label", None) == "Loading…":
             self._busy_label = None
+        if self.debug == "loading":
             self.debug = "ready"
         self._install_pivot_payload(payload.pivot_payload)
         self.source_tabs = payload.source_tabs
@@ -720,7 +723,7 @@ class PickerScreenRuntimeMixin:
         ]
         self._source_local = payload.source_local or self._source_local
         self._source_repo_branch = payload.source_repo_branch
-        self.machine_idx = self.local_index()
+        self.machine_idx = self.local_index() if selected_source is None else selected_source
         self.maint_sel = ListSelection()  # drop any stale Maintenance selection
         # Worktrees selection persists across reload (#2258 P3-7): it is NOT
         # hard-cleared here. Survivors are kept and vanished rows dropped by
@@ -730,6 +733,7 @@ class PickerScreenRuntimeMixin:
         self._last_pivot_poll = time.monotonic()  # registered-pivot repoll (#staleness)
         previous_loader = getattr(self, "loader", None)
         self.loader = payload.loader
+        self._activate_current_machine_tab()
         if previous_loader is not None and previous_loader is not self.loader:
             cancel = getattr(previous_loader, "cancel", None)
             if callable(cancel):
@@ -785,7 +789,9 @@ class PickerScreenRuntimeMixin:
             prewarm()
 
     def _apply_setup_failure(self, epoch: int, err: Exception) -> None:
-        self._busy_label = "Load failed"
+        if getattr(self, "_busy_label", None) == "Loading…":
+            self._busy_label = None
+        self._setup_error = str(err)
         self.debug = f"setup-failed: {err}"
         self._setup_failed_epoch = epoch
         self._ensure_setup_completion_event().set()
@@ -813,8 +819,12 @@ class PickerScreenRuntimeMixin:
 
     def _start_setup_reload_worker(self) -> int:
         """Schedule a setup/reload collect pass and apply it only if current."""
-        self._prime_setup_reload()
+        # An empty successful roster must survive replacement of its loader too.
+        worktree_read_feedback(self)
         epoch = self._next_setup_epoch()
+        self._setup_error = ""
+        self.refresh()
+        self._prime_setup_reload()
         cancel = self._bg_cancel
         try:
             self._invalidate_setup_reload_caches()

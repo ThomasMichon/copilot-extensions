@@ -732,6 +732,17 @@ rows until the replacement generation completes. Unsupported authority is an
 actionable engine-upgrade error. Explicit `AGENT_WORKTREES_PICKER_STREAM=0`
 selects current one-shot reads, not a direct computation fallback.
 
+Pressing `r` immediately shows retry progress and preserves the selected source,
+including All. Before a first successful list, the list area distinguishes
+`Worktrees connection unavailable` from a reachable service whose worktrees
+`could not load`; diagnostics and the retry hint appear there, not in a `WT`
+error badge. A read failure does not declare the host or its resources offline.
+After a successful list, including an empty one, later connection/refresh errors
+retain the last loaded data with a muted `~` source marker and scoped
+`Updates paused` notice rather than a fresh-connection checkmark.
+Refreshing preserves those rows, and successful recovery clears the notice.
+Held-feed staleness stays in availability metadata rather than rewriting every row title.
+
 Explicit version-1 machine tuples are validated by the shared dependency-free
 identity codec before current rows or stream publications are admitted.
 `engine_client.Worktree.machine` is their execution owner; the original physical

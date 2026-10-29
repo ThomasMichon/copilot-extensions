@@ -278,7 +278,7 @@ def test_current_feed_loader_reconnect_resolves_new_generation_without_empty_ove
         expected = "going away: update" if graceful else "without a going-away notice"
         assert expected in loader.error_for_source(source.source_id)
         assert loader.records()[0]["id"] == "one"
-        assert loader.records()[0]["title"].startswith("[stale]")
+        assert loader.records()[0]["raw"]["_availability"]["status"] == "stale"
         wait_until(lambda: loader.records()[0]["id"] == "two")
         assert len(calls) == 2
         assert loader.records()[0]["raw"]["_projection"]["generation"] == "b" * 32
@@ -312,13 +312,17 @@ def test_current_feed_local_and_remote_argv_preserve_authority(monkeypatch, shel
     assert command.count("--follow") == 1
 
 
-def test_current_feed_unsupported_is_actionable_not_legacy_fallback(monkeypatch):
+@pytest.mark.parametrize("structured", [False, True])
+def test_current_feed_unsupported_is_actionable_not_legacy_fallback(monkeypatch, structured):
     source = data_ssh.Source("host", "Win", None, local=True)
     loader = data_ssh.LiveLoader([source])
     error = {
         "type": "error", "error": {"code": "unavailable", "message": "resident lacks worktrees-feed-v1; update the engine"},
     }
-    script = f"import json; print(json.dumps({error!r}),flush=True)"
+    script = (
+        f"import json; print(json.dumps({error!r}),flush=True)" if structured else
+        "import sys; print('unrecognized arguments: --follow', file=sys.stderr); sys.exit(2)"
+    )
     monkeypatch.setattr(loader_feed, "feed_argv", lambda source: [sys.executable, "-u", "-c", script])
     monkeypatch.setattr(
         loader, "_load_local_two_phase", lambda *a: pytest.fail("feed fell back to caller polling")
@@ -326,6 +330,7 @@ def test_current_feed_unsupported_is_actionable_not_legacy_fallback(monkeypatch)
     loader._load_one(source, 0)
     assert loader._state[source.cache_key] == "failed"
     assert "update the engine" in loader.error_for_source(source.source_id)
+    assert loader.read_status_for_source(source.source_id)["failure_kind"] == "content"
     assert not loader._procs
 
 

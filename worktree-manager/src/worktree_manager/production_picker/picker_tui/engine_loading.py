@@ -149,6 +149,7 @@ class PickerScreenLoadingMixin:
             return
         threading.Thread(
             target=self._setup_live_async,
+            args=(self._setup_epoch,),
             name="picker-setup",
             daemon=True,
         ).start()
@@ -273,10 +274,14 @@ class PickerScreenLoadingMixin:
         self._config_cache_session = session
         return session.scope()
 
-    def _setup_live_async(self):
+    def _setup_live_async(self, epoch=None):
         """Enroll the current feed without a redundant advisory one-shot read."""
         from .frame_health import append_launch_event
 
+        if epoch is None:
+            epoch = self._setup_epoch
+        if epoch != self._setup_epoch:
+            return
         append_launch_event("picker_live_setup_start")
         threading.Thread(
             target=self._setup_live_pivots,
@@ -319,13 +324,22 @@ class PickerScreenLoadingMixin:
             err = exc
 
         def apply():
+            if epoch != self._setup_epoch:
+                if loader is not None:
+                    loader.cancel()
+                return
             if err is not None:
                 self.debug = f"setup-failed: {err}"
-                self._busy_label = "Load failed"
+                if self._busy_label == "Loading…":
+                    self._busy_label = None
+                self._setup_error = str(err)
+                self._setup_failed_epoch = epoch
                 self.refresh()
                 return
             self._apply_live_source(prepared, loader)
-            self._busy_label = None
+            self._setup_error = ""
+            if self._busy_label == "Loading…":
+                self._busy_label = None
             self.refresh()
 
         self._apply_from_worker(apply)

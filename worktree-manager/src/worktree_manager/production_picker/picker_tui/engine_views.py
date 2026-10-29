@@ -271,15 +271,35 @@ class WorktreesView:
     def build_data(self, add, width, sel, *, deferred=False):
         eng = self._eng
         btn_focus = sel == ("BTN", 0)
-        from .source_read_notices import failed_worktree_reads
-        failures = failed_worktree_reads(eng)
-        for label, identity, reason in failures[:6]:
-            add(Text(f"  Worktrees read failed · {label} · {identity or 'declared source'}", style=C_WARN))
-            add(Text(f"    {reason}", style=C_DIM))
-        if failures:
-            add(Text("  Reachability/liveness unknown; r retries reads. Other pivots may still work.", style=C_DIM))
-        if len(failures) > 6:
-            add(Text(f"  +{len(failures) - 6} other source reads failed; select a source to inspect.", style=C_DIM))
+        from .source_read_notices import worktree_read_feedback
+        notices = worktree_read_feedback(eng)
+        for notice in notices[:6]:
+            if notice.cached:
+                status = (
+                    "Refreshing" if notice.state == "loading" else
+                    "Updates paused · connection unavailable" if notice.failure_kind == "connection"
+                    else "Updates paused · refresh failed"
+                )
+                add(Text(f"  {notice.label} · {status} · showing last loaded worktrees", style=C_DIM))
+                continue
+            if notice.state == "loading":
+                add(Text(f"  {notice.loading_frame} Loading worktrees · {notice.label}", style=C_LOAD))
+                continue
+            title = (
+                "Worktrees connection unavailable" if notice.failure_kind == "connection"
+                else "Worktrees could not load"
+            )
+            add(Text(f"  {title}", style=C_WARN))
+            add(Text(f"  {notice.label} · {notice.identity or 'declared source'}", style=C_DIM))
+            add(Text(f"  {notice.reason}", style=C_DIM))
+            add(Text("  Press r to retry. Other pivots may still be available.", style=C_DIM))
+            add(Text(""))
+        if len(notices) > 6:
+            add(Text(f"  +{len(notices) - 6} other sources; select a source to inspect.", style=C_DIM))
+        if notices and not any(notice.cached for notice in notices) and (
+            not eng.is_all() or not eng._scope_data()
+        ):
+            return
         cols, sections = eng.current_list_visible()
         worker_index = eng._worktree_supervised_workers_index(
             [rec for _label, rows in sections for rec in rows])
