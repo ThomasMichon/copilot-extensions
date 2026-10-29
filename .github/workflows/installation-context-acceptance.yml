@@ -1122,6 +1122,14 @@ jobs:
           --test-file tests/test_first_use_native.py
           --allow-explicit-tiers -k "actual_native_supervisor_forwards and provision and stock_case"
           --timeout 120 --plugin-timeout 180
+      - name: Packaged Bridge native helper and optional-adapter closure
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: >-
+          python tools/run-plugin-tests.py agent-bridge
+          --test-file tests/test_session_host.py
+          --allow-explicit-tiers -k session_host_bundle
+          --timeout 120 --plugin-timeout 180
       - name: Native PowerShell post-caller owned-work lifetime
         if: ${{ !cancelled() }}
         shell: pwsh

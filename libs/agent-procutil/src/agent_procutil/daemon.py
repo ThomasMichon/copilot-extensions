@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import importlib
 import os
 import subprocess
 import time
@@ -21,9 +22,10 @@ def spawn_brokered_daemon(
     import agent_procutil as pu
 
     try:
-        from .windows_task_broker import spawn
+        # Minimal remote hosts omit this installed-only legacy adapter.
+        spawn = importlib.import_module(".windows_task_broker", __package__).spawn
     except ModuleNotFoundError as error:
-        if error.name != "zdd":
+        if error.name not in {"zdd", f"{__package__}.windows_task_broker"}:
             raise
         raise pu.DaemonSpawnError(
             "Windows launch broker: owning installation requires windows-broker support",
