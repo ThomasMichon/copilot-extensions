@@ -36,6 +36,9 @@ Checks (all stdlib, no dependencies):
                             instructions and their lock offline; with
                             `--from-settings`, compare enabled plugin declarations
                             and report source updates or migration work.
+ 10. hook timeouts       -- invalid explicit native command timeouts block owned
+                            offline review; omitted timeouts and external findings
+                            remain advisory. No hooks are executed.
 
 Usage:
     scan-customizations.py [REPO_ROOT] [--json] [--strict]
@@ -91,6 +94,7 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 import instruction_projections
+from scan_hooks import scan_hooks
 from context_budget import (
     ADDITIONAL_CONTEXT_EVENTS,
     TOKEN_HEURISTIC_CHARS,
@@ -372,6 +376,7 @@ def run(
     scan_skills(root, report, plugin_sources)
     scan_agents(root, report, plugin_sources, owned_agent_roots)
     scan_text_files(root, report, plugin_sources)
+    scan_hooks(root, report, plugin_sources)
     selected_projection_sources = (
         plugin_sources if projection_sources is ... else projection_sources
     )
