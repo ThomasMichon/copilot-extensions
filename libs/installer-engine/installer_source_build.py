@@ -368,7 +368,12 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
             "python": _digest_file(base_python.resolve(strict=True), 256 << 20, deadline),
             "uv": _digest_file(uv, 256 << 20, deadline),
             "builder": _digest_file(builder, 1 << 20, deadline),
-            "environment": hashlib.sha256(_canonical(environment)).hexdigest(),
+            # Job ancestry still reaches owned children; its per-invocation
+            # names do not describe the offline backend's build inputs.
+            "environment": hashlib.sha256(_canonical({
+                key: value for key, value in environment.items()
+                if key.upper() != "COPILOT_EXTENSIONS_OWNED_JOB_SCOPES"
+            })).hexdigest(),
         }
         tool_sets = {}
         tools_seconds = 0.0
