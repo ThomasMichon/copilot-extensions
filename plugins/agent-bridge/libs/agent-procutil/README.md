@@ -249,6 +249,16 @@ context through its native spawn; it is not added to the execution protocol or
 logged. Windows uses the same strict owned Job. Omitting both retains the
 existing inherited-context behavior, stream budgets and caller-death cleanup.
 
+`run_installation_owned()` is the explicit boundary for a trusted canonical
+installer that must start durable product daemons. It retains the same output
+budgets, caller-owned cleanup and settlement callback, but its Windows Job
+permits explicit daemon breakaway. Ordinary descendants remain contained and
+are retired before settlement; deliberately detached daemons belong to their
+own service lifecycle, not that settlement proof. An external restrictive Job
+still prevents escape. Contained tests suppress the exception. Ordinary tools
+continue to use strict `run_caller_owned()`; this is not a fallback or permission
+to detach bounded helpers, register tasks or elevate.
+
 `agent_procutil.startup.StartupClock` separates receipt-time communication
 silence from a fixed startup lifetime. `StartupTimeouts` defaults to 30 seconds
 of silence, 300 seconds of startup grace and a 60-second expected startup

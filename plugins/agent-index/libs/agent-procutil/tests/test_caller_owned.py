@@ -39,6 +39,24 @@ def _run(code: str, *, timeout: float = 5, stdout: int = 4096, stderr: int = 409
     )
 
 
+@pytest.mark.parametrize("contained", [False, True])
+def test_installation_exception_preserves_contained_tests_and_strict_tools(monkeypatch, contained):
+    observed = []
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1" if contained else "0")
+
+    def execute(argv, **kwargs):
+        observed.append(kwargs)
+        return subprocess.CompletedProcess(argv, 7, "installer output", "")
+
+    monkeypatch.setattr(protocol, "run", execute)
+    options = dict(timeout=5, max_stdout_bytes=4096, max_stderr_bytes=4096)
+    result = ownership.run_installation_owned(["installer"], **options)
+    assert result.returncode == 7 and result.stdout == "installer output"
+    assert observed[-1]["allow_daemon_breakaway"] is not contained
+    run_caller_owned(["ordinary-tool"], **options)
+    assert observed[-1].get("allow_daemon_breakaway", False) is False
+
+
 @pytest.mark.parametrize("capture", [True, False])
 @native_execution
 def test_separate_utf8_streams_input_and_real_returncode(capture):

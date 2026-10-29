@@ -218,6 +218,7 @@ def run(
     on_settled: Callable[[], None] | None = None,
     cwd: str | os.PathLike | None = None,
     env: dict[str, str] | None = None,
+    allow_daemon_breakaway: bool = False,
 ) -> subprocess.CompletedProcess:
     if on_settled is not None and not callable(on_settled):
         raise TypeError("settlement notification must be callable")
@@ -241,6 +242,7 @@ def run(
             argv, timeout=timeout, input_text=input_text, capture=capture,
             capture_limits=(max_stdout_bytes, max_stderr_bytes),
             on_settled=on_settled,
+            allow_daemon_breakaway=allow_daemon_breakaway,
             **({"cwd": cwd} if cwd is not None else {}),
             **({"env": env} if env is not None else {}),
         )
