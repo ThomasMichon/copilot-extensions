@@ -96,7 +96,7 @@ def test_contention_or_settlement_failure_never_unlinks_controls(
 
 
 @pytest.mark.parametrize(
-    "kind", ["passive", "live-token", "hardlink", "directory", "live-endpoint"]
+    "kind", ["passive", "live-token", "hardlink", "directory", "live-endpoint", "string-endpoint"]
 )
 def test_live_or_unsafe_state_is_not_treated_as_stale(tmp_path: Path, kind: str) -> None:
     control = tmp_path / "active.json"
@@ -126,7 +126,10 @@ def test_live_or_unsafe_state_is_not_treated_as_stale(tmp_path: Path, kind: str)
             listener.bind(("127.0.0.1", 0))
             listener.listen()
             (tmp_path / "serve.sock.endpoint").write_text(
-                json.dumps({"port": listener.getsockname()[1]}),
+                json.dumps(
+                    {"port": str(listener.getsockname()[1]) if kind == "string-endpoint"
+                     else listener.getsockname()[1]}
+                ),
                 encoding="utf-8",
             )
         with pytest.raises(RuntimeError):
@@ -168,10 +171,12 @@ def test_non_socket_control_names_never_unlink_a_foreign_socket(tmp_path: Path, 
 
 @pytest.mark.parametrize("role", ["active", "previous"])
 @pytest.mark.parametrize("live", [False, True])
+@pytest.mark.parametrize("numeric", [int, str])
 def test_routing_only_endpoint_is_probed_before_deletion(
     tmp_path: Path,
     role: str,
     live: bool,
+    numeric: type,
 ) -> None:
     path = tmp_path / "active.json"
     with socket.socket() as listener:
@@ -181,7 +186,7 @@ def test_routing_only_endpoint_is_probed_before_deletion(
         path.write_text(
             json.dumps(
                 {
-                    role: {"bind": "127.0.0.1", "port": listener.getsockname()[1]},
+                    role: {"bind": "127.0.0.1", "port": numeric(listener.getsockname()[1])},
                 }
             ),
             encoding="utf-8",
@@ -257,6 +262,7 @@ def test_uncertain_routing_probe_preserves_all_control_state(
     [
         {"bind": "example.invalid", "port": 1234},
         {"pid": os.getpid()},
+        {"pid": str(os.getpid())},
     ],
 )
 def test_uncertain_or_live_pid_routing_owner_is_preserved(

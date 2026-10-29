@@ -118,6 +118,14 @@ def _listening(address: str | tuple[str, int]) -> bool:
         return True
 
 
+def _integer(value: object) -> int | None:
+    """Match the numeric coercion accepted by routing.Endpoint.from_dict."""
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def _require_idle_routes(path: Path, rows: dict[int, dict]) -> None:
     if path.stat().st_size > 65536:
         raise RuntimeError("MCP routing table exceeds its reset inspection budget")
@@ -131,11 +139,11 @@ def _require_idle_routes(path: Path, rows: dict[int, dict]) -> None:
         endpoint = table.get(role)
         if not isinstance(endpoint, dict):
             continue
-        pid = endpoint.get("pid")
-        if type(pid) is int and pid in rows:
+        pid = _integer(endpoint.get("pid"))
+        if pid in rows:
             raise RuntimeError("A live process still owns MCP routing state")
-        port = endpoint.get("port")
-        if type(port) is not int or not 0 < port < 65536:
+        port = _integer(endpoint.get("port"))
+        if port is None or not 0 < port < 65536:
             continue
         bind = endpoint.get("bind")
         if bind is not None and not isinstance(bind, str):
@@ -185,8 +193,8 @@ def _require_idle(home: Path, paths: list[Path], rows: dict[int, dict]) -> None:
                 endpoint = json.loads(path.read_text(encoding="utf-8-sig"))
             except (ValueError, UnicodeError):
                 continue
-            port = endpoint.get("port") if isinstance(endpoint, dict) else None
-            if type(port) is int and 0 < port < 65536 and _listening(("127.0.0.1", port)):
+            port = _integer(endpoint.get("port")) if isinstance(endpoint, dict) else None
+            if port is not None and 0 < port < 65536 and _listening(("127.0.0.1", port)):
                 raise RuntimeError("A live MCP endpoint prevents control reset")
 
 
