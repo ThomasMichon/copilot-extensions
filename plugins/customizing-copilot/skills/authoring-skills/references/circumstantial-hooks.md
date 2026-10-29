@@ -164,7 +164,9 @@ Keep one active implementation per event during any later transition.
 The customization scanner checks only native command timeout declarations:
 explicit `timeoutSec` must be a finite positive number, excluding booleans. Invalid
 owned values block **offline review**; external findings are advisory. Omission
-warns and preserves the legacy host default. There is no universal ceiling or
+warns and preserves the legacy host default. Compatibility matcher groups and
+compatibility `timeout` fields are not subject to this native check.
+There is no universal ceiling or
 new runtime allow/deny policy. Static checks do not prove inner deadline margin,
 actual delivery, fact validity, semantic policy, performance or process cleanup;
 those require the contract-specific tests and review above.

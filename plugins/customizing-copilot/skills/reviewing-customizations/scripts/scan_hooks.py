@@ -11,6 +11,7 @@ import math
 from pathlib import Path
 
 from scan_plugin_sources import PluginSource, _plugin_hook_files
+from scan_session_context import _editable_plugin_footprint
 
 
 def _hook_files(root: Path, sources: list[PluginSource]):
@@ -21,15 +22,14 @@ def _hook_files(root: Path, sources: list[PluginSource]):
         '.github/copilot/settings.json', '.github/copilot/settings.local.json',
         '.claude/settings.json', '.claude/settings.local.json',
     ))
-    suite_names = set()
     for payload in sorted((root / 'plugins').glob('*')):
         if payload.is_dir():
-            suite_names.add(payload.name)
             owned.extend(sorted(_plugin_hook_files(payload)))
     seen: set[Path] = set()
     candidates = [(path, True, None) for path in owned]
     for source in sorted(sources, key=lambda source: not source.controlled):
-        if not source.controlled and source.plugin_name in suite_names:
+        if (not source.controlled
+                and _editable_plugin_footprint(root, source) != source.payload_root):
             continue
         candidates.extend((path, source.controlled, source)
                           for path in sorted(_plugin_hook_files(source.payload_root)))
@@ -63,6 +63,9 @@ def scan_hooks(root: Path, report, plugin_sources: list[PluginSource] | None = N
                 continue
             for index, entry in enumerate(entries):
                 if not isinstance(entry, dict) or entry.get('type', 'command') != 'command':
+                    continue
+                # Compatibility containers and timeout fields have a different contract.
+                if 'hooks' in entry or ('timeout' in entry and 'timeoutSec' not in entry):
                     continue
                 location = f'{str(event)[:80]}[{index}]'
                 if 'timeoutSec' not in entry:

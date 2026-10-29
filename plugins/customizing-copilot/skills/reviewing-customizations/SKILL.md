@@ -105,7 +105,8 @@ booleans: invalid owned declarations are BLOCKING in offline review, external
 findings stay WARNING with source/version attribution. Missing timeouts warn
 and preserve legacy host defaults; no universal ceiling or runtime allow/deny
 change is imposed. Unreadable hook documents warn that review is incomplete.
-Actual deadline margin, cleanup and semantic correctness still require review.
+Compatibility matcher groups and their `timeout` fields are outside this native
+check. Actual deadline margin, cleanup and semantic correctness still require review.
 
 The ordinary scan also validates checked-in static instruction projections and
 `.github/copilot/context-projections.json` offline. With `--from-settings`, it

@@ -4187,8 +4187,74 @@ def test_hook_timeout_strict_cli_blocks_only_invalid_owned_declaration(tmp_path,
 
 def test_hook_timeout_editable_source_supersedes_stale_external(tmp_path):
     root = tmp_path / 'repo'
-    _hook_timeout_document(root / 'plugins' / 'cap', [{'timeoutSec': 3}])
+    editable = root / 'plugins' / 'cap'
+    _hook_timeout_document(editable, [{'timeoutSec': 3}])
+    (editable / 'plugin.json').write_text(
+        json.dumps({'name': 'cap'}), encoding='utf-8')
     external = tmp_path / 'installed' / 'cap'
     _hook_timeout_document(external, [{'timeoutSec': 0}])
-    source = scan.PluginSource(skills_root=external / 'skills', origin='outside/cap')
+    source = scan.PluginSource(skills_root=external / 'skills',
+        origin='copilot-extensions/cap')
     assert _hook_timeout_findings(root, [source]) == []
+
+
+@pytest.mark.parametrize('candidate,marketplace', [
+    ('empty', 'copilot-extensions'),
+    ('no-manifest', 'copilot-extensions'),
+    ('wrong-manifest', 'copilot-extensions'),
+    ('matching-manifest', 'other-marketplace'),
+])
+def test_hook_timeout_same_basename_never_hides_unrelated_plugin(
+    tmp_path, candidate, marketplace,
+):
+    root = tmp_path / 'repo'
+    editable = root / 'plugins' / 'cap'
+    editable.mkdir(parents=True)
+    if candidate != 'empty':
+        _hook_timeout_document(editable, [{'timeoutSec': 3}])
+    if candidate in {'wrong-manifest', 'matching-manifest'}:
+        (editable / 'plugin.json').write_text(
+            json.dumps({'name': 'other' if candidate == 'wrong-manifest' else 'cap'}),
+            encoding='utf-8')
+    external = tmp_path / 'installed' / 'cap'
+    path = _hook_timeout_document(external, [{'timeoutSec': 0}])
+    source = scan.PluginSource(skills_root=external / 'skills',
+        origin=f'{marketplace}/cap')
+    findings = _hook_timeout_findings(root, [source])
+    assert len(findings) == 1
+    assert findings[0].severity == scan.WARNING
+    assert findings[0].check == 'hook-timeout-invalid'
+    assert findings[0].path == str(path)
+
+
+@pytest.mark.parametrize('hook_type', ['command', 'prompt', 'http'])
+def test_hook_timeout_compatibility_matcher_group_is_not_native_command(
+    tmp_path, hook_type,
+):
+    path = tmp_path / '.claude' / 'settings.json'
+    path.parent.mkdir()
+    entry = {'type': hook_type, 'timeout': 60}
+    path.write_text(json.dumps({'hooks': {'PreToolUse': [
+        {'matcher': '*', 'hooks': [entry]},
+    ]}}), encoding='utf-8')
+    assert _hook_timeout_findings(tmp_path) == []
+
+
+def test_hook_timeout_compatibility_timeout_field_is_not_native_policy(tmp_path):
+    path = tmp_path / '.claude' / 'settings.json'
+    path.parent.mkdir()
+    path.write_text(json.dumps({'hooks': {'PreToolUse': [
+        {'type': 'command', 'command': 'never-execute', 'timeout': 60},
+    ]}}), encoding='utf-8')
+    assert _hook_timeout_findings(tmp_path) == []
+
+
+def test_hook_timeout_skips_group_without_hiding_flat_native_command(tmp_path):
+    _hook_timeout_document(tmp_path, [
+        {'matcher': '*', 'hooks': [{'type': 'prompt', 'timeout': 60}]},
+        {'type': 'command', 'timeoutSec': 0},
+    ])
+    findings = _hook_timeout_findings(tmp_path)
+    assert len(findings) == 1
+    assert findings[0].check == 'hook-timeout-invalid'
+    assert 'preToolUse[1]' in findings[0].message
