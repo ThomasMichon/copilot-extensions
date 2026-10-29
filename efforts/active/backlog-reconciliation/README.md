@@ -184,7 +184,15 @@ outcomes from agent-recommended research and prioritization mechanics.
   The [later owner-boundary assessments](roadmap-inflow-late-owner.md)
   retain #9465/#9466's explicitly partial source characterization and
   #9468's reported, unpublished recovery candidate without claiming native
-  success, an accepted effort home or operational repair authority.
+  success, an accepted effort home or operational repair authority. #9476's
+  separate direct-entry ordering assessment retains typed pre-construction
+  admission and adapter-specific proof as gaps, while crediting the shared
+  driver's existing controls and preserving #9455's review/release prerequisite.
+  The [cold-fixture/image-metadata assessments](roadmap-inflow-fixtures.md)
+  add #9471's scoped P1 and #9472/#9481/#9482's P2 proposals, retaining
+  reported seven-case progress, exact fixture credit, optional-field scope
+  and original source/release/native obligations without candidate-completion
+  claims or competing implementation assignments.
 - [ ] Coalesce thematic duplicates into canonical issues and existing efforts;
   transfer explicit residual checklists before closing superseded reports.
   The [current receiving-contract unit](consolidation-current-unit.md)
