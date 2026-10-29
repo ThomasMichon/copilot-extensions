@@ -192,9 +192,20 @@ fidelity, and both production post-caller owned-work cycles. Neither the
 unsuccessful resume, serialization and progress alternatives and temporary
 diagnostic probes are removed. A separate live-supervisor artifact test now
 uses the store's existing bounded lock acquisition instead of racing renewal.
-The final clean candidate remains gated on hosted acceptance and ordinary
-review before source merge. The concrete ownership contract received
-independent design critique before runtime implementation.
+The final clean runtime source `f0223457b60fc4b79ff19ec535f15bdd0263f7be`
+passed all three jobs in
+[run 40870443339](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40870443339):
+18 native admission/cleanup controls, two native PowerShell post-caller
+owned-work cycles, the nested-Job Python survival/refusal packet, actual
+cold Worktrees/Manager construction, and two concurrent stopped-resident
+Manager/current-roster cycles. Every caller Job closed before same-resident
+health rechecks; canonical shutdown settled cleanup. Automatic handoff
+preceded installer release by 1.297 seconds. All three native installer
+serving-slot retention controls, 211 finite-removal cases and the POSIX
+packet passed (five finite-removal platform skips). Ordinary review,
+source merge and Main release remain open; no installed rollout is implied.
+The concrete ownership contract received independent design critique before
+runtime implementation.
 
 ### Phase 1 - Reviewed contract
 - [x] Land this plan through ordinary review before implementation.
