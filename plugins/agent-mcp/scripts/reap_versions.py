@@ -289,13 +289,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--exclude-pid", action="append", type=int, default=[])
     parser.add_argument("--fresh", action="store_true")
+    parser.add_argument("--reset-control", action="store_true")
     parser.add_argument("--check-only", action="store_true")
     args = parser.parse_args(argv)
     try:
-        reaped = reap_stale(
-            args.root, link_name=args.link_name, exclude_pids=set(args.exclude_pid),
-            fresh=args.fresh, check_only=args.check_only,
-        )
+        def settle() -> list[dict]:
+            return reap_stale(
+                args.root, link_name=args.link_name, exclude_pids=set(args.exclude_pid),
+                fresh=args.fresh, check_only=args.check_only,
+            )
+
+        if args.reset_control:
+            if not args.fresh:
+                raise RetirementRefused("Control reset requires the fresh construction path")
+            from agent_mcp.forward import _serve_handle
+            from reset_runtime_control import reset_control
+
+            reaped = reset_control(
+                Path(_serve_handle(None)).parent, settle=settle, inspect=lambda: _inspect(args.root),
+            )
+        else:
+            reaped = settle()
     except (OSError, RuntimeError, ValueError) as error:
         print(f"MCP runtime retirement failed: {error}", file=sys.stderr)
         return 1

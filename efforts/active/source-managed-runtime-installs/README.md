@@ -1303,4 +1303,18 @@ transition and live session/connectivity survival remain open.
 No host rollout, maintenance hold, service or protected process was changed;
 merged source is not released or installed-state proof.
 
+### 2026-10-29 - Reviewed bounded MCP control-reset ordering
+
+#9551 merged as `8deff0bd1b4336d236468821d2af1dcd0fcb6c84` after Copilot
+approved the exact proposal head without inline findings and all required
+checks passed. The source worktree reconciled to that verified squash boundary
+without replaying post-merge commits.
+
+The next implementation follows the reviewed finite control-home reset,
+existing cutover/serve/routing custody and selected-generation retry-consistency
+contract. Its Plan and Validation items remain open until implementation and
+native qualification merge. Old-code collection, complete reactivation
+prevention and every installed/portfolio/survival acceptance gate remain open.
+No deployment, maintenance hold or host cleanup is authorized by this proposal.
+
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.

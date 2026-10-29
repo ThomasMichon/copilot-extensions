@@ -2533,6 +2533,9 @@ The co-packaged `installer_engine_footprint.py` independently recognizes the
 legacy versioned layout using the deployment, selection and completion markers,
 supported footprint/schema/contract ranges and ordinary-file checks. The known
 legacy layout is revision 1, independent of the incoming manifest revision.
+The deployment's existing `runtime_version` must equal the selected generation;
+an old deployment record plus a newly completed/selected candidate is not
+integrated-layout reuse evidence.
 Missing, corrupt, foreign or unsupported evidence returns no match without
 discarding the reset inventory or executing installed code. A layout match is
 not update permission, source/content qualification, a lifecycle handshake or
@@ -2557,7 +2560,7 @@ that selected completed slot rather than a healthy fallback. The shared POSIX
 readiness fragment uses the same read-only identity helper for Bridge and
 Dispatch; PowerShell keeps ordinary package readiness Python-free.
 Fresh construction now requires MCP's finite incumbent-process settlement after
-activation, separately from completion and best-effort graceful handoff. The
+activation, separately from completion, and skips incremental graceful handoff. The
 reaper reuses the native current-user census, binds exact kernel births and pins
 Windows process handles or Linux pidfds. It pauses admitted parents while closing
 their descendant trees, refuses protected/current/excluded or uninspectable
@@ -2568,6 +2571,23 @@ known legacy `.venv`, `venv` and `tool` launch paths without an old deployment
 receipt. A disabled version-reap override requests check-only admission: it cannot
 report remaining old owners as settled. Incremental callers retain best-effort
 behavior but report unconfirmed retirement as incomplete.
+
+Fresh settlement holds the addressed socket home's existing cutover lock, then
+acquires its ordinary serve-instance lease and deadline-bounded routing lock
+before resetting declared control files. A live current owner or endpoint,
+uncertain passive scope or unsafe path makes reset incomplete without deleting
+that state. Reset preserves configuration, durable state, logs, unknown entries
+and lock-file identities; it never runs whole-uninstall or collects old code.
+The control home follows the forwarder's `AGENT_MCP_SERVE_SOCKET` override or
+default socket-home selection, not the code-root argument. Active and previous
+routing-only endpoints must also be idle; non-socket control names require
+ordinary unshared files, never listening socket artifacts.
+On Windows, a loopback connection timeout alone is not evidence of death:
+reset additionally requires a successful exclusive bind to that endpoint.
+An occupied or unverified bind preserves the controls and reports failure.
+Global commands and the final deployment record publish only after reset
+succeeds, so interrupted integration cannot gain incremental recognition from
+the candidate completion marker alone. MCP remains on-demand afterward.
 
 The reaper uses procutil's optional
 [`RetirementCustody`](../libs/agent-procutil/README.md) finite-worker API so

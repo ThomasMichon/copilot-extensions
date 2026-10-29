@@ -40,7 +40,7 @@ def _seed(root: Path) -> None:
     slot.mkdir(parents=True)
     (root / "current-version").write_text("1.2.3\n", encoding="utf-8")
     (root / "deploy-manifest.json").write_text(
-        '{"schema_version":3,"service":"agent-mcp"}', encoding="utf-8",
+        '{"schema_version":3,"service":"agent-mcp","runtime_version":"1.2.3"}', encoding="utf-8",
     )
     (slot / ".install-complete.json").write_text(
         '{"version":"1.2.3","completed_at":"fixture-time","pid":123}', encoding="utf-8",
@@ -51,6 +51,7 @@ def _seed(root: Path) -> None:
     "cold", "current", "missing-deployment", "corrupt-deployment", "duplicate-fields",
     "foreign-service", "unsupported-schema", "boolean-schema", "traversal-selection",
     "missing-completion", "foreign-completion", "boolean-pid", "unknown-revision",
+    "missing-runtime-version", "stale-deployment",
 ))
 def test_recognition_is_read_only_and_never_discards_reset_inventory(
     tmp_path: Path, condition: str,
@@ -62,6 +63,8 @@ def test_recognition_is_read_only_and_never_discards_reset_inventory(
     if condition != "cold":
         _seed(root)
     changes = {
+        "missing-runtime-version": ("deploy-manifest.json", '{"schema_version":3,"service":"agent-mcp"}'),
+        "stale-deployment": ("deploy-manifest.json", '{"schema_version":3,"service":"agent-mcp","runtime_version":"1.2.2"}'),
         "corrupt-deployment": ("deploy-manifest.json", "{"),
         "duplicate-fields": ("deploy-manifest.json", '{"schema_version":3,"schema_version":3,"service":"agent-mcp"}'),
         "foreign-service": ("deploy-manifest.json", '{"schema_version":3,"service":"other"}'),
@@ -74,7 +77,7 @@ def test_recognition_is_read_only_and_never_discards_reset_inventory(
     if condition in changes:
         name, content = changes[condition]
         (root / name).write_text(content, encoding="utf-8")
-    if condition.startswith("missing-"):
+    if condition in {"missing-deployment", "missing-completion"}:
         name = "deploy-manifest.json" if condition == "missing-deployment" else "versions/1.2.3/.install-complete.json"
         (root / name).unlink()
     before = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
@@ -142,6 +145,10 @@ def test_recognized_replacement_reuses_the_same_qualified_target(tmp_path: Path)
     selected = "1.2.3+repair." + "a" * 32
     (tmp_path / "versions/1.2.3").rename(tmp_path / "versions" / selected)
     (tmp_path / "current-version").write_text(selected, encoding="utf-8")
+    (tmp_path / "deploy-manifest.json").write_text(
+        json.dumps({"schema_version": 3, "service": "agent-mcp", "runtime_version": selected}),
+        encoding="utf-8",
+    )
     marker = tmp_path / "versions" / selected / ".install-complete.json"
     record = json.loads(marker.read_text())
     record["version"] = selected
@@ -151,6 +158,33 @@ def test_recognized_replacement_reuses_the_same_qualified_target(tmp_path: Path)
         admission=lambda root, version: "reuse" if version == selected else "health-repair-required",
     )
     assert plan.version == selected and plan.mode == "incremental"
+
+
+@pytest.mark.parametrize("old_slot", ("present", "missing"))
+def test_failed_fresh_integration_cannot_become_incremental_on_retry(
+    tmp_path: Path, old_slot: str,
+) -> None:
+    _seed(tmp_path)
+    if old_slot == "missing":
+        (tmp_path / "versions/1.2.3").rename(tmp_path / "removed-slot")
+    manifest = subject.parse(_record(), "agent-mcp")
+    initial = subject.plan_construction(
+        manifest, tmp_path, "1.2.3", admission=lambda *_: "health-repair-required",
+    )
+    assert initial.mode == "fresh" and initial.version != "1.2.3"
+    selected = initial.version
+    slot = tmp_path / "versions" / selected
+    slot.mkdir()
+    (slot / ".install-complete.json").write_text(
+        json.dumps({"version": selected, "completed_at": "fixture-time", "pid": 123}),
+        encoding="utf-8",
+    )
+    (tmp_path / "current-version").write_text(selected, encoding="utf-8")
+    plan = subject.plan_construction(
+        manifest, tmp_path, "1.2.3",
+        admission=lambda *_: pytest.fail("Incomplete integration must not reuse construction"),
+    )
+    assert plan.mode == "fresh" and plan.version != selected
 
 
 def test_occupied_incomplete_fallback_selects_distinct_construction(tmp_path: Path) -> None:

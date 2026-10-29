@@ -873,7 +873,7 @@ fi
 # used bridge, so this uses much shorter install-appropriate defaults
 # (still overridable, e.g. for a host with slow-starting upstream MCP
 # servers) via AGENT_MCP_CUTOVER_HEALTH_TIMEOUT / AGENT_MCP_CUTOVER_DRAIN_TIMEOUT.
-if [[ "$VERSIONED_RUNTIME" -eq 1 && -z "${AGENT_MCP_NO_CUTOVER:-}" ]]; then
+if [[ "$VERSIONED_RUNTIME" -eq 1 && "${_RUNTIME_CONSTRUCTION_MODE:-}" != fresh && -z "${AGENT_MCP_NO_CUTOVER:-}" ]]; then
     _cutover_health_timeout="${AGENT_MCP_CUTOVER_HEALTH_TIMEOUT:-15}"
     _cutover_drain_timeout="${AGENT_MCP_CUTOVER_DRAIN_TIMEOUT:-30}"
     _cutover_json="$("$VENV_PYTHON" -I -X utf8 -m agent_mcp cutover \
@@ -902,13 +902,13 @@ fi
 
 _settle_runtime_owners() {
     [[ "$VERSIONED_RUNTIME" -eq 1 && "${_RUNTIME_CONSTRUCTION_MODE:-}" == fresh ]] || return 0
-    local arguments=("$SCRIPT_DIR/reap_versions.py" --root "$INSTALL_DIR" --link-name '.venv' --fresh)
+    local arguments=("$SCRIPT_DIR/reap_versions.py" --root "$INSTALL_DIR" --link-name '.venv' --fresh --reset-control)
     [[ -z "${AGENT_MCP_NO_VERSION_REAP:-}" ]] || arguments+=(--check-only)
     if ! "$VENV_PYTHON" -I "${arguments[@]}"; then
-        _fail 'Fresh MCP replacement could not settle its old runtime owners'
+        _fail 'Fresh MCP replacement could not settle its old runtime owners and control state'
         return 1
     fi
-    _ok 'Old MCP runtime owners settled'
+    _ok 'Old MCP runtime owners and control state settled'
 }
 _settle_runtime_owners || exit 1
 
