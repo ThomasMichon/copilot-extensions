@@ -14,7 +14,7 @@ from single_instance_lease.operation import OperationLock
 from update_driver import (
     RequestSpec, TrustedRunner, enqueue, foundation_state as fs, foundation_status, status, wait,
 )
-from update_driver.foundation_inputs import inspect
+from update_driver.foundation_inputs import PACKAGES, inspect
 
 import test_foundation_producer_process as producer_fixtures
 
@@ -37,7 +37,7 @@ def installed_runtime(producer_source, area, target, version):
     # The fixture explicitly supplies source mapping; hosted qualification uses real retained packages.
     (bootstrap / "runtime_launcher.py").write_text(
         "import runpy,sys\n"
-        f"sys.path[:0] = {[str(installed / name / 'src') for name in ('update-driver', 'agent-procutil', 'single-instance-lease')]!r}\n"
+        f"sys.path[:0] = {[str(installed / name / 'src') for name in PACKAGES]!r}\n"
         "assert sys.argv[1] == '-m'\n"
         "module = sys.argv[2]\n"
         "sys.argv = sys.argv[2:]\n"
