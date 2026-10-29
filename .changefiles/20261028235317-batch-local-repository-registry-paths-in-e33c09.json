@@ -1,0 +1,9 @@
+{
+  "comment": "Batch local repository registry paths in related-list JSON so guarded-root cache misses avoid per-repository CLI discovery.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

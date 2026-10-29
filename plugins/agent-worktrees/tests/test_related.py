@@ -2337,3 +2337,39 @@ class TestRelatedCurrentMachine:
         monkeypatch.setattr(cfg.socket, "gethostname", lambda: "host.local")
 
         assert m._related_current_machine([str(base)], str(base)) == "host.local"
+
+
+def test_related_list_batches_registry_paths_once(tmp_path, monkeypatch, capfd):
+    from agent_worktrees import related_cli as cli, repos
+
+    names = ("registered", "pathless", "unregistered")
+    related.write_related(tmp_path, RelatedConfig(related={
+        name: RelatedEntry(name=name, delegate="agent-bridge", ownership="owned")
+        for name in names
+    }))
+    registry = repos.ReposRegistry(repos={
+        "registered": repos.RepoEntry(
+            name="registered", repo_class="worktree", remote="https://example.test/a/b",
+            paths={repos._current_platform(): str(tmp_path / "registered")},
+        ),
+        "pathless": repos.RepoEntry(name="pathless"),
+    })
+    calls = []
+
+    def read_registry():
+        calls.append("read")
+        return registry
+
+    monkeypatch.setattr(cli.cfg, "active_project", lambda: "consumer")
+    monkeypatch.setattr(cli, "_related_config_source_anchors", lambda _anchor: [str(tmp_path)])
+    monkeypatch.setattr(repos, "read_registry", read_registry)
+    assert cli.cmd_related_dispatch(["list", "--json", "--repo", str(tmp_path)]) == 0
+    data = json.loads(capfd.readouterr().out)
+    rows = {row["name"]: row for row in data["related"]}
+    assert rows["registered"]["registry"] == {
+        "class": "worktree", "remote": "https://example.test/a/b",
+        "path": str(tmp_path / "registered"),
+    }
+    assert rows["pathless"]["registry"]["path"] is None
+    assert rows["unregistered"]["registry"] is None
+    assert calls == ["read"]
