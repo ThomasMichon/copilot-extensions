@@ -2569,6 +2569,13 @@ receipt. A disabled version-reap override requests check-only admission: it cann
 report remaining old owners as settled. Incremental callers retain best-effort
 behavior but report unconfirmed retirement as incomplete.
 
+An identity disappearing before its tree is frozen is unconfirmed settlement,
+not success. Exited pins never seed later PID ancestry, every paused member's
+executable protection is rechecked, and an excluded root missing from census
+refuses retirement. Linux descendant observation may retain partial rows for
+unrelated nondumpable tasks; selected roots/children must remain fully inspected.
+The ordinary non-signaling uninstall census retains its existing strictness.
+
 External pinned retirement is supported on Windows and Linux; another platform
 with a live old owner refuses rather than substituting PID-only termination.
 This bounded process boundary does not clear disposable control state, remove

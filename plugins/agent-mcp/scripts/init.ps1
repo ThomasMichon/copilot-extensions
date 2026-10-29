@@ -461,7 +461,7 @@ function Invoke-VersionedMarkComplete {
 
 function Invoke-RuntimeOwnerSettlement {
     if (-not $VersionedRuntime -or $script:RuntimeConstructionSession.Construction -ne 'fresh') { return }
-    $arguments = @((Join-Path $PSScriptRoot 'reap_versions.py'), '--root', $InstallDir,
+    $arguments = @('-I', (Join-Path $PSScriptRoot 'reap_versions.py'), '--root', $InstallDir,
         '--link-name', '.venv', '--fresh')
     if ($env:AGENT_MCP_NO_VERSION_REAP) { $arguments += '--check-only' }
     Invoke-Hidden -FilePath $VenvPython -ArgList $arguments | Out-Null
@@ -1061,7 +1061,7 @@ if ($VersionedRuntime -and $script:RuntimeConstructionSession.Construction -ne '
         # Use the plain (one 'version:pid' per line) output, not --json: under this
         # script's Set-StrictMode 2.0, an empty ConvertFrom-Json array collapses so
         # a later .Count throws. @(...) of the lines is always a countable array.
-        $reapLines = (Invoke-Hidden -FilePath $VenvPython -ArgList @($ReapScript, '--root', $InstallDir, '--link-name', '.venv')) -split "`r?`n"
+        $reapLines = (Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', $ReapScript, '--root', $InstallDir, '--link-name', '.venv')) -split "`r?`n"
         if ($LASTEXITCODE -ne 0) { throw 'Old MCP runtime retirement was not confirmed' }
         $reaped = @($reapLines | Where-Object { $_ -and $_.ToString().Trim() })
         if ($reaped.Count -gt 0) {

@@ -167,7 +167,9 @@ _fixture_shutil.copytree = _fixture_copy
 """)
 
 
-def _run(tmp_path: Path, language: str, script: str) -> subprocess.CompletedProcess[str]:
+def _run(
+    tmp_path: Path, language: str, script: str, *, environment: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     host = _host(language)
     harness = tmp_path / f"native.{language}"
     harness.write_text(script, encoding="utf-8")
@@ -176,7 +178,7 @@ def _run(tmp_path: Path, language: str, script: str) -> subprocess.CompletedProc
     ]
     return subprocess.run(
         args, cwd=tmp_path, capture_output=True, text=True, encoding="utf-8",
-        timeout=60, check=False,
+        timeout=60, check=False, env=environment,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
 
@@ -274,8 +276,15 @@ def test_native_fresh_owner_settlement_failure_is_not_best_effort(
     scripts = tmp_path / "payload/scripts"
     scripts.mkdir(parents=True)
     observed = tmp_path / "arguments.json"
+    ambient = tmp_path / "ambient" / "agent_procutil"
+    ambient.mkdir(parents=True)
+    tripwire = tmp_path / "ambient-imported"
+    (ambient / "__init__.py").write_text(
+        f"from pathlib import Path\nPath({str(tripwire)!r}).write_text('unexpected')\n"
+        "raise RuntimeError('ambient retirement primitive must not load')\n", encoding="utf-8",
+    )
     (scripts / "reap_versions.py").write_text(
-        "import json,sys\nfrom pathlib import Path\n"
+        "import json,sys\nfrom pathlib import Path\nimport agent_procutil\n"
         f"Path({str(observed)!r}).write_text(json.dumps(sys.argv[1:]))\n"
         f"sys.exit({exit_code})\n", encoding="utf-8",
     )
@@ -311,7 +320,11 @@ _fail() {{ echo "$*" >&2; }}
 _settle_runtime_owners || exit 1
 echo CONTINUED
 """
-    result = _run(tmp_path, language, script)
+    result = _run(
+        tmp_path, language, script,
+        environment={**os.environ, "PYTHONPATH": str(ambient.parent)},
+    )
+    assert not tripwire.exists()
     if mode == "incremental":
         assert result.returncode == 0, result.stdout + result.stderr
         assert not observed.exists()

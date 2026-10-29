@@ -723,7 +723,14 @@ def inspect_processes(payload: Path, root: Path, shell: str, profile: Profile, *
                 command = " ".join(argv)
                 if not command:
                     continue
-                image = os.readlink(directory / "exe")
+                incomplete = False
+                try:
+                    image = os.readlink(directory / "exe")
+                except PermissionError:
+                    if not descendants:
+                        raise
+                    image = ""
+                    incomplete = True
                 # Bind argv/image observation to the original kernel start.
                 later = (directory / "stat").read_text()
                 if int(later[later.rfind(")") + 2:].split()[19]) != created:
@@ -732,12 +739,16 @@ def inspect_processes(payload: Path, root: Path, shell: str, profile: Profile, *
                        "command": command, "argv": argv, "created": created}
                 if descendants:
                     children = set()
-                    for task in (directory / "task").iterdir():
-                        try:
-                            children.update(int(pid) for pid in (task / "children").read_text().split())
-                        except FileNotFoundError:
-                            continue
+                    try:
+                        for task in (directory / "task").iterdir():
+                            try:
+                                children.update(int(pid) for pid in (task / "children").read_text().split())
+                            except FileNotFoundError:
+                                continue
+                    except PermissionError:
+                        incomplete = True
                     row["children"] = sorted(children)
+                    row["inspectionIncomplete"] = incomplete
                 rows.append(row)
             except (FileNotFoundError, ProcessLookupError):
                 continue

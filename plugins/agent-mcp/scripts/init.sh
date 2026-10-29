@@ -904,7 +904,7 @@ _settle_runtime_owners() {
     [[ "$VERSIONED_RUNTIME" -eq 1 && "${_RUNTIME_CONSTRUCTION_MODE:-}" == fresh ]] || return 0
     local arguments=("$SCRIPT_DIR/reap_versions.py" --root "$INSTALL_DIR" --link-name '.venv' --fresh)
     [[ -z "${AGENT_MCP_NO_VERSION_REAP:-}" ]] || arguments+=(--check-only)
-    if ! "$VENV_PYTHON" "${arguments[@]}"; then
+    if ! "$VENV_PYTHON" -I "${arguments[@]}"; then
         _fail 'Fresh MCP replacement could not settle its old runtime owners'
         return 1
     fi
@@ -920,7 +920,7 @@ _settle_runtime_owners || exit 1
 # attributed to the current version and never reaps itself.
 if [[ "$VERSIONED_RUNTIME" -eq 1 && "${_RUNTIME_CONSTRUCTION_MODE:-}" != fresh && -z "${AGENT_MCP_NO_VERSION_REAP:-}" ]]; then
     _reap_script="$SCRIPT_DIR/reap_versions.py"
-    if ! _reaped="$("$VENV_PYTHON" "$_reap_script" --root "$INSTALL_DIR" --link-name '.venv')"; then
+    if ! _reaped="$("$VENV_PYTHON" -I "$_reap_script" --root "$INSTALL_DIR" --link-name '.venv')"; then
         _step 'Version-reap incomplete: old MCP runtime retirement was not confirmed'
     elif [[ -n "$_reaped" ]]; then
         _n="$(printf '%s\n' "$_reaped" | grep -c . || true)"

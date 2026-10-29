@@ -32,7 +32,7 @@ def owners(tmp_path, monkeypatch):
         112: _row(112, 111, tmp_path / "upstream"),
         222: _row(222, os.getpid(), tmp_path / "versions/2.0/bin/python"),
     }
-    state = {"rows": rows, "paused": [], "terminated": [], "resumed": []}
+    state = {"rows": rows, "paused": [], "terminated": [], "resumed": [], "exited": set()}
 
     class Pin:
         def __init__(self, pid, birth):
@@ -42,17 +42,18 @@ def owners(tmp_path, monkeypatch):
             return self
 
         def __exit__(self, *_):
-            if self.pid not in state["terminated"]:
+            if not self.exited():
                 state["resumed"].append(self.pid)
 
         def exited(self):
-            return self.pid in state["terminated"]
+            return self.pid in state["terminated"] or self.pid in state["exited"]
 
         def pause(self):
             state["paused"].append(self.pid)
 
         def terminate(self):
-            state["terminated"].append(self.pid)
+            if not self.exited():
+                state["terminated"].append(self.pid)
 
     monkeypatch.setattr(rv, "PinnedProcess", Pin)
     monkeypatch.setattr(rv, "birth_identity", lambda pid: f"linux:boot:ns:{rows[pid]['created']}")
@@ -103,6 +104,82 @@ def test_pid_reuse_cannot_be_readmitted(tmp_path, owners, monkeypatch):
     with pytest.raises(rv.RetirementRefused, match="identity changed"):
         rv.reap_stale(tmp_path)
     assert owners["paused"] == owners["terminated"] == []
+
+
+def test_spawn_and_exit_before_pin_cannot_report_settlement(tmp_path, owners, monkeypatch):
+    original = rv.birth_identity
+
+    def birth(pid):
+        if pid == 111:
+            owners["rows"].pop(111)
+            owners["rows"][112]["ppid"] = 0
+            owners["rows"][333] = _row(333, 0, tmp_path / "orphaned upstream")
+            raise ProcessLookupError(pid)
+        return original(pid)
+
+    monkeypatch.setattr(rv, "birth_identity", birth)
+    with pytest.raises(rv.RetirementRefused, match="disappeared before descendant scope was frozen"):
+        rv.reap_stale(tmp_path)
+    assert owners["paused"] == owners["terminated"] == []
+    assert 333 in owners["rows"]
+
+
+def test_exited_pin_cannot_seed_a_reused_pids_children(tmp_path, owners, monkeypatch):
+    original = rv._inspect
+
+    def inspect(root):
+        if owners["paused"]:
+            owners["exited"].add(111)
+            owners["rows"][111] = _row(111, 0, tmp_path / "unrelated replacement", created=500)
+            owners["rows"][333] = _row(333, 111, tmp_path / "unrelated child", created=501)
+        return original(root)
+
+    monkeypatch.setattr(rv, "_inspect", inspect)
+    with pytest.raises(rv.RetirementRefused, match="exited before descendant scope was confirmed"):
+        rv.reap_stale(tmp_path)
+    assert 333 not in owners["paused"]
+    assert owners["terminated"] == []
+    assert owners["resumed"] == [112]
+
+
+@pytest.mark.parametrize("image", ["ssh.exe", "/usr/bin/ssh (deleted)"])
+def test_pinned_exec_to_protected_transport_is_resumed_not_terminated(tmp_path, owners, monkeypatch, image):
+    original = rv._inspect
+
+    def inspect(root):
+        if owners["paused"]:
+            owners["rows"][111]["image"] = image
+        return original(root)
+
+    monkeypatch.setattr(rv, "_inspect", inspect)
+    with pytest.raises(rv.RetirementRefused, match="protected"):
+        rv.reap_stale(tmp_path)
+    assert owners["terminated"] == []
+    assert owners["resumed"] == [112, 111]
+
+
+def test_missing_excluded_root_cannot_drop_its_descendant_protection(tmp_path, owners):
+    owners["rows"][111]["ppid"] = 999
+    with pytest.raises(rv.RetirementRefused, match="excluded process root is absent"):
+        rv.reap_stale(tmp_path, exclude_pids={999})
+    assert owners["paused"] == []
+
+
+def test_incomplete_selected_image_refuses_before_pausing(tmp_path, owners):
+    owners["rows"][111]["image"] = ""
+    owners["rows"][111]["inspectionIncomplete"] = True
+    with pytest.raises(rv.RetirementRefused, match="cannot be fully inspected"):
+        rv.reap_stale(tmp_path)
+    assert owners["paused"] == []
+
+
+def test_incomplete_unrelated_image_is_not_retirement_authority_or_a_global_veto(tmp_path, owners):
+    owners["rows"][333] = _row(333, 0, tmp_path / "unrelated")
+    owners["rows"][333]["image"] = ""
+    owners["rows"][333]["inspectionIncomplete"] = True
+    records = rv.reap_stale(tmp_path)
+    assert records == [{"version": "1.0", "pid": 111, "terminated": True}]
+    assert owners["terminated"] == [111, 112]
 
 
 def test_parent_pid_reuse_refuses_the_observed_tree(tmp_path, owners):

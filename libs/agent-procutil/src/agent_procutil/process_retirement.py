@@ -25,6 +25,8 @@ class PinnedProcess:
     """
 
     def __init__(self, pid: int, birth: str):
+        if type(pid) is not int or not 0 < pid < 2**32:
+            raise ValueError("Invalid native process PID")
         if pid == os.getpid():
             raise RetirementRefused("External retirement cannot target its caller")
         self.pid = pid

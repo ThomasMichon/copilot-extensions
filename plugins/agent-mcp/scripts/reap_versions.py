@@ -69,7 +69,7 @@ def _version(
 def _protected(row: dict) -> bool:
     """Keep session hosts and recognizable critical transport out of MCP custody."""
     arguments = inspection._arguments(row)
-    names = {Path(row["image"]).stem.casefold()}
+    names = {Path(row["image"].removesuffix(" (deleted)")).stem.casefold()}
     if arguments:
         names.add(Path(arguments[0]).stem.casefold())
     return bool(names & {
@@ -78,6 +78,13 @@ def _protected(row: dict) -> bool:
         "/@github/copilot/" in argument.replace("\\", "/").casefold()
         for argument in arguments
     )
+
+
+def _require_retirable(row: dict) -> None:
+    if row.get("inspectionIncomplete") or not row.get("image"):
+        raise RetirementRefused(f"A selected process cannot be fully inspected (pid={row['pid']})")
+    if _protected(row):
+        raise RetirementRefused("A stale MCP tree contains a protected session or transport")
 
 
 def _ancestors(rows: dict[int, dict], pid: int) -> set[int]:
@@ -127,8 +134,10 @@ def _retire(
     check_only: bool,
 ) -> set[int]:
     scope = _descendants(rows, targets)
-    if scope & protected or any(_protected(rows[pid]) for pid in scope):
+    if scope & protected:
         raise RetirementRefused("A stale MCP tree contains a protected session or transport")
+    for pid in scope:
+        _require_retirable(rows[pid])
     if check_only and targets:
         raise RetirementRefused("Old MCP owners remain while version reaping is explicitly disabled")
     retired = set()
@@ -137,7 +146,7 @@ def _retire(
         for _ in range(64):
             # Pause parents before discovering further descendants. Once every
             # admitted member is paused, no member can race a new child past census.
-            remaining = set(scope) - pinned.keys() - retired
+            remaining = set(scope) - pinned.keys()
             while remaining:
                 ready = {pid for pid in remaining if rows[pid]["ppid"] not in remaining}
                 if not ready:
@@ -147,23 +156,34 @@ def _retire(
                     try:
                         pin = custody.enter_context(PinnedProcess(pid, _birth(row)))
                         pin.pause()
+                        if pin.exited():
+                            raise RetirementRefused(
+                                f"A process exited before descendant scope was frozen (pid={pid})"
+                            )
                     except ProcessLookupError:
-                        retired.add(pid)
+                        raise RetirementRefused(
+                            f"A process disappeared before descendant scope was frozen (pid={pid})"
+                        ) from None
                     else:
                         pinned[pid] = pin
                 remaining -= ready
             later = _inspect(root)
             for pid, pin in pinned.items():
                 if pin.exited():
-                    continue
+                    raise RetirementRefused(
+                        f"A process exited before descendant scope was confirmed (pid={pid})"
+                    )
                 row = later.get(pid)
                 if row is None or _birth(row) != pin.birth:
                     raise RetirementRefused(f"Pinned process inspection is unavailable (pid={pid})")
+                _require_retirable(row)
             added = _descendants(later, set(pinned)) - scope
             if not added:
                 break
-            if added & protected or any(_protected(later[pid]) for pid in added):
+            if added & protected:
                 raise RetirementRefused("A stale MCP tree gained a protected session or transport")
+            for pid in added:
+                _require_retirable(later[pid])
             scope.update(added)
             rows.update({pid: later[pid] for pid in added})
         else:
@@ -208,6 +228,8 @@ def reap_stale(
         raise RetirementRefused("External pinned retirement requires Windows or Linux")
     ancestors = _ancestors(rows, os.getpid())
     excluded = set(exclude_pids or ())
+    if excluded - rows.keys():
+        raise RetirementRefused("An excluded process root is absent from the native census")
     current_pids = {
         pid for pid, version in classified.items() if _norm_version(version) == _norm_version(current)
     }

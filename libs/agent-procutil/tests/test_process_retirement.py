@@ -68,3 +68,9 @@ def test_pause_rollback_and_confirmed_exit(tmp_path):
 def test_own_caller_cannot_be_pinned():
     with pytest.raises(RetirementRefused, match="caller"):
         PinnedProcess(os.getpid(), "not a process authority")
+
+
+@pytest.mark.parametrize("pid", [0, -1, True, os.getpid() + 2**32])
+def test_invalid_or_wrapping_pid_is_rejected_before_native_access(pid):
+    with pytest.raises(ValueError, match="Invalid native process PID"):
+        PinnedProcess(pid, "not a process authority")
