@@ -53,3 +53,25 @@ def test_http51_uses_the_existing_capture_owner_and_keeps_prior_floors():
             "session_prompts.py", "session_targeting_cli.py",
         )
     }
+
+
+@pytest.mark.parametrize("fault", [None, "bytes", "code"])
+def test_http51_preloaded_containment_dependency_still_requires_exact_code(monkeypatch, fault):
+    from pathlib import Path
+    import agent_procutil.daemon_instances as module
+    from bridge_http47_runtime import sha, verify_preloaded
+
+    identity = {"sha256": sha(Path(module.__file__).read_bytes())}
+    if fault == "bytes":
+        identity["sha256"] = "0" * 64
+    elif fault == "code":
+        namespace = {}
+        exec(compile(
+            "def default_registry_root(): return None\n", module.__file__, "exec",
+        ), namespace)
+        monkeypatch.setattr(module, "default_registry_root", namespace["default_registry_root"])
+    if fault is None:
+        verify_preloaded(module, identity)
+    else:
+        with pytest.raises(ValueError, match="unproven"):
+            verify_preloaded(module, identity)
