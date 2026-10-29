@@ -223,57 +223,7 @@ def _send_refs(name: str, upload: tuple[str, bytes, list[tuple[str, int]]]) -> s
     )
 
 
-# A fresh CodeSpace can carry the agent-worktrees plugin payload (staged by
-# CodeSpace-scoped plugin registration) without its runtime/binstub, and the
-# shared best-effort preflight may not have installed agent-bridge (whose
-# extension registers the session). Both are hard preconditions here, so the
-# launch uses the existing installer for missing or unhealthy legacy tooling.
-# --help builds Worktrees' full command surface, unlike command-v or --version.
-_VENUE_TOOLING = """\
-prepare_venue_tooling() {
-    local P="$HOME/.copilot/installed-plugins/copilot-extensions" action=install
-    export PATH="$HOME/.local/bin:$PATH"
-    if [ ! -d "$P/agent-bridge" ]; then
-        if [ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]; then
-            printf 'Selected installation requires its own agent-bridge preparation\\n' >&2
-            return 1
-        fi
-        copilot plugin install agent-bridge@copilot-extensions >&2 || {
-            local status=$?
-            printf 'agent-bridge payload installation failed (exit %s)\\n' "$status" >&2
-            return "$status"
-        }
-        [ -d "$P/agent-bridge" ] || {
-            printf 'agent-bridge payload is still missing after installation\\n' >&2
-            return 1
-        }
-    fi
-    if command -v agent-worktrees >/dev/null 2>&1; then
-        if agent-worktrees --help >/dev/null; then
-            return 0
-        fi
-        action=repair
-    fi
-    if [ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]; then
-        printf 'Selected installation requires its own agent-worktrees health repair\\n' >&2
-        return 1
-    fi
-    [ -f "$P/agent-worktrees/scripts/install.sh" ] || {
-        printf 'agent-worktrees owning installer is unavailable\\n' >&2
-        return 1
-    }
-    bash "$P/agent-worktrees/scripts/install.sh" "$action" >&2 || {
-        local status=$?
-        printf 'agent-worktrees %s failed (exit %s)\\n' "$action" "$status" >&2
-        return "$status"
-    }
-    hash -r
-    agent-worktrees --help >/dev/null || {
-        printf 'agent-worktrees command health failed after preparation\\n' >&2
-        return 1
-    }
-}
-prepare_venue_tooling"""
+_VENUE_TOOLING = copilot_detach_startup.VENUE_TOOLING
 
 
 def _pane_tail(name: str, mux: str, lines: int = 40) -> str:
