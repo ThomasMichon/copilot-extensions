@@ -559,6 +559,9 @@ or changes a service. Controls cover per-project hits across fresh retained
 workspaces, library-only source changes, explicit unsupported-contract misses,
 pre-completion archive/content refusal, backend source/tool mutation and clean
 retry. POSIX source-mode cases remain explicit skips on Windows.
+Changing request witnesses or Windows Job ancestry must not change a wheel's
+build identity. Job ancestry still reaches the owned build children, and other
+build-environment changes continue to invalidate reuse.
 Distinct build-requirement groups use independently admitted tool environments;
 the lower-bound control also runs with the real backend. A synthetic
 conflicting-pin control checks each actual backend's installed version and
