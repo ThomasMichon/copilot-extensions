@@ -419,12 +419,12 @@ def _source_provenance(
     provenance = {"version": version, "source": payload.as_posix()}
     git_options = {
         "capture_output": True, "text": True, "timeout": 30,
-        "creationflags": subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     }
     inside_worktree = False
     if source_identity is None and shutil.which("git") is not None:
         result = subprocess.run(
             ["git", "-C", str(payload), "rev-parse", "--is-inside-work-tree"], **git_options,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         if result.returncode != 0:
             if "not a git repository" not in result.stderr:
@@ -446,6 +446,7 @@ def _source_provenance(
         result = subprocess.run(
             ["git", "-C", str(payload), *arguments],
             **git_options,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         if result.returncode != 0:
             if "not a git repository" not in result.stderr:
@@ -459,6 +460,7 @@ def _source_provenance(
         status = subprocess.run(
             ["git", "-C", str(payload), "status", "--porcelain", "--", str(payload)],
             **git_options,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         if status.returncode != 0:
             raise InstallationRefused(f"Source provenance status failed: {status.stderr}")

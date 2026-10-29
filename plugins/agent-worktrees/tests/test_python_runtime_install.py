@@ -178,6 +178,7 @@ def test_source_provenance_retains_actual_git_failure(driver, tmp_path, monkeypa
     monkeypatch.setattr(driver.shutil, "which", lambda _name: "git")
 
     def run(argv, **kwargs):
+        assert kwargs["creationflags"] == (subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
         arguments = argv[3:]
         current = (
             "status" if arguments[0] == "status"
