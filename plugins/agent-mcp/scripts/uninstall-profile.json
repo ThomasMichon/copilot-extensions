@@ -156,13 +156,13 @@
           }
         },
         "producers": {
-          "scripts": "472bf4e5c969471bb05fada7d6b424749e9a64d644cac58afcdcd91d3b4f6bca",
-          "src": "b1ca8023f5a32a9c3562afdb363d02da425d42741c0bb93176d8a6c5af4876e3"
+          "scripts": "e96a36d5597c73c849accf88d1ecf7db174b9f3126ec4689ebad0917290da504",
+          "src": "f6c42048e05eefa38cd0cdd7d173a481132d2a3763383e24489ef44c5ed8be85"
         }
       },
       "delta": {
         "introduced": [],
-        "changed": ["producers:scripts"],
+        "changed": ["producers:scripts", "producers:src"],
         "retired": []
       }
     }

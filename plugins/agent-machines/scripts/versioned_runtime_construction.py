@@ -11,6 +11,28 @@ from pathlib import Path
 from typing import Callable, ContextManager
 
 
+def read_completion(path: Path, *, object_pairs_hook: Callable) -> object:
+    """Reject unusable completion evidence without blocking on a pipe or device."""
+    info = path.lstat()
+    if (
+        not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+        or getattr(info, "st_file_attributes", 0) & 0x400
+    ):
+        return None
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+    with os.fdopen(os.open(path, flags), "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if (
+            not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+            or getattr(info, "st_file_attributes", 0) & 0x400
+        ):
+            return None
+        content = stream.read(65537)
+    if len(content) > 65536:
+        return None
+    return json.loads(content.decode("utf-8"), object_pairs_hook=object_pairs_hook)
+
+
 @dataclass(frozen=True)
 class RuntimeOperations:
     version_dir: Callable[[Path, str], Path]
@@ -354,7 +376,7 @@ def construction_session(runtime: RuntimeOperations, root: Path, version: str, *
         )
 
     with ExitStack() as retained, ExitStack() as building:
-        if plan is not None and plan.mode == "fresh":
+        if plan is not None:
             # A broken incumbent cannot approve its replacement. Retain healthy
             # references when available; construction never mutates the others.
             references = set()

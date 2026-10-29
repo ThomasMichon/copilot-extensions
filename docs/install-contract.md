@@ -2544,9 +2544,12 @@ A compatible layout can reuse an admitted candidate, including the selected
 same-input replacement generation. Otherwise construction is fresh: an occupied
 target receives a distinct `repair.<id>` generation, without rewriting the
 incumbent or requiring its completion receipt. Healthy incumbent references
-remain retained; unusable selectors/completion evidence do not veto building
-beside them. Source identity remains pinned independently of this physical
-generation name. The optional protocol leaves other callers unchanged.
+remain retained; unusable selectors/completion evidence do not veto either
+footprint-enabled construction path. Completion reads accept only ordinary,
+bounded files, not FIFOs or oversized evidence. Source identity remains pinned
+independently of the physical generation name; MCP still advertises that exact
+generation, including a repair suffix, for operational cutover comparisons.
+The optional protocol leaves other callers unchanged.
 This construction boundary does not execute the reset descriptors, establish
 old-process silence, relax command ownership, or complete fresh publication
 through corrupt deployment metadata. Those remain native lifecycle obligations.

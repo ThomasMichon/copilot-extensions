@@ -406,29 +406,40 @@ _stamp_source_snapshot
 
 
 @pytest.mark.parametrize("language", ["ps1", "sh"])
-@pytest.mark.parametrize("condition", ["current", "missing-deployment", "corrupt-completion"])
+@pytest.mark.parametrize("condition", [
+    "current", "missing-deployment", "corrupt-completion", "completion-fifo", "fallback-directory",
+])
 def test_native_mcp_footprint_routes_actual_construction_without_old_receipt_permission(
     tmp_path: Path, language: str, condition: str,
 ) -> None:
     if language == "sh" and os.name == "nt":
         pytest.skip("POSIX FIFO construction requires a native POSIX Python, not Git Bash with Windows Python")
+    if condition == "completion-fifo" and not hasattr(os, "mkfifo"):
+        pytest.skip("FIFO completion evidence requires native POSIX")
     payload, selected = _payload(tmp_path, "agent-mcp", construction_diagnostics=True)
     script = _setup(tmp_path, payload, "agent-mcp", language)
     root = tmp_path / "install"
-    incumbent = root / "versions" / selected
+    incumbent_version = "1.2.2" if condition == "fallback-directory" else selected
+    incumbent = root / "versions" / incumbent_version
     incumbent.mkdir(parents=True)
     (incumbent / "incumbent-data").write_bytes(b"unchanged")
-    (root / "current-version").write_text(selected, encoding="utf-8")
+    (root / "current-version").write_text(incumbent_version, encoding="utf-8")
+    if condition == "fallback-directory":
+        (root / "last-known-good").mkdir()
     if condition != "missing-deployment":
         (root / "deploy-manifest.json").write_text(
             '{"schema_version":3,"service":"agent-mcp"}', encoding="utf-8",
         )
-    (incumbent / ".install-complete.json").write_text(
-        "{" if condition == "corrupt-completion" else json.dumps({
-            "version": selected, "completed_at": "fixture", "pid": 1,
-            "payload_hash": "a" * 64,
-        }), encoding="utf-8",
-    )
+    completion = incumbent / ".install-complete.json"
+    if condition == "completion-fifo":
+        os.mkfifo(completion)
+    else:
+        completion.write_text(
+            "{" if condition == "corrupt-completion" else json.dumps({
+                "version": incumbent_version, "completed_at": "fixture", "pid": 1,
+                "payload_hash": "a" * 64,
+            }), encoding="utf-8",
+        )
     before = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
     if language == "ps1":
         script += """
@@ -480,7 +491,7 @@ _runtime_construction_finish
     assert result.returncode == 0, result.stdout + result.stderr
     version = (root / "chosen-version").read_text(encoding="utf-8")
     mode = (root / "construction-mode").read_text(encoding="utf-8")
-    if condition == "current":
+    if condition in {"current", "fallback-directory"}:
         assert version == selected and mode == "incremental"
     else:
         assert version.startswith(selected + ".repair.") and mode == "fresh"
@@ -488,6 +499,11 @@ _runtime_construction_finish
         assert (candidate / "constructed").is_file()
         assert json.loads((candidate / ".install-complete.json").read_text())["version"] == version
     assert {name: (root / name).read_bytes() for name in before} == before
+    if condition == "completion-fifo":
+        assert completion.is_fifo()
+    if condition == "fallback-directory":
+        assert (root / "last-known-good").is_dir()
+        assert (root / "versions" / selected / "constructed").is_file()
 
 
 @pytest.mark.parametrize("plugin", PLUGINS)

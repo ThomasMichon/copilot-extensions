@@ -1266,7 +1266,9 @@ def validate_marker(data, version: str) -> dict | None:
 def read_marker(root: Path, version: str) -> dict | None:
     """Parse completion evidence; absent/malformed is None, storage errors raise."""
     try:
-        data = _load_unique_json(marker_path(root, version))
+        data = _runtime_component("versioned_runtime_construction").read_completion(
+            marker_path(root, version), object_pairs_hook=_unique_object_pairs_hook,
+        )
     except (FileNotFoundError, ValueError):
         return None
     return validate_marker(data, version)

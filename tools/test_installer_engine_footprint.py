@@ -255,6 +255,35 @@ def test_fresh_plan_runs_the_existing_constructor_and_keeps_broken_incumbent(
     assert (root / "current-version").read_bytes() == selection
 
 
+@pytest.mark.parametrize("unusable", ["directory", "oversize"])
+def test_footprint_constructor_skips_unusable_fallback_completion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unusable: str,
+) -> None:
+    root = tmp_path / "runtime"
+    _seed(root)
+    fallback = root / "versions/1.2.2/.install-complete.json"
+    fallback.parent.mkdir()
+    if unusable == "directory":
+        fallback.mkdir()
+    else:
+        fallback.write_bytes(b" " * 65537)
+    (root / "last-known-good").write_text("1.2.2", encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("fallback_constructor_test", PAYLOAD / "scripts/versioned_runtime.py")
+    assert spec is not None and spec.loader is not None
+    runtime = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runtime)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(
+        json.dumps({"command": "complete", "payload_hash": "a" * 64}) + "\n"
+        + '{"command":"settled"}\n',
+    ))
+    assert runtime.construction_session(
+        root, "1.2.4", payload_hash="a" * 64, footprint=PATH, plugin="agent-mcp",
+    ) == 0
+    assert runtime.is_complete(root, "1.2.4", expect_hash="a" * 64)
+    assert (root / "last-known-good").read_text() == "1.2.2"
+    assert fallback.is_dir() if unusable == "directory" else fallback.stat().st_size == 65537
+
+
 def test_generated_package_metadata_is_not_a_source_producer(tmp_path: Path) -> None:
     source = tmp_path / "src/agent_mcp"
     source.mkdir(parents=True)

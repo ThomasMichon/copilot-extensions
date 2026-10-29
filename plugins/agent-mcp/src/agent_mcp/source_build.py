@@ -9,6 +9,7 @@ _SOURCE_VERSION = re.compile(
     r"(?P<package>\d+\.\d+\.\d+(?:[.-]dev\d+)?"
     r"(?:\+[A-Za-z0-9][A-Za-z0-9._-]*)?)[.+]"
     r"source\.(?:[0-9a-f]{40}|[0-9a-f]{64})\.[0-9a-f]{16}"
+    r"(?:\.repair\.[0-9a-f]{32})?"
 )
 
 
