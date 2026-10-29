@@ -137,8 +137,8 @@ the requested coordinated-background behavior.
   lifetime qualification to separately owned #6859/#7833 under the reviewed
   [broker contract](windows-launch-broker.md). They are not dependencies of the
   scheduling-only #7788. The repair's reviewed source and disposable-host
-  qualification are now complete; promotion and installed acceptance remain
-  separate open gates.
+  qualification and promotion are now complete; separately authorized
+  installed rollout and acceptance remain open.
 - [x] Move optional stage/bootstrap/reconcile work off the healthy handoff path
   on both PowerShell and Bash; remove the join and inline-download fallback
   from ordinary launches. Preserve explicit blocking recovery behavior.
