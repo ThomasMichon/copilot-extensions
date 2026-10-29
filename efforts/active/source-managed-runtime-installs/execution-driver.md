@@ -123,6 +123,13 @@ This amendment clears its own review gate before foundation implementation.
 
 ## Normal and force/repair operation
 
+The [fresh-default revision](fresh-default-installation.md) governs construction
+and replacement selection. Ordinary updates already select mostly fresh
+installation when incremental/ZDD recognition fails; that fallback is not an
+implicit request for the distinct force/repair mode. Reuse receipts qualify
+incremental compatibility, not permission to install. The existing driver
+remains the exclusive transaction owner in either path.
+
 **Operator requirement summary:** exclusivity means one active installer for
 the addressed installation, not a persistent dead-letter veto. Locks and owner
 markers are collaboration requests tied to the live installer process or
@@ -133,8 +140,10 @@ cleanly roll back failed preparation without cutover. ZDD is best effort:
 handoff incompatibility permits bounded retirement of the old service rather
 than abandoning the new selected version.
 
-Force/repair is a distinct, explicitly requested mode available to any intact
-authorized installer. Agents obtain operator approval for a concrete run. It
+Force/repair remains a distinct, explicitly requested recovery or target
+selection available to any intact authorized installer, not a prerequisite
+for fresh fallback. Agents obtain operator approval for a concrete disruptive
+host run. It
 may briefly cooperate, then takes over from previous installers, invalidates
 their stale installation-control state and retires older managed daemons so
 only selected code remains active on success. It does not guarantee ZDD.
@@ -231,8 +240,10 @@ existing installation execution implementer:
 3. Provide an explicit supported path for existing interrupted records,
    including records whose older producer lacks the new admission evidence.
    Automatic settlement must not assume a free lock, process-name/PID absence,
-   elapsed time or a reboot proves cleanup. Refuse insufficient automatic
-   evidence with an actionable outcome. Explicit operator repair uses its
+   elapsed time or a reboot proves cleanup. Missing historical evidence does
+   not veto the newly selected fresh-install path: settle known scoped effects
+   through the existing owner and manifest, and report a concrete failure when
+   that cannot complete. Explicit operator repair uses its
    separate authorization instead and requires no historical cleanup proof;
    audited pre-launch recovery is optional. Neither route may fabricate native
    settlement, a successful prior result or erase the original failure.
@@ -268,8 +279,9 @@ current scope; this is not a competing driver or proof of a live repair.
   no overlapping installer or unrelated service interruption. No reboot,
   timestamp/PID shortcut, arbitrary queue edit or success-shaped reset qualifies.
 - Exercise explicit operator repair with absent historical cleanup evidence
-  and separately with an optional pre-launch audit. Ordinary callers must not
-  silently choose repair. Preserve the distinct authorization/native-proof
+  and separately with an optional pre-launch audit. Also prove ordinary
+  missing-recognizer fallback reaches fresh installation without requiring
+  that separate mode. Preserve the distinct authorization/native-proof
   labels and old failure history; verify current scoped takeover and selected
   readiness rather than requiring the broken producer to certify its past.
 - Verify read-only status, malformed state, unavailable launch/runtime,

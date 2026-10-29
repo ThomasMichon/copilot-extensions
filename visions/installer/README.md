@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-10-26
+- **Last revised:** 2026-10-28
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -333,6 +333,44 @@ Complete, forced and purge removal/reinstall exclude that closure rather than
 sever the SSH or Gateway path used to manage the host. Agent credential relays
 may be removed; they are not automatically protected transport.
 
+### fresh-default-upstream-installation
+An ordinary project update reaches the installed global front door and the
+Manager's canonical upstream bootstrap without depending on the old runtime
+being healthy. The published Main bootstrap is the default; explicit local
+source, development, installation-scope and test overrides remain effective
+through one attributable selection.
+The bootstrap's transport override is distinct from its runtime selections;
+choosing a Dev runtime does not implicitly replace the Main orchestrator.
+
+The bootstrap orchestrates installation into the assigned immutable slot.
+Its baseline is a fresh installation, not permission to reuse whatever happens
+to be present. Positive recognition of a compatible existing footprint enables
+incremental construction and zero-downtime replacement. Missing or incompatible
+recognition selects a mostly fresh installation within the same requested
+scope; it does not veto updating or demand an extra repair flag.
+
+Fresh replacement retires known disposable runtime state, old managed processes,
+reactivation registrations and non-config generated globals. It preserves
+configuration, durable application data, unrelated installations and protected
+session-hosting and machine-connectivity dependencies. Success means the
+selected installation is ready and the displaced version is silent, including
+its restart paths. Unknown compatibility is not authority to delete unknown
+content, and an actual construction, scope or retirement failure stays explicit.
+
+### recognizer-manifests
+Each installed footprint has a maintained declarative manifest with two
+independent responsibilities: identify the disposable artifacts the installer
+may reset, and describe the markers and supported version/contract ranges that
+permit incremental or zero-downtime updating. An incremental-compatibility
+receipt is evidence of ability to reuse, never permission to install.
+
+Changes to installed artifacts carry the corresponding manifest and historical
+footprint transitions, just as a product schema change carries its migrations.
+Validation detects omitted artifacts, unsupported incremental reuse and unsafe
+reset boundaries. The inventory includes generated commands, runtime state and
+process or registration effects rather than only package files. Durable data
+and protected execution/connectivity remain outside disposable reset scope.
+
 ### single-installation-execution-owner
 An installation has one background execution owner for its complete update
 transaction: acquisition, runtime construction, activation and integration.
@@ -357,7 +395,8 @@ administered always-on coordinator. Foundation construction has one bounded,
 recoverable owner; it is not a general-purpose exception for running plugin
 installers. Once ready, first-use publication follows the same durable request
 contract as later updates. Missing, incompatible or interrupted foundation state
-is explicit, never permission to fall back to an independent installer.
+is handled by that same installation authority, including fresh establishment
+or supported recovery, never by an independent competing installer.
 
 Equivalent same-target requests debounce and share the active operation's
 observable result; different-target requests wait or queue rather than race.
@@ -388,18 +427,20 @@ does not make Manager a mandatory plugin dependency.
 ### normal-and-repair-installation
 Normal background installation limits trigger fan-out and converges on the
 authoritative desired version. Same-version requests debounce; a different
-version waits or queues behind the active installation. Blocking acquisition,
-I/O, permission or execution failures leave clean failed-candidate state
-without activating the failed version. Compatible zero-downtime handoff is
-preferred, not a veto on the selected replacement: an incompatible or stalled
-old service is retired by bounded cold takeover rather than defeating the new
-installation solely because handoff failed. Success still requires the new
-installation to be ready.
+version waits or queues behind the active installation. Fresh installation is
+the default convergence path; recognizers enable incremental/ZDD optimization.
+Absent reuse evidence, stale control records or an incompatible old runtime do
+not require a separate force/repair request merely to complete the selected
+update. The same execution owner settles displaced writers and known runtime
+effects before replacement; competing callers never become concurrent writers.
+Blocking acquisition, I/O, permission or execution failures leave explicit
+failed-candidate state without activating a failed version. Compatible handoff
+is preferred, not a veto on bounded cold replacement.
 
 Explicit force/repair installation gives any intact authorized installer a
-bounded way to take charge of its addressed installation, including when the
-previous installation, queue or owner records are corrupt. Agents request
-operator approval before invoking this disruptive mode. It may briefly attempt
+bounded way to request disruptive recovery or an explicit replacement target.
+It is not the switch that enables the normal fresh fallback. Agents request
+operator approval before a concrete disruptive host operation. It may briefly attempt
 cooperation, then terminates previous installers and older managed service
 daemons within that installation's process scope, invalidates stale ownership
 and installation-control state, and converges on its explicitly selected code.
@@ -414,7 +455,7 @@ a separate path, not a mandatory ceremony before repair. Status distinguishes
 operator-authorized recovery from native-confirmed settlement and preserves
 the prior failure without turning it back into installation authority.
 
-A successful repair leaves old generations inert: no older managed installer
+A successful replacement leaves old generations inert: no older managed installer
 or daemon remains serving or able to reactivate itself through stale launch,
 routing or maintenance state. Inert rollback artifacts need not be physically
 erased. The repair preserves application data and unrelated installations;

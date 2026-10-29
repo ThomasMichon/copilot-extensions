@@ -252,6 +252,36 @@ The [request record](inception-transcript.md#explicit-repair-authorization-and-l
 retains the exact words. This approves source implementation, not a concrete
 repair run on a host.
 
+**Fresh-default upstream orchestration (2026-10-28), summary:** the global
+project binstub intercepts `<repo> update` and routes it to
+`worktree-manager update --project=<repo>`. Unless explicitly overridden by
+the supported environment seam, it runs the upstream GitHub Main one-line
+bootstrap. That orchestrator reads local Dev, marketplace-cell and test
+overrides and constructs the selected installation in its assigned slot.
+Its baseline is a fresh installation. Recognizers positively qualify valid
+existing footprints for incremental/ZDD reuse; a missing match selects a
+mostly fresh install that silences the old version, clears known disposable
+runtime state, retires known processes/tasks and replaces non-config globals.
+Old receipts establish ability to reuse incrementally, not permission to
+update. Config, durable state and previously protected execution/connectivity
+remain intact. The [verbatim direction](inception-transcript.md#fresh-default-upstream-installation-orchestration)
+supersedes receipt-as-permission assumptions in the earlier normal/repair
+design. Realization still uses the existing canonical installation owner,
+not a parallel updater, and proceeds through review before implementation.
+The [fresh-default slice](fresh-default-installation.md) reconciles the routing,
+footprint inventory and execution-driver work without replacing their owners.
+
+**Recognizer-manifest refinement (2026-10-28), summary:** expected runtime
+footprints have a maintained manifest serving two distinct roles: enumerate
+the disposable artifacts safe to reset, and describe markers plus supported
+version/contract ranges that positively qualify incremental/ZDD updating.
+Changes to installed artifacts also update that manifest and its footprint
+deltas/migrations, analogous to product schema upgrades. The
+[verbatim refinement](inception-transcript.md#recognizer-manifests-and-footprint-migrations)
+retains the operator's wording. Manifest recognition is not an update-permission
+receipt; unknown compatibility selects fresh installation within declared
+disposable scope while preserving config and durable data.
+
 ## Plan
 ### Phase 0 - Review the intent and plan
 - [x] Land the vision amendments and this canonical proposal through repository review.
@@ -352,9 +382,21 @@ matrix; no schedule or cadence is enabled by this plan.
 ### Phase 4b - Durable installation execution driver
 The [execution-driver slice](execution-driver.md), tracked by #7758, separates
 transaction execution from the existing recurring-maintenance assignment.
+Completed items below retain earlier source evidence; their conservative
+reuse/admission behavior is not an exception to the fresh-default revision.
 
+- [ ] Review the [fresh-default upstream contract](fresh-default-installation.md) before changing
+  its routing or recovery implementation: global update interception, upstream
+  bootstrap and local overrides, positive incremental/ZDD recognizers, and the
+  mostly fresh known-runtime fallback. Preserve durable config/data, silence
+  the displaced owner and retain one installation execution owner; do not
+  turn missing incremental receipts back into update refusal.
+- [ ] Define maintained recognizer manifests with separate disposable-reset
+  inventories and incremental marker/version/contract ranges, plus historical
+  footprint deltas. Make installed-footprint changes carry manifest/migration
+  updates and validation against omitted artifacts or unsupported reuse.
 - [x] Review the execution-owner clarification and bounded implementation plan.
-- [ ] Review and implement [normal and operator-approved repair modes](execution-driver.md#normal-and-forcerepair-operation): central desired targets, same-version debounce, one active installer, clean normal rollback and bounded repair takeover without stale-marker vetoes. Preserve the [same-boot recovery requirement](execution-driver.md#live-cutover-recovery-correction), older-record repair and unrelated services/data; no host/kernel restart prerequisite.
+- [ ] Implement fresh-default normal convergence and [explicit repair modes](execution-driver.md#normal-and-forcerepair-operation): central desired targets, same-target debounce, one active installer and bounded known-runtime retirement without stale-marker or missing-recognizer vetoes. Preserve the [same-boot recovery requirement](execution-driver.md#live-cutover-recovery-correction), older-record history and unrelated services/data; no extra repair flag for normal fresh fallback or host/kernel restart prerequisite.
 - [x] Implement durable requests, compatible pending-request coalescing and attributable read-only status/results.
 - [x] Land pinned-target active-request sharing through the existing queue and fixed first-use adapter; preserve later execution for unresolved moving targets. This does not close central desired-target selection, worker fan-out, same-boot recovery or repair takeover.
 - [x] Land native-confirmed same-boot failure settlement, preserving interrupted/no-exit-status outcomes and older request history; qualify strict native cleanup, participant refusal, schema-2 compatibility and subsequent normal execution on Windows/Linux. Owner death without durable proof and legacy/approved repair remain separate open work.
@@ -919,6 +961,8 @@ implementation, rollout or parent completion is declared.
   alternatives, finite metrics/venues and unchanged source/resource ownership.
 
 ## Validation Plan
+- [ ] **Fresh-default orchestration:** resolve the [public-entry-point and construction-path matrix](fresh-default-installation.md#validation-plan): global project update interception, upstream Main/default and explicit overrides, cold/broken old runtime, compatible incremental/ZDD and missing/incompatible recognition reaching mostly fresh installation under the same execution owner. Receipts must not become update permission.
+- [ ] **Footprint evolution:** real installer-produced artifacts and process/registration effects match maintained manifests; installed-footprint changes without matching inventory/deltas fail validation. Qualify historical reset descriptors separately from incremental contract support, preserve unknown/foreign and durable/protected content, and prove displaced code cannot serve or reactivate.
 - [ ] **Critical connectivity:** resolve the [route/removal matrix and retention acceptance](connectivity-retention.md), distinguishing provisioning code from actual SSH/Gateway transport and protecting its complete live/reconnect dependency closure. Force or purge cannot bypass it; credential relays can be removed. Source audit/vision alignment is not installed survival proof.
 
 - [ ] **Disposable services and shared maintenance hold:** resolve the [YAML banner implementation/validation sequence](maintenance-banner.md#implementation-and-validation-sequence). Prove the same applicable banner blocks actual automatic updates/reprovisioning and explains agent standby, including Manager, queued execution and missing catalog tools. Retain durable state and independently hosted session continuity, native 30-minute polling and no self-repair during an explained hold; source text, an unrelated kill switch or a merged vision is not acceptance.
@@ -945,12 +989,12 @@ implementation, rollout or parent completion is declared.
 
 - [ ] **Bidirectional selection:** forward, lower-version and same-package/different-source replacements use identity inequality; compatible handoff health-gates before retirement, while incompatible/refused/hung handoff allows bounded owned-scope shutdown or identity-checked force termination before cold-start readiness.
 - [ ] **Cold recovery and retries:** breaking all predecessor handoff contracts does not veto selected Dev deployment. Qualify durable recovery after abrupt child death, consumer reconnect after stream/reply loss, safe retry/deduplication or unknown-outcome reconciliation, exclusive ownership and explicit failed-recovery reporting.
-- [ ] **Operator repair authority:** explicit repair proceeds without historical cleanup or pre-launch evidence, including older records that cannot supply it. Audited pre-launch recovery is optional. Distinguish authorization from native settlement, preserve actual failure/pending history, refuse implicit repair in ordinary callers, and verify scoped takeover, actual selected readiness and unrelated-data preservation separately.
+- [ ] **Operator repair authority:** explicit repair proceeds without historical cleanup or pre-launch evidence, including older records that cannot supply it. Audited pre-launch recovery is optional. Distinguish authorization from native settlement, preserve actual failure/pending history, and verify scoped takeover, actual selected readiness and unrelated-data preservation separately. Normal fresh fallback must not require this separate repair selection.
 - [ ] **Source admission:** reject dirty, worktree-backed, unmerged or substituted source; preserve the exact resolved commit throughout a run.
 - [ ] **Materialization:** actual installer imports the complete vendor closure from a non-editable install with no source-checkout dependency.
 - [ ] **Identity:** identical inputs reuse unchanged completion bytes; different commits or assembly/dependency/profile inputs cannot overwrite a completed slot.
 - [ ] **Selection:** installed binstubs and native resolvers execute the exact completed selected generation, including hash-qualified dev sources.
-- [ ] **Failure:** incomplete/failed candidates remain unselected and preserve the previous healthy runtime and redirects.
+- [ ] **Failure:** incomplete/failed candidates remain unselected; preparation failure preserves the previous healthy runtime and redirects. For failures after fresh-path retirement begins, report actual service/selection state without claiming an untouched predecessor or successful replacement.
 - [ ] **Policy:** real hook and first-use paths do not publish runtime copies or redirects in managed mode; their non-deployment behavior still runs.
 - [ ] **Skew:** newer-plugin/older-service and older-plugin/newer-service interactions work within declared capabilities or return precise readiness outcomes.
 - [ ] **Source modes:** main tracking, stable/exact pins and dev tracking converge through one source-assembly path without moving midway through a run.
@@ -986,6 +1030,23 @@ independent configuration choice rather than forcing the Manager and suite
 onto one branch.
 
 ## Journal
+
+### 2026-10-28 - Fresh-default installation and recognizer manifests
+
+The operator changed the installation baseline: upstream fresh construction,
+with positive recognition selecting incremental/ZDD optimization rather than
+permission to update. Both requests are retained verbatim in the inception
+record. The installer vision and existing execution/deployment plans now carry
+that direction and a [bounded implementation/validation proposal](fresh-default-installation.md).
+
+Source research identified the existing global bootstrap interception,
+immutable-slot/receipt/removal helpers and durable update driver as integration
+owners. A complete disposable-footprint manifest, producer/delta completeness
+guard and old-process/registration silence remain implementation obligations,
+not delivered behavior. The prior normal/repair admission prose is reconciled;
+no separate updater, signing protocol or new blanket permission gate is added.
+Existing #7758, maintenance, removal and critical-connectivity owners remain.
+Review precedes new orchestration implementation; no host operation is authorized.
 
 ### 2026-10-28 - Direct retained keeper and source selector
 

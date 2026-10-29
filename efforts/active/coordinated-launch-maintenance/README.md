@@ -64,20 +64,21 @@ end-to-end behavior result.
 
 | Boundary | Recorded state |
 |----------|----------------|
-| Checked-in source | #7788 merged into `dev`; its reviewed completion journal merged in #8207. |
-| Released source | Main `931e3d1734bb41496c8f4d526051b18e63914db4`, promoted by #8268, contains the scheduling change. The release's Worktrees automatic executor, shared participant and both shell launchers matched the merged source in read-only blob checks. |
+| Checked-in source | #7788 merged into `dev`; its reviewed completion journal merged in #8207. The independent broker/cold-Worktrees repair #7833 merged as `e58ba45041ca533d4a97ebee478195ce23462eeb` on 2026-10-29 UTC. |
+| Released source | Main `2aa36e8f4d853024c9f18b4309efb5e6e4fd2a8b`, promoted by #9486 through run 40798872550, contains both the scheduling change and the independent broker/cold-Worktrees repair. Worktrees is `1.24.338-dev1`; the three final runtime correction modules are byte-identical to reviewed head `e3e789d983`. |
 | Observed installed consumer | One existing Windows consumer selected Manager `0.6.104-dev1` and Worktrees `1.24.191-dev1`. Isolated package/distribution origins were inside the selected slots with `win-amd64` interpreters. Both installed Manager launchers matched #7788 after normalizing line endings. |
 | Installed execution-driver parity | The selected Worktrees executor and shared participant were not byte-identical to #7788; the difference has not been qualified as equivalent behavior. Do not infer parity from their version numbers. |
 | Running acceptance | No new installed healthy-handoff, automatic completion, failure or fresh-first-use proof is claimed. Existing source-fixture evidence remains separate. |
 | Rollout authority | These were read-only observations of existing installations, not an update performed by this driver or authorization to change other consumers. Existing deployment holds remain in force. |
 
-The same driver retains independent ownership of #6859 and draft #7833.
+The same driver retains independent ownership of #6859; #7833 is now merged.
 #6918 is merged, and neither its historical author nor another PR's delivery
 is a dependency of #7788. The immediate-Job inference and new Scheduled Task
 design belong to that separate repair, not the scheduling diff. Its reviewed
-contract, failed candidates, native qualification, generation retention and
-installer integration remain open there without a lifetime-check waiver or
-deployment authorization. Historical journal entries below record the former
+source, native disposable-host qualification, generation retention, installer
+integration and promotion are complete without a lifetime-check waiver.
+Installed rollout and running-state acceptance remain held. Historical journal
+entries below record the former
 broader hold; the explicit scheduling-only decision supersedes that delivery
 coupling, not the independent repair's technical gates.
 
@@ -135,7 +136,9 @@ the requested coordinated-background behavior.
 - [x] Transfer the independent broker repair, its installer integration and
   lifetime qualification to separately owned #6859/#7833 under the reviewed
   [broker contract](windows-launch-broker.md). They are not dependencies of the
-  scheduling-only #7788; no repair or qualification is claimed complete.
+  scheduling-only #7788. The repair's reviewed source and disposable-host
+  qualification and promotion are now complete; separately authorized
+  installed rollout and acceptance remain open.
 - [x] Move optional stage/bootstrap/reconcile work off the healthy handoff path
   on both PowerShell and Bash; remove the join and inline-download fallback
   from ordinary launches. Preserve explicit blocking recovery behavior.
@@ -160,8 +163,9 @@ the requested coordinated-background behavior.
 
 ### Phase 3 - Release and acceptance
 - [x] Land source, documentation and changefiles through review and required CI.
-- [ ] Observe legitimate promotion, then use the authorized normal rollout
-  owner; do not start a competing update to finish this effort.
+- [x] Observe legitimate promotion of the independent repair #7833.
+- [ ] Use only the separately authorized normal rollout owner; do not start a
+  competing update to finish this effort.
 - [ ] Record installed handoff, maintenance completion and failure evidence.
   Close this effort only when every validation item is resolved or explicitly
   transferred to a named tracked objective.
@@ -204,6 +208,61 @@ worker is insufficient. Machine-local request/status/log data never enters
 repository history.
 
 ## Journal
+
+### 2026-10-29 - Verify legitimate promotion; retain installed acceptance
+
+The green merged Dev CI 40798342150 is followed by the legitimate current-Dev
+admission of `c5f12192e0e9143a80e8d52311d0c1bea3253a9d`. Automatic pipeline
+40798872550 passes source units, first-party artifact construction and
+attestation, exact candidate reuse, immutable source publication/raw readback
+and non-administrator candidate merge. Generated #9486 merged at 01:23:03 UTC
+as Main `2aa36e8f4d853024c9f18b4309efb5e6e4fd2a8b`.
+
+Read-only Git blob comparison confirms the released `worktrees_client.py`,
+`runtime_dev_cli.py` and `update_driver_json_cli.py` exactly match reviewed
+head `e3e789d983de4bb6c5f09b0f6bcec6e830420aeb`. The released Worktrees
+manifest is `1.24.338-dev1`. This uses the actual generated promotion and
+content identity, not ancestry of a Dev commit on regenerated Main.
+
+Earlier run 40796936253 failed only at source-release readback when the
+Public Good Sigstore verifier could not initialize after its existing bounded
+retry. The literal failure is recorded on #9484. The new, automatically
+admitted current-source run passes that boundary without policy weakening,
+forced retry, administrator merge or a concurrent release controller; this
+does not assert a permanent fix to the earlier external initialization error.
+
+The promotion observation is resolved. The effort remains Active because
+installed handoff, automatic maintenance completion/failure and promoted
+running-state acceptance still require the existing owner's separately
+authorized rollout. No installed version, selected payload, source merge or
+disposable-host proof is substituted for that acceptance. Shared-host update,
+Task adoption, restart, updater replay and incumbent/custody retirement remain
+held. The next slice is owner-authorized installed rollout and acceptance,
+not another updater started by this source session.
+
+### 2026-10-29 - Merge the qualified broker and cold Worktrees repair
+
+#7833 merged through managed `pr-merge --now` as
+`e58ba45041ca533d4a97ebee478195ce23462eeb` at 01:06:15 UTC. The provider
+confirmed the merge and the effective self-merge profile; the ordinary
+Maintainer review-rule exception omitted only the additional CODEOWNER vote,
+not required CI, review assessment or unresolved threads.
+
+At the final reviewed head `e3e789d983de4bb6c5f09b0f6bcec6e830420aeb`,
+required CI 40797280463 passes. Review 5691634979 is `COMMENTED` with no open
+findings, and all ten review threads are resolved. Its remaining overview
+request for exact-head native qualification is satisfied by 40797339663:
+portable/native POSIX, Windows activation/shared-outer negative and desktop
+controls, and actual cold Worktrees/SSH/Manager concurrent-reader recovery
+with caller Job closure, resident health and canonical removal all pass.
+The consumer job takes 7m35s within its unchanged 15-minute cap.
+
+The source-repair gate in `windows-launch-broker.md` is resolved. The next
+slice is the legitimate promotion of this merged snapshot, then a separately
+authorized installed rollout/acceptance under the existing owner and holds.
+The parent effort remains Active. No shared-host update, Task adoption,
+restart, updater replay, incumbent retirement or unresolved-custody cleanup
+is authorized by this merge.
 
 ### 2026-10-28 - Preserve the concurrent reader's initial unready response
 
