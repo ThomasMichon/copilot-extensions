@@ -2913,7 +2913,7 @@
         "tools/wheel_input_fixture.py": "ed58b3876bcf48c89e6d327b8d5550246f626f79e68b7b77812eaf0fe606c122",
         "plugins/agent-bridge/src/agent_bridge/session_status.py": "96e8aec0a62cc68c7db7215d6a575c4ad772ce4a96c5def00b18cc1103f3b335",
         "plugins/agent-bridge/src/agent_bridge/caller_session.py": "18bf4f33a1742113d8d6c1a02986853a03a542d92e9c40eb3edbbea93301e698",
-        "plugins/agent-bridge/src/agent_bridge/protocol.py": "202d75e593174e50919da43753b544f24373e4fb6f7ca488e701179a1dc75910",
+        "plugins/agent-bridge/src/agent_bridge/protocol.py": "d55054a3b6d82093e25f0b56a44870b25a2ff72a3d1a78a1c9c11d7c6c97b09d",
         "plugins/agent-bridge/src/agent_bridge/client_worktree_restart.py": "af79a6f538b19ab9a14000524d3951007d71c5f6a957da91909019e8184e6d9c",
         "plugins/agent-bridge/src/agent_bridge/client_answers.py": "a0de77c3f1ef2119cdd16b67d0291dc367ec68c9931d0e80e04bf07ce1ef3b46",
         "plugins/agent-bridge/src/agent_bridge/client_cli_mode.py": "70058bd55121a268307177aaa9b1e4ef1447b7b69334832e29da5eff4f37690d",

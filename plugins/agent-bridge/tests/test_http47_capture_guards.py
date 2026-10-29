@@ -39,6 +39,21 @@ def fixture_git(root: Path, *args: str) -> str:
     return evidence.git(root, *args).decode("utf-8").strip()
 
 
+def copy_fixture_source(destination: Path, path: str, registry: dict) -> None:
+    source = ROOT / path
+    if not source.exists():
+        sources = {
+            row["path"]: row for contract in registry["contracts"]
+            for row in contract["source_paths"]
+        }
+        row = sources[path]
+        canonical = sources[row["current_path"]]
+        assert "current_path" not in canonical and row["sha256"] == canonical["sha256"]
+        source = ROOT / canonical["path"]
+        assert evidence.git_evidence.sha256_bytes(source.read_bytes()) == row["sha256"]
+    shutil.copyfile(source, destination)
+
+
 def test_http47_registry_encoding_is_lossless_and_bounded() -> None:
     registry = evidence.registry_codec.load(ROOT).index
     compact = evidence.encode(registry, indent=None)
@@ -66,7 +81,17 @@ def source_seed(tmp_path_factory: pytest.TempPathFactory) -> Path:
     for path in paths:
         destination = seed / path
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(ROOT / path, destination)
+        copy_fixture_source(destination, path, registry)
+    # Reconstruct a removed duplicate only inside this composed historical cohort.
+    for contract in registry["contracts"]:
+        for row in contract["source_paths"]:
+            if "current_path" in row:
+                destination = seed / row["path"]
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                copy_fixture_source(destination, row["path"], registry)
+                row.pop("current_path")
+                if row["path"] in evidence.AFFECTED:
+                    row.update(semantic=True, non_semantic_reason=None)
     http = next(c for c in registry["contracts"] if c["id"] == "agent-bridge.http-wire")
     if http["declared_range"]["current"] > 47:
         # This is a composed, disposable HTTP-47 test cohort, not a rewrite of

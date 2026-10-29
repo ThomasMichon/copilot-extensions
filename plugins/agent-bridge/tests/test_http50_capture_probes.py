@@ -59,7 +59,10 @@ async def idle_custody(db, admission, directory, requests) -> dict:
 
 def test_http50_capture_actual_observations(serving, request, tmp_path) -> None:
     bound = capture_request(evidence, ROOT)
-    assert HTTP_PROTOCOL_VERSION == evidence.GENERATION
+    if bound is not None:
+        assert HTTP_PROTOCOL_VERSION == evidence.GENERATION
+    else:
+        assert HTTP_PROTOCOL_VERSION >= evidence.GENERATION
     vector = json.loads(evidence.safe(ROOT, evidence.INPUT).read_bytes())
     app, client, db, consumer = serving
     observed = {
@@ -161,6 +164,9 @@ def test_http50_capture_actual_observations(serving, request, tmp_path) -> None:
     client.headers.pop("Forwarded")
     client.headers.pop("Authorization")
     observed["unauthenticated"] = client.get(PREFIX + "/recovery").status_code
-    assert observed == vector["expected"]
+    expected = json.loads(json.dumps(vector["expected"]))
+    if bound is None:
+        expected["advertised"]["protocol_version"] = HTTP_PROTOCOL_VERSION
+    assert observed == expected
     if bound is not None:
         record_observations(evidence, bound, request.node.callspec.params["installation"], observed)

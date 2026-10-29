@@ -98,9 +98,12 @@ def test_each_distinct_required_capture_is_prepared_and_validated(tmp_path, monk
     ]
 
 
-def test_retained_recovery_checkpoint_is_independently_prepared(tmp_path, monkeypatch):
+@pytest.mark.parametrize("name", [
+    "http50-retained-recovery.json", "http51-standard-native-send.json",
+])
+def test_new_operation_checkpoint_is_independently_prepared(tmp_path, monkeypatch, name):
     _packet(tmp_path)
-    recovery = "plugins/agent-bridge/contract/fixtures/http/current/http50-retained-recovery.json"
+    recovery = "plugins/agent-bridge/contract/fixtures/http/current/" + name
     commit = "5" * 40
     (tmp_path / recovery).write_text(json.dumps({
         "captured_from": {"commit": commit},

@@ -1,0 +1,20 @@
+{
+  "evidence_family": "http51-unchanged-source-link-v1",
+  "preserved_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http50-source-cold_outages-py-4c492c9d1b8f.json",
+    "sha256": "75346c08570de1a64551233e88ad5bded8a2eee85008dc00dcd2dbd1e936d45c"
+  },
+  "advertisement_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http51-standard-native-send.json",
+    "sha256": "ceb362de1587dea84c1aaef2b6e7b9c1ca1183cd23ec020ba2b9ec2d3aed3e2c"
+  },
+  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "captured_from": {
+    "commit": "295ec3ed0542323ed53f5ac4b7fbbdb91d031300",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 51,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/cold_outages.py",
+    "source_git_blob": "83ab44cca1230f3cc77fca2106e893d1fdbd37ae",
+    "source_sha256": "9cf42bbe2618caf8cb4113ac5f1778db38532d13e823d7ce228176f20da73f12"
+  }
+}

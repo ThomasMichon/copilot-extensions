@@ -36,6 +36,7 @@ delegated-agent facade.
 | Create a fresh session | `create <agent> [prompt]` | `POST /api/v1/sessions` with `force_new` as needed | Bridge `session_id`, generated display name, session status |
 | Reuse or create for this caller | `send <agent> <prompt>` | Client-side resolve/reuse followed by session creation when absent | Existing or new bridge session |
 | Submit a turn | `send <session> <prompt>` | `POST /api/v1/sessions/{id}/turns` | Immediate `turn_index`, or a queued result when `queue=true` |
+| Retry an exact native follow-up | Standard `send` with `--expected-native-session-id` and `--idempotency-key` | `POST .../turns/native-bound/send`, protocol 51 | Original native turn receipt; a stopped context is strictly resumed without recreation |
 | Handle a busy hosted session | Default `send` refuses (exit 75; with `--json`, `outcome: refused_busy`); `send ... --queue` preserves the turn; `send ... --force` ends/replaces it | Default prompt submission returns 409; `queue=true` persists FIFO work | Reject, queue identity/position, or a fresh unlinked session depending on the explicit mode; `send --json` names the hosted result as `delivered`, `queued`, or a `refused_*` with a distinct exit code. Represented sends use receipt stages `admitted`, `sdk_accepted`, or `consumed`, or `duplicate`; `steered`, `interrupted`, and `accepted` are legacy-daemon outcomes, not current receipt evidence. |
 | Manage pending prompts | Queue flags through `send` | Queue snapshot, delete-one, and clear-all endpoints | Durable FIFO queue maintenance |
 | Observe a live turn | attached `send`, bare `wait`, or following `read` | `GET .../events` plus cursor acknowledgement | Collapsed event stream |
@@ -78,6 +79,29 @@ but cannot overwrite an idle boundary already observed after consumption.
 Migration retains historical SDK-acceptance evidence without inventing
 consumption or classifying old acknowledged history as newly pending work.
 Newly admitted inputs carry explicit consumption-tracking provenance.
+
+### Exact native follow-ups through ordinary send
+
+The standard `send` command accepts a retained native conversation fence together
+with an idempotency key. Protocol 51 owns this combination. The caller supplies
+only the target, prompt and key; it does not construct an allocation/startup
+invocation or select an interactive inbox. Native aliases resolve to the actual
+hosted session and the daemon rechecks the native identity under its turn lock.
+
+The existing turn journal retains the key, exact prompt, native identity and
+original admission receipt. Repeating the same request returns that receipt,
+including after a lost reply; changed intent conflicts. A stopped context uses
+strict resume with recreation disabled and is checked again before admission.
+Failure never authorizes a different native conversation or an inbox fallback.
+The native turn receives the unchanged prompt text; Bridge retains the caller
+and `agent-bridge` source in its journal/event metadata, not an inbox envelope
+or a claim that the input came from a human.
+The receipt proves turn admission, not native consumption or semantic completion.
+
+This guarded combination currently refuses a busy target and does not support
+`--queue` or `--force`. Unkeyed sends and the ordinary hosted FIFO queue retain
+their previous behavior. An older daemon refuses the new combination before
+effects; package or payload freshness alone is not support evidence.
 
 Source anchors:
 
@@ -283,8 +307,9 @@ keys, so "unsupported" stays distinguishable from "no boundary".
 
 ## Target logical-message idempotency
 
-The current represented-session inbox supports an `idempotency_key`, but the
-ordinary hosted-session prompt queue does not. The current database index makes
+The current represented-session inbox supports an `idempotency_key`, and exact
+native follow-ups have the guarded turn-journal contract above. The ordinary
+hosted-session prompt queue does not yet support a key. The current database index makes
 that live-message key globally unique across the table. Repeating it with the
 same session, sender, body, reply target, and kind returns the original message
 (the response says `duplicate: true`); reusing it for different content or a

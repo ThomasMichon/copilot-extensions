@@ -1,0 +1,20 @@
+{
+  "evidence_family": "http51-unchanged-source-link-v1",
+  "preserved_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http50-source-workspace_creation_cli-py-41baaad2e79a.json",
+    "sha256": "4a63103ac8290cc843015787935780ceda06a56e003bd46f5e114983064a7e6d"
+  },
+  "advertisement_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http51-standard-native-send.json",
+    "sha256": "ceb362de1587dea84c1aaef2b6e7b9c1ca1183cd23ec020ba2b9ec2d3aed3e2c"
+  },
+  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "captured_from": {
+    "commit": "295ec3ed0542323ed53f5ac4b7fbbdb91d031300",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 51,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation_cli.py",
+    "source_git_blob": "e34368a3bc620f55c3d0e97032ccf8c1e117c9f3",
+    "source_sha256": "0ccd7487c5b9e661a45ebcfb8859fb9994eeb4672c26f1beb8b2f97fe821925f"
+  }
+}

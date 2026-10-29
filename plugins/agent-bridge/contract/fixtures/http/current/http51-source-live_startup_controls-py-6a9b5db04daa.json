@@ -1,0 +1,20 @@
+{
+  "evidence_family": "http51-unchanged-source-link-v1",
+  "preserved_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http50-source-live_startup_controls-py-6a9b5db04daa.json",
+    "sha256": "a77960a200891f0c8e0397635a833b9f2984bd3737933c960f3f6dabbd706e43"
+  },
+  "advertisement_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http51-standard-native-send.json",
+    "sha256": "ceb362de1587dea84c1aaef2b6e7b9c1ca1183cd23ec020ba2b9ec2d3aed3e2c"
+  },
+  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "captured_from": {
+    "commit": "295ec3ed0542323ed53f5ac4b7fbbdb91d031300",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 51,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/routes/live_startup_controls.py",
+    "source_git_blob": "94bd9fdf2e0242fba7030844693d4db82aa2c39b",
+    "source_sha256": "f33d32da7b32dafb9e1338995daa4d6b3154e495dd093e516d936cb77aeaf7fd"
+  }
+}

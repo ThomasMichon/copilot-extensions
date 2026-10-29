@@ -1,0 +1,21 @@
+{
+  "schema": "http51-standard-native-send-cases-v1",
+  "generation": 51,
+  "requests": {
+    "prompt": "Continue the original assignment.\nKeep \"prior context\"."
+  },
+  "expected": {
+    "advertised": {"protocol_version": 51, "min_protocol_version": 1},
+    "receipt": {"version": 1, "session_id": "bridge-a", "native_session_id": "native-a", "invocation_key": "same-operation", "turn_index": 0, "queued": false, "admission": "accepted"},
+    "same_retry": true,
+    "changed_input": 409,
+    "wrong_native": 409,
+    "busy": 409,
+    "old_receiver": {"exit": 69, "outcome": "refused_unavailable", "posts": 0},
+    "post_commit_failure": {"exit": 70, "outcome": "unknown", "reason": "native_send_acceptance_unknown", "idempotency_key": "lost-reply", "recovered_turn": 1, "turns": 2},
+    "malformed_receipt": {"exit": 70, "outcome": "unknown", "recovered_turn": 0, "turns": 2},
+    "caller_provenance": {"content": "Continue the original assignment.\nKeep \"prior context\".", "source": "agent-bridge", "caller_id": "fixture-controller"},
+    "no_inbox": true,
+    "unauthenticated": 401
+  }
+}

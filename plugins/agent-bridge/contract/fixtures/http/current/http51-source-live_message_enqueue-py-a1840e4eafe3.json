@@ -1,0 +1,20 @@
+{
+  "evidence_family": "http51-unchanged-source-link-v1",
+  "preserved_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http50-source-live_message_enqueue-py-a1840e4eafe3.json",
+    "sha256": "5f6bae3d88986f8d306874ce8cb54524099f6534c05a18329d44d4960e943791"
+  },
+  "advertisement_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http51-standard-native-send.json",
+    "sha256": "ceb362de1587dea84c1aaef2b6e7b9c1ca1183cd23ec020ba2b9ec2d3aed3e2c"
+  },
+  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "captured_from": {
+    "commit": "295ec3ed0542323ed53f5ac4b7fbbdb91d031300",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 51,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/live_message_enqueue.py",
+    "source_git_blob": "bfc64174c276565ed3d4229bfc10ae98bf76b66d",
+    "source_sha256": "db656d672e90dfd043b0eccc00fa587142ad2587a6226d7069ca7188433f3380"
+  }
+}

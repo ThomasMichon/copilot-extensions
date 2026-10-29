@@ -1,0 +1,20 @@
+{
+  "evidence_family": "http51-unchanged-source-link-v1",
+  "preserved_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http50-source-session_recovery_dormancy-py-b470203e97e9.json",
+    "sha256": "8998426010607b65d55febbfb80743211e23869a5f3185dbb15f583ffdbf9aeb"
+  },
+  "advertisement_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http51-standard-native-send.json",
+    "sha256": "ceb362de1587dea84c1aaef2b6e7b9c1ca1183cd23ec020ba2b9ec2d3aed3e2c"
+  },
+  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "captured_from": {
+    "commit": "295ec3ed0542323ed53f5ac4b7fbbdb91d031300",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 51,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/session_recovery_dormancy.py",
+    "source_git_blob": "daac10e595ca069d4af2db470a7d47724363e3bc",
+    "source_sha256": "1644dca8e2a7f06abc94c2b67f0aac5a1e75292b79c68f44763edb8cf6505716"
+  }
+}

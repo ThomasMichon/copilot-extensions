@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .native_keyed_admission import KeyedNativePrompt
+    from .native_send_admission import NativeSendPrompt
     from .native_turn_transport import NativeTurnAttempt
     from .runtime_custody import RuntimeAdmission, RuntimeInstallation
 
@@ -85,7 +86,7 @@ class _SessionPromptMixin:
     async def _submit_prompt_locked(
         self, session_id: str, prompt: str, *, no_resume: bool = False,
         delivery_id: str | None = None,
-        native_admission: KeyedNativePrompt | None = None,
+        native_admission: KeyedNativePrompt | NativeSendPrompt | None = None,
         pending_prompt_id: int | None = None,
         pending_prompt_caller_id: str | None = None,
     ) -> int:
@@ -234,7 +235,12 @@ class _SessionPromptMixin:
             # the prompt bubble, not only the agent's response. This mirrors
             # what the agent's load-time replay emits during a resync, keeping
             # live and replayed histories consistent.
-            session.event_log.append("user_message", {"content": prompt})
+            from .native_send_admission import NativeSendPrompt
+            provenance = (
+                {"source": "agent-bridge", "caller_id": native_admission.caller_id}
+                if isinstance(native_admission, NativeSendPrompt) else {}
+            )
+            session.event_log.append("user_message", {"content": prompt, **provenance})
             session.event_log.append("session_state_changed", {
                 "status": SessionStatus.RUNNING.value,
                 "turn_index": turn_index,

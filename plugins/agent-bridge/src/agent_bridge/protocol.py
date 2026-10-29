@@ -221,7 +221,9 @@ RETAINED_INBOX_PROTOCOL_VERSION = 48
 RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION = 49
 # Original handoff recovery observations are available without reenrollment.
 RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION = 50
-HTTP_PROTOCOL_VERSION = 50
+# Standard native sends retain an idempotency receipt across exact-context resume.
+NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION = 51
+HTTP_PROTOCOL_VERSION = 51
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

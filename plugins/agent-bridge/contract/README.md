@@ -124,6 +124,39 @@ When a wire contract does change:
    python tools/run-plugin-tests.py agent-bridge --guards
    ```
 
+## HTTP-51 standard native-send evidence
+
+HTTP generation 51 adds `NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION` for ordinary
+`send` with an exact native identity and idempotency key. Bridge owns admission
+and original-receipt recovery through its existing turn journal; callers do not
+construct a startup invocation. A changed intent conflicts, a busy target
+refuses without queuing, and ambiguous post-commit responses remain unknown
+until the same key recovers its receipt. No represented inbox is used.
+
+Independent expectations live in `inputs/http51/standard-native-send.json`.
+The parser, authenticated ASGI routes and actual journal execute in both fixture
+installation modes. HTTP-50 refusal, malformed receipts and lost post-commit
+responses are explicit cases. The required portfolio also overlaps two stopped
+retries through the actual resume lifecycle owner and recovers the first
+operation's receipt after the losing resume's state refusal. An unsuccessful
+resume without a matching receipt remains a failure. The ACP boundary is mocked:
+these observations do not qualify an installed receiver or retained native
+conversation.
+
+Commit matching source and declarations, then use the existing bounded
+capture owner:
+
+```text
+python tools/capture_bridge_http51.py --source-commit <full-source-commit> --write
+python tools/capture_bridge_http51.py --source-commit <full-source-commit>
+python tools/check-agent-bridge-contracts.py --base <reviewed-base>
+```
+
+HTTP-50 and earlier packets, inputs and provenance remain immutable. Ordinary
+HTTP-50 behavioral replay accepts a later advertisement, but an explicit HTTP-50
+capture still requires its genuine matching source and may never publish
+HTTP-51 observations as historical evidence.
+
 ## HTTP-50 original-handoff recovery evidence
 
 HTTP generation 50 adds the distinct
