@@ -1347,6 +1347,11 @@ Copilot executable. Ordinary seedless fallback launches are unchanged.
 
 ## One-line bootstrap
 
+Global project `update` fetches this Main orchestrator independently of local
+runtime-source policy. The [bootstrap transport contract](../docs/install-contract.md)
+owns the explicit environment overrides, source precedence and older-caller
+compatibility; `[source]` still selects the Manager runtime, not this transport.
+
 **Windows (PowerShell):**
 
 ```powershell

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import sys
@@ -251,6 +252,8 @@ def test_update_entry_windows_generic_git_exact_argv(
     (root / "config.toml").write_text(
         f"[source]\nrepo = {json.dumps(repo)}\nref = {json.dumps(ref)}\n",
     )
+    monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REPO", repo)
+    monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REF", ref)
     (tmp / "tools/git").unlink()
     monkeypatch.setenv("GIT_ARGS", str(tmp / "git.args"))
     monkeypatch.setenv("GIT_FAIL", "42" if phase == "fetch-failure" else "0")
@@ -306,9 +309,165 @@ public class UpdateGitDouble {
     ]
     if phase == "healthy":
         assert json.loads((tmp / "bootstrap.args").read_text()) == [
-            "--repair-update", repo, ref, "update", "--project", "sample", "--force",
+            "--bootstrap-update", "update", "--project", "sample", "--force",
         ]
     else:
         assert not (tmp / "bootstrap.args").exists()
     assert not os.path.exists(os.path.dirname(checkout))
     assert not (tmp / "curl.args").exists()
+
+
+@pytest.mark.parametrize("override", [False, True])
+@pytest.mark.parametrize("front", ["global", "installed-project", "legacy-caller"])
+@pytest.mark.parametrize("edition", ["configured", "core"])
+def test_main_bootstrap_resolves_runtime_source_after_transport(
+    update_entry_case: tuple[Path, Path, Path], native_powershell: str,
+    monkeypatch: pytest.MonkeyPatch, override: bool, front: str, edition: str,
+) -> None:
+    from agent_worktrees import project_command_templates
+
+    if edition == "core":
+        core = shutil.which("pwsh")
+        if core is None:
+            pytest.skip("PowerShell Core is unavailable")
+        native_powershell = core
+    tmp, home, resolver = update_entry_case
+    resolver.unlink()
+    root = home / ".worktree-manager"
+    root.mkdir()
+    repo, ref = r"C:\runtime source\selected.git", "b" * 40
+    config = (
+        '[runtime_source]\nchannel = "dev"\nallow_dev = true\n'
+        f"[source]\nrepo = {json.dumps(repo)}\nref = {json.dumps(ref)}\n"
+    )
+    if front == "legacy-caller":
+        config = '[source]\nrepo = "unterminated\n'
+    (root / "config.toml").write_text(config, encoding="utf-8")
+    (root / "current-version").write_text("missing-manager")
+    if override:
+        monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REPO", "https://github.com/example/orchestrator.git")
+        monkeypatch.setenv("WORKTREE_MANAGER_BOOTSTRAP_REF", "transport-branch")
+    tools = tmp / "tools"
+    capture = tools / "capture.py"
+    capture.write_text(
+        "import json, os, sys\n"
+        "with open(os.environ['FRESH_ARGS'], 'w') as stream:\n"
+        "    json.dump(sys.argv[1:], stream)\n"
+        "raise SystemExit(37)\n", encoding="utf-8",
+    )
+    python = tools / "fresh-python.cmd"
+    python.write_text(
+        f'@"{sys.executable}" -I -S -B "{capture}" %*\n@exit /b %ERRORLEVEL%\n',
+        encoding="utf-8",
+    )
+    (tools / "uv.ps1").write_text(f"Write-Output '{python}'\nexit 0\n", encoding="utf-8")
+    monkeypatch.setenv("FRESH_ARGS", str(tmp / "fresh.args"))
+    monkeypatch.setenv("FETCH_ARGS", str(tmp / "fetch.args"))
+    monkeypatch.setenv("TRANSPORT_URL", str(tmp / "transport.url"))
+    entry = PLUGIN / "bin/agent-worktrees.ps1"
+    if front == "installed-project":
+        commands = home / ".local/bin"
+        commands.mkdir(parents=True)
+        for name in ("agent-worktrees.ps1", "agent-worktrees-update-entry.ps1"):
+            shutil.copy2(PLUGIN / "bin" / name, commands / name)
+        entry = tmp / "sample.ps1"
+        entry.write_text(project_command_templates.render(
+            "sample", PLUGIN, windows=True, user_bin=commands,
+        )["sample.ps1"], encoding="utf-8")
+    bootstrap = PLUGIN.parents[1] / "worktree-manager/bootstrap.ps1"
+    escaped = lambda value: "'" + str(value).replace("'", "''") + "'"
+    arguments = ["update", "--skip-modules", "a b"]
+    if front == "global":
+        arguments = ["--project", "sample", *arguments]
+    elif front == "legacy-caller":
+        entry = bootstrap
+        arguments = ["--repair-update", "update", ref, "update", "--project", "sample",
+                     "--skip-modules", "a b"]
+    harness = tmp / "main-transport.ps1"
+    harness.write_text(
+        "function Invoke-WebRequest {\n"
+        "  param($Uri, $OutFile, [switch]$UseBasicParsing)\n"
+        "  [IO.File]::WriteAllText($env:TRANSPORT_URL, [string]$Uri)\n"
+        f"  [IO.File]::Copy({escaped(bootstrap)}, $OutFile)\n"
+        "}\n"
+        "function git {\n"
+        "  if ($args[0] -eq 'init') { [IO.Directory]::CreateDirectory($args[-1]) | Out-Null }\n"
+        "  if ($args -contains 'fetch') {\n"
+        "    [IO.File]::WriteAllText($env:FETCH_ARGS, (ConvertTo-Json -Compress -InputObject @($args)))\n"
+        "  }\n"
+        "  if ($args -contains 'checkout') {\n"
+        "    [IO.Directory]::CreateDirectory((Join-Path $args[1] 'worktree-manager')) | Out-Null\n"
+        "  }\n"
+        "  $global:LASTEXITCODE = 0\n"
+        "}\n"
+        f"$forward = @({','.join(escaped(arg) for arg in arguments)})\n"
+        f"& {escaped(entry)} @forward\nexit $LASTEXITCODE\n", encoding="utf-8",
+    )
+    result = subprocess.run(
+        [native_powershell, "-NoProfile", "-File", str(harness)],
+        capture_output=True, timeout=30, cwd=tmp, **no_window_kwargs(),
+    )
+    assert result.returncode == 37, result.stdout + result.stderr
+    transport = "example/orchestrator/transport-branch" if override else "ThomasMichon/copilot-extensions/main"
+    if front == "legacy-caller":
+        assert not (tmp / "transport.url").exists()
+    else:
+        assert (tmp / "transport.url").read_text() == (
+            f"https://raw.githubusercontent.com/{transport}/worktree-manager/bootstrap.ps1"
+        )
+    expected_repo = str(tmp / "update") if front == "legacy-caller" else repo
+    assert json.loads((tmp / "fetch.args").read_text())[-2:] == [expected_repo, ref]
+    assert json.loads((tmp / "fresh.args").read_text())[-7:] == [
+        "--repair-update", "--", "update", "--project", "sample", "--skip-modules", "a b",
+    ]
+    assert (root / "config.toml").read_text() == config
+    assert (root / "current-version").read_text() == "missing-manager"
+    assert not (tmp / "resolved").exists()
+    assert not list(tmp.glob("agent-update-*"))
+
+
+@pytest.mark.parametrize("source", [
+    'repo = "unterminated',
+    'repo = "unsupported\\qescape"',
+    'repo = ""',
+    'ref = "first"\nref = "second"',
+    'repo = "selected"\n[source]\nref = "other"',
+])
+def test_canonical_bootstrap_rejects_malformed_runtime_source_before_effects(
+    update_entry_case: tuple[Path, Path, Path], native_powershell: str, source: str,
+) -> None:
+    _tmp, home, _resolver = update_entry_case
+    root = home / ".worktree-manager"
+    root.mkdir()
+    config = root / "config.toml"
+    content = "[source]\n" + source + "\n"
+    config.write_text(content, encoding="utf-8")
+    bootstrap = PLUGIN.parents[1] / "worktree-manager/bootstrap.ps1"
+    result = subprocess.run(
+        [native_powershell, "-NoProfile", "-File", str(bootstrap), "--bootstrap-update", "update"],
+        capture_output=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode != 0
+    assert b"source" in result.stderr.lower()
+    assert config.read_text() == content
+    assert not (root / "staging").exists()
+    assert not (root / "current-version").exists()
+
+
+@pytest.mark.parametrize("name", ["WORKTREE_MANAGER_BOOTSTRAP_REPO", "WORKTREE_MANAGER_BOOTSTRAP_REF"])
+@pytest.mark.parametrize("value", ["-invalid", "invalid\nsource"])
+def test_invalid_windows_transport_never_downloads(
+    update_entry_case: tuple[Path, Path, Path], native_powershell: str,
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str,
+) -> None:
+    tmp, _home, _resolver = update_entry_case
+    monkeypatch.setenv(name, value)
+    entry = PLUGIN / "bin/agent-worktrees.ps1"
+    result = subprocess.run(
+        [native_powershell, "-NoProfile", "-File", str(entry), "update"],
+        capture_output=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode != 0
+    assert b"Invalid bootstrap transport" in result.stderr
+    assert not list(tmp.glob("agent-update-*"))
+    assert not (tmp / "resolved").exists()

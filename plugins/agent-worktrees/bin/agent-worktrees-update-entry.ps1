@@ -64,63 +64,19 @@ if ($_registeredRoot) {
 } elseif ($_updateRegistrations.Count -or $env:AGENT_WORKTREES_CONTROL_PLANE_PROVIDER) {
     throw 'Selected Manager is not registered.'
 }
-# Publication-owned bootstrap defaults; never inspect the selected runtime.
+# Bootstrap transport is independent of the runtime source read by bootstrap.
 $_updateRepo = 'https://github.com/ThomasMichon/copilot-extensions.git'
 $_updateRef = 'main'
-function ConvertFrom-UpdateSourceString([string]$Text) {
-    if (-not $Text -or $Text[0] -cnotin @([char]'"', [char]"'")) {
-        throw 'Unsupported or malformed source string.'
-    }
-    $quote = $Text[0]
-    $value = [Text.StringBuilder]::new()
-    for ($i = 1; $i -lt $Text.Length; $i++) {
-        $character = $Text[$i]
-        if ($character -ceq $quote) {
-            if ($Text.Substring($i + 1) -notmatch '^\s*(#.*)?$' -or -not $value.Length) {
-                throw 'Unsupported or malformed source string.'
-            }
-            return $value.ToString()
-        }
-        if ([char]::IsControl($character)) { throw 'Control characters in source string.' }
-        if ($quote -ceq [char]'"' -and $character -ceq [char]'\') {
-            $i++
-            if ($i -ge $Text.Length -or $Text[$i] -cnotin @([char]'\', [char]'"')) {
-                throw 'Unsupported or malformed source escape.'
-            }
-            $character = $Text[$i]
-        }
-        [void]$value.Append($character)
-    }
-    throw 'Unterminated source string.'
+if ($null -ne [Environment]::GetEnvironmentVariable('WORKTREE_MANAGER_BOOTSTRAP_REPO')) {
+    $_updateRepo = $env:WORKTREE_MANAGER_BOOTSTRAP_REPO
 }
-$_updateConfig = Join-Path $_updateRoot 'config.toml'
-if (Test-Path -LiteralPath $_updateConfig) {
-    $_inSource = $false
-    $_seen = @{}
-    $_sourceSeen = $false
-    foreach ($_line in [IO.File]::ReadAllLines($_updateConfig)) {
-        if ($_line -match '^\s*\[') {
-            $_inSource = $_line -cmatch '^\s*\[source\]\s*(#.*)?$'
-            if ($_line -cmatch 'source' -and -not $_inSource) { throw 'Unsupported source table syntax.' }
-            if ($_inSource -and $_sourceSeen) { throw 'Duplicate source table.' }
-            if ($_inSource) { $_sourceSeen = $true }
-            continue
-        }
-        if (-not $_inSource -and $_line -cmatch '^\s*["'']?source["'']?[\s.=]') { throw 'Unsupported inline source table.' }
-        if ($_inSource -and $_line -cmatch '^\s*(repo|ref)\s*=\s*(.*)$') {
-            $_key = $Matches[1]
-            $_encodedValue = $Matches[2]
-            if ($_seen.ContainsKey($_key)) { throw 'Duplicate source key.' }
-            $_seen[$_key] = $true
-            $_value = ConvertFrom-UpdateSourceString $_encodedValue
-            if ($_key -ceq 'repo') { $_updateRepo = $_value } else { $_updateRef = $_value }
-        } elseif ($_inSource -and $_line -notmatch '^\s*(#.*)?$') {
-            throw 'Unsupported source key syntax.'
-        }
-    }
+if ($null -ne [Environment]::GetEnvironmentVariable('WORKTREE_MANAGER_BOOTSTRAP_REF')) {
+    $_updateRef = $env:WORKTREE_MANAGER_BOOTSTRAP_REF
 }
-if (-not $_updateRepo -or $_updateRepo.StartsWith('-') -or -not $_updateRef -or $_updateRef.StartsWith('-')) {
-    throw 'Invalid configured Git source/ref; source preserved.'
+if (-not $_updateRepo -or $_updateRepo.StartsWith('-') -or -not $_updateRef -or
+    $_updateRef.StartsWith('-') -or $_updateRepo -match '[\x00-\x1f\x7f]' -or
+    $_updateRef -match '[\x00-\x1f\x7f]') {
+    throw 'Invalid bootstrap transport source/ref; runtime source preserved.'
 }
 $_updateUrl = ''
 if ($_updateRepo -cmatch '^https://github\.com/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+?)(?:\.git)?/?$') {
@@ -273,7 +229,7 @@ try {
         if (-not $env:AGENT_WORKTREES_UPDATE_CONTEXT) {
             $env:AGENT_WORKTREES_UPDATE_CONTEXT = (Get-Location).Path
         }
-        & $_updateFile --repair-update $_updateRepo $_updateRef @_forwardUpdate
+        & $_updateFile --bootstrap-update @_forwardUpdate
         $_updateRc = $LASTEXITCODE
     } finally {
         if ($null -eq $_savedUpdateRoot) {
