@@ -273,7 +273,7 @@ def test_update_entry_supported_bootstrap_preserves_independent_exact_git_ref(
 
 
 def test_update_entry_publication_defaults_match_supported_bootstrap():
-    tree = ast.parse((REPO / "worktree-manager/src/worktree_manager/source_config.py").read_text())
+    tree = ast.parse((REPO / "worktree-manager/src/worktree_manager/source_config.py").read_text(encoding="utf-8"))
     defaults = {
         target.id: ast.literal_eval(node.value)
         for node in tree.body if isinstance(node, ast.Assign)
@@ -287,11 +287,11 @@ def test_update_entry_publication_defaults_match_supported_bootstrap():
         ("worktree-manager/bootstrap.sh", ("REPO", "REF")),
         ("worktree-manager/bootstrap.ps1", ("$Repo", "$Ref")),
     ):
-        text = (REPO / relative).read_text()
+        text = (REPO / relative).read_text(encoding="utf-8")
         for name, key in zip(names, ("DEFAULT_REPO", "DEFAULT_REF"), strict=True):
             pattern = rf"(?m)^\s*{re.escape(name)}\s*=\s*'([^']+)'"
             assert re.search(pattern, text).group(1) == defaults[key]
     for suffix in ("sh", "ps1"):
-        text = (PLUGIN / "bin" / f"agent-worktrees-update-entry.{suffix}").read_text()
+        text = (PLUGIN / "bin" / f"agent-worktrees-update-entry.{suffix}").read_text(encoding="utf-8")
         assert "current-version" not in text
         assert "source_config.py" not in text

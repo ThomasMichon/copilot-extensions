@@ -468,7 +468,7 @@ def test_update_entry_powershell_before_runtime(
 
 
 def test_update_entry_helpers_are_in_publication_inventory():
-    tree = ast.parse((PLUGIN / "scripts/runtime_install_publication.py").read_text())
+    tree = ast.parse((PLUGIN / "scripts/runtime_install_publication.py").read_text(encoding="utf-8"))
     inventory = next(
         ast.literal_eval(node.value)
         for node in tree.body
@@ -478,5 +478,5 @@ def test_update_entry_helpers_are_in_publication_inventory():
     expected = {"agent-worktrees-update-entry.sh", "agent-worktrees-update-entry.ps1"}
     assert expected <= set(inventory)
     for shell in ("sh", "ps1"):
-        installer = (PLUGIN / "scripts" / f"install.{shell}").read_text()
+        installer = (PLUGIN / "scripts" / f"install.{shell}").read_text(encoding="utf-8")
         assert "agent-worktrees-update-entry.sh" in installer
