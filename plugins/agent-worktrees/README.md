@@ -814,6 +814,13 @@ Shell commands excluded by the guard's existing write-verb classifier skip
 topology discovery. Cold discovery can still exceed its budget; this cache
 does not change the guard's fail-open policy or guarantee cold-call latency.
 
+`related list --json` includes each entry's `registry` object (`class`, `remote`,
+and the current platform's `path`), matching `related show --json`; `null` means
+no registered repository. The command guard consumes this batched result in one
+CLI lookup on a cache miss. An older runtime that omits `registry` retains the
+per-repository `show` fallback. Cache scope, lifetime and completeness rules are
+unchanged, and break-glass grants are still read live for every decision.
+
 Session registration defaults to the hook's 1.5-second request budget with
 zero daemon boot-wait. Explicit `bind-session` selects the existing normal
 tracking-write request budget of 8 seconds instead; deregistration is unchanged.

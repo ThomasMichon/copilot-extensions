@@ -503,11 +503,15 @@ def _discover_guarded_roots(
         if not isinstance(delegate, str) or not isinstance(name, str) or not name:
             complete = False
             continue
-        show_out = _run(["show", name, "--json", "--repo", root])
-        try:
-            show = json.loads(show_out) if show_out else None
-        except ValueError:
-            show = None
+        if "registry" in r:
+            show = r
+        else:
+            # Older runtimes list relationships without local registry paths.
+            show_out = _run(["show", name, "--json", "--repo", root])
+            try:
+                show = json.loads(show_out) if show_out else None
+            except ValueError:
+                show = None
         if not isinstance(show, dict) or "registry" not in show:
             complete = False
             continue

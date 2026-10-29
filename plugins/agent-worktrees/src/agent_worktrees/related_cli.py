@@ -462,6 +462,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         entries = related.list_related_grafted(anchors, role=role)
         primary = related.get_primary_grafted(anchors)
         if json_out:
+            registered = repos.read_registry().repos
             output._json_output(
                 {
                     "primary": primary,
@@ -482,6 +483,13 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                                 "machines": e.locus.machines,
                                 "codespace": e.locus.codespace,
                                 "container": e.locus.container,
+                            },
+                            "registry": None
+                            if (reg := registered.get(e.name)) is None
+                            else {
+                                "class": reg.repo_class,
+                                "remote": reg.remote,
+                                "path": reg.local_path(),
                             },
                         }
                         for e in entries
