@@ -129,8 +129,9 @@ Successful publication marks the reservation `complete`.
 Missing or syntactically corrupt legacy deployment metadata does not veto
 construction. Its stably read bytes are distinguished from storage/identity
 errors, which still refuse admission. Recovery uses the existing finite
-removal profile and exact native command recognizer to protect incumbent global
-commands; edited or foreign commands are not implicitly replaced. A pending
+removal profile and exact native command recognizer, including Index's dedicated
+launcher matcher, against the resolved profile home to protect incumbent global
+commands; edited or foreign-root commands are not implicitly replaced. A pending
 reservation never supplies missing footprint-recognizer evidence: only final
 publication installs a complete schema-3 deployment. A failed recovery retains
 its pending source owner, so another source cannot take over a partial build.

@@ -296,55 +296,72 @@ def test_unrecognized_manifest_does_not_hide_unrecoverable_evidence(
 
 
 @pytest.mark.parametrize("old", [None, b"{"])
-@pytest.mark.parametrize("edited", [False, True])
+@pytest.mark.parametrize("plugin", ["agent-worktrees", "agent-index"])
+@pytest.mark.parametrize("mutation", ["none", "edited", "foreign-root"])
 def test_manifest_recovery_admits_only_exact_existing_global_commands(
-    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch, old: bytes | None, edited: bool,
+    binding_fixture: dict, old: bytes | None, plugin: str, mutation: str,
 ) -> None:
     fixture = binding_fixture
     binding, primitive = fixture["binding"], fixture["primitive"]
-    payload, home = fixture["payload"], fixture["home"]
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    home = fixture["home"]
+    payload = fixture["payload"].with_name(plugin)
+    payload.mkdir(exist_ok=True)
+    runtime = home / (".custom-runtime" if mutation == "foreign-root" else "." + plugin)
+    runtime.mkdir(exist_ok=True)
+    fixture.update(payload=payload, legacy=runtime)
+    fixture["arguments"].update(payload_root=payload, legacy_root=runtime, plugin_id=plugin)
     scripts = payload / "scripts"
     scripts.mkdir()
     for name in ("installer_engine_uninstall.py", "installer_engine_commands.py"):
         shutil.copyfile(ROOT / "libs/installer-engine" / name, scripts / name)
-    shutil.copyfile(
-        ROOT / "plugins/agent-worktrees/scripts/uninstall-profile.json",
-        scripts / "uninstall-profile.json",
-    )
-    _write(payload / "plugin.json", {"name": PLUGIN_ID})
-    (payload / "bin").mkdir()
+    _write(payload / "plugin.json", {"name": plugin})
     directory = home / ".local/bin"
     directory.mkdir(parents=True)
-    for name in (
-        "agent-worktrees", "agent-worktrees.ps1", "agent-worktrees.cmd",
-        "agent-worktrees-update-entry.sh", "agent-worktrees-update-entry.ps1",
-    ):
-        content = (ROOT / "plugins/agent-worktrees/bin" / name).read_bytes()
-        (payload / "bin" / name).write_bytes(content)
-        if name in {"agent-worktrees", "agent-worktrees.ps1", "agent-worktrees.cmd"}:
-            (directory / name).write_bytes(content + (b"\n# edited\n" if edited else b""))
-    context = scripts / "installation-context"
-    context.mkdir()
-    shutil.copyfile(
-        ROOT / "libs/installation-context/json-query.awk", context / "json-query.awk",
-    )
+    if plugin == "agent-index":
+        for name in ("stamp_repair.py", "install.ps1"):
+            shutil.copyfile(ROOT / "plugins/agent-index/scripts" / name, scripts / name)
+        inventory = _load(scripts / "installer_engine_uninstall.py", "recovery_index_fixture")
+        for name, templates in inventory._index_launchers(payload).items():
+            (directory / name).write_text(
+                templates[0] + ("\n# edited\n" if mutation == "edited" else ""), encoding="utf-8",
+            )
+    else:
+        shutil.copyfile(
+            ROOT / "plugins/agent-worktrees/scripts/uninstall-profile.json",
+            scripts / "uninstall-profile.json",
+        )
+        (payload / "bin").mkdir()
+        for name in (
+            "agent-worktrees", "agent-worktrees.ps1", "agent-worktrees.cmd",
+            "agent-worktrees-update-entry.sh", "agent-worktrees-update-entry.ps1",
+        ):
+            content = (ROOT / "plugins/agent-worktrees/bin" / name).read_bytes()
+            (payload / "bin" / name).write_bytes(content)
+            if name in {"agent-worktrees", "agent-worktrees.ps1", "agent-worktrees.cmd"}:
+                (directory / name).write_bytes(
+                    content + (b"\n# edited\n" if mutation == "edited" else b""),
+                )
+        context = scripts / "installation-context"
+        context.mkdir()
+        shutil.copyfile(
+            ROOT / "libs/installation-context/json-query.awk", context / "json-query.awk",
+        )
     path = fixture["legacy"] / "deploy-manifest.json"
     if old is not None:
         path.write_bytes(old)
     before = _snapshot(home)
     before_commands = {item.name: item.read_bytes() for item in directory.iterdir()}
     lifecycle = binding._load_lifecycle()
-    if edited:
+    if mutation != "none":
         with pytest.raises(binding.CommandOwnershipConflict, match="global commands"):
             with lifecycle.legacy_lifecycle(binding._rules(), primitive, **fixture["arguments"]):
-                pytest.fail("Edited commands were admitted without an incumbent owner")
+                pytest.fail("Unowned commands were admitted without an incumbent owner")
         assert _snapshot(home) == before
     else:
         with lifecycle.legacy_lifecycle(binding._rules(), primitive, **fixture["arguments"]) as lease:
             lease.assert_owned()
             binding.write_legacy_manifest(
-                primitive, {"schema_version": 3, "service": PLUGIN_ID}, **fixture["arguments"],
+                primitive, {"schema_version": 3, "service": plugin}, **fixture["arguments"],
             )
         assert _resolve(fixture)["status"] == "selected"
         assert {item.name: item.read_bytes() for item in directory.iterdir()} == before_commands
@@ -636,6 +653,9 @@ def _native_fixture(fixture: dict, shell: str, action: str = "provision") -> lis
         writer = "_build_deploy_manifest_json() {" + source.split(
             "_build_deploy_manifest_json() {", 1
         )[1].split("show_deploy_status() {", 1)[0]
+        native_path = "__aw_uninstall_native_path() {" + source.split(
+            "__aw_uninstall_native_path() {", 1,
+        )[1].split("\n}", 1)[0] + "\n}\n"
         admission = source.split(
             "# === command-lifecycle: admission before staging ===\n", 1
         )[1].split("# === end command-lifecycle: admission before staging ===", 1)[0]
@@ -669,7 +689,7 @@ def _native_fixture(fixture: dict, shell: str, action: str = "provision") -> lis
             "  sleep 0.3\n"
             "  cp \"$INSTALL_DIR/runtime-slot\" \"$INSTALL_DIR/current-version\"\n}\n"
             '. "$SCRIPT_DIR/source-runtime.sh"\n_initialize_source_runtime\n'
-            + writer + "\n" + admission + "\n" + dispatch
+            + writer + "\n" + native_path + admission + "\n" + dispatch
         )
         if action == "uninstall":
             uninstall = source.split("    uninstall)\n", 1)[1].split("    start)\n", 1)[0]
@@ -931,6 +951,8 @@ def test_command_binding_native_selfstage_preserves_human_optin(
 def test_command_binding_native_teardown_refuses_foreign_then_removes_owned_runtime(
     binding_fixture: dict, shell: str, remove_config: bool,
 ) -> None:
+    if shell == "powershell" and os.name != "nt":
+        pytest.skip("Full PowerShell installer removal requires Windows")
     command = _native_fixture(binding_fixture, shell, "uninstall")
     _publish(binding_fixture)
     runtime = binding_fixture["legacy"]

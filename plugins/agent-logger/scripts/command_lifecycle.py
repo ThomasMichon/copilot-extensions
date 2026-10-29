@@ -132,9 +132,8 @@ def _recovery_commands(binding: Any, primitive: Any, arguments: dict[str, Any]) 
             contents[name] = path.read_text(encoding="utf-8-sig")
     if not contents:
         return
-    commands = inventory._load(inventory._dependency(payload, "installer_engine_commands.py"))
-    owned = commands.owned_local_names(
-        payload, Path(arguments["legacy_root"]), profile.module, contents,
+    _, owned = inventory._local_bindings(
+        payload, Path(arguments["legacy_root"]), profile, home=home, deployment={},
     )
     if set(owned) != contents.keys():
         raise binding.CommandOwnershipConflict(
