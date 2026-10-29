@@ -203,6 +203,70 @@ not merely a nonzero return. Exercise the recognized incremental path as a
 positive control. Source fixtures do not satisfy the separately authorized
 installed survival, complete portfolio or same-existing-data adoption gates.
 
+### Bounded MCP displaced-code retirement - agent-recommended
+
+The next slice retires MCP's declared old executable footprints and restart
+routes during fresh fallback, under the existing native installer/execution
+owner. Control reset alone does not establish that old code cannot run again.
+Review this proposal before implementation. It authorizes no concrete host
+cleanup, rollout, maintenance hold or protected-session action.
+
+Keep the completed, health-gated selected candidate and its retention custody.
+The attached constructor currently retains healthy predecessor current/LKG
+references as well as that candidate until integration ends. Hand off only
+its own predecessor retention before admitting their removal; do not release
+the candidate, break another owner's lease or use caller death as permission.
+Keep this cooperation in the same finite constructor and paired shell
+adapters, not a second installer, supervisor or permission receipt.
+
+Append the next maintained footprint revision after published revision 5.
+Declare finite displaced immutable generation/snapshot classes, legacy
+`.venv`/`venv` code and exact known vendored tool/helper entries. Preserve the
+selected candidate and aliases it actually needs, configuration, databases,
+materialized fleets, logs, unknown content and protected coordination.
+Known disposable classes may be removed without an old deployment receipt;
+unknown incremental compatibility must not invalidate their reset inventory.
+Foreign/redirected scope, mutable-dev ownership or unconfirmed consumers
+requires a precise preserved/incomplete outcome, not arbitrary reclamation.
+Do not recursively clear the runtime root or follow a removed alias's target.
+
+Reuse canonical generation construction/retention and selector-publication
+custody in its existing lock order. Revalidate the finite inventory, actual
+current/LKG selection and native process scope under custody before effects.
+Activation's best-effort LKG write is not proof that no selector still names
+old code. Preserve current/protected/excluded consumers and all independent
+construction/retention owners; confirm that displaced native owners remain
+settled without extending the reaper's authority. Contention or an unsafe
+recognized artifact leaves retirement incomplete, never a successful fresh
+installation. Ordinary age-based, best-effort GC is not this mandatory step.
+
+Publish or validate the selected generated global commands/resolvers through
+their existing command-lifecycle owner, and retire declared stale selectors
+and restart routes without removing current projections or durable operation
+history. MCP declares no service registration today; do not invent one.
+Whole-uninstall is unsuitable after activation because it also removes the
+new candidate, current globals and deployment metadata.
+
+Publish the final deployment record only after fresh effect retirement and
+global integration succeed. Interrupted retirement/publication must remain
+fresh on retry and report the actual selected/build/serving state, not claim
+an untouched predecessor, silent old code or an automatic safe rollback.
+Verify absence of every declared displaced executable/restart route and actual
+selected CLI/on-demand service health before reporting this bounded slice done.
+
+Qualification must exercise the actual attached retention handoff, both native
+Windows/Linux fresh adapters and the unchanged incremental path. Cover missing
+or corrupt old metadata; finite old generations/snapshots and legacy venvs;
+exact alias removal without following targets; selection/inventory races;
+caller loss and interrupted deletion/publication; competing construction,
+retention or publication owners; and byte preservation for the selected
+candidate, configuration/data, foreign/unknown and protected scope. Prove that
+declared retired code/routes are absent and cannot be invoked through their
+old entries, while selected commands and on-demand serving still work.
+Keep macOS, the complete manifest portfolio, assembled public entry points,
+same-existing-data adoption and live all-code-absent session/connectivity
+survival as separate pending parent gates.
+
 ## Implementation sequence - agent-recommended
 
 1. Review and merge this revision of the existing vision and effort before
