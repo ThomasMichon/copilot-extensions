@@ -240,12 +240,12 @@ def cold_environment(installation, project, area):
     if os.name == "nt":
         env["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32")
         isolation = subprocess.run(
-            [str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"),
-             "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
-             "if (Get-Command python -CommandType Application -ErrorAction SilentlyContinue) { exit 92 }; exit 0"],
+            [str(Path(os.environ["SystemRoot"]) / "System32/where.exe"), "/Q", "python"],
             env=env, cwd=project, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
         )
-        assert isolation.returncode == 0, "native qualification must not expose host Python"
+        assert isolation.returncode == 1, (
+            "native qualification must not expose host Python: " + isolation.stdout + isolation.stderr
+        )
     else:
         tools = area / "native-tools"
         tools.mkdir()
@@ -260,7 +260,32 @@ def cold_environment(installation, project, area):
             assert executable, f"native tool unavailable: {name}"
             (tools / name).symlink_to(executable)
         env["PATH"] = str(tools)
+        if env.get("COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT"):
+            env["COPILOT_EXTENSIONS_DAEMON_PYTHON"] = "/usr/bin/python3"
+        assert shutil.which("python3", path=env["PATH"]) is None
+        assert shutil.which("uv", path=env["PATH"]) is None
     return env
+
+
+@pytest.mark.skipif(os.name != "nt", reason="stock Windows application lookup")
+@pytest.mark.parametrize("python_present", [False, True])
+def test_cold_environment_native_probe_rejects_python_on_its_private_path(
+    area, monkeypatch, python_present,
+):
+    system = area / "windows" / "System32"
+    system.mkdir(parents=True)
+    shutil.copyfile(Path(os.environ["SystemRoot"]) / "System32" / "where.exe", system / "where.exe")
+    if python_present:
+        (system / "python.exe").write_bytes(b"must never be executed")
+    monkeypatch.setenv("SystemRoot", str(system.parent))
+    project = area / "project"
+    project.mkdir()
+    installation = area / "profile" / ".agent-vault"
+    if python_present:
+        with pytest.raises(AssertionError, match="must not expose host Python"):
+            cold_environment(installation, project, area)
+    else:
+        assert cold_environment(installation, project, area)["PATH"] == str(system)
 
 
 @pytest.mark.parametrize("entry", ["payload", "primary"])

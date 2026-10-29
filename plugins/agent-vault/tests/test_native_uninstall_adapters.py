@@ -10,6 +10,8 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import time
+import venv
 from pathlib import Path
 
 import pytest
@@ -38,12 +40,14 @@ def _function(plugin: str, shell: str, name: str) -> str:
     return textwrap.dedent(text[line_start:end])
 
 
-def _run(tmp_path: Path, shell: str, body: str) -> subprocess.CompletedProcess[str]:
-    executable = PWSH if shell == "ps1" else BASH
+def _run(
+    tmp_path: Path, shell: str, body: str, *, host: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    executable = host or (PWSH if shell == "ps1" else BASH)
     if not executable:
         pytest.skip(f"Native {shell} host unavailable")
     script = tmp_path / f"fixture.{shell}"
-    script.write_text(body, encoding="utf-8", newline="\n")
+    script.write_text(body, encoding="utf-8-sig" if host else "utf-8", newline="\n")
     args = (
         [executable, "-NoProfile", "-NonInteractive", "-File", str(script)]
         if shell == "ps1" else [executable, _path(script)]
@@ -294,6 +298,181 @@ def test_root_indirection_refused_before_process_inspection(
     ).lower()
     assert "process inspection must not be reached" not in result.stdout + result.stderr
     assert sentinel.read_bytes() == b"untouched outside bytes"
+
+
+@pytest.mark.skipif(
+    os.name != "nt" or os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1",
+    reason="Windows synthetic redirector requires canonical process-tree containment",
+)
+@pytest.mark.parametrize("fault", [
+    "none", "base-argv", "argv", "foreign-argv-image", "foreign-owner", "stale-birth", "foreign-base",
+    "missing-config", "grandchild", "sibling", "utf8-home-stock",
+])
+def test_vault_uninstall_admits_only_native_service_redirector_closure(
+    tmp_path: Path, fault: str,
+) -> None:
+    if not PWSH:
+        pytest.skip("Native PowerShell host unavailable")
+    stock = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
+    install = tmp_path / "runtime"
+    slot = install / "versions" / "1.0"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    package = tmp_path / "agent_vault"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "service.py").write_text(
+        "import json,os,time\nfrom pathlib import Path\n"
+        "Path('ready.json').write_text(json.dumps({'pid':os.getpid(),'ppid':os.getppid()}))\n"
+        "until=time.monotonic()+20\n"
+        "while not Path('release').exists() and time.monotonic()<until: time.sleep(.02)\n",
+        encoding="utf-8",
+    )
+    ready = tmp_path / "ready.json"
+    config = slot / "pyvenv.cfg"
+    if fault == "utf8-home-stock":
+        alias = tmp_path / "base-\u7532\u57fa"
+        base = Path(sys._base_executable).parent
+        setup = _run(tmp_path, "ps1", "\n".join((
+            "$ErrorActionPreference='Stop'",
+            f"New-Item -ItemType Junction -Path {_quote(alias)} -Target {_quote(base)} | Out-Null",
+        )), host=stock)
+        assert setup.returncode == 0, setup.stdout + setup.stderr
+        config.write_text("\n".join(
+            f"home = {alias}" if line.startswith("home =") else line
+            for line in config.read_text(encoding="utf-8").splitlines()
+        ), encoding="utf-8")
+    process = subprocess.Popen(  # noqa: S603 - bounded synthetic module, not the Vault service
+        [str(slot / "Scripts" / "python.exe"), "-m", "agent_vault.service",
+         "--foreground", "--persistent"],
+        cwd=tmp_path, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    try:
+        until = time.monotonic() + 5
+        while not ready.exists() and process.poll() is None and time.monotonic() < until:
+            time.sleep(.02)
+        assert ready.exists(), "synthetic redirector did not publish its child identity"
+        child = json.loads(ready.read_text())
+        assert child["pid"] != process.pid and child["ppid"] == process.pid
+        if fault == "missing-config":
+            config.unlink()
+        elif fault == "foreign-base":
+            foreign = tmp_path / "foreign-base"
+            foreign.mkdir()
+            (foreign / "python.exe").write_bytes(b"not the runtime's base interpreter")
+            lines = config.read_text().splitlines()
+            config.write_text("\n".join(
+                f"home = {foreign}" if line.startswith("home =") else line for line in lines
+            ), encoding="utf-8")
+        body = "\n".join((
+            "$ErrorActionPreference='Stop'",
+            "if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) "
+            "{ throw 'Unicode-home control requires stock Windows PowerShell 5.1' }"
+            if fault == "utf8-home-stock" else "",
+            "Import-Module (Join-Path $PSHOME 'Modules\\CimCmdlets\\CimCmdlets.psd1') -ErrorAction Stop"
+            if fault == "utf8-home-stock" else "",
+            f". {_quote(REPO / 'plugins/agent-vault/scripts/daemon_instances.ps1')}",
+            f"$InstallDir={_quote(install)};$PidFile={_quote(install / 'pid')};$TaskName='fixture'",
+            "function Get-ScheduledTask { param($TaskName,$ErrorAction) }",
+            "function Invoke-FiniteRuntimeUninstall { param($InstallRoot,[switch]$Check) }",
+            f"$launcher={process.pid};$physical={child['pid']};$fault='{fault}'",
+            "$script:inventory=@($launcher,$physical | ForEach-Object {",
+            "  CimCmdlets\\Get-CimInstance Win32_Process -Filter ('ProcessId='+[string]$_) |",
+            "    Select-Object ProcessId,ParentProcessId,ExecutablePath,CommandLine,CreationDate",
+            "})",
+            "$base=$script:inventory | Where-Object ProcessId -eq $physical",
+            "if ($fault -eq 'base-argv') { $base.CommandLine='\"'+$base.ExecutablePath+"
+            "'\" -m agent_vault.service --foreground --persistent' }",
+            "if ($fault -eq 'argv') { $base.CommandLine+=' --unexpected' }",
+            "if ($fault -eq 'foreign-argv-image') { $base.CommandLine='\"'+"
+            "(Get-Process -Id $PID).Path+'\" -m agent_vault.service --foreground --persistent' }",
+            "if ($fault -eq 'stale-birth') { $base.CreationDate=$base.CreationDate.AddSeconds(-1) }",
+            "if ($fault -in @('grandchild','sibling')) {",
+            "  $script:inventory+=@([pscustomobject]@{ProcessId=2147483647;",
+            "    ParentProcessId=$(if ($fault -eq 'grandchild') {$physical} else {$launcher});",
+            "    ExecutablePath=$base.ExecutablePath;CommandLine='unrelated fixture child';",
+            "    CreationDate=[DateTime]::UtcNow})",
+            "}",
+            "function Get-CimInstance { param($ClassName,$Filter,$ErrorAction);",
+            "  if ($Filter) { throw 'guard must use its single captured test inventory' };",
+            "  $script:inventory",
+            "}",
+            "function Invoke-CimMethod { param($InputObject,$MethodName,$ErrorAction);",
+            "  if ($fault -eq 'foreign-owner' -and $InputObject.ProcessId -eq $physical) {",
+            "    return [pscustomobject]@{ReturnValue=0;Sid='S-1-0-0'}",
+            "  };",
+            "  $row=CimCmdlets\\Get-CimInstance Win32_Process -Filter "
+            "('ProcessId='+[string]$InputObject.ProcessId);",
+            "  CimCmdlets\\Invoke-CimMethod -InputObject $row -MethodName $MethodName",
+            "}",
+            _function("agent-vault", "ps1", "Test-VaultUninstallRedirectorChild"),
+            _function("agent-vault", "ps1", "Get-VaultUninstallProcesses"),
+            "try { $owned=@(Get-VaultUninstallProcesses) } catch {",
+            "  Initialize-DaemonInstanceNative",
+            "  foreach ($row in $script:inventory | Where-Object ProcessId -in @($launcher,$physical)) {",
+            "    $native=[Diagnostics.Process]::GetProcessById([int]$row.ProcessId)",
+            "    try { [Console]::Error.WriteLine((@{row=$row;path=$native.Path;",
+            "      birth=[CopilotExtensions.DaemonInstanceNative]::Birth($native);",
+            "      captured=$row.CreationDate.ToUniversalTime().ToFileTimeUtc()} |",
+            "      ConvertTo-Json -Depth 3 -Compress)) } finally { $native.Dispose() }",
+            "  }; throw",
+            "}",
+            "ConvertTo-Json -InputObject @($owned | ForEach-Object {[int]$_.ProcessId}) -Compress",
+        ))
+        result = _run(tmp_path, "ps1", body, host=stock if fault == "utf8-home-stock" else None)
+        if fault in {"none", "base-argv", "utf8-home-stock"}:
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert json.loads(result.stdout) == [child["pid"], process.pid]
+        else:
+            assert result.returncode != 0, result.stdout + result.stderr
+            assert "Vault still owns a live child" in result.stdout + result.stderr
+        assert process.poll() is None, "classification must never signal a process"
+    finally:
+        (tmp_path / "release").write_text("finish", encoding="ascii")
+        process.communicate(timeout=10)
+
+
+@pytest.mark.skipif(
+    os.name != "nt" or os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1",
+    reason="Windows finite-stop actor requires canonical process-tree containment",
+)
+@pytest.mark.parametrize("stale_birth", [False, True])
+def test_vault_uninstall_stop_pins_native_identity_through_signal_and_wait(
+    tmp_path: Path, stale_birth: bool,
+) -> None:
+    if not PWSH:
+        pytest.skip("Native PowerShell host unavailable")
+    process = subprocess.Popen(  # noqa: S603 - bounded caller-owned actor, no Vault service
+        [sys._base_executable, "-c",
+         "import time\nfrom pathlib import Path\nuntil=time.monotonic()+20\n"
+         "while not Path('release').exists() and time.monotonic()<until: time.sleep(.02)\n"],
+        cwd=tmp_path, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    try:
+        body = "\n".join((
+            "$ErrorActionPreference='Stop'",
+            f". {_quote(REPO / 'plugins/agent-vault/scripts/daemon_instances.ps1')}",
+            f"$script:captured=CimCmdlets\\Get-CimInstance Win32_Process -Filter 'ProcessId={process.pid}' |",
+            "  Select-Object ProcessId,ParentProcessId,ExecutablePath,CommandLine,CreationDate",
+            # Keep both CIM snapshots equal: only the pinned native birth exposes the change.
+            "$script:captured.CreationDate=$script:captured.CreationDate.AddSeconds(-1)"
+            if stale_birth else "",
+            "function Get-CimInstance { param($ClassName,$Filter,$ErrorAction); $script:captured }",
+            _function("agent-vault", "ps1", "Stop-VaultUninstallProcess"),
+            "Stop-VaultUninstallProcess -Row $script:captured",
+        ))
+        result = _run(tmp_path, "ps1", body)
+        if stale_birth:
+            assert result.returncode != 0, result.stdout + result.stderr
+            assert "native identity changed" in result.stdout + result.stderr
+            assert process.poll() is None, "a different native identity must never be signaled"
+        else:
+            assert result.returncode == 0, result.stdout + result.stderr
+            process.wait(timeout=5)
+    finally:
+        (tmp_path / "release").write_text("finish", encoding="ascii")
+        process.communicate(timeout=10)
 
 
 @pytest.mark.parametrize("plugin", PLUGINS)

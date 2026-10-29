@@ -25,6 +25,7 @@ def test_payload_manifest_describes_agent_vault_runtime() -> None:
         "module": "agent_vault",
         "legacyRuntimeRoot": ".agent-vault",
         "installationContext": "required",
+        "installerLifecycle": True,
         "noSelfProvisionEnv": "AGENT_VAULT_NO_SELFPROVISION",
         "purpose": "Fetch and manage machine-local vault credentials",
         "installer": "install",
