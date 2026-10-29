@@ -363,18 +363,21 @@ def test_reap_matches_normalized_current(tmp_path, owners, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "state,threads,later_threads,later_birth",
-    [("Z", 1, 1, 200), ("Z", 2, 2, 200), ("Z", 1, 2, 200),
-     ("R", 1, 1, 200), ("Z", 1, 1, 201)],
+    "state,threads,later_threads,later_birth,flags",
+    [("Z", 1, 1, 200, 0), ("Z", 2, 2, 200, 0), ("Z", 1, 2, 200, 0),
+     ("R", 1, 1, 200, 0), ("Z", 1, 1, 201, 0),
+     ("S", 1, 1, 200, 0x00200000), ("S", 1, 1, 201, 0x00200000),
+     ("S", 1, 1, 200, 0x00000040)],
 )
 def test_linux_empty_command_census_requires_confirmed_group_exit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str, threads: int,
-    later_threads: int, later_birth: int,
+    later_threads: int, later_birth: int, flags: int,
 ) -> None:
     proc = tmp_path / "proc"
 
     def stat(pid: int, status: str, count: int, birth: int) -> str:
         fields = [status, "0", *(["0"] * 15), str(count), "0", str(birth)]
+        fields[6] = str(flags if pid == 200 else 0)
         return f"{pid} (fixture) " + " ".join(fields)
 
     for pid, command in ((100, b"inspector\0"), (200, b"")):
@@ -409,7 +412,7 @@ def test_linux_empty_command_census_requires_confirmed_group_exit(
     if later_birth != 200:
         with pytest.raises(rv.inspection.UninstallRefused, match="identity changed"):
             census()
-    elif state != "Z" or later_threads != 1:
+    elif not (flags & 0x00200000) and (state != "Z" or later_threads != 1):
         with pytest.raises(rv.inspection.UninstallRefused, match="live tasks"):
             census()
     else:

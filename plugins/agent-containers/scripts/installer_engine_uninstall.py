@@ -726,6 +726,8 @@ def inspect_processes(payload: Path, root: Path, shell: str, profile: Profile, *
                     observed = later[later.rfind(")") + 2:].split()
                     if int(observed[19]) != created:
                         raise UninstallRefused("Process identity changed during inspection")
+                    if int(observed[6]) & 0x00200000:  # PF_KTHREAD: no userspace runtime.
+                        continue
                     # A zombie leader can still own live worker threads; its
                     # empty cmdline and unavailable exe do not prove group exit.
                     if observed[0] not in {"Z", "X", "x"} or int(observed[17]) != 1:
