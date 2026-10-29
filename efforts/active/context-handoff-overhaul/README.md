@@ -47,6 +47,27 @@ twelve direct #1920/#1921/#1922 clauses; #3000 receives case tracking, not that
 resource/source custody. No review of these documents releases a claim, grants process
 effects or completes any parent effort.
 
+<!-- backlog-reconciliation:7556:first-ten:Coordination -->
+
+### Continuing source-specific #1246/#2335 custody
+
+- **C1246.1:** Continue #1246 under its actual assigned source owner and SAME
+  handoff/query, task/file storage, ground/session-binding and admitted host custodians.
+  Preserve the exact finite same-baton, HOME-routing and recoverable-error contract
+  without importing the entire thirteen-stage lifecycle programme as a prerequisite.
+  Document intake is not source implementation, consume, assignee release or
+  claim/resource transfer; generic Taking and historical milestones create no new ACK
+  ceremony.
+
+- **C2335.1:** Continue #2335 under its existing source-confirmation and actual
+  query/foreground/storage/native/resource custodians, without appointing an assignee
+  from an unassigned metadata row. Retain the author's specific original post-fix
+  contention-confirmation-before-closure hold; neither historical #2660-to-#2594 intake
+  nor lack of recurrence releases it or subsumes foreground create/embody acceptance.
+  Preserve actual overlapping edits, reservations and process/claim authority. No
+  generic all-owner ACK, live historical-token, all-host or whole-parent veto is
+  introduced.
+
 ## Context
 
 Kicked off by an operator request for a from-scratch architecture pass on
@@ -1008,6 +1029,55 @@ remain untouched.
   Plan item. Keep this effort Active and every incumbent Plan/Validation/Journal
   obligation intact.
 
+<!-- backlog-reconciliation:7556:first-ten:Plan -->
+
+### Direct retained acceptance from #1246/#2335
+
+_Agent-recommended additive tracking proposal; original source requirements,
+alternatives, finite proof tiers and custody remain binding._
+
+These rows retain work rather than certify it complete. Existing Request,
+Status, Participants, Plan, global Validation, Journal, checked credit and
+first unresolved gates remain intact. Review of this amendment is document
+intake only, not implementation, native/installed proof, source closure,
+owner reassignment or claim/resource release. A separate source judgment
+must preserve each literal source-specific hold; no generic ACK, every-host
+or whole-parent completion gate is added.
+
+#### Source #1246
+
+- [ ] **P1246.1:** Retain #1246's exact existing unconsumed FILE-baton lookup through
+  the actual HOME/session-bound/CWD routing path. After a transient first
+  state-directory resolver miss, recover the SAME unconsumed baton OR return a precise
+  cause-preserving recoverable resolver error; do not report false absence, create a
+  replacement token or replay a spent baton. Preserve task-backed/file behavior and
+  current storage, identity and consume ownership.
+
+- [ ] **P1246.2:** Credit #1286's timeout/single-query/save-dispatch metadata reuse and
+  later structured-diagnostic/locator progress at their delivered scopes. Retain the
+  remaining actual top-level HOME/session-only routing and missing-versus-resolver/parse
+  distinction; one metadata lookup per operation, realistic timeout AND/OR transient
+  retry, or attributable explicit project/worktree routing remain supported approaches.
+  Do not build a second resolver or call a larger timeout/helper fixture completion.
+
+#### Source #2335
+
+- [ ] **P2335.1:** Retain #2335's independent post-fix original-contention confirmation:
+  large accumulated worktree registry AND aggressive resident monitor AND concurrent
+  foreground create/embody/get, together with actual foreground AND save-store/consume
+  latency and complete-continuation preservation. Treat the report as known-real
+  intermittent CPU work, not an assumed deadlock or an issue closable merely because it
+  stopped reproducing. Attribute actual call/lock/lease costs without importing
+  unrelated classify/background paths as causal proof.
+
+- [ ] **P2335.2:** Credit #3277's exclusion of unrelated PR-graft work from non-PR get
+  keys and #2774's bounded query/error-context partial delivery, preserving genuine
+  PR-dependent graft semantics and current approved deadlines. Historical #2660-to-#2594
+  consume/save acceptance and this ROOT's cold/warm/concurrent cost lane remain valuable
+  related coverage, not absorption of foreground create/embody contention or release of
+  #2335's specific confirmation hold. No timeout inflation, lock removal or generic
+  cache rewrite substitutes for the retained workload proof.
+
 ## Validation Plan
 
 - [ ] Resolve EVERY directly retained #3982 original and inherited #4306
@@ -1115,6 +1185,46 @@ remain untouched.
   against a disposable session -- surfacing and fixing a fifth live bug (a
   false `identity-mismatch-skip` in retire mode's own pre-flight check; see
   the Journal entry below).
+
+<!-- backlog-reconciliation:7556:first-ten:Validation -->
+
+### Global validation of retained #1246/#2335
+
+#### Source #1246
+
+- [ ] **V1246.1:** For #1246, qualify an existing exact unconsumed FILE baton whose
+  first resolver lookup transiently fails OR exceeds the original 5-second failure
+  boundary: actual same-baton recovery/one-time consume OR a precise cause-preserving
+  safely retryable error, never a false absent-file result, substituted token or replay.
+  Preserve complete prompt/recovery material, task/file compatibility and current
+  consume/claim authority.
+
+- [ ] **V1246.2:** Exercise the REAL top-level CLI from HOME with only the bound session
+  identity and actual intended CWD/project/worktree routing, not only an already-active
+  cmd_get helper. Preserve explicit selectors and current richer diagnostic/locator
+  progress, useful resolver-versus-ENOENT/read/parse error distinction and task-backed
+  behavior. A larger timeout, helper result or journal link alone is not this finite
+  end-to-end acceptance.
+
+#### Source #2335
+
+- [ ] **V2335.1:** Preserve the source author's literal #2335 post-fix hold: 'Recommend
+  re-testing the original repro before closing; leaving open pending that confirmation
+  rather than closing speculatively.' Qualify the exact
+  large-registry/aggressive-resident-monitor/concurrent create/embody/get shape after
+  the credited PR-graft fix, measuring foreground AND handoff save-store/consume
+  behavior and attribution under the original approved workload/deadlines. Preserve the
+  original reported 3-second monitor interval and CPU/timing observations as workload
+  provenance, not a new universal SLA or permission to change a real monitor.
+
+- [ ] **V2335.2:** Retain genuine PR-dependent graft behavior, bounded sibling-call
+  counts, cold/warm/concurrent consumer completion and clear finite actionable
+  timeout/unavailable outcomes with full-prompt/locator recovery, exact
+  identity/claim/replay/lane authority and no lost continuation or duplicate pickup.
+  Distinguish the existing 45-second query-budget partial delivery and later
+  individual-get nonreproduction timings from the still-held original foreground
+  workload. No deadline increase, lock removal, absence of recurrence or #2660
+  administrative transfer is that proof.
 
 ## Proposal
 
@@ -3457,3 +3567,9 @@ since prior rounds' verification):
     this round (out of scope for this scenario as written; it targets the
     clash specifically) and remains an open question for a future round
     or a fresh scenario.
+
+<!-- backlog-reconciliation:7556:first-ten:Journal -->
+
+### 2026-10-28 - Additive retained #1246/#2335 contract proposal
+
+Added direct per-source Plan, actual global Validation and continuing custody rows after whole-record and complete receiving-document research. Normal review and current complete receiving readback remain publication gates; this entry records authored tracking only, not a future merge or source disposition. All incumbent finite source/design/release/native credits remain at their actual tiers, with original alternatives, unknowns, source-specific holds and existing source/resource custodians preserved. No implementation, operational effect or claim release is authorized. The campaign's receiving register records delivery and later source judgments separately.

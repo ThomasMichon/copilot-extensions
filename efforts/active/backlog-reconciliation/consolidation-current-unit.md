@@ -98,6 +98,12 @@ claim/resource release or rollout.
 
 ## Selected direct receiving relationships
 
+The next creation-oldest-first unit is the [first ten receiving
+relationships](receiving-first-ten.md). Its four studies are independently
+admitted and seven direct ROOT amendments are authored. Review, complete
+current readback and separate source judgments remain; actual source-specific
+holds are retained and no closure count is claimed.
+
 The rows are independent contract lanes, not a serial implementation order.
 Within equally ready choices, retain creation-oldest-first coverage.
 

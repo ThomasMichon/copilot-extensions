@@ -193,6 +193,10 @@ outcomes from agent-recommended research and prioritization mechanics.
   reported seven-case progress, exact fixture credit, optional-field scope
   and original source/release/native obligations without candidate-completion
   claims or competing implementation assignments.
+  The later [native UV argument assessment](roadmap-inflow-uv-arguments.md)
+  identifies #9489's scoped P1 compatibility boundary, retaining its original
+  unreviewed-report attribution, non-editable installed-source and native
+  acceptance duties without operational repair or broader ownership.
 - [ ] Coalesce thematic duplicates into canonical issues and existing efforts;
   transfer explicit residual checklists before closing superseded reports.
   The [current receiving-contract unit](consolidation-current-unit.md)
@@ -213,6 +217,12 @@ outcomes from agent-recommended research and prioritization mechanics.
   administrative dispositions. #6236 and #7944 remain open keepers; actual
   technical work, source appointments and resource custody continue unchanged.
   No new implementation assignment or technical completion is inferred.
+- [ ] _(Agent-recommended)_ Deliver the [first ten oldest receiving
+  relationships](receiving-first-ten.md) through normal review and full current
+  readback, then make separate source judgments. Direct contracts are authored
+  under seven existing efforts; canonical incident, post-fix confirmation,
+  named-assignee and held-lane restrictions remain. Ten studied origins are
+  not ten closeable issues or a new numerical reduction.
 - [ ] Refresh live and original-cohort metrics, append journal checkpoints, and
   continue graph-backed consolidation with creation-oldest-first coverage until
   at most 729 issues remain.
