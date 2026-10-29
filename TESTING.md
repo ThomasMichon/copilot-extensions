@@ -58,7 +58,8 @@ Dispatch's reversible-maintenance Windows packet uses the existing
 `installation-context-full.yml` manual workflow with
 `portfolio=dispatch-maintenance`. Dispatch the reviewed source branch; each
 job checks out and verifies the immutable dispatch SHA. Three bounded packets
-exercise actual policy/overlay behavior, installer cleanup/retained-runtime
+exercise actual policy/overlay behavior, explicit preparation, strict
+supervisor-preserving adoption, installer cleanup/retained-runtime
 assertions and the native background-worker lifecycle under the canonical
 runner's disposable roots and process containment. Read the actual outcomes
 and skips: WSL PowerShell and a skipped Windows-only case are not native Windows

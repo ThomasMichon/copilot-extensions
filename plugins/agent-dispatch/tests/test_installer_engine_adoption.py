@@ -127,6 +127,7 @@ def _env(tmp_path: Path) -> dict[str, str]:
             "uname",
             "tr",
             "mv",
+            "mkdir",
             "mktemp",
             "cat",
             "git",
@@ -150,7 +151,8 @@ def _run(ext: str, script: str, tmp_path: Path, env: dict[str, str]):
     file.write_text(script, encoding="utf-8")
     command = ["/bin/bash", str(file)] if ext == "sh" else [PWSH, "-NoProfile", "-File", str(file)]
     return subprocess.run(
-        command, cwd=tmp_path, env=env, text=True, capture_output=True, timeout=30
+        command, cwd=tmp_path, env=env, text=True, capture_output=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
 
 
@@ -354,7 +356,7 @@ exit $result.ExitCode
     calls = [json.loads(line) for line in Path(env["TEST_UV_LOG"]).read_text().splitlines()]
     assert len(calls) == (1 if mode == "fatal" else 3)
     for actual in calls:
-        assert actual[:-3] == ["pip", "install", *args]
+        assert actual[:-3] == ["pip", "install", *args, "--no-editable", "--link-mode", "copy"]
         assert actual[-3] == "--exclude-newer"
         assert actual[-1] == "--reinstall"
         cutoff = datetime.fromisoformat(actual[-2].replace("Z", "+00:00"))
@@ -674,6 +676,7 @@ def test_fixture_checkout_accepts_already_materialized_input(tmp_path, monkeypat
 def _snapshot_prelude() -> str:
     script = _prelude("ps1")
     for name in (
+        "Assert-DispatchActions",
         "Resolve-VendoredLib",
         "Materialize-DispatchSnapshot",
         "Get-DispatchSnapshotHash",
@@ -973,7 +976,7 @@ if ($script:InstallerDependencyPolicy -cne $originalPolicy) {{ throw 'caller pol
         str(snapshot / "libs" / lib)
         for lib in (
             "zdd", "dropin-registry", "plugin-resolve",
-            "single-instance-lease", "agent-procutil", "worktree-identity",
+            "single-instance-lease", "agent-procutil", "update-driver", "worktree-identity",
             "process-telemetry", "plugin-activation",
         )
     ]
@@ -1039,7 +1042,8 @@ exit $result.ExitCode
     assert calls[0] == ["venv", str(tmp_path / "slot"), "--allow-existing"]
     assert len(calls) == 2
     assert calls[1][:-3] == [
-        "pip", "install", "--python", sys.executable, f"{snapshot}[mcp]"
+        "pip", "install", "--python", sys.executable, f"{snapshot}[mcp]",
+        "--no-editable", "--link-mode", "copy",
     ]
     assert calls[1][-3] == "--exclude-newer"
     assert calls[1][-1] == "--reinstall"

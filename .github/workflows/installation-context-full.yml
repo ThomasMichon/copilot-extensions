@@ -629,7 +629,7 @@ jobs:
 
   dispatch-maintenance-installer-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'dispatch-maintenance'
-    name: Dispatch installer cleanup and retained runtime (Windows)
+    name: Dispatch preparation, cleanup and retained runtime (Windows)
     runs-on: windows-latest
     timeout-minutes: 15
     env:
@@ -653,6 +653,8 @@ jobs:
           --test-file tests/test_install_lifecycle_emit.py
           --test-file tests/test_installer_required_cutover.py
           --test-file tests/test_retained_runtime.py
+          --test-file tests/test_runtime_preparation.py
+          --test-file tests/test_installer_engine_adoption.py
           --timeout 300 --plugin-timeout 360 --test-timeout 45
 
   dispatch-maintenance-worker-windows:
