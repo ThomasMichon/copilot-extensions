@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent repair PRs against `dev`
 - **Created:** 2026-10-29
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** existing plugin-services progress/timeout and explicit-failure contracts
 - **Umbrella issue:** #9520
 - **Sub-issues:** existing #5512 and #5761 retain their original scope
@@ -68,7 +68,7 @@ authorize a shared runtime rollout, service restart or live venue retry.
 
 ### Phase 1 - Review and ownership
 
-- [ ] Land this proposal after the repository's required review and CI.
+- [x] Land this proposal after the repository's required review and CI.
 - [ ] Check current source, claims and open PRs for every repair; record already
   fixed, intentional and evidence-dependent items without speculative edits.
 
@@ -151,3 +151,20 @@ depends on the mere existence of one of these source defects.
   consumer, explicitly preserving the unrelated pending-seed helper.
 - The guidance is not Maintainer acceptance. Implementation still awaits the
   proposal's required acceptance, current-head review and CI.
+
+### 2026-10-29 - Accepted plan and first repair
+
+- #9521 merged after Maintainer acceptance, current-head Copilot approval and
+  required CI. Source-only scope and all live-mutation exclusions are unchanged.
+- Began the narrow restart-command exit-status repair. Current source and open
+  work retain #5512's exclusive-replacement owner; no replacement protocol,
+  process identity, lock cleanup or serving-readiness behavior is changed here.
+- A contained CLI-dispatch regression reproduced exit zero after a failed spawn.
+  Success, disabled and already-current controls passed before the repair.
+- After the repair, 21 focused restart/cutover controls pass through the
+  canonical contained runner, including actual CLI dispatch. Focused Ruff,
+  install-contract validation and whitespace checks pass.
+- This narrow source slice does not change provisioning or process ownership,
+  so a fresh-machine installer scenario is not applicable. Validation ran on
+  native Windows; native POSIX and live installed service behavior are not
+  claimed. No external service was restarted or updated for qualification.

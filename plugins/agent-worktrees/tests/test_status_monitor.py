@@ -3299,12 +3299,32 @@ def test_restart_explicit_candidate_interpreter_preserves_bootstrap_identity(mon
     assert sys.executable == bootstrap
 
 
-def test_cmd_restart_always_exits_zero(monkeypatch, capsys):
-    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
-    _wire_restart(monkeypatch, lock_data=None, live=False, superseded=False)
-    rc = m.cmd_status_monitor_restart(argparse.Namespace())
-    assert rc == 0
-    assert "status-monitor:" in capsys.readouterr().out
+@pytest.mark.parametrize(
+    ("disabled", "already_current", "spawn_ok", "expected_rc", "summary"),
+    [
+        (False, False, True, 0, "spawned current monitor"),
+        (False, False, False, 1, "spawn failed"),
+        (True, False, False, 0, "disabled for this test run -- skipped"),
+        (False, True, False, 0, "a current monitor already owns the host"),
+    ],
+)
+def test_cmd_restart_exit_status(
+    monkeypatch, capsys, disabled, already_current, spawn_ok, expected_rc, summary,
+):
+    if disabled:
+        monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "0")
+    else:
+        monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    spawned, _, _ = _wire_restart(
+        monkeypatch,
+        lock_data={"pid": 999, "prefix": "/cur/slot"} if already_current else None,
+        live=already_current,
+        superseded=False,
+        spawn_ok=spawn_ok,
+    )
+    assert m.main(["status-monitor-restart"]) == expected_rc
+    assert summary in capsys.readouterr().out
+    assert (spawned["argv"] is not None) is (not disabled and not already_current)
 
 
 # ---------------------------------------------------------------------------
