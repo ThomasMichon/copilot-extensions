@@ -96,6 +96,30 @@ live. It retains prior values when registry or source evidence is indeterminate
 and returns structured findings for missing, mismatched, or ambiguous evidence.
 Consumers decide how often to refresh and how to render findings.
 
+Successful registered-project Git identity checks have an input-bound file memo
+under that registry's `cache/project-identities.json`. Ordinary `.git` directory
+and bare-anchor layouts reuse the check across processes only while the canonical
+root/directory identities, normalized expected remote, selected Git executable
+metadata, `HEAD`, `config`, and the presence/content of `config.worktree` agree.
+Inputs are checked before and after a fresh successful probe before publication.
+Access-time changes from reading files do not invalidate otherwise equal inputs.
+
+This memo does not persist activation, settings, topology or policy decisions:
+registries, activation settings and marketplace/provider evidence are still read
+on each resolution. Gitfiles, common-directory indirection, symlinks/reparse
+points, config includes and `core.worktree` retain fresh Git probes rather than
+claiming a complete dependency footprint. Memo eligibility additionally requires
+current-principal ownership of the repository directories on every read. POSIX
+uses effective UID and current stat ownership; Windows reuses the existing
+`agent-procutil` current-token owner checker when available. Without that optional
+checker or with uncertain/foreign ownership, resolution keeps real Git checks;
+it never installs a dependency to make a memo hit. Missing, invalid or unreadable memos
+also use fresh probes; cache publication failure is reported and never replaces
+fresh discovery with a success-shaped empty result. Publication uses the existing
+atomic state writer, and unchanged snapshots are not rewritten. Session-start
+consumers naturally warm the same memo without an additional CLI scan; this is
+not a full session-lifetime activation snapshot.
+
 `resolve_active_plugins(concurrent_roots=True)` optionally overlaps up to four
 independent local-root reads within each activation scope. The default remains
 serial. Results and findings are merged in the original source order; excluded
