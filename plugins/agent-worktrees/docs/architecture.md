@@ -780,6 +780,11 @@ retains legacy ownership. Direct/no-mux plans use their actual inherited and
 selected environment. There is no separate renderer-admission flag or
 renderer-capability handshake, and these rules do not depend on marketplace
 cells. Full Manager launch and installation-survival acceptance remain open.
+POSIX seeded plans begin with a finite Python exec bootstrap that restores the
+admitted empty initializer and replaces itself with the copied Bash command
+before setup effects. This preserves older Manager interpreter refresh and
+empty-value forwarding without retaining Python for the backend's lifetime.
+Manager refreshes only recognized Python seed envelopes, not native shell hosts.
 Plans containing non-UTF-8 POSIX command or record-path bytes also retain that
 owner before discovery or copying; the literal reply remains strict UTF-8.
 Direct NUL preparation with such arguments refuses before runtime selection or

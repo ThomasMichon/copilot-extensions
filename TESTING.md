@@ -236,6 +236,9 @@ The copied POSIX consumer packet also feeds those actual Manager-produced
 environment arguments into the unmodified native setup and requires a direct
 Bash parent, literal backend environment, retained input and completed receipts.
 It does not replace that component path with a renderer-admission mock.
+It executes the production command-array/interpreter-refresh blocks and covers
+the older unconditional refresh plus quoted-empty initializer behavior. Native
+host-preservation controls execute the matching Bash and PowerShell refresh blocks.
 That packet also explicitly selects `test_launch_seed_native.py` so the
 setup-only provider birth query exercises the canonical native OS helper,
 not a Bash ABI substitute. It covers caller-provided identity compatibility,

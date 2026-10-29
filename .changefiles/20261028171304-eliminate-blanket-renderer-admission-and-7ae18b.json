@@ -7,7 +7,7 @@
     },
     {
       "plugin": "worktree-manager",
-      "type": "dev"
+      "type": "patch"
     }
   ]
 }

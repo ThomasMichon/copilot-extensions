@@ -446,8 +446,9 @@ def test_mux_server_initializer_uses_only_explicit_pane_overrides(
     )
 
 
+@pytest.mark.parametrize("legacy_forwarding", [False, True])
 def test_manager_literal_pane_environment_runs_native_setup_without_renderer_admission(
-    tmp_path, installed_native_runtime, native_bash,
+    tmp_path, installed_native_runtime, native_bash, legacy_forwarding,
 ):
     plan, environment, checkout = _plan(
         tmp_path, installed_native_runtime, native_bash, "new",
@@ -459,30 +460,42 @@ def test_manager_literal_pane_environment_runs_native_setup_without_renderer_adm
     )
     start = source.index("    # Export profile env vars")
     exports = source[start:source.index("    # Build command array from JSON", start)]
+    start = source.index("    # Build command array from JSON")
+    command_array = source[start:source.index('    SESSION_BACKEND_JSON=""', start)]
+    start = source.index('    if [[ "$_PENDING_NEW_SEED" == "1" ]] && {')
+    refresh = source[start:source.index("    _KNOWLEDGE_CWD=", start)]
     start = source.index("        TMUX_ENV_FLAGS=()")
     flags = source[start:source.index("        # Pane wrapper", start)]
     selected = {"BASH_ENV": "", "FIXTURE_LITERAL": environment["FIXTURE_LITERAL"]}
+    selected_command = ["/missing/old-runtime/python", *plan["command"][1:]]
     rendered = run_caller_owned(
         [native_bash, "-c", "\n".join([
             "set -euo pipefail",
             f"PYTHON={shlex.quote(prefix[0])}",
-            f"JSON={shlex.quote(json.dumps({'env': selected}))}",
+            f"JSON={shlex.quote(json.dumps({'env': selected, 'cmd': selected_command}))}",
             exports,
+            command_array,
+            "_PENDING_NEW_SEED=1; setup_log() { :; }",
+            'CMD_ARRAY[0]="$PYTHON"' if legacy_forwarding else refresh,
             "_AHP_RESUME_AVAILABLE=0; SETUP_LOG=; LAUNCH_ID=",
             flags,
+            '''"$PYTHON" -I -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "${CMD_ARRAY[@]}"''',
             '''"$PYTHON" -I -c 'import json,sys; print(json.dumps(sys.argv[1:]))' '''
             '''${TMUX_ENV_FLAGS[@]+"${TMUX_ENV_FLAGS[@]}"}''',
         ])], env=environment, cwd=checkout, timeout=30,
         max_stdout_bytes=65536, max_stderr_bytes=65536,
     )
     assert rendered.returncode == 0, rendered.stdout + rendered.stderr
-    arguments = json.loads(rendered.stdout)
+    command, arguments = map(json.loads, rendered.stdout.splitlines())
+    assert command[0] == prefix[0]
     assert arguments == ["-e", "BASH_ENV=", "-e", "FIXTURE_LITERAL=" + selected["FIXTURE_LITERAL"]]
     for index in range(0, len(arguments), 2):
         key, _, content = arguments[index + 1].partition("=")
         environment[key] = content
+    if legacy_forwarding:
+        environment["BASH_ENV"] = "''"
     result = run_caller_owned(
-        plan["command"], env=environment, cwd=checkout, input_text="retained stdin\n", timeout=60,
+        command, env=environment, cwd=checkout, input_text="retained stdin\n", timeout=60,
         max_stdout_bytes=65536, max_stderr_bytes=65536,
     )
     assert result.returncode == 7, result.stdout + result.stderr + repr(_observations(plan))
