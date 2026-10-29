@@ -77,7 +77,7 @@ def test_recognition_is_read_only_and_never_discards_reset_inventory(
     if condition in changes:
         name, content = changes[condition]
         (root / name).write_text(content, encoding="utf-8")
-    if condition.startswith("missing-"):
+    if condition in {"missing-deployment", "missing-completion"}:
         name = "deploy-manifest.json" if condition == "missing-deployment" else "versions/1.2.3/.install-complete.json"
         (root / name).unlink()
     before = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
@@ -160,9 +160,19 @@ def test_recognized_replacement_reuses_the_same_qualified_target(tmp_path: Path)
     assert plan.version == selected and plan.mode == "incremental"
 
 
-def test_failed_fresh_integration_cannot_become_incremental_on_retry(tmp_path: Path) -> None:
+@pytest.mark.parametrize("old_slot", ("present", "missing"))
+def test_failed_fresh_integration_cannot_become_incremental_on_retry(
+    tmp_path: Path, old_slot: str,
+) -> None:
     _seed(tmp_path)
-    selected = "1.2.3+repair." + "a" * 32
+    if old_slot == "missing":
+        (tmp_path / "versions/1.2.3").rename(tmp_path / "removed-slot")
+    manifest = subject.parse(_record(), "agent-mcp")
+    initial = subject.plan_construction(
+        manifest, tmp_path, "1.2.3", admission=lambda *_: "health-repair-required",
+    )
+    assert initial.mode == "fresh" and initial.version != "1.2.3"
+    selected = initial.version
     slot = tmp_path / "versions" / selected
     slot.mkdir()
     (slot / ".install-complete.json").write_text(
@@ -171,7 +181,7 @@ def test_failed_fresh_integration_cannot_become_incremental_on_retry(tmp_path: P
     )
     (tmp_path / "current-version").write_text(selected, encoding="utf-8")
     plan = subject.plan_construction(
-        subject.parse(_record(), "agent-mcp"), tmp_path, "1.2.3",
+        manifest, tmp_path, "1.2.3",
         admission=lambda *_: pytest.fail("Incomplete integration must not reuse construction"),
     )
     assert plan.mode == "fresh" and plan.version != selected

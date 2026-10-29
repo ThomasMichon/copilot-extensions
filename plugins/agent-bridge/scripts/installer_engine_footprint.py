@@ -74,7 +74,12 @@ def plan_construction(
         ):
             return ConstructionPlan(version, "incremental", recognized)
     target = root / "versions" / version
-    if os.path.lexists(target):
+    try:
+        deployment = decode(_marker_text(root / "deploy-manifest.json"))
+        recorded = isinstance(deployment, dict) and deployment.get("runtime_version") == version
+    except (OSError, ValueError):
+        recorded = False
+    if recorded or os.path.lexists(target):
         separator = "." if "+" in version else "+"
         version = f"{version}{separator}repair.{uuid.uuid4().hex}"
     return ConstructionPlan(version, "fresh", recognized)
