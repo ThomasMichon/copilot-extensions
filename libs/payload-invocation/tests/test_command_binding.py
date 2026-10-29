@@ -711,6 +711,9 @@ class _PowerShellHost:
             "    $response=@{returncode=$code;stdout=(($output -join \"`n\")+$capturedOut.ToString());"
             "stderr=(($errors -join \"`n\")+$capturedErr.ToString())}|ConvertTo-Json -Compress\n"
             "    $capturedOut.Dispose(); $capturedErr.Dispose()\n"
+            "    $nativeErr=[IO.StreamWriter]::new([Console]::OpenStandardError(),"
+            "[Text.UTF8Encoding]::new($false),1024,$true)\n"
+            "    $nativeErr.WriteLine('__fixture_stderr_complete__'); $nativeErr.Dispose()\n"
             "    [Console]::WriteLine($response)\n"
             "}\n",
             encoding="utf-8",
@@ -722,6 +725,7 @@ class _PowerShellHost:
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         self.lines: queue.Queue[str | None] = queue.Queue()
+        self.native_errors: queue.Queue[str | None] = queue.Queue()
         self.errors: list[str] = []
         self.closed = False
 
@@ -733,7 +737,10 @@ class _PowerShellHost:
 
         def read_errors() -> None:
             assert self.process.stderr
-            self.errors.extend(self.process.stderr)
+            for line in self.process.stderr:
+                self.errors.append(line)
+                self.native_errors.put(line)
+            self.native_errors.put(None)
 
         self.readers = [
             threading.Thread(target=read_output, daemon=True),
@@ -762,8 +769,20 @@ class _PowerShellHost:
         self.process.stdin.write(json.dumps(request) + "\n")
         self.process.stdin.flush()
         response = self._response()
+        native_errors = []
+        while True:
+            line = self.native_errors.get(timeout=30)
+            assert line is not None, "PowerShell fixture stderr closed before completion"
+            marker = "__fixture_stderr_complete__"
+            prefix, separator, suffix = line.rpartition(marker)
+            if separator and suffix in {"\n", "\r\n"}:
+                if prefix:
+                    native_errors.append(prefix)
+                break
+            native_errors.append(line)
         return subprocess.CompletedProcess(
-            argv, response["returncode"], response["stdout"], response["stderr"],
+            argv, response["returncode"], response["stdout"],
+            response["stderr"] + "".join(native_errors),
         )
 
     def close(self) -> None:
@@ -800,7 +819,7 @@ def powershell_host():
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")
-@pytest.mark.parametrize("result", ["ignored-native-failure", "exit", "throw"])
+@pytest.mark.parametrize("result", ["ignored-native-failure", "exit", "throw", "native-stderr"])
 def test_command_binding_initialized_host_preserves_script_outcome(
     binding_fixture: dict, result: str, powershell_host,
 ) -> None:
@@ -813,12 +832,20 @@ def test_command_binding_initialized_host_preserves_script_outcome(
         ),
         "exit": "Write-Output 'complete'\nexit 7\n",
         "throw": "throw 'fixture-script-error'\n",
+        "native-stderr": (
+            "& $env:TEST_PYTHON -c 'import sys;sys.stderr.write(\"native-error\")'\n"
+        ),
     }[result], encoding="utf-8")
     host = powershell_host(binding_fixture, environment)
     completed = host.run([POWERSHELL, "-File", str(script)])
-    assert completed.returncode == {"ignored-native-failure": 0, "exit": 7, "throw": 1}[result]
+    assert completed.returncode == {
+        "ignored-native-failure": 0, "exit": 7, "throw": 1, "native-stderr": 0,
+    }[result]
     if result == "throw":
         assert "fixture-script-error" in completed.stderr
+    elif result == "native-stderr":
+        assert "native-error" in completed.stderr
+        assert host.run([POWERSHELL, "-File", str(script)]).stderr == completed.stderr
     else:
         assert completed.stdout == "complete"
 

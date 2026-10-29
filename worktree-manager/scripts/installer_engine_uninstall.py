@@ -402,8 +402,10 @@ def _index_launchers(payload: Path, stamped_payload: Path | None = None) -> dict
     }
 
 
-def _local_bindings(payload: Path, root: Path, profile: Profile) -> tuple[Path, tuple[str, ...]]:
-    directory = Path.home() / ".local" / "bin"
+def _local_bindings(payload: Path, root: Path, profile: Profile, *, home: Path | None = None,
+                    deployment: dict[str, Any] | None = None) -> tuple[Path, tuple[str, ...]]:
+    home = home or Path.home()
+    directory = home / ".local" / "bin"
     _plain(directory)
     contents = {}
     for name in profile.local_bin_entries:
@@ -414,7 +416,7 @@ def _local_bindings(payload: Path, root: Path, profile: Profile) -> tuple[Path, 
     if not contents:
         return directory, ()
     if profile.nested_engine:
-        if root != Path.home() / ".agent-index":
+        if root != home / ".agent-index":
             return directory, ()
         templates = _index_launchers(payload)
         marker = root / "payload-dir"
@@ -436,8 +438,9 @@ def _local_bindings(payload: Path, root: Path, profile: Profile) -> tuple[Path, 
     if profile.module in {"agent_bridge", "agent_dispatch", "agent_containers"}:
         manifest = root / "deploy-manifest.json"
         _plain(manifest, file=True)
-        if manifest.is_file():
-            record = json.loads(manifest.read_text(encoding="utf-8-sig"))
+        if deployment is not None or manifest.is_file():
+            record = deployment if deployment is not None else json.loads(
+                manifest.read_text(encoding="utf-8-sig"))
             source = record.get("source", {})
             path = source.get("path") if isinstance(source, dict) else None
             if path is not None:
@@ -445,7 +448,7 @@ def _local_bindings(payload: Path, root: Path, profile: Profile) -> tuple[Path, 
                     raise UninstallRefused("Invalid installed command publisher")
                 publisher = Path(path)
     return directory, commands.owned_local_names(
-        payload, root, profile.module, contents, publisher_root=publisher,
+        payload, root, profile.module, contents, publisher_root=publisher, home=home,
     )
 
 
