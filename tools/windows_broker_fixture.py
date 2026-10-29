@@ -105,3 +105,17 @@ def caller_job_memberships(api, child, jobs) -> list[bool]:
             raise ctypes.WinError(ctypes.get_last_error())
         memberships.append(bool(member.value))
     return memberships
+
+
+def collect_generations(runtime, root: Path, *, retired: tuple[str, ...], retained: tuple[str, ...]):
+    collected = set(runtime.gc(root))
+    if (
+        not set(retired) <= collected or set(retained) & collected
+        or any((root / "versions" / name).exists() for name in retired)
+        or any(
+            runtime.check_admission(root, name, payload_hash="a" * 64) != "reuse"
+            for name in retained
+        )
+    ):
+        raise RuntimeError("fixture collector did not retire controls and preserve usable recovery slots")
+    return sorted(collected)

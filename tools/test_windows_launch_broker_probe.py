@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import io
 import os
 from pathlib import Path
@@ -104,6 +105,57 @@ def test_native_leased_helper_can_belong_to_a_different_job(tmp_path, monkeypatc
         finally:
             for job in jobs:
                 job.close()
+
+
+@pytest.fixture
+def recovery_slots(tmp_path, monkeypatch):
+    source = Path(protocol_probe.__file__).resolve().parents[1] / "libs" / "versioned-runtime"
+    spec = importlib.util.spec_from_file_location("broker_fixture_gc_under_test", source / "versioned_runtime.py")
+    runtime = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, runtime)
+    spec.loader.exec_module(runtime)
+    root = tmp_path / "runtime"
+    for name in ("first", "replacement", "1.0", "control"):
+        slot = root / "versions" / name
+        slot.mkdir(parents=True)
+        (slot / "canary").write_text(name, encoding="ascii")
+        runtime.mark_complete(root, name, payload_hash="a" * 64)
+    runtime._leases.replace_runtime_references(
+        root, "fixture/recovery", ["first", "replacement"], expected=[],
+    )
+    return runtime, root
+
+
+def test_recovery_collection_accepts_other_disposable_constructor_candidates(recovery_slots):
+    runtime, root = recovery_slots
+    collected = broker_fixture.collect_generations(
+        runtime, root, retired=("control",), retained=("first", "replacement"),
+    )
+    assert collected == ["1.0", "control"]
+    for name in ("first", "replacement"):
+        assert (root / "versions" / name / "canary").read_text(encoding="ascii") == name
+
+
+@pytest.mark.parametrize("failure", ["retired-recovery", "missed-control", "unusable-recovery"])
+def test_recovery_collection_cannot_hide_a_broken_retention_control(recovery_slots, monkeypatch, failure):
+    runtime, root = recovery_slots
+    original = runtime.gc
+
+    def collect(path):
+        result = original(path)
+        if failure == "retired-recovery":
+            result.append("first")
+        elif failure == "missed-control":
+            result.remove("control")
+        return result
+
+    monkeypatch.setattr(runtime, "gc", collect)
+    if failure == "unusable-recovery":
+        monkeypatch.setattr(runtime, "check_admission", lambda *_a, **_kw: "construct")
+    with pytest.raises(RuntimeError, match="preserve usable recovery"):
+        broker_fixture.collect_generations(
+            runtime, root, retired=("control",), retained=("first", "replacement"),
+        )
 
 
 def test_native_adoption_program_refuses_an_unknown_plugin_before_reading_sources(tmp_path):

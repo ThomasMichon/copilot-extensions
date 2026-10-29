@@ -21,7 +21,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from windows_broker_fixture import (
-    admit, close_job, fixture_environment, make_job, mcp_candidate_seed, prepare_bootstrap,
+    admit, close_job, collect_generations, fixture_environment, make_job,
+    mcp_candidate_seed, prepare_bootstrap,
 )
 
 
@@ -731,8 +732,9 @@ def inspect(root: Path) -> dict[str, object]:
                         raise RuntimeError("fixture crashed installer lost runtime references")
                     control = "gc-control-" + phase
                     (root / "versions" / control).mkdir()
-                    if runtime.gc(root) != [control]:
-                        raise RuntimeError("fixture collector reclaimed a recovery generation")
+                    collect_generations(
+                        runtime, root, retired=(control,), retained=("first", "replacement"),
+                    )
                     try:
                         task_adapter.load(config.config_path, config.installation)
                     except pu.DaemonSpawnError as error:
@@ -752,10 +754,13 @@ def inspect(root: Path) -> dict[str, object]:
                 result["publication_crash_recovery"] = recovery_controls
                 if (
                     runtime._leases.read_runtime_references(root).get(config.owner) != ["replacement"]
-                    or runtime.gc(root) != ["first"]
-                    or packages.exists()
                 ):
                     raise RuntimeError("fixture old action generation was not retired after recovery")
+                collect_generations(
+                    runtime, root, retired=("first",), retained=("replacement",),
+                )
+                if packages.exists():
+                    raise RuntimeError("fixture old action package content survived collection")
                 result["crash_surviving_generation_retention"] = True
                 result["replaced_action_removed_before_second_cycle"] = True
                 task_operation("stop", config, Deadline(15))
