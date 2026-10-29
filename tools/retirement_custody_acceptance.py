@@ -39,6 +39,8 @@ def caller(packages: Path, root: Path, target: int, birth: str, report: Path, pa
     from agent_procutil._daemon_instance_identity import birth_identity
     from agent_procutil.retirement_custody import RetirementCustody
 
+    if os.name == "nt" and sys.stdin.readline() != "launch\n":
+        raise RuntimeError("Retirement caller was not released by its fixture owner")
     with RetirementCustody(root) as custody:
         if pause:
             custody.pin(target, birth).pause()
@@ -72,7 +74,7 @@ def qualify(root: Path, packages: Path, pu) -> dict:
     from agent_procutil.process_retirement import PinnedProcess
 
     if os.name == "nt":
-        from windows_broker_fixture import fixture_environment
+        from windows_broker_fixture import caller_job_memberships, fixture_environment, make_job
         environment = fixture_environment(dict(os.environ), control=True)
     else:
         environment = {
@@ -112,16 +114,30 @@ def qualify(root: Path, packages: Path, pu) -> dict:
                     "caller", str(packages), str(root), str(target.pid),
                     birth_identity(target.pid), str(offer_path), "0" if contained else "1",
                 ]
-                job = None
+                jobs = []
                 guardian = None
                 process = None
                 try:
                     if os.name == "nt":
                         process, job = pu.spawn_sync_in_kill_on_close_job(
                             arguments, require_job=True, allow_breakaway=False,
-                            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
                             **pu.no_window_kwargs(),
                         )
+                        if job is None:
+                            raise RuntimeError("Retirement caller Job is unavailable")
+                        jobs.append(job)
+                        inner = make_job(pu, jobs)
+                        api = pu._kernel32()
+                        pu._configure_job_api(api)
+                        if not api.AssignProcessToJobObject(
+                            inner.handle, int(process._handle),
+                        ):
+                            import ctypes
+                            raise ctypes.WinError(ctypes.get_last_error())
+                        process.stdin.write(b"launch\n")
+                        process.stdin.flush()
                     else:
                         process = subprocess.Popen(
                             arguments, env=env, stdout=subprocess.PIPE,
@@ -139,7 +155,7 @@ def qualify(root: Path, packages: Path, pu) -> dict:
                                 raise TimeoutError("Retirement caller did not offer native custody")
                             time.sleep(.02)
                     if os.name == "nt":
-                        from agent_procutil.daemon_broker import _outside_job
+                        from agent_procutil.daemon_broker import _kernel32 as process_api
                         from agent_procutil.windows_broker_native import (
                             NativeChild,
                             _duplicate,
@@ -148,8 +164,13 @@ def qualify(root: Path, packages: Path, pu) -> dict:
                             _duplicate(int(process._handle), offer["handle"]),
                             offer["pid"], ["retirement-custodian"],
                         )
-                        if _outside_job(guardian) == contained:
-                            raise RuntimeError("Retirement custody Job topology is wrong")
+                        memberships = caller_job_memberships(process_api(), guardian, jobs)
+                        # Disposable admission deliberately owns a separate expiry Job.
+                        if memberships != [contained] * len(jobs):
+                            raise RuntimeError(
+                                f"Retirement custody caller-Job mismatch (cycle={cycle}, "
+                                f"contained={contained}, memberships={memberships})"
+                            )
                     else:
                         guardian = PinnedProcess(offer["pid"], offer["birth"])
                         if os.getpgid(offer["pid"]) == process.pid:
@@ -159,8 +180,9 @@ def qualify(root: Path, packages: Path, pu) -> dict:
                         time.sleep(.05)
                         if progress.stat().st_size != before:
                             raise RuntimeError("Retirement pause was not observed")
-                    if job is not None:
-                        job.terminate_and_wait(5)
+                    if jobs:
+                        for job in reversed(jobs):
+                            job.terminate_and_wait(5)
                     else:
                         os.killpg(process.pid, signal.SIGKILL)
                     process.wait(timeout=5)
@@ -176,11 +198,13 @@ def qualify(root: Path, packages: Path, pu) -> dict:
                         "contained": contained, "caller_boundary_closed": True,
                         "original_target_alive": target.poll() is None,
                         "native_custodian_exit": True,
+                        "caller_jobs": len(jobs),
                     })
                 finally:
                     if process is not None and process.poll() is None:
-                        if job is not None:
-                            job.terminate_and_wait(5)
+                        if jobs:
+                            for job in reversed(jobs):
+                                job.terminate_and_wait(5)
                         else:
                             os.killpg(process.pid, signal.SIGKILL)
                         process.wait(timeout=5)
@@ -190,11 +214,12 @@ def qualify(root: Path, packages: Path, pu) -> dict:
                         elif not guardian.exited(10):
                             raise RuntimeError("Fixture retains a live retirement custodian")
                         guardian.close()
-                    if job is not None:
+                    for job in jobs:
                         job.close()
                     if process is not None:
-                        process.stdout.close()
-                        process.stderr.close()
+                        for stream in (process.stdin, process.stdout, process.stderr):
+                            if stream is not None:
+                                stream.close()
         return {"cycles": cycles, "native_boundary_rollback": True}
     finally:
         if target.poll() is None:

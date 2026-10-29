@@ -14,6 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 import windows_broker_protocol_acceptance as protocol_probe
+import windows_broker_fixture as broker_fixture
 import windows_launch_broker_probe as probe
 from windows_broker_desktop import DesktopWitness
 from windows_broker_cell_acceptance import qualify as qualify_cell
@@ -60,6 +61,49 @@ def test_copied_bootstrap_has_the_real_mcp_footprint_without_ambient_imports(tmp
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("memberships", [(False, False), (True, True), (True, False)])
+def test_retirement_topology_checks_each_caller_job_not_a_helpers_own_lease(memberships):
+    observed = []
+
+    class Api:
+        def IsProcessInJob(self, process, job, output):
+            assert process == 42
+            observed.append(job)
+            output._obj.value = memberships[job - 1]
+            return True
+
+    jobs = [SimpleNamespace(handle=1), SimpleNamespace(handle=2)]
+    result = broker_fixture.caller_job_memberships(Api(), SimpleNamespace(_handle=42), jobs)
+    assert result == list(memberships)
+    assert observed == [1, 2]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Job query")
+def test_native_leased_helper_can_belong_to_a_different_job(tmp_path, monkeypatch):
+    import agent_procutil as pu
+    from agent_procutil.daemon_broker import _kernel32, _outside_job
+    from agent_procutil.daemon_instances import daemon_test_lifecycle
+    from agent_procutil.retirement_custody import RetirementCustody
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
+    jobs = []
+    with daemon_test_lifecycle(
+        owner="contained-retirement-job-query", registry_root=tmp_path / "instances",
+    ) as environment:
+        for key, value in environment.items():
+            monkeypatch.setenv(key, value)
+        try:
+            for _ in range(2):
+                broker_fixture.make_job(pu, jobs)
+            with RetirementCustody(tmp_path) as custody:
+                child = custody._process
+                assert not _outside_job(child)
+                assert broker_fixture.caller_job_memberships(_kernel32(), child, jobs) == [False, False]
+        finally:
+            for job in jobs:
+                job.close()
 
 
 def test_native_adoption_program_refuses_an_unknown_plugin_before_reading_sources(tmp_path):

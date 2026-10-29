@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import os
 import shutil
 from pathlib import Path
@@ -68,3 +69,39 @@ def mcp_candidate_seed(root: Path, generation: str, python: str) -> tuple[str, s
         + "if ($LASTEXITCODE -ne 0) { throw ('Fixture candidate seeding failed: '+$seedError) }\n"
     )
     return {"first": "1.0", "replacement": "2.0"}[generation], seed
+
+
+def make_job(pu, owners):
+    api = pu._kernel32()
+    pu._configure_job_api(api)
+    handle = api.CreateJobObjectW(None, None)
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    owner = pu.JobHandle(handle)
+    owners.append(owner)
+    limits = pu._build_job_extended_limit_info()()
+    limits.BasicLimitInformation.LimitFlags = pu._JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    if not api.SetInformationJobObject(
+        handle, pu._JobObjectExtendedLimitInformation, ctypes.byref(limits),
+        ctypes.sizeof(limits),
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
+    return owner
+
+
+def close_job(pu, owner):
+    if not pu._kernel32().CloseHandle(owner.handle):
+        raise ctypes.WinError(ctypes.get_last_error())
+    owner._handle = None
+
+
+def caller_job_memberships(api, child, jobs) -> list[bool]:
+    from ctypes import wintypes
+
+    memberships = []
+    for job in jobs:
+        member = wintypes.BOOL()
+        if not api.IsProcessInJob(child._handle, job.handle, ctypes.byref(member)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        memberships.append(bool(member.value))
+    return memberships

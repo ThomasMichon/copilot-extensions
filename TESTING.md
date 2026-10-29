@@ -2185,8 +2185,9 @@ products, not a real Manager update, maintenance rollout or controller activatio
 An incomplete worker phase cannot report confirmed overall cleanup.
 The same adopted fixture runs `retirement_custody_acceptance.qualify`:
 two actual caller Job deaths after native pause must resume the original
-external target and settle the outside-Job custodian. A contained-mode negative
-control must keep the helper inside the caller Job. The existing desktop
+external target and settle the outside-caller-Job custodian. Queries name both
+nested caller Jobs; the helper's separate disposable expiry Job remains enabled.
+A contained-mode negative control must keep the helper inside both caller Jobs. The existing desktop
 witness covers all three cycles; none qualifies an installed-host teardown.
 It also terminates a separate publishing interpreter without Python cleanup
 after Task replacement and after configuration publication. Each control must

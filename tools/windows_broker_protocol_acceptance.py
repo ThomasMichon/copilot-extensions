@@ -21,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from windows_broker_fixture import (
-    admit, fixture_environment, mcp_candidate_seed, prepare_bootstrap,
+    admit, close_job, fixture_environment, make_job, mcp_candidate_seed, prepare_bootstrap,
 )
 
 
@@ -524,30 +524,6 @@ def interrupt_publication(
         process.wait(timeout=5)
         for stream in (process.stdout, process.stderr):
             stream.close()
-
-
-def make_job(pu, owners):
-    api = pu._kernel32()
-    pu._configure_job_api(api)
-    handle = api.CreateJobObjectW(None, None)
-    if not handle:
-        raise ctypes.WinError(ctypes.get_last_error())
-    owner = pu.JobHandle(handle)
-    owners.append(owner)
-    limits = pu._build_job_extended_limit_info()()
-    limits.BasicLimitInformation.LimitFlags = pu._JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-    if not api.SetInformationJobObject(
-        handle, pu._JobObjectExtendedLimitInformation, ctypes.byref(limits),
-        ctypes.sizeof(limits),
-    ):
-        raise ctypes.WinError(ctypes.get_last_error())
-    return owner
-
-
-def close_job(pu, owner):
-    if not pu._kernel32().CloseHandle(owner.handle):
-        raise ctypes.WinError(ctypes.get_last_error())
-    owner._handle = None
 
 
 def negative_topology(root, pu, processes, children, jobs):
