@@ -44,6 +44,93 @@ async def test_unsupported_receiver_is_visible(monkeypatch):
     assert execute.await_count == 1
 
 
+@pytest.mark.asyncio
+async def test_absent_receiver_uses_fresh_canonical_reader_before_any_provisioning(monkeypatch):
+    import json
+
+    execute = AsyncMock(side_effect=[
+        SimpleNamespace(exit_code=127, stdout="__HOSTING_RECEIVER_ABSENT__\n", stderr=""),
+        SimpleNamespace(exit_code=0, stderr="", stdout=json.dumps({
+            "version": 1, "allowed": True, "repository": "/workspaces/product",
+            "expose_agent": None, "sources": [], "denied_by": [],
+        })),
+    ])
+    monkeypatch.setattr("agent_codespaces._ssh_retry.exec_with_retry", execute)
+    await hosting_policy.require_guest_hosting(object(), "venue", "/workspaces/product")
+    assert execute.await_count == 2
+    probe = execute.call_args_list[1]
+    assert "python3 -I -S -c" in probe.args[2]
+    assert "/workspaces/product" in probe.args[2]
+    assert probe.kwargs["input_bytes"].startswith(b"PK")
+    assert "plugin install" not in probe.args[2] and "/scripts/install" not in probe.args[2]
+
+
+@pytest.mark.asyncio
+async def test_fresh_reader_denial_remains_a_terminal_preflight_refusal(monkeypatch):
+    execute = AsyncMock(side_effect=[
+        SimpleNamespace(exit_code=127, stdout="__HOSTING_RECEIVER_ABSENT__\n", stderr=""),
+        SimpleNamespace(exit_code=3, stdout='{"error":"expose_agent: false"}', stderr=""),
+    ])
+    monkeypatch.setattr("agent_codespaces._ssh_retry.exec_with_retry", execute)
+    with pytest.raises(RuntimeError, match="expose_agent: false"):
+        await hosting_policy.require_guest_hosting(object(), "venue", "/workspaces/product")
+    assert execute.await_count == 2
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("allowed", [False, True])
+async def test_fresh_policy_reader_gates_actual_preparation_boundary(monkeypatch, tmp_path, allowed):
+    import os
+    import shlex
+    import subprocess
+    import sys
+
+    from agent_codespaces.plugin_preparation import prepare_plugins
+
+    policy = tmp_path / ".agent-worktrees" / "config.yaml"
+    policy.parent.mkdir()
+    policy.write_text("expose_agent: " + ("true" if allowed else "false") + "\n")
+    monkeypatch.setattr(
+        "agent_codespaces.plugin_preparation.plugin_plan",
+        lambda *args, **kwargs: {"plugins": [], "marketplaces": {}},
+    )
+    commands = []
+
+    async def execute(_manager, _name, command, **kwargs):
+        commands.append(command)
+        if len(commands) == 1:
+            return SimpleNamespace(exit_code=127, stdout="__HOSTING_RECEIVER_ABSENT__\n", stderr="")
+        if len(commands) == 2:
+            words = shlex.split(command)
+            assert words[:4] == ["python3", "-I", "-S", "-c"]
+            environment = dict(os.environ)
+            environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+            result = subprocess.run(
+                [sys.executable, *words[1:5], str(tmp_path)],
+                input=kwargs["input_bytes"], capture_output=True, timeout=10, env=environment,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
+            return SimpleNamespace(
+                exit_code=result.returncode, stdout=result.stdout.decode(), stderr=result.stderr.decode(),
+            )
+        assert allowed and command == "bash -ls", "policy refusal reached plugin preparation"
+        return SimpleNamespace(exit_code=0, stdout="__VENUE_PLUGINS__{}", stderr="")
+
+    monkeypatch.setattr("agent_codespaces._ssh_retry.exec_with_retry", execute)
+    if allowed:
+        assert await prepare_plugins(
+            object(), "synthetic", None, object(), "/workspaces/product",
+        ) == []
+        assert len(commands) == 3
+    else:
+        with pytest.raises(RuntimeError, match="expose_agent: false"):
+            await prepare_plugins(object(), "synthetic", None, object(), "/workspaces/product")
+        assert len(commands) == 2
+
+
 def test_launch_guard_precedes_native_effects_and_keeps_caller_flags():
     command = hosting_policy.guarded_launch("copilot --acp", "/workspaces/execution harness")
     assert command.index("agent-policy check") < command.index("copilot --acp")

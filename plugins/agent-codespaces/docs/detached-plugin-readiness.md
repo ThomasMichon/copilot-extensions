@@ -16,8 +16,15 @@ Repository hosting eligibility is checked inside the selected guest checkout,
 including a resolved explicit worktree, before launch preparation. ACP commands
 also carry a guest-side check before the native process. The receiver must
 support `agent-worktrees agent-policy check --path <checkout> --operation launch
---json`; a missing or unsupported receiver is a visible refusal, not permission
-to fall back to an unchecked launch. The host's venue-name launch policy is a
+--json`; an unsupported receiver is a visible refusal, not permission
+to fall back to an unchecked launch. On an unprovisioned legacy CodeSpace only,
+absence of that command selects the canonical provisionless reader described
+in the repository-policy library. This reads the actual guest checkout before
+claims, credentials or plugin installation, using a temporary stdin bundle rather
+than requiring Worktrees to be installed already. Existing receiver failures and
+explicit installation contexts never take this legacy path. The final installed
+guest-side check is unchanged; this does not add a container fallback.
+The host's venue-name launch policy is a
 separate restriction, never a replacement for repository policy.
 Direct managed `ssh --stdio` uses this read-only admission before taking a
 venue claim, minting relay credentials, or provisioning hooks and plugins. It
