@@ -73,7 +73,6 @@ def script(ext: str) -> str:
             "Assert-DispatchActions",
             "Install-Runtime", "Get-PayloadHash", "Get-BootstrapPython",
             "Invoke-VersionedSlotClean", "Invoke-VersionedMarkComplete",
-            "Invoke-RuntimeBrokerAdoption",
             "New-PluginBuildSnapshot", "Enter-PluginSnapshotLock", "Publish-FileAtomically",
             "Invoke-VersionedActivate", "Get-VersionedCurrent", "Test-ActivationSupersededNow",
             "Get-VerTuple", "Test-VersionLt", "Write-Manifest",

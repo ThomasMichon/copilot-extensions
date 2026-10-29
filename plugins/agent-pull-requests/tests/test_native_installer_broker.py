@@ -1,4 +1,4 @@
-"""Legacy native broker adoption without installation or host task mutations."""
+"""Native completion and explicit legacy broker removal without host mutations."""
 
 from __future__ import annotations
 
@@ -87,13 +87,12 @@ def test_legacy_driver_admission_does_not_absorb_cell_or_read_only_actions():
     assert "if ($Force) { $driverOptions += 'Force' }" in SOURCE
 
 
-def test_pull_requests_adopts_before_selection_and_removes_before_deletion():
+def test_pull_requests_completes_before_selection_and_removes_before_deletion():
     complete = _function("Invoke-VersionedMarkComplete")
     assert "-RetainHelpers" in complete
     activate = _function("Invoke-VersionedActivate")
-    assert activate.index("Invoke-VersionedMarkComplete") < activate.index(
-        "Invoke-RuntimeBrokerAdoption"
-    ) < activate.index("activate $SrcVersion")
+    assert activate.index("Invoke-VersionedMarkComplete") < activate.index("activate $SrcVersion")
+    assert "BrokerAdoption" not in SOURCE
     uninstall = _uninstall()
     assert uninstall.index("Invoke-StatePreservingUninstall -AdmissionOnly") < uninstall.index("--remove-broker")
     assert uninstall.index("--remove-broker") < uninstall.index("Invoke-StatePreservingUninstall\n")
@@ -112,59 +111,7 @@ def test_pull_requests_declares_local_execution_driver_closure():
 
 
 @pytest.mark.skipif(PWSH is None, reason="PowerShell unavailable")
-@pytest.mark.parametrize("platform,contained", [("Linux", ""), ("Windows_NT", "1")])
-def test_pull_requests_suppressed_adoption_never_invokes_adapter(platform, contained):
-    _probe(_function("Invoke-RuntimeBrokerAdoption") + f"""
-$env:OS='{platform}'
-$env:COPILOT_EXTENSIONS_TEST_CONTAINED='{contained}'
-function Invoke-Hidden {{ throw 'unexpected broker call' }}
-Invoke-RuntimeBrokerAdoption
-""")
-
-
-@pytest.mark.skipif(PWSH is None, reason="PowerShell unavailable")
-@pytest.mark.parametrize("complete,exited", [
-    ("$false", "$false"), ("$true", "$true"),
-])
-def test_pull_requests_adoption_refuses_unretained_runtime(complete, exited):
-    _probe(_function("Invoke-RuntimeBrokerAdoption") + f"""
-$env:OS='Windows_NT'
-$env:COPILOT_EXTENSIONS_TEST_CONTAINED=''
-$script:RuntimeConstructionSession=@{{Complete={complete};Process=@{{HasExited={exited}}}}}
-function Invoke-Hidden {{ throw 'unexpected broker call' }}
-try {{ Invoke-RuntimeBrokerAdoption; throw 'missing refusal' }} catch {{
-    $expected='Broker adoption requires attached complete-slot retention'
-    if ($_.Exception.Message -ne $expected) {{ throw }}
-}}
-""")
-
-
-@pytest.mark.skipif(PWSH is None, reason="PowerShell unavailable")
-@pytest.mark.parametrize("exit_code,receipt,expected", [
-    (9, '{"adopted":true}', "Runtime broker adoption failed:"),
-    (0, '{"adopted":false}', "Runtime broker adoption returned no receipt"),
-])
-def test_pull_requests_adoption_checks_exit_and_receipt(exit_code, receipt, expected):
-    _probe(_function("Invoke-RuntimeBrokerAdoption") + f"""
-$env:OS='Windows_NT'
-$env:COPILOT_EXTENSIONS_TEST_CONTAINED=''
-$InstallDir='C:\\fixture\\pull-requests'
-$VenvDir='C:\\fixture\\pull-requests\\versions\\1.2.3'
-$VenvPython='C:\\fixture\\pull-requests\\versions\\1.2.3\\Scripts\\python.exe'
-$script:RuntimeConstructionSession=@{{Complete=$true;Process=@{{HasExited=$false}}}}
-function Invoke-Hidden {{
-    param($FilePath,$ArgList,[ref]$ErrorOutput)
-    $global:LASTEXITCODE={exit_code}
-    return '{receipt}'
-}}
-try {{ Invoke-RuntimeBrokerAdoption; throw 'missing refusal' }} catch {{
-    if (-not $_.Exception.Message.StartsWith('{expected}')) {{ throw }}
-}}
-""")
-
-
-@pytest.mark.skipif(PWSH is None, reason="PowerShell unavailable")
-def test_pull_requests_adoption_failure_blocks_selection():
+def test_pull_requests_completion_failure_blocks_selection():
     activate = _function("Invoke-VersionedActivate").replace(
         "$PSScriptRoot", "'C:\\fixture\\scripts'"
     )
@@ -176,16 +123,14 @@ $SrcVersion='1.2.3'
 $script:Events=[Collections.Generic.List[string]]::new()
 function Test-SourceRuntimeUnchanged {}
 function Test-Path { return $true }
-function Invoke-FakePython { $global:LASTEXITCODE=0 }
+function Invoke-FakePython { throw 'unexpected selection' }
 function Invoke-Hidden { $global:LASTEXITCODE=0 }
-function Invoke-VersionedMarkComplete { $script:Events.Add('complete'); return $true }
-function Invoke-RuntimeBrokerAdoption { $script:Events.Add('adopt'); throw 'fixture refusal' }
-try { Invoke-VersionedActivate | Out-Null; throw 'missing refusal' } catch {
-    if ($_.Exception.Message -ne 'fixture refusal') { throw }
-}
+function Invoke-VersionedMarkComplete { $script:Events.Add('complete'); return $false }
+function Invoke-RuntimeBrokerAdoption { throw 'unexpected broker adoption' }
+if (Invoke-VersionedActivate) { throw 'missing completion refusal' }
 $script:Events | ConvertTo-Json -Compress
 """)
-    assert json.loads(output) == ["complete", "adopt"]
+    assert json.loads(output) == "complete"
 
 
 @pytest.mark.skipif(PWSH is None, reason="PowerShell unavailable")
@@ -211,7 +156,7 @@ try { Invoke-FixtureUninstall; throw 'missing refusal' } catch {
 
 
 @pytest.mark.skipif(PWSH is None, reason="PowerShell unavailable")
-def test_pull_requests_reused_slot_executes_completion_and_adoption_before_publication():
+def test_pull_requests_reused_slot_executes_completion_without_adoption_before_publication():
     activate = _function("Invoke-VersionedActivate").replace(
         "$PSScriptRoot", "'C:\\fixture\\scripts'"
     )
@@ -220,7 +165,6 @@ def test_pull_requests_reused_slot_executes_completion_and_adoption_before_publi
     )[1].split("    $sourceFields = Get-SourceManifestFields", 1)[0]
     functions = "\n".join((
         activate, _function("Invoke-VersionedMarkComplete"),
-        _function("Invoke-RuntimeBrokerAdoption"),
     ))
     output = _probe(functions + """
 $env:OS='Windows_NT'
@@ -267,11 +211,9 @@ function Invoke-Hidden {
         $global:LASTEXITCODE=0
         return ''
     }
-    if ($ArgList[2] -ne 'update_driver.windows_broker') { throw 'unexpected adapter' }
-    $global:LASTEXITCODE=0
-    $script:Events.Add('adopt')
-    return '{"adopted":true}'
+    throw 'unexpected adapter'
 }
+function Invoke-RuntimeBrokerAdoption { throw 'unexpected broker adoption' }
 function Write-SimpleBinstub { $script:Events.Add('publish') }
 """ + reusable + "\n$script:Events | ConvertTo-Json -Compress")
-    assert json.loads(output) == ["reuse", "complete", "adopt", "select", "publish"]
+    assert json.loads(output) == ["reuse", "complete", "select", "publish"]

@@ -1,4 +1,4 @@
-"""Native publication refuses failed broker adoption before any callbacks."""
+"""Native publication retains completion without requiring legacy broker adoption."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ pytestmark = [
 
 
 @pytest.mark.parametrize("action", ["Install", "Update"])
-def test_native_adoption_failure_preserves_selection_and_blocks_callbacks(tmp_path, action):
+def test_native_completion_failure_preserves_selection_and_blocks_callbacks(tmp_path, action):
     root = tmp_path / "runtime"
     slot = root / "versions" / "1.2.3"
     slot.mkdir(parents=True)
@@ -39,37 +39,25 @@ function Write-Step {{ param($Message) }}
 function Deploy-Venv {{ return $true }}
 function Deploy-Package {{ return $true }}
 function Test-CodespacesRuntime {{ return $true }}
-function Invoke-VersionedMarkComplete {{ $script:Events.Add('complete'); return $true }}
-function Invoke-RuntimeBrokerAdoption {{ $script:Events.Add('adopt'); throw 'fixture adoption refusal' }}
+function Invoke-VersionedMarkComplete {{ $script:Events.Add('complete'); return $false }}
+function Invoke-RuntimeBrokerAdoption {{ throw 'UNEXPECTED_BROKER_ADOPTION' }}
 function Deploy-VersionedRuntimeHelper {{ throw 'UNEXPECTED_HELPER_PUBLICATION' }}
 function Deploy-SelfProvisioningBinstub {{ throw 'UNEXPECTED_BINSTUB_PUBLICATION' }}
 function Write-CodespacesDeployManifest {{ throw 'UNEXPECTED_MANIFEST_PUBLICATION' }}
 function Sync-ConnectionOwnerService {{ throw 'UNEXPECTED_CONNECTION_OWNER' }}
 $refused=$false
 try {{ Invoke-{action} }} catch {{
-    if ($_.Exception.Message -ne 'fixture adoption refusal') {{ throw }}
+    if ($_.Exception.Message -notmatch 'activat') {{ throw }}
     $refused=$true
 }}
-if (-not $refused) {{ throw 'Missing adoption refusal' }}
+if (-not $refused) {{ throw 'Missing completion refusal' }}
 $script:Events | ConvertTo-Json -Compress
 """
     )
     result = _run("ps1", script, tmp_path, _env(tmp_path))
     assert result.returncode == 0, result.stdout + result.stderr
-    assert json.loads(result.stdout.strip().splitlines()[-1]) == ["complete", "adopt"]
+    assert json.loads(result.stdout.strip().splitlines()[-1]) == "complete"
     assert selector.read_text(encoding="utf-8") == "previous"
-
-
-def test_native_adoption_requires_live_complete_slot_retention(tmp_path):
-    script = _prelude("ps1") + _function("ps1", "Invoke-RuntimeBrokerAdoption") + """
-$env:OS='Windows_NT'
-$env:COPILOT_EXTENSIONS_TEST_CONTAINED=''
-$script:RuntimeConstructionSession=@{Complete=$false;Process=@{HasExited=$false}}
-Invoke-RuntimeBrokerAdoption
-"""
-    result = _run("ps1", script, tmp_path, _env(tmp_path))
-    assert result.returncode != 0
-    assert "attached complete-slot retention" in result.stdout + result.stderr
 
 
 def test_native_uninstall_failure_keeps_connection_owner_and_runtime(tmp_path):

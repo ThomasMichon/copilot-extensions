@@ -98,7 +98,8 @@ def test_embedded_cli_run_never_requests_a_detached_broker(monkeypatch, tmp_path
     def forbidden(*args, **kwargs):
         pytest.fail("foreground embedded CLI attempted a detached launch")
 
-    def foreground(argv):
+    def foreground(argv, *, instance):
+        assert instance.runtime_root == tmp_path / "engine"
         calls.append(list(argv))
         return SimpleNamespace(wait=lambda: 23)
 
@@ -118,9 +119,9 @@ def test_embedded_cli_run_never_requests_a_detached_broker(monkeypatch, tmp_path
     monkeypatch.setattr(daemon, "spawn_daemon", forbidden)
     monkeypatch.setattr(cli, "spawn_daemon", forbidden)
     monkeypatch.setattr(daemon, "os", SimpleNamespace(
-        name=platform, environ=os.environ, execv=replace,
+        name=platform, environ=os.environ, path=os.path, execv=replace,
     ))
-    monkeypatch.setattr(daemon.subprocess, "Popen", foreground)
+    monkeypatch.setattr(daemon, "spawn_instance", foreground)
     if platform == "nt":
         assert cli.main(["engine", "run"]) == 23
     else:

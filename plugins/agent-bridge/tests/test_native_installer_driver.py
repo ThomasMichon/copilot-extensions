@@ -354,17 +354,17 @@ def test_uninstall_removes_only_the_component_under_the_current_owner(
     admission.assert_called_once_with(args)
 
 
-def test_bridge_adopts_inside_completion_before_publication_or_callbacks():
+def test_bridge_retains_completion_before_publication_without_broker_adoption():
     source = (SCRIPTS / "install.ps1").read_text(encoding="utf-8")
     assert source.index("-Plugin 'agent-bridge'") < source.index("# === install-contract:v4 self-stage")
     completion = source.split("function Invoke-VersionedMarkComplete {", 1)[1].split("\nfunction ", 1)[0]
     assert "-RetainHelpers" in completion
     update = source.split("function Invoke-Update {", 1)[1].split("# -- Dispatch", 1)[0]
     complete_at = update.index("Invoke-VersionedMarkComplete")
-    adopt_at = update.index("Invoke-RuntimeBrokerAdoption", complete_at)
-    assert complete_at < adopt_at < update.index('catch {\n        Write-Fail "Update failed:')
-    assert adopt_at < update.index("Invoke-VersionedActivate")
-    assert update.index("Ensure-RuntimeBrokerAdoption") < update.index("Invoke-ServingRuntimeReconcile")
+    assert complete_at < update.index('catch {\n        Write-Fail "Update failed:')
+    assert complete_at < update.index("Invoke-VersionedActivate")
+    assert "BrokerAdoption" not in source
+    assert update.index("Ensure-RuntimeSlotRetention") < update.index("Invoke-ServingRuntimeReconcile")
     uninstall = source.split("function Invoke-Uninstall {", 1)[1].split("\nfunction ", 1)[0]
     assert uninstall.index("--remove-broker") < uninstall.index("Unregister-ScheduledTask")
     assert uninstall.index("Owned Bridge daemon did not stop") < uninstall.index("--remove-broker")
@@ -372,14 +372,14 @@ def test_bridge_adopts_inside_completion_before_publication_or_callbacks():
     assert "-not ($Action -eq 'uninstall' -and $DryRun)" in source
 
 
-def test_codespaces_adopts_before_activation_and_preserves_numbered_action_during_dev():
+def test_codespaces_completes_before_activation_and_preserves_numbered_action_during_dev():
     source = (REPO / "plugins/agent-codespaces/scripts/install.ps1").read_text(encoding="utf-8")
     assert source.index("-Plugin 'agent-codespaces'") < source.index("# === install-contract:v4 self-stage")
     completion = source.split("function Invoke-VersionedMarkComplete {", 1)[1].split("\nfunction ", 1)[0]
     assert "-RetainHelpers" in completion
     activate = source.split("function Invoke-VersionedActivate {", 1)[1].split("\nfunction ", 1)[0]
-    assert activate.index("Invoke-VersionedMarkComplete") < activate.index("Invoke-RuntimeBrokerAdoption")
-    assert activate.index("Invoke-RuntimeBrokerAdoption") < activate.index("activate $SrcVersion")
+    assert activate.index("Invoke-VersionedMarkComplete") < activate.index("activate $SrcVersion")
+    assert "BrokerAdoption" not in source
     for action in ("Install", "Update"):
         function = source.split(f"function Invoke-{action} {{", 1)[1].split("\nfunction ", 1)[0]
         assert function.index("Invoke-VersionedActivate") < function.index("Deploy-VersionedRuntimeHelper")
