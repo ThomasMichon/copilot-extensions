@@ -28,6 +28,15 @@ def test_malformed_repair_slot_does_not_claim_source_identity(tmp_path: Path, su
     ) == PACKAGE
 
 
+@pytest.mark.parametrize("package", [PACKAGE, "1.2.3+provider-exec"])
+def test_release_repair_slot_advertises_exact_identity(tmp_path: Path, package: str) -> None:
+    selected = package + ("." if "+" in package else "+") + "repair." + "a" * 32
+    prefix = tmp_path / "versions" / selected
+    assert effective_runtime_version(
+        package, prefix=prefix, module_path=prefix / "lib" / "source_build.py",
+    ) == selected
+
+
 @pytest.mark.parametrize("version", ["1.2.3-dev4", "9.0.0"])
 def test_checkout_cannot_claim_installed_source_identity(tmp_path: Path, version: str) -> None:
     prefix = tmp_path / "versions" / SOURCE
