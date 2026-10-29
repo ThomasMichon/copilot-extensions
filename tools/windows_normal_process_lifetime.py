@@ -122,9 +122,12 @@ def _qualify_native_shell(root: Path, environment, pu) -> list[dict]:
         caller = directory / "caller.ps1"
         caller.write_text(
             "$ErrorActionPreference='Stop'\n"
+            "Write-Output 'native caller loading admission'\n"
             f". {literal(native)}\n"
+            "Write-Output 'native caller starting daemon'\n"
             f"$p=Start-NativeDaemon -Script {literal(worker)} -Arguments @('fixture') "
             f"-WorkingDirectory {literal(directory)} -LogPath {literal(directory / 'daemon.log')}\n"
+            "Write-Output 'native caller received admission'\n"
             "@{pid=$p.Id;birth=[CopilotExtensions.DaemonInstanceNative]::Birth($p)} "
             f"| ConvertTo-Json -Compress | Set-Content -LiteralPath {literal(directory / 'outcome.json')} "
             "-Encoding UTF8\n$p.Dispose()\n",
@@ -160,6 +163,12 @@ def _qualify_native_shell(root: Path, environment, pu) -> list[dict]:
                 ).read_text(encoding="utf-8", errors="replace"):
                     raise RuntimeError("native shell did not complete owned work after caller cleanup")
                 cycles.append({"caller_job_closed": True, "post_close_owned_work_completed": True})
+            except subprocess.TimeoutExpired as error:
+                details = "\n".join(
+                    path.name + ":\n" + path.read_text(encoding="utf-8", errors="replace")[-8192:]
+                    for path in directory.glob("*.log")
+                )
+                raise RuntimeError("native shell exceeded its unchanged fixture deadline:\n" + details) from error
             finally:
                 if job.handle:
                     job.terminate_and_wait(5)

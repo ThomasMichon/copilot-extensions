@@ -1109,13 +1109,12 @@ jobs:
         shell: pwsh
         run: python tools/windows_broker_consumer_acceptance.py --ephemeral-ci-consent
       - name: Real installer serving-slot retention controls
-        if: ${{ !cancelled() }}
         shell: pwsh
-        run: >-
-          python tools/run-plugin-tests.py agent-worktrees
-          --test-file tests/test_python_runtime_install.py
-          -k real_installer
-          --timeout 300 --plugin-timeout 600
+        run: |
+          foreach ($state in @('live', 'absent', 'stale')) {
+            python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_python_runtime_install.py -k "real_installer and $state" --timeout 300 --plugin-timeout 600
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
       - name: Prepare the bounded native removal controls
         id: finite-tooling
         if: ${{ !cancelled() }}
@@ -1140,6 +1139,8 @@ jobs:
             ${{ runner.temp }}/ce-broker-probe-consumers-*/desktop.json
             ${{ runner.temp }}/ce-broker-probe-consumers-*/command-*.log
             ${{ runner.temp }}/ce-broker-probe-consumers-*/command-*-requests.json
+            ${{ runner.temp }}/ce-broker-probe-consumers-*/native-*/**/*.log
+            ${{ runner.temp }}/ce-broker-probe-consumers-*/native-*/*.log
           if-no-files-found: error
 
   watch-owner-native-linux:
