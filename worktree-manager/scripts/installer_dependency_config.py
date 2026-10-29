@@ -21,6 +21,30 @@ from pathlib import Path, PureWindowsPath
 _WINDOWS = os.name == "nt"
 
 
+def argument_pairs(arguments, value_options, *, error_type):
+    """Distinguish UV option values from source operands."""
+    iterator = iter(arguments)
+    positional = False
+    for argument in iterator:
+        if positional or not argument.startswith("-"):
+            yield "", argument
+        elif argument == "--":
+            positional = True
+        else:
+            option, separator, value = argument.partition("=")
+            if (not argument.startswith("--") and len(argument) > 2
+                    and argument[:2] in value_options):
+                option, separator, value = argument[:2], "=", argument[2:]
+            if option in value_options:
+                if not separator:
+                    value = next(iterator, "")
+                if not value or value.startswith("--"):
+                    raise error_type("dependency installation option has no value")
+                yield option, value
+            else:
+                yield option, value
+
+
 def remaining_timeout(deadline, *, error_type, cap=None):
     if deadline is None:
         return cap
@@ -423,6 +447,14 @@ def config_inputs(arguments, environment, base, *, argument_pairs, toml, error_t
                 break
         candidates.append((system, False))
     return [(path, project) for path, project in candidates if path.is_file()]
+
+
+def freeze_source_editables(data):
+    sources = data.get("tool", {}).get("uv", {}).get("sources", {})
+    for entries in sources.values():
+        for source in entries if isinstance(entries, list) else [entries]:
+            if source.get("editable") is True:
+                source["editable"] = False
 
 
 def retain_editable_metadata(project, *, error_type):

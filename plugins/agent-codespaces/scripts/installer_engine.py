@@ -355,7 +355,7 @@ def _retained_inputs(inputs: FrozenInputs, uv: Path, python: Path, *, refresh: b
     selected = _installed_packages(inputs)
     with retain_uv_install(
         str(Path(_select_uv_executable(str(Path.cwd() / uv))).resolve(strict=True)),
-        ["--python", str(python), "--no-editable", "--link-mode", "copy" if refresh else "hardlink",
+        ["--python", str(python), "--link-mode", "copy" if refresh else "hardlink",
          *(["--reinstall"] if refresh else []),
          *(argument for package in selected
            for argument in ("-r", str(package / "pyproject.toml"))),
@@ -364,6 +364,7 @@ def _retained_inputs(inputs: FrozenInputs, uv: Path, python: Path, *, refresh: b
          ) for package in selected)],
         env=environment, cwd=inputs.plugin,
         trusted_source_roots=inputs.packages,
+        non_editable=True,
         excluded_local_packages=tuple(_excluded_packages(inputs)),
     ) as transaction:
         if set(transaction.sources) != set(inputs.packages):

@@ -91,7 +91,10 @@ def settings(global_value="None", packages="", index="None"):
 
 
 @pytest.mark.parametrize("declare_source", [False, True])
-def test_native_local_dependency_requires_declared_source_attribution(tmp_path, declare_source):
+@pytest.mark.parametrize("editable_source", [False, True])
+def test_native_local_dependency_requires_declared_source_attribution(
+    tmp_path, declare_source, editable_source,
+):
     import os
     from pathlib import Path
     import shutil
@@ -110,8 +113,9 @@ def test_native_local_dependency_requires_declared_source_attribution(tmp_path, 
     for name, dependency in (("fixture_local_a", ""), ("fixture_local_b", "Requires-Dist: fixture-local-a>=1\\n")):
         source = tmp_path / name
         source.mkdir()
+        editable = ",editable=true" if editable_source else ""
         mapping = (
-            '[tool.uv.sources]\nfixture-local-a = {path="../fixture_local_a"}\n'
+            '[tool.uv.sources]\nfixture-local-a = {path="../fixture_local_a"' + editable + '}\n'
             if dependency and declare_source else ""
         )
         (source / "pyproject.toml").write_text(
@@ -133,6 +137,7 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
     return name
 """, encoding="utf-8")
         sources.append(source)
+    original_manifests = {source: (source / "pyproject.toml").read_bytes() for source in sources}
     target = tmp_path / "venv"
     created = subprocess.run(
         [uv, "venv", "--python", sys._base_executable, str(target)],
@@ -154,6 +159,7 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
             assert "No solution found" in installed.stderr
         else:
             assert installed.returncode == 0, installed.stdout + installed.stderr
+    assert {source: (source / "pyproject.toml").read_bytes() for source in sources} == original_manifests
 
 
 def absolute(date):
@@ -1635,7 +1641,8 @@ def test_native_unowned_directory_is_not_a_first_party_exemption(tmp_path, edita
     arguments = ([editable] if editable else []) + [str(source)]
     result = native_policy(tmp_path, arguments)
     assert result.returncode != 0
-    assert "trusted source roots" in result.stderr
+    expected = "deployed runtimes require non-editable" if editable else "trusted source roots"
+    assert expected in result.stderr
 
 
 @pytest.mark.parametrize("reference", ["path", "url", "named"])
@@ -1661,7 +1668,11 @@ def test_native_local_wheel_refused_even_inside_attested_root(tmp_path, referenc
         arguments = ([option] if option else []) + [requirement]
     result = native_policy(tmp_path, arguments, roots=(tmp_path,))
     assert result.returncode != 0
-    assert "local artifacts cannot prove release age" in result.stderr
+    expected = (
+        "deployed runtimes require non-editable"
+        if option in ("-e", "--editable") else "local artifacts cannot prove release age"
+    )
+    assert expected in result.stderr
 
 
 @pytest.mark.parametrize("filename", ["demo.tar.gz", "demo.zip"])
@@ -2155,8 +2166,9 @@ def test_registry_only_cli_does_not_discover_product_roots(monkeypatch):
     ]
     assert policy.main(["--uv", "selected-uv", "--registry-only", "--", *arguments]) == 0
     assert len(calls) == 1
-    assert calls[0][:2] == ("selected-uv", [*arguments, "--no-editable", "--link-mode", "copy"])
+    assert calls[0][:2] == ("selected-uv", [*arguments, "--link-mode", "copy"])
     assert calls[0][2]["trusted_source_roots"] == ()
+    assert calls[0][2]["non_editable"] is True
 
 
 def test_default_cli_retains_product_attribution(monkeypatch, tmp_path):
@@ -2186,6 +2198,22 @@ def test_deployment_cli_refuses_live_or_shared_code_before_resolver(monkeypatch,
     monkeypatch.setattr(policy, "_anchor_roots", forbidden)
     assert policy.main(["--uv", "uv", "--", *arguments]) == 1
     assert "deployed runtimes require" in capsys.readouterr().err
+
+
+def test_deployment_cli_refuses_editable_requirement_before_uv(monkeypatch, tmp_path, capsys):
+    source = source_project(tmp_path / "source")
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text(f"-e {source.as_posix()}\n", encoding="utf-8")
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("editable requirement reached UV")
+
+    monkeypatch.setattr(policy, "_select_uv_executable", forbidden)
+    assert policy.main([
+        "--uv", "uv", "--trusted-source-root", str(tmp_path), "--",
+        "--no-config", "--requirements", str(requirements),
+    ]) == 1
+    assert "deployed runtimes require non-editable" in capsys.readouterr().err
 
 
 def test_registry_only_cannot_grant_explicit_source_roots(tmp_path, capsys):

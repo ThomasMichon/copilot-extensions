@@ -3711,6 +3711,14 @@ execution raises `RetainedInputCleanupError` and makes the CLI fail; it never
 turns an incomplete cleanup into success. Context-owned runtime construction
 uses the same exception-preserving cleanup path.
 
+The deployment CLI and immutable runtime engine select non-editable retention.
+Explicit editable operands, including requirement-file entries, are refused.
+Admitted local `tool.uv.sources` mappings are preserved but their editable flags
+are disabled only in private retained metadata; the original checkout is unchanged.
+Native `uv pip install` receives supported arguments, not `uv sync`'s
+`--no-editable` option. Ordinary retained-source API callers keep their explicit
+editable-install behavior unless they select non-editable retention.
+
 Absolute, non-editable source-only installations retain the common source/resource
 layout without reproducing unrelated caller-directory or staging ancestry.
 An unrelated caller uses a separate private working directory; its effective
@@ -4783,7 +4791,7 @@ repair, generation propagation and process-death/live monitor recovery still req
 own implementation and evidence.
 
 Construction uses the explicitly supplied base interpreter's `venv --copies`
-and one `uv pip install --no-sources --no-editable --link-mode copy` invocation
+and one retained, non-editable `uv pip install --link-mode copy` invocation
 over every frozen local package. It preserves the caller's configured indexes;
 it neither fetches unpublished local libraries from an index nor silently
 downgrades to another interpreter. An isolated installed-origin health probe
