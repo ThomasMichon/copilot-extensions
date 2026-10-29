@@ -9,16 +9,18 @@ Actual dispositions: [follow-through register](roadmap-follow-through.md).
 
 **Status:** Four independently admitted, agent-recommended bounded assessments,
 not implementations, accepted receiving intakes or new source assignments.
-The source snapshot is `984697ee81481e6e4f7d3ed1506557e42fe2dc7e`.
+The published source snapshot is `8552e5e196cebd983db3bd2249e70453bc2ae2d9`;
+all cited source files were verified byte-identical to that published
+revision, preserving every cited line range.
 Whole eligible originals and current refinements were retained; candidate
 metadata, reported native progress and actual source facts remain distinct.
 No issue closure is proposed by this document.
 
 ## #9471 - P1 scoped cold-Linux fixture qualification
 
-The [inline native-tools fixture](https://github.com/ThomasMichon/copilot-extensions/blob/984697ee81481e6e4f7d3ed1506557e42fe2dc7e/libs/update-driver/tests/test_first_use_genesis.py#L99-L120)
+The [inline native-tools fixture](https://github.com/ThomasMichon/copilot-extensions/blob/8552e5e196cebd983db3bd2249e70453bc2ae2d9/libs/update-driver/tests/test_first_use_genesis.py#L99-L120)
 omits `base64`; the
-[shared cold helper](https://github.com/ThomasMichon/copilot-extensions/blob/984697ee81481e6e4f7d3ed1506557e42fe2dc7e/libs/update-driver/tests/test_first_use_vault.py#L219-L264)
+[shared cold helper](https://github.com/ThomasMichon/copilot-extensions/blob/8552e5e196cebd983db3bd2249e70453bc2ae2d9/libs/update-driver/tests/test_first_use_vault.py#L219-L264)
 already includes it. Neither explicitly supplies the existing trusted
 lifecycle interpreter. The precise interpreter failure condition is an active
 test-purpose context with no usable inherited/explicit selector and no Python
@@ -50,9 +52,9 @@ identified within the bounded study; that is not proof no home exists.
 ## #9472 - P2 exact expected-manifest drift
 
 Independent standard-library JSON/AST data comparison proves that the
-[production manifest](https://github.com/ThomasMichon/copilot-extensions/blob/984697ee81481e6e4f7d3ed1506557e42fe2dc7e/plugins/agent-vault/payload-invocation.json#L1-L19)
+[production manifest](https://github.com/ThomasMichon/copilot-extensions/blob/8552e5e196cebd983db3bd2249e70453bc2ae2d9/plugins/agent-vault/payload-invocation.json#L1-L19)
 differs from the
-[exact expected dictionary](https://github.com/ThomasMichon/copilot-extensions/blob/984697ee81481e6e4f7d3ed1506557e42fe2dc7e/plugins/agent-vault/tests/test_payload_invocation.py#L17-L45)
+[exact expected dictionary](https://github.com/ThomasMichon/copilot-extensions/blob/8552e5e196cebd983db3bd2249e70453bc2ae2d9/plugins/agent-vault/tests/test_payload_invocation.py#L17-L45)
 only by existing `installerLifecycle: true`. Every other expected value agrees.
 This is stale fixture data, not a missing production capability. Canonical
 boolean validation/helper packaging, generated dispatch and retained
@@ -70,13 +72,13 @@ guards. Qualify the finite correction and existing targeted assertions at their
 original tier; retain any original Windows result as separately attributable
 evidence. Do not regenerate entrypoints, remove the capability, weaken the
 assertion or add a new all-host/full-parent programme. The
-[lifecycle declaration](https://github.com/ThomasMichon/copilot-extensions/blob/984697ee81481e6e4f7d3ed1506557e42fe2dc7e/libs/payload-invocation/README.md#L71-L86)
+[lifecycle declaration](https://github.com/ThomasMichon/copilot-extensions/blob/8552e5e196cebd983db3bd2249e70453bc2ae2d9/libs/payload-invocation/README.md#L71-L86)
 is packaging/admission data, not permission, service health or build completion.
 Containing delivery, targeted acceptance and an exact ROOT remain unestablished.
 
 ## #9481 - P2 optional Docker Config omission
 
-The [selected-image adapter](https://github.com/ThomasMichon/copilot-extensions/blob/984697ee81481e6e4f7d3ed1506557e42fe2dc7e/fleet-manager/src/fleet_manager/komodo_native.py#L153-L186)
+The [selected-image adapter](https://github.com/ThomasMichon/copilot-extensions/blob/8552e5e196cebd983db3bd2249e70453bc2ae2d9/fleet-manager/src/fleet_manager/komodo_native.py#L153-L186)
 formats `.Config.User` and sibling Env/Entrypoint/Cmd fields directly before
 bounded SDK JSON decoding. A missing map key can therefore fail in Docker's
 Go-template stage; the strict decoder cannot repair a formatter that already
@@ -110,7 +112,7 @@ this compatibility leaf neither completes nor blocks the whole parent.
 
 ## #9482 - P2 bounded Windows absence preflight
 
-The [shared Windows fixture](https://github.com/ThomasMichon/copilot-extensions/blob/984697ee81481e6e4f7d3ed1506557e42fe2dc7e/libs/update-driver/tests/test_first_use_vault.py#L239-L249)
+The [shared Windows fixture](https://github.com/ThomasMichon/copilot-extensions/blob/8552e5e196cebd983db3bd2249e70453bc2ae2d9/libs/update-driver/tests/test_first_use_vault.py#L239-L249)
 starts stock PowerShell solely for Application discovery of Python, under
 the private System32 PATH and a literal **30-second** timeout. The original
 reports run 40794977884 passing Windows foundation and cold Vault command/

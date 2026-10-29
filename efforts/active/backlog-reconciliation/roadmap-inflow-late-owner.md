@@ -9,8 +9,11 @@ Actual dispositions and count: [follow-through register](roadmap-follow-through.
 **Status:** Three independently admitted, agent-recommended **P2** proposals
 and one bounded pre-construction sequencing assessment, not implementations,
 accepted receiving intakes or source-owner assignments.
-All source evidence is fixed at
-`cc63cf74cc8bcea4c1afc27324e818e9b9f5bbc8`. The two partial studies
+The original #9465/#9466/#9468 source evidence is fixed at
+`cc63cf74cc8bcea4c1afc27324e818e9b9f5bbc8`. The later #9476 assessment
+cites published `8552e5e196cebd983db3bd2249e70453bc2ae2d9`, whose twelve
+complete source files were verified byte-identical to that study's admitted
+snapshot; the line ranges are unchanged. The two partial studies
 name exactly what they did not establish; a lookup failure is not proof of
 an undocumented owner or absent capability.
 
@@ -104,10 +107,10 @@ effort home remains unestablished, not proved absent.
 
 ## #9476 - Typed repair authority before Manager construction
 
-The [fixed runtime installer](https://github.com/ThomasMichon/copilot-extensions/blob/984697ee81481e6e4f7d3ed1506557e42fe2dc7e/worktree-manager/scripts/runtime_install.py#L414-L442)
+The [fixed runtime installer](https://github.com/ThomasMichon/copilot-extensions/blob/8552e5e196cebd983db3bd2249e70453bc2ae2d9/worktree-manager/scripts/runtime_install.py#L414-L442)
 calls `self_install` before rewriting the command to `update --repair-engine`
 and dispatching the constructed Manager. Its
-[public adapter](https://github.com/ThomasMichon/copilot-extensions/blob/984697ee81481e6e4f7d3ed1506557e42fe2dc7e/worktree-manager/src/worktree_manager/update_driver_cli.py#L281-L327)
+[public adapter](https://github.com/ThomasMichon/copilot-extensions/blob/8552e5e196cebd983db3bd2249e70453bc2ae2d9/worktree-manager/src/worktree_manager/update_driver_cli.py#L281-L327)
 constructs/enqueues `RequestSpec` later. Ordinary queued update therefore
 does not itself establish typed retained-driver admission for the earlier
 construction. This is a bounded direct-entry ordering finding, not a complete
