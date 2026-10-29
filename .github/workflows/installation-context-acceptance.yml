@@ -1113,6 +1113,7 @@ jobs:
           python tools/run-plugin-tests.py agent-procutil
           --test-file tests/test_native_daemon.py
           --test-file tests/test_native_daemon_cleanup.py
+          --test-file tests/test_metrics_native.py
           --allow-explicit-tiers --timeout 120 --plugin-timeout 300
       - name: Native first-use receipt and redirected-output logging
         if: ${{ !cancelled() }}
