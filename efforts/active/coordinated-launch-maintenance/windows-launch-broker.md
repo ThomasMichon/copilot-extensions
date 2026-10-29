@@ -55,6 +55,46 @@ component, not a new prerequisite for every service's normal start path.
 
 ## Proposed mechanism
 
+### Interactive-token desktop activation
+
+Follow-up #9522 replaces the original S4U implementation's logon contract for
+desktop use. The operator selected `interactive-token`; implementation below is
+**agent-recommended** and must clear review before source changes.
+
+Use `TASK_LOGON_INTERACTIVE_TOKEN` for the same current-user, non-elevated,
+on-demand finite task. Require an existing eligible interactive logon, including
+a locked but still logged-on desktop. Do not promise operation after sign-out,
+store a password, request S4U/batch-logon rights, silently elevate or provision
+a different service. Report an unavailable interactive-logon prerequisite or an
+actual scheduler refusal distinctly; changing the enum alone does not establish
+successful native activation.
+
+Retain the authenticated scheduler-instance/pipe identity, suspended-child
+adoption, independent lifetime proof, headlessness, bounded cleanup and existing
+installer/execution ownership. Task registration remains installer-only.
+Ordinary activation and status admission must not accept a mismatched legacy
+S4U policy as the new contract.
+
+The installer may recognize the previous S4U form only as a verified owned
+migration input: match owner, principal, action, settings and retained prior
+generation before disabling admission and draining finite instances. Failed
+publication and explicit recovery must restore the exact previous registration,
+including its original logon policy, rather than relabel an unqualified legacy
+task as interactive. Foreign or edited tasks remain unchanged and refused.
+
+Qualify first/repeat adoption, legacy migration, replacement, failed-update
+rollback, recovery, stop/removal and actual activation in a disposable Windows
+lane with an existing user logon. Keep the shared-outer negative and all-caller
+Job-close proof. Exercise concurrent installed Manager readers against a stopped
+resident and require the current roster, not just a successful task start.
+An unsuitable CI logon context is a named qualification blocker; do not substitute
+S4U or weaken the contract to make that runner pass.
+
+This closes the same least-privileged responsive-launch intent, narrowing
+availability to an existing desktop logon rather than adding a privileged
+lifecycle. Shared-host registration and rollout remain with the separately
+authorized deployment owner and its existing hold.
+
 ### One independent activation boundary
 
 Prefer the lowest-privilege Windows-owned activation that can demonstrate
