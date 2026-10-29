@@ -92,9 +92,10 @@ async def require_guest_hosting(
         from repository_policy.guest_probe import build_guest_policy_probe
 
         script, payload = build_guest_policy_probe()
+        command = f"python3 -I -S -c {shlex.quote(script)} {shlex.quote(workspace)}"
         result = await exec_with_retry(
             manager, name,
-            f"python3 -I -S -c {shlex.quote(script)} {shlex.quote(workspace)}",
+            f"bash -lc {shlex.quote(command)}",
             input_bytes=payload, timeout=90,
         )
     if result.exit_code:

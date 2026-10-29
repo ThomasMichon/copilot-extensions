@@ -21,9 +21,11 @@ to fall back to an unchecked launch. On an unprovisioned legacy CodeSpace only,
 absence of that command selects the canonical provisionless reader described
 in the repository-policy library. This reads the actual guest checkout before
 claims, credentials or plugin installation, using a temporary stdin bundle rather
-than requiring Worktrees to be installed already. Existing receiver failures and
-explicit installation contexts never take this legacy path. The final installed
-guest-side check is unchanged; this does not add a container fallback.
+than requiring Worktrees to be installed already. Both probes use the same guest
+login environment; the isolated reader refuses any explicit installation context,
+including one exported by login initialization. Existing receiver failures never
+select this fallback. The final installed guest-side check is unchanged; this
+does not add a container fallback.
 The host's venue-name launch policy is a
 separate restriction, never a replacement for repository policy.
 Direct managed `ssh --stdio` uses this read-only admission before taking a
