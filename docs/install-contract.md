@@ -2556,9 +2556,24 @@ payload/source separately from an admitted exact repair suffix, then require
 that selected completed slot rather than a healthy fallback. The shared POSIX
 readiness fragment uses the same read-only identity helper for Bridge and
 Dispatch; PowerShell keeps ordinary package readiness Python-free.
-This construction boundary does not execute the reset descriptors, establish
-old-process silence, relax command ownership, or complete fresh publication
-through corrupt deployment metadata. Those remain native lifecycle obligations.
+Fresh construction now requires MCP's finite incumbent-process settlement after
+activation, separately from completion and best-effort graceful handoff. The
+reaper reuses the native current-user census, binds exact kernel births and pins
+Windows process handles or Linux pidfds. It pauses admitted parents while closing
+their descendant trees, refuses protected/current/excluded or uninspectable
+children, then waits for every pinned member's exit. Failed pre-termination
+inspection resumes the paused members. It never uses PID files, numeric tree
+kills or process-group signals as retirement authority. Fresh mode also covers
+known legacy `.venv`, `venv` and `tool` launch paths without an old deployment
+receipt. A disabled version-reap override requests check-only admission: it cannot
+report remaining old owners as settled. Incremental callers retain best-effort
+behavior but report unconfirmed retirement as incomplete.
+
+External pinned retirement is supported on Windows and Linux; another platform
+with a live old owner refuses rather than substituting PID-only termination.
+This bounded process boundary does not clear disposable control state, remove
+old code/reactivation routes, or qualify installed-host survival. The complete
+manifest-driven reset remains a native lifecycle obligation.
 
 `tools/check-install-contract.py` checks this first adopter's complete
 `scripts` and `src` producer trees, including added/removed files, with
@@ -2572,8 +2587,8 @@ producer. A producer change must carry its manifest revision and delta;
 published history is compared with the local publication merge-base, PR base, or CI push
 parent rather than trusting a rewritten baseline. Source digests are omission
 checks, not a signing or runtime-authorization protocol. This initial data
-provider does not yet select fresh construction, clear its additional effects
-or integrate recognition with the update driver.
+provider alone neither executes effects nor grants update permission; native
+construction and process settlement consume the applicable parts separately.
 
 Worktrees uses its existing whole-action command lifecycle and the standard
 self-stage/re-exec path. Its pre-stage admission returns early for a genuinely

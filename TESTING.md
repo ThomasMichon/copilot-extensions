@@ -12,6 +12,14 @@ and unchanged incumbent bytes. The POSIX FIFO adapter requires native POSIX
 Python; Git Bash feeding a Windows Python is not qualified. These controls do
 not perform full installation, old-owner retirement or installed-host rollout.
 
+The same optional lane separately executes MCP's `test_reap_versions.py` and
+procutil's `test_process_retirement.py` on Windows and Linux. A real synthetic
+tree (including Windows-owned headless console hosts) must exit through retained
+kernel identities while its original parent survives. Native pause/rollback
+and both shell adapters' fresh-failure propagation are distinct controls.
+These process witnesses do not qualify disposable-state reset, old-code removal,
+critical transport survival, full installed acceptance or rollout.
+
 The opt-in Windows broker consumer lane also constructs the actual Manager
 runtime through its canonical installer in the credential-free disposable
 profile. Two concurrent current-roster

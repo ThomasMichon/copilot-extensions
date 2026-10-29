@@ -698,49 +698,15 @@ def _controllers(rows: list[dict[str, Any]], payload: Path, root: Path,
     return verified, redirectors
 
 
-def refuse_consumers(payload: Path, plugin: str, root: Path, shell: str, profile: Profile, *,
-                     controller_custody: Any = None, lifecycle_lease: Any = None) -> None:
-    """Require inspectable current-user processes; never signal any process."""
-    prefix = str(root).replace("\\", "/").casefold()
+def inspect_processes(payload: Path, root: Path, shell: str, profile: Profile, *,
+                      descendants: bool = False) -> list[dict[str, Any]]:
+    """Observe current-user consumers; observation never grants stop authority."""
     if os.name == "nt":
-        quote = lambda value: "'" + value.replace("'", "''") + "'"  # noqa: E731
-        script = f"$prefix={quote(prefix)};$module={quote(profile.module)};$inspector={os.getpid()}\n"
-        script += r"""
-$ErrorActionPreference='Stop'
-$sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-$raw=@(Get-CimInstance Win32_Process -ErrorAction Stop)
-$ancestors=@($inspector)
-$current=$inspector
-foreach ($level in 1..4) {
-    $parent=@($raw | Where-Object ProcessId -eq $current)
-    if ($parent.Count -ne 1) { break }
-    $current=$parent[0].ParentProcessId
-    $ancestors+=@($current)
-}
-$rows=@($raw | ForEach-Object {
-    $image=([string]$_.ExecutablePath).Replace('\','/').ToLowerInvariant()
-    $command=([string]$_.CommandLine).Replace('\','/').ToLowerInvariant()
-    $candidate=($_.ProcessId -in $ancestors -or
-        $_.Name -match '^(bash|sh)(\.exe)?$' -or
-        ($_.ParentProcessId -in $ancestors -and $_.Name -match '^(bash|sh)(\.exe)?$') -or
-        $image.StartsWith($prefix+'/') -or
-        $command.Contains($prefix) -or $command.Contains($module) -or
-        ($_.Name -match '^(python|pythonw|pypy)[0-9.]*\.exe$' -and (-not $image -or -not $command)))
-    if (-not $candidate) { return }
-    $row=$_
-    try { $owner=Invoke-CimMethod -InputObject $row -MethodName GetOwnerSid -ErrorAction Stop } catch {
-        if (-not (Get-Process -Id $row.ProcessId -ErrorAction SilentlyContinue)) { return }; throw
-    }
-    if ($owner.ReturnValue -ne 0) { throw 'Cannot attribute candidate process ownership' }
-    if ($owner.Sid -eq $sid) {
-        if (-not $image -or -not $command) { throw 'Cannot inspect a current-user candidate process' }
-        [pscustomobject]@{pid=$row.ProcessId;ppid=$row.ParentProcessId;image=$row.ExecutablePath;
-            command=$row.CommandLine;inspectionHost=($row.ProcessId -eq $PID)}
-    }
-})
-ConvertTo-Json -InputObject $rows -Compress
-"""
-        rows = json.loads(_run(payload, [shell, "-NoProfile", "-NonInteractive", "-Command", script]))
+        native = _load(_dependency(payload, "installer_engine_uninstall_windows.py"))
+        rows = native.inspect_processes(
+            root, shell, profile.module, lambda command: _run(payload, command),
+            descendants=descendants,
+        )
     elif sys.platform.startswith("linux") and Path("/proc").is_dir():
         rows = []
         for directory in Path("/proc").iterdir():
@@ -749,15 +715,30 @@ ConvertTo-Json -InputObject $rows -Compress
             try:
                 if directory.stat().st_uid != os.getuid():
                     continue
+                status = (directory / "stat").read_text()
+                fields = status[status.rfind(")") + 2:].split()
+                parent = int(fields[1])
+                created = int(fields[19])
                 argv = [os.fsdecode(value) for value in (directory / "cmdline").read_bytes().split(b"\0") if value]
                 command = " ".join(argv)
                 if not command:
                     continue
                 image = os.readlink(directory / "exe")
-                status = (directory / "stat").read_text()
-                parent = int(status[status.rfind(")") + 2:].split()[1])
-                rows.append({"pid": int(directory.name), "ppid": parent, "image": image,
-                             "command": command, "argv": argv})
+                # Bind argv/image observation to the original kernel start.
+                later = (directory / "stat").read_text()
+                if int(later[later.rfind(")") + 2:].split()[19]) != created:
+                    raise UninstallRefused("Process identity changed during inspection")
+                row = {"pid": int(directory.name), "ppid": parent, "image": image,
+                       "command": command, "argv": argv, "created": created}
+                if descendants:
+                    children = set()
+                    for task in (directory / "task").iterdir():
+                        try:
+                            children.update(int(pid) for pid in (task / "children").read_text().split())
+                        except FileNotFoundError:
+                            continue
+                    row["children"] = sorted(children)
+                rows.append(row)
             except (FileNotFoundError, ProcessLookupError):
                 continue
             except PermissionError as error:
@@ -768,6 +749,14 @@ ConvertTo-Json -InputObject $rows -Compress
         raise UninstallRefused("Runtime removal requires native Windows, Linux /proc or Darwin process inspection")
     if not any(row["pid"] == os.getpid() for row in rows):
         raise UninstallRefused("Process inventory did not include its inspector")
+    return rows
+
+
+def refuse_consumers(payload: Path, plugin: str, root: Path, shell: str, profile: Profile, *,
+                     controller_custody: Any = None, lifecycle_lease: Any = None) -> None:
+    """Require inspectable current-user processes; never signal any process."""
+    prefix = str(root).replace("\\", "/").casefold()
+    rows = inspect_processes(payload, root, shell, profile)
     identities = [profile.module]
     if profile.nested_engine:
         identities.append("agent_index_engine")

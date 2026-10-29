@@ -162,6 +162,10 @@ def test_worktrees_controller_requires_live_fixed_uninstall_stack(
     scripts = original / "scripts"
     scripts.mkdir(parents=True)
     shutil.copyfile(CONTROLLERS, scripts / CONTROLLERS.name)
+    shutil.copyfile(
+        SOURCE.with_name("installer_engine_uninstall_windows.py"),
+        scripts / "installer_engine_uninstall_windows.py",
+    )
     for name in ("runtime_install_driver.py", "command_binding.py", "command_lifecycle.py",
                  "installer_engine.py", "install.ps1"):
         (scripts / name).write_text("# ordinary fixed source fixture\n", encoding="utf-8")
@@ -399,6 +403,10 @@ def installation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path,
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
     shutil.copyfile(CONTROLLERS, scripts / CONTROLLERS.name)
+    shutil.copyfile(
+        SOURCE.with_name("installer_engine_uninstall_windows.py"),
+        scripts / "installer_engine_uninstall_windows.py",
+    )
     origin = REPO / "plugins" / "agent-bridge" / "scripts"
     shutil.copytree(origin / "installation-context", scripts / "installation-context")
     for name in (*MODULE.RUNTIME_MODULES, "command_binding.py", "command_lifecycle.py"):

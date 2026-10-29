@@ -263,6 +263,66 @@ source "$SCRIPT_DIR/source-runtime.sh"
 """
 
 
+@pytest.mark.parametrize("language", ["ps1", "sh"])
+@pytest.mark.parametrize("mode,exit_code,no_reap", [
+    ("incremental", 1, False), ("fresh", 0, False),
+    ("fresh", 1, False), ("fresh", 1, True),
+])
+def test_native_fresh_owner_settlement_failure_is_not_best_effort(
+    tmp_path: Path, language: str, mode: str, exit_code: int, no_reap: bool,
+) -> None:
+    scripts = tmp_path / "payload/scripts"
+    scripts.mkdir(parents=True)
+    observed = tmp_path / "arguments.json"
+    (scripts / "reap_versions.py").write_text(
+        "import json,sys\nfrom pathlib import Path\n"
+        f"Path({str(observed)!r}).write_text(json.dumps(sys.argv[1:]))\n"
+        f"sys.exit({exit_code})\n", encoding="utf-8",
+    )
+    q = lambda value: _quote(value, language)
+    if language == "ps1":
+        script = f"""
+Set-StrictMode -Version 2.0
+$ErrorActionPreference='Stop'
+$VersionedRuntime=$true
+$script:RuntimeConstructionSession=[pscustomobject]@{{Construction='{mode}'}}
+$ScriptDir={q(scripts)}
+$InstallDir={q(tmp_path / 'install')}
+$VenvPython={q(sys.executable)}
+$env:AGENT_MCP_NO_VERSION_REAP='{1 if no_reap else ""}'
+function Write-Ok($value) {{ }}
+function Invoke-Hidden {{ param($FilePath,$ArgList) & $FilePath @ArgList; $global:LASTEXITCODE=$LASTEXITCODE }}
+{_function('agent-mcp', 'Invoke-RuntimeOwnerSettlement', language)}
+Invoke-RuntimeOwnerSettlement
+Write-Output 'CONTINUED'
+"""
+    else:
+        script = f"""
+set -euo pipefail
+VERSIONED_RUNTIME=1
+_RUNTIME_CONSTRUCTION_MODE='{mode}'
+SCRIPT_DIR={q(scripts)}
+INSTALL_DIR={q(tmp_path / 'install')}
+VENV_PYTHON={q(sys.executable)}
+AGENT_MCP_NO_VERSION_REAP='{1 if no_reap else ""}'
+_ok() {{ :; }}
+_fail() {{ echo "$*" >&2; }}
+{_function('agent-mcp', '_settle_runtime_owners', language)}
+_settle_runtime_owners || exit 1
+echo CONTINUED
+"""
+    result = _run(tmp_path, language, script)
+    if mode == "incremental":
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not observed.exists()
+    else:
+        assert (result.returncode == 0) == (exit_code == 0), result.stdout + result.stderr
+        arguments = json.loads(observed.read_text(encoding="utf-8"))
+        assert "--fresh" in arguments
+        assert ("--check-only" in arguments) is no_reap
+        assert ("CONTINUED" in result.stdout) == (exit_code == 0)
+
+
 @pytest.mark.parametrize("plugin", PLUGINS)
 @pytest.mark.parametrize("language", ["ps1", "sh"])
 @pytest.mark.parametrize("boundary", ["admission", "lock", "build", "reuse"])
