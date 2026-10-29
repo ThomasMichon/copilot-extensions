@@ -1176,10 +1176,10 @@ Write-SetupLog "Runtime refreshed before knowledge preflight: $VenvPython"
 # that's actually still on disk.
 if ($plan.cmd) {
     $planCmd = @($plan.cmd)
-    if ($plan.seed_pending -and $planCmd.Count -ge 3 -and (
-        ($planCmd[1] -eq '-m' -and $planCmd[2] -eq 'agent_worktrees.launch_seed_exec') -or
-        ($planCmd[1] -eq '-c' -and $planCmd[2] -like '# agent-worktrees:native-setup-exec-v1*')
-    )) { $planCmd[0] = $VenvPython }
+    if ($plan.seed_pending -and $planCmd.Count -ge 3 -and
+        $planCmd[1] -eq '-m' -and $planCmd[2] -eq 'agent_worktrees.launch_seed_exec') {
+        $planCmd[0] = $VenvPython
+    }
     for ($i = 0; $i -lt $planCmd.Count - 1; $i++) {
         if ($planCmd[$i] -in @('-RuntimePython', '--runtime-python')) {
             if ($planCmd[$i + 1] -ne $VenvPython) {

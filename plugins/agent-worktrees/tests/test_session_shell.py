@@ -468,13 +468,13 @@ def test_posix_native_selection_requires_the_selected_runtime_contract(
         assert not (record.parent / "launch-attempts").exists()
         return
     index = launch_seed_exec.native_setup_index(prepared)
-    assert index == (8 if wrapped else 4)
+    assert index == (5 if wrapped else 1)
     assert Path(prepared[index]).is_relative_to(record.parent / "launch-attempts")
     assert prepared[index + 1:index + 3] == ["--launch-seed-preparation", "seed"]
     assert prepared[prepared.index("--launch-seed-id") + 1] == "staged"
     assert prepared[-4:] == command[-4:]
     if wrapped:
-        assert Path(prepared[4]) == Path(prepared[index]).with_name("launch-command.sh")
+        assert Path(prepared[1]) == Path(prepared[index]).with_name("launch-command.sh")
 
 
 @pytest.mark.skipif(os.name != "posix", reason="Native POSIX setup plan")
@@ -507,7 +507,7 @@ def test_posix_unsupported_inputs_keep_legacy_owner_without_matching_literal_val
         assert prepared[-len(command):] == command
         assert not (record.parent / "launch-attempts").exists()
     else:
-        assert launch_seed_exec.native_setup_index(prepared) == 4
+        assert launch_seed_exec.native_setup_index(prepared) == 1
         assert prepared[-len(arguments):] == arguments
 
 
@@ -548,7 +548,7 @@ def test_posix_bash_env_selection_uses_the_effective_launch_environment(
         assert prepared[-len(command):] == command
         assert not (record.parent / "launch-attempts").exists()
     else:
-        assert launch_seed_exec.native_setup_index(prepared) == 4
+        assert launch_seed_exec.native_setup_index(prepared) == 3
 
 
 @pytest.mark.skipif(os.name != "posix", reason="Native POSIX setup plan")

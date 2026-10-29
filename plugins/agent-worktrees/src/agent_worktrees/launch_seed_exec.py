@@ -21,12 +21,6 @@ from .native_arguments import SETUP_VALUE_OPTIONS, VALUE_OPTIONS
 BOUNDARY_MARKER = "# agent-worktrees:launch-seed-boundary-v1"
 ATTEMPT_BOUNDARY_MARKER = "# agent-worktrees:launch-attempt-boundary-v1"
 NATIVE_SETUP_MARKER = "# agent-worktrees:native-setup-owner-v1"
-POSIX_NATIVE_EXEC = (
-    "# agent-worktrees:native-setup-exec-v1\n"
-    "import os,sys\n"
-    "os.environ['BASH_ENV']=''\n"
-    "os.execvp(sys.argv[1],sys.argv[1:])\n"
-)
 
 
 def _interactive_console() -> bool:
@@ -75,10 +69,8 @@ def deferred_command(
         mux=mux,
     ) if prepare_native else None
     if native is not None:
-        if os.name == "posix":
-            # Older Manager refreshes the first interpreter and quotes empty env values.
-            # Replace this finite bootstrap with Bash before any setup or backend effects.
-            return [sys.executable, "-c", POSIX_NATIVE_EXEC, *native]
+        if os.name == "posix" and (environment or {}).get("BASH_ENV") == "":
+            return ["env", "BASH_ENV=", *native]
         return native
     prefix = [
         sys.executable, "-m", "agent_worktrees.launch_seed_exec",
@@ -260,9 +252,9 @@ def _native_setup_command(
 def _script_index(command: list[str]) -> int | None:
     if not command:
         return None
-    if command[1:3] == ["-c", POSIX_NATIVE_EXEC]:
-        inner = _script_index(command[3:])
-        return inner + 3 if inner is not None else None
+    if command[:2] == ["env", "BASH_ENV="]:
+        inner = _script_index(command[2:])
+        return inner + 2 if inner is not None else None
     host = Path(command[0]).name.lower()
     if host in {"bash", "bash.exe"}:
         return 1 if len(command) > 1 and not command[1].startswith("-") else None

@@ -128,10 +128,12 @@ classify shell renderers for native eligibility: an explicitly empty
 `BASH_ENV` permits the copied native seeded setup, while actual nonempty or
 unknown mux initializer state retains the existing owner. This is independent
 of marketplace cells and does not establish full launch or removal survival.
-Post-update interpreter refresh recognizes Python seed envelopes only; it does
-not replace native Bash or PowerShell hosts. POSIX native seed plans include a
-finite exec bootstrap that tolerates older refresh and empty-value forwarding,
-then replaces itself with Bash before setup or backend effects.
+Post-update interpreter refresh recognizes the legacy Python seed envelope
+only; it does not replace native Bash/PowerShell hosts or a POSIX `env` prefix.
+The native prefix applies the selected empty initializer before Bash while
+preserving Python-sensitive backend environment values. Older launchers that
+overwrite every seeded executable need this correction; no new renderer
+handshake or planner-admission fence is introduced.
 The shell launchers defer setup-log creation/pruning, trace publication, root
 registration and automatic update staging/apply until the actual target passes
 the versioned owner check. Early diagnostic messages remain in memory. Recovery

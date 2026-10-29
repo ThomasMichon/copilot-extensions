@@ -186,7 +186,7 @@ def test_powershell_launcher_contains_unwrap():
     ["bash", "default-setup.sh"],
     ["pwsh", "-File", "default-setup.ps1"],
     ["old-python", "-m", "agent_worktrees.launch_seed_exec", "--", "copilot"],
-    ["old-python", "-c", "# agent-worktrees:native-setup-exec-v1\n", "bash", "default-setup.sh"],
+    ["env", "BASH_ENV=", "bash", "default-setup.sh"],
 ])
 def test_seed_interpreter_refresh_preserves_native_hosts(tmp_path, command):
     expected = "selected-python" if command[0] == "old-python" else command[0]
@@ -211,7 +211,7 @@ def test_seed_interpreter_refresh_preserves_native_hosts(tmp_path, command):
         )
     else:
         source = _LAUNCH_SCRIPT.read_text(encoding="utf-8")
-        start = source.index('    if [[ "$_PENDING_NEW_SEED" == "1" ]] && {')
+        start = source.index('    if [[ "$_PENDING_NEW_SEED" == "1" &&')
         refresh = source[start:source.index("    _KNOWLEDGE_CWD=", start)]
         code = "\n".join([
             "set -euo pipefail",

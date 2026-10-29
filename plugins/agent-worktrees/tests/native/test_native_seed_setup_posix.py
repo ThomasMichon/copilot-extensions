@@ -462,12 +462,13 @@ def test_manager_literal_pane_environment_runs_native_setup_without_renderer_adm
     exports = source[start:source.index("    # Build command array from JSON", start)]
     start = source.index("    # Build command array from JSON")
     command_array = source[start:source.index('    SESSION_BACKEND_JSON=""', start)]
-    start = source.index('    if [[ "$_PENDING_NEW_SEED" == "1" ]] && {')
+    start = source.index('    if [[ "$_PENDING_NEW_SEED" == "1" &&')
     refresh = source[start:source.index("    _KNOWLEDGE_CWD=", start)]
     start = source.index("        TMUX_ENV_FLAGS=()")
     flags = source[start:source.index("        # Pane wrapper", start)]
     selected = {"BASH_ENV": "", "FIXTURE_LITERAL": environment["FIXTURE_LITERAL"]}
-    selected_command = ["/missing/old-runtime/python", *plan["command"][1:]]
+    selected_command = list(plan["command"])
+    selected_command[selected_command.index("--runtime-python") + 1] = "/missing/old-runtime/python"
     rendered = run_caller_owned(
         [native_bash, "-c", "\n".join([
             "set -euo pipefail",
@@ -476,7 +477,7 @@ def test_manager_literal_pane_environment_runs_native_setup_without_renderer_adm
             exports,
             command_array,
             "_PENDING_NEW_SEED=1; setup_log() { :; }",
-            'CMD_ARRAY[0]="$PYTHON"' if legacy_forwarding else refresh,
+            refresh,
             "_AHP_RESUME_AVAILABLE=0; SETUP_LOG=; LAUNCH_ID=",
             flags,
             '''"$PYTHON" -I -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "${CMD_ARRAY[@]}"''',
@@ -487,7 +488,8 @@ def test_manager_literal_pane_environment_runs_native_setup_without_renderer_adm
     )
     assert rendered.returncode == 0, rendered.stdout + rendered.stderr
     command, arguments = map(json.loads, rendered.stdout.splitlines())
-    assert command[0] == prefix[0]
+    assert command[0] == "env"
+    assert command[command.index("--runtime-python") + 1] == prefix[0]
     assert arguments == ["-e", "BASH_ENV=", "-e", "FIXTURE_LITERAL=" + selected["FIXTURE_LITERAL"]]
     for index in range(0, len(arguments), 2):
         key, _, content = arguments[index + 1].partition("=")
