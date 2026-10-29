@@ -214,7 +214,8 @@ def test_native_daemon_rejects_real_powershell_core_before_initialization():
     assert outcome["initialized"] is False
 
 
-def test_native_contained_handshake_with_credential_free_private_profile(tmp_path):
+@pytest.mark.parametrize("cycle", [0, 1])
+def test_native_contained_handshake_with_credential_free_private_profile(tmp_path, cycle):
     from agent_procutil.daemon_broker import WindowsDaemonProcess
 
     repository = Path(__file__).resolve().parents[3]
@@ -231,7 +232,9 @@ def test_native_contained_handshake_with_credential_free_private_profile(tmp_pat
     environment = fixture_environment.fixture_environment(dict(os.environ), control=True)
     environment.update({
         key: value for key, value in os.environ.items()
-        if key.startswith("COPILOT_EXTENSIONS_TEST_") or key == "COPILOT_EXTENSIONS_OWNED_JOB_SCOPES"
+        if key.startswith("COPILOT_EXTENSIONS_TEST_") or key in (
+            "COPILOT_EXTENSIONS_OWNED_JOB_SCOPES", "COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT",
+        )
     })
     environment.update({
         "HOME": str(profile), "USERPROFILE": str(profile),
@@ -243,69 +246,68 @@ def test_native_contained_handshake_with_credential_free_private_profile(tmp_pat
     def literal(path):
         return "'" + str(path).replace("'", "''") + "'"
 
-    for cycle in range(2):
-        directory = tmp_path / f"private-{cycle}"
-        directory.mkdir()
-        worker = directory / "worker.ps1"
-        worker.write_text(
-            "$ErrorActionPreference='Stop'\n"
-            f"[IO.File]::WriteAllText({literal(directory / 'started')}, 'ready')\n"
-            "$deadline=[DateTime]::UtcNow.AddSeconds(15)\n"
-            f"while (-not (Test-Path -LiteralPath {literal(directory / 'continue')})) {{\n"
-            " if ([DateTime]::UtcNow -gt $deadline) { throw 'caller did not release worker' }\n"
-            " Start-Sleep -Milliseconds 50\n}\n",
-            encoding="utf-8",
+    directory = tmp_path / f"private-{cycle}"
+    directory.mkdir()
+    worker = directory / "worker.ps1"
+    worker.write_text(
+        "$ErrorActionPreference='Stop'\n"
+        f"[IO.File]::WriteAllText({literal(directory / 'started')}, 'ready')\n"
+        "$deadline=[DateTime]::UtcNow.AddSeconds(15)\n"
+        f"while (-not (Test-Path -LiteralPath {literal(directory / 'continue')})) {{\n"
+        " if ([DateTime]::UtcNow -gt $deadline) { throw 'caller did not release worker' }\n"
+        " Start-Sleep -Milliseconds 50\n}\n",
+        encoding="utf-8",
+    )
+    caller = directory / "caller.ps1"
+    caller.write_text(
+        "$ErrorActionPreference='Stop'\n"
+        "Write-Output 'native caller loading admission'\n"
+        f". {literal(helper)}\n"
+        "Write-Output 'native caller starting daemon'\n"
+        f"$p=Start-NativeDaemon -Script {literal(worker)} -Arguments @('fixture') "
+        f"-WorkingDirectory {literal(directory)} -LogPath {literal(directory / 'daemon.log')}\n"
+        "Write-Output 'native caller received admission'\n"
+        "@{pid=$p.Id} | ConvertTo-Json -Compress "
+        f"| Set-Content -LiteralPath {literal(directory / 'outcome.json')} -Encoding UTF8\n"
+        "$p.Dispose()\n",
+        encoding="utf-8",
+    )
+    daemon = None
+    env = {**environment, "COPILOT_EXTENSIONS_DAEMON_REGISTRY": str(directory / "instances")}
+    with (directory / "caller.log").open("wb") as log:
+        process, job = pu.spawn_sync_in_kill_on_close_job(
+            [str(shell), "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(caller)],
+            env=env, cwd=directory, require_job=True, allow_breakaway=False,
+            stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, **pu.no_window_kwargs(),
         )
-        caller = directory / "caller.ps1"
-        caller.write_text(
-            "$ErrorActionPreference='Stop'\n"
-            "Write-Output 'native caller loading admission'\n"
-            f". {literal(helper)}\n"
-            "Write-Output 'native caller starting daemon'\n"
-            f"$p=Start-NativeDaemon -Script {literal(worker)} -Arguments @('fixture') "
-            f"-WorkingDirectory {literal(directory)} -LogPath {literal(directory / 'daemon.log')}\n"
-            "Write-Output 'native caller received admission'\n"
-            "@{pid=$p.Id} | ConvertTo-Json -Compress "
-            f"| Set-Content -LiteralPath {literal(directory / 'outcome.json')} -Encoding UTF8\n"
-            "$p.Dispose()\n",
-            encoding="utf-8",
-        )
-        daemon = None
-        env = {**environment, "COPILOT_EXTENSIONS_DAEMON_REGISTRY": str(directory / "instances")}
-        with (directory / "caller.log").open("wb") as log:
-            process, job = pu.spawn_sync_in_kill_on_close_job(
-                [str(shell), "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(caller)],
-                env=env, cwd=directory, require_job=True, allow_breakaway=False,
-                stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, **pu.no_window_kwargs(),
-            )
-        try:
+    try:
+        code = process.wait(timeout=30)
+        assert code == 0, (directory / "caller.log").read_text(errors="replace")
+        outcome = json.loads((directory / "outcome.json").read_text(encoding="utf-8-sig"))
+        daemon = WindowsDaemonProcess(outcome["pid"], ["native-private-profile"])
+        observe(lambda: (directory / "started").exists() or daemon.poll() is not None)
+        assert (directory / "started").exists(), (directory / "daemon.log").read_text(errors="replace")
+        stages = (directory / "daemon.log").read_text(errors="replace")
+        for stage in ("prepared", "creating", "created-suspended", "resumed", "bootstrap",
+                      "peer-ready", "connected", "offered"):
+            assert f"native-daemon-stage:{stage}" in stages
+        assert daemon.poll() is None
+        job.close()
+        daemon.wait(timeout=5)
+    except BaseException:
+        print("\n".join(
+            path.name + ":\n" + path.read_text(encoding="utf-8", errors="replace")
+            for path in directory.glob("*.log")
+        ), flush=True)
+        raise
+    finally:
+        if job.handle:
+            job.terminate_and_wait(5)
+        process.wait(timeout=5)
+        if daemon is not None:
             try:
-                code = process.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                pytest.fail("\n".join(
-                    path.name + ":\n" + path.read_text(encoding="utf-8", errors="replace")
-                    for path in directory.glob("*.log")
-                ))
-            assert code == 0, (directory / "caller.log").read_text(errors="replace")
-            outcome = json.loads((directory / "outcome.json").read_text(encoding="utf-8-sig"))
-            daemon = WindowsDaemonProcess(outcome["pid"], ["native-private-profile"])
-            observe(lambda: (directory / "started").exists() or daemon.poll() is not None)
-            assert (directory / "started").exists(), (directory / "daemon.log").read_text(errors="replace")
-            stages = (directory / "daemon.log").read_text(errors="replace")
-            for stage in ("prepared", "creating", "created-suspended", "resumed", "bootstrap",
-                          "peer-ready", "connected", "offered"):
-                assert f"native-daemon-stage:{stage}" in stages
-            assert daemon.poll() is None
-            job.close()
-            daemon.wait(timeout=5)
-        finally:
-            if job.handle:
-                job.terminate_and_wait(5)
-            process.wait(timeout=5)
-            if daemon is not None:
-                try:
-                    if daemon.poll() is None:
-                        daemon.kill()
-                    daemon.wait(timeout=5)
-                finally:
-                    daemon.close()
+                if daemon.poll() is None:
+                    daemon.kill()
+                daemon.wait(timeout=5)
+            finally:
+                daemon.close()

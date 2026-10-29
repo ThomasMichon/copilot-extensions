@@ -147,11 +147,11 @@ its existing owner; neither source work nor publication disables that hold.
   the failed #9526 qualification rather than calling that candidate delivered.
 - [x] Land the general spawn-guidance correction first and verify legitimate
   promotion to Main, separately from any runtime change.
-- [ ] Amend and review the [normal-process direction](windows-launch-broker.md#normal-process-direction)
+- [x] Amend and review the [normal-process direction](windows-launch-broker.md#normal-process-direction)
   before implementing the runtime repair: ordinary native headless/detached
   creation, explicit launcher-owned Job scopes and no automatic COM, Task
   Scheduler or UAC fallback.
-- [ ] Qualify the direct runtime boundary against all actual caller-owned
+- [x] Qualify the direct runtime boundary against all actual caller-owned
   cleanup Jobs, including bounded tools and the restrictive shared-outer
   negative. No blanket any-Job rejection or immediate-Job-only escape claim.
 - [ ] Exercise stopped-resident concurrent Manager recovery, preserve
@@ -167,6 +167,26 @@ the native runtime lifetime guarantee to every tracked launcher-owned Job
 rather than arbitrary unknown external supervisors. The concrete
 [ownership mechanism](windows-launch-broker.md#selected-runtime-ownership-contract)
 retains the restrictive shared-outer negative and the separate deployment hold.
+
+Runtime candidate #9542 qualified source
+`96feb3a0396f6d38f8f45b07d636c9f20aca3f9d` in
+[run 40856274752](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40856274752):
+two native Python survival cycles, the restrictive shared-outer negative,
+two native PowerShell post-caller owned-work cycles, actual cold Worktrees
+and Manager construction, and two concurrent stopped-resident Manager
+current-roster cycles all passed. Every reader Job closed before resident
+health rechecks and canonical shutdown. Automatic handoff preceded the held
+installer gate by 1.437 seconds. All three native installer-retention controls
+and 211 finite-removal cases passed, with five platform skips; POSIX passed.
+This is not a release or installed-host rollout.
+
+The same run exposed an aggregate item timeout in the added contained
+private-profile test. Its two cycles are now independently bounded cases,
+and its environment preserves the actual test-lifecycle context. Neither
+the 30-second caller limit nor the 15-second handshake limit changed.
+The corrected local cases pass; the final hosted gate remains required
+before source merge. The concrete ownership contract received independent
+design critique before runtime implementation.
 
 ### Phase 1 - Reviewed contract
 - [x] Land this plan through ordinary review before implementation.
