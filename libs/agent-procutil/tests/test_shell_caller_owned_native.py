@@ -334,6 +334,7 @@ def test_native_offer_failure_preserves_parent_handle_custody(mode, tmp_path):
             if mode not in ("no-permission", "wrong-permission"):
                 wire = stderr.split(b"receipt:", 1)[1] if mode.startswith("write-") else stdout
                 receipt = json.loads(wire.splitlines()[0])
+                assert receipt["version"] == 1 and receipt["scope"] == "windows-job"
                 assert receipt["nonce"] == nonce and receipt["owner_pid"] == os.getpid()
                 assert receipt["job"]["parent_pid"] == os.getpid()
                 assert receipt["job"]["parent_birth"] == parent_birth
@@ -351,7 +352,15 @@ def test_native_offer_failure_preserves_parent_handle_custody(mode, tmp_path):
                 ]
                 assert not stderr
             else:
-                assert process.returncode != 0
+                if mode in ("abort", "write-abort"):
+                    # Last-Job-handle closure may kill the worker before Python raises.
+                    flags = wintypes.DWORD()
+                    assert not kernel.GetHandleInformation(
+                        receipt["job"]["parent_handle"], ctypes.byref(flags),
+                    ), "aborted offer left its caller handle valid"
+                    assert ctypes.get_last_error() == 6, "aborted offer handle closure is unconfirmed"
+                else:
+                    assert process.returncode != 0, "offer failure unexpectedly exited successfully"
                 assert b"admitted" not in stdout and b"__COPILOT_CALLER_EXIT_" not in stdout
                 if mode in ("no-permission", "wrong-permission"):
                     assert b"original caller did not acknowledge lifetime custody" in stderr

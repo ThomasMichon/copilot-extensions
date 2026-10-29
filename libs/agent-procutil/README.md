@@ -125,6 +125,12 @@ must show exactly the correlated offered Job, if any, and return to the same
 baseline after that known Job closes, before fixture disposal. This avoids
 attributing subprocess setup or reader-thread resources to the SDK; it does not
 permit a tolerance, warmup, garbage-collection workaround or unknown-handle close.
+An explicit unadopted abort closes the worker's last kill-on-close Job handle
+and may terminate it before Python can raise an error. The fixture therefore
+checks the exact offered handle is invalid (`ERROR_INVALID_HANDLE`), no callback
+or completion was published, and the same exact handle balance is restored;
+it does not infer abort custody from a nonzero process exit. See Windows'
+[last-Job-handle termination contract](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects#managing-job-objects).
 
 ### Existing compiled entrypoints
 

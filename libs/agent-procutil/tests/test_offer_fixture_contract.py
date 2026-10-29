@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import ctypes
 import io
 import json
 import os
@@ -32,6 +33,7 @@ def fixture_native(monkeypatch, tmp_path):
         process=None, counts=[], fixture_handles=0, job=False,
         extra_handle=0, leak_on_subject=False, inherit_flags=0,
         job_closes=0, process_closed=False,
+        invalid_handle_error=6, abort_retains_handle=False, exit_override=None, stdout_extra=b"",
     )
 
     def count(_process, output):
@@ -108,11 +110,13 @@ def fixture_native(monkeypatch, tmp_path):
             assert state.decision == expected[self.mode]
             state.extra_handle = int(state.leak_on_subject)
             receipt = json.dumps({
-                "nonce": nonce, "owner_pid": os.getpid(),
+                "version": 1, "scope": "windows-job", "nonce": nonce, "owner_pid": os.getpid(),
                 "job": {"parent_pid": os.getpid(), "parent_birth": "windows:12",
                         "parent_handle": 333},
             }).encode() + b"\n"
             self.returncode = 1
+            if self.mode in ("abort", "write-abort"):
+                self.returncode = 0
             if self.mode in ("no-permission", "wrong-permission"):
                 self.errors.write(b"RuntimeError: original caller did not acknowledge lifetime custody\n")
             elif self.mode.startswith("write-"):
@@ -123,9 +127,14 @@ def fixture_native(monkeypatch, tmp_path):
                 self.errors.write(b"Job adoption is unconfirmed\n")
             if self.mode not in ("no-permission", "wrong-permission", "abort", "write-abort"):
                 state.job = True
+            elif self.mode in ("abort", "write-abort") and state.abort_retains_handle:
+                state.job = True
             if self.mode == "adopted":
                 self.returncode = 7
                 self.output.write(b"admitted\n\n__COPILOT_CALLER_EXIT_" + nonce.encode() + b"=7\n")
+            if state.exit_override is not None:
+                self.returncode = state.exit_override
+            self.output.write(state.stdout_extra)
             self.output.flush()
             self.errors.flush()
             return self.returncode
@@ -137,6 +146,7 @@ def fixture_native(monkeypatch, tmp_path):
             pytest.fail("the handle fixture must not allocate communicate reader threads")
 
     monkeypatch.setattr(parent_job, "_api", lambda: api)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: state.invalid_handle_error, raising=False)
     monkeypatch.setattr(identity, "birth_identity", lambda _pid: "windows:12")
     monkeypatch.setattr(subject.subprocess, "Popen", Process)
     return state
@@ -169,6 +179,49 @@ def test_fixture_refuses_an_inheritable_offered_handle(fixture_native, tmp_path)
         subject.test_native_offer_failure_preserves_parent_handle_custody("missing-ack", tmp_path)
     assert fixture_native.job_closes == 1
     assert fixture_native.process_closed
+
+
+@pytest.mark.parametrize("mode", [
+    "no-permission", "wrong-permission", "write-eof", "wrong-ack", "missing-ack",
+])
+def test_zero_exit_never_qualifies_unacknowledged_custody(
+    mode: str, fixture_native: SimpleNamespace, tmp_path: Path,
+) -> None:
+    fixture_native.exit_override = 0
+    with pytest.raises(AssertionError, match="offer failure unexpectedly exited successfully"):
+        subject.test_native_offer_failure_preserves_parent_handle_custody(mode, tmp_path)
+    assert fixture_native.process_closed
+
+
+@pytest.mark.parametrize("mode", ["abort", "write-abort"])
+def test_aborted_offer_requires_its_exact_caller_handle_to_be_closed(
+    mode: str, fixture_native: SimpleNamespace, tmp_path: Path,
+) -> None:
+    fixture_native.abort_retains_handle = True
+    with pytest.raises(AssertionError, match="aborted offer left its caller handle valid"):
+        subject.test_native_offer_failure_preserves_parent_handle_custody(mode, tmp_path)
+    assert fixture_native.process_closed and fixture_native.job_closes == 0
+
+
+@pytest.mark.parametrize("mode", ["abort", "write-abort"])
+def test_aborted_offer_refuses_unknown_handle_query_failures(
+    mode: str, fixture_native: SimpleNamespace, tmp_path: Path,
+) -> None:
+    fixture_native.invalid_handle_error = 5
+    with pytest.raises(AssertionError, match="aborted offer handle closure is unconfirmed"):
+        subject.test_native_offer_failure_preserves_parent_handle_custody(mode, tmp_path)
+    assert fixture_native.process_closed and fixture_native.job_closes == 0
+
+
+@pytest.mark.parametrize("mode", ["abort", "write-abort"])
+@pytest.mark.parametrize("output", [b"admitted\n", b"__COPILOT_CALLER_EXIT_"])
+def test_aborted_offer_cannot_publish_application_admission_or_completion(
+    mode: str, output: bytes, fixture_native: SimpleNamespace, tmp_path: Path,
+) -> None:
+    fixture_native.stdout_extra = output
+    with pytest.raises(AssertionError):
+        subject.test_native_offer_failure_preserves_parent_handle_custody(mode, tmp_path)
+    assert fixture_native.process_closed and fixture_native.job_closes == 0
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="bounded portable gate process control")
