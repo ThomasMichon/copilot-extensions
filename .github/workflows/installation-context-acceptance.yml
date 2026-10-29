@@ -1092,6 +1092,42 @@ jobs:
             ${{ runner.temp }}/ce-broker-probe-*/protocol-result.json
           if-no-files-found: error
 
+  windows-native-process:
+    if: ${{ inputs.windows_broker_consumers && !inputs.watch_owner && !inputs.dispatch_delegation }}
+    name: Native PowerShell owned-process lifetime (disposable Windows)
+    runs-on: windows-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Contained native admission and fresh-profile controls
+        env:
+          PROCUTIL_NATIVE_DAEMON_LIFETIME: "1"
+        shell: pwsh
+        run: >-
+          python tools/run-plugin-tests.py agent-procutil
+          --test-file tests/test_native_daemon.py
+          --test-file tests/test_native_daemon_cleanup.py
+          --allow-explicit-tiers --timeout 120 --plugin-timeout 300
+      - name: Native PowerShell post-caller owned-work lifetime
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: python tools/windows_normal_process_lifetime.py --ephemeral-ci-consent --native-shell-only
+      - name: Retain native admission and cleanup diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-native-process-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/ce-broker-probe-native-*/native-result.json
+            ${{ runner.temp }}/ce-broker-probe-native-*/native-*/*.log
+          if-no-files-found: error
+
   windows-broker-consumers:
     if: ${{ (inputs.windows_broker_probe || inputs.windows_broker_consumers) && !inputs.watch_owner && !inputs.dispatch_delegation }}
     name: Normal native Worktrees and Manager consumers (disposable Windows)
@@ -1106,9 +1142,11 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Direct Job lifetime, cold construction and concurrent Manager recovery
+        id: consumers
         shell: pwsh
         run: python tools/windows_broker_consumer_acceptance.py --ephemeral-ci-consent
       - name: Real installer serving-slot retention controls
+        if: ${{ !cancelled() && steps.consumers.outcome == 'success' }}
         shell: pwsh
         run: |
           foreach ($state in @('live', 'absent', 'stale')) {

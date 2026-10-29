@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
+import argparse
 import os
 from pathlib import Path
 import subprocess
 import sys
 import time
+import tempfile
+import traceback
 
-from windows_broker_fixture import admit
+from windows_broker_fixture import admit, fixture_environment
 
 SOURCE = Path(__file__).resolve().parents[1] / "libs" / "agent-procutil" / "src"
 
@@ -261,16 +264,53 @@ def qualify(root: Path, environment: dict[str, str]) -> dict:
                         child.close()
     return {
         "direct_native_lifetime": cycles,
-        "native_shell_lifetime": _qualify_native_shell(root, environment, pu),
         "cleanup_confirmed": True,
     }
 
 
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--ephemeral-ci-consent", action="store_true")
+    parser.add_argument("--native-shell-only", action="store_true", required=True)
+    args = parser.parse_args(argv)
+    temporary = Path(os.environ.get("RUNNER_TEMP", tempfile.gettempdir()))
+    admit(temporary / "ce-broker-probe-native-admission", args.ephemeral_ci_consent)
+    root = Path(tempfile.mkdtemp(prefix="ce-broker-probe-native-", dir=temporary))
+    profile = root / "profile"
+    profile.mkdir()
+    environment = fixture_environment(dict(os.environ), control=True)
+    environment.update(
+        HOME=str(profile), USERPROFILE=str(profile),
+        HOMEDRIVE=profile.drive, HOMEPATH=str(profile)[len(profile.drive):],
+        APPDATA=str(profile / "AppData" / "Roaming"),
+        LOCALAPPDATA=str(profile / "AppData" / "Local"),
+    )
+    for name in ("APPDATA", "LOCALAPPDATA"):
+        Path(environment[name]).mkdir(parents=True)
+    sys.path.insert(0, str(SOURCE))
+    import agent_procutil as pu
+
+    outcome = {"source": subprocess.check_output(
+        ["git", "-C", str(SOURCE.parents[2]), "rev-parse", "HEAD"],
+        text=True, **pu.no_window_kwargs(),
+    ).strip()}
+    try:
+        outcome.update(
+            qualified=True, native_shell_lifetime=_qualify_native_shell(root, environment, pu),
+        )
+    except Exception as error:
+        outcome.update(qualified=False, failure="".join(traceback.format_exception(error))[-32768:])
+    (root / "native-result.json").write_text(json.dumps(outcome, indent=2), encoding="utf-8")
+    print(json.dumps(outcome, indent=2))
+    return 0 if outcome["qualified"] else 1
+
+
 if __name__ == "__main__":
     sys.path.insert(0, str(SOURCE))
-    if len(sys.argv) != 3 or sys.argv[1] not in ("--worker", "--launcher"):
-        raise SystemExit("fixture actors require an explicit mode and private root")
-    if sys.argv[1] == "--worker":
-        _worker(Path(sys.argv[2]))
+    if len(sys.argv) == 3 and sys.argv[1] in ("--worker", "--launcher"):
+        if sys.argv[1] == "--worker":
+            _worker(Path(sys.argv[2]))
+        else:
+            _launcher(Path(sys.argv[2]), dict(os.environ))
     else:
-        _launcher(Path(sys.argv[2]), dict(os.environ))
+        raise SystemExit(main())

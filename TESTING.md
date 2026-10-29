@@ -31,6 +31,11 @@ metadata and the different-inner/shared-restrictive-outer negative before
 constructing the actual Worktrees and Manager runtimes. Only fixture Jobs
 explicitly launching durable work permit breakaway; bounded tools stay strict.
 No COM, WMI, Scheduled Task or UAC activation is exercised.
+The same selector runs native PowerShell admission/post-caller work and POSIX
+regressions as independent bounded jobs. A failure in any job remains a failed
+qualification; it does not prevent the actual Manager consumer from reporting
+its own result. Disposable Windows profiles set both forms of the home path
+consistently, including `HOMEDRIVE`/`HOMEPATH`.
 The lane constructs the actual Manager
 runtime through its canonical installer in the credential-free disposable
 profile. Two concurrent current-roster

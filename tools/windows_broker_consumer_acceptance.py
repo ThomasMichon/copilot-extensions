@@ -46,6 +46,7 @@ def qualify(root: Path) -> dict:
     environment = fixture_environment(dict(os.environ), control=True)
     environment.update(
         HOME=str(profile), USERPROFILE=str(profile), AGENT_HOME=str(profile),
+        HOMEDRIVE=profile.drive, HOMEPATH=str(profile)[len(profile.drive):],
         APPDATA=str(profile / "AppData" / "Roaming"),
         LOCALAPPDATA=str(profile / "AppData" / "Local"),
         UV_PYTHON=sys.executable, UV_PYTHON_DOWNLOADS="never",
