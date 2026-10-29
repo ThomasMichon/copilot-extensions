@@ -162,7 +162,7 @@ outcomes from agent-recommended research and prioritization mechanics.
   #8733/#7650/#8802/#9072/#9413/#7940/#7408/#9332 finite completions,
   #8796's exact retained claim
   duty, #9233's focused documentation gap and the independently verified
-  925-open census after the separately recorded administrative consolidations,
+  923-open census after the separately recorded administrative consolidations,
   alongside the earlier twelve consolidations and three further finite
   source completions; the whole
   target remains unmet. The next-decision matrix
@@ -247,7 +247,7 @@ outcomes from agent-recommended research and prioritization mechanics.
   The latest complete census is 925 whole issues, 196 above 729; all four
   departures are verified own original-cohort folds, with no new arrivals
   or external departures in that observation.
-- [ ] _(Agent-recommended)_ Deliver the [next ten finite command and
+- [x] _(Agent-recommended)_ Deliver the [next ten finite command and
   assurance relationships](receiving-next-ten.md) through ordinary review,
   actual merge and complete current readback before separate source judgments.
   Six direct Plan/local-or-global Validation/Coordination contracts under
@@ -255,6 +255,24 @@ outcomes from agent-recommended research and prioritization mechanics.
   credited sources retain their individual disposition or remaining-work
   boundaries without duplicate implementation. Draft status, existing first
   unchecked gates and all source/resource custodians remain unchanged.
+  #9511 actually merged; all four complete current ROOTs and their strict
+  annex/history were read back, followed by separate whole-source and keeper
+  judgments. Four guarded administrative folds preserve #609/#4056/#4395/
+  #4464 work under the same custodians; six sources retain their literal
+  Draft-fit or assigned-source conditions. The 2026-10-29 04:24:56 UTC
+  census is 923 whole issues, 194 above 729: four own original-cohort
+  departures coexist with one eligible and one excluded metadata-only arrival.
+  No technical completion or claim/resource release is inferred.
+- [ ] _(Agent-recommended)_ Deliver the [Transport and Bridge receiving
+ relationships](receiving-transport-bridge.md) through normal review,
+ actual merge and complete current readback before separate source judgments.
+ Seven direct source families under five existing ROOTs retain #84/#954/
+ #1460/#1843/#1941/#2860/#2885, including original alternatives, all
+ inherited acceptance and every real assignment/token/resource condition.
+ #1138 remains an external semantic owner, #4049 retains its finite
+ selected-target proof gap and #4050 remains standalone because the
+ historical-review ROOT does not fit. No new implementation, technical
+ completion, source disposition or claim release is inferred.
 - [ ] Refresh live and original-cohort metrics, append journal checkpoints, and
   continue graph-backed consolidation with creation-oldest-first coverage until
   at most 729 issues remain.
