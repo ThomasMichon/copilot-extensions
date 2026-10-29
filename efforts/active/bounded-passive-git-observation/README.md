@@ -50,6 +50,22 @@ performance-measurement, headless-launch and process-containment patterns.
   fixture or change production fsmonitor configuration.
 - Preserve #2619 and #6086 as separately owned open dependencies. This effort
   cannot complete either issue or the broader integration campaign.
+- **Later bounded admission:** The original unassigned full-R1/R2 table and P0
+  gate do not erase the subsequently declared Windows-first R1a episode under
+  its current source custodian. Planning #8372/#8379 is delivered; that narrow
+  source admission is not R1b/R2/POSIX/native admission or a new appointment.
+  Preserve surrounding F1/P/H2, owned-process and broker reservations.
+- **Continuing source custody:** Exact-hunk admission applies to actual shared
+  overlaps, not a generic ACK tour. Keep `git_ops.py` writers serial. R2 may
+  follow settled R1a while R1b waits on its real snapshot/publication handoff;
+  broader #2619/#6086 and cleanup/native owners retain independent duties.
+  No arbitrary timeout inflation, process-name kill or all-parent/native-on-
+  every-host prerequisite is added.
+- **Receiving boundary:** Normal reviewed delivery and complete current
+  Plan/Validation/Coordination/Journal readback precede any separately supported
+  administrative source judgment. Generic Taking or historical open text is
+  not a new token ceremony; actual specific conditions, active source work and
+  resource authority remain. No technical completion or claim release follows.
 
 ## Context
 
@@ -117,6 +133,27 @@ or additional operator authorization.
 - [ ] Record review, CI, release and separately authorized installed proof
   independently; no rollout is authorized here.
 
+### Direct retained acceptance from #7944/#7945
+
+These are **agent-recommended retention rows**, not implementation admission
+or executed evidence.
+
+- [ ] **P-7944-ORIGIN:** Retain the complete #7944 initial/current/default
+  total-deadline, honest UNKNOWN/classifier and contained descendant/pipe
+  contract plus served-segment AND warm-roster observation outside mutation
+  admission with actual unrelated progress. Reuse existing R1a/R1b
+  Plan/contract rows; do not add fresh per-spawn windows or drop locks without
+  explicit snapshot/fence authority.
+- [ ] **P-7945-ORIGIN:** Retain the complete #7945 invocation-local opt-out OR
+  reviewed owner session-lifetime outcome; the reviewed choice is invocation-
+  local suppression. Preserve dark/finalized and genuine-live controls,
+  operator config and exact cleanup, not a new watcher/lifetime framework.
+- [ ] **P-ADMISSION-SCOPE:** Credit merged #8372/#8379 planning and record only
+  the already declared narrow Windows-first R1a episode under its current
+  custodian. Preserve the still-open P0/full-R1/R2 gates without treating their
+  original generic unassigned wording as cancellation of that later narrow
+  admission. #8458 was observed OPEN/non-draft, not merged or permission.
+
 ## Validation Plan
 
 - [ ] Complete the plan-only checks in [validation.md](validation.md).
@@ -129,6 +166,20 @@ or additional operator authorization.
   and source reasoning are not a performance pass.
 - [ ] Retain #2619's event/controller/backstop and #6086's quiet/concurrent
   spawn-versus-peak gates with their current owners.
+- [ ] **V-7944-ORIGIN:** Retain all existing deterministic/real-process
+  first/default/segment bounds, original classification/fetch semantics,
+  total cleanup/EOF/root proof, stale result refusal and unrelated admission/
+  publication before releasing the stall, including negative held-lock
+  control. No tests are run by this amendment.
+- [ ] **V-7945-ORIGIN:** Retain at least three supported-native classify-
+  cleanup-classify cycles for dark active/finalized and a genuine owned live
+  session; inspect after each classification and cleanup, preserve config bytes
+  and refuse unsupported qualification rather than count a passing skip.
+- [ ] **V-ADMISSION-SCOPE:** Map latest exact source-scope declarations and
+  actual closeout metadata to the receiving Plan/Validation before inferring
+  progress. Source, pure injected checkpoints, native process/latency, release
+  and installed proof remain distinct; historical reported host saturation is
+  not a new current measurement.
 
 ## Proposal
 
@@ -141,6 +192,19 @@ Prefer invocation-local `-c core.fsmonitor=false` for passive classifier
 status reads over a new session-lifetime configuration policy.
 
 ## Journal
+
+### 2026-10-28 - Direct retained acceptance and bounded-admission reconciliation
+
+- Retained #7944/#7945 directly in this ROOT's Plan, actual Validation and
+  continuing Coordination, preserving original Request, Draft status,
+  participants, checked planning credit and first unchecked gates.
+- Reconciled the original generic unassigned/full-R1 language with the later
+  narrow Windows-first R1a source episode; no new executor or R1b/R2/POSIX/
+  native admission is created. Planning credit is not source or installed
+  qualification, and observed open #8458 is not a delivered result.
+- This paper amendment runs no test, contacts no owner/venue and releases no
+  claim/resource. Actual reviewed merge and complete receiving readback
+  precede a separate source judgment under its literal conditions.
 
 ### 2026-10-23 — Bounded planning
 - Resolved a local worktree-class target and compatible effort adoption.

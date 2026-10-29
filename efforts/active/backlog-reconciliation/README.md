@@ -159,9 +159,11 @@ outcomes from agent-recommended research and prioritization mechanics.
 - [ ] Verify and publish supported dispositions, preserving source versus
   release versus rollout distinctions and all active ownership.
   The [roadmap follow-through register](roadmap-follow-through.md) records
-  #8733/#7650/#8802/#9072/#9413 finite completions, #8796's exact retained claim
+  #8733/#7650/#8802/#9072/#9413/#7940/#7408/#9332 finite completions,
+  #8796's exact retained claim
   duty, #9233's focused documentation gap and the independently verified
-  926-open census after twelve administrative consolidations; the whole
+  931-open six-hour census after twelve administrative consolidations and
+  three further finite source completions; the whole
   target remains unmet. The next-decision matrix
   preserves #8682's specific finite consumer-qualification gap.
   The [bounded inflow decisions](roadmap-inflow.md) preserve #9414's P1
@@ -184,6 +186,11 @@ outcomes from agent-recommended research and prioritization mechanics.
   open-token restrictions. The work, custodians and canonical keepers remain;
   no technical completion or claim/resource release is inferred.
   The separate #4124/#4564 specific acceptance gate remains deferred.
+  The [next nine-origin receiving group](consolidation-current-unit.md#next-nine-origin-receiving-group)
+  now has coordinator-authored direct Plan/Validation/Coordination amendments
+  under five existing ROOTs. These are tracking proposals, not accepted
+  donor dispositions or new implementation assignments; normal reviewed merge
+  and complete current readback remain required before separate source judgment.
 - [ ] Refresh live and original-cohort metrics, append journal checkpoints, and
   continue graph-backed consolidation with creation-oldest-first coverage until
   at most 729 issues remain.

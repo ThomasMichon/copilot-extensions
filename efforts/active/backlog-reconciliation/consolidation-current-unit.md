@@ -35,6 +35,39 @@ fresh metadata-first research. Sixteen are potential source trackers and three
 are retained own keepers. That is a research denominator, not sixteen
 closeable issues or a numerical reduction.
 
+## Next nine-origin receiving group
+
+The next group is an **agent-recommended tracking amendment**, distinct from
+the twelve already-published administrative dispositions above. Independently
+admitted whole-clause studies support the following direct receiving proposals;
+the coordinator has authored their ROOT Plan, actual global Validation and
+continuing Coordination/Journal amendments. No source is accepted or closed by
+this proposal.
+
+| Own source | Existing receiver and complete retained acceptance |
+|---|---|
+| #4121/#5862/#6240/#6241 | [Fleet Control V2](../fleet-control-v2/README.md) directly incorporates the [41 paired Plan/Validation rows](../fleet-control-v2/retained-fleet-contracts.md). Library AND CLI list/reconciliation/delegate/transcript duties remain distinct from observation-only ownership; existing release/operation/auth/source appointments and single-operator charter remain. |
+| #7944/#7945 | [Bounded Passive Git Observation](../bounded-passive-git-observation/README.md) directly retains total observation deadlines/unlocked progress and passive fsmonitor policy/native cycles. Original full-R1/R2 gates coexist with the later narrow Windows-first R1a source admission; planning credit is not a new execution appointment or native result. |
+| #8860 | [Linux Role Fleet](../linux-role-fleet/README.md) directly incorporates the complete existing [substrate Plan AND Validation](../linux-role-fleet/komodo-substrate-lifecycle.md), preserving SDK/profile source credit and actual official-image/adopter/Linux-runtime acceptance. |
+| #4304 | [Worktree Manager Control Plane](../worktree-manager-control-plane/README.md) directly retains adoption installed/skipped/error/refusal reporting, guard OR equivalent hygiene and existing hook/auth/integration boundaries; delivered branch protection is not complete reporting. |
+| #5868 | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md) directly retains preparation lifetime/process/resource ownership, ordinary accounting, cleanup and governed acquisition/cache reuse. #7408's delivered finite routing result does not complete this separate preparation contract. |
+
+Preserve every incumbent Request/status/participant, checked prerequisite,
+first unchecked Plan/Validation gate, original alternative, finite venue/metric
+and source/resource custodian. Current source declarations remain authoritative
+at their actual narrow scopes. Generic Taking or a historical milestone is not
+a newly invented ACK ceremony; literal source-specific holds and real shared-
+source admission remain binding. No all-parent or native-on-every-host veto is
+added to a finite source judgment.
+
+Actual normal review and merge, then complete current receiving ROOT/annex
+Plan AND Validation/Coordination/Journal readback, precede any fresh separately
+supported administrative disposition. #6236 remains the open Fleet keeper.
+The existing #4124/#4564 manual-acceptance and #5972/#5974/#7937/#7946
+specific restrictions are unchanged. This group grants no implementation,
+product execution, release/installed acceptance, owner reassignment,
+claim/resource release or rollout.
+
 ## Selected direct receiving relationships
 
 The rows are independent contract lanes, not a serial implementation order.
@@ -314,3 +347,35 @@ findings. Bridge's narrower selection found no supported new unit among its
 ten detailed candidates; this is not exhaustion of its entire repertoire.
 The three new arrivals remain additional explicit research supply, not
 implementation assignments.
+
+## Current continuation after the reviewed unit
+
+#9459 published the actual unit follow-through and merged as
+`b992973b6a0493ca4e48c3e4f5986b940cafd383`. The complete parent was
+re-read after merge and remains Active. Later separate whole-contract
+admission and live explanation/state audits completed #7940/#7408/#9332
+at their original finite SOURCE tiers; their native, installed, release
+and original source/resource custodians remain separate.
+
+The next nine retained origins now have independently admitted current
+receiving maps and **unapplied** drafts: #4121/#5862/#6240/#6241 under
+Fleet V2, #7944/#7945 under Bounded Passive Git Observation, #8860 under
+the existing substrate contract, #4304 adoption reporting and #5868
+preparation ownership. Actual direct Plan AND Validation, continuing
+Coordination and Journal amendments still need normal review/merge and
+complete current readback before separately supported administrative
+judgment. No new receiver acceptance or source supersession is claimed.
+
+The inflow studies separately credit #9444's actual #9447 source delivery
+and external completed state, retain #9443's narrow forwarding boundary and
+#9448's exact first-retained-foundation/qualification gaps, and distinguish
+the four later qualification/diagnostic/fixture residuals from production
+defects. #9455 was observed open at the studies' fixed cutoffs, not delivered
+or native-qualified. Unknown native causes and launch-outcome-unknown
+responsibility are not permission to replay, weaken custody or repair a host.
+
+The [latest complete follow-through observation](roadmap-follow-through.md#external-source-delivery-and-the-six-hour-supply-observation)
+is 931 whole open, 202 above the fixed checkpoint. #9464's exact aggregate
+study awaits independent admission; #9465/#9466/#9467/#9468 remain
+metadata-only arrivals. The same four researchers and original source
+owners remain; no new worker or implementation programme is created.

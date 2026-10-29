@@ -710,6 +710,49 @@ custody.
   incomplete, eligibility changes or custody cannot be preserved, RETAIN #4123. No
   cleanup, test, implementation or parent completion is claimed.
 
+### Direct retained preparation lifetime from #5868
+
+**Agent-recommended tracking amendment.** Preserve the complete original and
+current refined preparation contract, existing primary maintainer and runner/
+UV/containment/source/native/periodic-failure custodians. #7408's separately
+delivered finite selector-routing result and Done container foundations are not
+the remaining preparation-lifetime proof.
+
+#### Plan
+
+- [ ] **P5868-1:** Own/bound preparation process tree, wall time, memory,
+  temporary/mutable state, cancellation/failure/cleanup for cold, drift/rebuild
+  and prepare-only before child work.
+- [ ] **P5868-2:** Retain #7382 setup-through-cleanup ordinary accounting and
+  provide meaningful enforced/recorded preparation budget rather than
+  post-return observation; environment admission and reuse do not replace
+  holder-lifetime ownership.
+- [ ] **P5868-3:** Preserve canonical governed editable dependency acquisition,
+  expressly supported preparation networking without fixture/test imports or
+  collection, guards/collection modes, leased-cache directory identity and safe
+  reuse.
+
+#### Local Validation
+
+- [ ] **V5868-1:** Use synthetic UV/build fixtures for cold/rebuild/prepare-only
+  timeout, descendant settlement, cancellation/failure, mutable-state/temp
+  boundary and admission release; no live package/provider credentials or host
+  process storm.
+- [ ] **V5868-2:** Retain accounting/admission/no-pytest controls, cached reuse/
+  editable source and disconnected execution selectors; do not regress shared-
+  state protection or count lease ownership as resource-lifetime proof.
+
+#### Continuing Coordination
+
+Existing primary maintainer and runner/UV/containment/source/native/periodic-
+failure custodians remain. Use the current migration-intake deduplication/
+ownership gate and explicit per-origin Plan, local AND global Validation and
+Journal readback. The delivered #7408 routing result remains finite credit,
+not another patch or whole preparation acceptance. Normal reviewed merge and
+full current receiving readback precede a separate source judgment; this paper
+amendment executes no fixture, resource action or implementation and releases
+no claim.
+
 ## Validation Plan
 
 - [ ] G5921: Resolve EVERY direct #5921 P1-P6, V1-V5 and C1-C3 clause in the Phase4 finite clean-room verdict family at its ORIGINAL source/API consumer tier: actual Python AND Python-less version/schema/evidence-complete reduction and real caller shape, explicit malformed/incomplete/unjudged NON-PASS, correct valid control/classified-jam results/exits, literal-mode separation and source-safe diagnostics. Preserve all incumbent Plan/Validation, OPEN #1303, same owners and independent #5922/#8511/#4312/#688/#1475 gates. Administrative intake is not a reducer fix or executed evidence; no live box/model/all-host/native programme or unrelated whole-portfolio prerequisite is added, and this does not waive the ROOT's own whole completion gate.
@@ -768,6 +811,13 @@ custody.
   falsify.
 - [ ] Repository documentation and contribution guidance prevent silent
   unbudgeted regrowth.
+- [ ] **G5868:** Resolve every directly retained #5868 preparation Plan/local
+  Validation row at its original synthetic/contained evidence tier: actual
+  preparation lifetime/resources, accounting and cleanup, no fixture/test
+  import or collection, governed editable acquisition and safe cache reuse.
+  Preserve the same owners and current migration-intake gates. #7408's finite
+  routing credit and Done container foundations do not complete this duty;
+  unrelated whole-portfolio, native-every-host or new ACK gates are not added.
 
 ## Proposal
 
@@ -777,6 +827,19 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-10-28 - Direct retained preparation lifetime
+
+- Added complete #5868 preparation Plan/local Validation, actual global
+  Validation and continuing Coordination under the existing primary and
+  source/resource custodians. Original Request, status, participants, checked
+  credit and first unresolved gates remain unchanged.
+- Retained #7382 ordinary setup-through-cleanup accounting and #7408's delivered
+  finite routing credit while keeping bounded preparation process/resource
+  ownership open. No test/collection/import, native process, package/provider,
+  implementation, source disposition or resource release is performed here.
+  Normal reviewed delivery and full receiving readback precede a separate
+  administrative judgment.
 
 ### 2026-10-24 - Direct retained clean-room verdict acceptance from #5921
 
