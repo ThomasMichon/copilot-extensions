@@ -209,6 +209,21 @@ def test_source_and_policy_are_revalidated_under_lock(interrupted, monkeypatch):
     assert path.read_bytes() == before
 
 
+def test_helper_help_does_not_write_payload_bytecode(tmp_path):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    for name in ("recover_command_lifecycle.py", "command_binding.py"):
+        shutil.copyfile(ROOT / "scripts" / name, scripts / name)
+    environment = {key: value for key, value in os.environ.items() if key != "PYTHONDONTWRITEBYTECODE"}
+    result = subprocess.run(
+        [sys.executable, str(scripts / "recover_command_lifecycle.py"), "--help"],
+        env=environment, capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not list(tmp_path.rglob("__pycache__"))
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Native profile fixture is Windows-specific")
 def test_real_helper_inspection_repair_and_retry_contract(interrupted):
     arguments, path = interrupted
@@ -223,25 +238,38 @@ def test_real_helper_inspection_repair_and_retry_contract(interrupted):
         "inspect", "--payload-root", str(payload), "--runtime-root", str(path.parent),
         "--project-root", str(arguments["project_root"]),
     ]
+    environment = {
+        key: value for key, value in arguments["environment"].items()
+        if key != "PYTHONDONTWRITEBYTECODE"
+    }
     before = path.read_bytes()
     foreign_helper = subprocess.run(
         [command[0], str(ROOT / "scripts" / "recover_command_lifecycle.py"), *command[2:]],
-        env=arguments["environment"], capture_output=True, text=True,
+        env=environment, capture_output=True, text=True,
         timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert foreign_helper.returncode == 2
     assert "does not own this recovery helper" in foreign_helper.stderr
     assert path.read_bytes() == before
     plan = subprocess.run(
-        command, env=arguments["environment"], capture_output=True, text=True,
+        command, env=environment, capture_output=True, text=True,
         timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert plan.returncode == 0, plan.stdout + plan.stderr
     evidence = json.loads(plan.stdout)["expectedEvidence"]
     assert path.read_bytes() == before
+    assert not list(payload.rglob("__pycache__"))
     command[2] = "repair"
+    refused = subprocess.run(
+        [*command, "--expected-evidence", "changed"], env=environment,
+        capture_output=True, text=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert refused.returncode == 3, refused.stdout + refused.stderr
+    assert "evidence changed" in refused.stderr
+    assert path.read_bytes() == before
+    assert not list(payload.rglob("__pycache__"))
     repaired = subprocess.run(
-        [*command, "--expected-evidence", evidence], env=arguments["environment"],
+        [*command, "--expected-evidence", evidence], env=environment,
         capture_output=True, text=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert repaired.returncode == 0, repaired.stdout + repaired.stderr

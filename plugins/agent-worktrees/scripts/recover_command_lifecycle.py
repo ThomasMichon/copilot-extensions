@@ -9,6 +9,8 @@ from pathlib import Path
 import sys
 from typing import Any
 
+sys.dont_write_bytecode = True
+
 import command_binding as binding
 
 
@@ -142,5 +144,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.dont_write_bytecode = True
     raise SystemExit(main())
