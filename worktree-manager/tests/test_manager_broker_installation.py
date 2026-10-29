@@ -230,6 +230,62 @@ def test_foreground_bootstrap_queues_only_its_fixed_installation_not_application
     driver.wait.assert_called_once_with("request", output=sys.stdout)
 
 
+@pytest.mark.parametrize(("command", "repair"), [
+    (["--", "update", "--force"], True),
+    (["update", "--force-runtime", "agent-worktrees"], True),
+    (["update", "--recreate-venv"], True),
+    (["update"], False),
+    (["create", "--prompt", "--force"], False),
+])
+def test_bootstrap_retains_update_repair_authority_without_executing_inhibited_work(
+    installation, monkeypatch, command, repair,
+):
+    state = installation
+    monkeypatch.setattr(state.adapter, "_source_digest", lambda payload: "a" * 64)
+    state.adapter.runtime.mark_complete(state.root, state.slot.name, payload_hash="b" * 64)
+    switch = state.root / "killswitch.json"
+    switch.write_text('{"active":true}', encoding="utf-8")
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(switch))
+    automatic = core.enqueue(
+        core.RequestSpec("automatic-fixture", cwd=str(state.root)),
+        runner=core.TrustedRunner((sys.executable, "-c", "raise SystemExit(99)"), str(state.root)),
+    )
+    executed = []
+
+    def install(transaction):
+        assert transaction.request.spec.backend == "manager-bootstrap"
+        executed.append(transaction.request.id)
+        transaction.log_path.write_text(json.dumps({
+            "schema": "copilot-extensions.manager-bootstrap", "version": 1,
+            "root": str(state.root), "source": "a" * 64, "slot": str(state.slot),
+        }) + "\n", encoding="utf-8")
+        return 0
+
+    driver = SimpleNamespace(
+        RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        enqueue=core.enqueue, drain=lambda: core.drain(executor=install), wait=core.wait,
+    )
+    normalized = command[1:] if command[:1] == ["--"] else command
+    args = SimpleNamespace(
+        payload=state.root, root=state.root, command=command,
+        repair_update=normalized[:1] == ["update"], recover_adopted=None,
+        skip_instance_reconcile=False,
+    )
+    result = state.adapter._foreground_install(args, driver)
+    assert result == (state.slot if repair else 3)
+    skipped = core.status(automatic.id)
+    assert skipped.state == "completed" and skipped.exit_code == 3 and skipped.started_at is None
+    bootstrap = next(request for request in core.status() if request.id != automatic.id)
+    assert bootstrap.spec.repair is repair
+    assert bootstrap.state == "completed" and bootstrap.exit_code == (0 if repair else 3)
+    assert executed == ([bootstrap.id] if repair else [])
+    assert bootstrap.spec.argv == (
+        ("install", "repair-update") if normalized[:1] == ["update"] else ("install",)
+    )
+    assert "--force" not in bootstrap.runner.argv
+    assert json.loads(switch.read_text()) == {"active": True}
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows removal execution ownership")
 @pytest.mark.parametrize("as_json", [False, True])
 def test_apply_removal_enters_the_driver_before_any_removal_custody(

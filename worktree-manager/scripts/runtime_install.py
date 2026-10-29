@@ -379,8 +379,13 @@ def _source_digest(payload: Path) -> str:
 
 def _foreground_install(args, driver) -> Path | int:
     """Explicit bootstrap owns the existing finite driver, not a spawn fallback."""
-    from worktree_manager.update_driver_cli import _CONTEXT_KEYS, request_context
+    from worktree_manager.update_driver_cli import _CONTEXT_KEYS, parse_options, request_context
 
+    command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    repair = False
+    if command[:1] == ["update"]:
+        options, _forwarded = parse_options(command[1:])
+        repair = options.repair
     digest = _source_digest(args.payload)
     arguments = [
         sys.executable, "-I", "-S", "-B", "-X", "utf8", str(SCRIPTS / "runtime_install.py"),
@@ -403,6 +408,7 @@ def _foreground_install(args, driver) -> Path | int:
             "manager-bootstrap", tuple(identity), project=str(args.root.resolve()),
             cwd=str(args.payload.resolve()), source=digest,
             context=tuple({**request_context(), "WORKTREE_MANAGER_ROOT": str(args.root.resolve())}.items()),
+            repair=repair,
         ),
         runner=driver.TrustedRunner(
             tuple(arguments), str(args.payload.resolve()), context_keys=_CONTEXT_KEYS,
