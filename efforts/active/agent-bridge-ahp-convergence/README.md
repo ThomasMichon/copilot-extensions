@@ -83,6 +83,30 @@ CLI/REST consumers.
   fresh ACK demands. Inherited native Phase D and existing claims stay explicit without
   an every-native-product or all-parent gate.
 
+
+<!-- backlog-reconciliation:7556:last-seven:Coordination -->
+
+### Continuing source-specific #4229
+
+#### Source #4229
+
+- **ROOT-R4229-C1:** The current actual #1266 assignee and held
+  AHP/source/resource/native/ACP/compatibility claims remain unchanged. #4229 adds no
+  execution owner or implicit enlargement. Existing credential, policy, protocol,
+  lifecycle and resource custodians retain their responsibilities.
+
+- **ROOT-R4229-C2:** Preserve inherited #989 native Phase D and existing
+  #985/#1138/#1460 boundaries unchanged. Ingress host construction and optional released
+  native-host egress remain orthogonal; #1454 is not a new Phase 3 ordering gate.
+  Broader #1266 obligations do not become new all-parent/every-native-product gates on
+  this finite wrapper.
+
+- **ROOT-R4229-C3:** The specifically retained whole-mapping acceptance is not a new
+  blanket owner ACK. #4229 stays a standalone tracker until its original condition and
+  proper current disposition are resolved. Draft status, same author/assignee, old
+  milestones or closed historical umbrellas do not supply acceptance, release custody or
+  authorize effects.
+
 ## Context
 
 agent-bridge is already a substantial host substrate: an authenticated local
@@ -340,6 +364,44 @@ or whole-parent completion gate is added.
   #1266 assignee, held source/resource claims and original qualification/activation
   gates unchanged.
 
+
+<!-- backlog-reconciliation:7556:last-seven:Plan -->
+
+### Direct retained contract proposal from #4229
+
+_Agent-recommended additive tracking proposal; the original finite
+requirements, alternatives, evidence tiers and custody remain binding._
+
+These rows retain work, not completion credit. All incumbent Request,
+Status, Participants, Plan, global Validation, Journal, checked credit and
+first unresolved gates remain intact, including prior receiving amendments.
+Reviewed document intake is not implementation, native/installed proof,
+owner reassignment, source disposition or claim/resource release.
+
+#### Source #4229
+
+- [ ] **ROOT-R4229-P1:** Place the COMPLETE conditionally proposed #4229 preservation
+  matrix under the existing #1266 lane across the actual hosted-session migration
+  phases. No subset consisting only of corpus, downstream ACP or private Host framing is
+  accepted as the whole standard public-layer outcome.
+
+- [ ] **ROOT-R4229-P2:** Directly retain credential custody/access bindings AND policy
+  enforcement together with session/resource lifecycle identity at the protocol
+  migration boundary, through their existing owners rather than a new generic handshake
+  or authority.
+
+- [ ] **ROOT-R4229-P3:** Directly retain public-interface migration plus supported
+  old/new durable-reader/writer and rollback compatibility. Consume only the relevant
+  #1460 reader/fencing/rollback prerequisites, preserve #1138 reference semantics, and
+  do not duplicate their frameworks.
+
+- [ ] **ROOT-R4229-P4:** Track the original specific #4229 condition: only the current
+  #1266 assignee's acceptance of the COMPLETE mapping within its held lane can establish
+  that proposed receiving relation. This draft/main study is not the receipt; preserve
+  #4229 standalone tracking pending proper current disposition.
+
+**Unmet source-specific condition:** The existing #1266 assignee has not supplied the required acceptance of the complete #4229 mapping. The keeper-body amendment remains unapplied. This conditional ROOT proposal, its review, file authorship and existing AHP corpus credit cannot substitute for that receipt or retire #4229.
+
 ## Validation Plan
 
 - [ ] A released AHP 0.8 client initializes, subscribes to root state, discovers
@@ -398,6 +460,41 @@ or whole-parent completion gate is added.
 - [ ] **R1266-V4:** Retain boundary-fact feedback/coordination for
   #985/#1138/#1454/#1460 and SAME current assignee/held lane. Report unavailable
   original native evidence honestly; add no all-host/whole-parent veto.
+
+
+<!-- backlog-reconciliation:7556:last-seven:Validation -->
+
+### Global validation of retained #4229
+
+#### Source #4229
+
+- [ ] **ROOT-R4229-V1:** Qualify actual standards-compatible hosted-session behavior
+  behind the public orchestration layer while preserving lifecycle and exact durable
+  resource/conversation identity. Existing source fixtures/corpus, private framing or
+  remote ACP alone are not this outcome.
+
+- [ ] **ROOT-R4229-V2:** Qualify credential and policy preservation together: unchanged
+  existing custody/target/access bindings, permission/refusal behavior and one
+  appropriate owner across protocol transitions. No secrets, real account ceremony or
+  native probe is authorized by this draft.
+
+- [ ] **ROOT-R4229-V3:** Qualify public client/CLI/REST/ACP/venue compatibility and
+  supported generation/reader/writer upgrade/rollback cases, with exact identity and
+  defined safe refusal before effects where support is absent. No unconditional data
+  rollback or every future version guarantee.
+
+- [ ] **ROOT-R4229-V4:** Retain a complete clause-by-clause mapping/receipt only if the
+  existing assigned #1266 authority actually accepts all
+  lifecycle/credential/policy/rollback/public-interface terms and its original claims.
+  Record incomplete or unavailable evidence, never turn generic Taking/same author/old
+  source credit into acceptance.
+
+- [ ] **G4229:** Resolve all direct P/V preservation clauses together at their original
+  finite hosted-session/client tier, with supported compatibility windows and unchanged
+  custodians. The incumbent #1266 assignee's specific whole-mapping acceptance remains
+  UNMET. This ROOT proposal is not that receipt, and the proposed keeper #1266 body
+  amendment remains unapplied. Keep #4229 standalone; no technical completion, source
+  disposition or claim release follows from review of this document.
 
 ## Proposal
 
@@ -549,3 +646,10 @@ policy, version decision, and exception ledger live in
 ### 2026-10-28 - Additive retained #1266 contract proposal
 
 Added direct per-source Plan, actual global Validation and continuing custody rows after whole-record and complete receiving-document research. Normal review and current complete receiving readback remain publication gates; this entry records authored tracking only, not a future merge or source disposition. All incumbent finite source/design/release/native credits remain at their actual tiers, with original alternatives, unknowns, source-specific holds and existing source/resource custodians preserved. No implementation, operational effect or claim release is authorized. The campaign's receiving register records delivery and later source judgments separately.
+
+
+<!-- backlog-reconciliation:7556:last-seven:Journal -->
+
+### 2026-10-28 - Additive retained #4229 contract proposal
+
+Authored direct per-source Plan, actual global Validation and continuing custody rows from complete original/refined requirements and admitted receiving-document evidence. This entry records a tracking proposal, not a future review, merge, acceptance or source judgment. Existing checked credit and all prior receiving amendments remain at their actual tiers. Normal publication and complete receiving readback precede separate source-specific judgments. No implementation, native experiment, runtime change, owner appointment or claim/resource release is authorized. The specific incumbent-assignee whole-mapping receipt remains unmet; #4229 stays standalone and its keeper #1266 body draft remains unapplied. The delivered AHP 0.8 corpus/classification/compatibility foundation remains credited without being mistaken for hosted-session migration, native adoption or installed acceptance.

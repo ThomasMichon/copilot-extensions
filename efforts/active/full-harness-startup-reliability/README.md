@@ -89,6 +89,31 @@ and reliably).
   global Validation/Journal, checked credit and first unchecked gates; no actual Done
   foundation is reopened.
 
+
+<!-- backlog-reconciliation:7556:last-seven:Coordination -->
+
+### Continuing source-specific #3944/#3945
+
+#### Source #3944
+
+- **C3944:** Keep actual native host, plugin producer, startup/qualification and
+  source/resource custodians and existing ROOT roles. No generic historical Taking, file
+  authorship or empty assignment grants custody, expiry or universal ACK. Normal actual
+  scoped review/readback precedes a separate acceptance/source judgment; no
+  implementation or operation is authorized. Keep #3945 actual initialization/seed scope
+  separate from #3944 one-notification render/Loading/input; coordinator #3939 work remains
+  independent reference only.
+
+#### Source #3945
+
+- **C3945:** Keep actual native host, plugin producer, startup/qualification and
+  source/resource custodians and existing ROOT roles. No generic historical Taking, file
+  authorship or empty assignment grants custody, expiry or universal ACK. Normal actual
+  scoped review/readback precedes a separate acceptance/source judgment; no
+  implementation or operation is authorized. Exactly-once is intended INITIAL startup,
+  not suppression of valid later permission/settings/resume reloads; preserve #3944's
+  separate repaint consumer.
+
 ## Context
 
 This effort is seeded directly from a live investigation this session (see
@@ -334,6 +359,60 @@ or whole-parent completion gate is added.
   owner;4282/2457/2633 are bounded related scopes, not exhaustive successors. No
   source/resource ownership transfer.
 
+
+<!-- backlog-reconciliation:7556:last-seven:Plan -->
+
+### Direct retained contract proposal from #3944/#3945
+
+_Agent-recommended additive tracking proposal; the original finite
+requirements, alternatives, evidence tiers and custody remain binding._
+
+These rows retain work, not completion credit. All incumbent Request,
+Status, Participants, Plan, global Validation, Journal, checked credit and
+first unresolved gates remain intact, including prior receiving amendments.
+Reviewed document intake is not implementation, native/installed proof,
+owner reassignment, source disposition or claim/resource release.
+
+#### Source #3944
+
+- [ ] **P3944-1:** ONE actual session.log notification renders ONCE, repaint terminates,
+  Loading ends AND native input/seeded turn is usable.
+
+- [ ] **P3944-2:** Distinguish repeated painting of ONE notification from multiple
+  producer emissions, repeated identical notifications and legitimate extension-host
+  reloads; retain exact notification/session/correlation identity.
+
+- [ ] **P3944-3:** Credit #3758 merged a30ef6ad3c9c1fd4c37468bf0f6e84e18496862b
+  once-per-known-session producer announcement mitigation; deliberate
+  announce-when-no-ID/no-state/error remains.
+
+- [ ] **P3944-4:** Use attributable supported native version/caller/event evidence;
+  native render/dedup/Loading cause and current-version fix remain unestablished by
+  repository-only historical evidence.
+
+- [ ] **P3944-5:** Keep native renderer authority separate from plugin producer
+  mitigation, #3945 double initialization and #3939 coordinator research; no new
+  service/review owner/source/resource transfer.
+
+#### Source #3945
+
+- [ ] **P3945-1:** Exactly ONE intended actual extension initialization per native
+  SESSION STARTUP, with process/session/extension-instance/init-generation attribution.
+
+- [ ] **P3945-2:** Seeded INTERACTIVE -i prompt is admitted AND actually consumed
+  without a second UNINTENDED Loading barrier or duplicate startup work.
+
+- [ ] **P3945-3:** Preserve legitimate DELIBERATE later permission/settings/resume host
+  reloads; startup exactly-once is not a once-per-entire-lifetime ban.
+
+- [ ] **P3945-4:** Credit producer announcement dedup and owned hook/bootstrap cost
+  fixes, but do not infer native construction control from marker, ready count, fewer
+  logs or hook latency.
+
+- [ ] **P3945-5:** Version/caller/native qualification and actual matching delivery
+  remain unestablished; keep #3945 distinct from #3944 single-notification repaint and
+  generic startup programme.
+
 ## Validation Plan
 
 - [ ] 20/20 clean full-harness starts: all 3 real extensions (and any others
@@ -418,6 +497,63 @@ or whole-parent completion gate is added.
   same owners and every source-specific restriction. Paper intake is not
   implementation/native/installed proof or source/resource release. No unrelated
   whole-parent, every-host or generic ACK gate.
+
+
+<!-- backlog-reconciliation:7556:last-seven:Validation -->
+
+### Global validation of retained #3944/#3945
+
+#### Source #3944
+
+- [ ] **V3944-1:** Versioned original native caller evidence correlates one emitted
+  notification with one completed render, terminated repaint, exit from Loading and
+  actual usable seeded/native input; no new 20/20 quota.
+
+- [ ] **V3944-2:** Observe actual emission/correlation and native notification handling
+  separately, including repeated-message/reload controls without using ready/log counts
+  as render proof.
+
+- [ ] **V3944-3:** Retain legitimate diagnostics and unknown-marker announcement
+  behavior; no global log suppression, disablement, source helper count or separate
+  startup success substitutes for original native outcome.
+
+- [ ] **V3944-4:** Report exact native version/caller and unavailable lanes honestly;
+  preserve original bounded scope, no experiment or native-runtime audit performed here.
+
+- [ ] **V3944-5:** Preserve actual incumbent custodians and all literal finite
+  conditions; empty current assignment does not appoint the receiving-document author or
+  imply expiry. No additional issue scope is admitted.
+
+- [ ] **G3944:** Resolve every direct P3944/V3944 clause at its ORIGINAL finite
+  supported native/caller tier, keeping actual event/init/seed identity and legitimate
+  behavior, component credit, honest unknowns and same custodians. Whole #3303
+  20/20/every-host/new ACK gates are not added.
+
+#### Source #3945
+
+- [ ] **V3945-1:** Correlate actual native startup initialization events and intended
+  host generations; one loaded line is not one initialization, two logs not two
+  initializations.
+
+- [ ] **V3945-2:** Original supported native startup shows first seed consumption/no
+  duplicate work and no unintended second Loading phase. Do not substitute successful
+  task/worker evaluation or headless ACP execution.
+
+- [ ] **V3945-3:** Differentiate duplicate initial startup from authorized later
+  permission/settings/resume reload, preserving seeded first-prompt behavior and actual
+  host lifecycle.
+
+- [ ] **V3945-4:** Native initialization/seed outcome requires its own attribution; no
+  log-count/title or current code claim is made by this documentation study.
+
+- [ ] **V3945-5:** Record supported version and unavailable lanes at original native
+  tier without deadline changes, new startup experiment, all-parent requirement or
+  source/claim closure.
+
+- [ ] **G3945:** Resolve every direct P3945/V3945 clause at its ORIGINAL finite
+  supported native/caller tier, keeping actual event/init/seed identity and legitimate
+  behavior, component credit, honest unknowns and same custodians. Whole #3303
+  20/20/every-host/new ACK gates are not added.
 
 ## Proposal
 
@@ -886,3 +1022,10 @@ correction inline, per the effort's own journal discipline)._
 ### 2026-10-28 - Additive retained #1151/#2830 contract proposal
 
 Added direct per-source Plan, actual global Validation and continuing custody rows after whole-record and complete receiving-document research. Normal review and current complete receiving readback remain publication gates; this entry records authored tracking only, not a future merge or source disposition. All incumbent finite source/design/release/native credits remain at their actual tiers, with original alternatives, unknowns, source-specific holds and existing source/resource custodians preserved. No implementation, operational effect or claim release is authorized. The campaign's receiving register records delivery and later source judgments separately.
+
+
+<!-- backlog-reconciliation:7556:last-seven:Journal -->
+
+### 2026-10-28 - Additive retained #3944/#3945 contract proposal
+
+Authored direct per-source Plan, actual global Validation and continuing custody rows from complete original/refined requirements and admitted receiving-document evidence. This entry records a tracking proposal, not a future review, merge, acceptance or source judgment. Existing checked credit and all prior receiving amendments remain at their actual tiers. Normal publication and complete receiving readback precede separate source-specific judgments. No implementation, native experiment, runtime change, owner appointment or claim/resource release is authorized.

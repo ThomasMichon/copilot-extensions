@@ -15,12 +15,6 @@ from typing import Any
 
 sys.dont_write_bytecode = True
 SCRIPTS = Path(__file__).resolve().parent
-ENTRIES = (
-    "versions", ".venv", "snapshots", "current-version", "last-known-good",
-    "running-version.json", "deploy-manifest.json", "payload-dir", "stamped-version",
-    ".provision-status",
-)
-RESOLVERS = ("resolve-runtime.ps1", "resolve-runtime.sh")
 OWNER_ENTRIES = ("stamped-version", "payload-dir", "deploy-manifest.json")
 
 
@@ -32,6 +26,11 @@ def _load(name: str, filename: str) -> Any:
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _profile() -> Any:
+    inventory = _load("_mcp_uninstall_inventory", "installer_engine_uninstall.py")
+    return inventory.profile_for(SCRIPTS.parent, "agent-mcp")
 
 
 def _ordinary_path(path: Path) -> None:
@@ -90,9 +89,10 @@ def check_root(root: Path) -> bool:
     for name in ("install.json", "runtime-deployment.json"):
         if os.path.lexists(root / name):
             raise RuntimeError("Legacy uninstall refuses installation-cell or managed-deployment metadata")
+    profile = _profile()
     snapshots = _snapshot_generations(root)
-    if not snapshots and not any(os.path.lexists(root / name) for name in ENTRIES if name != "snapshots") and not any(
-        os.path.lexists(root / "bin" / name) for name in RESOLVERS
+    if not snapshots and not any(os.path.lexists(root / name) for name in profile.root_entries if name != "snapshots") and not any(
+        os.path.lexists(root / "bin" / name) for name in profile.bin_entries
     ):
         return False
     binding = _load("_mcp_uninstall_binding", "command_binding.py")
@@ -323,6 +323,7 @@ def _restore_owner(source: Any, evidence: dict[Path, Any]) -> None:
 def uninstall(root: Path, shell: str) -> None:
     if not check_root(root):
         return
+    profile = _profile()
     runtime = _load("_mcp_uninstall_runtime", "versioned_runtime.py")
     leases = _load("_mcp_uninstall_leases", "versioned_runtime_leases.py")
     snapshots = _snapshot_generations(root)
@@ -362,7 +363,7 @@ def uninstall(root: Path, shell: str) -> None:
         if root == Path.home() / ".agent-mcp" and local_bin.exists():  # marketplace-isolation: allow legacy teardown
             _ordinary_path(local_bin)
             selected = []
-            for name in ("agent-mcp", "agent-mcp.cmd", "agent-mcp.ps1"):
+            for name in profile.local_bin_entries:
                 path = local_bin / name
                 if not os.path.lexists(path):
                     continue
@@ -398,10 +399,10 @@ def uninstall(root: Path, shell: str) -> None:
         }
         try:
             if (root / "bin").exists():
-                _remove(shell, root / "bin", RESOLVERS)
+                _remove(shell, root / "bin", profile.bin_entries)
             if commands:
                 _remove(shell, local_bin, commands)
-            _remove(shell, root, tuple(name for name in ENTRIES if name not in (*OWNER_ENTRIES, "snapshots")))
+            _remove(shell, root, tuple(name for name in profile.root_entries if name not in (*OWNER_ENTRIES, "snapshots")))
             _remove(shell, root / "snapshots", snapshots)
             for name in OWNER_ENTRIES:
                 _remove(shell, root, (name,))

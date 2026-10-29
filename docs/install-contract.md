@@ -2506,6 +2506,44 @@ ordinary daemon adapters retain their owned service-STOP ordering. Finite
 `bin_entries` and `script_entries` may name nested files: every path segment
 is validated, only declared immediate children and their own bytecode are
 selected, and unknown siblings are retained.
+
+Agent MCP's `scripts/uninstall-profile.json` now uses the version-2
+`copilot-extensions.installed-footprint` contract. Its ordered history contains
+complete snapshots and exact introduced/changed/retired deltas. The latest
+snapshot's version-1 finite profile is the removal inventory consumed by both
+the shared helper and MCP's native adapter; the adapter no longer maintains a
+second list. Existing version-1 profiles for other owners remain supported.
+Additional effect descriptors distinguish disposable tools/control state,
+identity-bound processes and owned children, registrations (none for MCP's
+installer), shared PATH integration and preserved configuration/data/locks.
+These descriptors are data, not executable deletion or termination selectors.
+Native owners still resolve and validate the addressed installation and every
+effect under their existing custody.
+
+The co-packaged `installer_engine_footprint.py` independently recognizes the
+legacy versioned layout using the deployment, selection and completion markers,
+supported footprint/schema/contract ranges and ordinary-file checks. The known
+legacy layout is revision 1, independent of the incoming manifest revision.
+Missing, corrupt, foreign or unsupported evidence returns no match without
+discarding the reset inventory or executing installed code. A layout match is
+not update permission, source/content qualification, a lifecycle handshake or
+a health result. No new installed receipt is required.
+
+`tools/check-install-contract.py` checks this first adopter's complete
+`scripts` and `src` producer trees, including added/removed files, with
+LF-normalized content digests. The manifest itself and Python bytecode caches
+and generated egg-info metadata are excluded, matching materialization.
+Promotion-owned `__version__`/`_FALLBACK_VERSION` literals in
+`src/*/__init__.py` and `src/*/_build_info.py` are normalized; all surrounding
+code remains covered.
+Coverage cannot be narrowed to selected files to hide a new
+producer. A producer change must carry its manifest revision and delta;
+published history is compared with the local publication merge-base, PR base, or CI push
+parent rather than trusting a rewritten baseline. Source digests are omission
+checks, not a signing or runtime-authorization protocol. This initial data
+provider does not yet select fresh construction, clear its additional effects
+or integrate recognition with the update driver.
+
 Worktrees uses its existing whole-action command lifecycle and the standard
 self-stage/re-exec path. Its pre-stage admission returns early for a genuinely
 absent default footprint without creating a runtime. Staged ownership resolves

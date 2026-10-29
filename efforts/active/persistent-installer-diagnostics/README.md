@@ -45,6 +45,22 @@ ownership, cleanup, review or deployment requirements.
   remains held; its source is reference material, not permission to merge or
   deploy an unqualified candidate.
 
+
+<!-- backlog-reconciliation:7556:last-seven:Coordination -->
+
+### Continuing source-specific #4055
+
+#### Source #4055
+
+- **R4055-CD1:** Continue #4055 through this ROOT's existing diagnostics
+  integration/logging and reconcile/installation-source custodians; preserve
+  steady-anvil's declared publication role, #6812/#7743 and native lifetime/recovery
+  ownership plus held qualifications. The narrow unavailable-#6859-owner countermand
+  does not appoint a new #4055 owner or authorize held-candidate deployment. Keep
+  attempt monotonicity inside the existing producer, not a broad second
+  logging/installation authority; no claim, process, record or resource effect follows
+  from this proposal.
+
 ## Context
 
 The reproduced Windows path loses output at both a Manager-to-engine handoff
@@ -158,6 +174,62 @@ the operator requirements and selected policies above remain authoritative.
 - [ ] Journal actual source/release/installed outcomes, archive the effort and
   finalize its source worktree through the native owner.
 
+
+<!-- backlog-reconciliation:7556:last-seven:Plan -->
+
+### Direct retained contract proposal from #4055
+
+_Agent-recommended additive tracking proposal; the original finite
+requirements, alternatives, evidence tiers and custody remain binding._
+
+These rows retain work, not completion credit. All incumbent Request,
+Status, Participants, Plan, global Validation, Journal, checked credit and
+first unresolved gates remain intact, including prior receiving amendments.
+Reviewed document intake is not implementation, native/installed proof,
+owner reassignment, source disposition or claim/resource release.
+
+#### Source #4055
+
+- [ ] **R4055-PD1:** Bind #4055's start time, detected/from version, target/to version,
+  steps and outcome on success AND failure to one attributable actual reconcile attempt.
+  Preserve reconcile.log OR an explicitly owner-accepted and documented supported
+  log/status/sidecar relation through the existing diagnostic producer; an empty stdout
+  file alone is not a complete record.
+
+- [ ] **R4055-PD2:** Preserve actual reconcile caller propagation for successful
+  installer, explicit nonzero/deferred return, startup failure, native stderr, wrapper
+  failure and interruption. Parent spawn, helper/recorder return and prepared attempt
+  remain distinct from the real installer's native terminal status.
+
+- [ ] **R4055-PD3:** Preserve actual installer stdout AND stderr on POSIX AND headless
+  Windows, not conhost's empty output. Surface diagnostic/status-write failure
+  explicitly through the existing degraded policy, preserve native exit/protocol stdout
+  and safe bounded draining, and credit implemented stream/Windows repairs without
+  rebuilding logging.
+
+- [ ] **R4055-PD4:** Keep attempt/worker identity and monotonic reconcile records: a
+  fast terminal result must not be overwritten by a later initial record, and an older
+  attempt must not overwrite a newer attempt. Qualify the retained POSIX
+  child-before-initial ordering case and concurrency while crediting Windows
+  mutex/attempt fencing; no second recorder or authority.
+
+- [ ] **R4055-PD5:** Preserve running/incomplete/failed/deferred/success distinctions,
+  real child status and bounded waits. A source merge, release/version, selected
+  candidate, empty log or successful command does not prove activation/serving health;
+  do not add unrelated service qualification to this finite diagnostic contract.
+
+- [ ] **R4055-PD6:** Keep records non-secret and attributable to the owning
+  installation/source through existing redaction/retention/output conventions.
+  Stale/wedged labels, deadlines, missing completion or log failures grant no kill,
+  restart, overwrite or erasure of another attempt. Preserve current
+  lifecycle/source/native/resource holders.
+
+- [ ] **R4055-PD7:** Retain all original diagnostic facts and actual caller branches
+  before source-completion judgment, separating source, native, release and installed
+  evidence. Credit existing observability, #5812 Windows fencing, #7515 command-boundary
+  recording and later bounded registered-origin timeout capture without declaring the
+  entire reconcile interface or POSIX/native/serving matrix complete.
+
 ## Validation Plan
 
 - [ ] Early admission/refusal and standalone cold paths produce discoverable
@@ -184,6 +256,50 @@ the operator requirements and selected policies above remain authoritative.
   recovery, rollback and removal.
 - [ ] Record exact installed generation and serving/cutover evidence separately
   from source fixtures, source merge, release and human terminal acceptance.
+
+
+<!-- backlog-reconciliation:7556:last-seven:Validation -->
+
+### Global validation of retained #4055
+
+#### Source #4055
+
+- [ ] **R4055-VD1:** Map every original #4055 fact (start, detected/from, target/to,
+  steps, outcome) for success AND failure to one actual attempt and the existing
+  owner-accepted log/status relation. Distributed fields must be documented and
+  attributable; an empty output file alone does not pass.
+
+- [ ] **R4055-VD2:** Verify actual successful, explicit nonzero/deferred,
+  startup-failed, native-stderr, wrapper-failed and interrupted reconcile caller
+  outcomes, preserving the real child's native exit rather than a parent/helper/recorder
+  result.
+
+- [ ] **R4055-VD3:** Retain both actual installer channels on POSIX and headless
+  Windows, safe bounded draining and explicit missing/unwritable diagnostic/status
+  failure while preserving nonzero native status and protocol stdout. Reuse existing
+  capture/redaction; conhost output is not the child result.
+
+- [ ] **R4055-VD4:** Exercise finish-before-initial and concurrent old/new-attempt
+  ordering: terminal cannot regress to initial/running, old attempts cannot replace
+  newer records, and exact worker/attempt fencing is preserved. Keep delivered Windows
+  protection credited and independently qualify the POSIX ordering case without mutating
+  a real attempt here.
+
+- [ ] **R4055-VD5:** Preserve running/incomplete/failed/deferred/success and
+  bounded-wait truth. Missing completion or successful installation-command result does
+  not assert serving health or permit a second attempt/repair; original finite
+  diagnostic acceptance is distinct from unrelated deployment qualification.
+
+- [ ] **R4055-VD6:** Verify non-secret installation/source attribution, explicit
+  diagnostic loss and no overwrite of a different current attempt. Preserve existing
+  source/resource/native holds and retention policy; no missing-log/deadline/stale label
+  creates process or recovery authority.
+
+- [ ] **R4055-VD7:** Retain exact source/native/release/installed evidence and remaining
+  original branches, with #5812/#7515 and registered-origin capture credited only at
+  their actual finite scopes. Current ROOT Draft status is not a new universal veto;
+  completed bounded source credit is not reopened and no whole-broker/all-host
+  completion gate is added.
 
 ## Proposal
 
@@ -229,3 +345,10 @@ Keep necessary lifetime/publication repair as an independently qualified slice.
 - Merged #8373 independently supplied the historical Git-evidence preparation
   needed by required CI. The operator approved dropping this proposal's
   redundant CI repair and building on that upstream fix instead.
+
+
+<!-- backlog-reconciliation:7556:last-seven:Journal -->
+
+### 2026-10-28 - Additive retained #4055 contract proposal
+
+Authored direct per-source Plan, actual global Validation and continuing custody rows from complete original/refined requirements and admitted receiving-document evidence. This entry records a tracking proposal, not a future review, merge, acceptance or source judgment. Existing checked credit and all prior receiving amendments remain at their actual tiers. Normal publication and complete receiving readback precede separate source-specific judgments. No implementation, native experiment, runtime change, owner appointment or claim/resource release is authorized. Existing stream/native-status, Windows capture/fencing, command-boundary recording and registered-origin timeout credit remain scoped. None alone proves all five reconcile facts or POSIX fast-terminal/initial ordering.

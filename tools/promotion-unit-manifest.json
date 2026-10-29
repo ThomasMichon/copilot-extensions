@@ -2783,7 +2783,7 @@
         "tools/coverage_guided_selection/correlation.py": "ad046f82729bf0c0ebdaf3ce2e780a67c173d95165fb551015614a83d1f7d170",
         "tools/coverage_guided_selection/selection.py": "bfa87b4332a72b4def6536914b3d39daa785561d90a72162ebd96339984697fb",
         "tools/governed_feed_trust.py": "0dcee2353bb09b65ffe030f4956c92c08a6ade284464ac7389389fad863e0300",
-        "tools/installer_engine_ref.py": "81290bfb18c5d0637ed200914a85334b6991853fb4390cb817bff1836024849d",
+        "tools/installer_engine_ref.py": "9ed5dd7a8acdcaef57ffb70700cc31454831b802e176f7d4664d0fd57ade0c17",
         "tools/launch_wrapper_assets_ref.py": "8b1eb2f5620cf4ba245a8acd992749e16e64694e6ebc08da4874db50c3d8e414",
         "tools/materialize_installer_engine.py": "351b30f1a0e82f37a1df39a756b9c41170cfdd551642f98fc2871f9c78d6637d",
         "tools/materialize_launch_wrapper_assets.py": "c8441a7c7edff2e36ad2019d79942b6160493f3927251b560d43219f9c75d45f",
