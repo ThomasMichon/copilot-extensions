@@ -250,21 +250,39 @@ def spawn_daemon(
         child_env.update(instance_environment(receipt))
         process = None
         creation_attempted = False
+        creation_refused = False
         resume_attempted = False
+
+        def create():
+            nonlocal creation_attempted, creation_refused
+            creation_attempted, creation_refused = True, False
+            try:
+                return subprocess.Popen(command, **popen_kwargs, **kwargs)  # noqa: S603
+            except (OSError, ValueError, TypeError):
+                creation_refused = True
+                raise
+
         try:
             if durable_windows:
                 # Query handles must close before resume: inherited handles
                 # would defeat the caller's KILL_ON_JOB_CLOSE ownership.
                 with _job_scopes.query_scopes(scope_environment) as verify:
-                    creation_attempted = True
-                    process = subprocess.Popen(command, **popen_kwargs, **kwargs)  # noqa: S603
+                    process = create()
                     verify(process._handle)
                 resume_attempted = True
                 if not pu._resume_suspended_process(process.pid):
                     raise OSError("failed to resume verified daemon")
             else:
-                process = subprocess.Popen(command, **popen_kwargs, **kwargs)  # noqa: S603
+                process = create()
         except BaseException as error:
+            if (
+                process is None and creation_attempted and not creation_refused
+            ):
+                write_logs(
+                    f"{stamp} spawn_daemon: creation-outcome-unknown; "
+                    f"type={type(error).__name__}; reservation retained\n".encode()
+                )
+                raise
             if not durable_windows:
                 refused()
                 raise
@@ -314,7 +332,7 @@ def spawn_daemon(
             receipt = reserve()
             child_env.update(instance_environment(receipt))
             try:
-                process = subprocess.Popen(command, **popen_kwargs, **kwargs)  # noqa: S603
+                process = create()
             except OSError:
                 refused()
                 raise

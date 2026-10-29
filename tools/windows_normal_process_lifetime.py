@@ -17,6 +17,20 @@ from windows_broker_fixture import admit, fixture_environment
 SOURCE = Path(__file__).resolve().parents[1] / "libs" / "agent-procutil" / "src"
 
 
+def _verified_process(pid: int, birth: str, label: str):
+    from agent_procutil.daemon_broker import WindowsDaemonProcess
+    from agent_procutil._daemon_instance_identity import _windows_birth
+
+    process = WindowsDaemonProcess(pid, [label])
+    try:
+        if _windows_birth(process._handle) != birth:
+            raise RuntimeError(f"{label} identity changed")
+    except BaseException:
+        process.close()
+        raise
+    return process
+
+
 def _observe(predicate, process, timeout=15):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -37,7 +51,7 @@ def _worker(root: Path) -> None:
     admit(root.parent, True)
     import agent_procutil as pu
     from agent_procutil import _job_scopes
-    from agent_procutil._daemon_instance_identity import birth_identity
+    from agent_procutil._daemon_instance_identity import _windows_birth
 
     python, python_env = pu.direct_python(sys.executable)
     ordinary = subprocess.Popen(
@@ -53,7 +67,7 @@ def _worker(root: Path) -> None:
         f"t.write_text(json.dumps({{'scopes':os.environ.get({_job_scopes.ENVIRONMENT_KEY!r}),"
         "'pid':os.getpid()}));t.replace(p);time.sleep(120)"
     )
-    outcome = {"ordinary": ordinary.pid, "ordinary_birth": birth_identity(ordinary.pid),
+    outcome = {"ordinary": ordinary.pid, "ordinary_birth": _windows_birth(ordinary._handle),
                "scope_count": len(_job_scopes.scope_names(os.environ))}
     try:
         daemon = pu.spawn_daemon(
@@ -66,7 +80,7 @@ def _worker(root: Path) -> None:
             process_created=error.process_created, admission_sent=error.admission_sent,
         )
     else:
-        outcome.update(admitted=True, daemon=daemon.pid, daemon_birth=birth_identity(daemon.pid))
+        outcome.update(admitted=True, daemon=daemon.pid, daemon_birth=_windows_birth(daemon._handle))
     temporary = root / "outcome.tmp"
     temporary.write_text(json.dumps(outcome), encoding="utf-8")
     temporary.replace(root / "outcome.json")
@@ -113,9 +127,6 @@ def _intermediate(root: Path, environment) -> None:
 
 
 def _qualify_native_shell(root: Path, environment, pu) -> list[dict]:
-    from agent_procutil.daemon_broker import WindowsDaemonProcess
-    from agent_procutil._daemon_instance_identity import _windows_birth
-
     def literal(path):
         return "'" + str(path).replace("'", "''") + "'"
 
@@ -172,9 +183,7 @@ def _qualify_native_shell(root: Path, environment, pu) -> list[dict]:
                         encoding="utf-8", errors="replace",
                     )[-8192:])
                 outcome = json.loads((directory / "outcome.json").read_text(encoding="utf-8-sig"))
-                daemon = WindowsDaemonProcess(outcome["pid"], ["native-shell-daemon"])
-                if _windows_birth(daemon._handle) != outcome["birth"]:
-                    raise RuntimeError("native shell daemon identity changed")
+                daemon = _verified_process(outcome["pid"], outcome["birth"], "native shell daemon")
                 job.close()
                 if daemon.poll() is not None:
                     raise RuntimeError("native shell daemon died with caller cleanup")
@@ -211,9 +220,6 @@ def qualify(root: Path, environment: dict[str, str]) -> dict:
     admit(root, True)
     sys.path.insert(0, str(SOURCE))
     import agent_procutil as pu
-    from agent_procutil.daemon_broker import WindowsDaemonProcess
-    from agent_procutil._daemon_instance_identity import _windows_birth
-
     cycles = []
     python, python_env = pu.direct_python(sys.executable)
     for cycle, restrictive in enumerate((False, False, True), 1):
@@ -236,9 +242,7 @@ def qualify(root: Path, environment: dict[str, str]) -> dict:
             )
             if outcome["scope_count"] != 2:
                 raise RuntimeError("native fixture omitted a caller cleanup ancestor")
-            ordinary = WindowsDaemonProcess(outcome["ordinary"], ["bounded-control"])
-            if _windows_birth(ordinary._handle) != outcome["ordinary_birth"]:
-                raise RuntimeError("bounded control identity changed")
+            ordinary = _verified_process(outcome["ordinary"], outcome["ordinary_birth"], "bounded control")
             if restrictive:
                 if (
                     outcome["admitted"] or not outcome.get("cleanup_confirmed")
@@ -249,9 +253,7 @@ def qualify(root: Path, environment: dict[str, str]) -> dict:
             else:
                 if not outcome["admitted"]:
                     raise RuntimeError("normal native daemon was refused: " + json.dumps(outcome))
-                daemon = WindowsDaemonProcess(outcome["daemon"], ["durable-control"])
-                if _windows_birth(daemon._handle) != outcome["daemon_birth"]:
-                    raise RuntimeError("durable control identity changed")
+                daemon = _verified_process(outcome["daemon"], outcome["daemon_birth"], "durable control")
                 ready = _observe(
                     lambda: json.loads((directory / "daemon-ready.json").read_text())
                     if (directory / "daemon-ready.json").is_file() else None, process,

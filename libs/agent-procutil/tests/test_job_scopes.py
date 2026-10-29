@@ -27,6 +27,18 @@ def test_explicit_child_environment_cannot_drop_outer_cleanup_scopes(monkeypatch
     assert scopes.scope_names(os.environ) == (outer,)
 
 
+def test_scope_aliases_merge_and_invalid_aliases_cannot_hide(monkeypatch):
+    outer, first, second = scopes.new_name(), scopes.new_name(), scopes.new_name()
+    monkeypatch.setenv(scopes.ENVIRONMENT_KEY, outer)
+    environment = {scopes.ENVIRONMENT_KEY: first, scopes.ENVIRONMENT_KEY.lower(): second}
+    child = scopes.child_environment(environment)
+    assert scopes.scope_names(child) == (outer, first, second)
+    assert list(child) == [scopes.ENVIRONMENT_KEY]
+    environment[scopes.ENVIRONMENT_KEY.lower()] = "malformed"
+    with pytest.raises(ValueError, match="scope metadata"):
+        scopes.child_environment(environment)
+
+
 @pytest.mark.parametrize("retained", [None, 0, 1])
 def test_every_scope_checked_and_query_handles_closed(monkeypatch, retained):
     names = (scopes.new_name(), scopes.new_name())

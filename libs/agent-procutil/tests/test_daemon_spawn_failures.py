@@ -56,6 +56,51 @@ def test_positive_native_breakaway_refusal_removes_record_without_activation(lau
     activate.assert_not_called()
 
 
+@pytest.mark.parametrize("mode", ["durable-windows", "contained-windows", "posix"])
+@pytest.mark.parametrize("error", [KeyboardInterrupt(), RuntimeError("creation handoff lost")])
+def test_interrupted_creation_retains_unknown_reservation_without_replay(launch, monkeypatch, mode, error):
+    from agent_procutil import _job_scopes
+
+    start, spec = launch
+    monkeypatch.setattr(pu, "_is_windows", lambda: mode != "posix")
+
+    @contextmanager
+    def scopes(environment):
+        yield Mock()
+
+    monkeypatch.setattr(_job_scopes, "query_scopes", scopes)
+    popen = Mock(side_effect=error)
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    with pytest.raises(type(error)) as caught:
+        start(breakaway=mode == "durable-windows", contained_fallback=True)
+    assert caught.value is error
+    assert len(inspect_instances(spec.registry_root)) == 1
+    assert popen.call_count == 1
+    assert "creation-outcome-unknown" in (spec.runtime_root / "log").read_text()
+
+
+def test_query_cleanup_cannot_reclassify_interrupted_creation_as_refusal(launch, monkeypatch):
+    from agent_procutil import _job_scopes
+
+    start, spec = launch
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+
+    @contextmanager
+    def scopes(environment):
+        try:
+            yield Mock()
+        finally:
+            raise OSError("query handle close failed")
+
+    monkeypatch.setattr(_job_scopes, "query_scopes", scopes)
+    monkeypatch.setattr(subprocess, "Popen", Mock(side_effect=KeyboardInterrupt()))
+    with pytest.raises(OSError, match="query handle close failed"):
+        start(contained_fallback=True)
+    assert len(inspect_instances(spec.registry_root)) == 1
+    assert subprocess.Popen.call_count == 1
+    assert "creation-outcome-unknown" in (spec.runtime_root / "log").read_text()
+
+
 def test_native_reservation_failure_is_visible_without_exception_payload(launch, monkeypatch):
     from agent_procutil import daemon_instances
 
@@ -75,7 +120,8 @@ def test_native_reservation_failure_is_visible_without_exception_payload(launch,
     broker.assert_not_called()
 
 
-def test_refused_contained_fallback_also_removes_its_new_reservation(launch, monkeypatch):
+@pytest.mark.parametrize("error,retained", [(FileNotFoundError("fallback missing"), False), (KeyboardInterrupt(), True)])
+def test_contained_fallback_settles_only_positive_creation_refusal(launch, monkeypatch, error, retained):
     start, spec = launch
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
     monkeypatch.setattr(daemon_broker, "caller_in_job", lambda: True)
@@ -84,10 +130,10 @@ def test_refused_contained_fallback_also_removes_its_new_reservation(launch, mon
     )))
     denied = PermissionError("breakaway refused")
     denied.winerror = 5
-    monkeypatch.setattr(subprocess, "Popen", Mock(side_effect=[denied, FileNotFoundError("fallback missing")]))
-    with pytest.raises(FileNotFoundError):
+    monkeypatch.setattr(subprocess, "Popen", Mock(side_effect=[denied, error]))
+    with pytest.raises(type(error)):
         start(contained_fallback=True)
-    assert inspect_instances(spec.registry_root) == []
+    assert len(inspect_instances(spec.registry_root)) == int(retained)
 
 
 @pytest.mark.parametrize("kill_fails", [False, True])

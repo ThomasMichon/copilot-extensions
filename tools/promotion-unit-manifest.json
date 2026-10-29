@@ -2668,7 +2668,7 @@
         "libs/agent-procutil/src/agent_procutil/_darwin_caller_owned.py": "4dfafcc9944e429d3c1c83525d30379c2f02473d12c4031433cf7fe4f6906974",
         "libs/agent-procutil/src/agent_procutil/_interpreter.py": "0fe387814f80638c27f4d12c7bb1c2122abaeb2b4c71b75402d471e3940f92c7",
         "libs/agent-procutil/src/agent_procutil/_linux_pidfd.py": "cfb80912e44db7f98efe911ad57dd38f0fa5eb5a28e4e7b91da8206431871560",
-        "libs/agent-procutil/src/agent_procutil/daemon.py": "91d016780cc8513d112742d55d9f24c02e9be150c000ee9959490fb02c953b5b",
+        "libs/agent-procutil/src/agent_procutil/daemon.py": "854818bdb219fd9067d5b5bb11735d3900b33b6d749471631b0c958e1c0e7fed",
         "libs/agent-procutil/src/agent_procutil/daemon_broker.py": "4a8034bfa07af5f56a382f93a45f5082e4d5b0f387f58084420d5019bde8f289",
         "libs/agent-procutil/src/agent_procutil/daemon_instances.py": "e5780dd000be04931e5b1075c5ae0e8fc47915dd343289f6f51557082e676965",
         "libs/agent-procutil/src/agent_procutil/diagnostics.py": "c5e3c4e15f1e853c4da3a2916514dbc50b743272b54223780fae6262bd3dc113",
