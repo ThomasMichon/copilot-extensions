@@ -68,6 +68,84 @@ effects or completes any parent effort.
   generic all-owner ACK, live historical-token, all-host or whole-parent veto is
   introduced.
 
+<!-- backlog-reconciliation:7556:transport-bridge-receiving -->
+
+### Continuing source-specific Transport/Bridge custody
+
+#### Source #84
+
+Continue the current ground/head, consume/task/storage, Bridge
+host/provider/native and journal custodians through this existing Active
+ROOT and eligible open bounded-source coordination. #84's entire original,
+five direct #112 rows, all 52 six-source Plan/Validation/Coordination rows
+and six #4131 cases remain binding. Preserve every protected dependency,
+actual hold and finite alternative. Current acknowledged-incumbent and
+reviewed #2175/#4181 signal-only/process-manager-agnostic boundaries govern
+obsolete clear-first/close-first/payload-spawn sketches; no native SAME-owner
+rollover or provisional receipt grants physical retirement authority.
+
+- [ ] **R84-S84-4126-C1:** Continue the current ground/head, actual host/provider pane/process and
+  #912 claim ownership unchanged. The independent thirteen-stage/dual-session archival/native
+  observability contract remains a dependency, not custody transferred by this wrapper.
+
+- [ ] **R84-S84-4126-C2:** No daemon recovery policy, native SAME-owner context rollover,
+  signal-only handoff or successful provisional launch grants pane-kill/retirement authority.
+  Preserve every original resource/activation hold and retain the source if an actual current hold
+  or finite fit cannot be preserved.
+
+- [ ] **R84-S84-4134-C1:** Continue existing project-routing, registration and introspection
+  implementers and the separate hook-CWD fallback owner. Preserve #912 and actual ground/head
+  authority; no source/resource role is received or enlarged.
+
+- [ ] **R84-S84-4134-C2:** Any new assignment or explicit hold observed before later disposition
+  remains. This intake supplies no bind, register-session, session-role, project adoption, native
+  call or mutation permission and requests no generic owner ACK.
+
+- [ ] **R84-S84-5684-C1:** Continue current #84/#2594 ground/head, consume, provider/native/manual
+  and implementation owners, including the existing #5456 relationship. Keep #912/#3000/#3584
+  independently OPEN and actual exclusive resource custody intact.
+
+- [ ] **R84-S84-5684-C2:** This is a direct tracker intake of the full original plus ALL six #4131
+  rows, not implementation or consumption/head repair. Old #84 references to #5684 do not substitute
+  for these direct clauses; preserve all current claims/checkstates and source acceptance before any
+  wrapper disposition.
+
+- [ ] **R84-S84-5997-C1:** Preserve the original contributor's path and candidate PR6009 work; its
+  current provider state is not newly adjudicated here. This receiving tracker does not supersede
+  the implementation, change its author or take over source files, claims or native resources.
+
+- [ ] **R84-S84-5997-C2:** No actual independent textual claim/assignment was found on the current
+  issue, but an actual newly observed contributor hold must keep #5997 OPEN. Do not infer release
+  from emptiness or PR age, invent a universal author ACK, or require product completion merely for
+  administrative tracking.
+
+- [ ] **R84-S84-6144-C1:** Retain #3000 target arbitration and #4539 predecessor-identity boundaries
+  plus current ground/head/task and source authorities. A report or partial head mutation does not
+  transfer custody or authorize subsequent conclusions.
+
+- [ ] **R84-S84-6144-C2:** Preserve the complete finite readonly/partial-outcome objective and
+  auditable provenance; this intake is not permission for link-succession, cleanup, a consumed-baton
+  reset, session contact or a competing reconciler.
+
+- [ ] **R84-S84-6279-C1:** Keep existing ground/head and resume-reader source ownership. The
+  historical repair/reproduction command is evidence data, not permission to mutate lineage,
+  terminate processes, spawn or alter an installed runtime.
+
+- [ ] **R84-S84-6279-C2:** Receive only original resume-selection acceptance and its finite
+  refinements. Do not silently broaden the separate restore branch or declare all succession
+  complete from this leaf; preserve incumbent #84/#112 and every independent claimant.
+
+- [ ] **R84-C1:** 84 remains canonical ground/head/lifecycle source; all original112 and52 S84
+  rows/six4131 cases survive. Existing ground/head, consume, task/storage,
+  host/provider/native/journal and actual source/resource holders retain authority.912 SAME
+  nonexpiring claimant/all24 direct rows and independent3000/3584/6579 are dependencies, not
+  received custody.
+
+- [ ] **R84-C2:** Current acknowledged-incumbent and reviewed2175/4181
+  signal-only/process-manager-agnostic boundary governs old close-first/payload mux/spawn/kill
+  wording. Preserve original finite native choices and no-close-on-plan/full-readback conditions; no
+  generic ACK, age expiry or every-host/all-parent veto.
+
 ## Context
 
 Kicked off by an operator request for a from-scratch architecture pass on
@@ -1078,6 +1156,202 @@ or whole-parent completion gate is added.
   #2335's specific confirmation hold. No timeout inflation, lock removal or generic
   cache rewrite substitutes for the retained workload proof.
 
+<!-- backlog-reconciliation:7556:transport-bridge-receiving -->
+
+### Direct retained Transport/Bridge acceptance
+
+**Agent-recommended additive tracking amendment.** Preserve every incumbent
+Request, status, checked credit, original row and first unresolved gate. The
+direct rows below retain unfinished work at its original finite scope,
+alternatives and evidence tiers. They do not authorize implementation,
+native/installed trials, operational changes, source closure, reassignment
+or claim/resource release. Normal review, actual merge and complete current
+receiving readback precede any separate source-specific disposition.
+
+
+#### Source #84
+
+#### Original ground-owned lifecycle and protected dependencies
+
+- [ ] **P84-original:** Preserve one authoritative ground-owned head,
+  affirmative active/handed-off/concluded lifecycle and two-way succession.
+  Conclusion is asserted, never inferred from liveness or timestamps.
+  Bridge derives that head without a rival pointer; active-head creation
+  refuses with structured reuse (preferred), handoff, sunset and explicit
+  break-glass choices, including an asserted incumbent absent from its own
+  store. Higher continuity layers compose the canonical link/head transition;
+  generic launch stays a ground primitive, not a second continuity owner.
+- [ ] **P84-viewer:** The live-session viewer follows the actual head and
+  offers explicitly badged non-head history. Preserve the suggested graceful
+  exit-with-handoff/open-head path under current acknowledged-incumbent and
+  provider authority, not unconditional close-first retirement.
+
+#912 retains its SAME explicit nonexpiring claimant, original role/startup/
+HOME-CWD behavior and all 24 #1920/#1921/#1922/#3096 clauses. #3000 retains
+its three-layer disagreement and all 31 #1786/#3001/#2463/#2582/#2670
+clauses, including arbitration, current-token recognition, finalization,
+focus, repeated-hop retirement OR guarded offer and native/dual-archive
+observability. #3584 retains all three #229 and six #3716 clauses:
+fresh versus explicitly recovered vacancy, atomic acknowledged predecessor
+retention, same-successor retry and later live-head reversion fencing.
+Assigned #6579 retains production-client versus later-persisted-state and
+no-retry acceptance; its explicit-bind eight-second selection does not
+change the 1.5-second hook default. None of these dependencies or resources
+is transferred into this amendment.
+
+
+- [ ] **R84-84-I112-1:** Verify the creation guard's handoff choice reaches the hosted operation,
+  preserving explicit, opt-in critical and prompt-triggered continuation.
+
+- [ ] **R84-84-I112-2:** Prove ground-layer authoritative head/lineage and caller changeover agree;
+  suppressed/best-effort failed updates cannot count as confirmed succession. Preserve #5684's
+  failure-reporting owner.
+
+- [ ] **R84-84-I112-3:** Verify events identify the actual worktree and both predecessor/successor
+  identities, independently of caller identity; clients follow the successor.
+
+- [ ] **R84-84-I112-4:** Preserve command/single-checkout hosted-session continuation as explicit
+  unresolved scope, including failed-successor recovery; rejection is not completed continuation.
+
+- [ ] **R84-84-I112-5:** Retain brief fallback, same-worktree seeding, off-by-default policy, turn
+  settling and failed-successor retention regressions. Head-first viewer/non-head badging and
+  asserted-incumbent creation protections remain required under the original umbrella.
+
+- [ ] **R84-S84-4126-P1:** Preserve the original actual native visible outcome: predecessor and
+  successor do not render over one another in the same mux pane during supported live cutover. A
+  record, seed receipt, trace or backend confirmation is not that visible result.
+
+- [ ] **R84-S84-4126-P2:** Keep exact owning mux-session, pane, Copilot-session and
+  process-incarnation identity through predecessor capture, successor creation, ancestry-qualified
+  candidate association, foregrounding and retirement; reject predecessor, wrong-pane, ambiguous
+  bare-pane and losing-race matches.
+
+- [ ] **R84-S84-4126-P3:** Retain actual failed-foreground cleanup of the exact provisional
+  successor and truthful independent foreground/consume/head-ack/retirement outcomes. Keep the last
+  valid predecessor and bounded recovery under the current admitted authority; never kill it merely
+  because spawn was attempted or resurrect unconditional self-retirement.
+
+- [ ] **R84-S84-4126-P4:** Reconcile the original close/detach-before-render suggestion with current
+  acknowledged succession and provider-owned physical action. Preserve last-window safety,
+  legitimate supported recovery and actual owner gates without inventing zero-outage, every-host or
+  universal successor-ready-before-every-retirement requirements.
+
+- [ ] **R84-S84-4134-P1:** Make explicit --worktree-id override inappropriate CWD-based project
+  selection for BOTH session-role and register-session. Both commands already consume the flag;
+  retain that real partial and address actual owning-project/tracking-scope selection, not a
+  fictional missing parser.
+
+- [ ] **R84-S84-4134-P2:** Resolve the unique correct adopted owning project for exact IDs and
+  supported unique short IDs; report ambiguous or missing identity rather than guessing another
+  project, silently adopting it or treating current CWD as authority.
+
+- [ ] **R84-S84-4134-P3:** Role reads load the selected authoritative tracking scope, and
+  registration routes/persists to that same scope even when a different project is already active.
+  When no explicit selector is supplied, retain legitimate ordinary CWD/default behavior.
+
+- [ ] **R84-S84-4134-P4:** Keep introspection, authorized registration and head/custody admission
+  distinct. Successful targeting is not permission to seize a head, repair succession or replace
+  #912; the separately completed plugin-directory hook-CWD fallback is not this cross-project fix.
+
+- [ ] **R84-S84-5684-P1:** Preserve #4131 row1: successful live cutover leaves the canonical durable
+  head naming the actual successor, and context lookup, Picker and session-role derive that same
+  head rather than a rival consumer-specific index.
+
+- [ ] **R84-S84-5684-P2:** Preserve #4131 row2: use one canonical locked lineage/head transition
+  with correct revision, authoring predecessor, actual successor and REAL handoff token. Credit
+  implemented promotion/writer behavior; do not synthesize a manual token that cancels pending work,
+  resurrect a terminal successor or repair an unrelated owner.
+
+- [ ] **R84-S84-5684-P3:** Preserve the original defect and #4131 row3: retain structured promotion
+  results through BOTH file-backed and task-backed consume results and actual model/operator-facing
+  formatting. Distinguish expected untracked/no-worktree and already-head idempotence from
+  failed/diverged or CLI/link failure; render bounded actionable partial-state warnings rather than
+  full-cutover success.
+
+- [ ] **R84-S84-5684-P4:** Preserve #4131 row4: revalidate expected predecessor, actual current
+  head, revision and real token/candidate authority AT the canonical mutation boundary. A pre-read
+  cannot overwrite a concurrent different head; expose an explicit bounded supported repair result,
+  never a guessed predecessor or foreign-head takeover.
+
+- [ ] **R84-S84-5684-P5:** Preserve #4131 row5: already-exclusive delivery/claim survives promotion
+  failure. Do not unconsume, invite a second consumer, replay another owner's checkpoint, release a
+  claim or retire a predecessor to make lineage bookkeeping look successful.
+
+- [ ] **R84-S84-5684-P6:** Preserve #4131 row6 and all original finite choices: file/task retry and
+  same-session idempotence, absent/untracked outcomes, real CLI/link failures, divergent/concurrent
+  head changes and visible consumer results remain explicit, with source fixtures, actual native
+  ownership and installed adoption kept at separate tiers.
+
+- [ ] **R84-S84-5997-P1:** For a session started inside the active project's real main/anchor
+  checkout, resolve the actual same Git top-level/bare-directory ownership and register it to
+  @anchor, not linked-worktree adoption or an invented managed checkout. Preserve correct
+  distinctions for linked, bare and foreign roots.
+
+- [ ] **R84-S84-5997-P2:** Persist the normal session entry plus activation, a worktree-binding.json
+  stamp naming @anchor and session_started event. Normal list-sessions --worktree @anchor and
+  head-session --worktree @anchor use their usual envelopes so project session/history/Picker
+  consumers can observe anchor sessions.
+
+- [ ] **R84-S84-5997-P3:** Keep @anchor a machine-local ledger, NEVER a worktree: no status updater,
+  monitor, profile assignment or handoff linkage; ordinary list_records excludes it except opt-in
+  claim/session readers, finalize/push-changes refuse it, reap skips it and short-suffix worktree
+  matching never selects it.
+
+- [ ] **R84-S84-5997-P4:** Preserve existing linked-worktree/session registration and atomic
+  first-use anchor creation. Candidate tests, JSON examples and the previously reported unmerged
+  contributor PR are credited as candidate work, not delivery; no new desktop/native portfolio or
+  competing implementation replaces the finite original.
+
+- [ ] **R84-S84-6144-P1:** Provide a read-only reconciliation plan explaining existing immutable
+  edges, exact token-consumption evidence, head implications, conflicts and required actual
+  authorization before any later recovery.
+
+- [ ] **R84-S84-6144-P2:** Keep historical token consumption distinct from the newly intended
+  continued objective's completion. Preserve competing predecessors and immutable provenance; never
+  replace an edge or consume a token merely to clear pending presentation.
+
+- [ ] **R84-S84-6144-P3:** Expose the original two-step partial result: an authorized first edge may
+  already have moved the head before the second edge refuses. Record preceding success/revision,
+  remaining conflict and truthful recoverable current head rather than claiming whole-chain success
+  or silently undoing/overwriting it.
+
+- [ ] **R84-S84-6144-P4:** Keep legitimate unconsumed batons available and preserve the current
+  correct single-edge conflict refusal. Repeated preview/authorized recovery must be idempotent,
+  without inferred objective completion, automatic launch/retirement or bypass of the current owner.
+
+- [ ] **R84-S84-6279-P1:** Make existing-worktree JSON and normal resolve derive the SAME resume
+  target from the existing authoritative head-first resolver, not a new pointer or independent
+  filesystem-latest policy.
+
+- [ ] **R84-S84-6279-P2:** Preserve the original counterexample: after a successful supported
+  succession repair, an older valid content-bearing asserted head A must win over a newer
+  concluded/superseded diagnostic session B in actual JSON launch argv, agreeing with ordinary
+  resume.
+
+- [ ] **R84-S84-6279-P3:** Preserve the documented ordering/fallback for usable asserted head,
+  usable yielded head, missing conversation data and legacy/no usable head. Keep legitimate explicit
+  resume options and ordinary behavior; do not expand this finite selection fix into a new
+  restore/native matrix, termination, automatic creation or deployment.
+
+- [ ] **SEM-1-P:** Stored ground-owned head, affirmative lifecycle and two-way lineage; conclusion
+  is asserted, not derived from timestamps/liveness; no rival pointer.
+
+- [ ] **SEM-2-P:** Structured reuse/handoff/sunset/break-glass creation/refusal at actual ground
+  head, including asserted active head absent from Bridge store.
+
+- [ ] **SEM-3-P:** Complete hosted continuation/changeover/events/head-first viewer/non-head badging
+  and command/single-checkout residuals survive; backend metadata/planning alone is partial.
+
+- [ ] **SEM-4-P:** Acknowledged incumbent retention supersedes clear-first/close-first sketches;
+  physical action remains provider-owned and generic payload signal-only.
+
+- [ ] **SEM-5-P:** All protected912/3000/3584/6579 requirements/actual holds and all six4131 cases
+  remain independent; no source/resource custody is received.
+
+- [ ] **SEM-6-P:** Complete incumbent prefix/discussion,52 rows and exact finite choices must
+  survive actual whole delivery/readback/current real holds. No source disposition or generic owner
+  ACK is invented.
+
 ## Validation Plan
 
 - [ ] Resolve EVERY directly retained #3982 original and inherited #4306
@@ -1225,6 +1499,141 @@ or whole-parent completion gate is added.
   individual-get nonreproduction timings from the still-held original foreground
   workload. No deadline increase, lock removal, absence of recurrence or #2660
   administrative transfer is that proof.
+
+<!-- backlog-reconciliation:7556:transport-bridge-receiving -->
+
+### Global validation of retained Transport/Bridge acceptance
+
+#### Source #84
+
+- [ ] **V84-original:** Verify stored authoritative head, asserted
+  conclusion, two-way links, all creation resolutions and head-first/
+  non-head-badged viewing through their actual consumers. Keep the complete
+  hosted #112 and six-source cases below, protected #912/#3000/#3584/#6579
+  acceptance and every current hold at its original evidence tier.
+
+
+- [ ] **R84-V-84-I112-1:** At the original finite source/native tier, qualify this entire retained
+  clause, preserving its actual OR/deferral/maintenance alternatives: Verify the creation guard's
+  handoff choice reaches the hosted operation, preserving explicit, opt-in critical and
+  prompt-triggered continuation.
+
+- [ ] **R84-V-84-I112-2:** At the original finite source/native tier, qualify this entire retained
+  clause, preserving its actual OR/deferral/maintenance alternatives: Prove ground-layer
+  authoritative head/lineage and caller changeover agree; suppressed/best-effort failed updates
+  cannot count as confirmed succession. Preserve #5684's failure-reporting owner.
+
+- [ ] **R84-V-84-I112-3:** At the original finite source/native tier, qualify this entire retained
+  clause, preserving its actual OR/deferral/maintenance alternatives: Verify events identify the
+  actual worktree and both predecessor/successor identities, independently of caller identity;
+  clients follow the successor.
+
+- [ ] **R84-V-84-I112-4:** At the original finite source/native tier, qualify this entire retained
+  clause, preserving its actual OR/deferral/maintenance alternatives: Preserve
+  command/single-checkout hosted-session continuation as explicit unresolved scope, including
+  failed-successor recovery; rejection is not completed continuation.
+
+- [ ] **R84-V-84-I112-5:** At the original finite source/native tier, qualify this entire retained
+  clause, preserving its actual OR/deferral/maintenance alternatives: Retain brief fallback,
+  same-worktree seeding, off-by-default policy, turn settling and failed-successor retention
+  regressions. Head-first viewer/non-head badging and asserted-incumbent creation protections remain
+  required under the original umbrella.
+
+- [ ] **R84-S84-4126-V1:** Qualify the original affected native terminal/mux visible noncollision
+  boundary using exact session/pane/process evidence, not only creation, ancestry helpers, a
+  document or the complete observability ROOT.
+
+- [ ] **R84-S84-4126-V2:** Retain successful and failed foreground/candidate paths,
+  ambiguous/wrong-pane/losing-race rejection, failed-successor recovery and qualified predecessor
+  retirement separately; actual receipt/consumption and physical gone must not be conflated.
+
+- [ ] **R84-S84-4126-V3:** Keep existing source fixtures and delivered pane/confirmation/cleanup
+  improvements as credited partials. Original native acceptance remains specific, not a new
+  whole-parent or all-host campaign.
+
+- [ ] **R84-S84-4134-V1:** Exercise BOTH actual command entry paths across neutral/HOME CWD and a
+  different already-active project with exact ID, unique short ID, ambiguous ID and missing target.
+  Assert correct role data and persisted registration in the owning project; flag presence alone is
+  insufficient.
+
+- [ ] **R84-S84-4134-V2:** Retain legitimate no-selector fallback and ambiguity/refusal boundaries.
+  Existing explicit-registration tests are partial; a similarly named deregister-session
+  project-activation test is not proof for these two commands. Keep this finite command/fixture
+  qualification without adding a native or whole-parent gate.
+
+- [ ] **R84-S84-5684-V1:** Cover both consume backends and actual formatting for normal promotion,
+  already-head, legitimate no-worktree/untracked, guarded divergent head and actual CLI/link error;
+  assert the exclusive receipt remains valid while unconfirmed durable succession is honestly
+  reported.
+
+- [ ] **R84-S84-5684-V2:** Exercise retry/idempotence and a head changed between observation and
+  mutation, wrong author/token/candidate and terminal successor. Verify one canonical locked
+  revision/real-token write, no foreign overwrite and no second pickup after failed promotion.
+
+- [ ] **R84-S84-5684-V3:** Retain the original successful live-head/consumer agreement requirement
+  and the six direct #4131 cases without replacing them with a helper, source publication or
+  unrelated native claim. No new native-on-every-leaf or whole-parent trial is required.
+
+- [ ] **R84-S84-5997-V1:** Verify the actual registration/reader boundary for the ordinary
+  real-anchor shape, including session, activation, binding, event and both normal reader envelopes.
+  Contrast linked/bare/foreign-root handling and preserve their correct ownership/refusal behavior.
+
+- [ ] **R84-S84-5997-V2:** Cover repeated and concurrent first-use registration without a
+  duplicate/rival ledger and preserve ordinary linked-worktree behavior. Check no
+  monitor/profile/handoff or destructive/reap/ordinary-list/short-suffix eligibility leaks into the
+  anchor.
+
+- [ ] **R84-S84-5997-V3:** Keep original finite safety/reader qualification and
+  source/containing-provider evidence distinct. The reported Windows desktop observation is context,
+  not a newly imposed universal live-desktop gate or a performed experiment.
+
+- [ ] **R84-S84-6144-V1:** Preserve ALL four generic fixture cases: already-linked successor,
+  two-token chain with conflicting second edge, stale-objective payload, and legitimate unconsumed
+  baton. Assert readonly planning and explicit earlier-success/later-refusal/head outcome.
+
+- [ ] **R84-S84-6144-V2:** Repeat preview/recovery and assert no silent edge replacement, false
+  whole-objective completion, unwanted token consumption, session launch or retirement. Current
+  single-edge guards are credited, not treated as the complete multi-edge plan or removed to make a
+  conflict pass.
+
+- [ ] **R84-S84-6279-V1:** Use a deterministic older valid head/newer concluded session regression
+  after the same persisted lifecycle transition. Assert the actual JSON launch argv targets A and
+  matches normal resolution, not merely metadata reporting A.
+
+- [ ] **R84-S84-6279-V2:** Retain yielded-head, missing-data and legacy/no-head fallback coverage
+  with the existing resolver. Successful prior repair and valid data are givens of the
+  counterexample, not authorization to perform another live repair or an added whole-parent/native
+  qualification gate.
+
+- [ ] **SEM-1-V:** At the original finite supported tier, demonstrate without substituting
+  source/helper/receipt/count: Stored ground-owned head, affirmative lifecycle and two-way lineage;
+  conclusion is asserted, not derived from timestamps/liveness; no rival pointer.
+
+- [ ] **SEM-2-V:** At the original finite supported tier, demonstrate without substituting
+  source/helper/receipt/count: Structured reuse/handoff/sunset/break-glass creation/refusal at
+  actual ground head, including asserted active head absent from Bridge store.
+
+- [ ] **SEM-3-V:** At the original finite supported tier, demonstrate without substituting
+  source/helper/receipt/count: Complete hosted continuation/changeover/events/head-first
+  viewer/non-head badging and command/single-checkout residuals survive; backend metadata/planning
+  alone is partial.
+
+- [ ] **SEM-4-V:** At the original finite supported tier, demonstrate without substituting
+  source/helper/receipt/count: Acknowledged incumbent retention supersedes clear-first/close-first
+  sketches; physical action remains provider-owned and generic payload signal-only.
+
+- [ ] **SEM-5-V:** At the original finite supported tier, demonstrate without substituting
+  source/helper/receipt/count: All protected912/3000/3584/6579 requirements/actual holds and all
+  six4131 cases remain independent; no source/resource custody is received.
+
+- [ ] **SEM-6-V:** At the original finite supported tier, demonstrate without substituting
+  source/helper/receipt/count: Complete incumbent prefix/discussion,52 rows and exact finite choices
+  must survive actual whole delivery/readback/current real holds. No source disposition or generic
+  owner ACK is invented.
+
+- [ ] **G84:** Resolve every directly retained #84 Plan and Validation clause at its original finite
+  evidence tier, preserving alternatives, completed credit and existing custodians. Administrative
+  tracking is not technical completion or claim release.
 
 ## Proposal
 
@@ -3573,3 +3982,17 @@ since prior rounds' verification):
 ### 2026-10-28 - Additive retained #1246/#2335 contract proposal
 
 Added direct per-source Plan, actual global Validation and continuing custody rows after whole-record and complete receiving-document research. Normal review and current complete receiving readback remain publication gates; this entry records authored tracking only, not a future merge or source disposition. All incumbent finite source/design/release/native credits remain at their actual tiers, with original alternatives, unknowns, source-specific holds and existing source/resource custodians preserved. No implementation, operational effect or claim release is authorized. The campaign's receiving register records delivery and later source judgments separately.
+
+<!-- backlog-reconciliation:7556:transport-bridge-receiving -->
+
+### 2026-10-28 - Additive Transport/Bridge tracking contracts
+
+Authored direct finite Plan and actual global Validation with continuing
+
+custody after complete current receiving-document and source-contract
+
+research. Normal review, actual merge and complete current readback remain
+
+separate publication gates; no future delivery or disposition is claimed.
+
+Credited existing lifecycle/head/two-way succession, pane/flag/receiving-authority improvements and the already checked native-mux proof at their finite tiers. Backend metadata is not complete hosted continuation, render noncollision or consumer agreement.
