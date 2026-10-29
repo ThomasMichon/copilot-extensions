@@ -220,6 +220,14 @@ and [repair register](reconstruction-findings.md) retain the evidence and limits
   Reuse finite seed preparation, existing seed custody and execution receipts;
   the native shell owns the actual child handle and wait. The normalized
   Windows slice is merged; remaining legacy consumer parity is still open.
+  - [x] Activate and natively qualify the conditional copied POSIX seeded
+    consumer (#9427), preserving literal streams, foreground Ctrl+C and
+    seed/execution receipts. Admission-only, sourced initialization, opaque
+    shell-rendered environments and unsupported providers retain legacy
+    ownership; this is not full Manager or installed-survival acceptance.
+  - [ ] Repair Manager's literal pane-environment forwarding and qualify its
+    real shell consumer before considering migration of the conservative
+    opaque-renderer fence. Preserve the existing #5579 forwarding boundary.
 - [ ] Fence only same-worktree check/create races until mux discoverability.
   Recheck and join on contention; distinct worktrees remain parallel and no
   launch lock survives for Copilot's lifetime.
@@ -356,6 +364,11 @@ operator's installation-survival contract.
   unchanged literal argument/environment/exit propagation.
 - [ ] A simple subprocess integration test invokes the real copied shell and
   real redirectable handler; mocks cannot bypass the resolution being tested.
+  - [x] Conditional copied POSIX seeded controls exercise unmodified shipped
+    scripts, actual foreground input/Ctrl+C, runtime selection, backend
+    receipts and legacy fallback under malformed shell-rendered `BASH_ENV`
+    (#9427). Linux and stock macOS Bash 3.2 pass; these component controls
+    do not establish live tmux/Copilot or real removal survival.
   - [x] Native Windows engine-startup controls run real copied command/setup,
     consume arguments before the backend and preserve literal argv, same-host
     and alternate-option behavior, normal/recovery reconciliation and real
@@ -458,6 +471,12 @@ and does not delay final Copilot exit indefinitely merely to deliver a lifecycle
 notice; the existing bounded/quiet absent-handler contract remains intact.
 
 ## Journal
+
+### 2026-10-28 - Conditional copied POSIX consumer merged
+
+[Merge evidence and remaining integration](<journal/2026/10.28 copied-posix-consumer.md>).
+The conditional consumer is landed; full consumer parity, release/rollout and
+the real same-process installation cycles remain open.
 
 ### 2026-10-28 - Source-wheel deadline diagnosis
 

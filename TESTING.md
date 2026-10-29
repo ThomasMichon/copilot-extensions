@@ -226,6 +226,12 @@ The existing optional installation-context acceptance workflow's `native_launch`
 input also selects this focused reader/phase/copy/consumer packet on Linux and macOS, using
 `/bin/bash` and explicitly requiring stock macOS Bash 3.2. It stays outside
 required PR CI; the Windows terminal packet selected by that input is unchanged.
+The same optional Linux/macOS jobs select Manager's
+`test_launch_session_unwrap.py -k shell_pane_environment` component controls.
+They execute the production export/flag-building blocks and observe literal
+tmux argument delivery for empty values, quotes, multiline values and unchanged
+AHP credential exclusions. They do not qualify a live tmux server, complete
+Manager launch or installation survival.
 That packet also explicitly selects `test_launch_seed_native.py` so the
 setup-only provider birth query exercises the canonical native OS helper,
 not a Bash ABI substitute. It covers caller-provided identity compatibility,

@@ -1005,12 +1005,15 @@ if [[ "$ACTION" == "exec" ]]; then
     # env -u prefix on the child launches below.
 
     # Export profile env vars (BYOK, offline mode, token limits, etc.)
-    # Uses shlex.quote for safe shell quoting; keys are validated alphanumeric.
+    # One quoted assignment array serves both export and literal tmux argv.
+    ENV_ASSIGNMENTS=()
     ENV_EXPORTS=$(echo "$JSON" | "$PYTHON" -c "
 import sys, json, shlex
 d = json.load(sys.stdin)
-for k, v in d.get('env', {}).items():
-    print(f'export {k}={shlex.quote(str(v))}')
+assignments = [shlex.quote(f'{k}={v}') for k, v in d.get('env', {}).items()]
+print('ENV_ASSIGNMENTS=(' + ' '.join(assignments) + ')')
+if assignments:
+    print('export ' + ' '.join(assignments))
 " 2>/dev/null) || true
     if [[ -n "$ENV_EXPORTS" ]]; then
         eval "$ENV_EXPORTS"
@@ -1366,20 +1369,16 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
         if [[ -n "${LAUNCH_ID:-}" ]]; then
             TMUX_ENV_FLAGS+=(-e "WORKTREE_LAUNCH_ID=$LAUNCH_ID")
         fi
-        if [[ -n "$ENV_EXPORTS" ]]; then
-            while IFS= read -r line; do
-                # Strip 'export ' prefix → KEY=VALUE
-                local_kv="${line#export }"
-                if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then
-                    case "$local_kv" in
-                        GH_TOKEN=*|GITHUB_TOKEN=*|AGENT_WORKTREES_AHP_AUTH_TOKEN=*)
-                            continue
-                            ;;
-                    esac
-                fi
-                TMUX_ENV_FLAGS+=(-e "$local_kv")
-            done <<< "$ENV_EXPORTS"
-        fi
+        for local_kv in ${ENV_ASSIGNMENTS[@]+"${ENV_ASSIGNMENTS[@]}"}; do
+            if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then
+                case "$local_kv" in
+                    GH_TOKEN=*|GITHUB_TOKEN=*|AGENT_WORKTREES_AHP_AUTH_TOKEN=*)
+                        continue
+                        ;;
+                esac
+            fi
+            TMUX_ENV_FLAGS+=(-e "$local_kv")
+        done
         if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then
             TMUX_ENV_FLAGS+=(
                 -e "COPILOT_CLI_ENABLED_FEATURE_FLAGS=$COPILOT_CLI_ENABLED_FEATURE_FLAGS"
