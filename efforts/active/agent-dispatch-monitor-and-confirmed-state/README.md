@@ -141,6 +141,13 @@ known end-states; a `monitors` system should complement `emitters`/
 
 ## Coordination
 
+The finite #4464 producing-harness guidance contract below continues through
+existing producer/task-command/guidance owners and this ROOT's reviewed
+Plan, actual global Validation and Journal. Preserve backend versus
+Tasks-pane custody and current SUBMITTED/COMPLETED direction. This intake
+does not appoint an implementation owner, adopt a code target as a harness,
+move a task, change routing defaults or release a source/resource claim.
+
 The complete #3681 retained finite family continues through this existing Active ROOT's
 reviewed Plan, actual global Validation and Journal/open bounded-source process under
 the SAME declared and source-specific custodians. Preserve every incumbent alternative,
@@ -522,6 +529,23 @@ independent owners remain, and no genuine hold still requires the source live. O
 RETAIN #3681. No task/claim/configuration/native/model/process/service/source effect or
 implementation authority is created by this proposal.
 
+### Finite producing-harness versus code-target guidance from #4464
+
+**Agent-recommended tracking amendment.** Preserve the original guidance-only
+realization and current lane-versus-target foundations, not a new resolver
+or a mandatory default redesign.
+
+- [ ] **P4464-1:** Explicitly reason about the PRODUCING harness lane whenever
+  work touches or is authored from multiple repository worktrees. When CWD
+  is not unambiguously that harness, pass `--repo <harness>` together with
+  `--target-repo <code-target>`. Legitimate target-repository CWD does not
+  adopt that repository as another operating harness.
+- [ ] **P4464-2:** Put the cross-CWD warning in the existing owning skill
+  and/or pick-and-claim guidance, retaining supported unambiguous defaults.
+  Root-versus-delegate resolver enrichment is optional; no task movement,
+  new registry/resolver, harness reconfiguration or restoration of historical
+  task enum/API direction is required.
+
 ## Validation Plan
 
 - [ ] GLOBAL ROOT GATE: resolve EVERY incumbent ROOT Plan AND own Validation item, ALL
@@ -557,6 +581,15 @@ implementation authority is created by this proposal.
       Provenance-adjacent reality docs once code lands (per envisioning's
       "close the loop" step) — no vision *edit* needed unless Phase 2's
       risk-audit surfaces a genuine blind spot the vision failed to state.
+- [ ] **V4464-1:** Qualify the actual supported neutral/cross-CWD and explicit
+  target examples: producing `--repo` identity stays independent of
+  `--target-repo` code metadata. Generic project examples or a spawn/task-
+  state receipt do not substitute for the exact lane warning.
+- [ ] **V4464-2:** Resolve every direct #4464 Plan clause through its original
+  guidance-only option, existing routing defaults and task/source custody,
+  without adoption, lane/task mutation or a competing resolver. Finite
+  source/consumer evidence is separate from unrelated backend/UI/native or
+  whole-parent acceptance; no generic owner ACK or task operation is added.
 
 ## Proposal
 
@@ -582,6 +615,18 @@ extension policy are in the 2026-10-08 amendment):
 Phase 3/4's shapes are still pending their own design pass.
 
 ## Journal
+
+### 2026-10-28 - Finite producing-lane guidance intake
+
+- Added direct #4464 Plan and actual global Validation with continuing
+  coordination, retaining explicit multi-worktree-CWD lane reasoning,
+  `--repo` producer versus `--target-repo` metadata and the guidance-only
+  realization. Existing task-owned routing/claim/policy foundations remain
+  credit, not proof the exact warning is delivered.
+- Preserve every original row, checked credit, amendment and independent
+  custodian. Normal reviewed actual merge and complete current readback
+  precede a separate source judgment. No source audit, task move, provider
+  operation, peer contact, implementation or resource release occurs here.
 
 ### 2026-10-23 - Direct retained acceptance from #3681
 

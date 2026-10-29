@@ -71,6 +71,16 @@ work; actual UI/native qualification and installed holds remain separate.
 
 ## Apply only the scoped edges
 
+The [next ten finite receiving relationships](receiving-next-ten.md) add
+bounded command/assurance next decisions without another hard dependency
+chain: six direct planning contracts and four credited/retained source
+boundaries. Qualify the original diagnostic OR setup, native-route OR
+guidance, shared-core WITH hooks OR accepted-separate alternatives; keep
+warm/chaos witness requirements distinct from already delivered foundations.
+The non-urgent executor evaluation is P3, not a blocker for P2 reliability
+or guidance work. Draft homes, individual source conditions and native/
+resource custody remain explicit; publication grants no implementation.
+
 The [first-wave register](roadmap-wave-1-dependencies.md) has 33 directed
 proposals. The [second-wave register](roadmap-wave-2-dependencies.md) adds
 32 directed proposals and two interface edges. The
