@@ -77,6 +77,35 @@ class TestExistingFeaturePush:
 
 
 class TestCreatePR:
+    @pytest.mark.parametrize("provider_reconciled", [False, True])
+    def test_publication_origin_can_change_for_new_pr_after_merge(self, pr_repo, monkeypatch, provider_reconciled):
+        config, wid, wt_path, _ = pr_repo
+        first = pr_ops.create_pr(
+            wid, config, title="First feature", publication_origin="control-plane",
+            publication_labels=("source:control-plane",),
+        )
+        assert first["success"], first
+
+        def mark_merged(record, *_):
+            record.prs[0].state = "merged"
+            tracking.save_record(record)
+
+        if provider_reconciled:
+            monkeypatch.setattr(pr_ops, "_reconcile_active_pr", mark_merged)
+        else:
+            mark_merged(tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml"))
+        (wt_path / "next.txt").write_text("next feature\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "next feature", cwd=wt_path)
+        result = pr_ops.create_pr(
+            wid, config, title="Next feature", publication_origin="other",
+            publication_labels=("source:other",),
+        )
+        assert result["success"], result
+        record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert record.prs[0].publication_origin["id"] == "control-plane"
+        assert record.active_pr().publication_origin == {"id": "other", "labels": ["source:other"]}
+
     def test_disabled_errors(self, pr_repo):
         config, wid, _wt_path, _ = pr_repo
         import dataclasses
@@ -112,7 +141,7 @@ class TestCreatePR:
         assert pr.attribution_mode == "codename"
         assert pr.attribution_explicit is False
         assert pr.pr_id
-        assert pr.pr_revision == 3  # attribution, publication lease, ownership
+        assert pr.pr_revision == 4  # attribution, creation publication, lease, ownership
         assert pr.rewrite_owner == f"{wid}:{pr.branch}"
 
     def test_freezes_explicit_per_call_override_verbatim(self, pr_repo):
