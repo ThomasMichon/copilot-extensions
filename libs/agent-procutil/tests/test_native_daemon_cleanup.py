@@ -5,6 +5,7 @@ import base64
 import os
 import subprocess
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -14,6 +15,21 @@ pytestmark = pytest.mark.skipif(
     os.name != "nt" or os.environ.get("PROCUTIL_NATIVE_DAEMON_LIFETIME") != "1",
     reason="explicit Windows native bootstrap lifetime qualification",
 )
+
+
+def test_reported_worker_reuse_never_grants_cleanup_custody(monkeypatch):
+    from agent_procutil import daemon_broker, _daemon_instance_identity
+    from test_native_daemon import observed_worker
+
+    unrelated = Mock(_handle=123)
+    monkeypatch.setattr(daemon_broker, "WindowsDaemonProcess", Mock(return_value=unrelated))
+    monkeypatch.setattr(_daemon_instance_identity, "_windows_birth", lambda handle: "reused")
+    with pytest.raises(ProcessLookupError, match="birth identity changed"):
+        observed_worker({"pid": 321, "birth": "expected"})
+    unrelated.close.assert_called_once_with()
+    unrelated.kill.assert_not_called()
+    unrelated.terminate.assert_not_called()
+    unrelated.wait.assert_not_called()
 
 
 def test_native_worker_failure_preserves_original_error_in_redirected_log(tmp_path):

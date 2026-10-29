@@ -37,10 +37,22 @@ def observer():
     return module._WindowObserver(user, kernel, callback)
 
 
+def observed_worker(details):
+    from agent_procutil.daemon_broker import WindowsDaemonProcess
+    from agent_procutil._daemon_instance_identity import _windows_birth
+
+    process = WindowsDaemonProcess(details["pid"], ["native-bootstrap-fixture"])
+    try:
+        if _windows_birth(process._handle) != details["birth"]:
+            raise ProcessLookupError("native fixture worker birth identity changed")
+    except BaseException:
+        process.close()
+        raise
+    return process
+
+
 @pytest.mark.parametrize("mode", ["production", "contained"])
 def test_python_free_bootstrap_refuses_strict_escape_and_preserves_contained_custody(tmp_path, monkeypatch, mode):
-    from agent_procutil.daemon_broker import WindowsDaemonProcess
-
     base = Path(__file__).resolve().parents[2]
     monkeypatch.syspath_prepend(str(base / "single-instance-lease" / "src"))
     from single_instance_lease.operation import OperationLock, OperationLockedError
@@ -78,7 +90,7 @@ def test_python_free_bootstrap_refuses_strict_escape_and_preserves_contained_cus
                         continue
                     assert code == 0, (root / "submitter.log").read_text()
                     details = json.loads((root / "worker.json").read_text())
-                    worker = WindowsDaemonProcess(details["pid"], ["native-bootstrap-fixture"])
+                    worker = observed_worker(details)
                     observe(lambda: (root / "started").exists() or worker.poll() is not None)
                     assert (root / "started").exists(), (
                         (root / "worker.log").read_text()
@@ -216,8 +228,6 @@ def test_native_daemon_rejects_real_powershell_core_before_initialization():
 
 @pytest.mark.parametrize("cycle", [0, 1])
 def test_native_contained_handshake_with_credential_free_private_profile(tmp_path, cycle):
-    from agent_procutil.daemon_broker import WindowsDaemonProcess
-
     repository = Path(__file__).resolve().parents[3]
     fixture_path = repository / "tools" / "windows_broker_fixture.py"
     spec = importlib.util.spec_from_file_location("_native_private_profile", fixture_path)
@@ -270,7 +280,7 @@ def test_native_contained_handshake_with_credential_free_private_profile(tmp_pat
         f"([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('{encoded_argument}')))) "
         f"-WorkingDirectory {literal(directory)} -LogPath {literal(directory / 'daemon.log')}\n"
         "Write-Output 'native caller received admission'\n"
-        "@{pid=$p.Id} | ConvertTo-Json -Compress "
+        "@{pid=$p.Id;birth=[CopilotExtensions.DaemonInstanceNative]::Birth($p)} | ConvertTo-Json -Compress "
         f"| Set-Content -LiteralPath {literal(directory / 'outcome.json')} -Encoding UTF8\n"
         "$p.Dispose()\n",
         encoding="utf-8",
@@ -287,7 +297,7 @@ def test_native_contained_handshake_with_credential_free_private_profile(tmp_pat
         code = process.wait(timeout=30)
         assert code == 0, (directory / "caller.log").read_text(errors="replace")
         outcome = json.loads((directory / "outcome.json").read_text(encoding="utf-8-sig"))
-        daemon = WindowsDaemonProcess(outcome["pid"], ["native-private-profile"])
+        daemon = observed_worker(outcome)
         observe(lambda: (directory / "started").exists() or daemon.poll() is not None)
         assert (directory / "started").exists(), (directory / "daemon.log").read_text(errors="replace")
         assert (directory / "started").read_text(encoding="utf-8") == argument
