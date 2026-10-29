@@ -380,13 +380,21 @@ assessment. The original isolated Windows bootstrap packet refused cleanup
 **before stopping** an unclassified live child; that is neither a stop-latency
 measurement nor permission to terminate it.
 
-The later eligible refinement materially narrows the reported case: in BOTH
+The [complete eligible refinement](https://github.com/ThomasMichon/copilot-extensions/issues/9467#issuecomment-6483912301)
+materially narrows the **reported**, not independently reproduced, case: in BOTH
 bootstrap AND command packets, the owned venv launcher delegates to the
 controlled managed-base interpreter named by that venv, outside `InstallDir`,
 with the same service module/foreground/persistent arguments. Failure-only
 diagnostic progress is credit, not a new diagnostics rewrite. Do not retain
 the original wholly-unattributed description as though that refinement did not
 exist.
+
+The [public comment API](https://api.github.com/repos/ThomasMichon/copilot-extensions/issues/comments/6483912301)
+retains the complete body, including "the same controlled managed base Python
+named by the venv", "running the same -m agent_vault.service --foreground
+--persistent argv" and "rejects its physical interpreter child outside
+InstallDir". These are the author's diagnostic assertions, not positive
+native ownership proof supplied by this research.
 
 The pinned ownership guard classifies root-local service rows and refuses a
 live child outside that classified set before stop/removal. This corroborates
