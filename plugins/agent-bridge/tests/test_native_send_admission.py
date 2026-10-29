@@ -119,6 +119,53 @@ async def test_stopped_context_uses_strict_resume_without_recreate(native_send):
 
 
 @pytest.mark.asyncio
+async def test_concurrent_stopped_retries_reconcile_after_actual_resume_state_race(
+    native_send, monkeypatch, tmp_db,
+):
+    from unittest.mock import AsyncMock
+    from agent_bridge import hosting_policy
+    from agent_bridge.session_manager import SessionManager
+
+    manager, session, request = native_send
+    session.status = SessionStatus.STOPPED
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def reattach(retained):
+        assert retained is session
+        entered.set()
+        await release.wait()
+        retained.status = SessionStatus.IDLE
+        return True
+
+    monkeypatch.setattr(hosting_policy, "require_session_hosting", AsyncMock())
+    manager._try_reattach_live_host = AsyncMock(side_effect=reattach)
+    manager.resume_session = AsyncMock(wraps=SessionManager.resume_session.__get__(manager))
+    first = asyncio.create_task(submit(manager, session.session_id, request))
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    second = asyncio.create_task(submit(manager, session.session_id, request))
+    await asyncio.sleep(0)
+    release.set()
+    receipts = await asyncio.wait_for(asyncio.gather(first, second), timeout=2)
+    await session._prompt_task
+    assert receipts[0] == receipts[1]
+    assert len(tmp_db.get_turns(session.session_id)) == 1
+    assert manager.resume_session.await_count == 2
+    manager._try_reattach_live_host.assert_awaited_once()
+    manager._run_prompt.assert_awaited_once_with(session, 0, request.prompt)
+
+
+@pytest.mark.asyncio
+async def test_failed_resume_without_a_matching_receipt_remains_a_failure(native_send):
+    manager, session, request = native_send
+    session.status = SessionStatus.STOPPED
+    manager.resume_session.side_effect = ValueError("synthetic resume refusal")
+    with pytest.raises(ValueError, match="synthetic resume refusal"):
+        await submit(manager, session.session_id, request)
+    assert session.turn_count == 0
+    manager._run_prompt.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_resume_identity_change_refuses_before_prompt(native_send):
     manager, session, request = native_send
     session.status = SessionStatus.STOPPED

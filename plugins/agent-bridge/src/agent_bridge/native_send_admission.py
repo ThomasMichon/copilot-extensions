@@ -73,7 +73,16 @@ async def submit(
     if saved is not None:
         return saved
     # Cold reconnect takes the turn lock itself; resume must not retain it.
-    await manager.resume_session(session_id, drain=False, allow_recreate=False)
+    try:
+        await manager.resume_session(session_id, drain=False, allow_recreate=False)
+    except ValueError:
+        # Another sender may have resumed and admitted this exact operation first.
+        async with session._turn_start_lock:
+            require_native()
+            saved = stored_receipt(manager.db, session_id, request)
+            if saved is not None:
+                return saved
+        raise
     saved = await admit(may_resume=False)
     if saved is None:
         raise ValueError("native_admission_history_unproven")

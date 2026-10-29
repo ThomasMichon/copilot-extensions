@@ -136,8 +136,12 @@ until the same key recovers its receipt. No represented inbox is used.
 Independent expectations live in `inputs/http51/standard-native-send.json`.
 The parser, authenticated ASGI routes and actual journal execute in both fixture
 installation modes. HTTP-50 refusal, malformed receipts and lost post-commit
-responses are explicit cases. The ACP boundary is mocked: these observations
-do not qualify an installed receiver or retained native conversation.
+responses are explicit cases. The required portfolio also overlaps two stopped
+retries through the actual resume lifecycle owner and recovers the first
+operation's receipt after the losing resume's state refusal. An unsuccessful
+resume without a matching receipt remains a failure. The ACP boundary is mocked:
+these observations do not qualify an installed receiver or retained native
+conversation.
 
 Commit matching source and declarations, then use the existing bounded
 capture owner:

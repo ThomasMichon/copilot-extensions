@@ -28,7 +28,11 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/tests/test_live_inbox_runtime.py",
     "plugins/agent-bridge/tests/test_loop_governance_custody.py",
 )
-PROBES = {"test_http51_capture_actual_observations": 2}
+PROBES = {
+    "test_http51_capture_actual_observations": 2,
+    "test_concurrent_stopped_retries_reconcile_after_actual_resume_state_race": 1,
+    "test_failed_resume_without_a_matching_receipt_remains_a_failure": 1,
+}
 POLICY = common.POLICY
 encode = common.encode
 digest = common.digest

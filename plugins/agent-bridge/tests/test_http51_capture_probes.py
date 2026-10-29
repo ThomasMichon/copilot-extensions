@@ -14,6 +14,12 @@ from test_live_inbox_runtime import (
     installation as installation, serving as serving,
 )
 from test_native_send_admission import _command, native_send as native_send
+from test_native_send_admission import (
+    test_concurrent_stopped_retries_reconcile_after_actual_resume_state_race
+    as test_concurrent_stopped_retries_reconcile_after_actual_resume_state_race,
+    test_failed_resume_without_a_matching_receipt_remains_a_failure
+    as test_failed_resume_without_a_matching_receipt_remains_a_failure,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 
