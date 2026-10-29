@@ -86,6 +86,24 @@ namespace CopilotExtensions {
             private IntPtr handle;
             public readonly uint Pid;
             internal Child(IntPtr process, uint pid) { handle = process; Pid = pid; }
+            public void Describe(string log) {
+                var result = new StringBuilder("native-daemon-state:pid=" + Pid);
+                using (var process = Process.GetProcessById((int)Pid)) {
+                    if (process.HasExited) result.Append(" exited=").Append(process.ExitCode);
+                    else {
+                        result.Append(" cpu-ms=").Append(process.TotalProcessorTime.TotalMilliseconds);
+                        foreach (ProcessThread thread in process.Threads) {
+                            using (thread) {
+                                result.Append("\nthread=").Append(thread.Id).Append(" state=").Append(thread.ThreadState);
+                                if (thread.ThreadState == System.Diagnostics.ThreadState.Wait)
+                                    result.Append(" wait=").Append(thread.WaitReason);
+                            }
+                        }
+                    }
+                }
+                using (var output = new FileStream(log, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+                    Stage(output, result.ToString());
+            }
             public bool Stop() {
                 if (WaitForSingleObject(handle, 0) == 0) return true;
                 Check(TerminateProcess(handle, 125));
@@ -176,8 +194,9 @@ namespace CopilotExtensions {
                         Check(CloseHandle(queries[i]));
                         queries[i] = IntPtr.Zero;
                     }
-                    Check(ResumeThread(child.Thread) != UInt32.MaxValue);
-                    Stage(output, "resumed");
+                    uint suspended = ResumeThread(child.Thread);
+                    Check(suspended != UInt32.MaxValue);
+                    Stage(output, "resumed count=" + suspended + " pid=" + child.Pid);
                     Check(CloseHandle(child.Thread));
                     child.Thread = IntPtr.Zero;
                 }
@@ -306,8 +325,10 @@ function Start-NativeDaemon {
         working = $WorkingDirectory
     } | ConvertTo-Json -Compress
     $data = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($description))
+    $diagnosticLiteral = "'" + ($LogPath + '.entry.log').Replace("'", "''") + "'"
     $body = @"
 `$ErrorActionPreference = 'Stop'
+[IO.File]::WriteAllText($diagnosticLiteral, "native-daemon-stage:script-entry``n")
 `$d = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$data')) | ConvertFrom-Json
 try {
     [Console]::Error.WriteLine('native-daemon-stage:bootstrap')
@@ -352,7 +373,10 @@ try {
         $launcher = [CopilotExtensions.NativeDaemonAdmission]::Start(
             $shell, $commandArgs, $WorkingDirectory, $LogPath, $contained
         )
-        if (-not $connected.AsyncWaitHandle.WaitOne(15000)) { throw 'Native daemon did not reach admission.' }
+        if (-not $connected.AsyncWaitHandle.WaitOne(15000)) {
+            $launcher.Describe($LogPath)
+            throw 'Native daemon did not reach admission.'
+        }
         $server.EndWaitForConnection($connected)
         $frame = Read-NativeDaemonFrame -Pipe $server -Length 4
         $actualPid = [CopilotExtensions.NativeDaemonAdmission]::PipeProcess($server, $true)
