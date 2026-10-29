@@ -1114,6 +1114,14 @@ jobs:
           --test-file tests/test_native_daemon.py
           --test-file tests/test_native_daemon_cleanup.py
           --allow-explicit-tiers --timeout 120 --plugin-timeout 300
+      - name: Native first-use receipt and redirected-output logging
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_native.py
+          --allow-explicit-tiers -k "actual_native_supervisor_forwards and provision and stock_case"
+          --timeout 120 --plugin-timeout 180
       - name: Native PowerShell post-caller owned-work lifetime
         if: ${{ !cancelled() }}
         shell: pwsh

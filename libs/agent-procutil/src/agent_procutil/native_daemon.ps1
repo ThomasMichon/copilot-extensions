@@ -337,7 +337,7 @@ try {
     & `$d.script @forward
     if (`$null -ne `$LASTEXITCODE) { exit `$LASTEXITCODE }
 } catch {
-    [IO.File]::AppendAllText(`$d.log, (`$_ | Out-String))
+    [Console]::Error.WriteLine((`$_ | Out-String))
     exit 1
 }
 "@

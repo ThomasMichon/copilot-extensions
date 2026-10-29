@@ -16,6 +16,34 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def test_native_worker_failure_preserves_original_error_in_redirected_log(tmp_path):
+    helper = Path(__file__).resolve().parents[1] / "src" / "agent_procutil" / "native_daemon.ps1"
+    shell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+
+    def quoted(value):
+        return "'" + str(value).replace("'", "''") + "'"
+
+    worker = tmp_path / "worker.ps1"
+    worker.write_text("throw 'fixture-native-original-error'\n", encoding="utf-8")
+    log = tmp_path / "worker.log"
+    body = (
+        "$ErrorActionPreference='Stop'; $env:COPILOT_EXTENSIONS_TEST_CONTAINED='1'; "
+        f". {quoted(helper)}; "
+        f"$p=Start-NativeDaemon -Script {quoted(worker)} -Arguments @('fixture') "
+        f"-WorkingDirectory {quoted(tmp_path)} -LogPath {quoted(log)}; "
+        "try { if (-not $p.WaitForExit(15000)) { throw 'worker did not exit' }; "
+        "@{code=$p.ExitCode} | ConvertTo-Json -Compress } finally { $p.Dispose() }"
+    )
+    encoded = base64.b64encode(body.encode("utf-16le")).decode("ascii")
+    result = subprocess.run(
+        [str(shell), "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+        capture_output=True, text=True, timeout=30, **pu.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["code"] == 1
+    assert "fixture-native-original-error" in log.read_text(encoding="utf-8", errors="replace")
+
+
 @pytest.mark.parametrize("mode", ["cleanup", "mismatch", "unconfirmed-cleanup"])
 def test_native_preack_cleanup_requires_verified_handles_and_observed_exit(tmp_path, mode):
     from test_native_daemon import observer
