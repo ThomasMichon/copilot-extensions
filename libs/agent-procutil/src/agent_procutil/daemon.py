@@ -241,7 +241,8 @@ def spawn_daemon(
             from . import _job_scopes
 
             scope_environment = _job_scopes.child_environment(child_env)
-            child_env.update(scope_environment)
+            child_env = scope_environment.copy()
+            popen_kwargs["env"] = child_env
         if durable_windows:
             child_env.pop(_job_scopes.ENVIRONMENT_KEY, None)
             kwargs["creationflags"] = flags | pu._CREATE_SUSPENDED

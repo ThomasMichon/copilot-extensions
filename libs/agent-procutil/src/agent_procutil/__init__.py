@@ -139,7 +139,11 @@ def _job_scope_names(environment) -> tuple[str, ...]:
 
 def _job_child_environment(environment=None, *, append: str | None = None) -> dict[str, str]:
     child = dict(os.environ if environment is None else environment)
-    names = list(dict.fromkeys((*_job_scope_names(os.environ), *_job_scope_names(child))))
+    names = list(_job_scope_names(os.environ))
+    for key in tuple(child):
+        if key.upper() == _JOB_SCOPES_ENV:
+            names.extend(_job_scope_names({_JOB_SCOPES_ENV: child.pop(key)}))
+    names = list(dict.fromkeys(names))
     if append is not None:
         names.append(append)
     if names:
@@ -153,12 +157,9 @@ def _publish_job_scope(name: str) -> None:
 
 
 class JobHandle:
-    """Owned Windows Job Object handle.
-
-    Keep an instance alive as long as its assigned child process should be
-    tied to this owner. Closing it releases the handle; with
-    ``JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`` that also terminates any process
-    still assigned to the job. Off Windows callers never receive one.
+    """Own a Windows Job for its assigned child's bounded lifetime.
+    Closing a KILL_ON_JOB_CLOSE Job terminates remaining members.
+    Non-Windows callers never receive a Job owner.
     """
 
     def __init__(self, handle: Any, *, name: str | None = None) -> None:

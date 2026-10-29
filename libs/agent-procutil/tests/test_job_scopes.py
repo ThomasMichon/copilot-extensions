@@ -85,37 +85,40 @@ def native_admission(monkeypatch, declared_mock_daemon):
     return process
 
 
+@pytest.mark.parametrize("replacement", [False, True])
 def test_direct_native_admission_closes_queries_before_resume(
-    tmp_path, monkeypatch, native_admission,
+    tmp_path, monkeypatch, native_admission, replacement,
 ):
     events = []
-    name = scopes.new_name()
+    name, supplied = scopes.new_name(), scopes.new_name()
+    environment = {scopes.ENVIRONMENT_KEY.lower(): supplied} if replacement else None
+    expected = (name, supplied) if replacement else (name,)
     monkeypatch.setenv(scopes.ENVIRONMENT_KEY, name)
 
     @contextmanager
     def queries(environment):
-        assert scopes.scope_names(environment) == (name,)
+        assert scopes.scope_names(environment) == expected
         events.append("open")
         yield lambda handle: events.append(("verify", handle))
         events.append("close")
 
     monkeypatch.setattr(scopes, "query_scopes", queries)
     monkeypatch.setattr(pu, "_resume_suspended_process", lambda pid: events.append(("resume", pid)) or True)
-    child = pu.spawn_daemon(["fixture.exe"], cwd=tmp_path, log_path=tmp_path / "log")
+    child = pu.spawn_daemon(["fixture.exe"], cwd=tmp_path, log_path=tmp_path / "log", env=environment)
     assert child is native_admission
     assert events == ["open", ("verify", 456), "close", ("resume", 123)]
     kwargs = subprocess.Popen.call_args.kwargs
     assert kwargs["creationflags"] & pu._CREATE_SUSPENDED
     assert kwargs["creationflags"] & pu._CREATE_BREAKAWAY_FROM_JOB
     assert kwargs["close_fds"]
-    assert scopes.ENVIRONMENT_KEY not in kwargs["env"]
+    assert all(key.upper() != scopes.ENVIRONMENT_KEY for key in kwargs["env"])
 
 
 @pytest.mark.parametrize("breakaway, contained", [(False, False), (True, True)])
 def test_contained_daemon_replacement_environment_retains_outer_scopes(
     tmp_path, monkeypatch, native_admission, breakaway, contained,
 ):
-    outer = scopes.new_name()
+    outer, supplied = scopes.new_name(), scopes.new_name()
     monkeypatch.setenv(scopes.ENVIRONMENT_KEY, outer)
     monkeypatch.setattr(pu, "contained_test_mode", lambda: contained)
     queries, resume = Mock(), Mock()
@@ -123,12 +126,13 @@ def test_contained_daemon_replacement_environment_retains_outer_scopes(
     monkeypatch.setattr(pu, "_resume_suspended_process", resume)
     child = pu.spawn_daemon(
         ["fixture.exe"], cwd=tmp_path, log_path=tmp_path / "log",
-        env={"literal": "retained"}, breakaway=breakaway,
+        env={"literal": "retained", scopes.ENVIRONMENT_KEY.lower(): supplied}, breakaway=breakaway,
     )
     assert child is native_admission
     environment = subprocess.Popen.call_args.kwargs["env"]
-    assert scopes.scope_names(environment) == (outer,)
+    assert scopes.scope_names(environment) == (outer, supplied)
     assert environment["literal"] == "retained"
+    assert [key for key in environment if key.upper() == scopes.ENVIRONMENT_KEY] == [scopes.ENVIRONMENT_KEY]
     queries.assert_not_called()
     resume.assert_not_called()
 
