@@ -128,6 +128,16 @@ async def _pump(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> N
         await writer.drain()
 
 
+async def _close_writer(writer: asyncio.StreamWriter) -> None:
+    writer.close()
+    with contextlib.suppress(ConnectionError, OSError):
+        try:
+            await asyncio.wait_for(writer.wait_closed(), timeout=_DRAIN_TIMEOUT)
+        except (TimeoutError, asyncio.TimeoutError):
+            writer.transport.abort()
+            log.warning("SSH proxy writer did not close within the drain allowance")
+
+
 class _ProxyBroker:
     def __init__(
         self, command: list[str], env: dict[str, str] | None, *, cwd: str | None = None,
@@ -254,6 +264,7 @@ class _ProxyBroker:
         writer: asyncio.StreamWriter,
         child_job: JobHandle | None,
     ) -> None:
+        writer_cleanup = asyncio.create_task(_close_writer(writer))
         try:
             if process is not None:
                 await terminate_ssh_process_tree(process)
@@ -264,13 +275,7 @@ class _ProxyBroker:
                 task.cancel()
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
-            writer.close()
-            with contextlib.suppress(ConnectionError, OSError):
-                try:
-                    await asyncio.wait_for(writer.wait_closed(), timeout=_DRAIN_TIMEOUT)
-                except TimeoutError:
-                    writer.transport.abort()
-                    log.warning("SSH proxy writer did not close within the drain allowance")
+            await writer_cleanup
 
     async def _close(self) -> None:
         if self._server is not None:

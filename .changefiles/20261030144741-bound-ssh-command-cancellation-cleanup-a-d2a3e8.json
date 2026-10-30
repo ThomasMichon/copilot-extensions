@@ -1,5 +1,5 @@
 {
-  "comment": "Bound SSH command cancellation cleanup and retain child ownership while reaping",
+  "comment": "Bound SSH command cancellation cleanup, overlap writer drain with child retirement, and abort stalled writers on Python 3.10",
   "changes": [
     {
       "plugin": "libs/ssh-manager",

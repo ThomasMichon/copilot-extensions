@@ -421,7 +421,25 @@ async def test_proxy_cancellation_reaps_hung_child(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_proxy_cleanup_aborts_a_writer_that_will_not_close(monkeypatch, caplog):
+@pytest.mark.parametrize("legacy_asyncio_timeout", [False, True])
+async def test_proxy_cleanup_aborts_a_writer_that_will_not_close(
+    monkeypatch, caplog, legacy_asyncio_timeout,
+):
+    class LegacyAsyncioTimeout(Exception):
+        pass
+
+    wait_for = asyncio.wait_for
+
+    async def legacy_wait_for(awaitable, *, timeout):
+        try:
+            return await wait_for(awaitable, timeout=timeout)
+        except TimeoutError:
+            raise LegacyAsyncioTimeout from None
+
+    if legacy_asyncio_timeout:
+        monkeypatch.setattr(asyncio, "TimeoutError", LegacyAsyncioTimeout)
+        monkeypatch.setattr(asyncio, "wait_for", legacy_wait_for)
+
     async def stalled_close():
         await asyncio.Event().wait()
 
@@ -431,11 +449,46 @@ async def test_proxy_cleanup_aborts_a_writer_that_will_not_close(monkeypatch, ca
     broker = proxy._ProxyBroker(["unused"], None)
     monkeypatch.setattr(proxy, "_DRAIN_TIMEOUT", 0.01)
 
-    await asyncio.wait_for(broker._cleanup_connection(None, [], writer, None), timeout=1)
+    await wait_for(broker._cleanup_connection(None, [], writer, None), timeout=1)
 
     writer.close.assert_called_once()
     writer.transport.abort.assert_called_once()
     assert "did not close within the drain allowance" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_proxy_cleanup_overlaps_stalled_writer_with_slow_retirement(monkeypatch):
+    retiring = asyncio.Event()
+    aborted = asyncio.Event()
+    release_retirement = asyncio.Event()
+
+    async def slow_retirement(process):
+        retiring.set()
+        await release_retirement.wait()
+
+    async def stalled_close():
+        await retiring.wait()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(proxy, "terminate_ssh_process_tree", slow_retirement)
+    monkeypatch.setattr(proxy, "_DRAIN_TIMEOUT", 0.01)
+    writer = SimpleNamespace(
+        close=Mock(), wait_closed=stalled_close,
+        transport=SimpleNamespace(abort=Mock(side_effect=aborted.set)),
+    )
+    broker = proxy._ProxyBroker(["unused"], None)
+    cleanup = asyncio.create_task(
+        broker._cleanup_connection(SimpleNamespace(), [], writer, None)
+    )
+    try:
+        await asyncio.wait_for(retiring.wait(), timeout=1)
+        await asyncio.wait_for(aborted.wait(), timeout=1)
+        assert not cleanup.done()
+    finally:
+        release_retirement.set()
+        await asyncio.wait_for(cleanup, timeout=1)
+    writer.close.assert_called_once()
+    writer.transport.abort.assert_called_once()
 
 
 @pytest.mark.asyncio

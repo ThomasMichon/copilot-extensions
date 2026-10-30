@@ -22,7 +22,8 @@ before waiting for exit, so descendants retaining redirected pipes cannot
 block their own retirement. Roots without an owned Job use `taskkill`, bounded
 to 3 seconds, followed by up to 5 seconds of exit wait and 2 seconds after
 forced kill. Registered proxy cleanup runs alongside root retirement and is
-joined before cancellation returns; proxy writers have a bounded drain too.
+joined before cancellation returns. Proxy writers drain concurrently with
+child retirement, so their two-second allowance does not extend that budget.
 Children without a confirmed exit remain registered to their connection.
 
 ## Features
