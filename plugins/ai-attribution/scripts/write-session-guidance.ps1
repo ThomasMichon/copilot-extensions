@@ -166,23 +166,7 @@ try {
                             $guidance = $data.profile_guidance
                             $GuidanceHeader = $data.profile_header
                         } else {
-                            # Legacy base-only caches can serve unchanged unconfigured launches.
-                            $profilePaths = @(
-                                (Join-Path $repoRoot '.github\ai-attribution.json'),
-                                (Join-Path $resolvedHome '.copilot\ai-attribution.json')
-                            )
-                            $configHome = if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } elseif ($env:APPDATA) { $env:APPDATA } else { Join-Path $resolvedHome '.config' }
-                            $profilePaths += Join-Path $configHome 'ai-attribution\config.json'
-                            foreach ($directory in ($env:COPILOT_CUSTOM_INSTRUCTIONS_DIRS -split '[;,]')) {
-                                if ($directory.Trim()) {
-                                    $profilePaths += Join-Path $directory.Trim() 'ai-attribution.json'
-                                }
-                            }
-                            foreach ($profilePath in $profilePaths) {
-                                if (-not [System.IO.Path]::IsPathRooted($profilePath) -or
-                                    (Get-Item -LiteralPath $profilePath -Force -ErrorAction SilentlyContinue)
-                                ) { throw 'Profile needs shared discovery' }
-                            }
+                            throw 'Profile discovery has not completed'
                         }
                         $content = $GuidanceHeader + $guidance + "`n"
                         if (

@@ -149,26 +149,8 @@ if [[ -n "$session_id" && "$session_id" =~ $SESSION_ID_PATTERN \
                         fi
                         GUIDANCE_HEADER="${profile_header}"$'\n\n'
                     else
-                        # Legacy base-only caches may serve unchanged unconfigured launches.
-                        profile_paths=("$repo_root/.github/ai-attribution.json"
-                            "$resolved_home/.copilot/ai-attribution.json"
-                            "${XDG_CONFIG_HOME:-$resolved_home/.config}/ai-attribution/config.json")
-                        IFS=':,' read -r -a profile_dirs <<<"${COPILOT_CUSTOM_INSTRUCTIONS_DIRS:-}"
-                        for directory in "${profile_dirs[@]}"; do
-                            directory="${directory#"${directory%%[![:space:]]*}"}"
-                            directory="${directory%"${directory##*[![:space:]]}"}"
-                            [[ -z "$directory" ]] || profile_paths+=("$directory/ai-attribution.json")
-                        done
-                        for profile_path in "${profile_paths[@]}"; do
-                            case "$profile_path" in
-                                /*) ;;
-                                *) run_python_fallback "$stdin_text"; exit 0 ;;
-                            esac
-                            if [[ -e "$profile_path" || -L "$profile_path" ]]; then
-                                run_python_fallback "$stdin_text"
-                                exit 0
-                            fi
-                        done
+                        run_python_fallback "$stdin_text"
+                        exit 0
                     fi
                     content="${GUIDANCE_HEADER}${guidance}"$'\n'
                     content_bytes=${#content}

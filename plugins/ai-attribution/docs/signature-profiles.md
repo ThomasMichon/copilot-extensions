@@ -13,7 +13,10 @@ reuse rendered profile guidance only after checking the discovery environment
 and bounded present/missing-file probes produced by the Python owner. Native
 wrappers do not repeat its directory normalization or containment decisions.
 Changed, added, removed, reordered or unsafe inputs fall back to the shared
-writer. The cache format is migrated automatically. The legacy policy kernel stays
+writer. A base-only cache is not eligible for native reuse: profile discovery
+must have completed, including an explicit snapshot for an unconfigured launch.
+Discovery errors are reevaluated without restoring baseline exemptions.
+The cache format is migrated automatically. The legacy policy kernel stays
 separate, so removing the last profile cannot replay its old presentation.
 
 ## Files and authority

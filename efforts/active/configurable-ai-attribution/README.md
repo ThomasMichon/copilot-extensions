@@ -268,3 +268,12 @@ network dependency, parallel policy registry or mandatory sibling plugin.
   markup in all four slot/variant fields, discovery failures, and native
   warm reuse without Python under plain and trailing-separator home values.
   High-signal lint passed; fresh review and exact-head CI remain required.
+
+### 2026-10-30 - Incomplete cache cannot bypass failed discovery
+- Removed legacy base-only native reuse. Only a completed Python-owned
+  discovery snapshot is eligible, including for an unconfigured launch.
+  Consecutive launches with 129 missing absolute directories now both preserve
+  the kernel, diagnostic and conservative disclosure header.
+- Focused validation passed 87 tests with 3 platform skips. Warm no-Python
+  fixtures now originate in the real Python owner rather than synthetic
+  base-only cache records. Lint passed.

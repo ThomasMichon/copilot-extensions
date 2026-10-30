@@ -400,3 +400,17 @@ def test_native_hook_reads_profile_changes_with_warm_base_cache(tmp_path, home_s
                        text=True, capture_output=True, env=warm_env, check=True)
         target = target.parents[3] / session / "instructions" / "ai-attribution" / target.name
         assert target.read_text(encoding="utf-8") == expected
+    env["COPILOT_CUSTOM_INSTRUCTIONS_DIRS"] = os.pathsep.join(
+        str(tmp_path / f"missing-{i}") for i in range(129)
+    )
+    for cache in (home / ".copilot" / "ai-attribution-cache").glob("*.json"):
+        cache.unlink()
+    for index in range(2):
+        session = f"discovery-error-{index}"
+        subprocess.run(command, input=json.dumps({"sessionId": session, "cwd": str(repo)}),
+                       text=True, capture_output=True, env=env, check=True)
+        target = home / ".copilot" / "session-state" / session / "instructions" / "ai-attribution" / target.name
+        text = target.read_text(encoding="utf-8")
+        assert text.startswith("Disclose AI for ALL contributions.\n\n")
+        assert "profile discovery rejected" in text
+        assert "[owner: ai-attribution@" in text

@@ -397,7 +397,7 @@ def test_powershell_wrapper_writes_bounded_session_file(tmp_path):
     assert len(content.encode("utf-8")) <= writer._GUIDANCE_MAX_BYTES
 
 
-def test_powershell_wrapper_serves_warm_cache_without_spawning_python(tmp_path):
+def test_powershell_wrapper_serves_warm_cache_without_spawning_python(monkeypatch, tmp_path):
     """Proves the wrapper's cache fast path actually skips python on a hit,
     by stripping every python interpreter from PATH before invoking it: if
     the fast path did not serve this from cache and instead fell through to
@@ -416,19 +416,15 @@ def test_powershell_wrapper_serves_warm_cache_without_spawning_python(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
 
-    key = writer._repo_cache_key(str(repo))
-    cache_dir = writer._cache_dir(home)
-    cache_dir.mkdir(parents=True)
-    (cache_dir / f"{key}.json").write_text(
-        json.dumps(
-            {
-                "version": writer._CACHE_FORMAT_VERSION,
-                "computed_at": time_module.time(),
-                "guidance": "[owner: ai-attribution@1.0.0]\ncached policy only",
-            }
-        ),
-        encoding="utf-8",
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", "")
+    monkeypatch.setattr(
+        writer, "_run_contributor",
+        lambda *args: "[owner: ai-attribution@1.0.0]\ncached policy only",
     )
+    assert writer.write_session_guidance({"sessionId": "seed", "cwd": str(repo)}, home=home)
 
     payload = json.dumps(
         {"sessionId": "session-1", "cwd": str(repo), "source": "copilot-cli"}
@@ -553,7 +549,7 @@ def test_bash_wrapper_writes_bounded_session_file(tmp_path):
     assert len(content.encode("utf-8")) <= writer._GUIDANCE_MAX_BYTES
 
 
-def test_bash_wrapper_serves_warm_cache_without_spawning_python(tmp_path):
+def test_bash_wrapper_serves_warm_cache_without_spawning_python(monkeypatch, tmp_path):
     """Same proof as the PowerShell equivalent, adapted for bash: build an
     isolated PATH containing symlinks only to the tools the fast path needs
     (bash, jq, sha256sum/shasum, git, coreutils) and deliberately excluding
@@ -568,19 +564,15 @@ def test_bash_wrapper_serves_warm_cache_without_spawning_python(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
 
-    key = writer._repo_cache_key(str(repo))
-    cache_dir = writer._cache_dir(home)
-    cache_dir.mkdir(parents=True)
-    (cache_dir / f"{key}.json").write_text(
-        json.dumps(
-            {
-                "version": writer._CACHE_FORMAT_VERSION,
-                "computed_at": time_module.time(),
-                "guidance": "[owner: ai-attribution@1.0.0]\ncached policy only",
-            }
-        ),
-        encoding="utf-8",
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("HOME", str(home))
+    for variable in ("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", "XDG_CONFIG_HOME", "APPDATA"):
+        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setattr(
+        writer, "_run_contributor",
+        lambda *args: "[owner: ai-attribution@1.0.0]\ncached policy only",
     )
+    assert writer.write_session_guidance({"sessionId": "seed", "cwd": str(repo)}, home=home)
 
     isolated_bin = tmp_path / "isolated-bin"
     isolated_bin.mkdir()
