@@ -30,7 +30,8 @@ def prepared(tmp_path, monkeypatch):
 
     def git(*args, data=b""):
         result = subprocess.run(
-            ["git", "-c", "core.fsmonitor=false", "-c", "commit.gpgsign=false", *args],
+            ["git", "-c", "core.fsmonitor=false", "-c", "core.longpaths=true",
+             "-c", "commit.gpgsign=false", *args],
             cwd=repository, env=environment, input=data, capture_output=True, timeout=15,
             check=True, **no_window_kwargs(),
         )
@@ -89,7 +90,7 @@ def test_real_source_manifest_and_immutable_refs_do_not_rewrite_metadata(prepare
     owner, generation, git, checks = prepared
     original = copy.deepcopy(generation)
     result = attach(owner, generation)
-    assert result["state"] == "ready", result
+    assert result["state"] == "ready", result["source"]["errors"]
     assert result["review_authority"] is False
     assert generation == original and generation["complete"] is False
     source = result["source"]
@@ -113,7 +114,9 @@ def test_real_source_manifest_and_immutable_refs_do_not_rewrite_metadata(prepare
     assert repeated["source"]["retained_refs"] == source["retained_refs"]
 
 
-@pytest.mark.parametrize("damage", ["missing_path", "blob", "folder", "common_missing", "head_missing"])
+@pytest.mark.parametrize("damage", [
+    "missing_path", "blob", "folder", "common_missing", "head_missing", "invalid_original",
+])
 def test_bad_native_mapping_or_missing_object_cannot_relabel_source(prepared, damage):
     from agent_pull_requests.review_workspace import _digest
     owner, generation, git, checks = prepared
@@ -123,6 +126,11 @@ def test_bad_native_mapping_or_missing_object_cannot_relabel_source(prepared, da
         generation["sections"]["changes"]["data"][0]["item"]["objectId"] = "1" * 40
     elif damage == "folder":
         generation["sections"]["changes"]["data"][0]["item"]["isFolder"] = True
+    elif damage == "invalid_original":
+        rows = generation["sections"]["changes"]["data"]
+        rows[2]["originalPath"] = "/empty.txt"
+        del rows[2]["item"]["originalObjectId"]
+        rows.append({"changeType": "delete", "item": {"path": "/old.txt"}})
     else:
         generation["revision"]["common_sha" if damage == "common_missing" else "head_sha"] = "1" * 40
     generation["id"] = _digest({key: value for key, value in generation.items() if key != "id"})
@@ -196,7 +204,7 @@ def test_new_source_range_preserves_the_prior_immutable_refs(prepared):
         assert git("rev-parse", retained["ref"]) == retained["object_id"]
 
 
-@pytest.mark.parametrize("damage", ["errors", "retained_range", "version"])
+@pytest.mark.parametrize("damage", ["errors", "retained_range", "version", "scope_mutation"])
 def test_actual_owner_result_corruption_is_not_a_ready_attachment(prepared, damage):
     from agent_pull_requests.source_attachment import attach_source
     owner, generation, _, _ = prepared
@@ -211,9 +219,49 @@ def test_actual_owner_result_corruption_is_not_a_ready_attachment(prepared, dama
                 result["errors"] = ["contradictory-readiness"]
             elif damage == "version":
                 result["version"] = True
+            elif damage == "scope_mutation":
+                request["scope"]["principal_id"] = "different-native-principal"
+                result["scope"] = request["scope"]
             else:
                 result["retained_refs"]["head"]["object_id"] = "1" * 40
             return result
 
     with pytest.raises(ValueError, match="incompatible"):
         attach_source(generation, CorruptResult(), budget=60)
+
+
+def test_internal_ref_publication_never_executes_repository_hooks(prepared):
+    owner, generation, git, _ = prepared
+    hook = owner.root / ".git" / "hooks" / "reference-transaction"
+    hook.write_text("#!/bin/sh\nprintf unexpected > source-hook-ran\n", encoding="utf-8")
+    hook.chmod(0o755)
+    git("-c", "core.hooksPath=" + str(hook.parent), "update-ref",
+        "refs/fixture/hook-control", generation["revision"]["head_sha"])
+    sentinel = owner.root / "source-hook-ran"
+    assert sentinel.read_text() == "unexpected"
+    sentinel.unlink()
+    assert attach(owner, generation)["state"] == "ready"
+    assert not sentinel.exists()
+
+
+def test_wide_source_diff_batches_physical_git_operations(prepared):
+    from agent_pull_requests.review_workspace import _digest
+    owner, generation, git, checks = prepared
+    head = generation["revision"]["head_sha"]
+    blob = git("rev-parse", head + ":edit.txt")
+    entries = git("ls-tree", "-z", head).encode()
+    entries += b"".join(f"100644 blob {blob}\twide-{index:03}.txt\0".encode() for index in range(100))
+    tree = git("mktree", "-z", data=entries)
+    new_head = git("commit-tree", tree, "-p", head, data=b"wide source fixture\n")
+    generation["revision"].update(head_sha=new_head, iteration_head_sha=new_head, iteration=4)
+    generation["sections"]["pull_request"]["data"]["lastMergeSourceCommit"]["commitId"] = new_head
+    generation["sections"]["iterations"]["data"][0].update(id=4, sourceRefCommit={"commitId": new_head})
+    generation["sections"]["changes"]["revision"].update(head_sha=new_head, iteration=4)
+    generation["sections"]["changes"]["data"].extend(
+        {"changeType": "add", "item": {"path": f"/wide-{index:03}.txt"}} for index in range(100)
+    )
+    generation["id"] = _digest({key: value for key, value in generation.items() if key != "id"})
+    result = attach(owner, generation)
+    assert result["state"] == "ready", result["source"]["errors"]
+    assert len(result["source"]["files"]) == 108
+    assert len(checks) <= 40  # Two checkpoints per physical command, not per changed path.

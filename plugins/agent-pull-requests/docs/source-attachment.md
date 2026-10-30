@@ -43,6 +43,9 @@ newlines. UTF-8/NUL-free blobs are text; other blobs are binary. Zero-byte files
 remain existing text blobs. Deleted sides are absent; symlinks and gitlinks are
 explicit, never followed or expanded. Renames retain separate old/new tree paths
 and their native change-tracking/original-path relationship.
+An original/rename path must resolve to an actual common-side object, not another
+added path. Tree lookups are argv-batched and unique blob sizes/contents use Git's
+batch protocols; physical process/checkpoint overhead does not grow per path.
 
 The source manifest includes workspace reference, revision, path/object/mode/size
 classification, original native changes, completeness/error codes and measured
@@ -53,6 +56,10 @@ Only after complete mapping verification does the owner atomically create or
 verify deterministic immutable head/common refs. Conflicting refs are never
 force-moved. Prior ranges remain retained; cache rebuild has no ref-retirement
 authority. The existing workspace/resource lifetime remains authoritative.
+Internal Git commands disable repository hooks through Worktrees' existing
+mechanical-operation hook policy, so a reference-transaction hook cannot add
+effects. Git's long-path option is scoped to these commands, not persisted as
+machine or repository configuration.
 
 Ref IO failure or timeout may leave same-range refs present. The result remains
 incomplete with `effects: local_refs_possible`; retry the same range and verify

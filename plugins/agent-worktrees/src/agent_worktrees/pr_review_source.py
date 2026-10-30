@@ -13,8 +13,8 @@ import time
 
 from agent_procutil.owned_process import OutputLimitExceeded, OwnedCleanupError, run_caller_owned
 
-from .git_ops import repository_identity_env
-from .git_tree_diff import parse as parse_tree_diff
+from .git_ops import _NO_HOOKS_PATH, repository_identity_env
+from .git_tree_diff import _path_batches, parse as parse_tree_diff
 
 _OID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 
@@ -107,7 +107,8 @@ class LocalReviewSource:
                 raise SourceIncomplete("deadline_exhausted")
             output = run_caller_owned(
                 ["git", "--no-lazy-fetch", "--no-replace-objects", "-c", "core.fsmonitor=false",
-                 "-c", "protocol.allow=never", *args],
+                 "-c", "core.longpaths=true", "-c", "protocol.allow=never",
+                 "-c", f"core.hooksPath={_NO_HOOKS_PATH}", *args],
                 cwd=self.root, env=environment, timeout=remaining,
                 max_stdout_bytes=min(limit, max_output_bytes), max_stderr_bytes=8192,
                 input_text=input_text, binary=True,
@@ -119,44 +120,24 @@ class LocalReviewSource:
                 raise SourceIncomplete("git_operation_failed")
             return output
 
-        consumed = 0
         blobs = {}
+        trees = {}
 
         def entry(commit, path, expected):
-            nonlocal consumed
             if not any(char != "0" for char in expected):
+                if path in trees[commit]:
+                    raise SourceIncomplete("tree_entry_mismatch")
                 return None
-            output = git("ls-tree", "--full-tree", "-z", commit, "--", ":(literal)" + path).stdout
-            match = re.fullmatch(rb"([0-7]{6}) (blob|commit) ([0-9a-f]+)\t(.+)\x00", output, re.DOTALL)
-            if match is None or match[4].decode("utf-8") != path or match[3].decode() != expected:
+            retained = trees[commit].get(path)
+            if retained is None or retained[2] != expected:
                 raise SourceIncomplete("tree_entry_mismatch")
-            mode, kind = match[1].decode(), match[2].decode()
+            mode, kind, _ = retained
             value = {"object_id": expected, "mode": mode, "type": kind, "size": None}
             if mode == "160000" and kind == "commit":
                 value["classification"] = "gitlink"
                 return value
             if mode not in ("100644", "100755", "120000") or kind != "blob":
                 raise SourceIncomplete("unsupported_tree_entry")
-            if expected not in blobs:
-                raw_size = git("cat-file", "-s", expected, limit=128).stdout
-                if re.fullmatch(rb"[0-9]+\n", raw_size) is None:
-                    raise SourceIncomplete("invalid_blob_size")
-                size = int(raw_size)
-                if size > max_blob_bytes or consumed + size > max_total_blob_bytes:
-                    raise SourceIncomplete("blob_budget_exhausted")
-                body = git("cat-file", "blob", expected, limit=min(size + 1, max_blob_bytes + 1)).stdout
-                if len(body) != size:
-                    raise SourceIncomplete("blob_size_mismatch")
-                algorithm = hashlib.sha1 if len(expected) == 40 else hashlib.sha256
-                if algorithm(b"blob " + str(size).encode() + b"\0" + body).hexdigest() != expected:
-                    raise SourceIncomplete("blob_identity_mismatch")
-                try:
-                    body.decode("utf-8")
-                    classification = "binary" if b"\0" in body else "text"
-                except UnicodeError:
-                    classification = "binary"
-                blobs[expected] = (size, classification)
-                consumed += size
             value["size"], value["classification"] = blobs[expected]
             if mode == "120000":
                 value["classification"] = "symlink"
@@ -187,7 +168,11 @@ class LocalReviewSource:
                 path = _path(item.get("path"))
                 native_paths.add(path)
                 if change.get("originalPath") is not None:
-                    native_paths.add(_path(change["originalPath"]))
+                    original_path = _path(change["originalPath"])
+                    original_entry = changes.get(original_path)
+                    if original_entry is None or not any(char != "0" for char in original_entry[0]):
+                        raise SourceIncomplete("original_path_has_no_common_object")
+                    native_paths.add(original_path)
                 old, new = changes.get(path, (None, None))
                 if old is None:
                     raise SourceIncomplete("native_path_missing")
@@ -200,6 +185,74 @@ class LocalReviewSource:
                         raise SourceIncomplete("native_blob_mismatch")
             if native_paths != set(changes):
                 raise SourceIncomplete("native_path_coverage_mismatch")
+            for commit in (common, head):
+                entries = trees.setdefault(commit, {})
+                arguments = ("ls-tree", "--full-tree", "-z", commit, "--")
+                for batch in _path_batches(arguments, changes):
+                    output = git(*arguments, *(":(literal)" + path for path in batch)).stdout
+                    if output and not output.endswith(b"\0"):
+                        raise SourceIncomplete("unterminated_tree_entries")
+                    for row in output.split(b"\0")[:-1]:
+                        match = re.fullmatch(rb"([0-7]{6}) (blob|commit) ([0-9a-f]+)\t(.+)", row, re.DOTALL)
+                        if match is None:
+                            raise SourceIncomplete("invalid_tree_entry")
+                        path = match[4].decode("utf-8")
+                        if path not in batch or path in entries:
+                            raise SourceIncomplete("unexpected_tree_entry")
+                        entries[path] = tuple(part.decode() for part in match.group(1, 2, 3))
+            identifiers = sorted({
+                oid for tree in trees.values() for _, kind, oid in tree.values() if kind == "blob"
+            })
+            if identifiers:
+                metadata = git("cat-file", "--batch-check", input_text="\n".join(identifiers) + "\n").stdout
+                rows = metadata.splitlines()
+                if len(rows) != len(identifiers):
+                    raise SourceIncomplete("invalid_blob_metadata")
+                sizes = {}
+                for identifier, row in zip(identifiers, rows):
+                    match = re.fullmatch(rb"([0-9a-f]+) blob ([0-9]+)", row)
+                    if match is None or match[1].decode() != identifier:
+                        raise SourceIncomplete("invalid_blob_metadata")
+                    sizes[identifier] = int(match[2])
+                if any(size > max_blob_bytes for size in sizes.values()) or sum(sizes.values()) > max_total_blob_bytes:
+                    raise SourceIncomplete("blob_budget_exhausted")
+                batches, batch, size = [], [], 0
+                for identifier in identifiers:
+                    cost = sizes[identifier] + len(identifier) + 32
+                    if cost > max_output_bytes:
+                        raise SourceIncomplete("blob_output_budget_exhausted")
+                    if batch and size + cost > max_output_bytes:
+                        batches.append(batch)
+                        batch, size = [], 0
+                    batch.append(identifier)
+                    size += cost
+                if batch:
+                    batches.append(batch)
+                for batch in batches:
+                    output = git("cat-file", "--batch", input_text="\n".join(batch) + "\n").stdout
+                    offset = 0
+                    for identifier in batch:
+                        end = output.find(b"\n", offset)
+                        size = sizes[identifier]
+                        if end < 0 or output[offset:end] != f"{identifier} blob {size}".encode():
+                            raise SourceIncomplete("invalid_blob_frame")
+                        offset = end + 1
+                        body = output[offset:offset + size]
+                        offset += size
+                        if len(body) != size or output[offset:offset + 1] != b"\n":
+                            raise SourceIncomplete("invalid_blob_frame")
+                        offset += 1
+                        algorithm = hashlib.sha1 if len(identifier) == 40 else hashlib.sha256
+                        if algorithm(b"blob " + str(size).encode() + b"\0" + body).hexdigest() != identifier:
+                            raise SourceIncomplete("blob_identity_mismatch")
+                        try:
+                            body.decode("utf-8")
+                            classification = "binary" if b"\0" in body else "text"
+                        except UnicodeError:
+                            classification = "binary"
+                        blobs[identifier] = (size, classification)
+                    if offset != len(output):
+                        raise SourceIncomplete("unexpected_blob_frame")
             for path, (before, after) in sorted(changes.items()):
                 result["files"].append({
                     "path": path, "before": entry(common, path, before), "after": entry(head, path, after),

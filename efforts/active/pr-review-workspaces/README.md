@@ -203,6 +203,15 @@ contract.
 - Initial contained controls: shared process owner 88 passed / 12 platform skips;
   source/tree contracts 52 passed / 2 existing opt-in skips. Final source and
   malformed-result controls remain in progress; this is not effort completion.
+- PR #9708 review identified four legitimate mapping/effect/aliasing/performance
+  findings. Protect the validated scope from in-place owner request mutation,
+  require a common-side object for original paths, disable internal Git hooks
+  through the existing Worktrees mechanical policy, and batch tree/blob IO.
+  Twenty actual synthetic source controls pass, including hostile owner mutation,
+  a real reference-hook witness, misleading rename coverage, 108-path bounded
+  process counts and deep Windows ref paths. Fix the two CI source-admission/
+  generated-archive failures through their existing manifest/generator owners;
+  no failing gate is waived.
 
 ### 2026-10-30 - Priority cursorless native change paging
 - Merged source PR #9697 as `eef6ddbd87f1c708a6ac334fa622f1dfa7abf44e`

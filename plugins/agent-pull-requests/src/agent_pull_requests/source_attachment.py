@@ -14,7 +14,7 @@ def attach_source(generation: dict, source_owner, **limits) -> dict:
     _generation(generation, scope)
     result = {
         "schema": "agent-pull-requests.source-attachment", "version": 1,
-        "generation_id": generation["id"], "scope": scope,
+        "generation_id": generation["id"], "scope": copy.deepcopy(scope),
         "revision": copy.deepcopy(generation["revision"]),
         "state": "unavailable", "source": None, "errors": [],
         "review_authority": False,
@@ -41,7 +41,7 @@ def attach_source(generation: dict, source_owner, **limits) -> dict:
         return result
     # This is consistency/capability discovery, not authentication of an owner.
     source = operation({
-        "scope": scope, "revision": copy.deepcopy(revision),
+        "scope": copy.deepcopy(scope), "revision": copy.deepcopy(revision),
         "changes": copy.deepcopy(sections["changes"]["data"]),
     }, **limits)
     if (
