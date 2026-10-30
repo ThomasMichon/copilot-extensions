@@ -97,6 +97,24 @@ try {
                     $repoRoot = ($top | Select-Object -First 1).Trim()
                 }
             } catch {}
+            # Only reuse a rendered profile when its complete input set still matches.
+            $profilePaths = @((Join-Path $repoRoot '.github\ai-attribution.json'))
+            foreach ($directory in ($env:COPILOT_CUSTOM_INSTRUCTIONS_DIRS -split '[;,]')) {
+                if ($directory.Trim()) {
+                    $profilePaths += Join-Path $directory.Trim() 'ai-attribution.json'
+                }
+            }
+            $profilePaths += Join-Path $resolvedHome '.copilot\ai-attribution.json'
+            $configHome = if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } elseif ($env:APPDATA) { $env:APPDATA } else { Join-Path $resolvedHome '.config' }
+            $profilePaths += Join-Path $configHome 'ai-attribution\config.json'
+            foreach ($profilePath in $profilePaths) {
+                if (-not [System.IO.Path]::IsPathRooted($profilePath)) {
+                    throw 'Profile path needs shared resolution'
+                }
+            }
+            $activeProfiles = @($profilePaths | Where-Object {
+                Test-Path -LiteralPath $_
+            } | ForEach-Object { [System.IO.Path]::GetFullPath($_) } | Select-Object -Unique)
             $sha256 = [System.Security.Cryptography.SHA256]::Create()
             try {
                 $bytes = [System.Text.Encoding]::UTF8.GetBytes($repoRoot)
@@ -127,6 +145,30 @@ try {
                         ($now - [double]$data.computed_at) -le $ttl
                     ) {
                         $guidance = $data.guidance
+                        if ($activeProfiles.Count -gt 0) {
+                            if (
+                                $data.profile_guidance -isnot [string] -or
+                                @($data.profile_inputs).Count -ne $activeProfiles.Count
+                            ) { throw 'Profile inputs changed' }
+                            for ($profileIndex = 0; $profileIndex -lt $activeProfiles.Count; $profileIndex++) {
+                                $profilePath = $activeProfiles[$profileIndex]
+                                $component = Get-Item -LiteralPath $profilePath -Force -ErrorAction Stop
+                                if ($component.PSIsContainer -or $component.Length -gt 65536) {
+                                    throw 'Invalid profile file'
+                                }
+                                while ($component) {
+                                    if ($component.Attributes.HasFlag([System.IO.FileAttributes]::ReparsePoint)) {
+                                        throw 'Unsafe profile path'
+                                    }
+                                    $component = if ($component.PSIsContainer) { $component.Parent } else { $component.Directory }
+                                }
+                                $expected = @($data.profile_inputs)[$profileIndex]
+                                if ($expected.path -ne $profilePath -or
+                                    (Get-FileHash -LiteralPath $profilePath -Algorithm SHA256 -ErrorAction Stop).Hash -ne $expected.sha256
+                                ) { throw 'Profile content changed' }
+                            }
+                            $guidance = $data.profile_guidance
+                        }
                         $content = $GuidanceHeader + $guidance + "`n"
                         if (
                             [System.Text.Encoding]::UTF8.GetByteCount($content) -gt $GuidanceMaxBytes -and

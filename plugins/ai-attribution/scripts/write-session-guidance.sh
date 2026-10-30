@@ -70,6 +70,26 @@ if [[ -n "$session_id" && "$session_id" =~ $SESSION_ID_PATTERN \
         if top="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)" && [[ -n "$top" ]]; then
             repo_root="$top"
         fi
+        # Only reuse a rendered profile when its complete input set still matches.
+        profile_paths=("$repo_root/.github/ai-attribution.json")
+        IFS=':,' read -r -a profile_dirs <<<"${COPILOT_CUSTOM_INSTRUCTIONS_DIRS:-}"
+        for directory in "${profile_dirs[@]}"; do
+            directory="${directory#"${directory%%[![:space:]]*}"}"
+            directory="${directory%"${directory##*[![:space:]]}"}"
+            [[ -z "$directory" ]] || profile_paths+=("$directory/ai-attribution.json")
+        done
+        profile_paths+=("$resolved_home/.copilot/ai-attribution.json"
+            "${XDG_CONFIG_HOME:-$resolved_home/.config}/ai-attribution/config.json")
+        active_profiles=()
+        for profile_path in "${profile_paths[@]}"; do
+            case "$profile_path" in
+                /*) ;;
+                *) run_python_fallback "$stdin_text"; exit 0 ;;
+            esac
+            if [[ -e "$profile_path" || -L "$profile_path" ]]; then
+                active_profiles+=("$profile_path")
+            fi
+        done
         if [[ "$sha256_uses_shasum" -eq 1 ]]; then
             key="$(printf '%s' "$repo_root" | shasum -a 256 | cut -c1-16)"
         else
@@ -91,6 +111,45 @@ if [[ -n "$session_id" && "$session_id" =~ $SESSION_ID_PATTERN \
                 if [[ "$version" == "$CACHE_FORMAT_VERSION" && -n "$computed_at" && -n "$guidance" ]] \
                     && age="$(awk -v now="$now" -v c="$computed_at" 'BEGIN { print (now - c) }')" \
                     && awk -v age="$age" -v ttl="$ttl" 'BEGIN { exit !(age <= ttl) }'; then
+                    if [[ "${#active_profiles[@]}" -gt 0 ]]; then
+                        inputs_count="$(printf '%s' "$data" | jq -er '.profile_inputs | length' 2>/dev/null)"
+                        if [[ "$inputs_count" != "${#active_profiles[@]}" ]]; then
+                            run_python_fallback "$stdin_text"
+                            exit 0
+                        fi
+                        profile_index=0
+                        for profile_path in "${active_profiles[@]}"; do
+                            component="$profile_path"
+                            while [[ "$component" != "/" && "$component" != "." ]]; do
+                                if [[ -L "$component" ]]; then
+                                    run_python_fallback "$stdin_text"
+                                    exit 0
+                                fi
+                                component="$(dirname -- "$component")"
+                            done
+                            if [[ ! -f "$profile_path" ]] || [[ "$(wc -c < "$profile_path")" -gt 65536 ]]; then
+                                run_python_fallback "$stdin_text"
+                                exit 0
+                            fi
+                            canonical="$(cd -- "$(dirname -- "$profile_path")" && printf '%s/%s' "$(pwd -P)" "$(basename -- "$profile_path")")"
+                            expected="$(printf '%s' "$data" | jq -er --arg path "$canonical" --argjson index "$profile_index" '.profile_inputs[$index] | select(.path == $path) | .sha256' 2>/dev/null)"
+                            if [[ "$sha256_uses_shasum" -eq 1 ]]; then
+                                actual="$(shasum -a 256 -- "$profile_path" | cut -d ' ' -f 1)"
+                            else
+                                actual="$(sha256sum -- "$profile_path" | cut -d ' ' -f 1)"
+                            fi
+                            if [[ -z "$expected" || "$actual" != "$expected" ]]; then
+                                run_python_fallback "$stdin_text"
+                                exit 0
+                            fi
+                            profile_index=$((profile_index + 1))
+                        done
+                        guidance="$(printf '%s' "$data" | jq -er '.profile_guidance // empty' 2>/dev/null)"
+                        if [[ -z "$guidance" ]]; then
+                            run_python_fallback "$stdin_text"
+                            exit 0
+                        fi
+                    fi
                     content="${GUIDANCE_HEADER}${guidance}"$'\n'
                     content_bytes=${#content}
                     if [[ "$content_bytes" -gt "$GUIDANCE_MAX_BYTES" && -n "$guidance" ]]; then

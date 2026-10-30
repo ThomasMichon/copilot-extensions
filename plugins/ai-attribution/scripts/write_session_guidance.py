@@ -19,6 +19,9 @@ import tempfile
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from attribution_profile import guidance as profile_guidance, load_profile
+
 _SESSION_IDENTIFIER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$")
 _MAX_INPUT_BYTES = 64 * 1024
 _GUIDANCE_MAX_BYTES = 4 * 1024
@@ -99,7 +102,7 @@ def _run_contributor(root: Path, payload: bytes) -> str:
     return _additional_context(completed.stdout)
 
 
-def _repo_cache_key(cwd: str) -> str:
+def _repo_root(cwd: str) -> str:
     """A stable per-repository cache key, keyed by the git toplevel when one
     can be resolved (grouping every subdirectory of the same repo onto one
     cache entry), falling back to the raw ``cwd`` string otherwise. The git
@@ -120,7 +123,11 @@ def _repo_cache_key(cwd: str) -> str:
                 root = candidate
     except (OSError, subprocess.SubprocessError):
         pass
-    digest = hashlib.sha256(root.encode("utf-8", "surrogateescape")).hexdigest()
+    return root
+
+
+def _repo_cache_key(cwd: str, *, root: str | None = None) -> str:
+    digest = hashlib.sha256((root or _repo_root(cwd)).encode("utf-8", "surrogateescape")).hexdigest()
     return digest[:16]
 
 
@@ -128,9 +135,9 @@ def _cache_dir(home: Path) -> Path:
     return home / ".copilot" / "ai-attribution-cache"
 
 
-def _read_cached_guidance(home: Path, cwd: str) -> str | None:
+def _read_cached_guidance(home: Path, cwd: str, *, key: str | None = None) -> str | None:
     try:
-        path = _cache_dir(home) / f"{_repo_cache_key(cwd)}.json"
+        path = _cache_dir(home) / f"{key or _repo_cache_key(cwd)}.json"
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
@@ -145,11 +152,11 @@ def _read_cached_guidance(home: Path, cwd: str) -> str | None:
     return guidance
 
 
-def _write_cached_guidance(home: Path, cwd: str, guidance: str) -> None:
+def _write_cached_guidance(home: Path, cwd: str, guidance: str, *, key: str | None = None) -> None:
     try:
         directory = _cache_dir(home)
         directory.mkdir(parents=True, exist_ok=True)
-        path = directory / f"{_repo_cache_key(cwd)}.json"
+        path = directory / f"{key or _repo_cache_key(cwd)}.json"
         data = {
             "version": _CACHE_FORMAT_VERSION,
             "computed_at": time.time(),
@@ -170,20 +177,48 @@ def _write_cached_guidance(home: Path, cwd: str, guidance: str) -> None:
         pass
 
 
-def _run_contributor_cached(root: Path, payload: bytes, *, home: Path, cwd: str | None) -> str:
+def _cache_profile(home: Path, key: str, inputs: list, guidance: str) -> None:
+    """Keep base policy separate so removing the last profile cannot replay it."""
+    temporary = None
+    try:
+        path = _cache_dir(home) / f"{key}.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return
+        data.update(profile_inputs=inputs, profile_guidance=guidance)
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent,
+            prefix=".ai-attribution-profile.", suffix=".tmp", delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            json.dump(data, handle)
+        os.replace(temporary, path)
+    except (OSError, ValueError, TypeError):
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _run_contributor_cached(
+    root: Path, payload: bytes, *, home: Path, cwd: str | None,
+    repo_root: str | None = None,
+) -> str:
     """`_run_contributor`, but reused from a per-repository cache when one is
     fresh, so a session whose repository and config haven't changed since the
     last computation skips the (much costlier) shell-script invocation
     entirely. Never used when ``cwd`` is absent/invalid, or when the operator
     has set the force-refresh escape hatch."""
     force_refresh = bool(os.environ.get(_FORCE_REFRESH_ENV))
+    key = _repo_cache_key(cwd, root=repo_root) if cwd else None
     if cwd and not force_refresh:
-        cached = _read_cached_guidance(home, cwd)
+        cached = _read_cached_guidance(home, cwd, key=key)
         if cached is not None:
             return cached
     guidance = _run_contributor(root, payload)
     if cwd and guidance:
-        _write_cached_guidance(home, cwd, guidance)
+        _write_cached_guidance(home, cwd, guidance, key=key)
     return guidance
 
 
@@ -210,7 +245,33 @@ def write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
     raw_payload = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     payload_cwd = payload.get("cwd")
     cwd = payload_cwd if isinstance(payload_cwd, str) and payload_cwd else None
-    guidance = _run_contributor_cached(_plugin_root(), raw_payload, home=home, cwd=cwd)
+    repo_root = _repo_root(cwd) if cwd else None
+    guidance = _run_contributor_cached(
+        _plugin_root(), raw_payload, home=home, cwd=cwd, repo_root=repo_root
+    )
+    if guidance:
+        profile, errors = load_profile(home, Path(repo_root) if repo_root else None)
+        addition = profile_guidance(profile)
+        if errors:
+            addition = "Signature profile unavailable: " + "; ".join(errors) + (
+                ". Use the policy's default disclosure; do not infer an exemption."
+            )
+        if addition:
+            candidate = _GUIDANCE_HEADER + guidance + "\n\n" + addition + "\n"
+            if len(candidate.encode("utf-8")) <= _GUIDANCE_MAX_BYTES:
+                guidance += "\n\n" + addition
+            else:
+                notice = (
+                    "\n\nSignature profile exceeds the session budget. Use default "
+                    "disclosure or resolve the profile with attribution_profile.py "
+                    "before preview/approval; the policy above still applies."
+                )
+                if len((_GUIDANCE_HEADER + guidance + notice + "\n").encode("utf-8")) <= _GUIDANCE_MAX_BYTES:
+                    guidance += notice
+        if cwd and not errors and profile["_inputs"]:
+            _cache_profile(
+                home, _repo_cache_key(cwd, root=repo_root), profile["_inputs"], guidance
+            )
     if guidance:
         content = _GUIDANCE_HEADER + guidance + "\n"
     else:

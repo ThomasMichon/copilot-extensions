@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent proposal and implementation PRs
 - **Created:** 2026-10-30
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Harness Guidance](../../../visions/harness-guidance/README.md#configurable-attribution-signatures)
 - **Umbrella issue:** #9633
 - **Sub-issues:** none; #2965 retains its separate owner
@@ -79,29 +79,29 @@ Private identifiers and adopter-specific context are intentionally absent.
 ### Phase 1 - Review the bounded contract
 - [x] Establish the public issue and visible claim without taking over #2965.
 - [x] Reconcile the guidance vision, current provider and duplicate inventories.
-- [ ] Land this proposal through normal review before implementation.
+- [x] Land this proposal through normal review before implementation.
 
 ### Phase 2 - Implement the canonical profile
-- [ ] Add sparse surface/visibility/activity selection and header/footer
+- [x] Add sparse surface/visibility/activity selection and header/footer
   templates, shared defaults, trusted overrides and bounded interpolation.
-- [ ] Render the same effective profile into concise exact-session Markdown,
+- [x] Render the same effective profile into concise exact-session Markdown,
   retaining the current disclosure kernel and attributable error behavior.
-- [ ] Provide the optional pure resolver/decorator consumer with idempotent
+- [x] Provide the optional pure resolver/decorator consumer with idempotent
   marker insertion and no publishing, authentication or approval side effects.
-- [ ] Document configuration, rendering, inheritance, supported context and
+- [x] Document configuration, rendering, inheritance, supported context and
   failure behavior; preserve legacy configuration compatibility.
 
 ### Phase 3 - Reconcile consumers and duplicate guidance
 - [x] Complete the source-owned attribution inventory and classify real forks,
   fixed wording, canonical references and intentional safety/provenance copies.
-- [ ] Replace genuine suite duplicates with canonical-owner references or data.
+- [x] Replace genuine suite duplicates with canonical-owner references or data.
 - [ ] Supply the selected adopter's defaults/override seam and retire its
   competing provider through the adopter's own reviewed flow.
 - [ ] Preserve independent sending authority, human-review truth and required
   static/offline delivery; cooperate with externally owned changes.
 
 ### Phase 4 - Validate and close
-- [ ] Run focused unit, hook/CLI consumer and applicable native parity checks.
+- [x] Run focused unit, hook/CLI consumer and applicable native parity checks.
 - [ ] Land source and consumer changes through their required review/CI gates.
 - [ ] Record release versus installed/running state separately; transfer any
   unapproved rollout to a named objective rather than claiming deployment.
@@ -112,19 +112,19 @@ Private identifiers and adopter-specific context are intentionally absent.
 The following implementation/test mechanics are **agent-recommended** realization
 of the confirmed scope, not additional operator-requested features.
 
-- [ ] Exercise sparse inheritance, wildcard specificity, deterministic conflict
+- [x] Exercise sparse inheritance, wildcard specificity, deterministic conflict
   handling, header/footer independence and explicit empty versus missing slots.
-- [ ] Cover interpolation, output escaping, invalid/oversized data and review
+- [x] Cover interpolation, output escaping, invalid/oversized data and review
   statements derived from actual context rather than presumed human review.
-- [ ] Prove guidance and programmatic output use the same effective profile;
+- [x] Prove guidance and programmatic output use the same effective profile;
   configuration changes invalidate any reused session-guidance computation.
-- [ ] Prove repeated decoration is idempotent, recognizes owned marker variants
+- [x] Prove repeated decoration is idempotent, recognizes owned marker variants
   at intended slots and does not remove ordinary quoted content or another
   author's disclosure.
-- [ ] Check unchanged unconfigured/legacy behavior and operator-versus-target
+- [x] Check unchanged unconfigured/legacy behavior and operator-versus-target
   configuration authority; a presentation profile must not silently waive a
   required disclosure or authorize a send.
-- [ ] Exercise the actual entrypoints in disposable configuration/session roots,
+- [x] Exercise the actual entrypoints in disposable configuration/session roots,
   including cold/warm guidance and available native shell paths. Record what
   was exercised and any unavailable lane explicitly.
 - [ ] Audit both inventories after migration: no competing selected provider,
@@ -161,3 +161,51 @@ network dependency, parallel policy registry or mandatory sibling plugin.
   policy reconciliation rather than executing superseded checkboxes.
 - Read-only audits are recorded in the linked inventory. No implementation or
   rollout has begun.
+
+### 2026-10-30 - Proposal reviewed; canonical-profile implementation admitted
+- #9637 merged after an approving Copilot review and required green checks.
+  The worktree was pulled forward onto the merged proposal.
+- Phase 1 is complete. The next slice is Phase 2, implementing the shared
+  profile/resolver and its two consumers before adopter reconciliation.
+
+### 2026-10-30 - Shared implementation and focused consumer validation
+- Implemented JSON profile discovery/selection, header/footer inheritance,
+  literal interpolation, truthful review context and pure idempotent draft
+  decoration in one standard-library module. The existing policy authority,
+  legacy configuration and static safety floor remain unchanged.
+- Exact-session guidance consumes the same profile. Profile-enabled launches
+  bypass native warm-cache shortcuts and load current data after the cached
+  policy kernel; unconfigured native warm paths remain intact.
+- Contained suite passed 137 tests with 6 platform skips. A focused rerun after
+  profile diagnostics and byte-budget fixes passed 20 tests, including the
+  actual JSON helper and Windows wrapper with add/edit/remove configuration.
+  New effectful probes are explicit T3 tests, not required unit-only CI growth.
+- Python high-signal lint, documentation consistency and module-size checks
+  passed. Design review, exact-head CI/review, publication and dependent adopter
+  reconciliation remain open. No runtime rollout or human sending occurred.
+
+### 2026-10-30 - Freshness/performance refinement and review
+- Independent design review found no blocking defects. Its redundant root
+  lookup observation was fixed: cache/profile consumers reuse one lookup per
+  writer invocation, pinned by a work-count test.
+- An initial native measurement exposed avoidable configured-warm Python
+  startup. Native wrappers now reuse separately cached rendered profiles only
+  after validating the complete ordered input roster and bounded file digests.
+  Add/edit/remove/reorder inputs and warm operation without Python are covered.
+- Eight isolated Windows wrapper samples completed: cold unconfigured 4.096s;
+  warm unconfigured 1.0362/0.9829/1.1261s; first profile 1.8791s; warm profile
+  1.526/1.3017/1.3342s. Warm medians were 1.0362s and 1.3342s respectively.
+  These small samples do not qualify tails or composed session startup, and
+  the cold sample does not meet the two-second composed-hook target.
+- The final broad run passed 142 tests with 6 skips, but revealed a Windows
+  pytest environment-length setup/teardown error from an oversized parameter
+  ID. Explicit short IDs fixed it; the final affected packet passed 41 tests,
+  including the formerly blocked oversized-file case, native cache freshness
+  and real helper subprocesses. High-signal lint passed.
+- A second independent review scoped to the cache refinement found no issues.
+  Disposable fresh HOME/session fixtures cover first touch; no installer or
+  external deployment changed. Native Linux/macOS execution and whole-session
+  composition were not exercised locally; publication does not claim them or
+  authorize a rollout. The new effectful probes remain explicit-only.
+- Final full native-inclusive rerun after the short-ID fixture correction:
+  **143 passed, 6 platform skips**. This supersedes the earlier failing attempt.

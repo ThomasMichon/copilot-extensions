@@ -159,10 +159,51 @@ def test_missing_cwd_never_caches(monkeypatch, tmp_path):
     assert not writer._cache_dir(tmp_path).exists()
 
 
+def test_root_lookup_is_reused_for_cache_and_profile(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(writer, "_repo_root", lambda cwd: calls.append(cwd) or cwd)
+    monkeypatch.setattr(writer, "_run_contributor", lambda *args: "Required disclosure.")
+    monkeypatch.setenv("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", "")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    payload = {"sessionId": "session-1", "cwd": str(repo)}
+    assert writer.write_session_guidance(payload, home=tmp_path)
+    assert calls == [str(repo)]
+    calls.clear()
+    assert writer.write_session_guidance(payload, home=tmp_path)
+    assert calls == [str(repo)]
+
+
 def test_over_budget_content_writes_explicit_status(monkeypatch, tmp_path):
     monkeypatch.setattr(writer, "_run_contributor", lambda *args: "x" * 5000)
     assert writer.write_session_guidance({"sessionId": "session-1"}, home=tmp_path)
     assert "omitted because" in _target(tmp_path).read_text(encoding="utf-8")
+
+
+def test_large_profile_never_displaces_policy_kernel(monkeypatch, tmp_path):
+    base = "Required disclosure. " + "x" * 3800
+    monkeypatch.setattr(writer, "_run_contributor", lambda *args: base)
+    monkeypatch.setenv("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", "")
+    config = tmp_path / ".copilot" / "ai-attribution.json"
+    config.parent.mkdir()
+    config.write_text(json.dumps({"version": 1, "rules": [{"header": "AI " * 150}]}),
+                      encoding="utf-8")
+    assert writer.write_session_guidance({"sessionId": "session-1"}, home=tmp_path)
+    actual = _target(tmp_path).read_text(encoding="utf-8")
+    assert base in actual
+    assert len(actual.encode("utf-8")) <= 4096
+
+
+def test_bad_profile_preserves_kernel_with_visible_diagnostic(monkeypatch, tmp_path):
+    monkeypatch.setattr(writer, "_run_contributor", lambda *args: "Required disclosure.")
+    monkeypatch.setenv("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", "")
+    config = tmp_path / ".copilot" / "ai-attribution.json"
+    config.parent.mkdir()
+    config.write_text("invalid", encoding="utf-8")
+    assert writer.write_session_guidance({"sessionId": "session-1"}, home=tmp_path)
+    actual = _target(tmp_path).read_text(encoding="utf-8")
+    assert "Required disclosure." in actual
+    assert "profile layer 1 rejected" in actual
 
 
 @pytest.mark.parametrize("session_id", ("", "../escape", "slash/value", "a" * 129))
