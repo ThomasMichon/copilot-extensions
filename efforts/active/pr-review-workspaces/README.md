@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Planning proposal, then separately admitted implementation slices against `dev`
 - **Created:** 2026-10-29
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/plugins/agent-pull-requests/README.md` and `visions/plugins/agent-worktrees/pull-requests/README.md`
 - **Umbrella issue:** #9535
 - **Related owners:** #6007 / #7188 (PR service), #7051 (provider conformance)
@@ -18,16 +18,16 @@ existing service is the candidate owner of a shared caching database; a client
 can materialize a coherent local representation without another agent
 assembling and interpreting bespoke review packets.
 
-Capture the vision and architecture build-out now. This effort is a reviewed
-planning proposal, not authorization to implement, install, update, deploy,
-change credentials, or perform live review effects.
+The planning baseline cleared review in #9537. Source implementation is now
+admitted in incremental, reviewed slices under #9535. Installation, updates,
+deployment, credential changes and live review effects remain separately gated.
 
 ## Participants
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Planning coordinator | Capture intent, reconcile existing owners, publish the planning proposal | This effort and #9535 |
-| PR-domain implementer | Future admitted workspace/cache/provider slices; not assigned by this proposal | Separately claimed source issue |
+| PR-domain implementer | Own the admitted source-only read-generation slice and its tests | #9535 |
 | Reviewer integrator | Future admitted consumer and end-to-end qualification; not assigned by this proposal | Separately claimed source issue |
 
 ## Coordination
@@ -35,7 +35,7 @@ change credentials, or perform live review effects.
 - **Topology:** A documentation-only proposal followed by independent, reviewed
   source slices against `dev`; implementation admission is separate.
 - **Host (owns proposal PR):** Planning coordinator.
-- **Delegates:** None assigned for this capture.
+- **Delegates:** One PR-domain implementer; no recursive delegation.
 - **Existing owners:** Preserve the PR service/watch/registration scope of
   #6007 and #7188, #7051 conformance, credential providers, service lifecycle,
   and Worktrees source/publication/resource authority. Extend their contracts,
@@ -84,8 +84,8 @@ are preserved in [inception-transcript.md](inception-transcript.md).
 
 ## Plan
 
-The requested capture is planning-only. The decomposition and technical
-acceptance below are **agent-recommended**, not additional operator grants.
+The decomposition and technical acceptance below are **agent-recommended**.
+The source implementation continuation is admitted; operational effects are not.
 
 ### Phase 0 - Capture and review the planning baseline
 - [x] Confirm `pr-review-workspaces`, canonical source placement and ADO-first
@@ -93,11 +93,11 @@ acceptance below are **agent-recommended**, not additional operator grants.
 - [x] Check existing efforts/issues and retain service/provider/lifecycle owners.
 - [x] Record the [architecture proposal](architecture.md), risks and validation
   plan; distinguish desired behavior from existing source capabilities.
-- [ ] Land the documentation-only proposal through ordinary review and CI.
+- [x] Land the documentation-only proposal through ordinary review and CI (#9537).
   This does not admit runtime implementation or rollout.
 
 ### Phase 1 - Reconcile standing intent and architecture
-- [ ] Reconcile the existing PR plugin/capability visions; revise their
+- [x] Reconcile the existing PR plugin/capability visions; revise their
   intent-level features and behaviors where this proposal extends them.
 - [ ] Specify PR-domain ownership, service-backed cache and client workspace
   roles without retaining a parallel forge implementation.
@@ -105,6 +105,8 @@ acceptance below are **agent-recommended**, not additional operator grants.
   capability discovery, supported peer behavior and expand/migrate/contract.
 - [ ] Admit concrete implementation slices through their own reviewed plans
   and source claims; keep operational rollout separately authorized.
+  The first bounded [read-generation slice](read-generation-slice.md) is claimed
+  under #9535; its contract amendment clears review before source realization.
 
 ### Phase 2 - Build the ADO read and source path after admission
 - [ ] Provide initial normalized load and section-aware incremental sync using
@@ -137,7 +139,7 @@ acceptance below are **agent-recommended**, not additional operator grants.
 
 ## Validation Plan
 
-- [ ] Planning capture matches the operator inputs; all additions remain
+- [x] Planning capture matches the operator inputs; all additions remain
   visibly agent-recommended and public artifacts contain no private context.
 - [ ] Initial load, no-change sync, author reply/edit/deletion, new source head
   and target-only movement preserve honest revision and completeness evidence.
@@ -171,6 +173,14 @@ submission recovery and remaining decisions. It is not a shipped CLI or wire
 contract.
 
 ## Journal
+
+### 2026-10-30 - Source continuation admitted
+- Source implementation was explicitly authorized, with incremental candidates
+  for reviewer feedback; installation and live review effects remain separate.
+- Re-read the canonical proposal and existing service/provider owners. Claimed
+  the initial read-generation slice under #9535 rather than duplicating the effort.
+- Reconciled the owning visions and specified the bounded first slice for review
+  before implementation. This is not completion of the full workspace campaign.
 
 ### 2026-10-29 - Canonical planning capture
 - Confirmed the effort slug, canonical source home and ADO-first slice.
