@@ -113,7 +113,7 @@ def _task_command_parts(tier: str, *, home: Path | None = None) -> list[str]:
     # project-scoped tier; today's single "sweep" tier runs a global update.
     if tier not in TIER_SPECS:
         raise ValueError(f"unknown fleet-update tier: {tier}")
-    return [task_binstub_path(home), "update", "--auto"]
+    return [task_binstub_path(home), "update"]
 
 
 def task_description(tier: str) -> str:
@@ -185,6 +185,7 @@ def task_definition_matches(
     literal_arguments = (snapshot.arguments or "").casefold().strip()
     try:
         arguments = shlex.split(snapshot.arguments or "", posix=False)
+        expected = shlex.split(task_action_arguments(tier, home=home), posix=False)
     except ValueError:
         return False
     normalized_arguments = _normalize_windows_text(snapshot.arguments)
@@ -196,7 +197,8 @@ def task_definition_matches(
         and "cmd.exe /c" in literal_arguments
         and _normalize_windows_text(task_binstub_path(home)) in normalized_arguments
         and "update" in literal_arguments
-        and any(argument in {"--auto", '"--auto"'} for argument in arguments)
+        and tuple(_normalize_windows_text(arg.strip('"')) for arg in arguments)
+        == tuple(_normalize_windows_text(arg.strip('"')) for arg in expected)
         and _normalize_windows_text(snapshot.working_directory)
         == _normalize_windows_text(task_working_directory(home))
         and (snapshot.trigger_kind or "") == spec.schedule_kind

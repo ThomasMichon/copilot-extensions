@@ -121,3 +121,8 @@ fallback or an attempted review write.
 Later slices own authorized live acquisition, service-backed atomic cache/CAS,
 source-workspace attachment and durable explicit submission/reconciliation.
 No cache journal or live review authority is introduced here.
+
+The [protected owner-read embedding](owner-read.md) adds an explicitly adopted
+owner integration without exporting credentials. Its returned generations can
+be compared locally with `compare --generation current.json --previous previous.json`;
+the comparison does not reacquire evidence or grant owner adoption.

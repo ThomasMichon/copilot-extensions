@@ -1,0 +1,8 @@
+{
+  "schema": "agent-pull-requests.owner-read-request",
+  "version": 1,
+  "binding_ref": "example-read-binding",
+  "number": 42,
+  "budget_seconds": 60,
+  "expected_principal": "effective-ado-user-id"
+}

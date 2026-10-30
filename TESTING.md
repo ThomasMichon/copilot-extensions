@@ -1,5 +1,11 @@
 # Testing copilot-extensions
 
+The optional `update_diagnostics` lane includes Manager's actual scoped
+engine handoff under a no-window captured parent. It verifies repeated stdout
+and stderr, the unchanged native nonzero result and unaffected unscoped
+passthrough controls. This proves stream delivery, not installed full-update
+success or native publication settlement.
+
 The optional `update_diagnostics` lane also runs MCP's focused
 `test_source_install_transactions.py -k footprint_routes` controls and
 `test_source_build.py` operational-identity and
@@ -1355,6 +1361,11 @@ guidance hooks run independently after bootstrap refusal, preserving exact
 payload binstub identity without configuring a host bridge or processing
 personal sessions. This is an explicit manual integration lane, not required PR
 CI, live timer/serving-worker proof, selected-snapshot recipe admission or rollout.
+
+Windows runs recipe refusals, actual bootstrap hooks and the concurrent cold
+consumer in three separate contained packets. A filtered invocation combines
+its selected files, so each packet names only its own file. All three keep the
+canonical storage cap and retain every selected test.
 
 ## Optional CodeSpaces bootstrap adoption
 
