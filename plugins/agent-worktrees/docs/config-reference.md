@@ -54,6 +54,75 @@ that carries no in-repo config.
 
 ---
 
+## Acquisition reports (Python owners)
+
+`config.load_config_report(path=None, *, include_control_plane_related_pr=True,
+include_knowledge_preferences=True, project=None)` returns an
+`AcquisitionReport[Config]`. It calls the same `load_config` operation, with
+unchanged arguments, precedence, optional fallbacks and caller-owned cache.
+It does not replay acquisition to reconstruct missing evidence.
+
+`inrepo_config_source.load_config_base_report(anchor, candidates, *, strict=False)`
+returns an `AcquisitionReport[dict]` for the committed-ref/disk base only. It
+excludes marketplace overlays and the rest of the full config load. Committed
+reads remain offline, keep the same candidate order and one-hop branch policy,
+and use the same bounded batch/presence/ordered-read fallback. An empty committed
+mapping still permits the existing disk fallback. Reporting adds no Git probes,
+parses, source rescans or hashes.
+
+Reports separate the operational `value` from ordered, metadata-only
+`observations` and sanitized `findings`:
+
+- `absent` means every observed applicable source is authoritatively absent or
+  unconfigured. A successfully parsed empty document is not a read failure.
+- `complete` means the observed acquisition path completed without unresolved
+  uncertainty; it does not mean the configuration grants authority or that the
+  complete full-loader input frontier is known.
+- `indeterminate` retains unreadable/malformed-source findings, unresolved
+  higher-priority candidate failures and opaque child-owner boundaries, even
+  when a lower layer supplies a usable value. Recovered batch/presence failures
+  remain visible rather than becoming an invented successful acquisition.
+
+The full loader currently reports opaque repository/adoption registries,
+knowledge-preference selection, control-plane PR discovery, installation-context
+selection and execution-machine discovery as `owner-coverage-unavailable` where
+those boundaries are used. Non-default committed parser callbacks likewise do
+not provide parser coverage. A valid `Config` or mapping is not proof that these
+owners supplied complete evidence. Fatal full-load and strict-parser/file errors
+propagate their original exceptions: there is no fabricated successful report
+for a failed operation.
+
+Disk candidate/marketplace presence selection preserves the existing single
+`Path.exists()` call and its exact native return/throw behavior. A negative result
+is `presence-provenance-unavailable` uncertainty: that API can suppress stat
+errors, so it cannot certify ordinary disk absence. The separate YAML-source
+report and existing `source_probes` consumers retain their own authoritative
+absence classification. Successful strict-file mapping is also an opaque owner:
+its empty result does not distinguish parsed empty from read-time disappearance.
+Neither boundary triggers another probe or read to reconstruct provenance.
+
+The collector is request-scoped and restored on success or exception. Nested
+reports isolate their observations; a collector cannot be consumed by another
+thread, including through an explicitly copied context. Returned observations
+are immutable tuples, not retained request collectors. Drop-in observations keep
+the existing owner's entry verdicts, attribution and last-known-good retention
+without copying configuration bodies or unstructured owner error text.
+
+Within the existing committed-resolution snapshot scope, the same snapshot
+retains both its value and original acquisition metadata; later reads do not
+reacquire them. This is not a freshness witness. The separate `Config` memoization
+cache still owns values without acquisition provenance. A report that receives
+such a cached value returns `cached-config-unattributed` uncertainty without
+forcing another load.
+
+All reports remain `reusable=False`. `full-load-config-closure`,
+`inrepo-config-closure` (including marketplace selection), and
+`stable-owner-input-frontier` remain unavailable. These Python report seams do
+not qualify stable write-version/input witnesses, migrate hook/memo consumers,
+prove performance or establish live guidance delivery.
+
+---
+
 ## Execution-space identity
 
 Launch selectors accept both `--machine example-host --environment WSL` and

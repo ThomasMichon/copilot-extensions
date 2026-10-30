@@ -423,3 +423,102 @@ def test_default_root_fixture_loads_without_ambient_procutil(api, monkeypatch):
     assert owner.no_window_kwargs is boundary.no_window_kwargs
     assert owner.no_window_kwargs() == {"creationflags": 1234}
     assert attempts == []
+
+
+
+def test_config_report_request_collection_restores_nested_failure_and_opaque_owners(api):
+    value = object()
+    failure = ValueError("synthetic private failure")
+    inner = []
+    calls = []
+
+    def load(path, **options):
+        calls.append((path, options))
+        api.config.full_load_started()
+        api.config.opaque_source(str(path))
+        if path == "failed":
+            raise failure
+        if path == "outer":
+            original = api.config.current_observations()
+            inner.append(api.config.load_config_report("inner"))
+            with pytest.raises(ValueError) as caught:
+                api.config.load_config_report("failed")
+            assert caught.value is failure
+            assert api.config.current_observations() is original
+        return value
+
+    api.stub("config", load_config=load)
+    outer = api.config.load_config_report("outer", project="sample",
+        include_control_plane_related_pr=False, include_knowledge_preferences=False)
+    assert api.config.current_observations() is None
+    assert outer.value is inner[0].value is value
+    assert {o.source for o in outer.observations} == {"load-config", "execution-machine", "outer"}
+    assert {o.source for o in inner[0].observations} == {"load-config", "execution-machine", "inner"}
+    assert calls[0] == ("outer", dict(project="sample", include_control_plane_related_pr=False,
+                                    include_knowledge_preferences=False))
+    assert outer.authority is ScanAuthority.INDETERMINATE
+    assert "synthetic private failure" not in repr(outer.observations)
+    assert outer.reusable is False
+
+
+def test_config_report_unattributed_cached_value_is_not_replayed(api):
+    calls = []
+    value = object()
+
+    def load(*args, **kwargs):
+        calls.append((args, kwargs))
+        return value
+
+    api.stub("config", load_config=load)
+    report = api.config.load_config_report("selected")
+    assert len(calls) == 1
+    assert report.value is value
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert [f.reason for f in report.findings] == ["cached-config-unattributed"]
+    assert report.reusable is False
+
+
+@pytest.mark.parametrize("mode", ["absent", "empty", "malformed", "partial", "snapshot", "replacement"])
+def test_committed_config_report_preserves_canonical_acquisition_and_snapshot_metadata(api, monkeypatch, mode):
+    calls = []
+    text = {"empty": b"", "malformed": b"marker: [\n", "replacement": b"marker: \xff\n"}.get(mode, b"marker: fixture\n")
+    packet = b"a" * 40 + b" blob " + str(len(text)).encode() + b"\n" + text + b"\n"
+
+    def git(*args, **kwargs):
+        calls.append(args)
+        if args[0] == "symbolic-ref":
+            return SimpleNamespace(returncode=1 if mode == "absent" else 0,
+                                   stdout="refs/remotes/origin/main\n")
+        if mode == "partial":
+            if args == ("show", "origin/main:later.yaml"):
+                return SimpleNamespace(returncode=0, stdout="marker: fixture\n")
+            return SimpleNamespace(returncode=128, stdout="")
+        assert args == ("cat-file", "--batch")
+        return SimpleNamespace(returncode=0, stdout=packet)
+
+    original_exists = api.config.source_exists
+
+    def absent(path, stage):
+        class AbsentPath(str):
+            def exists(self):
+                return False
+        return original_exists(AbsentPath(str(path)), stage)
+
+    api.stub("git_ops", git=git, GitError=RuntimeError)
+    monkeypatch.setattr(api.config, "source_exists", absent)
+    source = api.load("inrepo_config_source")
+    candidates = (Path("first.yaml"), Path("later.yaml")) if mode == "partial" else (Path("config.yaml"),)
+    if mode == "snapshot":
+        with source.resolution_budget(reuse_snapshots=True):
+            legacy = source.load_config_base(Path("synthetic-anchor"), candidates)
+            legacy["marker"] = "caller mutation"
+            report = source.load_config_base_report(Path("synthetic-anchor"), candidates)
+        assert len(calls) == 2
+    else:
+        report = source.load_config_base_report(Path("synthetic-anchor"), candidates)
+    expected_value = {"marker": "\ufffd"} if mode == "replacement" else {"marker": "fixture"} if mode in ("partial", "snapshot") else {}
+    assert report.value == expected_value
+    expected = "complete" if mode == "snapshot" else "indeterminate"
+    assert report.authority.value == expected
+    assert report.reusable is False
+    assert api.config.current_observations() is None
