@@ -100,10 +100,20 @@ writer's transient replacement file or lock metadata. The filesystem needs
 headroom for one bounded generation/pointer replacement; disk exhaustion is an
 explicit IO failure, never permission to discard retained history.
 
-`rebuild()` explicitly clears **valid managed cache state only**. It first
+`rebuild()` explicitly clears **valid managed cache state only**. Under the
+existing cache lock, it may remove abandoned generation/target staging files
+with the exact naming pattern produced by the existing atomic JSON writer;
+partial staging content is never interpreted as a committed generation.
+Committed artifacts are validated before recovery, and unrelated or linked
+artifacts still refuse without deletion. Normal publication does not silently
+discard abandoned staging files.
+It first
 durably writes empty-pointer tombstones, then retires cache objects. Uncertain
 pointer clearing stops before object retirement; prior referenced objects remain
-available for recovery. A corrupted cache requires the existing owner's explicit
+available for recovery. After all object retirements finish, it removes cleared
+pointer files too, reclaiming capacity across different scopes. An interruption
+during retirement or pointer cleanup leaves only cleared pointers and can be
+retried through the same explicit rebuild. A corrupted cache requires the existing owner's explicit
 repair/disposal flow, not an automatic reset.
 
 Replay/operation files outside the cache child are never read, rewritten or

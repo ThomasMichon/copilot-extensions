@@ -168,16 +168,19 @@ class GenerationCache:
             self._check(lock)
             _atomic_write_json(self.descriptor, self.expected_descriptor)
 
-    def _inventory(self) -> tuple[list[Path], list[Path], int]:
+    def _inventory(self, *, include_staging=False) -> tuple[list[Path], list[Path], int, list[Path]]:
         for path in self.root.iterdir():
             if path.name not in {"descriptor.json", "cache.lock", "generations", "targets"}:
                 raise CacheInvalid("unexpected cache root entry")
             _plain(path, directory=path.name in {"generations", "targets"})
-        generations, pointers = [], []
+        generations, pointers, staging = [], [], []
         total = self.descriptor.stat().st_size
         for directory, output in ((self.generations, generations), (self.targets, pointers)):
             for path in directory.iterdir():
                 _plain(path)
+                if include_staging and re.fullmatch(r"\.[0-9a-f]{64}\.json\.[a-z0-9_]{8}\.tmp", path.name):
+                    staging.append(path)
+                    continue
                 if path.suffix != ".json":
                     raise CacheInvalid("unexpected cache object name")
                 try:
@@ -186,7 +189,7 @@ class GenerationCache:
                     raise CacheInvalid("unexpected cache object name") from None
                 output.append(path)
                 total += path.stat().st_size
-        return generations, pointers, total
+        return generations, pointers, total, staging
 
     def _load_generation(self, identifier: str, scope: dict) -> dict:
         value = self._read(self.generations / (_identifier(identifier) + ".json"), MAX_GENERATION_BYTES)
@@ -271,7 +274,7 @@ class GenerationCache:
 
             if current != expected_current:
                 return outcome("conflict")
-            generations, _, total = self._inventory()
+            generations, _, total, _ = self._inventory()
             object_path = self.generations / (identifier + ".json")
             target_path = self.targets / (_digest(scope) + ".json")
             existing = object_path.exists() or object_path.is_symlink()
@@ -317,7 +320,7 @@ class GenerationCache:
     def rebuild(self) -> None:
         """Explicit cache-only reset of valid managed state, never parent receipts."""
         with self._transaction() as lock:
-            generations, pointers, _ = self._inventory()
+            generations, pointers, _, staging = self._inventory(include_staging=True)
             for path in generations:
                 value = self._read(path, MAX_GENERATION_BYTES)
                 self._load_generation(path.stem, _scope(value.get("scope")))
@@ -327,6 +330,11 @@ class GenerationCache:
                 if path.stem != _digest(scope):
                     raise CacheInvalid("cache pointer filename does not match its scope")
                 self._current(scope)
+            # Only explicit rebuild removes abandoned files from our existing
+            # atomic writer, after validating every committed managed object.
+            for path in staging:
+                self._check(lock)
+                path.unlink()
             # Durably clear every pointer before retiring any object. A crash
             # during the clear leaves old pointers referencing still-held data.
             for path in pointers:
@@ -335,6 +343,11 @@ class GenerationCache:
                 value["generation_id"] = None
                 _atomic_write_json(path, value)
             for path in generations:
+                self._check(lock)
+                path.unlink()
+            # Every pointer was durably cleared before any retirement. Removing
+            # those tombstones now reclaims scope capacity without dangling refs.
+            for path in pointers:
                 self._check(lock)
                 path.unlink()
             self._check(lock)

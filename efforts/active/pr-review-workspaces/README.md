@@ -187,6 +187,10 @@ contract.
 ## Journal
 
 ### 2026-10-30 - Priority cursorless native change paging
+- Merged source PR #9697 as `eef6ddbd87f1c708a6ac334fa622f1dfa7abf44e`
+  after 112 contained tests, lint/install-contract gates, passing required CI
+  and assessed review. Fixed the review's documentation-impact omission.
+  Publication is not release, installation or live-owner qualification.
 - Preserved the open cache implementation PR and its remaining review findings
   while isolating native response compatibility under the same source objective.
 - Native change pages may omit both continuation fields. Probe with the actual
@@ -199,6 +203,13 @@ contract.
 - The separate warm-host large-response framing gap is already tracked in
   #1803. It is not fixed or broadened into this source slice; no installed
   transport, authentication or service state is changed.
+
+### 2026-10-30 - Resume owned cache review after native compatibility
+- Restored the held #9693 implementation onto the merged compatibility base.
+  The original cache issue/PR remain owned; no competing cache PR is opened.
+- Address the two remaining review findings through explicit lock-held staging
+  recovery and post-retirement tombstone reclamation. Preserve unrelated-file
+  refusal, uncertain-clear ordering and replay/operation receipt isolation.
 
 ### 2026-10-30 - Priority native nullable-properties compatibility
 - Isolated the normalizer correction from the unpublished cache implementation,

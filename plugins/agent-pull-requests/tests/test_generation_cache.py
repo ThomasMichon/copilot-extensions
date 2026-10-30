@@ -275,6 +275,80 @@ def test_uncertain_rebuild_clear_does_not_retire_still_needed_objects(
     assert list(cache.generations.iterdir()) == []
 
 
+@pytest.mark.parametrize("directory", ["generations", "targets"])
+def test_explicit_rebuild_recovers_abandoned_atomic_staging(cache, evidence, monkeypatch, directory):
+    first = generation(evidence)
+    cache.publish(first, expected_current=None)
+    parent = getattr(cache, directory)
+    target = next(parent.iterdir())
+    original_replace, original_unlink = Path.replace, Path.unlink
+
+    def fail_replace(path, other):
+        if path.parent == parent:
+            raise OSError("controlled interrupted replacement")
+        return original_replace(path, other)
+
+    def fail_cleanup(path, *args, **kwargs):
+        if path.parent == parent and path.name.endswith(".tmp"):
+            raise OSError("controlled interrupted cleanup")
+        return original_unlink(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "replace", fail_replace)
+        patch.setattr(Path, "unlink", fail_cleanup)
+        with pytest.raises(OSError):
+            storage._atomic_write_json(target, {"unfinished": True})
+    staging = [path for path in parent.iterdir() if path.name.endswith(".tmp")]
+    assert len(staging) == 1
+    with pytest.raises(CacheInvalid, match="name"):
+        cache.publish(generation(evidence, head="6" * 40), expected_current=first["id"])
+    cache.rebuild()
+    assert not staging[0].exists()
+    assert cache.lookup(first["scope"])["found"] is False
+    assert cache.publish(first, expected_current=None)["status"] == "published"
+
+
+@pytest.mark.parametrize("name", [".unrelated.tmp", "." + "a" * 64 + ".json.invalid.tmp"])
+def test_rebuild_refuses_unrelated_staging_without_deleting_anything(cache, evidence, name):
+    first = generation(evidence)
+    cache.publish(first, expected_current=None)
+    unknown = cache.generations / name
+    unknown.write_bytes(b"not-cache-state")
+    before = {path: path.read_bytes() for path in cache.generations.iterdir()}
+    with pytest.raises(CacheInvalid, match="name"):
+        cache.rebuild()
+    assert before == {path: path.read_bytes() for path in cache.generations.iterdir()}
+    assert cache.lookup(first["scope"])["current_id"] == first["id"]
+
+
+def test_rebuild_reclaims_scope_pointers_and_resumes_after_retirement_interruption(
+    tmp_path, evidence, monkeypatch,
+):
+    first = generation(evidence)
+    value = GenerationCache(tmp_path / "owner", "namespace",
+                            max_bytes=len(json.dumps(first).encode()) + 1500, max_generations=1)
+    value.provision()
+    original = Path.unlink
+    for index in range(6):
+        current = generation(evidence, principal=f"effective-principal-{index}")
+        assert value.publish(current, expected_current=None)["status"] == "published"
+        if index == 0:
+            def interrupted(path, *args, **kwargs):
+                if path.parent == value.generations:
+                    raise OSError("controlled retirement interruption")
+                return original(path, *args, **kwargs)
+
+            with monkeypatch.context() as patch:
+                patch.setattr(Path, "unlink", interrupted)
+                with pytest.raises(OSError, match="retirement"):
+                    value.rebuild()
+            assert value.lookup(current["scope"])["found"] is False
+            assert all(json.loads(path.read_text())["generation_id"] is None
+                       for path in value.targets.iterdir())
+        value.rebuild()
+        assert list(value.generations.iterdir()) == list(value.targets.iterdir()) == []
+
+
 def test_owner_permission_loss_between_object_and_pointer_is_not_reclassified(
     cache, evidence, monkeypatch,
 ):
