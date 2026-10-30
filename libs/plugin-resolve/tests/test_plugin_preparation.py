@@ -112,6 +112,29 @@ def test_present_optional_plugin_keeps_target_enablement(tmp_path, enabled):
     assert result == ({"sample@local": str((target / ".ai" / "sample").resolve())} if enabled else {})
 
 
+@pytest.mark.parametrize("mode", ["copy", "reference"])
+def test_missing_override_retires_only_stale_owned_marketplace(tmp_path, mode):
+    host, target = tmp_path / "host", tmp_path / "target"
+    local_plan(host)
+    init_checkout(target)
+    plan = build_plan([{"source": "sample@local"}], [host], local_mode=mode)
+    assert "sample@local" in prepare({"repo": str(target), **plan, "local_mode": mode})
+    catalog = target / ".ai" / "marketplace.json"
+    catalog.parent.mkdir()
+    atomic_json(catalog, {"name": "local", "owner": {"name": "Synthetic"}, "plugins": []})
+    settings_path = target / ".github" / "copilot" / "settings.json"
+    atomic_json(settings_path, {
+        "enabledPlugins": {"sample@local": True},
+        "extraKnownMarketplaces": {"local": {"source": {"source": "directory", "path": "./.ai"}}},
+    })
+    before = settings_path.read_bytes()
+    plan = build_plan([{"source": "sample@local", "allow_missing": True}], [host], local_mode=mode)
+    assert prepare({"repo": str(target), **plan, "local_mode": mode}) == {}
+    assert settings_path.read_bytes() == before
+    overlay = json.loads(settings_path.with_name("settings.local.json").read_text())
+    assert "local" not in overlay["extraKnownMarketplaces"]
+
+
 @pytest.mark.parametrize("failure", ["dependency", "broken-payload", "wrong-identity", "malformed"])
 def test_missing_override_does_not_weaken_required_or_invalid_sources(tmp_path, failure):
     target = tmp_path / "target"

@@ -881,6 +881,9 @@ def main(argv: list[str] | None = None) -> int:
     plugin_plan_p.add_argument("name")
     plugin_plan_p.add_argument("--repo")
     plugin_plan_p.add_argument(
+        "--stage-plugin-spec", dest="stage_plugins", action="append", type=selection_json, default=[],
+    )
+    plugin_plan_p.add_argument(
         "--plugin-root", dest="plugin_roots", action="append", default=[], metavar="PATH",
         help="Controller checkout to prefer for payload lookup (repeatable, highest priority first).",
     )
@@ -1055,6 +1058,7 @@ def main(argv: list[str] | None = None) -> int:
             from .plugin_preparation import plugin_plan
             print(json.dumps(plugin_plan(
                 args.repo or _lookup_codespace_repo(args.name), load_merged_config(),
+                sources=args.stage_plugins,
                 repo_roots=args.plugin_roots,
             )))
             return 0

@@ -555,6 +555,24 @@ def test_provider_selection_bool_wins_related_fallback(monkeypatch):
     ]
 
 
+def test_plugin_plan_cli_passes_structured_selection_before_planning(monkeypatch, capsys):
+    from agent_codespaces import __main__ as cli, plugin_preparation as module
+
+    spec = {"source": "retired@local", "enable": False, "allow_missing": True}
+    observed = {}
+    monkeypatch.setattr(cli, "load_merged_config", lambda: SimpleNamespace())
+    monkeypatch.setattr(
+        module, "plugin_plan",
+        lambda repo, config, **kwargs: observed.update(repo=repo, **kwargs) or {"plugins": []},
+    )
+    assert cli.main([
+        "plugin-plan", "synthetic", "--repo", "example/app",
+        "--stage-plugin-spec", json.dumps(spec),
+    ]) == 0
+    assert observed["sources"] == [spec]
+    assert json.loads(capsys.readouterr().out) == {"plugins": []}
+
+
 def test_interrupt_before_attached_readiness_cancels_install_and_awaits_cleanup(monkeypatch):
     import asyncio
     import threading

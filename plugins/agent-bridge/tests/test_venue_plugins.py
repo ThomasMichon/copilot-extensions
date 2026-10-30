@@ -9,6 +9,41 @@ from agent_bridge.venue_plugins import prepare_venue_plugins
 
 
 @pytest.mark.asyncio
+async def test_missing_permission_reaches_provider_before_strict_planning(monkeypatch, tmp_path):
+    from agent_bridge.venue_plugins import venue_plugin_plan
+    from plugin_resolve.reflection import build_plan, selection_json
+    from plugin_resolve.registration import atomic_json
+
+    catalog = tmp_path / ".ai" / "marketplace.json"
+    catalog.parent.mkdir()
+    atomic_json(catalog, {"name": "local", "owner": {"name": "Synthetic"}, "plugins": []})
+    settings = tmp_path / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    atomic_json(settings, {
+        "extraKnownMarketplaces": {"local": {"source": {"source": "directory", "path": "./.ai"}}},
+    })
+    monkeypatch.setattr("agent_bridge.related_plugins.control_plane_anchors", lambda: [])
+    monkeypatch.setattr("agent_bridge.related_plugins.related_plugins_for_repo", lambda *a, **k: [])
+
+    async def provider(command, **kwargs):
+        selected = {"source": "retired@local", "enable": False}
+        if "--stage-plugin-spec" in command:
+            spec = selection_json(command[command.index("--stage-plugin-spec") + 1])
+            selected["allow_missing"] = spec["allow_missing"]
+        return 0, json.dumps(build_plan([selected], [tmp_path])), ""
+
+    monkeypatch.setattr("agent_bridge.session_host.container_transport._run_provider", provider)
+    plan = await venue_plugin_plan({
+        "name": "synthetic", "repo": "example/app", "provider_command": ["provider"],
+        "plugin_plan": True,
+        "related_plugins": [{"source": "retired@local", "allow_missing": True}],
+    }, controller_cwd=str(tmp_path))
+    assert plan["plugins"] == [{
+        "source": "retired@local", "enable": False, "allow_missing": True, "resolve_on_target": True,
+    }]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("repository", ["app-alias", "example/app"])
 async def test_target_binding_uses_only_registered_identity(monkeypatch, tmp_path, repository):
     from agent_bridge.venue_plugins import _registered_target_binding

@@ -473,12 +473,16 @@ The exception does not authorize acquisition from another marketplace, changing
 authored settings, or ignoring a malformed catalog, a declared-but-invalid
 payload, source identity, content proof or a dependency on the omitted source.
 Absence is checked again under the registration lock before publication.
+An unchanged operation-owned marketplace override is retired when it would
+mask the target's current local declaration; authored preferences are preserved.
 The permission is request-scoped and is never persisted as a target preference.
 Native and legacy settings use the existing native-last, last-per-key precedence.
 
 Structured CLI transport uses `--stage-plugin-spec '<JSON selection>'` only for
 this opt-in; ordinary and install-only selections retain their existing flags.
 An older CLI rejects the new argument rather than silently dropping the policy.
+The Codespaces planning command and SSH launch parser accept the same structured
+selection, including before strict producer planning.
 Remote streamed preparation carries its matching shared implementation, so it
 does not depend on an installed receiver's schema version. Local native requests
 retain their existing version and digest the full plan; older preparation code

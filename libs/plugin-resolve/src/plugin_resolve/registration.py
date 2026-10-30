@@ -398,6 +398,15 @@ def register_prepared(
                 marketplaces.pop(marketplace, None)
                 owned_marketplaces.pop(marketplace, None)
                 reference_marketplaces.pop(marketplace, None)
+        for source in omitted_sources:
+            _name, marketplace = split_source(source)
+            if marketplace in owned_marketplaces and marketplace in operator.marketplaces:
+                marketplaces.pop(marketplace, None)
+                owned_marketplaces.pop(marketplace, None)
+                reference_marketplaces.pop(marketplace, None)
+                origins.pop(marketplace, None)
+                origin_active.pop(marketplace, None)
+            inventory_sources.pop(source, None)
         effective = RepoPluginSettings(
             enabled={**operator.enabled, **plugins},
             marketplaces={**operator.marketplaces, **marketplaces},

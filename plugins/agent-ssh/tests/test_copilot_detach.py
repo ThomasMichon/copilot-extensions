@@ -23,6 +23,17 @@ from agent_ssh.copilot_plugins import resolve_launch as real_resolve_launch
 from agent_ssh.__main__ import main
 
 
+@pytest.mark.parametrize("enabled", [True, False])
+def test_bridge_structured_selection_reaches_ssh_parser(enabled):
+    from plugin_resolve.reflection import selection_cli_args
+
+    spec = {"source": "retired@local", "enable": enabled, "allow_missing": True}
+    parser = argparse.ArgumentParser()
+    detach.add_copilot_subparser(parser.add_subparsers(dest="command"))
+    args = parser.parse_args(["copilot", "synthetic", *selection_cli_args(spec)])
+    assert args.stage_plugins == [spec]
+
+
 def _args(**kw):
     base = dict(
         target="devbox",
