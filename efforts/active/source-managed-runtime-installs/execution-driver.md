@@ -133,10 +133,11 @@ command name generalized:
 
 > We should probably update the other call flows to pass `--auto` to make it clear, and have *those* no-op
 
-The clarified portable boundary (#9679) is explicit/manual update by default,
-with `--auto` only on Manager's optional maintenance before session launch or
-resume. Independently requested fleet/self-update operations and their opted-in
-schedules retain ordinary admission and their own policy controls.
+The portable boundary is explicit/manual update by default, with `--auto` on
+all automatic/background producers, including Manager launch/resume maintenance
+and unattended fleet/self-update sweeps. A schedule's independent opt-in remains
+required but does not exempt its updates from the automatic hold. This
+supersedes the narrower Manager-only interpretation in #9679 / #9680.
 An active automatic hold makes marked
 automatic requests visibly no-op without executing installers. It does not
 silently convert a manual update into a force rebuild or require the operator
@@ -149,11 +150,10 @@ to remove the automatic hold.
    durable execution owner. Preserve strict parsing, existing force/repair
    options and declared version-skew compatibility. Reuse existing request
    authority rather than adding a second queue or a parallel inhibition flag.
-2. Inventory Manager's pre-launch/resume update producers and mark those
-   `--auto`, without marking separately requested fleet/self-update operations
-   or their independently opted-in schedules. Preserve selected source,
-   publication and authentication policy. Any operator or agent invocation
-   with no flag remains ordinary manual update.
+2. Inventory and mark all automatic/background update producers `--auto`,
+   including unattended schedules. Preserve their opt-ins, selected source,
+   publication and authentication policy. An explicit project update with no
+   flag remains ordinary manual update.
 3. Qualify manual update under an active hold, automatic no-op under that
    same hold, automatic execution without the hold, and mode propagation
    through bootstrap and engine requests. Manual and automatic requests

@@ -5022,8 +5022,9 @@ active**, in which case that plugin's hook skips its own reconcile entirely for
 this session (see `libs/bootstrap-killswitch/README.md`; amends the
 *self-provisioning-runtime* vision in `visions/plugin-services/README.md`).
 Explicit `<repo> update` and `worktree-manager update` calls are manual by
-default and do not require clearing an automatic-update hold. Manager's optional
-pre-launch/resume maintenance passes `--auto`; the existing execution owner retires an
+default and do not require clearing an automatic-update hold. All automatic
+producers pass `--auto`, including Manager pre-launch/resume maintenance and
+unattended fleet/self-update sweeps. The existing execution owner retires an
 inhibited automatic request with the visible exit-3 no-work outcome before its
 installer starts. Manual admission does not inject `--force`, recreate a healthy
 runtime, settle an interrupted transaction, or supersede a live installer.
@@ -5031,11 +5032,12 @@ Existing force/repair options and installation-cell scope remain independent.
 The [driver contract](../libs/update-driver/README.md) defines persisted
 manual/automatic identity and compatible readers.
 
-Only Manager's optional pre-session update producers add `--auto`.
-Independently requested fleet/self-update commands and their opted-in schedules
-use ordinary admission, not Manager's launch-maintenance hold. Reconcile obsolete
-scheduled `--auto` arguments through their existing owner under separate
-deployment authority; source publication does not edit installed schedules.
+An independent schedule opt-in does not exempt automatic updates from the hold.
+Generated unattended commands and task definitions include `--auto`. During
+rollout, quiesce old unmarked producers through their existing owners before
+upgrading the receiver, then reconcile their configured schedules with the
+automatic marker before re-enabling them. Source publication does not edit
+installed schedules or settle an already-running updater.
 Legacy launch-maintenance verbs retain their automatic admission semantics
 while their updated producers also spell out `--auto`.
 
