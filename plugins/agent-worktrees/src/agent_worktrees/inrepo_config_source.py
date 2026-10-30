@@ -386,12 +386,21 @@ def load_config_file(path: Path, *, strict: bool = False) -> dict[str, Any]:
     if strict:
         from .repos_configuration_sources import mapping
 
+        observations = acquisition.current_observations()
+        start = len(observations) if observations is not None else 0
         try:
             value = mapping(path)
         except Exception as exc:
             failed(acquisition.current_observations(), str(path), "inrepo-file", "unreadable-source", type(exc).__name__)
             raise
-        acquisition.opaque_source("strict-config-file")
+        if observations is not None:
+            outcomes = {(o.stage, o.authority) for o in observations[start:] if o.source == str(path)}
+            if not (
+                ("config-source-bytes", ScanAuthority.ABSENT) in outcomes
+                or {("config-source-bytes", ScanAuthority.COMPLETE),
+                    ("strict-config-mapping", ScanAuthority.COMPLETE)} <= outcomes
+            ):
+                acquisition.opaque_source("strict-config-file")
         return value
     from .config import _load_yaml_safe
 
