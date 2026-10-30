@@ -866,12 +866,12 @@ jobs:
           python tools/run-plugin-tests.py agent-worktrees
           --test-file tests/test_creation_tail_repair.py
           -k test_creation_retains_companion_lifecycle_through_guidance_against_cmd_embody
-      - name: Explicit canonical inline allowlist guard
+      - name: Canonical declaration compatibility guard
         if: ${{ !cancelled() && steps.guardian-tooling.outcome == 'success' }}
         run: >-
           python tools/run-plugin-tests.py customizing-copilot
           --test-file tests/test_instruction_delivery.py
-          -k test_shipped_inline_allowlist_is_explicit_and_substantive
+          -k 'test_shipped_inline_allowlist_is_explicit_and_substantive or test_shipped_sources_all_declare_non_discovered_fallbacks'
       - name: Windows shim simulation without shared platform mutation
         if: ${{ !cancelled() && steps.guardian-tooling.outcome == 'success' }}
         run: >-

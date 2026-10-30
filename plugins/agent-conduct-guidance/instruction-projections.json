@@ -4,7 +4,7 @@
   "projections": [
     {
       "id": "maintenance-standby",
-      "deliveryMode": "inline",
+      "deliveryMode": "selector",
       "template": "instructions/maintenance-standby.instructions.md",
       "destination": ".github/instructions/agent-conduct-guidance/maintenance-standby.instructions.md",
       "customizationKind": "instructions",
@@ -13,7 +13,7 @@
     },
     {
       "id": "elevation-fallback",
-      "deliveryMode": "inline",
+      "deliveryMode": "selector",
       "template": "instructions/elevation-fallback.instructions.md",
       "destination": ".github/instructions/agent-conduct-guidance/elevation-fallback.instructions.md",
       "customizationKind": "instructions",
@@ -22,7 +22,7 @@
     },
     {
       "id": "multi-agent-rules-of-engagement",
-      "deliveryMode": "inline",
+      "deliveryMode": "selector",
       "template": "instructions/multi-agent-rules-of-engagement.instructions.md",
       "destination": ".github/instructions/agent-conduct-guidance/multi-agent-rules-of-engagement.instructions.md",
       "customizationKind": "instructions",
@@ -31,7 +31,7 @@
     },
     {
       "id": "process-hygiene-fallback",
-      "deliveryMode": "inline",
+      "deliveryMode": "selector",
       "template": "instructions/process-hygiene-fallback.instructions.md",
       "destination": ".github/instructions/agent-conduct-guidance/process-hygiene-fallback.instructions.md",
       "customizationKind": "instructions",
@@ -40,7 +40,7 @@
     },
     {
       "id": "delegation-fallback",
-      "deliveryMode": "inline",
+      "deliveryMode": "selector",
       "template": "instructions/delegation-fallback.instructions.md",
       "destination": ".github/instructions/agent-conduct-guidance/delegation-fallback.instructions.md",
       "customizationKind": "instructions",
@@ -49,7 +49,7 @@
     },
     {
       "id": "scratch-space-fallback",
-      "deliveryMode": "inline",
+      "deliveryMode": "selector",
       "template": "instructions/scratch-space-fallback.instructions.md",
       "destination": ".github/instructions/agent-conduct-guidance/scratch-space-fallback.instructions.md",
       "customizationKind": "instructions",
@@ -58,7 +58,7 @@
     },
     {
       "id": "secret-masking-fallback",
-      "deliveryMode": "inline",
+      "deliveryMode": "selector",
       "template": "instructions/secret-masking-fallback.instructions.md",
       "destination": ".github/instructions/agent-conduct-guidance/secret-masking-fallback.instructions.md",
       "customizationKind": "instructions",

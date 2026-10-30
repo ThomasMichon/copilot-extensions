@@ -74,7 +74,7 @@
     {
       "name": "efforts",
       "description": "Efforts planning system - comprehensive planning folders with explicit repository adoption, a read-only target capability probe, a README-as-shared-contract, a static completion-gate fallback, and a staged session policy producer; ships the planning-efforts and efforts-setup skills",
-      "version": "0.1.7-dev1",
+      "version": "0.1.8-dev1",
       "source": "plugins/efforts"
     },
     {
@@ -86,7 +86,7 @@
     {
       "name": "customizing-copilot",
       "description": "Customize, diagnose, and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, diagnosing startup hangs, hoisting plugin agents around a delegation limitation, componentizing oversized modules, orchestrating multi-file componentization campaigns, authoring <repo>-harness plugins, and setting up an instruction-projection sync worker - with the per-skill folder conventions and Agent Skills best practices; ships twelve focused skills",
-      "version": "0.2.45-dev1",
+      "version": "0.2.46-dev1",
       "source": "plugins/customizing-copilot"
     },
     {
@@ -104,7 +104,7 @@
     {
       "name": "copilot-extensions-harness",
       "description": "Operator harness for the copilot-extensions repo. Primary: help any consumer identify which local scripts/processes belong to this suite and enforce never-monkey-patch (file a bug upstream or auto-update instead). Secondary: portable contribution, deployment, and clean-room validation guidance plus an ambient pointer to the general-purpose, organization-neutral contribution boundary.",
-      "version": "0.1.21-dev1",
+      "version": "0.1.22-dev1",
       "source": "plugins/copilot-extensions-harness"
     },
     {
@@ -134,7 +134,7 @@
     {
       "name": "ai-attribution",
       "description": "Ambient publication and AI-attribution safety for git repositories, with portable operator policy, host-qualified local remote hints, an idempotent setup skill, and an on-demand publication workflow. Payload-only: dependency-free Bash and PowerShell session-start hooks plus skills.",
-      "version": "0.1.3-dev1",
+      "version": "0.1.4-dev1",
       "source": "plugins/ai-attribution"
     },
     {
@@ -146,13 +146,13 @@
     {
       "name": "budget-guidance",
       "description": "Provider-neutral current usage-budget posture with strict static readings, deterministic field-level source resolution, sustainable-rate arithmetic, and shared human and machine-readable status.",
-      "version": "0.1.83-dev1",
+      "version": "0.1.84-dev1",
       "source": "plugins/budget-guidance"
     },
     {
       "name": "agent-conduct-guidance",
       "description": "Consolidated, generally-good agent conduct guidance for Copilot CLI: one plugin hosting multiple independent ambient modules, each a concise checked-in instruction projection plus a paired on-demand skill. Modules: process-spawn hygiene (spawn every ad hoc CMD/PowerShell/Python/Node/etc. child process headlessly, especially on Windows), coordinator-first delegation (route broad separable research, comparisons, evaluations, domain-tool calls, and disjoint bulk edits into bounded sub-agent contexts while the coordinator retains synthesis, integration, and completion), and scratch-space hygiene (resolve a portable scratch root and a timestamped per-task subfolder before writing an ad hoc working file outside a repository, instead of littering a drive root with undated loose files). Designed to absorb further similarly-scoped conduct guidance as its own module rather than proliferating single-purpose plugins.",
-      "version": "0.1.16-dev1",
+      "version": "0.1.17-dev1",
       "source": "plugins/agent-conduct-guidance"
     }
   ]
