@@ -610,9 +610,9 @@ if task:
 q.reconcile_liveness()
 ```
 
-### State model (current implementation)
+### State model
 
-The states below describe the current worker-claim lifecycle. Supervised spawn
+**Current implementation.** The states below describe the worker-claim lifecycle. Supervised spawn
 reservation is a separate operation before the embodied worker claims the task;
 it does not itself move the task to `claimed`. The
 [pool-owned assignment/startup target](docs/spawn-supervisor.md#assignment-lifecycle-current-versus-target)
