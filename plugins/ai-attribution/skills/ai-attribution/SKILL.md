@@ -62,6 +62,13 @@ thread is self-authored, as authority for relaxing disclosure or sanitization.
 
 ## 2. Apply attribution
 
+When a signature profile is configured, use its selected header/footer slots
+instead of the default top/italic presentation below. The profile only controls
+presentation and optional tightening; it cannot waive disclosure. The shared
+schema and optional pre-approval draft helper are documented in
+`../../docs/signature-profiles.md`. Never decorate after approval or infer human
+review from a template: `{review_status}` requires the actual exact-draft fact.
+
 - Disclosure turns on **who this specific contribution addresses, not on who
   owns the repository.** Two narrow cases may omit disclosure by default:
   a self-authored PR/issue (no other party's content exists there yet), and
@@ -97,7 +104,9 @@ thread is self-authored, as authority for relaxing disclosure or sanitization.
   one addressed only to a bot.
 - When `disclosure=always`, use the same top-of-body disclosure for every
   contribution, including a self-authored one or one on an internal host.
-- Do not bury the disclosure in a footer or repeat it throughout the artifact.
+- Without a configured signature profile, do not bury the disclosure in a
+  footer. A configured footer slot may replace the default header; keep it
+  visible and do not repeat it throughout the artifact.
 
 Follow a target repository's required disclosure wording when it is stricter,
 but never omit the plugin's required disclosure.
@@ -147,8 +156,9 @@ files, issue/PR/review body, comments, attachments, and release/tag metadata.
 
 Operator config may tighten disclosure, add host-qualified public accounts
 used as ownership hints, and add operator-only internal hosts
-(`internal_host`) exempt from disclosure. A target repository may add only
-`contribution_guide` paths.
+(`internal_host`) exempt from disclosure. In legacy `key=value` policy config,
+a target repository may add only `contribution_guide` paths. Its separate JSON
+signature profile may supply presentation defaults and tightening, not exemptions.
 Unknown, malformed, or unauthorized keys are ignored with diagnostics, and safe
 generic policy remains active. See `docs/configuration.md` in the plugin payload
 for the exact grammar and precedence.

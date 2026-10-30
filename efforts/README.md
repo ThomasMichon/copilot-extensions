@@ -10,7 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Configurable AI Attribution](active/configurable-ai-attribution/README.md) | Draft; signature profiles, one owner and optional pure decorator proposal | #9633; current disclosure defaults, #2965 custody and #9627 delivery owner retained; no rollout |
+| [Configurable AI Attribution](active/configurable-ai-attribution/README.md) | Active; proposal reviewed, canonical profile implementation next | #9633/#9637; current disclosure defaults, #2965 custody and #9627 delivery owner retained; no rollout |
 | [Startup-Only Guidance](active/startup-only-guidance/README.md) | Active; declarations released, approved adoption held on installer prerequisites | Bounded #5993 follow-up; preserves periodic sync, existing delivery/native owners and separately owned #9489 repair |
 | [PR Review Workspaces](active/pr-review-workspaces/README.md) | Active; source continuation admitted, initial read-generation contract amendment | #9535; successor PR plugin/service cache, existing #6007/#7188 and #7051 owners retained; no rollout |
 | [Native Startup Prompts](active/native-startup-prompts/README.md) | Active; ordinary cold-launch consumer #9374 merged, native POSIX/full-mux and installed qualification remain | #9364; preserves #7116/#8375/#7942/#8669/#5579 owners; no rollout or retained-session restart |
