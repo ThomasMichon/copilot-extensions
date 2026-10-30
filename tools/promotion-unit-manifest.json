@@ -3503,7 +3503,7 @@
         "plugins/agent-machines/src/agent_machines/git_config_transaction.py": "5b054f3f2c2270672c55bab7de114e5e05541235d94553c4c1de2a06b26fe38d",
         "tools/promotion_unit_tests/test_git_config_transaction.py": "d47c4b32c9ccbffdda2cc3813ae66871970a068be44fddcbde5449230db4da2b",
         "libs/agent-procutil/src/agent_procutil/_caller_owned.py": "74b0e3832bd33d710feaa450112a967ee189d45853e7ccba907bf7e3dbaade1b",
-        "libs/agent-procutil/src/agent_procutil/_windows_caller_owned.py": "11b50e673eeaed94262389c03fd504584a699f672c756b23ad5a9b6c13a67c73",
+        "libs/agent-procutil/src/agent_procutil/_windows_caller_owned.py": "686c69b11c3b0601cc381292dc56b217391dae35634db8e3de18e0a27e375a57",
         "libs/agent-procutil/src/agent_procutil/owned_process.py": "f44494ec1714f06968eb6c4ba9b4710bbd12124e1e2341125ad04797a3c9763b",
         "libs/agent-procutil/src/agent_procutil/windows_broker_cell.py": "eaecb72de5977740e505cd63fcd8641578a3410331859d6933e0d8fe8ef31f72",
         "libs/agent-procutil/src/agent_procutil/windows_broker_installation.py": "633bd532bf44365fc4540cdfc632e9f93c039f1662fb824f1c674b4299665abd",

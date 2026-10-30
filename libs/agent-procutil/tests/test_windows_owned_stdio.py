@@ -13,10 +13,12 @@ from unittest.mock import Mock
 import pytest
 
 from agent_procutil import _windows_caller_owned as native
+from agent_procutil.owned_process import OwnedCleanupError
 
 
+@pytest.mark.parametrize("thread_close", [True, False])
 def test_log_fds_are_duplicated_and_only_unique_stdio_handles_are_inherited(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, thread_close: bool,
 ) -> None:
     kernel = Mock()
     kernel.CreateJobObjectW.return_value = 300
@@ -26,13 +28,16 @@ def test_log_fds_are_duplicated_and_only_unique_stdio_handles_are_inherited(
     )
     kernel.UpdateProcThreadAttribute.return_value = True
     kernel.ResumeThread.return_value = 1
-    kernel.CloseHandle.return_value = True
+    kernel.CloseHandle.side_effect = lambda handle: handle != 502 or thread_close
+    kernel.WaitForSingleObject.return_value = 0
+    kernel.GetExitCodeProcess.side_effect = lambda handle, code: setattr(code._obj, "value", 0) or True
     monkeypatch.setattr(native, "_api", lambda: kernel)
     monkeypatch.setattr(native.ctypes, "get_last_error", lambda: 0, raising=False)
+    monkeypatch.setattr(native.ctypes, "WinError", lambda *args: OSError("native close failed"), raising=False)
     monkeypatch.setattr(native.os, "set_handle_inheritable", lambda *args: None, raising=False)
     monkeypatch.setattr(native.os, "O_BINARY", 0, raising=False)
     monkeypatch.setitem(sys.modules, "msvcrt", SimpleNamespace(get_osfhandle=lambda fd: fd))
-    job = SimpleNamespace(handle=300, close=Mock())
+    job = SimpleNamespace(handle=300, close=Mock(), terminate_and_wait=Mock())
     monkeypatch.setattr(native, "JobHandle", Mock(return_value=job))
     monkeypatch.setenv("COPILOT_EXTENSIONS_OWNED_JOB_SCOPES", r"Local\ce-owned-job-" + "f" * 32)
     observed = {}
@@ -55,11 +60,23 @@ def test_log_fds_are_duplicated_and_only_unique_stdio_handles_are_inherited(
     with logfile.open("ab", buffering=0) as output:
         original_fd = output.fileno()
         inherited_before = os.get_inheritable(original_fd)
-        process, actual_job = native.spawn(
-            ["fixture.exe", "", "a b"], cwd=str(tmp_path), env={"PATH": "fixture"},
-            inherit_job_scopes=False, allow_breakaway=False,
-            stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
-        )
+        def spawn():
+            return native.spawn(
+                ["fixture.exe", "", "a b"], cwd=str(tmp_path), env={"PATH": "fixture"},
+                inherit_job_scopes=False, allow_breakaway=False,
+                stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
+            )
+
+        if not thread_close:
+            with pytest.raises(OwnedCleanupError) as failure:
+                spawn()
+            assert failure.value.job is job
+            assert failure.value.process._thread_handle == 502
+            assert failure.value.process._handle == 501
+            job.terminate_and_wait.assert_called_once_with(2.0)
+            assert kernel.CloseHandle.call_args_list.count(((502,), {})) == 1
+            return
+        process, actual_job = spawn()
         assert actual_job is job
         assert observed["output"] != original_fd
         assert os.get_inheritable(original_fd) is inherited_before

@@ -255,6 +255,7 @@ class _Process:
         self.args = argv
         self.pid = info.dwProcessId
         self._handle = info.hProcess
+        self._thread_handle = info.hThread
         self.stdin, self.stdout, self.stderr = streams
         self.returncode = None
 
@@ -285,7 +286,14 @@ class _Process:
         if self.poll() is None and not _api().TerminateProcess(self._handle, 1):
             raise ctypes.WinError(ctypes.get_last_error())
 
+    def close_thread(self) -> None:
+        if self._thread_handle:
+            if not _api().CloseHandle(self._thread_handle):
+                raise ctypes.WinError(ctypes.get_last_error())
+            self._thread_handle = None
+
     def close(self):
+        self.close_thread()
         if self._handle:
             if not _api().CloseHandle(self._handle):
                 raise ctypes.WinError(ctypes.get_last_error())
@@ -415,24 +423,37 @@ def spawn(argv: list[str], **kwargs):
                 if kernel.ResumeThread(info.hThread) == 0xFFFFFFFF:
                     raise ctypes.WinError(ctypes.get_last_error())
             finally:
-                if info.hThread:
-                    kernel.CloseHandle(info.hThread)
+                if process is not None:
+                    process.close_thread()
+                elif info.hThread:
+                    if not kernel.CloseHandle(info.hThread):
+                        raise ctypes.WinError(ctypes.get_last_error())
+                    info.hThread = None
             # Transfer only parent streams and native custody, never inheritable child handles.
             parent_streams.pop_all()
             return process, job
-    except BaseException:
+    except BaseException as error:
         if process is None and info.hProcess:
             process = _Process(argv, info, streams)
         if process is not None:
             try:
                 job.terminate_and_wait(2.0)
                 process.wait(2.0)
-            except BaseException as error:
+            except BaseException as cleanup:
+                raise OwnedCleanupError(process, job) from cleanup
+            try:
+                for stream in (process.stdin, process.stdout, process.stderr):
+                    if stream is not None:
+                        stream.close()
+            except BaseException as cleanup:
+                raise OwnedCleanupError(process, job) from cleanup
+            if process._thread_handle:
+                # Keep the failed native handle, rather than retrying an uncertain close.
                 raise OwnedCleanupError(process, job) from error
-            for stream in (process.stdin, process.stdout, process.stderr):
-                if stream is not None:
-                    stream.close()
-            process.close()
+            try:
+                process.close()
+            except BaseException as cleanup:
+                raise OwnedCleanupError(process, job) from cleanup
         else:
             job.close()
         raise

@@ -202,6 +202,9 @@ windowless child and deliberately retains the caller's Job.
 stderr directly into the append-only log. It atomically assigns the suspended
 child to a strict kill-on-close Job using `PROC_THREAD_ATTRIBUTE_JOB_LIST`,
 inherits only its two declared stdio handles, and never permits breakaway.
+The startup thread handle must close successfully before spawn returns.
+A close failure retires the owned target and retains the original native
+objects as explicit uncertainty, without automatically retrying that handle.
 Return preserves the root's exit status only after every Job writer exits;
 root exit alone is not completion. Timeout and failure terminate and observe
 the same tree. The original shell's complete environment and argument array
