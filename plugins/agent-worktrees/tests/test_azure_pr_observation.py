@@ -145,6 +145,44 @@ def test_native_current_evidence_is_shared_with_status_and_wait():
     assert result.observation.source_push_at == POSTED
 
 
+@pytest.mark.parametrize("legacy", [False, True])
+def test_native_indexed_vote_identity_is_resolved_without_losing_discussions(legacy):
+    reader = Reader()
+    row = event()
+    if not legacy:
+        del row["properties"]["CodeReviewVotedByTfId"]
+    row["properties"]["CodeReviewVotedByIdentity"] = {"$value": "1"}
+    row["identities"] = {"1": {"id": "reviewer"}}
+    reader.thread_rows = Collection((row, thread("fixed")))
+
+    result = read(reader)
+    assert result.observation.complete
+    assert result.observation.approval_events[0].actor_id == "reviewer"
+    assert gates(result)["comments_resolved"].state == "satisfied"
+    assert result.observation.to_dict()["all_required_satisfied"]
+
+
+@pytest.mark.parametrize("identities", [None, {}, {"1": {}}, {"1": {"id": ""}}, {"1": {"id": 1}}])
+def test_invalid_indexed_vote_identity_cannot_fall_back_to_a_legacy_actor(identities):
+    reader = Reader()
+    row = event()
+    row["properties"]["CodeReviewVotedByIdentity"] = {"$value": "1"}
+    row["identities"] = identities
+    reader.thread_rows = Collection((row,))
+    result = read(reader)
+    assert not result.observation.complete
+    assert "read_evidence" in result.observation.to_dict()["unknown"]
+
+
+def test_conflicting_native_and_legacy_vote_actors_remain_unknown():
+    reader = Reader()
+    row = event(actor="another-reviewer")
+    row["properties"]["CodeReviewVotedByIdentity"] = {"$value": "1"}
+    row["identities"] = {"1": {"id": "reviewer"}}
+    reader.thread_rows = Collection((row,))
+    assert not read(reader).observation.complete
+
+
 @pytest.mark.parametrize("value", [-5, -10])
 def test_enabling_reviews_does_not_invent_an_existing_negative_vote_event(value):
     reader = Reader()
@@ -481,6 +519,37 @@ def test_stale_build_or_missing_policy_evidence_never_greens_current_push():
     assert not result.observation.complete
     assert gates(result)["policy_evidence"].state == "unknown"
     assert not result.observation.to_dict()["ready_for_human"]
+
+
+@pytest.mark.parametrize("invalid", [
+    None, "different-source-head", "expired", "missing-expiry", "wrong-iteration",
+    "queued", "unrelated-build",
+])
+def test_native_current_approval_can_retain_its_validated_merge_candidate(invalid):
+    reader = Reader()
+    candidate = "c" * 40
+    row = policy()
+    row["context"].update(
+        buildId=42, lastMergeCommitId=candidate, isExpired=False,
+    )
+    reader.build = lambda number: {"sourceVersion": candidate}
+    if invalid == "different-source-head":
+        row["context"]["lastMergeSourceCommitId"] = "d" * 40
+    elif invalid == "expired":
+        row["context"]["isExpired"] = True
+    elif invalid == "missing-expiry":
+        del row["context"]["isExpired"]
+    elif invalid == "wrong-iteration":
+        row["context"]["iterationId"] = 1
+    elif invalid == "queued":
+        row["status"] = "queued"
+    elif invalid == "unrelated-build":
+        reader.build = lambda number: {"sourceVersion": "e" * 40}
+    reader.policy_rows = Collection((row,))
+
+    result = read(reader)
+    assert result.observation.to_dict()["all_required_satisfied"] is (invalid is None)
+    assert (result.checks_state == "success") is (invalid is None)
 
 
 def test_required_configuration_without_an_evaluation_is_unknown_not_green():

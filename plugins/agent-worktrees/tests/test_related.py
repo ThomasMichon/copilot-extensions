@@ -108,6 +108,83 @@ def test_grafted_union_overlays_knowledge_on_harness(tmp_path: Path):
     assert merged.related["example-web"].origin_anchor == str(knowledge)
 
 
+def test_grafted_metadata_overlay_preserves_contributed_pr_defaults(tmp_path: Path):
+    policy = {
+        "enabled": True, "provider": "azure-devops",
+        "repository": "Project/repository", "api_base": "https://dev.azure.com/example",
+    }
+    plugin = _make_installed_plugin(tmp_path / "installed", "example", "example-harness",
+        RelatedConfig(related={"target": RelatedEntry(
+            name="target", role="tooling", delegate="agent-bridge", pr=policy,
+        )}))
+    knowledge = tmp_path / "knowledge"
+    _write_related(knowledge, RelatedConfig(related={
+        "target": RelatedEntry(name="target", role="product", summary="operator metadata"),
+    }))
+
+    entry = related.read_related_grafted([plugin, knowledge]).related["target"]
+    assert entry.pr == policy
+    assert entry.role == "product" and entry.summary == "operator metadata"
+    assert entry.delegate == ""
+    assert entry.origin_anchor == str(knowledge)
+
+
+@pytest.mark.parametrize("override", [
+    {},
+    {"enabled": False},
+    {"provider": "github", "repository": "Other/repository"},
+    None,
+    "invalid",
+])
+def test_explicit_related_pr_override_never_inherits_a_lower_binding(tmp_path: Path, override):
+    base, overlay = tmp_path / "base", tmp_path / "overlay"
+    _write_related(base, RelatedConfig(related={"target": RelatedEntry(
+        name="target", pr={
+            "provider": "azure-devops", "repository": "Project/repository",
+            "api_base": "https://dev.azure.com/example", "token_env": "EXAMPLE_PR_TOKEN",
+        },
+    )}))
+    path = related.related_path(overlay)
+    path.parent.mkdir(parents=True)
+    path.write_text(yaml.safe_dump({"related": {"target": {"pr": override}}}), encoding="utf-8")
+
+    entry = related.read_related_grafted([base, overlay]).related["target"]
+    assert entry.pr == (override if isinstance(override, dict) else {})
+    assert entry.pr_declared
+
+
+def test_explicit_empty_pr_survives_write_and_reread(tmp_path: Path):
+    base, overlay = tmp_path / "base", tmp_path / "overlay"
+    _write_related(base, RelatedConfig(related={
+        "target": RelatedEntry(name="target", pr={"provider": "azure-devops"}),
+    }))
+    path = related.related_path(overlay)
+    path.parent.mkdir(parents=True)
+    path.write_text("related:\n  target:\n    pr: {}\n", encoding="utf-8")
+    related.write_related(overlay, related.read_related(overlay))
+
+    assert yaml.safe_load(path.read_text(encoding="utf-8"))["related"]["target"]["pr"] == {}
+    assert related.read_related_grafted([base, overlay]).related["target"].pr == {}
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_marketplace_related_overlay_retains_pr_only_when_omitted(tmp_path: Path, monkeypatch, explicit):
+    base = tmp_path / "repo"
+    policy = {"provider": "azure-devops", "repository": "Project/repository"}
+    _write_related(base, RelatedConfig(related={
+        "target": RelatedEntry(name="target", role="tooling", pr=policy),
+    }))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", json.dumps({"marketplaceId": "example-cell"}))
+    path = base / related.MARKETPLACE_OVERLAYS_DIR / "example-cell" / related.RELATED_FILENAME
+    path.parent.mkdir(parents=True)
+    entry = {"role": "product", **({"pr": {}} if explicit else {})}
+    path.write_text(yaml.safe_dump({"related": {"target": entry}}), encoding="utf-8")
+
+    selected = related.read_related(base).related["target"]
+    assert selected.role == "product"
+    assert selected.pr == ({} if explicit else policy)
+
+
 def test_grafted_single_anchor_matches_ungrafted(tmp_path: Path):
     base = tmp_path / "harness"
     _write_related(base, RelatedConfig(

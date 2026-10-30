@@ -209,6 +209,8 @@ class RelatedEntry:
     # own in-repo ``pr`` and below a machine-local ``repos.<name>.pr`` override);
     # a raw mapping here, never a parsed object. Empty ``{}`` for most entries.
     pr: dict[str, Any] = field(default_factory=dict)
+    # Distinguish an omitted policy from an explicit empty/invalid block.
+    pr_declared: bool = field(default=False, compare=False, repr=False)
     # The checkout anchor this entry was **read from**, set by the state-root
     # config-graft (:func:`read_related_grafted`) so a knowledge-repo overlay
     # entry's narrative ``doc`` -- which is relative to ITS source repo's
@@ -604,6 +606,8 @@ def write_related(anchor: str | Path, cfg: RelatedConfig) -> None:
                         lines.append(f"      - {{ source: {src}, enable: false }}")
             if entry.pr:
                 _emit_pr(lines, entry.pr, "    ")
+            elif entry.pr_declared:
+                lines.append("    pr: {}")
             lines.append("")
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
