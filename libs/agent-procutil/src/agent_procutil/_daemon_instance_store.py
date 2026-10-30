@@ -16,12 +16,14 @@ import threading
 import time
 import uuid
 import zipfile
-from dataclasses import replace
 from pathlib import Path
 
 from . import _daemon_instance_clock as lease_clock
 from ._daemon_instance_identity import (
     birth_identity, delete_owned_file, identity_state, path_identity, retire_self, stop_identity,
+)
+from ._daemon_instance_records import (
+    ProcessIdentity, admit_for_process, bind_for_process, finish_for_process, reserve_for_process,
 )
 from .daemon_instances import (
     INSTANCE_ENV, REGISTRY_ENV, TEST_CONTEXT_ENV, DaemonInstanceGuard, DaemonInstanceReceipt,
@@ -294,69 +296,12 @@ def source_provenance(source: Path) -> tuple[Path, str]:
 
 
 def reserve(spec: DaemonInstanceSpec, *, environment=None) -> DaemonInstanceReceipt:
-    context = _test_context(environment)
-    if context is not None:
-        if spec.purpose == "interactive-test" and context["purpose"] != "interactive-test":
-            raise ValueError("interactive daemon requires a pause-tolerant lifecycle owner")
-        spec = replace(
-            spec, purpose=context["purpose"], owner=context["owner"],
-            registry_root=Path(context["registry_root"]),
-            lease=DaemonLeasePolicy(float(context["ttl"]), float(context["max_lifetime"])),
-        )
-    source, source_member = source_provenance(spec.source)
-    timing = lease_clock.fields(
-        spec.lease.ttl_seconds, spec.lease.max_lifetime_seconds, _monotonic_clock(),
-    ) if sys.platform.startswith("linux") and spec.lease else {}
-    root = _root(spec.registry_root or registry_root(), create=True)
-    runtime = _runtime_anchor(spec.runtime_root)
-    receipt = DaemonInstanceReceipt(uuid.uuid4().hex, root)
-    now = _wall_clock()
-    device, inode = path_identity(runtime)
-    record = {
-        "schema": "1", "instance_id": receipt.instance_id, "state": "reserved",
-        "service": spec.service, "purpose": spec.purpose,
-        "lifecycle": spec.lifecycle,
-        "owner": spec.owner or f"process:{os.getpid()}",
-        "owner_pid": str(os.getpid()), "owner_birth": birth_identity(os.getpid()),
-        "launcher_pid": str(os.getpid()), "launcher_birth": birth_identity(os.getpid()),
-        "runtime_root": str(runtime), "runtime_device": device,
-        "runtime_inode": inode,
-        "source": str(source), "source_member": source_member,
-        "created": str(now), "updated": str(now), "artifact_count": "0",
-        "ttl": str(spec.lease.ttl_seconds if spec.lease else 0),
-        "hard_deadline": str(now + spec.lease.max_lifetime_seconds if spec.lease else 0),
-        "deadline": str(now + spec.lease.ttl_seconds if spec.lease else 0),
-        "run_id": context["run_id"] if context else "",
-        "protected": "0",
-    }
-    if context:
-        record.update(owner_pid=str(context["pid"]), owner_birth=context["birth"])
-    record.update(timing)
-    with _locked(receipt, wait_seconds=1) as path:
-        if path.exists():
-            raise OSError("daemon instance reservation already exists")
-        _write(path, record)
-    return receipt
+    return reserve_for_process(spec, ProcessIdentity.current(), environment=environment)
 
 
 def bind_process(receipt: DaemonInstanceReceipt, pid: int, *, observed_birth: str | None = None) -> None:
     birth = observed_birth if observed_birth is not None else birth_identity(pid)
-    with _locked(receipt, wait_seconds=1) as path:
-        record = _read(path)
-        if record["state"] in ("running", "finished") and (
-            record.get("pid"), record.get("birth")
-        ) == (str(pid), birth):
-            return
-        if record["state"] not in ("reserved", "bound"):
-            raise ValueError("daemon instance reservation already consumed")
-        if (record["launcher_pid"], record["launcher_birth"]) != (
-            str(os.getpid()), birth_identity(os.getpid()),
-        ):
-            raise ValueError("daemon launch belongs to a different process")
-        if record["state"] == "bound" and (record["pid"], record["birth"]) != (str(pid), birth):
-            raise ValueError("daemon instance process changed")
-        record.update(state="bound", pid=str(pid), birth=birth, updated=str(_wall_clock()))
-        _write(path, record)
+    bind_for_process(receipt, ProcessIdentity(pid, birth), ProcessIdentity.current())
 
 
 def cancel_reservation(receipt, creation_refused):
@@ -468,20 +413,7 @@ def _admit_owned(
             service, runtime, source, purpose, owner,
             Path(registry_root) if registry_root is not None else None, lease,
         ))
-    me = birth_identity(os.getpid())
-    with _locked(receipt, wait_seconds=1) as path:
-        record = _read(path)
-        if record["state"] == "running":
-            if record.get("pid") != str(os.getpid()) or record.get("birth") != me:
-                raise ValueError("daemon instance reservation already admitted")
-        elif record["state"] not in ("reserved", "bound"):
-            raise ValueError("daemon instance admission refused")
-        if _expire(record, _wall_clock()):
-            raise ValueError("daemon instance admission refused")
-        if record.get("pid") and (record["pid"], record["birth"]) != (str(os.getpid()), me):
-            raise ValueError("daemon instance admission process differs")
-        record.update(state="running", pid=str(os.getpid()), birth=me, updated=str(_wall_clock()))
-        _write(path, record)
+    record = admit_for_process(receipt, ProcessIdentity.current())
     # Do not let later unassociated children consume their parent's reservation.
     os.environ.pop(INSTANCE_ENV, None)
     os.environ.pop(REGISTRY_ENV, None)
@@ -650,26 +582,18 @@ def _observe_expiry():
                 previous = observations.get(receipt.instance_id)
                 monotonic = _monotonic_clock()
                 if previous is None:
-                    previous = (
-                        monotonic, min(float(record["deadline"]), float(record["hard_deadline"])) - _wall_clock(),
-                        record["updated"], monotonic + max(0, float(record["hard_deadline"]) - _wall_clock()),
-                    )
-                elif record["updated"] != previous[2]:
-                    previous = (
-                        monotonic, min(float(record["deadline"]), float(record["hard_deadline"])) - _wall_clock(),
-                        record["updated"], previous[3],
+                    previous = lease_clock.WallLeaseObservation(
+                        record, wall=_wall_clock(), monotonic=monotonic,
                     )
                 observations[receipt.instance_id] = previous
-                if (
-                    _expire(record, _wall_clock()) or monotonic - previous[0] >= previous[1]
-                    or monotonic >= previous[3]
-                ):
+                if previous.expired(record, wall=_wall_clock(), monotonic=monotonic):
                     retire_self()
             except OSError as error:
                 if error.errno in (errno.EACCES, errno.EAGAIN):
                     hard = observations.get(receipt.instance_id)
-                    if sys.platform.startswith("linux") and hard is not None and (
-                        _monotonic_clock() >= hard
+                    if hard is not None and (
+                        _monotonic_clock() >= hard if sys.platform.startswith("linux")
+                        else hard.past_hard(_monotonic_clock())
                     ):
                         retire_self()
                     continue
@@ -715,12 +639,7 @@ def close_guard(receipt):
                 _admitted = (os.getpid(), receipt, _admitted[2] - 1)
                 return
             _admitted = None
-    with _locked(receipt, wait_seconds=1) as path:
-        record = _read(path)
-        if (record.get("pid"), record.get("birth")) != (str(os.getpid()), birth_identity(os.getpid())):
-            raise ValueError("daemon instance custody belongs to another process")
-        record.update(state="finished", updated=str(_wall_clock()))
-        _write(path, record)
+    finish_for_process(receipt, ProcessIdentity.current())
     with _local_lock:
         entry = _guards.pop(receipt.instance_id, None)
         if entry:
@@ -762,7 +681,7 @@ def inspect(root=None):
     return results
 
 
-def cleanup(receipt, *, terminate=True, stop_timeout=5):
+def cleanup(receipt, *, terminate=True, stop_timeout=5, _caller_pid=None):
     removed = []
 
     def result(status, reason):
@@ -828,6 +747,8 @@ def cleanup(receipt, *, terminate=True, stop_timeout=5):
                 if supervisor_state == "matching":
                     if not _expire(record, _wall_clock()):
                         return result("live", "production-or-unexpired")
+                    if int(supervisor_pid) in (os.getpid(), _caller_pid):
+                        return result("held", "self-cleanup-refused")
                     if not terminate or not stop_identity(
                         int(supervisor_pid), record["supervisor_birth"],
                         timeout=stop_timeout, graceful=True,
@@ -854,6 +775,8 @@ def cleanup(receipt, *, terminate=True, stop_timeout=5):
                     return result("live", "production-or-unexpired")
                 if not terminate:
                     return result("held", "stop-required")
+                if int(record["pid"]) in (os.getpid(), _caller_pid):
+                    return result("held", "self-cleanup-refused")
                 if not stop_identity(int(record["pid"]), record["birth"], timeout=stop_timeout):
                     return result("held", "stop-unconfirmed")
             record["state"] = "cleaning"
@@ -917,7 +840,7 @@ def _write_cursor(root, key):
             pending.unlink()
 
 
-def reconcile(root, limit, max_seconds=5):
+def reconcile(root, limit, max_seconds=5, *, _caller_pid=None):
     started = _monotonic_clock()
     if type(limit) is not int or not 1 <= limit <= 4096:
         raise ValueError("daemon reconciliation limit must be between 1 and 4096")
@@ -964,9 +887,10 @@ def reconcile(root, limit, max_seconds=5):
                 except (OSError, ValueError, KeyError):
                     results.append(InstanceCleanupResult(path.stem, "held", "invalid-record"))
                     continue
-                results.append(cleanup(
-                    DaemonInstanceReceipt(path.stem, root), stop_timeout=min(5, remaining),
-                ))
+                options = {"stop_timeout": min(5, remaining)}
+                if _caller_pid is not None:
+                    options["_caller_pid"] = _caller_pid
+                results.append(cleanup(DaemonInstanceReceipt(path.stem, root), **options))
         finally:
             if visited is not None and visited != cursor:
                 _write_cursor(root, visited)

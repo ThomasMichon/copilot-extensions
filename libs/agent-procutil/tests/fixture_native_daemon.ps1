@@ -12,7 +12,7 @@ if ($Mode -eq 'submit') {
         -LogPath (Join-Path $Root 'worker.log')
     try {
         [IO.File]::WriteAllText((Join-Path $Root 'worker.json'), (@{
-            pid = $worker.Id; birth = [CopilotExtensions.DaemonInstanceNative]::Birth($worker)
+            pid = $worker.Id; birth = (Get-DaemonInstanceProcessBirth $worker)
         } | ConvertTo-Json))
     } finally {
         $worker.Dispose()
@@ -24,7 +24,7 @@ if ($Mode -eq 'submit') {
 $lease = Enter-NativeOperationLock (Join-Path $Root 'bootstrap.lock')
 try {
     $lease.AssertOwned()
-    [IO.File]::WriteAllText((Join-Path $Root 'started'), 'no Python or uv')
+    [IO.File]::WriteAllText((Join-Path $Root 'started'), 'setup-provided PATH Python')
     $deadline = [DateTime]::UtcNow.AddSeconds(25)
     while (-not [IO.File]::Exists((Join-Path $Root 'continue'))) {
         if ([DateTime]::UtcNow -gt $deadline) { throw 'native worker fixture deadline expired' }

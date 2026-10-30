@@ -3105,7 +3105,11 @@
         "tools/promotion_unit_tests/test_related_acquisition.py::test_adoption_defaults_keep_original_order_and_replacement_opacity[opaque-reader]",
         "tools/promotion_unit_tests/test_related_acquisition.py::test_projects_callbacks_bind_actual_callable_identity_and_selection[same-globals-migration]",
         "tools/promotion_unit_tests/test_related_acquisition.py::test_projects_callbacks_bind_actual_callable_identity_and_selection[self-restoring-loader]",
-        "tools/promotion_unit_tests/test_related_acquisition.py::test_projects_callbacks_bind_actual_callable_identity_and_selection[read-time-swap]"
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_projects_callbacks_bind_actual_callable_identity_and_selection[read-time-swap]",
+        "tools/promotion_unit_tests/test_daemon_clock.py::test_schema1_retains_original_monotonic_soft_and_hard_bounds",
+        "tools/promotion_unit_tests/test_daemon_clock.py::test_schema1_renewal_never_reanchors_original_hard_limit",
+        "tools/promotion_unit_tests/test_daemon_clock.py::test_schema1_rejects_changed_or_nonfinite_hard_bound",
+        "tools/promotion_unit_tests/test_daemon_clock.py::test_schema1_observation_rejects_production_and_other_schemas"
     ],
     "sources": {
         "tools/core_python_artifacts.py": "cfeae35bfee4537022e1026ffae498b61b23508426a676d9dc09ca8ab8d4b4a0",
@@ -3116,8 +3120,8 @@
         "tools/promotion_unit_tests/test_bundle_snapshot.py": "4122e4030eb49d3748acc70ae4360c597f273a224a2d257c8e7fd2825b3c48da",
         "tools/promotion_unit_tests/test_wheel_acquisition_budget.py": "3b84b0f4dde389f1a31c1b8d684576a29fb62e53b9696064749cf20c37ca0cf6",
         "tools/promotion_unit_tests/test_artifact_license_notices.py": "65956a73f5582f8c82876a7cf7b833d9f70f70789e72b78fb1de3476c830f76e",
-        "libs/agent-procutil/src/agent_procutil/_daemon_instance_clock.py": "6036e8400b8250d7c745907025dd48a99a2441e07e9ffebb8ee0f751c6a2c43c",
-        "tools/promotion_unit_tests/test_daemon_clock.py": "8dd13337618d5bf7648124bbe20fba9a8c35e06c0b3fb5db6231859406f187f9",
+        "libs/agent-procutil/src/agent_procutil/_daemon_instance_clock.py": "8f5bb37b76ccbb846d28ebe098eff8e1de5191a4b3839f5fe6a8d2eee164297a",
+        "tools/promotion_unit_tests/test_daemon_clock.py": "cb66993f87749513f54f115c741132b1baafee555e0391fe8e1f24c76c18dd74",
         "plugins/agent-machines/src/agent_machines/gh_account_prerequisite.py": "d8bada832bbbb3b5bba1aa317efdadd9ab4e65c0fa8862ef25f75e8bcdec9d2f",
         "tools/promotion_unit_tests/test_gh_account_prerequisite.py": "2119a0f2a99998eb02916fe8254382e9d776567851404ecf970999c19cbeada9",
         ".devcontainer/trusted-harness-base/build.py": "4d96b40567c1135bf82d117f6b54a41ac88b5ddf6fe6d033835a42e88203966d",
@@ -3135,7 +3139,7 @@
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_child.py": "081933f7f8512827ff9fe0800a3bf226b0d4a757114e9b7060b63081b5aea644",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_identity.py": "2a45a4d16a5990a3ed1e0fe85fa92f598304aa1a2c6d3999fc7c30a70d0a9c31",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_owner.py": "cefaa53b33187c2ee4cacc3e1179116fbe03e182b43b73f1d87152205a522942",
-        "libs/agent-procutil/src/agent_procutil/_daemon_instance_store.py": "96b116d1bc558e59c75a05bf6d460aafd61b8b80617dbcfd1320d32374549927",
+        "libs/agent-procutil/src/agent_procutil/_daemon_instance_store.py": "200d745d6bd5d37c1251b3f0e6cafc3deeeaa82a7d44ffd6bacf1c2575d44c9b",
         "libs/agent-procutil/src/agent_procutil/_darwin_caller_owned.py": "4dfafcc9944e429d3c1c83525d30379c2f02473d12c4031433cf7fe4f6906974",
         "libs/agent-procutil/src/agent_procutil/_interpreter.py": "0fe387814f80638c27f4d12c7bb1c2122abaeb2b4c71b75402d471e3940f92c7",
         "libs/agent-procutil/src/agent_procutil/_linux_pidfd.py": "cfb80912e44db7f98efe911ad57dd38f0fa5eb5a28e4e7b91da8206431871560",
@@ -3452,7 +3456,7 @@
         "libs/agent-procutil/tests/sdk_desktop_observer.py": "9937f27126d265bbe0af52f3394b0e319e8b35b95b6926e9c518565d0f675667",
         "libs/agent-procutil/tests/sdk_visibility.py": "1dd963ecc72096b8a9b91d1f3089dd4b9301ca0ee7e2ba89a71a3cfcb30ca901",
         "tools/promotion_unit_tests/test_sdk_desktop_observer.py": "7117cbb65e5d6010465969333d7d429dadf3e3652c1d3f6f9bba7e9a05f5456b",
-        "libs/agent-procutil/tests/sdk_visibility_sources.py": "3f3665ad2eae346f757d324c1a1e41ba397835ea5c334f513b822212596f7632",
+        "libs/agent-procutil/tests/sdk_visibility_sources.py": "1369a38abd05304d5bb1c9dfd546a0ac1c2f7b4463d90024d07374b5ab08aa7d",
         "libs/agent-procutil/tests/sdk_visibility_cases.py": "6cf438b387e7123eca6baeec1fed5d14e4297a1c336f029de4ec66dc99ad2972",
         "libs/installation-context/_installation_context_worker.py": "6c10396cb0555736155b25bf3f52d507c9e36b189eb06a175d0a27fc778f6c8d",
         "libs/agent-procutil/tests/test_shell_caller_owned_native.py": "9387ec4b81c5b5fe0d834493309b2863f1f0deac8001bf2b8b6df1c0e13b13e1",
@@ -3476,7 +3480,10 @@
         "plugins/agent-worktrees/src/agent_worktrees/config_migrations.py": "bbd221022396cda6d02a6c6afbe4e73803a2277d8c3e6fb35eff547937c1e445",
         "plugins/agent-worktrees/src/agent_worktrees/config_adoption_defaults.py": "c0d49f245fbe1615f064746d7d145066f00ea34414315cc2863298eac82278ea",
         "plugins/agent-worktrees/src/agent_worktrees/projects_registry.py": "665579af2edf5e67fbdf44ff12dc990a41f0d98cd9008344a3401d7a63558c66",
-        "plugins/agent-worktrees/src/agent_worktrees/strict_yaml.py": "98c2abc729a4544129c8fc60d723aa45fb4b49142c7194b21f41e0e84ef018d3"
+        "plugins/agent-worktrees/src/agent_worktrees/strict_yaml.py": "98c2abc729a4544129c8fc60d723aa45fb4b49142c7194b21f41e0e84ef018d3",
+        "libs/agent-procutil/src/agent_procutil/_daemon_instance_records.py": "722d48c76e5a9ac285f09868bd83291ba448fa1aa8a66c8e7854e9354e4fe4d4",
+        "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell.py": "1026faf3874c170a1299b54307b9a7c5d1b924410abdcf299b5fa0bdd721e60c",
+        "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell_windows.py": "a825d8bbb01952d46f49877e16ea88f8361e13cba449083c51469f0a04193d73"
     },
     "coverage_targets": [
         "tools/core_runtime_profile.py",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import ast
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 import os
 from pathlib import Path
 import re
@@ -356,13 +356,15 @@ def test_manager_install_reconciles_once_before_candidate_reuse(tmp_path, monkey
     ))
     namespace = {
         "Path": Path, "SelfInstallResult": SimpleNamespace,
-        "os": os, "subprocess": subprocess,
+        "os": os, "subprocess": subprocess, "ExitStack": ExitStack,
         "running_payload_dir": lambda: payload,
         "payload_version": lambda path: "1.0",
         "version_slot": lambda version, root: root / "versions" / version,
         "current_version": lambda root: None if state == "fresh" else "1.0",
         "needs_install": lambda version, root: state == "fresh",
-        "_runtime_installer": lambda: SimpleNamespace(candidate=candidate),
+        "_runtime_installer": lambda: SimpleNamespace(
+            candidate=candidate, _installation_custody=lambda: nullcontext(object()),
+        ),
         "_copy_payload": object(),
         "_complete_candidate": lambda *args, **kwargs: SimpleNamespace(
             action="installed" if state == "fresh" else "already-current",
@@ -381,12 +383,25 @@ def test_manager_install_reconciles_once_before_candidate_reuse(tmp_path, monkey
 )
 def test_manager_bootstrap_does_not_sweep_for_ordinary_commands(command, expected):
     source = REPO / "worktree-manager" / "scripts" / "runtime_install.py"
-    assignment = next(
-        node for node in ast.walk(ast.parse(source.read_text()))
-        if isinstance(node, ast.Assign)
+    functions = {
+        node.name: node for node in ast.parse(source.read_text()).body
+        if isinstance(node, ast.FunctionDef)
+    }
+    policy = next(
+        node for node in ast.walk(functions["main"]) if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Attribute) and target.attr == "skip_instance_reconcile"
+            and isinstance(target.value, ast.Name) and target.value.id == "args"
+            for target in node.targets
+        )
+    )
+    consumer = next(
+        node for node in functions["_install"].body if isinstance(node, ast.Assign)
         and any(isinstance(target, ast.Name) and target.id == "reconcile" for target in node.targets)
     )
-    assert eval(compile(ast.Expression(assignment.value), str(source), "eval"), {"command": command}) is expected
+    namespace = {"command": command, "args": SimpleNamespace(skip_instance_reconcile=False)}
+    exec(compile(ast.Module(body=[policy, consumer], type_ignores=[]), str(source), "exec"), namespace)
+    assert namespace["reconcile"] is expected
 
 
 @pytest.mark.skipif(os.name != "nt", reason="PowerShell installed-helper distribution")
@@ -402,7 +417,7 @@ def test_dtssh_installer_copies_native_binding_before_launcher_without_host_effe
     )[0]
     helpers = tmp_path / "source"
     helpers.mkdir()
-    for name in ("daemon_instances.ps1", "installer-instance-reconcile.ps1"):
+    for name in ("daemon_instances.ps1", "daemon_instance_runtime.pyz", "installer-instance-reconcile.ps1"):
         (helpers / name).write_text(f"synthetic {name}\n")
     installed = tmp_path / "installed"
     installed.mkdir()
@@ -424,7 +439,7 @@ def test_dtssh_installer_copies_native_binding_before_launcher_without_host_effe
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert result.returncode == 0, result.stderr
-    for name in ("daemon_instances.ps1", "installer-instance-reconcile.ps1"):
+    for name in ("daemon_instances.ps1", "daemon_instance_runtime.pyz", "installer-instance-reconcile.ps1"):
         assert (installed / name).read_bytes() == (helpers / name).read_bytes()
     assert (installed / "unrelated-proof").read_bytes() == b"preserved"
 

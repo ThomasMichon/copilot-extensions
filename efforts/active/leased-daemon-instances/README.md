@@ -163,6 +163,10 @@ their existing owners and guarantees.
 - [x] Reuse shared Python reservation, schema, locks and identity operations;
   replace Linux C supervise/cleanup and preserve owner-loss, lease/hard maximum,
   subreaper descendant settlement and exact-artifact behavior.
+- [x] Establish the shared compiler-free original-shell custody prerequisite
+  through the installation-context SDK (#9354), including its complete bounded
+  44-case native Windows packet. Instance admission/expiry migration below
+  remains a separate implementation and qualification boundary.
 - [ ] Migrate thin shell and PowerShell instance entrypoints through
   setup-provided PATH Python without interpreter attestation; preserve Windows
   process/Job and uncertainty contracts.
@@ -209,13 +213,17 @@ The journal distinguishes actual supported-lane proof from unavailable
 hardware, dependency and production-venue lanes; those are not claimed as
 exercised. Release promotion and installed rollout are separate, and no
 runtime rollout was authorized or performed.
+The compiler-free SDK custody prerequisite subsequently merged in #9354.
+Its native packet does not replace the retained compiled PowerShell
+daemon-instance entrypoint or qualify its admission, expiry and reconciliation.
 
 ## Journal
 
 All original entries and qualification details are retained in dated sidecars,
 newest first:
 
-- [2026-10-28 - SDK caller bounds and negative native qualification](../lean-runtime-dependencies/journal/2026/10.28%20sdk-caller-qualification.md)
+- [2026-10-30 - compiler-free PowerShell instance custody](../lean-runtime-dependencies/journal/2026/10.30%20powershell-instance-custody.md)
+- [2026-10-28 - SDK caller bounds and native qualification](../lean-runtime-dependencies/journal/2026/10.28%20sdk-caller-qualification.md)
 - [2026-10-26 - compiler-free amendment](journal/2026/10.26%20compiler-free-amendment.md)
 - [2026-10-25 - retirement and completion](journal/2026/10.25%20retirement-and-completion.md)
 - [2026-10-24 - native and installer qualification](journal/2026/10.24%20native-and-installer-qualification.md)
