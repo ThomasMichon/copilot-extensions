@@ -4,8 +4,13 @@ from __future__ import annotations
 
 from collections import deque
 from copy import deepcopy
+import math
 import threading
 import time
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sdk_desktop_win32 import WinAPI
 
 
 class ObservationBlocked(RuntimeError):
@@ -26,6 +31,55 @@ def capture_foreground(api) -> tuple[int, tuple[int, int, int]]:
         ):
             raise ObservationBlocked("foreground changed, exited or is not directly visible")
         return hwnd, (*owner, pin.birth)
+    finally:
+        pin.close()
+
+
+def activate_foreground(
+    api: WinAPI, hwnd: int, identity: tuple[int, int, int], deadline: float, operation: str,
+) -> dict:
+    """Request once, then verify the pinned visible endpoint, not a return proxy."""
+    if type(deadline) not in (int, float) or not math.isfinite(deadline):
+        raise ObservationBlocked(f"{operation}: invalid foreground deadline")
+    if time.monotonic() >= deadline:
+        raise ObservationBlocked(f"{operation}: foreground deadline expired before request")
+    pin = api.pin(identity[0])
+    try:
+        def require_target() -> None:
+            if (
+                pin.gone() or pin.birth != identity[2]
+                or not api.user.IsWindow(hwnd) or not api.user.IsWindowVisible(hwnd)
+                or api.window_identity(hwnd) != identity[:2]
+            ):
+                raise ObservationBlocked(f"{operation}: pinned target changed or is not visible")
+
+        require_target()
+        before = api.foreground()
+        returned = bool(api.user.SetForegroundWindow(hwnd))
+        observed = before
+        while time.monotonic() < deadline:
+            api.pump()
+            require_target()
+            observed = api.foreground()
+            if observed == hwnd:
+                confirmed, owner = capture_foreground(api)
+                if confirmed != hwnd or owner != identity:
+                    raise ObservationBlocked(f"{operation}: foreground target identity changed")
+                confirmed_at = time.monotonic()
+                if confirmed_at >= deadline:
+                    break
+                return {
+                    "api_return_nonzero": returned, "foreground_before": before,
+                    "foreground_after": confirmed, "identity": owner,
+                    "confirmed_monotonic": confirmed_at, "deadline": deadline,
+                }
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(.01, remaining))
+        raise ObservationBlocked(
+            f"{operation}: foreground postcondition deadline; "
+            f"api_return_nonzero={returned}, before={before}, observed={observed}, target={hwnd}"
+        )
     finally:
         pin.close()
 

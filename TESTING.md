@@ -306,6 +306,20 @@ most 16 cases, retires inside that same observer and writes its own exact
 literal JUnit; all four reports must cover the declared matrix. Calibration is
 never repeated to partition tests, and the original whole deadline is not
 rearmed between workers.
+Each foreground request calls `SetForegroundWindow` once and retains its return
+separately from the observed outcome. Within a one-second sub-deadline capped
+by the existing control deadline, it pumps only its own messages and verifies
+the visible target's HWND/PID/TID/query-pinned birth at the actual foreground
+endpoint. A nonzero return without that endpoint cannot pass; an already
+matching endpoint does not by itself replace any raw calibration witness.
+The [Win32 contract](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setforegroundwindow)
+does not document extended `GetLastError` information, and
+[activation can be asynchronous across input queues](https://devblogs.microsoft.com/oldnewthing/20161118-00/?p=94745).
+No input-queue attachment, simulated input, lock bypass or system setting change
+is used. The same pinned checks cover restoration and failure cleanup, without
+rearming the original whole/control deadline. Raw show, foreground, exact
+original restoration and retirement remain independent required witnesses;
+failed or missing evidence never becomes a passing qualification.
 The canonical arguments explicitly retain all four pytest temporary sessions,
 including failed cases, so the fourth packet cannot prune the first SDK
 packet's closed publications before final reconciliation. The policy is

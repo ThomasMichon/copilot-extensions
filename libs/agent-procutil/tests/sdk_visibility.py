@@ -19,7 +19,9 @@ import traceback
 from typing import TYPE_CHECKING
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from sdk_desktop_observer import DesktopObserver, ObservationBlocked, validate_calibration
+from sdk_desktop_observer import (
+    DesktopObserver, ObservationBlocked, activate_foreground, validate_calibration,
+)
 from sdk_visibility_cases import native_arguments, validate_case_packet, validate_case_packets, verify_native_junit
 from sdk_visibility_sources import bind_sdk_import, require_sdk_sources
 
@@ -356,7 +358,8 @@ def canary(request: dict, allow_visible: bool) -> int:
     hwnd = 0
     result = {"kind": "canary-result", "nonce": request["nonce"], "passed": False}
     try:
-        emit({"kind": "ready", "nonce": request["nonce"], "identity": api.identity()})
+        identity = api.identity()
+        emit({"kind": "ready", "nonce": request["nonce"], "identity": identity})
         if command(api, request["nonce"], request["deadline"]) != "show":
             raise ObservationBlocked("visible control was not explicitly admitted")
         visible_deadline = min(request["deadline"], time.monotonic() + 8)
@@ -374,7 +377,10 @@ def canary(request: dict, allow_visible: bool) -> int:
         result["hwnd"] = hwnd
         result["thread"] = api.window_identity(hwnd)[1]
         api.check(api.user.IsWindowVisible(hwnd), "calibration window visibility")
-        api.check(api.user.SetForegroundWindow(hwnd), "calibration foreground activation")
+        result["foreground_activation"] = activate_foreground(
+            api, hwnd, (identity["pid"], result["thread"], identity["birth"]),
+            min(visible_deadline, time.monotonic() + 1), "calibration foreground activation",
+        )
         emit({"kind": "shown", "nonce": request["nonce"], "hwnd": hwnd,
               "thread": result["thread"], "identity": api.identity()})
         if command(api, request["nonce"], visible_deadline) != "restore":
@@ -383,7 +389,10 @@ def canary(request: dict, allow_visible: bool) -> int:
             original["pid"], original["thread"],
         ):
             raise ObservationBlocked("original foreground changed before restoration")
-        api.check(api.user.SetForegroundWindow(original["hwnd"]), "restore original foreground")
+        result["foreground_restoration"] = activate_foreground(
+            api, original["hwnd"], (original["pid"], original["thread"], original["birth"]),
+            min(visible_deadline, time.monotonic() + 1), "restore original foreground",
+        )
         emit({"kind": "restoring", "nonce": request["nonce"]})
         if command(api, request["nonce"], visible_deadline) != "close":
             raise ObservationBlocked("calibration retirement was not admitted")
@@ -400,8 +409,13 @@ def canary(request: dict, allow_visible: bool) -> int:
                     if api.foreground() == hwnd and not original_pin.gone():
                         if api.window_identity(original["hwnd"]) != (original["pid"], original["thread"]):
                             raise ObservationBlocked("original window identity changed during cleanup")
-                        api.check(api.user.SetForegroundWindow(original["hwnd"]),
-                                  "restore foreground during control cleanup")
+                        activate_foreground(
+                            api, original["hwnd"],
+                            (original["pid"], original["thread"], original["birth"]),
+                            min(request["deadline"], result["before_visible"] + 10,
+                                time.monotonic() + 1),
+                            "restore foreground during control cleanup",
+                        )
                 finally:
                     api.check(api.user.DestroyWindow(hwnd), "cleanup owned calibration window")
         finally:
@@ -465,8 +479,11 @@ def restore_incomplete_control(api: WinAPI, original: dict, pin, report: dict) -
     if pin.gone() or api.window_identity(original["hwnd"]) != (original["pid"], original["thread"]):
         raise ObservationBlocked("original window identity changed during control cleanup")
     if api.foreground() != original["hwnd"]:
-        api.check(api.user.SetForegroundWindow(original["hwnd"]),
-                  "restore original foreground during observed control cleanup")
+        report["control_cleanup_restoration"] = activate_foreground(
+            api, original["hwnd"], (original["pid"], original["thread"], original["birth"]),
+            min(report["deadline"], time.monotonic() + 1),
+            "restore original foreground during observed control cleanup",
+        )
 
 
 def probe(request: dict, allow_visible: bool) -> int:

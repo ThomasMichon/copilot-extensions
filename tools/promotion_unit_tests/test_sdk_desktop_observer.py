@@ -72,6 +72,125 @@ class API:
             birth=self.birth, gone=lambda: False, close=lambda: self.closed.append(pid),
         )
 
+    def pump(self):
+        pass
+
+
+@pytest.mark.parametrize("returned", [0, 1])
+@pytest.mark.parametrize("transition", ["immediate", "deferred", "already"])
+def test_foreground_postcondition_retains_request_result_without_claiming_calibration(
+    monkeypatch, returned, transition,
+):
+    api = API()
+    calls = []
+    pending = []
+    if transition == "already":
+        api.current = 11
+    before = api.current
+
+    def activate(hwnd):
+        calls.append(hwnd)
+        if transition == "immediate":
+            api.current = hwnd
+        elif transition == "deferred":
+            pending.append(hwnd)
+        return returned
+
+    def pump():
+        if pending:
+            api.current = pending.pop()
+
+    api.user.SetForegroundWindow = activate
+    api.pump = pump
+    monkeypatch.setattr(observer.time, "sleep", lambda _: None, raising=False)
+    result = observer.activate_foreground(api, 11, (3, 4, 100), 101, "unit request")
+    assert result["api_return_nonzero"] is bool(returned)
+    assert result["foreground_before"] == before
+    assert result["foreground_after"] == 11 and result["identity"] == (3, 4, 100)
+    assert result["confirmed_monotonic"] < result["deadline"] == 101
+    assert calls == [11]
+    assert api.pins == api.closed == [3, 3]
+
+
+@pytest.mark.parametrize("returned", [0, 1])
+def test_foreground_request_cannot_pass_without_actual_endpoint(monkeypatch, returned):
+    api = API()
+    calls = []
+    api.user.SetForegroundWindow = lambda hwnd: calls.append(hwnd) or returned
+    monkeypatch.setattr(observer.time, "sleep", lambda _: None, raising=False)
+    with pytest.raises(observer.ObservationBlocked, match="foreground postcondition deadline"):
+        observer.activate_foreground(api, 11, (3, 4, 100), 100.02, "unit request")
+    assert api.current == 10 and calls == [11]
+    assert api.pins == api.closed == [3]
+
+
+@pytest.mark.parametrize("fault", ["birth", "pid", "thread", "invisible", "gone", "replaced"])
+def test_foreground_request_refuses_changed_or_unobservable_target(monkeypatch, fault):
+    api = API()
+    calls = []
+
+    def activate(hwnd):
+        calls.append(hwnd)
+        api.current = hwnd
+        if fault == "replaced":
+            api.windows[hwnd] = (5, 6)
+        return 1
+
+    api.user.SetForegroundWindow = activate
+    if fault == "birth":
+        api.birth = 101
+    elif fault == "pid":
+        api.windows[11] = (5, 4)
+    elif fault == "thread":
+        api.windows[11] = (3, 6)
+    elif fault == "invisible":
+        api.visible = False
+    elif fault == "gone":
+        original = api.pin
+
+        def pin(pid):
+            value = original(pid)
+            value.gone = lambda: True
+            return value
+
+        api.pin = pin
+    monkeypatch.setattr(observer.time, "sleep", lambda _: None, raising=False)
+    with pytest.raises(observer.ObservationBlocked, match="pinned target changed"):
+        observer.activate_foreground(api, 11, (3, 4, 100), 101, "unit request")
+    assert calls == ([11] if fault == "replaced" else [])
+    assert api.pins == api.closed == [3]
+
+
+@pytest.mark.parametrize("deadline", [99, float("nan"), float("inf"), True, "later"])
+def test_foreground_request_rejects_bad_deadline_before_native_effect(deadline):
+    api = API()
+    with pytest.raises(observer.ObservationBlocked, match="foreground deadline"):
+        observer.activate_foreground(api, 11, (3, 4, 100), deadline, "unit request")
+    assert not api.pins
+
+
+def test_foreground_endpoint_captured_after_deadline_is_not_accepted(monkeypatch):
+    api = API()
+    tick = [100.0]
+    api.user.SetForegroundWindow = lambda hwnd: setattr(api, "current", hwnd) or 1
+    monkeypatch.setattr(observer, "time", SimpleNamespace(monotonic=lambda: tick[0]))
+
+    def capture(_api):
+        tick[0] = 102
+        return 11, (3, 4, 100)
+
+    monkeypatch.setattr(observer, "capture_foreground", capture)
+    with pytest.raises(observer.ObservationBlocked, match="foreground postcondition deadline"):
+        observer.activate_foreground(api, 11, (3, 4, 100), 101, "unit request")
+    assert api.pins == api.closed == [3]
+
+
+def test_foreground_postcondition_does_not_replace_raw_calibration_witnesses():
+    packet, witnesses = control_packet()
+    packet["raw_events"] = packet["raw_events"][:2]
+    with pytest.raises(observer.ObservationBlocked):
+        observer.validate_calibration(packet, witnesses, 20, 7, 10)
+
 
 def sealed(api=None):
     value = observer.DesktopObserver(api or API(), "unit")
@@ -688,12 +807,27 @@ def probe_failure_fixture(monkeypatch, tmp_path):
         api.current = hwnd
         return True
 
-    api.user = SimpleNamespace(SetForegroundWindow=restore, IsWindow=lambda hwnd: api.visible)
+    api.user = SimpleNamespace(
+        SetForegroundWindow=restore,
+        IsWindow=lambda hwnd: hwnd == 10 or api.visible,
+        IsWindowVisible=lambda hwnd: hwnd == 10 or api.visible,
+    )
     api.identity = lambda: {"pid": 9, "birth": 10}
     api.require_desktop = lambda: {}
     api.foreground = lambda: api.current
     api.window_identity = lambda hwnd: (1, 2) if hwnd == 10 else (3, 4)
-    api.pin = lambda *args: pin
+    original_pin_opened = []
+
+    def query_pin(*args):
+        if not original_pin_opened:
+            original_pin_opened.append(True)
+            return pin
+        return SimpleNamespace(
+            birth=5, gone=lambda: False, close=lambda: events.append("query-pin-close"),
+        )
+
+    api.pin = query_pin
+    api.pump = lambda: None
     api.check = lambda value, stage: value
 
     class Capture:
