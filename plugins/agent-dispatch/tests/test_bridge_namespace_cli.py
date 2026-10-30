@@ -67,6 +67,27 @@ def test_namespace_list_is_empty(capsys):
     assert json.loads(capsys.readouterr().out) == []
 
 
+def test_namespace_reads_current_replacement_authority(monkeypatch, capsys):
+    current = {
+        "key": "reservation-b", "task_id": "task-a", "attempt": 300,
+        "worktree": "wt-active", "state": "reserving", "conversation_retired": True,
+    }
+    detail = {**current, "native_replacement_authorization": {"task_generation": 1}}
+    client = _FakeClient({"id": "task-a", "status": "queued"}, reservations=[current])
+    reads = []
+
+    def get_reservation(key):
+        reads.append(key)
+        return detail
+
+    client.get_reservation = get_reservation
+    monkeypatch.setattr(m, "_client", lambda *_args, **_kwargs: client)
+    assert m.main(["namespace-resolve", "task-a"]) == 0
+    spec = json.loads(capsys.readouterr().out)
+    assert spec["venue"]["acquisition_reservation"] == detail
+    assert reads == ["reservation-b"]
+
+
 def test_namespace_resolve_supplies_bounded_retry_reservation_history(monkeypatch, capsys):
     current = {
         "key": "reservation-b", "task_id": "task-a", "attempt": 2,

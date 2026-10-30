@@ -33,6 +33,7 @@ class SessionStartClientMixin(_Base):
         creation_prompt: str | None = None,
         provider_instance: bool = False,
         remote_session_id: str | None = None,
+        replacement_task: str | None = None,
     ) -> dict[str, Any]:
         """POST /api/v1/sessions
 
@@ -51,6 +52,13 @@ class SessionStartClientMixin(_Base):
         from .client import BridgeClientError
 
         body: dict[str, Any] = {}
+        if replacement_task is not None:
+            from .protocol import NATIVE_REPLACEMENT_PROTOCOL_VERSION
+            if not creation_key or not worktree_id or provider_instance or creation_prompt is not None:
+                raise ValueError("replacement_task requires a keyed existing workspace without a prompt")
+            if not self.daemon_supports(NATIVE_REPLACEMENT_PROTOCOL_VERSION):
+                raise BridgeClientError(426, "daemon does not support explicit native replacement")
+            body["replacement_task"] = replacement_task
         from .remote_acp_config import is_remote_address
 
         if "://" in (agent or ""):

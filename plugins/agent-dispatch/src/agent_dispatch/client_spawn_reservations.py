@@ -21,6 +21,28 @@ class SpawnReservationClientMixin:
 
     _http: Any
     _unwrap: Callable[[Any], Any]
+    _control_headers: Callable[[], dict[str, str]]
+
+    def authorize_native_replacement(
+        self, task_id: str, *, reservation_key: str, worktree: str,
+        expected_generation: int, expected_head: str, expected_head_revision: int,
+        expected_lifecycle_revision: int, permitted: bool, confirmed_no_live_holder: bool,
+        reason: str,
+    ) -> dict:
+        """Request one same-allocation replacement from the authenticated control route."""
+        return self._unwrap(self._http.post(
+            f"/spawn-reservations/tasks/{task_id}/authorize-replacement",
+            headers=self._control_headers(),
+            json={
+                "reservation_key": reservation_key, "worktree": worktree,
+                "expected_generation": expected_generation, "expected_head": expected_head,
+                "expected_head_revision": expected_head_revision,
+                "expected_lifecycle_revision": expected_lifecycle_revision,
+                "permitted": permitted, "confirmed_no_live_holder": confirmed_no_live_holder,
+                "reason": reason,
+            },
+            timeout=120,
+        ))
 
     def fence_spawn_startup(self, key: str, *, startup_revision: int) -> dict:
         """Close completed startup admission while retaining resource ownership."""

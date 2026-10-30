@@ -18,6 +18,62 @@ from .queue_execution_custody import require_execution_send_reconciliation
 from .queue_records import SpawnState, Status, TaskError
 
 
+def recovery_reservation(
+    queue, conn, task_id: str, *, reservation_key: str, worktree: str,
+    expected_generation: int, allow_retired: bool = False,
+):
+    """Read recovery fences under the caller's queue write transaction."""
+    task = queue._fetch(conn, task_id)
+    rows = conn.execute(
+        "SELECT * FROM spawn_reservations WHERE task_id=? ORDER BY attempt DESC",
+        (task_id,),
+    ).fetchall()
+    if (
+        task is None or task.status != Status.QUEUED or task.owner is not None
+        or task.hold_reason is not None or task.generation != expected_generation
+        or task.owner_session_id or not rows or task.exclusive_key is None
+    ):
+        raise TaskError("fresh acquisition task generation/ownership fence changed")
+    latest = rows[0]
+    latest_allocation = conn.execute(
+        "SELECT key FROM spawn_reservations WHERE exclusive_key=? AND worktree IS NOT NULL "
+        "ORDER BY reserved_at DESC LIMIT 1", (task.exclusive_key,),
+    ).fetchone()
+    if (
+        latest["key"] != reservation_key or latest["worktree"] != worktree
+        or latest_allocation is None or latest_allocation["key"] != reservation_key
+        or latest["state"] not in {SpawnState.DEFERRED, SpawnState.FAILED}
+        or latest["session_handle"] or latest["release_requested"]
+        or latest["conversation_retired"] and not allow_retired
+        or latest["worktree_ownership"] not in {"created", "reused", "targeted"}
+        or latest["conclusion_state"] == "pending"
+        or any(row["state"] in SpawnState.ACTIVE for row in rows)
+    ):
+        raise TaskError("fresh acquisition reservation fence changed or remains active")
+    if latest["worktree_ownership"] == "targeted" and (
+        task.affinity.get("worktree") != worktree
+        or task.target_worktree not in {None, worktree}
+    ):
+        raise TaskError("fresh acquisition target no longer matches the retained worktree")
+    foreign = conn.execute(
+        "SELECT key FROM spawn_reservations WHERE (worktree=? OR inherited_worktree=?) AND task_id!=? "
+        "AND (state IN ('reserving','spawned','cold','releasing') OR conclusion_state='pending') LIMIT 1",
+        (worktree, worktree, task_id),
+    ).fetchone()
+    if foreign:
+        raise TaskError("another task has an active reservation on the worktree")
+    exclusive_owner = conn.execute(
+        "SELECT key FROM spawn_reservations WHERE exclusive_key=? "
+        "AND state IN ('reserving','spawned','cold','releasing') "
+        "AND (exclusive_released=0 OR task_id=?) LIMIT 1",
+        (task.exclusive_key, task_id),
+    ).fetchone()
+    if exclusive_owner:
+        raise TaskError("exclusive-key spawn authority is still active")
+    require_execution_send_reconciliation(conn, task_id, exclusive_key=task.exclusive_key)
+    return task, latest
+
+
 class SpawnRearmMixin:
     """``rearm_spawn`` for :class:`TaskQueue`."""
 
@@ -33,55 +89,9 @@ class SpawnRearmMixin:
             raise TaskError("fresh acquisition requires an exact non-negative task generation")
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            task = self._fetch(conn, task_id)
-            rows = conn.execute(
-                "SELECT * FROM spawn_reservations WHERE task_id=? ORDER BY attempt DESC",
-                (task_id,),
-            ).fetchall()
-            if (
-                task is None or task.status != Status.QUEUED or task.owner is not None
-                or task.hold_reason is not None or task.generation != expected_generation
-                or task.owner_session_id or not rows or task.exclusive_key is None
-            ):
-                raise TaskError("fresh acquisition task generation/ownership fence changed")
-            latest = rows[0]
-            latest_allocation = conn.execute(
-                "SELECT key FROM spawn_reservations WHERE exclusive_key=? AND worktree IS NOT NULL "
-                "ORDER BY reserved_at DESC LIMIT 1", (task.exclusive_key,),
-            ).fetchone()
-            if (
-                latest["key"] != reservation_key or latest["worktree"] != worktree
-                or latest_allocation is None or latest_allocation["key"] != reservation_key
-                or latest["state"] not in {SpawnState.DEFERRED, SpawnState.FAILED}
-                or latest["session_handle"] or latest["release_requested"]
-                or latest["conversation_retired"]
-                or latest["worktree_ownership"] not in {"created", "reused", "targeted"}
-                or latest["conclusion_state"] == "pending"
-                or any(row["state"] in SpawnState.ACTIVE for row in rows)
-            ):
-                raise TaskError("fresh acquisition reservation fence changed or remains active")
-            if latest["worktree_ownership"] == "targeted" and (
-                task.affinity.get("worktree") != worktree
-                or task.target_worktree not in {None, worktree}
-            ):
-                raise TaskError("fresh acquisition target no longer matches the retained worktree")
-            foreign = conn.execute(
-                "SELECT key FROM spawn_reservations WHERE (worktree=? OR inherited_worktree=?) AND task_id!=? "
-                "AND state IN ('reserving','spawned','cold','releasing') LIMIT 1",
-                (worktree, worktree, task_id),
-            ).fetchone()
-            if foreign:
-                raise TaskError("another task has an active reservation on the worktree")
-            exclusive_owner = conn.execute(
-                "SELECT key FROM spawn_reservations WHERE exclusive_key=? "
-                "AND state IN ('reserving','spawned','cold','releasing') "
-                "AND (exclusive_released=0 OR task_id=?) LIMIT 1",
-                (task.exclusive_key, task_id),
-            ).fetchone()
-            if exclusive_owner:
-                raise TaskError("exclusive-key spawn authority is still active")
-            require_execution_send_reconciliation(
-                conn, task_id, exclusive_key=task.exclusive_key,
+            recovery_reservation(
+                self, conn, task_id, reservation_key=reservation_key, worktree=worktree,
+                expected_generation=expected_generation,
             )
             timestamp = self._now(None)
             conn.execute(

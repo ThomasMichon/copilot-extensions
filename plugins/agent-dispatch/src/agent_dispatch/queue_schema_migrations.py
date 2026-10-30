@@ -780,3 +780,5 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
     )
     from .acquisition_receipts import ensure
     ensure(conn)
+    from .ordinary_replacement import ensure as ensure_ordinary_replacements
+    ensure_ordinary_replacements(conn)

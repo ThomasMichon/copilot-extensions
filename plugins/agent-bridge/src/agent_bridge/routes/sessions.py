@@ -742,7 +742,10 @@ async def start_session(req: StartSessionRequest, request: Request):
     request_env, source = apply_request_preferences(req, request.app.state, target)
 
     from ..workspace_creation import start_request
-    creation = await start_request(req, mgr, target, agent_name=agent_name, env=request_env, source=source)
+    creation = await start_request(
+        req, mgr, target, agent_name=agent_name, env=request_env, source=source,
+        **({"resolver": resolver} if req.replacement_task is not None else {}),
+    )
     if creation is not None:
         return creation
 

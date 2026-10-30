@@ -31,7 +31,10 @@ def test_http51_capture_actual_observations(
 ) -> None:
     bound = capture_request(evidence, ROOT)
     receipt_client_factory = core._get_client
-    assert HTTP_PROTOCOL_VERSION == evidence.GENERATION
+    if bound is not None:
+        assert HTTP_PROTOCOL_VERSION == evidence.GENERATION
+    else:
+        assert HTTP_PROTOCOL_VERSION >= evidence.GENERATION
     vector = json.loads(evidence.safe(ROOT, evidence.INPUT).read_bytes())
     app, client, db, _ = serving
     manager, session, original = native_send
@@ -114,6 +117,9 @@ def test_http51_capture_actual_observations(
     api.headers.pop("Authorization")
     observed["unauthenticated"] = api.post(path, json=body).status_code
     api.close()
-    assert observed == vector["expected"]
+    expected = json.loads(json.dumps(vector["expected"]))
+    if bound is None:
+        expected["advertised"]["protocol_version"] = HTTP_PROTOCOL_VERSION
+    assert observed == expected
     if bound is not None:
         record_observations(evidence, bound, request.node.callspec.params["installation"], observed)

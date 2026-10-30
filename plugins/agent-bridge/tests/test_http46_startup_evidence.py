@@ -352,7 +352,7 @@ def test_current_generation_attestations_cover_semantic_sources_and_moved_prompt
             proof = fixture["captured_from"]
             proofs.setdefault(proof["source_path"], set()).add(proof["source_sha256"])
     for source in registry["source_paths"]:
-        assert source["sha256"] == _hash(ROOT / source["path"])
+        assert source["sha256"] == _hash(ROOT / source.get("current_path", source["path"]))
         if source["semantic"]:
             assert source["sha256"] in proofs[source["path"]]
     moved = "plugins/agent-bridge/src/agent_bridge/client_prompt.py"

@@ -16,6 +16,11 @@ worktree and contribution operations. See
 [repository hosting policy](docs/repository-agent-policy.md) for `expose_agent`,
 read-only admission checks, and the allocation/launch distinction.
 
+An explicitly authorized caller can conditionally promote an already registered
+new native conversation after the old head is proved stopped. The opt-in local
+[head replacement API and command](docs/conditional-head-replacement.md) preserve normal
+registration, history and claims; it never launches or retires a process.
+
 For optional encrypted PR attribution with an already configured agent-vault
 KeePass database, use `identity-vault setup/status/verify` or the
 [setting-up-pr-identity skill](skills/setting-up-pr-identity/SKILL.md).

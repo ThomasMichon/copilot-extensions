@@ -66,7 +66,7 @@ async def allocate_workspace(
 
 async def start_request(
     request: StartSessionRequest, manager: SessionManager, target: SpawnTarget, *,
-    agent_name: str | None, env: dict[str, str], source: PreferenceSource,
+    agent_name: str | None, env: dict[str, str], source: PreferenceSource, resolver=None,
 ) -> StartSessionResponse | None:
     """Adapt keyed requests without changing the legacy unkeyed start path."""
     if request.creation_key is None:
@@ -82,6 +82,8 @@ async def start_request(
         session, creation = await start(
             manager, target, key=request.creation_key, prompt=request.creation_prompt,
             provider_instance=request.provider_instance,
+            **({"replacement_task": request.replacement_task, "resolver": resolver}
+               if request.replacement_task is not None else {}),
             agent_name=agent_name, caller_id=request.caller_id,
             caller_session_id=request.caller_session_id, mcp_servers=request.mcp_servers,
             copilot_args=request.copilot_args, env_overrides=env or None,
@@ -150,9 +152,14 @@ def _sessionless(
 
 async def start(
     manager: SessionManager, target: SpawnTarget, *, key: str,
-    prompt: str | None = None, provider_instance: bool = False, **options: Any,
+    prompt: str | None = None, provider_instance: bool = False,
+    replacement_task: str | None = None, resolver=None, **options: Any,
 ) -> tuple[Session, dict[str, Any]]:
     """Persist intent before effects; replay never allocates or starts twice."""
+    if replacement_task is not None and (
+        provider_instance or prompt is not None or not target.worktree_id
+    ):
+        raise AcquisitionRefused("replacement_request_invalid", "replacement requires the exact existing workspace and no prompt")
     if provider_instance:
         from .provider_creation import start as start_provider
 
@@ -172,6 +179,12 @@ async def start(
     from .hosting_policy import require_target_hosting
 
     await require_target_hosting(target, operation="keyed creation")
+    replacement = None
+    if replacement_task is not None:
+        from .native_replacement import ReplacementAuthority
+        replacement = await ReplacementAuthority.load(
+            resolver, replacement_task, target.project, target.worktree_id, key,
+        )
     db = manager.db
     store = AcquisitionStore(db)
     digest = hashlib.sha256(json.dumps([target.project, key]).encode()).hexdigest()
@@ -179,6 +192,8 @@ async def start(
         "target": json.loads(target.to_json()), "prompt": prompt,
         "options": creation_fact_options(options),
     }
+    if replacement is not None:
+        facts["options"]["native_replacement"] = replacement.grant
     facts_digest = hashlib.sha256(json.dumps(facts, sort_keys=True).encode()).hexdigest()
     with executor(db, f"creation:{digest}"):
         operation = legacy_creation(db, "workspace", digest, facts_digest)
@@ -246,7 +261,9 @@ async def start(
                         replace(target, cwd=row["path"], explicit_cwd=True),
                         operation="keyed creation",
                     )
-                    if not _sessionless(manager, row, head, worktree_id):
+                    if replacement is not None:
+                        await replacement.before_launch(manager, row, head)
+                    elif not _sessionless(manager, row, head, worktree_id):
                         raise AcquisitionRefused("creation_history_occupied", "workspace is not positively sessionless")
                     store.gate_workspace(
                         worktree_id, delivery_id, "acp", operation["session_id"], None, "agent-bridge",
@@ -258,7 +275,9 @@ async def start(
                             for field in ("id", "repo", "path", "creation_nonce")
                         ):
                             raise AcquisitionRefused("creation_conflict", "workspace identity changed before native start")
-                        if not _sessionless(manager, current, current_head, worktree_id):
+                        if replacement is not None:
+                            await replacement.before_launch(manager, current, current_head)
+                        elif not _sessionless(manager, current, current_head, worktree_id):
                             raise AcquisitionRefused("live_holder", "workspace changed before native start")
                     except (AcquisitionRefused, AgentHostingError):
                         store.release_workspace_gate(worktree_id, delivery_id)
@@ -273,7 +292,9 @@ async def start(
                             current, current_head = await _workspace(
                                 target.project, worktree_id, expected=saved,
                             )
-                            if not _sessionless(manager, current, current_head, worktree_id):
+                            if replacement is not None:
+                                await replacement.before_launch(manager, current, current_head)
+                            elif not _sessionless(manager, current, current_head, worktree_id):
                                 raise AcquisitionRefused("live_holder", "workspace changed during launch preparation")
                         except AcquisitionRefused:
                             _update(db, digest, state="allocated")
@@ -316,6 +337,28 @@ async def start(
                 ):
                     raise AcquisitionRefused("creation_pending", "original native start requires reconciliation")
                 native = session.acp_session_id
+                if (
+                    operation["state"] == "complete" and head == native and not prompt
+                    and operation["native_session_id"] == native
+                    and session.status == SessionStatus.STOPPED and not db.execute_read(
+                        "SELECT 1 FROM turns WHERE session_id=? LIMIT 1", (session.session_id,),
+                    )
+                ):
+                    if replacement is not None:
+                        await replacement.read()
+                    session = await manager.resume_session(
+                        session.session_id, drain=False, allow_recreate=False,
+                    )
+                    if (
+                        session.acp_session_id != native or session.target.project != target.project
+                        or session.target.worktree_id != worktree_id or session.target.cwd != saved["path"]
+                    ):
+                        raise AcquisitionRefused("native_identity_changed", "strict creation replay changed native identity")
+                replacement_result = None
+                if replacement is not None:
+                    _update(db, digest, native_session_id=native)
+                    replacement_result = await replacement.promote(session)
+                    head = native
                 if head and head != native:
                     raise AcquisitionRefused("foreign_live_holder", "another native head owns the workspace")
                 if operation["state"] == "complete" and head != native:
@@ -327,6 +370,8 @@ async def start(
                     "native_session_id": native, "turn_index": turn_index,
                     "replayed": operation["state"] == "complete",
                 }
+                if replacement_result is not None:
+                    result["native_replacement"] = replacement_result
                 if operation["state"] == "complete":
                     if prompt:
                         admitted = db.execute_read(
@@ -338,17 +383,6 @@ async def start(
                             or admitted[0]["turn_index"] != turn_index or admitted[0]["prompt"] != prompt
                         ):
                             raise AcquisitionRefused("creation_delivery_unproven", "completed first-turn receipt is missing")
-                    elif session.status == SessionStatus.STOPPED and not db.execute_read(
-                        "SELECT 1 FROM turns WHERE session_id=? LIMIT 1", (session.session_id,),
-                    ):
-                        session = await manager.resume_session(
-                            session.session_id, drain=False, allow_recreate=False,
-                        )
-                        if (
-                            session.acp_session_id != native or session.target.project != target.project
-                            or session.target.worktree_id != worktree_id or session.target.cwd != saved["path"]
-                        ):
-                            raise AcquisitionRefused("native_identity_changed", "strict creation replay changed native identity")
                     store.release_workspace_gate(worktree_id, delivery_id)
                     return session, result
                 gates = db.execute_read(
@@ -361,10 +395,11 @@ async def start(
                     raise AcquisitionRefused("launch_gate_held", "another acquisition holds this workspace")
                 if not db.reserve_worktree_ownership(worktree_id, session.session_id, now=time.time()):
                     raise AcquisitionRefused("live_holder", "workspace ownership fence refused embodiment")
-                await worktree_command(
-                    ["bind-session", "--session-id", native, "--worktree-id", worktree_id,
-                     "--worktree-dir", saved["path"]], target.project,
-                )
+                if replacement is None:
+                    await worktree_command(
+                        ["bind-session", "--session-id", native, "--worktree-id", worktree_id,
+                         "--worktree-dir", saved["path"]], target.project,
+                    )
                 _update(db, digest, native_session_id=native)
                 if prompt:
                     admitted = db.execute_read(

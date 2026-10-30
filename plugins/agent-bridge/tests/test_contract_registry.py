@@ -94,7 +94,8 @@ def test_native_resume_does_not_reuse_the_published_receipt_generation() -> None
     assert bridge_protocol.RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION == 49
     assert bridge_protocol.RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION == 50
     assert bridge_protocol.NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION == 51
-    assert bridge_protocol.HTTP_PROTOCOL_VERSION == 51
+    assert bridge_protocol.NATIVE_REPLACEMENT_PROTOCOL_VERSION == 52
+    assert bridge_protocol.HTTP_PROTOCOL_VERSION == 52
     assert bridge_protocol.HTTP_PROTOCOL_MIN_SUPPORTED == 1
 
 
@@ -636,7 +637,7 @@ def test_session_create_request_fixture_proves_unknown_field_tolerance() -> None
     request = StartSessionRequest.model_validate(fixture["request"])
     assert request.model_dump(mode="json") == {
         **fixture["accepted_model"], "creation_key": None, "creation_prompt": None,
-        "provider_instance": False, "remote_session_id": None,
+        "provider_instance": False, "remote_session_id": None, "replacement_task": None,
     }
     assert "future_option" not in request.model_fields_set
 

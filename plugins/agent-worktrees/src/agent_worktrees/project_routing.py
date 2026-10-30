@@ -42,6 +42,7 @@ _NO_PROJECT_COMMANDS = {
     "session-lineage",
     "installer-readiness",
     "bind-session",
+    "replace-dead-head",
     "bind-nudge",
     "history-digest",
     "note-handoff",

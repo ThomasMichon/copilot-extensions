@@ -12,9 +12,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--creation-key", help="opaque logical creation identity; exact local workspace/session retries retain the original result")
     parser.add_argument("--provider-instance", action="store_true",
                         help="keyed native creation on an exact provider-exec instance, without a worktree")
+    parser.add_argument("--replacement-task", help="task whose current control grant authorizes this native replacement")
 
 
 def validate_arguments(args: argparse.Namespace) -> None:
+    if getattr(args, "replacement_task", None) is not None and (
+        not getattr(args, "creation_key", None) or not getattr(args, "worktree_id", None)
+        or getattr(args, "provider_instance", False)
+    ):
+        print("[FAIL] --replacement-task requires --creation-key and --worktree-id.", file=sys.stderr)
+        sys.exit(2)
     if getattr(args, "provider_instance", False) and getattr(args, "creation_key", None) is None:
         print("[FAIL] --provider-instance requires --creation-key.", file=sys.stderr)
         sys.exit(2)
@@ -52,6 +59,8 @@ def create(args: argparse.Namespace, client, *, caller_id: str | None) -> None:
         effort=getattr(args, "effort", None), force_new=True,
         creation_key=args.creation_key, creation_prompt=prompt,
         provider_instance=provider_instance,
+        **({"replacement_task": args.replacement_task}
+           if getattr(args, "replacement_task", None) is not None else {}),
         request_timeout=core._startup_request_timeout(),
     )
     creation = result.get("creation")

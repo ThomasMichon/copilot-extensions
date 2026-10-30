@@ -10,6 +10,7 @@ from agent_dispatch.ordinary_agent_storage import reservation_native_facts
 from agent_dispatch.supervisor import Supervisor
 from tests.test_ordinary_assignment import _legacy, _start, assigned as assigned, create_app_for
 from tests.test_supervisor import QueueBackedClient
+from tests._hosting_owner import admission_owner as admission_owner
 
 pytestmark = pytest.mark.contract("agent_dispatch.ordinary_bridge")
 

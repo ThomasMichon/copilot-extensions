@@ -43,13 +43,70 @@ sharing an exclusive lane; unrelated worktree history is not imported.
 A handleless inherited retirement marker permits only current-head inspection
 when all known retired identities are attributable. Exact resumed-agent storage
 can atomically clear that current derived marker for a different unretired
-head; historical retirement evidence is unchanged. It never permits creation.
+head; historical retirement evidence is unchanged. That derived marker alone
+never permits creation. A separate explicit replacement grant is described below.
 Assigned keyed reservations missing project/path metadata defer through normal
 supervisor retry without probing or launching a native session.
 Reconciliation preserves explicit prior workspace ownership;
 a fresh ordinary Bridge allocation remains Bridge-owned and `targeted` from
 Dispatch's perspective. Deploy compatible exact-record, strict-resume and
 coordinator facts/storage support together; older capabilities refuse explicitly.
+
+## Authorized replacement in the same workspace
+
+When the recorded conversation has stopped and must not be resumed, an operator
+can authorize one replacement while keeping the task, workspace and old history.
+This is separate from ordinary resume and from the legacy `authorize-fresh`
+acquisition path:
+
+```text
+agent-dispatch reservations authorize-replacement <task-id> \
+  --reservation-key <latest-deferred-reservation> --worktree <worktree-id> \
+  --expected-generation <generation> --expected-head <old-native-uuid> \
+  --expected-head-revision <head-revision> \
+  --expected-lifecycle-revision <lifecycle-revision> \
+  --permit --confirm-no-live-holder --reason "<authorization and evidence>"
+```
+
+The command requires the coordinator's control credential. Worker credentials
+cannot grant replacement. It reads the exact workspace record itself, requires
+Bridge payload and running daemon protocol 52, and invokes Worktrees'
+[read-only stopped-head check](../../agent-worktrees/docs/conditional-head-replacement.md).
+An older or unavailable receiver refuses before changing queue state.
+The request does not accept a caller-supplied workspace record.
+
+Under the queue write transaction, the grant requires the exact task generation
+and latest deferred/failed unbound reservation, retained original allocation
+provenance, no task hold or owner, and no active reservation or pending cleanup
+on that workspace. Targeted workspace affinity must still match. It advances
+the task generation, records a stable `replacement_creation_key`, and retains
+all old reservation details and native retirement evidence. Repeating a stale
+authorization refuses; it does not produce a second key. The response's
+`launched: false` means no conversation has been started.
+
+The next admitted reservation exposes the current grant through
+`native_replacement_authorization`. Dispatch uses the grant's stable key and
+`create --worktree-id <id> --replacement-task <task-id>`, without a prompt.
+Bridge independently reads the authenticated `dispatch:` namespace, rechecks
+permission and stopped holders before launch, then uses the ground owner's
+conditional head replacement. It never falls back to ordinary bind or resume.
+The original workspace allocation key is unchanged; the replacement key
+identifies this new conversation only.
+
+Before sending work, Dispatch stores the new identity and frozen first prompt.
+Replacement storage requires the exact grant, Bridge's completed replacement
+result, matching workspace nonce, and the ground owner's new native head and
+revision. The HTTP storage route obtains that record itself; caller-supplied
+metadata cannot clear retirement. Only the new reservation's derived retirement
+marker is cleared. Historical rows and retired native IDs remain unchanged.
+A storage or send failure retains the same task and keys for retry.
+
+After identity storage, ordinary retained-handle delivery owns retries.
+Direct creation replay is supported while the grant still authorizes the
+unbound reservation; it is not a second permission to recreate a stored or
+retired result. Roll out all three compatible receivers before authorizing
+this path. No service restart, rollout, teardown, claim transfer or task
+completion is authorized by the grant.
 
 Explicit `make_embody_spawn` and interactive CLI embodiment use
 `agent-bridge acquire --request-file -`, current-client HTTP protocol 34. Existing

@@ -10,6 +10,7 @@ import pytest
 from agent_dispatch.ordinary_agent_storage import record_created_agent
 from agent_dispatch.ordinary_invocation import prepare
 from agent_dispatch.queue import TaskQueue, TaskError
+from tests._hosting_owner import admission_owner as admission_owner
 
 
 @pytest.fixture
@@ -264,7 +265,7 @@ def test_unknown_historical_intent_never_gets_a_new_key(intent, version):
         prepare(asdict(task), asdict(reservation), {**info, "startup_invocation": previous}, prompt)
 
 
-def test_old_storage_ignoring_intent_refuses_before_send(intent, monkeypatch):
+def test_old_storage_ignoring_intent_refuses_before_send(intent, monkeypatch, admission_owner):
     from agent_dispatch import bridge, ordinary_bridge
     queue, task, reservation, info, prompt, _ = intent
     calls = []

@@ -81,6 +81,11 @@ def register(subparsers: Any) -> None:
         "acquisition-readiness", help="Prove daemon support for current acquisition safety",
     )
     readiness.set_defaults(func=readiness_command)
+    from .native_replacement import readiness_command as replacement_readiness
+    replacement = subparsers.add_parser(
+        "native-replacement-readiness", help="Read support for authorized same-workspace native replacement",
+    )
+    replacement.set_defaults(func=replacement_readiness)
 
 
 def readiness_command(args: argparse.Namespace) -> None:

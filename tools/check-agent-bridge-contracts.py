@@ -76,6 +76,7 @@ _DEFERRED_KEYS = {
     "reference_sha256",
 }
 _HTTP_CAPABILITY_CONSTANTS = {
+    "native_replacement": "NATIVE_REPLACEMENT_PROTOCOL_VERSION",
     "native_send_idempotency": "NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION",
     "retained_inbox": "RETAINED_INBOX_PROTOCOL_VERSION",
     "retained_inbox_producer": "RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION",

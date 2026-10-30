@@ -226,7 +226,9 @@ NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION = 51
 # Optional read-only receipt observation, advertised by the running daemon.
 NATIVE_SEND_RECEIPT_CAPABILITY = "native_send_receipt"
 NATIVE_SEND_RECEIPT_CAPABILITY_VERSION = 1
-HTTP_PROTOCOL_VERSION = 51
+# Explicit, queue-authorized native replacement in the retained ordinary workspace.
+NATIVE_REPLACEMENT_PROTOCOL_VERSION = 52
+HTTP_PROTOCOL_VERSION = 52
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

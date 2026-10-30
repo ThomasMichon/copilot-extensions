@@ -161,6 +161,7 @@ def test_flow_update_leaves_golden_corpus_unchanged(tmp_path):
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
     import agent_bridge_contract_registry as registry_codec
+    import agent_bridge_contract_git as git_evidence
     registry_snapshot = registry_codec.load(snapshot)
     registry = registry_snapshot.materialized
     fixture_paths = {
@@ -168,12 +169,17 @@ def test_flow_update_leaves_golden_corpus_unchanged(tmp_path):
         for contract in registry["contracts"] for fixture in contract["fixtures"]
     }
     before = {path: (snapshot / path).read_bytes() for path in fixture_paths}
+    relocated = {
+        record["path"] for contract in registry["contracts"]
+        for record in contract["source_paths"] if "current_path" in record
+    }
     for contract in registry["contracts"]:
         for record in contract["source_paths"]:
-            destination = snapshot / record["path"]
+            relative = record.get("current_path", record["path"])
+            destination = snapshot / relative
             if not destination.exists():
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(REPO / record["path"], destination)
+                shutil.copy2(REPO / relative, destination)
     for deferred in registry["deferred_contracts"]:
         if "reference_path" in deferred:
             destination = snapshot / deferred["reference_path"]
@@ -181,13 +187,18 @@ def test_flow_update_leaves_golden_corpus_unchanged(tmp_path):
             shutil.copy2(REPO / deferred["reference_path"], destination)
     for packet in (
         "http47-owned-cold-drain.json", "http48-retained-inbox.json", "http49-retained-producer.json",
-        "http50-retained-recovery.json",
+        "http50-retained-recovery.json", "http51-standard-native-send.json",
+        "http52-native-replacement.json",
     ):
         source = REPO / CONTRACT / "fixtures/http/current" / packet
         if not source.exists():
             continue
         closure = json.loads(source.read_text(encoding="utf-8"))["execution_closure"]
         for relative in closure:
+            if relative in relocated or not (REPO / relative).exists():
+                # Historical code stays in the borrowed object store, not a revived executable path.
+                assert git_evidence.blob_sha256(closure[relative]["blob"]) == closure[relative]["sha256"]
+                continue
             destination = snapshot / relative
             if not destination.exists():
                 destination.parent.mkdir(parents=True, exist_ok=True)
@@ -197,6 +208,8 @@ def test_flow_update_leaves_golden_corpus_unchanged(tmp_path):
                  "bridge_http47_validation.py", "bridge_http48_evidence.py",
                  "bridge_http49_evidence.py", "bridge_http_retained_evidence.py",
                  "bridge_http50_evidence.py",
+                 "bridge_http51_evidence.py", "bridge_http52_evidence.py",
+                 "agent_bridge_contract_families.py",
                  "bridge_http48_installation.py",
                  "agent_bridge_contract_registry.py",
                  "agent_bridge_contract_paths.py", "agent_bridge_contract_publication.py"):

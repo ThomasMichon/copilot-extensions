@@ -308,8 +308,10 @@ or linked artifacts are errors, not an empty or successful history.
 under the recorded backend process. It explicitly reports
 `prompt_acceptance: unknown`; it does not prove a delivered turn, current
 liveness, New/Resume parity or same-conversation installed acceptance.
-Windows, macOS and containers remain outside the native source owner's
-qualification. The separate native source lane
+Windows, macOS and containers remain outside this receipt's qualification.
+Windows original-hook activation ownership is available separately, as described
+in [conditional head replacement](conditional-head-replacement.md); it does not
+expand this receipt or the restart-recovery platform gate. The separate native source lane
 `python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_launch_native_observation_native.py`
 uses a synthetic Linux/WSL open hold, an actual original-hook subprocess and the
 resident write transport. It is not a real Copilot acceptance test.

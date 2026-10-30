@@ -1855,6 +1855,7 @@ _install_slot_build() {
             --reinstall-package agent-machine-transport --refresh-package agent-machine-transport \
             --reinstall-package agent-worktree-identity --refresh-package agent-worktree-identity \
             --reinstall-package agent-process-telemetry --refresh-package agent-process-telemetry \
+            --reinstall-package agent-repository-policy --refresh-package agent-repository-policy \
             --reinstall-package agent-update-driver --refresh-package agent-update-driver \
             "$PLUGIN_DIR" --quiet; then
         _fail "Package install failed"
@@ -2593,6 +2594,7 @@ _update_core() {
             --reinstall-package agent-machine-transport --refresh-package agent-machine-transport \
             --reinstall-package agent-worktree-identity --refresh-package agent-worktree-identity \
             --reinstall-package agent-process-telemetry --refresh-package agent-process-telemetry \
+            --reinstall-package agent-repository-policy --refresh-package agent-repository-policy \
             --reinstall-package agent-update-driver --refresh-package agent-update-driver \
             "$PLUGIN_DIR" --quiet; then
         _fail "Package update failed"

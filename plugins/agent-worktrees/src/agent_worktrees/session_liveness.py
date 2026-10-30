@@ -55,7 +55,7 @@ def copilot_pid_state(pid: int) -> bool | None:
     # No process-identity probe (e.g. macOS): only "no such process" is proof.
     try:
         os.kill(pid, 0)
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         return False if exc.errno == errno.ESRCH else None
     return None
 
@@ -95,8 +95,8 @@ def session_liveness(session_id: str | None) -> Liveness:
 def session_process_owns_hold(session_id: str, pid: int, start_time: str) -> bool:
     """Strict positive UUID/process proof, not a replacement death detector.
 
-    Linux/WSL native Copilot holds ``inuse.<pid>.hold`` open for its session.
-    Match the actual open-file inode and process birth, not a stale pathname.
+    Native Copilot holds ``inuse.<pid>.hold`` open for its session.
+    Match the OS-observed file owner and process birth, not a stale pathname.
     Unsupported, inaccessible or over-budget observations remain unconfirmed.
     """
     if (
@@ -105,7 +105,8 @@ def session_process_owns_hold(session_id: str, pid: int, start_time: str) -> boo
         or not isinstance(start_time, str) or not start_time
     ):
         raise ValueError("Invalid native session process identity")
-    if platform.system() != "Linux":
+    system = platform.system()
+    if system not in {"Linux", "Windows"}:
         return False
     try:
         directory = sessions._session_state_dir() / session_id
@@ -116,6 +117,16 @@ def session_process_owns_hold(session_id: str, pid: int, start_time: str) -> boo
         if not stat.S_ISREG(expected.st_mode) or locks.process_start_time(pid) != start_time:
             return False
         identity = (expected.st_dev, expected.st_ino)
+        if system == "Windows":
+            from .windows_session_hold import owners
+
+            confirmed = (pid, start_time) in owners(hold)
+            fresh = hold.lstat()
+            return (
+                confirmed and stat.S_ISREG(fresh.st_mode)
+                and (fresh.st_dev, fresh.st_ino) == identity
+                and locks.process_start_time(pid) == start_time
+            )
         with os.scandir(f"/proc/{pid}/fd") as descriptors:
             for index, descriptor in enumerate(descriptors):
                 if index >= _MAX_BINDING_DESCRIPTORS:

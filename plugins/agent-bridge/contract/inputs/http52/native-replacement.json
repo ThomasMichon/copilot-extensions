@@ -1,0 +1,28 @@
+{
+  "schema": "http52-native-replacement-cases-v1",
+  "generation": 52,
+  "requests": {
+    "replacement_task": "task-a",
+    "creation_key": "replacement-key",
+    "unexpected_prompt": "Must not be sent"
+  },
+  "expected": {
+    "advertised": {"protocol_version": 52, "min_protocol_version": 1},
+    "receipt": {
+      "status": "complete",
+      "native_session_id": "22222222-2222-4222-8222-222222222222",
+      "turn_index": null
+    },
+    "same_native_retry": true,
+    "same_grant_retry": true,
+    "replayed": true,
+    "predecessor_preserved": true,
+    "native_starts": 1,
+    "promotions": 1,
+    "turns": 0,
+    "unexpected_prompt": 422,
+    "old_receiver": {"status": 426, "posts": 0},
+    "revoked_authority": 409,
+    "unauthenticated": 401
+  }
+}

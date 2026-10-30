@@ -19,10 +19,14 @@ def reservation_native_facts(queue: Any, key: str) -> dict:
         task = queue._fetch(conn, row["task_id"]) if row else None
         if row is None or task is None:
             raise TaskError("ordinary assignment has no current task/reservation")
+        authorization = None
         try:
             known, retired = native_bindings(conn, row, task)
             reconcile_retirement = inherited_retirement(conn, row, task)
             error = _admission_error(conn, row, task)
+            if not error and not row["agent_info"] and not row["session_handle"]:
+                from .ordinary_replacement import current_authorization
+                authorization = current_authorization(conn, row, task)
         except TaskError as exc:
             known, retired, reconcile_retirement, error = [], [], False, str(exc)
         redrive, redrive_error = None, None
@@ -36,6 +40,7 @@ def reservation_native_facts(queue: Any, key: str) -> dict:
         "ordinary_assignment_error": error,
         "inherited_retirement_reconcilable": reconcile_retirement,
         "ordinary_redrive": redrive, "ordinary_redrive_error": redrive_error,
+        "native_replacement_authorization": authorization,
     }
 
 
@@ -126,7 +131,8 @@ def _record_agent(
         elif resumed or row["worktree"] and not row["agent_info"]:
             raise TaskError("assigned agent requires the exact ground owner record")
         if row["conversation_retired"] and not resumed:
-            raise TaskError("retired history requires a proven current native head")
+            from .ordinary_replacement import validate_replacement
+            validate_replacement(conn, row, task, agent_info, worktree_record)
         known, retired = native_bindings(conn, row, task)
         if native_conflict(actual.native, known, retired):
             raise TaskError("ordinary agent conflicts with known or retired native identity")

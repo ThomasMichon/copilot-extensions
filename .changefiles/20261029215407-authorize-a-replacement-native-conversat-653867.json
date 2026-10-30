@@ -1,0 +1,13 @@
+{
+  "comment": "Authorize a replacement native conversation in the retained workspace without losing history; refresh Bridge's local repository-policy dependency during install and update.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "dev"
+    }
+  ]
+}

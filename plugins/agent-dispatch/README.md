@@ -2841,6 +2841,11 @@ If a lost create response left the original reservation without a workspace,
 a successful replay's stored agent facts can prove that workspace within the
 same allocation and creation key; the original origin and retirement history
 remain intact.
+An explicit control-authorized [same-workspace native replacement](docs/session-acquisition.md#authorized-replacement-in-the-same-workspace)
+can create one different conversation after stopped-holder checks. It uses a
+separate stable conversation key, preserves the original allocation and old
+history, and stores the new identity before sending work. It is never an
+automatic fallback from failed resume.
 Both paths recheck the authenticated
 reservation/task admission fence immediately before delivery. That coordinator
 transaction is a pre-send admission point, not a cross-service transaction:

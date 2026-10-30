@@ -119,7 +119,7 @@ def install(*, observer: bool = False) -> None:
     path, request = load_request()
     proof = request["source_proof"]
     root = Path(request["root"])
-    bind_installation = request.get("capture_generation") in (48, 49, 50, 51)
+    bind_installation = request.get("capture_generation") in (48, 49, 50, 51, 52)
     own = "tools/bridge_http47_runtime.py"
     if sha(Path(__file__).read_bytes()) != proof[own]["sha256"]:
         raise ValueError("HTTP-47 runtime guard source is unproven")

@@ -175,6 +175,63 @@ its still-unadmitted original prompt, with recreation disabled.
 The journal composes the existing per-worktree async lock and OS executor lease;
 it introduces no resident service or independent session host.
 
+### Authorized native replacement
+
+Protocol **52** adds `--replacement-task <task-id>` to keyed creation of an
+exact existing local worktree. It requires `--creation-key` and
+`--worktree-id`, rejects an initial prompt and provider-instance mode, and
+reads its authority from the authenticated `dispatch:` namespace.
+Dispatch owns the [explicit control grant and retry rules](../../agent-dispatch/docs/session-acquisition.md#authorized-replacement-in-the-same-workspace).
+Ordinary keyed creation still requires positively empty history; ordinary
+bind and resume never acquire this exception.
+
+`native-replacement-readiness` reads payload and daemon support without
+starting the daemon. The receiver also requires version 1 of the ground
+owner's [conditional head-replacement checks](../../agent-worktrees/docs/conditional-head-replacement.md).
+Missing support refuses; there is no older binding fallback.
+
+The grant's task generation, queued/unowned/unheld task, current unbound
+reservation, workspace identity and original allocation keys must all match.
+Bridge freezes those facts in its existing keyed journal and rereads authority
+before consequential steps. It checks stopped holders before preparation,
+after the workspace read and immediately before native launch. A live or
+unknown Bridge or native holder blocks the launch.
+
+After launch, Bridge records the native identity before requesting promotion.
+The ground owner must corroborate that exact native conversation's running
+process and original activation; a process ID by itself is insufficient.
+The normal registration hook may already have made this candidate the head
+with reason `reclaim` when it proved the old process was gone. Bridge accepts
+that existing transition only when its old/new identities and old revision
+match the frozen grant and the new process is corroborated. Otherwise, explicit
+promotion uses the observed predecessor and lifecycle revisions, never plain
+bind. Bridge reads back the exact old/new pair with reason `reclaim` or
+`authorized-dead-head-replacement`; other transition reasons refuse.
+The returned `creation.native_replacement` contains
+the frozen grant, new native ID and confirmed head revision.
+
+An uncertain promotion response retains the journal's original identity.
+Same-key replay observes that candidate again and recognizes only the exact
+completed transition, without launching a second conversation or sending a
+prompt. After a daemon restart, a completed, unprompted creation can load its
+recorded conversation before checking the running process again. This requires
+the same current head, no recorded turns, and a fresh read of the original
+grant. Loading cannot create a new conversation; a changed identity or workspace
+refuses. An incomplete launch or uncertain promotion does not gain this resume
+path. Once Dispatch stores the identity, the grant is no longer exposed for
+creation; its ordinary stored-handle delivery handles subsequent retries.
+This path creates no new workspace, erases no history, and transfers no task
+claims or cleanup authority.
+
+`tests/test_native_replacement_wire.py` checks the client, HTTP route and keyed
+journal together, including an older receiver's refusal and same-key replay.
+The opt-in `tests/test_native_replacement_process.py` uses the absolute
+`COPILOT_NATIVE_TEST_EXECUTABLE` to open an isolated, offline Agent Client
+Protocol session without a prompt. It checks that `Session.pid` owns the
+native session's open hold and that the workspace can be read before
+conversation history exists. It closes its own process afterward. This
+qualifies that native boundary, not a deployed Dispatch-to-Bridge issue run.
+
 ### Exact provider-instance creation
 
 Protocol **36** adds an explicit `--provider-instance` option alongside

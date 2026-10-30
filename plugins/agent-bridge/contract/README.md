@@ -124,6 +124,32 @@ When a wire contract does change:
    python tools/run-plugin-tests.py agent-bridge --guards
    ```
 
+## HTTP-52 authorized native-replacement evidence
+
+HTTP generation 52 adds `NATIVE_REPLACEMENT_PROTOCOL_VERSION` for explicit
+control-authorized replacement in an existing workspace. Independent requests
+and expected results live in `inputs/http52/native-replacement.json`.
+`test_http52_capture_probes.py` runs the client, authenticated HTTP routes,
+receiving authority checks and keyed journal in both installation modes.
+It observes same-key replay without another conversation or prompt, refusal
+by an HTTP-51 receiver, invalid requests, revoked authority and missing
+authentication. Native launch, ground-owner commands and hosting attribution
+are mocked; the separate native process and Worktrees checks qualify those
+boundaries. This is not installed issue-loop evidence.
+
+Commit the matching source and registry declarations, then run:
+
+```text
+python tools/capture_bridge_http52.py --source-commit <full-source-commit> --write
+python tools/capture_bridge_http52.py --source-commit <full-source-commit>
+python tools/check-agent-bridge-contracts.py --base <reviewed-base>
+```
+
+The capture uses the existing bounded source, installation, publication and
+validation owners. HTTP-51 and earlier captures, inputs and provenance remain
+immutable. Ordinary HTTP-51 replay may see a newer advertisement; an explicit
+HTTP-51 capture still requires matching generation-51 source.
+
 ## HTTP-51 standard native-send evidence
 
 HTTP generation 51 adds `NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION` for ordinary

@@ -1,0 +1,9 @@
+{
+  "comment": "Add opt-in guarded replacement of a provably stopped native worktree head with exact registered ownership and revision checks.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

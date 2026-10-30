@@ -87,7 +87,9 @@ def native_bindings(conn: Any, row: Any, task: Any) -> tuple[list[str], list[str
     if row["worktree_ownership"] == "reused" and row["inherited_worktree"]:
         _validate_origin(conn, row, origin)
     known = {task.owner_session_id} if task.owner_session_id else set()
-    retired: set[str] = set()
+    from .ordinary_replacement import retired_heads
+    retired = set(retired_heads(conn, row))
+    known.update(retired)
     handle_natives: dict[str, str] = {}
     histories = conn.execute(
         "SELECT s.*,a.native_session_id FROM spawn_reservations s "

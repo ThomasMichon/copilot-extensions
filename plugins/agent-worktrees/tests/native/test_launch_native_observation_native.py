@@ -14,6 +14,8 @@ from agent_worktrees import native_source_context
 
 @pytest.mark.parametrize("transport", ["resident", "registration-unavailable", "observation-unavailable"])
 def test_original_hook_and_real_backend_join_through_resident(tmp_path, transport):
+    if not sys.platform.startswith("linux"):
+        pytest.skip("This resident-observation scenario requires Linux/WSL")
     try:
         native_source_context.epoch()
     except (OSError, ValueError, IndexError):

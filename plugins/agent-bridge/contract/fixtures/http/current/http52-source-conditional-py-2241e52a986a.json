@@ -1,0 +1,20 @@
+{
+  "evidence_family": "http52-unchanged-source-link-v1",
+  "preserved_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http51-source-conditional-py-2241e52a986a.json",
+    "sha256": "943b76fababf3bb93be355a8e6840d2d9629967bb90a2581a0fec5ec9546f08c"
+  },
+  "advertisement_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http52-native-replacement.json",
+    "sha256": "d0048604f52bc4e751f11af279a1fc95209fa9029bd0a43a8d2e5f56afda1ac7"
+  },
+  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "captured_from": {
+    "commit": "5db14ce0d4f9a811363ec74d4de10141c621dfc8",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 52,
+    "source_path": "libs/zdd/src/zdd/conditional.py",
+    "source_git_blob": "7ed32b1030ad296a9e90aa3a2c493688f89af49f",
+    "source_sha256": "38cde9d113f3d690122ab8c87c8f9b1b67b5271d58ce551c67f4f0c837d50a27"
+  }
+}

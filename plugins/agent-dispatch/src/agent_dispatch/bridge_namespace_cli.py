@@ -89,6 +89,12 @@ def _cmd_namespace_resolve(args: argparse.Namespace) -> int:
             reservations = c.list_reservations(task_id=task_id, latest_only=True, limit=1)
             reservation_history = None
             latest = reservations[0] if reservations else {}
+            if (
+                latest.get("state") == "reserving" and latest.get("conversation_retired") is True
+                and not latest.get("agent_info") and not latest.get("session_handle")
+            ):
+                latest = c.get_reservation(latest["key"])
+                reservations[0] = latest
             attempt = latest.get("attempt")
             if (
                 latest.get("state") == "reserving"

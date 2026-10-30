@@ -50,6 +50,35 @@ def owner_process(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("operation", [
+    ["replace-dead-head", "check", "--stdin"],
+    ["replace-dead-head", "apply", "--permit", "--stdin"],
+])
+async def test_replacement_owner_input_uses_stdin_not_argv(owner_process, operation):
+    process, factory = owner_process(b'{"version":1}', returncode=0)
+    payload = {"contract": "agent-worktrees/conditional-head-replacement", "version": 1,
+               "worktree_id": "target", "replacement_activation": "synthetic-activation"}
+    assert await authority.worktree_command(operation, "project-a", input_json=payload) == {"version": 1}
+    process.communicate.assert_awaited_once_with(json.dumps(payload).encode("utf-8"))
+    assert factory.call_args.args == ("synthetic-owner", "--project", "project-a", *operation)
+    assert factory.call_args.kwargs["stdin"] == authority.asyncio.subprocess.PIPE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation,payload", [
+    (["create"], {"unexpected": "input"}),
+    (["replace-dead-head", "observe"], {"unexpected": "input"}),
+    (["replace-dead-head", "apply", "--permit", "--stdin"], {"value": "x" * 65536}),
+])
+async def test_invalid_owner_input_refuses_before_subprocess(owner_process, operation, payload):
+    _, factory = owner_process()
+    with pytest.raises(AcquisitionRefused) as refused:
+        await authority.worktree_command(operation, "project-a", input_json=payload)
+    assert refused.value.code == "owner_input_invalid"
+    factory.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_owner_json_failure_survives_warning_stderr(owner_process):
     process, factory = owner_process(
         json.dumps({

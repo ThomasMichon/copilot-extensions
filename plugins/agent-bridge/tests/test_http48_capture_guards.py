@@ -16,11 +16,13 @@ import bridge_http48_evidence as evidence
 import bridge_http49_evidence as producer_evidence
 import bridge_http50_evidence as recovery_evidence
 import bridge_http51_evidence as native_send_evidence
+import bridge_http52_evidence as replacement_evidence
 import bridge_http47_validation as historical
 import capture_bridge_http48 as capture
 import capture_bridge_http49 as producer_capture
 import capture_bridge_http50 as recovery_capture
 import capture_bridge_http51 as native_send_capture
+import capture_bridge_http52 as replacement_capture
 import test_http47_capture_guards as old_guards
 from test_http47_capture_guards import (
     commit_fixture, fixture_git, source_seed as source_seed,
@@ -30,12 +32,13 @@ ROOT = Path(__file__).resolve().parents[3]
 historical_repository = old_guards.repository
 
 
-@pytest.fixture(params=["http48", "http49", "http50", "http51"])
+@pytest.fixture(params=["http48", "http49", "http50", "http51", "http52"])
 def capture_case(request):
     return {
         "http48": (evidence, capture), "http49": (producer_evidence, producer_capture),
         "http50": (recovery_evidence, recovery_capture),
         "http51": (native_send_evidence, native_send_capture),
+        "http52": (replacement_evidence, replacement_capture),
     }[request.param]
 
 
@@ -173,7 +176,7 @@ def test_http48_capture_ignores_observation_object_key_order(
     observed = expected(root, evidence)
     for case in observed:
         observed[case] = dict(reversed(list(observed[case].items())))
-        nested = ("receipt" if evidence.GENERATION == 51 else
+        nested = ("receipt" if evidence.GENERATION >= 51 else
                   "recovery" if evidence.GENERATION == 50 else "ordinary_producer")
         observed[case][nested] = dict(reversed(list(
             observed[case][nested].items(),
@@ -227,6 +230,7 @@ def test_http48_capture_rejects_self_consistent_evidence_tampering(
     registry, outputs, loaded = planned(root, commit, evidence)
     packet = loaded[evidence.PRIMARY][1]
     source = evidence.previous.PREFIX + (
+        "native_replacement.py" if evidence.GENERATION == 52 else
         "native_send_admission.py" if evidence.GENERATION == 51 else "routes/live_inbox.py"
     )
     if fault == "missing-source":

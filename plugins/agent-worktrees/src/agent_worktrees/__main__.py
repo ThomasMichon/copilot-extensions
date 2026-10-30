@@ -5132,6 +5132,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     from . import pr_cli, resolve_cli, session_binding_cli, session_inspection_cli, session_tracking_cli
+    from . import conditional_head_replacement_cli
     from . import handoff_successor_repair_cli
     from . import record_cli
 
@@ -5230,6 +5231,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
 
     session_binding_cli.add_parsers(sub)
+    conditional_head_replacement_cli.add_parsers(sub)
     session_inspection_cli.add_parsers(sub)
     from . import handoff_cancel_cli
     handoff_cancel_cli.add_parsers(sub)
@@ -5346,6 +5348,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'backfill-sessions': ('maintenance_cli', 'cmd_backfill_sessions'),
     'bind-nudge': ('session_binding_cli', 'cmd_bind_nudge'),
     'bind-session': ('session_binding_cli', 'cmd_bind_session'),
+    'replace-dead-head': ('conditional_head_replacement_cli', 'cmd_replace_dead_head'),
     'claimant-liveness': ('session_metadata_cli', 'cmd_claimant_liveness'),
     'claims': ('claims_cli', 'cmd_claims'),
     'resource-producer': ('resource_producer_cli', 'cmd_resource_producer'),
@@ -5625,6 +5628,7 @@ def _load_full_command_surface() -> None:
     global pr_state_cli, reap_cli, reap_orphan_launcher_shells, reclaim_cli, reclaim_one, related_cli, repos_cli, resolve_cli
     global identifier_blocklist_cli
     global resource_producer_cli
+    global conditional_head_replacement_cli
     global resolve_launch_cli, resolve_machine_cli, resolve_picker_cli, resolve_system_cli, services_cli, session_binding_cli, session_inspection_cli, session_metadata_cli
     global session_tracking_cli, status_bar_cli, status_cli, status_monitor_cli, status_monitor_reap_stale, status_monitor_runtime, status_updater_cli, sweep_finished_session_worktrees
     global sweep_managed_worktrees
@@ -5632,6 +5636,7 @@ def _load_full_command_surface() -> None:
     from . import (
         claims_cli,
         cleanup_gc_cli,
+        conditional_head_replacement_cli,
         context_cli,
         copilot_cli,
         copilot_identity_cli,
@@ -6132,6 +6137,7 @@ def _load_full_command_surface() -> None:
         "session-recovery": cmd_session_recovery,
         "session-lineage": cmd_session_lineage,
         "bind-session": cmd_bind_session,
+        "replace-dead-head": conditional_head_replacement_cli.cmd_replace_dead_head,
         "bind-nudge": cmd_bind_nudge,
         "history-digest": cmd_history_digest,
         "note-handoff": cmd_note_handoff,

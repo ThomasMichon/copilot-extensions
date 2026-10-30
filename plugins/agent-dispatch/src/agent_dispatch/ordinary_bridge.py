@@ -65,8 +65,16 @@ def register_routes(app: Any, queue: Any, bus: Any) -> None:
         ):
             raise HTTPException(422, detail="invalid created-agent request")
         try:
+            reservation = queue.get_reservation(key)
+            if reservation and reservation.conversation_retired and not reservation.agent_info:
+                from .ordinary_assignment import read_owner
+                body = {
+                    **body, "worktree_record": read_owner(
+                        asdict(reservation), reservation.task_id, timeout=30,
+                    ),
+                }
             result = asdict(record_created_agent(queue, key, **body))
-        except (TaskError, TypeError) as exc:
+        except (TaskError, TypeError, BridgeCarriedSessionBusy) as exc:
             raise HTTPException(409, detail=str(exc)) from exc
         bus.publish({"type": "spawn.agent_created", "reservation": result})
         return result
@@ -230,6 +238,17 @@ def start(
     if reservation.get("state") != "reserving" or reservation.get("release_requested"):
         raise BridgeUnavailable("ordinary startup reservation is not admitted")
     info = reservation.get("agent_info")
+    replacement = reservation.get("native_replacement_authorization")
+    if replacement is not None and (
+        not isinstance(replacement, dict) or info or not reservation.get("worktree")
+        or replacement.get("contract") != "agent-dispatch/ordinary-native-replacement"
+        or type(replacement.get("version")) is not int or replacement["version"] != 1
+        or replacement.get("task_id") != task.get("id")
+        or replacement.get("task_generation") != task["generation"]
+        or not isinstance(replacement.get("replacement_creation_key"), str)
+        or not replacement["replacement_creation_key"]
+    ):
+        raise BridgeCarriedSessionBusy("ordinary native replacement authority is unproven")
     diagnostics.creation_key = reservation.get("creation_key")
     assigned = bool(reservation.get("worktree") and not info) or bool(
         info and info.get("fact_kind") == "resumed"
@@ -406,7 +425,13 @@ def start(
             ):
                 raise BridgeCarriedSessionBusy("coordinator native bindings are unproven")
             head = record.get("last_session_id")
-            if head:
+            if replacement is not None:
+                if any(record.get(field) != replacement.get(expected) for field, expected in (
+                    ("id", "worktree_id"), ("repo", "project"),
+                    ("path", "worktree_path"), ("creation_nonce", "creation_nonce"),
+                )):
+                    raise BridgeCarriedSessionBusy("native replacement allocation changed")
+            elif head:
                 if native_conflict(head, known, retired):
                     raise BridgeCarriedSessionBusy("ground head conflicts with known or retired native identity")
                 if reservation.get("legacy_acquisition"):
@@ -441,9 +466,12 @@ def start(
         if not info:
             target = f"{project}@{agent}" if project and "@" not in agent else agent
             from .ordinary_invocation import KEYED_NATIVE_PROTOCOL
+            from .ordinary_replacement import BRIDGE_PROTOCOL
             argv = ["--json", "create", target, "--require-agent-hosting",
-                    "--creation-key", reservation["creation_key"],
-                    "--min-daemon-protocol", str(KEYED_NATIVE_PROTOCOL)]
+                    "--creation-key", replacement["replacement_creation_key"] if replacement else reservation["creation_key"],
+                    "--min-daemon-protocol", str(BRIDGE_PROTOCOL if replacement else KEYED_NATIVE_PROTOCOL)]
+            if replacement:
+                argv += ["--replacement-task", task["id"]]
             if assigned:
                 argv += ["--worktree-id", reservation["worktree"]]
             if charter:

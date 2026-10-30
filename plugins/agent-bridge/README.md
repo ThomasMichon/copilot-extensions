@@ -1184,6 +1184,11 @@ model prompt. Consumers must persist this identity before using ordinary
 `send` for the first assigned task. A false readiness result is not permission
 to send or to create a replacement.
 
+Explicit [same-workspace native replacement](docs/session-acquisition.md#authorized-native-replacement)
+uses protocol 52 and a current Dispatch control grant. It retains the workspace
+and old history, checks stopped holders, and confirms the new native owner before
+returning readiness. Ordinary create, bind and resume do not gain takeover authority.
+
 `send <session-id> --expected-native-session-id <uuid>` (HTTP protocol 33)
 admits an immediate ordinary prompt only when that exact native conversation
 is still idle with a running client. Identity and liveness are checked under

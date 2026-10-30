@@ -41,8 +41,15 @@ def _bounded_log_text(text: str | None, limit: int) -> str | None:
 
 async def worktree_command(
     args: list[str], project: str | None, *, before_spawn: Callable[[], None] | None = None,
-    timeout: float = 120,
+    timeout: float = 120, input_json: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    document = None
+    if input_json is not None:
+        if args[:2] not in (["replace-dead-head", "check"], ["replace-dead-head", "apply"]):
+            raise AcquisitionRefused("owner_input_invalid", "JSON input requires an explicit replacement operation")
+        document = json.dumps(input_json).encode("utf-8")
+        if len(document) > 65536:
+            raise AcquisitionRefused("owner_input_invalid", "replacement input exceeds its budget")
     try:
         prefix = _agent_worktrees_launch_prefix()
     except ContextRefused as exc:
@@ -59,12 +66,13 @@ async def worktree_command(
         before_spawn()
     proc = await asyncio.create_subprocess_exec(
         *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        **({"stdin": asyncio.subprocess.PIPE} if document is not None else {}),
         env=env, **no_window_kwargs(),
     )
 
     def log_failure(reason: str, stdout: bytes | None = None, stderr: bytes | None = None) -> None:
         operation = args[0] if args and args[0] in {
-            "create", "record", "head-session", "bind-session",
+            "create", "record", "head-session", "bind-session", "replace-dead-head",
         } else "other"
         # The existing formatter owns parsing, redaction and per-field bounds.
         # No raw response or argument list is serialized.
@@ -91,7 +99,8 @@ async def worktree_command(
             # awaits this owner before releasing its operation files/locks.
             stdout, stderr = await proc.communicate()
         else:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout)
+            communication = proc.communicate(document) if document is not None else proc.communicate()
+            stdout, stderr = await asyncio.wait_for(communication, timeout)
     except (TimeoutError, asyncio.TimeoutError) as exc:
         # The owner may still be launching. Never terminate it or retry a launch.
         log_failure("owner_operation_pending")

@@ -101,6 +101,9 @@ def test_capture_rejects_tampered_proposed_keyed_before_write(
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / path, destination)
     if representation != "retained":
+        http["provenance"] = [
+            row for row in http["provenance"] if row["generation"] <= 45
+        ]
         baseline = snapshot / capture.registry_codec.REGISTRY
         baseline.write_bytes(capture.registry_codec.encode(registry))
         metadata = capture.registry_codec.load(snapshot)

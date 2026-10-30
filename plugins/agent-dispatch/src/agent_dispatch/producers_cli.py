@@ -330,6 +330,17 @@ def _cmd_reservations(args: argparse.Namespace) -> int:
                 expected_generation=args.expected_generation, permitted=args.permit,
                 confirmed_no_live_holder=args.confirm_no_live_holder, reason=args.reason,
             ))
+        if args.reservations_command == "authorize-replacement":
+            if not callable(getattr(c, "authorize_native_replacement", None)):
+                raise DispatchError(409, "native replacement requires the authenticated coordinator control route")
+            return _emit(c.authorize_native_replacement(
+                args.task, reservation_key=args.reservation_key, worktree=args.worktree,
+                expected_generation=args.expected_generation, expected_head=args.expected_head,
+                expected_head_revision=args.expected_head_revision,
+                expected_lifecycle_revision=args.expected_lifecycle_revision,
+                permitted=args.permit, confirmed_no_live_holder=args.confirm_no_live_holder,
+                reason=args.reason,
+            ))
     return 2
 
 
@@ -503,6 +514,20 @@ def register_reservations_command(subparsers: Any) -> None:
     rp.add_argument("--reservation-key", required=True)
     rp.add_argument("--worktree", required=True)
     rp.add_argument("--expected-generation", required=True, type=int)
+    rp.add_argument("--permit", action="store_true")
+    rp.add_argument("--confirm-no-live-holder", action="store_true")
+    rp.add_argument("--reason", required=True)
+    rp.set_defaults(func=_cmd_reservations)
+    rp = res_sub.add_parser(
+        "authorize-replacement", help="authorize one checked native replacement in the same allocation",
+    )
+    rp.add_argument("task")
+    rp.add_argument("--reservation-key", required=True)
+    rp.add_argument("--worktree", required=True)
+    rp.add_argument("--expected-generation", required=True, type=int)
+    rp.add_argument("--expected-head", required=True)
+    rp.add_argument("--expected-head-revision", required=True, type=int)
+    rp.add_argument("--expected-lifecycle-revision", required=True, type=int)
     rp.add_argument("--permit", action="store_true")
     rp.add_argument("--confirm-no-live-holder", action="store_true")
     rp.add_argument("--reason", required=True)

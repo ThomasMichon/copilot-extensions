@@ -83,7 +83,7 @@ def test_delayed_end_matches_history_not_current_head(witness):
 
 def test_capture_is_bounded_metadata_only(witness, monkeypatch):
     monkeypatch.setattr(context, "process", lambda pid: {
-        "pid": pid, "start_time": str(pid), "parent_pid": pid + 1,
+        "pid": pid, "start_time": "100", "parent_pid": pid + 1,
     })
     value = context.capture()
     assert value["qualified"] is True
@@ -103,6 +103,45 @@ def test_capture_refuses_parent_reuse_or_reparenting(witness, monkeypatch):
     value = context.capture()
     assert value["qualified"] is False
     assert "ancestors" not in value
+
+
+def test_windows_capture_refuses_reused_parent_pid(witness, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(os, "getpid", lambda: 1000)
+    monkeypatch.setattr(context, "process", lambda pid: {
+        "pid": pid, "start_time": "100" if pid == 1000 else "200",
+        "parent_pid": 101 if pid == 1000 else 1,
+    })
+    assert context.capture()["qualified"] is False
+
+
+def test_windows_capture_retains_only_verified_prefix(witness, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(os, "getpid", lambda: 1000)
+
+    def observe(pid):
+        if pid == 1:
+            raise PermissionError("protected ancestor")
+        return {
+            "pid": pid, "start_time": "200" if pid == 1000 else "100",
+            "parent_pid": 101 if pid == 1000 else 1,
+        }
+
+    monkeypatch.setattr(context, "process", observe)
+    assert context.capture()["ancestors"] == [{"pid": 101, "start_time": "100"}]
+
+
+def test_windows_first_parent_unavailable_is_unqualified(witness, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(os, "getpid", lambda: 1000)
+
+    def observe(pid):
+        if pid != 1000:
+            raise PermissionError("first ancestor")
+        return {"pid": pid, "start_time": "200", "parent_pid": 101}
+
+    monkeypatch.setattr(context, "process", observe)
+    assert context.capture()["qualified"] is False
 
 
 def test_actual_held_file_start_binding(tmp_path, monkeypatch, witness):

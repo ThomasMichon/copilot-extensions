@@ -85,10 +85,10 @@ def adopted_repo(tmp_path: Path, monkeypatch, _context_repo_seed):
     tdir = tmp_path / "tracking"
     tdir.mkdir()
     (tdir / f"{wt_id}.yaml").write_text("id: x\n")
-    monkeypatch.setattr("agent_worktrees.config.tracking_dir", lambda: tdir)
+    monkeypatch.setattr("agent_worktrees.config.tracking_dir", lambda name=None: tdir)
 
     conf = cfg.Config(
-        srcroot=str(tmp_path), machine="t", platform="linux", repo_name="myproj",
+        srcroot=str(tmp_path), machine="t", platform=cfg.detect_platform(), repo_name="myproj",
         repos={"myproj": cfg.RepoConfig(
             anchor=str(anchor), worktree_root=str(wt_root),
             default_branch="master", remote="origin",

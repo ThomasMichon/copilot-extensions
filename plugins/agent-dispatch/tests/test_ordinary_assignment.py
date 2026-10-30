@@ -18,19 +18,20 @@ from agent_dispatch.acquisition_receipts import validate_start
 from agent_dispatch.client import DispatchClient
 from agent_dispatch.ordinary_agent_storage import reservation_native_facts
 from agent_dispatch.queue import TaskError, TaskQueue
+from tests._hosting_owner import admission_owner as admission_owner
 
 pytestmark = pytest.mark.contract("agent_dispatch.ordinary_bridge")
 
 
 @pytest.fixture
-def assigned(tmp_path, monkeypatch, request):
+def assigned(tmp_path, monkeypatch, request, admission_owner):
     queue = TaskQueue(tmp_path / "tasks.db")
     task = queue.create("review", repo="queue-lane", exclusive_key="review-slot",
                         **getattr(request, "param", {}))
     reservation, _ = queue.reserve_spawn(task.id, reserved_by="supervisor", driver="ordinary-bridge")
     queue.record_spawn_allocation(reservation.key, "execution-project")
     workspace = tmp_path / "worktree-a"
-    workspace.mkdir()
+    (workspace / ".git").mkdir(parents=True)
     worktree_path = str(workspace)
     queue.record_spawn_worktree(
         reservation.key, "worktree-a", ownership="targeted", driver="ordinary-bridge",

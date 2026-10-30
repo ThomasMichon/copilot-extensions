@@ -179,6 +179,12 @@ def read_exact_record(worktree_id: str, *, include_workspace: bool = False) -> d
                 if "state" in entry and entry["state"] not in get_args(tracking.SessionState):
                     raise ValueError("Recorded session has an unknown state")
         _validate_head_ledger(data)
+        for key in ("head_revision", "lifecycle_revision"):
+            if key in data and (
+                type(data[key]) is not int
+                or not 0 <= data[key] <= tracking.MAX_PERSISTED_COUNTER
+            ):
+                raise ValueError(f"Record {key} must be a bounded non-negative integer")
         for key in ("execution_leg", "session_backend"):
             binding = data.get(key)
             if isinstance(binding, dict) and "version" in binding:
@@ -197,6 +203,8 @@ def read_exact_record(worktree_id: str, *, include_workspace: bool = False) -> d
             "status": record.status,
             "session_count": len(record.sessions) if record.sessions is not None else None,
             "last_session_id": record.resolved_head_session,
+            "head_revision": data.get("head_revision"),
+            "lifecycle_revision": data.get("lifecycle_revision"),
             "execution_leg": leg.to_dict() if leg is not None else record.execution_leg_raw,
             "execution_leg_opaque": record.execution_leg_opaque,
             # Same liveness rule as the roster row, so exact-record readers can

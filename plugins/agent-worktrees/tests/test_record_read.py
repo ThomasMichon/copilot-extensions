@@ -57,6 +57,36 @@ def invoke(*args):
     return rc, json.loads(captured.getvalue())
 
 
+@pytest.mark.parametrize("revisions", [None, (0, 0), (2, 5)])
+def test_exact_record_returns_persisted_revisions_without_minting(record_fixture, revisions):
+    data, path = record_fixture
+    if revisions is not None:
+        data.update(head_revision=revisions[0], lifecycle_revision=revisions[1])
+        path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    before = path.read_bytes()
+    rc, result = invoke(data["worktree_id"])
+    assert rc == 0 and result["ok"] is True
+    assert (
+        result["worktree"]["head_revision"],
+        result["worktree"]["lifecycle_revision"],
+    ) == (revisions or (None, None))
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("field", ["head_revision", "lifecycle_revision"])
+@pytest.mark.parametrize("value", [None, True, "2", 2.0, -1, 2**63])
+def test_exact_record_rejects_opaque_revision_without_repair(record_fixture, field, value):
+    data, path = record_fixture
+    data[field] = value
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    before = path.read_bytes()
+    rc, result = invoke(data["worktree_id"])
+    assert rc != 0 and result["ok"] is False
+    assert result["error"]["code"] == "record-malformed"
+    assert field in result["error"]["message"]
+    assert path.read_bytes() == before
+
+
 @pytest.mark.parametrize("case", [
     "tracked", "untracked", "colliding-id", "foreign-project", "anchor",
     "nested-untracked", "record-race", "symlink-root", "ambiguous-root",
@@ -260,6 +290,8 @@ def test_record_read_exact_unpublished_record_and_unchanged_list(record_fixture,
         "status": "active",
         "session_count": 0,
         "last_session_id": None,
+        "head_revision": None,
+        "lifecycle_revision": None,
         "execution_leg": None,
         "execution_leg_opaque": False,
         "execution_leg_live": False,

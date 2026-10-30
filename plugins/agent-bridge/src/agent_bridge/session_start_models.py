@@ -20,11 +20,17 @@ class StartSessionRequest(PreferenceRequestFields):
     creation_key: str | None = Field(default=None, min_length=1, max_length=1024)
     creation_prompt: str | None = None
     provider_instance: bool = False  # explicit keyed provider-native creation, never a worktree
+    replacement_task: str | None = Field(default=None, min_length=1, max_length=256)
 
     @model_validator(mode="after")
     def require_provider_creation_key(self) -> StartSessionRequest:
         if self.provider_instance and self.creation_key is None:
             raise ValueError("provider_instance requires creation_key")
+        if self.replacement_task is not None and (
+            self.creation_key is None or not self.worktree_id or self.provider_instance
+            or self.creation_prompt is not None or self.parity_fault is not None
+        ):
+            raise ValueError("replacement_task requires a keyed existing workspace without a prompt or provider instance")
         return self
 
     caller_id: str | None = None  # caller identity for session affinity
