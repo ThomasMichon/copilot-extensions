@@ -3576,7 +3576,7 @@
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell_windows.py": "d75e1e2988b64d78cffe6ee13f78f27c52c2a300dede3d32ede5191734907aa4",
         "libs/agent-procutil/src/agent_procutil/_native_owned.py": "643c3333d3f435ece115f714c144ca6b64af571e37cc68aec9b3b8bf91bac06f",
         "tools/promotion_unit_tests/test_native_owned.py": "da1356b2b9224d900a1535d13467ea630455d55073a1001c56c119518f7c24e1",
-        "tools/promotion_unit_tests/test_sdk_functional.py": "c79fbbc89702c185ea63eb2aea14fe5e016f862958cb215fbaf46a390f5538a2"
+        "tools/promotion_unit_tests/test_sdk_functional.py": "f30122f14b36012322b580d8d64a0d2c88b677eaaf06c113ee83bf624a266c5a"
     },
     "coverage_targets": [
         "tools/core_runtime_profile.py",

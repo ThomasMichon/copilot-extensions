@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from test_sdk_desktop_observer import runner, source_request
+from tools.promotion_unit_tests.test_sdk_desktop_observer import runner, source_request
 
 
 @pytest.fixture
