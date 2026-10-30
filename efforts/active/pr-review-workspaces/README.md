@@ -116,6 +116,9 @@ The source implementation continuation is admitted; operational effects are not.
   the existing provider and credential authorities.
   Next is the finite [authorized acquisition slice](acquisition-slice.md),
   extending the existing provider reader without another HTTP client.
+  Its source is merged in #9667; live qualification requires an actual trusted
+  owner. The [owner-executed adapter proposal](owner-read-adapter.md) addresses
+  adopters without a qualified typed credential owner, without inventing one.
 - [ ] Add coherent cache generations, completeness/freshness, bounded recovery
   and materialized local read views.
 - [ ] Attach exact shallow source/head/common-baseline workspaces through the
@@ -178,6 +181,22 @@ submission recovery and remaining decisions. It is not a shipped CLI or wire
 contract.
 
 ## Journal
+
+### 2026-10-30 - Acquisition merged; live owner adoption remains gated
+- #9667 merged as `14ef6f358ad3dfa0991ea0e9bcfeca63d0172755` after
+  current-head Copilot approval, resolved feedback and required green checks.
+  The current source packet passed 134 cases; final contained acquisition
+  controls passed 21 cases after the pagination correction.
+- Re-read the canonical plan. The acquisition source is delivered, not a
+  completed live ADO review or campaign. Publication does not install an issuer
+  or make an owner API available.
+- The credential consumption shape and full ADO principal namespace are now
+  explicit. Authentication or secret retrieval alone cannot supply its missing
+  policy/account/target authority; do not manufacture a typed binding.
+- Proposed a minimal owner-executed read adapter through the existing owner's
+  protected pipeline, retaining credentials there and reusing acquisition/
+  normalization rather than creating another issuer or HTTP client. Generic
+  contract review and actual owner implementation/adoption remain prerequisites.
 
 ### 2026-10-30 - Offline slice merged; acquisition implementation
 - #9647 merged as `fdd60cfc27c6cf14c803e8b610c6462dbc9d6efe` after
