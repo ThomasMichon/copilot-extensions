@@ -7,9 +7,16 @@
 - **Status:** Active - submission/output/delivery amendment proposed 2026-10-08
 - **Source umbrella:** #3681; continuing coordination is this Active ROOT's
   reviewed Plan/Validation/Journal and eligible OPEN bounded-source issues
-- **Sub-issues:** _none yet_
+- **Sub-issues:** #9709 (bounded assignment/startup documentation and repair design)
 
 ## Guiding Intent
+
+**Continuing direction (2026-10-30):** the
+[assignment/startup amendment](assignment-startup-amendment.md) distinguishes
+pool-owned placement before embodiment from worker acceptance, and adds bounded
+startup, scoped decline routing/closeout and retry-eligibility design. This is a
+documentation/review slice, not implementation or installed qualification.
+Existing submission/conversation phases and their custodians remain unchanged.
 
 **Current direction (2026-10-08):** extend the existing lifecycle, result
 storage, evaluator, and steering machinery into a durable task conversation.
@@ -100,6 +107,12 @@ particularly for Phase 3's crash-recovery behavior.
 
 ## Request
 
+The 2026-10-30 operator-directed intent is captured as a generic summary in the
+[assignment/startup amendment](assignment-startup-amendment.md#requested-direction).
+Its requested requirements, agent-recommended implementation means and unresolved
+policy choices are separated; it does not settle result-rejection reassignment
+or terminal-worktree policy.
+
 The 2026-10-07/08 direction is captured in
 [operator-direction.md](operator-direction.md), with settled decisions and
 agent-recommended implementation safeguards separated in
@@ -180,6 +193,17 @@ not immediate implementation authority. #3681 is provenance, not a required
 live claim token. No new blanket ACK or executor appointment is created.
 
 ## Plan
+
+### Continuing slice - Pool-owned assignment/startup and retry eligibility
+
+- [ ] Land the #9709 vision/current-versus-target architecture and
+      [repair amendment](assignment-startup-amendment.md) through normal review,
+      without behavioral changes.
+- [ ] Execute the amendment's implementation/compatibility plan only through
+      separately claimed, reviewed source slices, preserving incumbent startup,
+      idle-worker, pool-capacity and submission owners.
+- [ ] Resolve the amendment's policy choices and complete its validation matrix
+      at the stated source, mixed-version and installed/native evidence tiers.
 
 ### Phase 1 — The monitor vocabulary only (data only, no `Status`/table change)
 _(agent-recommended: sequencing shape, revised 2026-09-25 after actually
@@ -705,6 +729,9 @@ receiving readback precede any separate source-specific disposition.
 
 ## Validation Plan
 
+- [ ] Complete the [assignment/startup validation matrix](assignment-startup-amendment.md#validation-plan);
+      documentation approval alone does not establish runtime conformance.
+
 - [ ] GLOBAL ROOT GATE: resolve EVERY incumbent ROOT Plan AND own Validation item, ALL
   direct acceptance above and original amendment matrix at their retained evidence tiers
   OR explicitly transfer discrete remaining work to named accepted objectives before
@@ -956,6 +983,17 @@ extension policy are in the 2026-10-08 amendment):
 Phase 3/4's shapes are still pending their own design pass.
 
 ## Journal
+
+### 2026-10-30 - Assignment/startup and retry-eligibility proposal
+
+- Added the bounded #9709 design slice and amendment under this existing
+  lifecycle effort, rather than a competing task authority or repair campaign.
+- Separated the intended pre-embodiment `CLAIMED` transaction from current
+  reservation/worker-claim operations. Recorded existing `not_before` selection
+  and claim enforcement, and the reservation-admission gap.
+- Retained numeric retry policy and result-rejection/terminal-worktree choices
+  as open, preserved incumbent owners, and claimed no implementation, root
+  cause, release or running-system qualification.
 
 ### 2026-10-28 - Finite producing-lane guidance intake
 

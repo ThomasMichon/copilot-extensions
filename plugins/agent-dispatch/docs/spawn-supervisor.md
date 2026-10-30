@@ -130,6 +130,36 @@ an unavailable trace sink warns but does not abort launch. Consequently, absence
 of a trace does not prove no call occurred. Source support for these records
 does not establish their availability in a particular deployed runtime.
 
+## Assignment lifecycle: current versus target
+
+The [pool-owned startup vision](../../../visions/plugins/agent-dispatch/README.md#pool-owned-assignment-startup)
+changes the intended meaning of supervised `CLAIMED`. It is not the behavior
+of the current reservation and worker-claim operations:
+
+| Boundary | Current implementation | Target, not yet implemented |
+|----------|------------------------|-----------------------------|
+| Pool selection | Each lane sweeps its own candidates and capacity; no universal ordered all-pool sweep | The allocator selects the first matching pool with capacity, or waits for the task's retained pool |
+| Spawn reservation | `reserve_spawn` reserves a queued, unowned task separately from its execution claim | `QUEUED -> CLAIMED` commits pool binding, reservation creation/reuse and occupied capacity atomically |
+| Worker identity | `claim_one` requires a worker identity; the embodied worker claims later | Initial placement needs no worktree/native identity; startup attaches the actual identities afterward |
+| `STARTED` | A later worker-owned transition | Startup has succeeded and the worker has explicitly accepted and begun the assignment |
+| Retry eligibility | Supervisor selection and transactional `claim_one` check task `not_before`; `reserve_spawn` does not enforce that timestamp | Every new selection/reservation/claim enforces the applicable retry decision |
+
+These are source-level statements, not evidence about a particular installed
+runtime. The relevant owners are `Supervisor._eligible`,
+`QueueClaimQueriesMixin.claim_one` and
+`SpawnReservationMixin.reserve_spawn`. Existing startup revisions,
+workspace allocation identity and effect-custody checks remain separate
+correctness constraints; the target must compose them, not replace them.
+
+The [assignment/startup repair amendment](../../../efforts/active/agent-dispatch-monitor-and-confirmed-state/assignment-startup-amendment.md)
+owns the target transition ordering, decline closeout, retry-policy choices,
+compatibility sequence and validation matrix. It retains bounded startup
+attempts under the selected pool, periodic decision nudges through existing
+supervision, and return to `QUEUED` on exhaustion without prematurely freeing
+capacity or replaying unresolved effects. Retry duration, backoff and task-wide
+versus pool-specific scope remain open design choices. There is no new retry
+timer, runtime transition, or deployment in this documentation revision.
+
 ## Retained startup and process capacity
 
 Task completion does not prove that an admitted startup has finished. A terminal
