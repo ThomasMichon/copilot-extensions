@@ -53,8 +53,9 @@ Resolve each changed entry at both exact commits, retaining mode, type, object I
 and size. Read actual bounded blob bytes, not working-tree files or remote
 `isBinary` guesses. Classify NUL-containing or non-UTF-8 blobs as binary, ordinary
 UTF-8 blobs as text, and symlinks/gitlinks explicitly as non-text entries without
-following or expanding them. Empty/deleted sides remain absent, not empty text
-blobs. Hash actual blob bytes with the repository's Git object format before
+following or expanding them. Missing/deleted tree entries remain absent, not
+empty text blobs. An existing zero-byte blob is a text entry with its actual
+object ID, mode and size zero. Hash actual blob bytes with the repository's Git object format before
 accepting their recorded IDs.
 
 Return a versioned source manifest containing scope, immutable source revision,
@@ -94,6 +95,9 @@ source evidence, never a partial-ready mapping or hidden fallback. These are
 actual Git/IO contracts, not limits on a delegate or the operator's work.
 Subprocess failure/timeout/capture overflow must retire its owned process tree
 through the existing process utility; no new background helper remains.
+If the existing bounded process utility requires an additive raw-byte capture
+option, implement it there with unchanged default text behavior rather than
+adding another process owner or passing blob bytes through newline normalization.
 
 ## Acceptance and rollout boundary
 
