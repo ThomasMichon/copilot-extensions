@@ -1140,7 +1140,13 @@ does not itself establish that the worker reclaimed or completed the task.
 Version 2 negotiates the pending-startup request through the existing reservation
 read before sending the additive `ordinary_redrive` field to `record_spawn`.
 Version-1, missing and unknown declarations hold before publication or transport;
-older callers keep their existing `record_spawn` syntax. Native owner/waiter wake
+older callers keep their existing `record_spawn` syntax.
+The supervisor also verifies that the startup-publication response contains its
+exact pending revision and frozen operation before transport. A coordinator
+rollback between discovery and publication cannot silently drop the new field
+and still trigger a send. A lost publication response retains startup custody;
+a later supported retry reconciles the stored operation, never infers absence.
+Native owner/waiter wake
 commands also use an explicit key-bound caller. A receipt previously bound to a
 different implicit caller is not permission to change its key or replay accepted
 work: a conflict stays unresolved for reconciliation.

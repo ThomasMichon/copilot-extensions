@@ -3295,6 +3295,9 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                         startup_complete=False, startup_revision=session["startup_revision"],
                         ordinary_redrive=session,
                     )
+                    from .ordinary_native_redrive import require_pending_redrive
+
+                    require_pending_redrive(current, session, pending)
                     if self.redrive_fn(
                         session["worktree_id"], session["machine"], task, session, current,
                     ):

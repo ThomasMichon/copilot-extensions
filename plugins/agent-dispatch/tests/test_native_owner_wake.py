@@ -435,7 +435,7 @@ def test_queued_ordinary_redrive_unknown_retry_and_restart_keep_exact_key_and_pr
     )
 
 
-@pytest.mark.parametrize("provider", ["current", "legacy", "old", "future"])
+@pytest.mark.parametrize("provider", ["current", "legacy", "old", "future", "rollback"])
 def test_queued_ordinary_redrive_negotiates_existing_reservation_read(
     hosted: tuple[TaskQueue, str], monkeypatch: pytest.MonkeyPatch, provider: str, caplog,
 ) -> None:
@@ -452,7 +452,12 @@ def test_queued_ordinary_redrive_negotiates_existing_reservation_read(
     calls = _capture(monkeypatch)
     with TestClient(create_app(queue, enable_mcp=False)) as api:
         def exchange(request):
-            result = api.request(request.method, str(request.url), content=request.content,
+            content = request.content
+            if provider == "rollback" and request.url.path.endswith("/spawned"):
+                body = json.loads(content)
+                body.pop("ordinary_redrive", None)
+                content = json.dumps(body).encode()
+            result = api.request(request.method, str(request.url), content=content,
                                  headers=dict(request.headers))
             payload = result.json()
             if request.url.path == f"/spawn-reservations/{reservation.key}":
@@ -475,12 +480,62 @@ def test_queued_ordinary_redrive_negotiates_existing_reservation_read(
                     1 if provider == "current" else 0
                 )
     assert len(calls) == (1 if provider == "current" else 0)
-    if provider != "current":
+    if provider == "rollback":
+        assert "pending startup publication not confirmed" in caplog.text
+    elif provider != "current":
         assert "unsupported coordinator redrive facts" in caplog.text
     if provider == "current":
         _assert_redrive_custody(reservation, queue.latest_reservation(task_id))
-    else:
+    elif provider != "rollback":
         assert queue.latest_reservation(task_id) == reservation
+    else:
+        assert queue.latest_reservation(task_id).startup_complete is False
+
+
+@pytest.mark.parametrize("lost_completion", [False, True])
+def test_queued_redrive_recovers_lost_startup_publication_response(hosted, monkeypatch, lost_completion):
+    import httpx
+    from fastapi.testclient import TestClient
+
+    from agent_dispatch.client import DispatchClient
+    from agent_dispatch.coordinator import create_app
+
+    queue, task_id = hosted
+    queue.resume(task_id, OWNER, reuse_session=True)
+    queue.yield_task(task_id, OWNER, release_spawn=False)
+    original = queue.latest_reservation(task_id)
+    calls = _capture(monkeypatch)
+    lost = False
+    with TestClient(create_app(queue, enable_mcp=False)) as api:
+        def exchange(request):
+            nonlocal lost
+            result = api.request(
+                request.method, str(request.url), content=request.content, headers=dict(request.headers),
+            )
+            if request.url.path.endswith("/spawned") and not lost:
+                body = json.loads(request.content)
+                if body["startup_complete"] is lost_completion:
+                    assert result.status_code == 200
+                    lost = True
+                    return httpx.Response(503, json={"detail": "publication response lost"})
+            return httpx.Response(result.status_code, json=result.json())
+
+        with DispatchClient("http://testserver", transport=httpx.MockTransport(exchange)) as client:
+            assert _native_supervisor(queue, client).redrive_unclaimed_spawns() == 0
+            pending = queue.latest_reservation(task_id)
+            assert pending.startup_revision == original.startup_revision + 1
+            assert pending.startup_complete is lost_completion
+            assert _native_supervisor(queue, client).redrive_unclaimed_spawns() == 1
+    assert lost
+    assert len(calls) == (2 if lost_completion else 1)
+    if lost_completion:
+        assert calls[0] == calls[1]
+    after = queue.latest_reservation(task_id)
+    assert after.startup_complete is True
+    assert after.startup_revision == pending.startup_revision + int(lost_completion)
+    assert after.agent_info["retained_redrive"]["invocation"] == (
+        pending.agent_info["retained_redrive"]["invocation"]
+    )
 
 
 @pytest.mark.parametrize("returncode", [0, 70])

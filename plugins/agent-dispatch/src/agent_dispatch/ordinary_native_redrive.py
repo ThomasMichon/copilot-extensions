@@ -56,6 +56,26 @@ def redrive_invocation(row: Any, machine: str) -> dict:
     return invocation
 
 
+def require_pending_redrive(before: dict, facts: dict, pending: dict) -> None:
+    """Confirm the executing provider retained this operation before transport."""
+    revision = before["startup_revision"] + int(before["startup_complete"])
+    info = pending.get("agent_info")
+    marker = info.get("retained_redrive") if isinstance(info, dict) else None
+    if (
+        pending.get("startup_complete") is not False
+        or type(pending.get("startup_revision")) is not int
+        or pending["startup_revision"] != revision
+        or marker != {"startup_revision": revision, "invocation": facts["invocation"]}
+        or any(pending.get(name) != before.get(name) for name in (
+            "key", "task_id", "driver", "worktree", "session_handle",
+        ))
+        or pending.get("state") != SpawnState.SPAWNED
+        or pending.get("release_requested") or pending.get("conversation_retired")
+        or pending.get("startup_fenced") or pending.get("cooling_token") is not None
+    ):
+        raise ValueError("retained native redrive pending startup publication not confirmed")
+
+
 def record_redrive(
     queue: Any, key: str, *, ordinary_redrive: dict, startup_complete: bool,
     startup_revision: int, session_handle: str | None, worktree: str | None,
