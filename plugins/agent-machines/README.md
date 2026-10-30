@@ -499,6 +499,11 @@ upgraded. Source publication changes no deployed schedule. Skipped, deferred or
 failed registration is not convergence, and the hold does not replace a
 schedule's own opt-in or domain policy.
 
+A confirmed held-update exit3 is an explicit tier `noop`, not a failed update
+or completed installation. It preserves the previous success timestamp; a held
+self-update stops before machine restore. Exit3 without the receiver's exact
+no-work marker remains an error.
+
 ## Playwright CLI provisioning
 
 `provision-playwright-cli` converges only machine-local state for the current

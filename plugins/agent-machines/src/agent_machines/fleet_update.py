@@ -24,6 +24,7 @@ from typing import Any
 from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
 
 from . import fleet_update_tasks as _tasks
+from .self_update_types import update_was_inhibited
 from .fleet_update_lock import TierLock, _iso_utc, _utc_now
 from .fleet_update_state import (
     SWEEP_TIER,
@@ -323,20 +324,22 @@ def run_tier(
         # per-tier shape, so a second tier can be added the same way later.
         if tier == SWEEP_TIER:
             update_result = runner(["worktree-manager", "update", "--auto"], timeout=3600)
+            update_output = update_result.output
+            inhibited = update_was_inhibited(update_result.returncode, update_output)
             steps = [
                 StepResult(
                     "update",
-                    "changed" if update_result.returncode == 0 else "error",
-                    update_result.output or "ran worktree-manager update",
+                    "noop" if inhibited else "changed" if update_result.returncode == 0 else "error",
+                    update_output or "ran worktree-manager update",
                     command=update_result.argv,
                 )
             ]
             if update_result.returncode != 0:
                 return RunResult(
                     tier=tier,
-                    status="error",
+                    status="noop" if inhibited else "error",
                     opted_in=True,
-                    detail=update_result.output or "worktree-manager update failed",
+                    detail=update_output or "worktree-manager update failed",
                     lock_reclaimed=lock.reclaimed,
                     attempted_at=attempted_at,
                     steps=steps,

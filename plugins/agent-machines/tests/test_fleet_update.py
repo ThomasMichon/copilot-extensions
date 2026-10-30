@@ -206,6 +206,33 @@ def test_run_tier_reports_error_when_worktree_manager_update_fails(tmp_path):
     assert status.last_success is None
 
 
+@pytest.mark.parametrize(("returncode", "detail", "expected"), [
+    (3, "automatic-update KillSwitch active; nothing ran", "noop"),
+    (3, "engine configuration is unavailable", "error"),
+    (1, "automatic-update KillSwitch active; nothing ran", "error"),
+])
+def test_held_fleet_update_preserves_no_work_without_recording_success(
+    tmp_path, returncode, detail, expected,
+):
+    previous = "2026-09-14T09:05:00+00:00"
+    fleet_update.write_status(tmp_path, "sweep", success=previous)
+    calls = []
+
+    def runner(argv, timeout=3600):
+        calls.append(argv)
+        return fleet_update.CommandResult(argv, returncode, "", detail)
+
+    result = fleet_update.run_tier("sweep", opted_in=True, runner=runner, home=tmp_path)
+    assert calls == [["worktree-manager", "update", "--auto"]]
+    assert result.status == result.steps[0].status == expected
+    assert result.ok is (expected == "noop")
+    assert detail in result.detail
+    assert result.success_at is None
+    status = fleet_update_state.tier_status(tmp_path, "sweep")
+    assert status.last_attempt == result.attempted_at
+    assert status.last_success == previous
+
+
 def test_run_tier_converts_unexpected_exception_into_error_result_and_releases_lock(
     monkeypatch, tmp_path
 ):
