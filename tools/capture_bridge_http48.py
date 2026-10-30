@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 from pathlib import Path
 import sys
 import tempfile
@@ -40,7 +41,7 @@ def run_probes(root: Path, proof: dict, vector: dict, *, evidence=evidence) -> d
         request.write_bytes(payload)
         with patch.dict(os.environ, {
             binding.REQUEST: str(request), binding.REQUEST_SHA: evidence.digest(payload),
-            "PYTEST_ADDOPTS": "--junitxml=" + str(junit),
+            "PYTEST_ADDOPTS": shlex.quote("--junitxml=" + str(junit)),
         }):
             result = run_caller_owned([
                 sys.executable, str(root / "tools/run-plugin-tests.py"), "agent-bridge",
