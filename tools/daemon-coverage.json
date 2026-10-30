@@ -276,6 +276,7 @@
       "t:reproducer-lab/Dockerfile::<script>::ENTRYPOINT": 1
     },
     "finite-worker": {
+      "r:plugins/customizing-copilot/skills/capturing-client-requests/scripts/capture-client-request.py::capture::Popen": 1,
       "d:execution_cli.py::_spawn_detached_waiter::Popen": 1,
       "d:spawn_script_body.py::make_script_spawn.spawn::Popen": 1,
       "i:indexing/runner.py::TaskRunner._spawn_worker::Popen": 1,
