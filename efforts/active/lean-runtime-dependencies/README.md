@@ -217,6 +217,11 @@ owns the revised implementation and validation boundary.
   action/policy behavior and source-only distribution. The complete bounded
   44-case Windows SDK packet passes; merged in #9354. This does not migrate
   daemon-instance entrypoints or complete Manager's separate native gate.
+- [x] Qualify the compiler-free PowerShell instance adapter and requalify its
+  changed common archive: all 107 native installer, instance and SDK cases pass
+  with independent source, desktop and retirement reconciliation. See the
+  [slice journal](journal/2026/10.30%20powershell-instance-custody.md);
+  current-head source review/CI/merge and remaining compiled launchers stay open.
 - [ ] Replace remaining executable embedded Windows helper compilation and runtime code
   emission through their existing installation-context, operation-lock,
   update-driver, process and session-host owners. Establish the existing

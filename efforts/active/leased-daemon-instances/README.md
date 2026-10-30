@@ -167,7 +167,12 @@ their existing owners and guarantees.
   through the installation-context SDK (#9354), including its complete bounded
   44-case native Windows packet. Instance admission/expiry migration below
   remains a separate implementation and qualification boundary.
-- [ ] Migrate thin shell and PowerShell instance entrypoints through
+- [x] Qualify the compiler-free PowerShell instance adapter and its changed
+  source archive: 60 native instance, three installer and 44 SDK cases pass
+  with exact source, desktop and retirement reconciliation. Current-head
+  review/CI/merge remain separate gates; see the linked implementation journal.
+- [ ] Migrate the remaining thin shell and PowerShell daemon/owned-process
+  entrypoints through
   setup-provided PATH Python without interpreter attestation; preserve Windows
   process/Job and uncertainty contracts.
 - [x] Remove canonical C, all distributed copies and native build/export hooks,
