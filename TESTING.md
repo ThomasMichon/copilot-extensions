@@ -2249,6 +2249,16 @@ fixture build prerequisites and eight local distributions into a fresh
 unseeded slot, then refreshes a same-version source edit. Build isolation and
 seasoning remain enabled. The existing offline full-provision fixture checks
 the same batching against the real Logger package, health and publication flow.
+Its snapshot-only first-use control removes the original payload and libraries
+before invoking the compatibility wrapper. The UV emulator supplies private
+package effects and cache discovery, but uses the declared setuptools/wheel
+development inputs and native offline UV wheel builds. The actual foundation
+constructor, source/wheel verification, native custody and runtime health remain
+enabled; successful first use must include a recorded wheel build. Native stamp
+and first-use subprocess limits stay at 60 and 420 seconds.
+The outer observation window is 720 seconds to include release-payload
+materialization and real backend staging before those individually bounded calls;
+it does not extend either native subprocess or constructor phase allowance.
 Logger's existing Windows retry fixtures allow 180 seconds for their native
 subprocess and 210 seconds per item: three/four-attempt cases exceeded the old
 20-second subprocess cap on a slow host. Exact attempt counts, mocked 3/6/10
