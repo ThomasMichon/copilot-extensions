@@ -6,6 +6,7 @@ import json
 import pytest
 
 from agent_machines import __main__ as cli
+from agent_machines import cli_fleet_update
 from agent_machines.manifest import ManifestError
 
 
@@ -232,6 +233,94 @@ def test_explicit_repo_identity_does_not_validate_unrelated_projects(
     identity = cli._resolve_machine_identity(args)
 
     assert identity.canonical == "fixture"
+
+
+@pytest.mark.parametrize("entrypoint", [cli, cli_fleet_update])
+@pytest.mark.parametrize("explicit_path", [False, True])
+def test_machine_identity_uses_registered_anchor_not_worktree(
+    monkeypatch, tmp_path, entrypoint, explicit_path
+):
+    anchor = tmp_path / "anchor"
+    worktree = tmp_path / "worktree"
+    for root, platform_name in ((anchor, "linux"), (worktree, "windows")):
+        topology = root / ".agent-worktrees" / "machines.yaml"
+        topology.parent.mkdir(parents=True)
+        topology.write_text(
+            f"machines:\n  fixture:\n    execution_platform: {platform_name}\n",
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(
+        entrypoint._discover,
+        "candidate_repos",
+        lambda: [entrypoint._discover.RepoCandidate(name="current", path=anchor)],
+    )
+    monkeypatch.setattr(
+        entrypoint._discover, "resolve_registered_repo", lambda _selector: None
+    )
+    monkeypatch.setattr(
+        entrypoint._layout,
+        "resolve_cwd_repo",
+        lambda path=None: ("current", worktree, anchor),
+    )
+    args = argparse.Namespace(
+        repo=str(worktree) if explicit_path else None, machine="fixture"
+    )
+
+    identity = entrypoint._resolve_machine_identity(args)
+
+    assert identity.canonical == "fixture"
+    assert identity.execution_platform == "linux"
+    assert identity.topology_path == anchor / ".agent-worktrees" / "machines.yaml"
+
+
+@pytest.mark.parametrize("entrypoint", [cli, cli_fleet_update])
+def test_machine_identity_preserves_standalone_topology(monkeypatch, tmp_path, entrypoint):
+    topology = tmp_path / "machines.yaml"
+    topology.write_text(
+        "machines:\n  fixture:\n    execution_platform: linux\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(entrypoint._discover, "candidate_repos", lambda: [])
+    monkeypatch.setattr(
+        entrypoint._layout,
+        "resolve_cwd_repo",
+        lambda: ("standalone", tmp_path, tmp_path),
+    )
+
+    identity = entrypoint._resolve_machine_identity(
+        argparse.Namespace(repo=None, machine="fixture")
+    )
+
+    assert identity.execution_platform == "linux"
+    assert identity.topology_path == topology
+
+
+@pytest.mark.parametrize("entrypoint", [cli, cli_fleet_update])
+def test_machine_identity_retains_cross_anchor_conflict_checks(
+    monkeypatch, tmp_path, entrypoint
+):
+    anchors = [tmp_path / "first", tmp_path / "second"]
+    for root, platform_name in zip(anchors, ("linux", "windows")):
+        root.mkdir()
+        (root / "machines.yaml").write_text(
+            f"machines:\n  fixture:\n    execution_platform: {platform_name}\n",
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(
+        entrypoint._discover,
+        "candidate_repos",
+        lambda: [
+            entrypoint._discover.RepoCandidate(name=root.name, path=root)
+            for root in anchors
+        ],
+    )
+    monkeypatch.setattr(
+        entrypoint._layout,
+        "resolve_cwd_repo",
+        lambda: ("first", anchors[0], anchors[0]),
+    )
+
+    with pytest.raises(ManifestError, match="conflicting topology declarations"):
+        entrypoint._resolve_machine_identity(argparse.Namespace(repo=None, machine="fixture"))
 
 
 def test_validate_json_preserves_findings_array(monkeypatch, capsys):

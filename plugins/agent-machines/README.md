@@ -730,6 +730,14 @@ honored. Partial overrides of a shared package remain in that package's existing
 `per-machine` block rather than being a cross-file merge.
 Multi-machine packages belong in `all/` with an explicit `gate`.
 
+Machine topology is read from registered repository anchors, including when
+running inside a linked worktree or selecting that worktree with `--repo`.
+Branch-local topology edits do not override or conflict with the anchor's
+machine identity. Unregistered standalone repositories retain their local
+topology fallback; genuine conflicts between different anchors still fail.
+This rule applies to the main CLI and `fleet-update` without changing which
+checkout supplies repository-scoped requirement packages.
+
 `<machine>` is the canonical topology key when an adopted repository provides a
 matching `machines.yaml` entry. The raw `platform.node()` host name (Windows
 `%COMPUTERNAME%`) is matched case-insensitively against the entry key plus its
