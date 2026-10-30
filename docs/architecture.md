@@ -554,6 +554,12 @@ configuration path. The
 [spawn supervisor guide](../plugins/agent-dispatch/docs/spawn-supervisor.md#coordinator-supervisor-daemon-and-worker-lanes)
 owns the process, routing and observability details.
 
+Current spawn reservation is separate from the embodied worker's task claim.
+The [current-versus-target assignment model](../plugins/agent-dispatch/docs/spawn-supervisor.md#assignment-lifecycle-current-versus-target)
+distinguishes that implementation from the intended pool-owned `CLAIMED`
+startup transaction and links its reviewed-repair proposal; the target is not
+an installed behavior claim.
+
 Producer creation can be fenced by a coordinator-owned, durable generation over
 one permanent canonical repo-lane + source scope. An optional immutable required
 label binds a protected pool back to that source: carrying the label through an
