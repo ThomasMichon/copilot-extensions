@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import runpy
 import sys
 import shutil
 import subprocess
@@ -175,6 +176,40 @@ def test_scoped_engine_handoff_keeps_inherited_pipes_without_showing_windows() -
     assert stdout.splitlines() == ["engine progress"] * 2
     assert stderr.splitlines() == ["engine failure"] * 2
     assert not shown and not focused, (shown, focused)
+
+
+@pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Native PowerShell pipes")
+@pytest.mark.parametrize("operation", ("Complete-RuntimeConstruction", "Stop-RuntimeConstruction"))
+def test_construction_owner_failure_survives_closed_input_pipe(tmp_path: Path, operation: str) -> None:
+    from agent_procutil import no_window_kwargs
+
+    child = tmp_path / "owner.py"
+    child.write_text(
+        "import sys\nprint('{\"admission\":\"construct\"}',flush=True)\n"
+        "print('fixture owner failure',file=sys.stderr,flush=True)\nsys.exit(9)\n",
+        encoding="utf-8",
+    )
+    helpers = runpy.run_path(str(
+        fixture.REPO / "libs" / "versioned-runtime" / "versioned_runtime_construction.py",
+    ))["construction_shell_helpers"]("ps1")
+    def quote(value: object) -> str:
+        return "'" + str(value).replace("'", "''") + "'"
+
+    script = helpers + (
+        "\n$ErrorActionPreference='Stop'\n"
+        f"Start-RuntimeConstruction -Python {quote(sys.executable)} -Helper {quote(child)} "
+        f"-Root {quote(tmp_path)} -Version '1.0' -PayloadHash '{'a' * 64}' -LinkName 'current' | Out-Null\n"
+        "$script:RuntimeConstructionSession.Process.WaitForExit()\n"
+        f"try {{ {operation} }} catch {{ Write-Output $_.Exception.Message }}\n"
+        "if ($script:RuntimeConstructionSession) {"
+        "$script:RuntimeConstructionSession.Process.Dispose()}\n"
+    )
+    result = subprocess.run(
+        [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Construction owner exited (9): fixture owner failure" in result.stdout
 
 
 @pytest.mark.parametrize("mode", ("normal", "repair"))

@@ -793,6 +793,18 @@ function script:Get-RuntimeConstructionFailure($Session, [string]$Cause) {
     return ("$Cause (construction helper exit $($Session.Process.ExitCode)): " +
         $Session.Errors.Result)
 }
+function script:Send-RuntimeConstructionCommand($Session, [string]$Message) {
+    try {
+        $Session.Process.StandardInput.WriteLine($Message)
+        $Session.Process.StandardInput.Flush()
+    } catch {
+        if ($Session.Process.HasExited) {
+            throw ("Construction owner exited (" + $Session.Process.ExitCode + "): " +
+                $Session.Errors.Result.Trim())
+        }
+        throw
+    }
+}
 function script:Complete-RuntimeConstruction([string]$PayloadHash, [switch]$RetainHelpers) {
     $session = $script:RuntimeConstructionSession
     if (-not $session) { throw 'Completion requires attached construction ownership' }
@@ -817,10 +829,9 @@ function script:Stop-RuntimeConstruction {
     $script:RuntimeConstructionSession = $null
     try {
         $command = if ($session.Complete) { 'settled' } else { 'abort' }
-        $session.Process.StandardInput.WriteLine(
+        Send-RuntimeConstructionCommand $session (
             (@{command=$command} | ConvertTo-Json -Compress)
         )
-        $session.Process.StandardInput.Flush()
         $line = $session.Process.StandardOutput.ReadLine()
         $session.Process.StandardInput.Close()
         $session.Process.WaitForExit()
