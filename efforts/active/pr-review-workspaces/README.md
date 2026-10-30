@@ -211,6 +211,9 @@ contract.
 - Clarified that the CLI consumes a credential DTO, not a shipped ADO issuer:
   adopters must supply their existing authorized owner/adapter. The expected
   principal is the full ADO `authorizedUser.id`, not an AAD identity or label.
+- Follow-up review found that continuation `nextTop` was validated but not used.
+  Subsequent page requests now honor both native continuation values, with a
+  differing-page-size regression and explicit oversized-continuation refusal.
 
 ### 2026-10-30 - Offline read-generation source candidate
 - #9641 merged after current-head Copilot approval with no findings and required

@@ -162,10 +162,11 @@ def test_incomplete_policies_and_final_iteration_read_retain_known_records():
     assert iterations["data"][0]["id"] == 3
 
 
-def test_change_pagination_and_credentials_are_bounded_by_actual_pages():
+@pytest.mark.parametrize("next_top", [25, 100])
+def test_change_pagination_and_credentials_are_bounded_by_actual_pages(next_top):
     forge = Forge()
     first = forge.pages[0]
-    first.update(nextSkip=100, nextTop=100)
+    first.update(nextSkip=100, nextTop=next_top)
     forge.pages[100] = {
         "changeEntries": [{"changeTrackingId": 9, "item": {"path": "/second.txt"}}],
         "nextSkip": 0, "nextTop": 0,
@@ -174,15 +175,21 @@ def test_change_pagination_and_credentials_are_bounded_by_actual_pages():
     assert result["sections"]["changes"]["complete"] is True
     assert len(result["sections"]["changes"]["data"]) == 2
     assert sum(path.endswith("/changes") for path, _ in forge.requests) == 2
+    queries = [query for path, query in forge.requests if path.endswith("/changes")]
+    assert [query["$top"] for query in queries] == [["100"], [str(next_top)]]
 
 
-@pytest.mark.parametrize("failure", ["missing", "repeated", "repeated_terminal", "nonadvancing"])
+@pytest.mark.parametrize("failure", [
+    "missing", "repeated", "repeated_terminal", "nonadvancing", "oversize",
+])
 def test_bad_change_continuation_retains_known_records_as_incomplete(failure):
     forge = Forge()
     if failure == "missing":
         forge.pages[0].pop("nextSkip")
     elif failure == "nonadvancing":
         forge.pages[0].update(nextSkip=0, nextTop=100)
+    elif failure == "oversize":
+        forge.pages[0].update(nextSkip=100, nextTop=20_001)
     else:
         forge.pages[0].update(nextSkip=100, nextTop=100)
         forge.pages[100] = copy.deepcopy(forge.pages[0])

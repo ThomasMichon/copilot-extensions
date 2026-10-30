@@ -246,12 +246,12 @@ class AdoReader:
         if type(iteration) is not int or iteration <= 0:
             raise ProviderError("ADO changes require a positive iteration")
         records, seen = [], set()
-        skip = 0
+        skip, top = 0, 100
         try:
             for _ in range(201):
                 body, continuation = self.json(
                     self.base + f"/iterations/{iteration}/changes?api-version=7.1",
-                    query={"$compareTo": 0, "$top": 100, "$skip": skip},
+                    query={"$compareTo": 0, "$top": top, "$skip": skip},
                 )
                 values = body.get("changeEntries")
                 if (
@@ -275,9 +275,11 @@ class AdoReader:
                     raise ProviderError("ADO iteration changes lack continuation evidence")
                 if next_top == 0:
                     return Collection(tuple(records))
+                if next_top > MAX_RECORDS:
+                    raise ProviderError("ADO iteration change continuation exceeds the record budget")
                 if not values or next_skip <= skip:
                     raise ProviderError("ADO iteration changes repeated or failed to advance")
-                skip = next_skip
+                skip, top = next_skip, next_top
             raise ProviderError("ADO iteration changes exceed the page limit")
         except ObservationCredentialError:
             raise

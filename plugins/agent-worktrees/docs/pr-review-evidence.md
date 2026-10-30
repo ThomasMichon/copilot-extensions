@@ -85,6 +85,8 @@ wrong scope, expired material and malformed output fail closed. Captured streams
 are bounded at 64 KiB stdout / 8 KiB stderr; credential data and raw helper errors
 are never echoed. Unconfirmed child cleanup preserves the existing owned-process
 custody error and must not be blindly retried.
+The schema identifier does not select an issuer or require a Fleet Manager
+installation, service or login; it is only the existing consumption format.
 
 `--expected-principal` and output `scope.principal_id` are in the ADO identity
 namespace: the complete provider `connectionData.authorizedUser.id`, **not** an
@@ -115,6 +117,8 @@ Iterations, common-baseline iteration changes, all-status discussions and
 evaluations use the existing bounded HTTP reader. Iteration changes have their
 own `changeEntries`/`nextSkip`/`nextTop` protocol; missing, malformed, repeated or
 nonadvancing continuation leaves retained records explicitly incomplete.
+Subsequent requests use the advertised `nextSkip` and `nextTop`, not a guessed
+page size; continuation beyond the existing record budget refuses explicitly.
 Unavailable policies are not an empty complete set. Credential loss aborts the
 whole operation rather than becoming a best-effort partial success.
 
