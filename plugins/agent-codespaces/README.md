@@ -98,6 +98,10 @@ helper deployment from authenticated hooks: Session Hosts deploy helpers first,
 verify the real relay, then run hooks in the login-shell launch environment
 before plugin preparation.
 
+Pre-plugin relay readiness has a 30-second total budget, including SSH startup
+and transport retries. Each remote ping remains bounded to 3 seconds; a relay
+that never answers still blocks launch.
+
 Attached CLI launches retain their foreground-owned relay fallback when the
 Connection Owner is unavailable. Its event loop supervises the forward until the
 interactive child exits, while SSH retains the main thread and terminal signals.
