@@ -1413,6 +1413,7 @@ Bounded phase markers distinguish fixture readiness, owner acknowledgement,
 foundation observation and ordinary-result waits; diagnostic paths are fixture-relative.
 Terminal foundation failures, interrupted requests and owner exit without a
 receipt fail the observer immediately rather than consuming its remaining wait.
+After observing owner exit, re-read its receipt before declaring it missing.
 The contained Windows Logger hook fixture proves original caller-process exit,
 not cleanup-Job escape: it retains its strict test-owned Job until native owner
 settlement and closes it in final cleanup. Separate native controls retain

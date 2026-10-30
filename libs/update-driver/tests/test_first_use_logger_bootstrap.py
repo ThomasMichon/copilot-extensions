@@ -39,9 +39,13 @@ def _cold_results_completed(root, callers, progress):
     assert progress.state not in {"failed", "interrupted"}, (
         f"Foundation {progress.state}: exit={progress.exit_code}, reason={progress.error}"
     )
-    receipts = [ordinary_receipt(caller.receipt_log) for caller in callers]
-    for caller, receipt in zip(callers, receipts):
-        assert receipt or not caller.exited(), "Native owner exited without an ordinary request receipt"
+    receipts = []
+    for caller in callers:
+        receipt = ordinary_receipt(caller.receipt_log)
+        if receipt is None and caller.exited():
+            receipt = ordinary_receipt(caller.receipt_log)
+            assert receipt is not None, "Native owner exited without an ordinary request receipt"
+        receipts.append(receipt)
     if not all(receipts):
         return False
     requests = [status(receipt, root=root) for receipt in receipts]
@@ -62,6 +66,18 @@ def test_cold_results_reject_owner_exit_without_receipt(area):
     caller = SimpleNamespace(receipt_log=area / "absent.log", exited=lambda: True)
     with pytest.raises(AssertionError, match="without an ordinary request receipt"):
         _cold_results_completed(area, [caller], progress)
+
+
+def test_cold_results_recheck_receipt_committed_before_owner_exit(area, monkeypatch):
+    log = area / "receipt.log"
+
+    def exited():
+        log.write_text('{"request_id":"fixture-request","state":"pending"}\n', encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(sys.modules[__name__], "status", lambda _receipt, **_kwargs: SimpleNamespace(state="completed"))
+    caller = SimpleNamespace(receipt_log=log, exited=exited)
+    assert _cold_results_completed(area, [caller], SimpleNamespace(state="completed"))
 
 
 @pytest.mark.parametrize("state", ["pending", "running", "completed", "interrupted"])
