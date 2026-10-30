@@ -54,6 +54,8 @@ preserved; newly created files use restrictive permissions.
 Native service save/adopt/remove share that lock across their configuration
 transaction. A stale native save retains a newer mode preference when it did
 not edit that policy, and refuses conflicting simultaneous mode edits.
+Serialized YAML uses ASCII Unicode escapes, preserving non-ASCII values even
+when a legacy Windows reader uses its platform-default text encoding.
 Its `written` result identifies the exact modified file/scope; top-level `mode`
 and `source` report the subsequent effective resolution, which can differ when a
 more specific scope or marketplace overlay wins. `--unset` removes that exact

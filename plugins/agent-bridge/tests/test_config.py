@@ -304,6 +304,25 @@ else:
             save_config(stale)
         assert resolve_session_mode()["mode"] == "cli"
 
+    def test_non_ascii_values_survive_platform_default_readers(self, tmp_path, config_home, monkeypatch):
+        label = "caf\u00e9 \u65c5\u884c"
+        path = self.policy(tmp_path, {"default": "acp"}, default_env={"LABEL": label})
+        save_config(ServiceConfig(topologies={"example": TopologyProfile(default_env={"LABEL": label})}))
+        original = Path.read_text
+
+        def legacy_locale(candidate, *args, **kwargs):
+            if candidate in (path, config_home / "config.yaml") and not args:
+                kwargs.setdefault("encoding", "cp1252")
+            return original(candidate, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", legacy_locale)
+        write_session_mode(operator_repo=tmp_path, venue="ssh", mode="cli")
+        write_session_mode(machine_local=True, venue="local", mode="cli")
+        assert load_repo_bridge_config(tmp_path).default_env["LABEL"] == label
+        assert load_config().topologies["example"].default_env["LABEL"] == label
+        assert path.read_bytes().isascii()
+        assert (config_home / "config.yaml").read_bytes().isascii()
+
     @pytest.mark.parametrize("kwargs", [{"repo": "../example"}, {"venue": "SSH"}, {"mode": "other"}])
     def test_invalid_write_selectors(self, config_home, kwargs):
         args = {"machine_local": True, "mode": "cli", **kwargs}

@@ -59,7 +59,7 @@ def config_file_lock(config_path: Path):
 def atomic_write_config(path: Path, data: dict, *, expected: bytes | None) -> None:
     """Caller holds config_file_lock across the complete read/modify/write."""
     permissions = stat.S_IMODE(path.stat().st_mode) if expected is not None else 0o600
-    encoded = yaml.safe_dump(data, sort_keys=False, allow_unicode=True).encode("utf-8")
+    encoded = yaml.safe_dump(data, sort_keys=False, allow_unicode=False).encode("utf-8")
     path.parent.mkdir(parents=True, exist_ok=True)
     staged = path.with_name(f".{path.name}.{uuid4().hex}.pending")
     try:
