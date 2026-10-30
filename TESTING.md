@@ -162,6 +162,17 @@ installed service or retained conversation is changed. This is native CLI
 startup qualification, not real-mux, physical keyboard, installed rollout or
 whole managed-launch acceptance; platform lanes are qualified independently.
 
+Customizing-copilot's `tests/native/test_client_request_capture_transport.py`
+exercises exact raw-body persistence, streaming/nonstreaming replies and
+failure/timeout cleanup using synthetic local clients. Select it with
+`python tools/run-plugin-tests.py customizing-copilot --test-file tests/native/test_client_request_capture_transport.py --allow-explicit-tiers`.
+The optional `test_selected_native_cli_captures_synthetic_harness_only` case
+uses `COPILOT_NATIVE_TEST_EXECUTABLE` for an actual offline CLI invocation in a
+fresh synthetic home/workspace. It checks that a synthetic `AGENTS.md` marker
+reaches the saved request without reading the operator's harness or publishing
+the raw artifact. Windows and POSIX qualification are separate; neither test
+claims hosted-provider prompt equivalence or OS egress isolation.
+
 Agent-worktrees' `test_session_shell.py` checks canonical Windows setup copying
 for cold `embody`, without taking over its separate seed/admission owner.
 Its native PowerShell control invokes the actual copied wrapper/setup with

@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent proposal and implementation PRs against `dev`
 - **Created:** 2026-10-29
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/harness-guidance`, `attributable-context-budget`
 - **Umbrella issue:** #9581
 
@@ -20,14 +20,14 @@ logging for an existing or shared inference service.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Coordinator | Own design, integration, review and completion | Managed source worktree |
-| Implementation worker | Bounded payload, documentation and synthetic tests | Coordinator delegation |
+| Independent reviewer | Read-only implementation review | Coordinator delegation |
 
 ## Coordination
 
 - **Topology:** reviewed proposal, then an implementation PR against `dev`.
 - **Host (owns PRs):** Coordinator.
-- **Delegates:** Implementation worker owns only the assigned new capture
-  skill/scripts/tests and related plugin documentation.
+- **Delegates:** Independent reviewer inspects the new capture
+  skill/scripts/tests and related plugin documentation without editing.
 - **Handoff:** report changed paths, executed checks and unresolved concerns;
   the Coordinator owns integration and the final completion judgment.
 - No live harness capture, deployment, global configuration change or shared
@@ -63,18 +63,18 @@ The operator confirmed the slug `local-request-capture`.
 ## Plan
 
 ### Phase 1 - Review the portable contract
-- [ ] Land this proposal through the normal review and merge flow.
-- [ ] Keep the implementation standalone in the payload-only
+- [x] Land this proposal through the normal review and merge flow.
+- [x] Keep the implementation standalone in the payload-only
   `customizing-copilot` plugin, usable without harness registration.
 
 ### Phase 2 - Implement operator-owned capture
-- [ ] Provide a scriptable invocation that starts its own temporary loopback
+- [x] Provide a scriptable invocation that starts its own temporary loopback
   listener and launches the operator-selected Copilot CLI in the selected
   harness directory.
-- [ ] Write the exact received JSON request bytes, not a reconstruction or a
+- [x] Write the exact received JSON request bytes, not a reconstruction or a
   counts-only substitute, to an explicitly selected local output location.
-- [ ] Return a valid terminal completion and settle the owned client/listener.
-- [ ] Provide a discoverable skill and complete invocation/privacy guidance.
+- [x] Return a valid terminal completion and settle the owned client/listener.
+- [x] Provide a discoverable skill and complete invocation/privacy guidance.
 
 **Agent-recommended implementation details:** use an ephemeral IPv4 loopback
 port and a per-run dummy credential passed only to the owned child; accept one
@@ -85,7 +85,7 @@ Document that local hooks/MCP processes still have their ordinary capabilities;
 loopback binding is not an operating-system egress sandbox.
 
 ### Phase 3 - Qualify and publish
-- [ ] Exercise the public script boundary using synthetic requests/clients.
+- [x] Exercise the public script boundary using synthetic requests/clients.
 - [ ] Complete independent review, required repository checks and the normal
   implementation PR merge.
 - [ ] Reconcile the effort's entire Plan and Validation Plan, then archive.
@@ -95,20 +95,20 @@ loopback binding is not an operating-system egress sandbox.
 All implementation checks below are agent-recommended ways to prove the
 operator's requested boundary.
 
-- [ ] Byte-for-byte output preserves Unicode, messages, instructions and tools
+- [x] Byte-for-byte output preserves Unicode, messages, instructions and tools
   from a synthetic client request; stdout contains status/path metadata only.
-- [ ] Streaming and non-streaming requests receive valid terminal completions.
-- [ ] The actual launcher directs only its owned child to its ephemeral
+- [x] Streaming and non-streaming requests receive valid terminal completions.
+- [x] The actual launcher directs only its owned child to its ephemeral
   loopback listener without changing user configuration.
-- [ ] Foreign credentials, wrong routes, oversized/truncated requests and
+- [x] Foreign credentials, wrong routes, oversized/truncated requests and
   request timeouts do not persist a purported successful raw capture.
-- [ ] Existing outputs are preserved; listener/client failure is explicit;
+- [x] Existing outputs are preserved; listener/client failure is explicit;
   owned resources have a bounded lifetime.
-- [ ] The skill is packaged/discoverable, includes Windows and POSIX usage,
+- [x] The skill is packaged/discoverable, includes Windows and POSIX usage,
   and clearly excludes shared-endpoint logging and provider-side additions.
-- [ ] Focused contained tests, touched-code lint and applicable repository
+- [x] Focused contained tests, touched-code lint and applicable repository
   guards pass; public artifacts contain only synthetic examples.
-- [ ] No real operator prompt is captured or published as validation evidence.
+- [x] No real operator prompt is captured or published as validation evidence.
 
 ## Proposal
 
@@ -125,3 +125,26 @@ made by GitHub's hosted provider.
 - Confirmed the upstream effort name and claimed #9581.
 - Captured the operator's requested raw-persistence and no-shared-service
   boundary. Implementation awaits the proposal's review and merge.
+
+### 2026-10-29 - Reviewed intent and implementation
+- Proposal #9583 merged after independent Copilot review and required CI.
+  Corrected the review's documentation-impact finding before merge.
+- Implemented the standalone capture script and discoverable skill in
+  `customizing-copilot`, with explicit local output and no shared endpoint mode.
+- Seventeen synthetic controls passed under the contained Windows runner.
+  An additional actual native CLI run in a disposable synthetic home/workspace
+  captured the fixture's instruction marker and returned normally. No operator
+  harness or raw request was published. POSIX native qualification is not
+  claimed by these Windows results.
+- Independent implementation review reported no significant issues. Source
+  skill, customization, headless-launch and touched-code lint checks passed.
+  Implementation PR merge and final effort reconciliation remain.
+- Implementation review identified relative executable selection and rejection
+  diagnostics improvements; both received focused regressions. CI also found
+  the new bounded CLI launch missing from the lifecycle census; classified its
+  existing finite-worker behavior without weakening the guard.
+- All twenty controls, including actual native CLI qualification, passed after
+  those corrections; the lifecycle census and touched-code lint passed.
+- The next review found three additional ambient GitHub credential variables
+  missing from the documented child filter. Added them and extended the
+  environment regression; no broader harness credential sanitization is claimed.
