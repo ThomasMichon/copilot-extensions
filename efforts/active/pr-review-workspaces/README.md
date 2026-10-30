@@ -192,6 +192,18 @@ contract.
 
 ## Journal
 
+### 2026-10-30 - Exact source contract and implementation continuation
+- Contract #9703 merged as `5267c7010200a53acaee48dfe9e9e6876a2cb790`
+  after an actual current-head approval, resolved feedback and passing CI.
+  Corrected the distinction between absent paths and existing zero-byte blobs.
+- Implement the admitted Worktrees local source owner and separate PR-domain
+  attachment envelope over already prepared objects. Extend the existing bounded
+  process owner with opt-in exact binary capture; preserve default text behavior,
+  lifetime cleanup and per-stream limits rather than adding a second owner.
+- Initial contained controls: shared process owner 88 passed / 12 platform skips;
+  source/tree contracts 52 passed / 2 existing opt-in skips. Final source and
+  malformed-result controls remain in progress; this is not effort completion.
+
 ### 2026-10-30 - Priority cursorless native change paging
 - Merged source PR #9697 as `eef6ddbd87f1c708a6ac334fa622f1dfa7abf44e`
   after 112 contained tests, lint/install-contract gates, passing required CI
