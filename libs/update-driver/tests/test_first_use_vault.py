@@ -276,6 +276,10 @@ def cold_environment(installation, project, area, *, python_prerequisite=False):
     return env
 
 
+@pytest.mark.skipif(
+    os.name != "nt" and sys.platform != "linux",
+    reason="native cold environment is qualified only on Windows and Linux",
+)
 def test_cold_environment_preserves_runner_lifetime_and_hides_product_python(area, monkeypatch):
     monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
     monkeypatch.setenv("COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT", "fixture-context")
