@@ -101,7 +101,12 @@ def test_bootstrap_observer_waits_for_committed_receipt_without_masking_bad_stat
 def owned_hook(
     command, *, env, project, directory, timeout, diagnostic,
     acknowledgement_prefix=ACKNOWLEDGEMENT,
+    keep_contained_job_until_settlement=False,
 ):
+    if keep_contained_job_until_settlement and (
+        os.name != "nt" or env.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1"
+    ):
+        raise ValueError("Retained caller Jobs require a contained Windows test")
     directory.mkdir()
     output = directory / "stdout"
     errors = directory / "stderr"
@@ -109,6 +114,11 @@ def owned_hook(
 
     def close_caller():
         nonlocal job
+        if keep_contained_job_until_settlement:
+            if caller is not None and caller.poll() is None:
+                caller.kill()
+                caller.wait(timeout=10)
+            return
         if job is not None:
             job.close()
             job = None
@@ -180,21 +190,28 @@ def owned_hook(
             print(message, file=sys.stderr, flush=True)
             raise
         finally:
-            close_caller()
-            if owner is not None:
-                try:
-                    owner.wait(timeout=900)
-                finally:
-                    owner.close()
-            if descriptor is not None:
-                try:
-                    observe(exited, 900, diagnostic)
-                finally:
-                    os.close(descriptor)
+            try:
+                close_caller()
+                if owner is not None:
+                    try:
+                        owner.wait(timeout=900)
+                    finally:
+                        owner.close()
+                if descriptor is not None:
+                    try:
+                        observe(exited, 900, diagnostic)
+                    finally:
+                        os.close(descriptor)
+            finally:
+                if job is not None:
+                    job.close()
+                    job = None
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows owner cleanup reporting")
-def test_hook_failure_reports_before_waiting_for_owner_cleanup(area, monkeypatch, capsys):
+@pytest.mark.parametrize("keep_job", [False, True])
+@pytest.mark.parametrize("wait_fails", [False, True])
+def test_hook_failure_reports_before_waiting_for_owner_cleanup(area, monkeypatch, capsys, keep_job, wait_fails):
     import test_foundation_genesis_process as native
 
     events = []
@@ -203,6 +220,8 @@ def test_hook_failure_reports_before_waiting_for_owner_cleanup(area, monkeypatch
         error = capsys.readouterr().err
         assert "controlled hook failure" in error and "retained native diagnostic" in error
         events.append("wait")
+        if wait_fails:
+            raise TimeoutError("fixture owner settlement timeout")
 
     owner = SimpleNamespace(wait=wait_for_owner, close=lambda: events.append("owner-close"))
 
@@ -212,17 +231,34 @@ def test_hook_failure_reports_before_waiting_for_owner_cleanup(area, monkeypatch
         frame = ACKNOWLEDGEMENT + json.dumps({"log": str(area / "receipt.log")}) + "\n"
         kwargs["stderr"].write(frame.encode())
         kwargs["stderr"].flush()
-        return SimpleNamespace(wait=lambda timeout: 0), SimpleNamespace(close=lambda: events.append("caller-close"))
+        return (SimpleNamespace(wait=lambda timeout: 0, poll=lambda: 0),
+                SimpleNamespace(close=lambda: events.append("caller-close")))
 
     monkeypatch.setattr(agent_procutil, "spawn_sync_in_kill_on_close_job", launch)
     monkeypatch.setattr(native, "pinned_worker", lambda _acknowledgement: owner)
-    with pytest.raises(RuntimeError, match="controlled hook failure"):
+    with pytest.raises(TimeoutError if wait_fails else RuntimeError,
+                       match="fixture owner settlement timeout" if wait_fails else "controlled hook failure"):
+        with owned_hook(
+            ["fixture"], env={"COPILOT_EXTENSIONS_TEST_CONTAINED": "1"} if keep_job else {},
+            project=area, directory=area / "hook", timeout=15,
+            diagnostic=lambda: "retained native diagnostic",
+            keep_contained_job_until_settlement=keep_job,
+        ) as control:
+            control.close_caller()
+            assert events == ([] if keep_job else ["caller-close"])
+            raise RuntimeError("controlled hook failure")
+    assert events == (["wait", "owner-close", "caller-close"] if keep_job else
+                      ["caller-close", "wait", "owner-close"])
+
+
+def test_hook_cannot_retain_a_job_outside_contained_windows_test(area):
+    with pytest.raises(ValueError, match="contained Windows test"):
         with owned_hook(
             ["fixture"], env={}, project=area, directory=area / "hook", timeout=15,
-            diagnostic=lambda: "retained native diagnostic",
+            diagnostic=lambda: "", keep_contained_job_until_settlement=True,
         ):
-            raise RuntimeError("controlled hook failure")
-    assert events == ["caller-close", "wait", "owner-close"]
+            pytest.fail("uncontained Job retention was admitted")
+    assert not (area / "hook").exists()
 
 
 @native_genesis

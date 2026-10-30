@@ -242,6 +242,9 @@ def test_actual_logger_hook_deadline_caller_loss_drift_install_and_consumers(
         return owned_hook(
             command, env=env, project=project, directory=area / label,
             timeout=deadline, diagnostic=diagnostic, acknowledgement_prefix=ACKNOWLEDGEMENT,
+            keep_contained_job_until_settlement=(
+                os.name == "nt" and env.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1"
+            ),
         )
 
     def assert_admission(item, action):
