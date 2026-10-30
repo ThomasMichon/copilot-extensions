@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Write agent-bridge guidance as a sessionStart side effect.
 
-The command-catalog producer is invoked fresh and its output is atomically
+The generated payload-local catalog is rendered in process and atomically
 written to the exact session's guidance file.
 """
 
@@ -10,17 +10,15 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import stat
-import subprocess
 import sys
 import tempfile
+from contextlib import redirect_stdout
 from pathlib import Path
 
 _SESSION_IDENTIFIER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$")
 _MAX_INPUT_BYTES = 64 * 1024
 _GUIDANCE_MAX_BYTES = 4 * 1024
-_SUBPROCESS_TIMEOUT_S = 10.0
 _GUIDANCE_HEADER = "# Agent Bridge session guidance\n\n"
 
 
@@ -46,38 +44,20 @@ def _plugin_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def _contributor_argv(root: Path, stem: str) -> list[str] | None:
-    if os.name == "nt":
-        script = root / "scripts" / f"{stem}.ps1"
-        shell = shutil.which("pwsh") or shutil.which("powershell.exe")
-        if not shell or not script.is_file():
-            return None
-        return [shell, "-NoLogo", "-NoProfile", "-File", str(script)]
-    script = root / "scripts" / f"{stem}.sh"
-    shell = shutil.which("bash")
-    if not shell or not script.is_file():
-        return None
-    return [shell, str(script)]
-
-
 def _run_contributor(root: Path, stem: str, payload: bytes) -> str:
-    argv = _contributor_argv(root, stem)
-    if argv is None:
-        return ""
+    script = root / "scripts" / "emit_command_catalog.py"
     try:
-        completed = subprocess.run(
-            argv,
-            input=payload,
-            capture_output=True,
-            timeout=_SUBPROCESS_TIMEOUT_S,
-            check=False,
-            env={**os.environ, "PYTHONPATH": ""},
-        )
-    except (OSError, subprocess.SubprocessError):
+        with script.open("rb") as stream:
+            source = stream.read(_MAX_INPUT_BYTES + 1)
+        if len(source) > _MAX_INPUT_BYTES:
+            return ""
+        namespace = {"__file__": str(script), "__name__": "_payload_session_catalog"}
+        with redirect_stdout(sys.stderr):
+            exec(compile(source.decode("utf-8"), str(script), "exec"), namespace)
+            context = namespace["render_context"]()
+        return context.strip() if isinstance(context, str) else ""
+    except Exception:
         return ""
-    if completed.returncode != 0:
-        return ""
-    return _additional_context(completed.stdout)
 
 
 def _is_link_or_reparse(path: Path) -> bool:

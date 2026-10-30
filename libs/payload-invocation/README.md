@@ -255,6 +255,33 @@ unresolved binding while retaining the supported payload command.
 Stable out-of-session launchers and other runtime
 adopters remain separate migration work.
 
+## In-process session catalogs
+
+`inProcessCatalog: true` additionally generates `scripts/emit_command_catalog.py`
+from the same manifest command specifications. Exact-session writers load that
+absolute payload-local source and call `render_context()` without starting a
+catalog shell or another Python interpreter. The generated module is stdlib-only,
+prints nothing, and performs only fresh payload-path/availability checks. It is
+not a runtime selector, persisted memo, installation permission, or readiness
+claim. Missing runtime/configuration does not hide an otherwise available payload
+command. Direct POSIX/PowerShell catalog emitters retain their public contract. PowerShell resolves its payload root literally, including bracket-containing paths.
+
+The opt-in is boolean and currently cannot combine with `catalogGate` or
+`catalogBinding`; those independently owned policies are not silently omitted.
+Windows command suffixes and CMD input warnings, POSIX executable/file predicates,
+and multi-command ordering are preserved. Missing or malformed module source
+leaves the writer's existing bounded unavailable guidance and empty hook response;
+it never falls back to activation or a subprocess ladder. The writer compiles
+the selected source in memory, without publishing Python bytecode.
+Source acquisition is capped by the writer's existing 64 KiB input budget;
+oversized source is unavailable rather than executed. Unexpected helper stdout
+is redirected to diagnostic stderr during both module loading and rendering,
+preserving the exact empty-object hook response even for a noisy broken helper.
+
+This closes the narrow redundant catalog-process path in the circumstantial-hook
+contract; it does not establish reusable full discovery facts or whole-hook
+performance qualification.
+
 ## Usage
 
 ```bash
