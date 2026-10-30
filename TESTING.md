@@ -1392,6 +1392,13 @@ payload binstub identity without configuring a host bridge or processing
 personal sessions. This is an explicit manual integration lane, not required PR
 CI, live timer/serving-worker proof, selected-snapshot recipe admission or rollout.
 
+The cold consumer fixture keeps the canonical runner's containment and daemon
+lifetime context. On Linux, only the nonproduction lifecycle supervisor receives
+the runner's absolute interpreter; product `PATH` still contains no Python.
+The installed foundation's SDK home must be inside the private fixture, proving
+it did not borrow that lifecycle interpreter. These are bounded consumer
+controls, not proof of escape from a caller cleanup Job.
+
 Windows runs recipe refusals, actual bootstrap hooks and the concurrent cold
 consumer in three separate contained packets. A filtered invocation combines
 its selected files, so each packet names only its own file. All three keep the
