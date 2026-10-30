@@ -9,9 +9,12 @@ from agent_procutil import no_window_kwargs
 from machine_transport import IdentityError, machine_identity_names, resolve_machine_selection
 
 from . import config as cfg
-from . import output, state_root as state_root_mod
+from . import output, state_root as state_root_mod  # noqa: F401 - legacy module patch seam
 from . import status_updater_cli
 from .related_availability import MachineMatch
+from .related_acquisition import (
+    _related_config_source_anchors_report as _related_config_source_anchors_report,
+)
 
 
 def _core():
@@ -173,33 +176,9 @@ def _related_config_source_anchors(
     *,
     installed_anchors: list[str] | None = None,
 ) -> list[str]:
-    from . import related as _related_mod
+    from .related_acquisition import source_anchors
 
-    try:
-        srcs = state_root_mod.config_source_anchors(
-            cfg.load_config(include_control_plane_related_pr=False),
-            base_anchor=base_anchor,
-        )
-        anchors = [
-            _related_mod.config_contribution_anchor(s.anchor, s.origin) for s in srcs if s.anchor
-        ]
-    except Exception:
-        anchors = []
-    if not anchors:
-        anchors = [_related_mod.config_contribution_anchor(base_anchor, "harness")]
-    elif os.path.abspath(anchors[0]) != os.path.abspath(base_anchor):
-        anchors.insert(0, _related_mod.config_contribution_anchor(base_anchor, "harness"))
-    try:
-        existing = {_related_mod._anchor_key(a) for a in anchors}
-        discovered = (
-            _related_mod.installed_plugin_related_anchors()
-            if installed_anchors is None
-            else installed_anchors
-        )
-        plugin_anchors = [p for p in discovered if _related_mod._anchor_key(p) not in existing]
-    except Exception:
-        return anchors
-    return [*plugin_anchors, *anchors]
+    return source_anchors(base_anchor, installed_anchors=installed_anchors)
 
 
 def _related_lookup_anchors(

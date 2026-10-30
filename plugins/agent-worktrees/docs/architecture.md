@@ -1,5 +1,64 @@
 # Agent Worktrees -- Architecture
 
+## Related/config acquisition reports
+
+The existing value APIs retain their signatures, return shapes and fallback
+behavior. Optional in-process report siblings share the same acquisition path:
+`related.read_related_report`, `related.read_related_grafted_report`,
+`related.installed_plugin_related_anchors_report`,
+`related_cli._related_config_source_anchors_report`,
+`config_sources.config_source_anchors_report`, `config._load_yaml_safe_report`
+and `config._load_config_d_report`. They add no CLI syntax or JSON fields.
+Machine-overlay reports borrow the machine-config owner's failure-aware lookup
+and link-following marker classification; lookup/stat errors are not absence.
+Report-mode related entry conversion failures retain healthy peers and surface
+uncertainty. Legacy entry conversion exceptions still propagate unchanged.
+Related/config source reports use one purpose-owned, link-following stat
+classifier rather than inferring absence from error-suppressing boolean probes.
+Missing candidates, confirmed incorrect kinds and failed lookups remain distinct.
+Manifest layout/identity and path-resolution fallbacks retain encountered
+uncertainty alongside available values; fallback keys are not stable witnesses.
+Default-base reports also borrow the existing state-root owner's single Git
+lookup result: lookup exceptions, ambiguous nonzero exits and empty successful
+output retain uncertainty even when a default anchor remains available. A
+positive explicit base bypasses that lookup; no Git execution policy changes.
+
+Each `AcquisitionReport[T]` contains the legacy available value, a named
+operation scope, ordered source observations and `ScanAuthority`/`Finding`
+diagnostics. Authority describes logical coverage of that operation only:
+a complete empty result and confirmed absence differ from an unreadable,
+malformed or partially acquired result. Valid peers remain available alongside
+uncertainty. Activation and drop-in entry statuses are retained even when the
+owner's overall scan is complete. A drop-in's last-known contribution remains
+available data, explicitly marked retained, not a fresh confirmed positive.
+Observations project only status/provenance metadata, not configuration bodies;
+new YAML parse diagnostics name the error class rather than quoting contents.
+Owner findings retain their reason/status/provenance fields; unstructured
+detail is omitted because owner parse exceptions can contain private bodies.
+
+The report siblings do not re-read inputs after calling a legacy API, hash
+inputs, introduce a cache, or decide policy. Related overlays retain ordered
+whole-entry replacement and ignore plugin-provided primary markers. Explicit
+filesystem plugin discovery retains its compatibility glob; its report exposes
+unobserved directory-membership authority rather than claiming that a successful
+glob establishes completeness.
+
+These operations select config sources, not checkout paths, so their path tag
+is `not-resolved`. CLI consumers still use registered `local_path` only; the
+resident's existing `resolve_path`/srcroot fallback is separate and unchanged.
+Any future root-fact consumer must bind its actual resolution mode.
+
+Every report keeps `reusable = false`, explicit `missing_coverage` and
+`reuse_blockers`. Full `load_config` and committed/default-branch in-repo
+acquisition closure and the stable owner-produced input frontier are not yet
+available through these reports. A COMPLETE operation is not global discovery
+completeness, stability, authorization or permission to reuse facts. No hook or
+protected-write consumer is migrated by this provider-first expansion.
+
+This realizes the harness-guidance vision's reusable-facts/current-decisions
+separation at the acquisition boundary and follows the circumstantial-hook and
+resilient-registry patterns without claiming their full frontier qualification.
+
 ## Concurrent PR publication
 
 ### Unpublished creation retries

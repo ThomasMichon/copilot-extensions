@@ -39,6 +39,9 @@ import yaml
 
 from agent_procutil import no_window_kwargs
 
+from dropin_registry import ScanAuthority
+
+from .acquisition_report import AcquisitionReport, SourceObservation, failed, observe
 from . import config as cfg
 from . import git_ops
 from . import repos as repos_mod
@@ -442,6 +445,10 @@ class StatePair:
 
 def _git_toplevel(cwd: str | None) -> str | None:
     """Return the git worktree root of ``cwd`` (or the process cwd), or None."""
+    return _git_toplevel_value(cwd)
+
+
+def _git_toplevel_value(cwd, observations=None):
     try:
         checkout = cwd or os.getcwd()
         proc = subprocess.run(
@@ -453,12 +460,26 @@ def _git_toplevel(cwd: str | None) -> str | None:
             stdin=subprocess.DEVNULL,
             **no_window_kwargs(),
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as exc:
+        failed(observations, "git-worktree-root", "git-root", "root-lookup-failed", type(exc).__name__)
         return None
     if proc.returncode != 0:
+        failed(observations, "git-worktree-root", "git-root", "root-lookup-nonzero", "nonzero exit status")
         return None
     root = (proc.stdout or "").strip()
+    if root:
+        observe(observations, "git-worktree-root", "git-root", ScanAuthority.COMPLETE)
+    else:
+        failed(observations, "git-worktree-root", "git-root", "empty-root-output", "lookup produced no root")
     return root or None
+
+
+
+def _git_toplevel_report(cwd: str | None) -> AcquisitionReport[str | None]:
+    """Observe the existing single root lookup without changing process policy."""
+    observations: list[SourceObservation] = []
+    value = _git_toplevel_value(cwd, observations)
+    return AcquisitionReport("git-toplevel", value, tuple(observations))
 
 
 def _checkout_path(name: str) -> str | None:

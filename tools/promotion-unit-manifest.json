@@ -3025,7 +3025,34 @@
         "tools/promotion_unit_tests/test_cell_installer.py::test_worker_binds_original_caller_before_payload_identity",
         "tools/promotion_unit_tests/test_cell_installer.py::test_snapshot_control_launches_disable_bytecode_writes",
         "tools/promotion_unit_tests/test_shell_caller_owned.py::test_real_pipe_transfer_core_retains_one_original_owner[False-scope-publication]",
-        "tools/promotion_unit_tests/test_shell_caller_owned.py::test_real_pipe_transfer_core_retains_one_original_owner[True-scope-publication]"
+        "tools/promotion_unit_tests/test_shell_caller_owned.py::test_real_pipe_transfer_core_retains_one_original_owner[True-scope-publication]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_entry_uncertainty_survives_complete_activation_without_discarding_positive",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_retained_dropin_data_is_not_fresh_confirmed_positive[entry-uncertain]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_retained_dropin_data_is_not_fresh_confirmed_positive[registry-unavailable]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_retained_dropin_data_is_not_fresh_confirmed_positive[registry-with-entry]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_machine_root_resolution_failure_is_owner_uncertainty",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_machine_marker_failure_keeps_later_positive_and_marker_order",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_machine_marker_classification_keeps_absence_and_short_circuit[missing]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_machine_marker_classification_keeps_absence_and_short_circuit[regular-file]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_machine_marker_classification_keeps_absence_and_short_circuit[first-directory]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_related_entry_report_isolates_conversion_fault_at_field_boundary[role]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_related_entry_report_isolates_conversion_fault_at_field_boundary[delegate]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_source_probe_classifies_one_following_stat_without_boolean_suppression[missing]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_source_probe_classifies_one_following_stat_without_boolean_suppression[wrong-kind]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_source_probe_classifies_one_following_stat_without_boolean_suppression[loop]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_source_probe_classifies_one_following_stat_without_boolean_suppression[file]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_manifest_helpers_keep_later_positive_without_hiding_first_failure",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_resolution_helpers_keep_legacy_fallback_and_observe_failure_once[installed-anchor]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_resolution_helpers_keep_legacy_fallback_and_observe_failure_once[anchor-key]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_default_git_root_owner_reports_one_unchanged_lookup_without_private_output[timeout]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_default_git_root_owner_reports_one_unchanged_lookup_without_private_output[os-error]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_default_git_root_owner_reports_one_unchanged_lookup_without_private_output[nonzero]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_default_git_root_owner_reports_one_unchanged_lookup_without_private_output[empty]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_default_git_root_owner_reports_one_unchanged_lookup_without_private_output[none-output]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_default_git_root_owner_reports_one_unchanged_lookup_without_private_output[success]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_config_sources_uses_root_owner_once_and_preserves_explicit_bypass[explicit]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_config_sources_uses_root_owner_once_and_preserves_explicit_bypass[timeout-fallback]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_default_root_fixture_loads_without_ambient_procutil"
     ],
     "sources": {
         "tools/core_python_artifacts.py": "cfeae35bfee4537022e1026ffae498b61b23508426a676d9dc09ca8ab8d4b4a0",
@@ -3379,7 +3406,15 @@
         "tools/promotion_unit_tests/test_cell_installer.py": "56b67d4a86aefa4ccfeb2662205b46c0dec27cecc6e4ce530a19a5b5c55b1af1",
         "plugins/agent-machines/tests/test_cell_installer.py": "de004be5b70e1d4bed4945e766f393c167db0682979853eba4fa40814e01bf14",
         "plugins/agent-machines/scripts/cell_installer.py": "041a28230551d926c65ff00866213f5944ff5d1e0596c75e37ffa8cd0af64795",
-        "libs/versioned-runtime/versioned_runtime_construction.py": "df703e23675c232079f28c74eb85977b3460aef252e2bb2079bbf9081ad1480d"
+        "libs/versioned-runtime/versioned_runtime_construction.py": "df703e23675c232079f28c74eb85977b3460aef252e2bb2079bbf9081ad1480d",
+        "tools/promotion_unit_tests/test_related_acquisition.py": "8bc666d9c2c3b27158f138e56d478f2e2440d2723efabffbebab080828e5bf1c",
+        "plugins/agent-worktrees/src/agent_worktrees/acquisition_report.py": "a83793221939d9744aa1be72c839bf631d279cee1fc2bb67601ca8fe68c8deed",
+        "plugins/agent-worktrees/src/agent_worktrees/related_acquisition.py": "085a6a6745c793e781dbf8db9c56c14c140e0f379550af8fd3d34b32770139c9",
+        "plugins/agent-worktrees/src/agent_worktrees/config_acquisition.py": "50fad08afef90e0fbd39eb343202042d3e259c03ea1bc2e98a9d948ecb05de82",
+        "plugins/agent-worktrees/src/agent_worktrees/machine_config.py": "5b5d263e95ccb49725e25d1eaa3b529df5f37050fffd14f16160fc3d5798ea33",
+        "plugins/agent-worktrees/src/agent_worktrees/source_probes.py": "6d3a171db77782d50137e61ede48df22bab040eb0f5c3c18391675a11306a9a8",
+        "plugins/agent-worktrees/src/agent_worktrees/state_root.py": "c885e37c248086b63ba2822453c11c45be758437e71682f57e11d2c017ccf215",
+        "plugins/agent-worktrees/src/agent_worktrees/config_sources.py": "af6f2d7632d492635cb1ba5f7085de2066a2a3e50fd81f7c7b3f6a466e07e637"
     },
     "coverage_targets": [
         "tools/core_runtime_profile.py",
@@ -3537,7 +3572,14 @@
         "libs/agent-procutil/tests/sdk_visibility_sources.py",
         "libs/agent-procutil/tests/sdk_visibility_cases.py",
         "libs/installation-context/_installation_context_worker.py",
-        "plugins/agent-machines/scripts/cell_installer.py"
+        "plugins/agent-machines/scripts/cell_installer.py",
+        "plugins/agent-worktrees/src/agent_worktrees/acquisition_report.py",
+        "plugins/agent-worktrees/src/agent_worktrees/related_acquisition.py",
+        "plugins/agent-worktrees/src/agent_worktrees/config_acquisition.py",
+        "plugins/agent-worktrees/src/agent_worktrees/machine_config.py",
+        "plugins/agent-worktrees/src/agent_worktrees/source_probes.py",
+        "plugins/agent-worktrees/src/agent_worktrees/state_root.py",
+        "plugins/agent-worktrees/src/agent_worktrees/config_sources.py"
     ],
     "max_seconds": 300
 }
