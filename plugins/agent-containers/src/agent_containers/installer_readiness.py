@@ -54,18 +54,16 @@ def inspect_toolchain(
 
 
 def _driver_failures(name, fleet, command_finder) -> list[str]:
-    """A driver fleet needs its driver registered, and OpenSSH only when the
-    driver's members use the trusted SSH transport."""
+    """A driver fleet needs a registered driver that answers the protocol,
+    and OpenSSH only when its members use the trusted SSH transport."""
     from .external_driver import ExternalDriver, find_driver
 
     try:
-        spec = find_driver(fleet.driver)
-        if command_finder("ssh") is None and ExternalDriver(
-            spec, name, fleet,
-        ).capabilities.ssh_transport:
-            return [f"OpenSSH is required by fleet {name!r} (driver ssh_transport)"]
+        capabilities = ExternalDriver(find_driver(fleet.driver), name, fleet).capabilities
     except RuntimeError as exc:
         return [f"fleet {name!r}: {exc}"]
+    if capabilities.ssh_transport and command_finder("ssh") is None:
+        return [f"OpenSSH is required by fleet {name!r} (driver ssh_transport)"]
     return []
 
 

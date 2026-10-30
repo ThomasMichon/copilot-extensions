@@ -687,6 +687,19 @@ def discover(config: ContainersConfig) -> None:
         list_driver_members(config)
 
 
+def inspect_pinned(name: str, instance_id: str | None) -> dict | None:
+    """Inspect ``instance_id`` through the driver owning member ``name``.
+
+    A recreated member's previous incarnation is no longer enumerated, so its
+    id alone does not route; the member name does. Returns ``None`` when
+    ``name`` is not driver-owned (the caller continues on Docker).
+    """
+    route = owner_of(name)
+    if route is None:
+        return None
+    return route.driver.inspect(route.name, instance_id=instance_id)
+
+
 def require_ssh_transport(config: ContainersConfig, name: str, operation: str) -> None:
     """Refuse an SSH-only operation on a driver member that lacks SSH."""
     if not any(f.driver for f in config.fleets.values()):

@@ -324,7 +324,7 @@ class ExternalDriver(RuntimeDriver):
         return {
             "Id": info.container_id,
             "Name": "/" + info.name,
-            "State": {"Status": info.state},
+            "State": {"Status": info.state, "Running": info.is_running},
             "Config": {"Image": info.image, "Labels": dict(info.labels)},
             "HostConfig": {},
         }

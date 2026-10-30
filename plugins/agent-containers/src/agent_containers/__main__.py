@@ -123,6 +123,8 @@ def main(argv: list[str] | None = None) -> int:
     claim_provider_cli.add_claim_provider_parsers(sub)
     sub.add_parser("drivers", help="List registered external runtime drivers").add_argument(
         "--json", action="store_true", help="Emit JSON")
+    sub.add_parser("runtime-proxy", help=argparse.SUPPRESS).add_argument(
+        "argv", nargs=argparse.REMAINDER)
     rescue_capture_cli.add_rescue_capture_parser(sub)
     borrow_p = sub.add_parser("borrow", help="Lease a free container to an effort")
     borrow_p.add_argument("effort", help="Effort name (lease holder)")
@@ -313,9 +315,10 @@ def main(argv: list[str] | None = None) -> int:
             return lifecycle.dispatch_stop_or_remove(args)
         if args.command == "leases":
             return _cmd_leases()
-        if args.command == "drivers":
-            from .driver_cli import cmd_drivers
-            return cmd_drivers(args)
+        if args.command in ("drivers", "runtime-proxy"):
+            from . import driver_cli
+            return (driver_cli.cmd_drivers if args.command == "drivers"
+                    else driver_cli.cmd_runtime_proxy)(args)
         if args.command == "lifecycle-clear":
             return _cmd_lifecycle_clear(args)
         if args.command == "exec":
@@ -533,9 +536,13 @@ def _cmd_session_host_state(args: argparse.Namespace) -> int:
     """Emit lifecycle state without starting or attaching to the container."""
     from .lifecycle import inspect_container
 
-    _runtime_drivers().discover(load_config())
+    drivers = _runtime_drivers()
+    drivers.discover(load_config())
     try:
-        details = inspect_container(args.expected_instance or args.name)
+        details = (
+            drivers.inspect_pinned(args.name, args.expected_instance)
+            or inspect_container(args.expected_instance or args.name)
+        )
     except RuntimeError as exc:
         detail = str(exc)
         if "No such object" not in detail and "No such container" not in detail:

@@ -100,6 +100,21 @@ async def _codespace_policy(
         await transport.close()
 
 
+def _provider_command(metadata: dict[str, Any]) -> list[str] | None:
+    command = metadata.get("provider_command")
+    if not command:
+        from .provider_sources import discover_provider_manifests
+
+        provider = discover_provider_manifests().get("container")
+        command = list(provider.command) if provider is not None else None
+    if (
+        not isinstance(command, (list, tuple)) or not command
+        or any(not isinstance(part, str) or not part for part in command)
+    ):
+        return None
+    return list(command)
+
+
 async def _container_policy(target: SpawnTarget, operation: str) -> dict[str, Any]:
     from .session_host.container_transport import _run_provider
 
@@ -110,7 +125,15 @@ async def _container_policy(target: SpawnTarget, operation: str) -> dict[str, An
     identity = expected or name
     if not isinstance(identity, str) or not identity:
         raise AgentHostingError("Container hosting check requires an exact receiving instance")
-    rc, output, error = await _run_provider(["docker", "inspect", identity], timeout=30)
+    runtime = ["docker"]
+    if venue.get("driver"):
+        # The member lives in an external runtime driver's runtime, not
+        # necessarily Docker's: the provider proxies the same inspect/exec.
+        provider = _provider_command(metadata)
+        if provider is None:
+            raise AgentHostingError("Container receiver lacks an attributed runtime proxy")
+        runtime = [*provider, "runtime-proxy"]
+    rc, output, error = await _run_provider([*runtime, "inspect", identity], timeout=30)
     if rc:
         raise AgentHostingError(f"Container hosting inspection failed: {error.decode(errors='replace')}")
     try:
@@ -134,17 +157,8 @@ async def _container_policy(target: SpawnTarget, operation: str) -> dict[str, An
     )
     user = target.user
     if not user or not workspace:
-        command = metadata.get("provider_command")
-        if not command:
-            from .provider_sources import discover_provider_manifests
-
-            provider = discover_provider_manifests().get("container")
-            command = list(provider.command) if provider is not None else None
-        if (
-            not isinstance(command, (list, tuple)) or not command
-            or any(not isinstance(part, str) or not part for part in command)
-            or not isinstance(name, str) or not name
-        ):
+        command = _provider_command(metadata)
+        if command is None or not isinstance(name, str) or not name:
             raise AgentHostingError("Container receiver lacks an attributed context resolver")
         rc, output, error = await _run_provider([*command, "namespace-resolve", name], timeout=30)
         try:
@@ -164,7 +178,7 @@ async def _container_policy(target: SpawnTarget, operation: str) -> dict[str, An
     if not isinstance(workspace, str):
         raise AgentHostingError("Container receiver did not resolve an execution checkout")
     guest_command(workspace, operation)
-    prefix = ["docker", "exec", "-u", user, instance, "bash", "-lc"]
+    prefix = [*runtime, "exec", "-u", user, instance, "bash", "-lc"]
     if target.worktree_id and not target.explicit_cwd:
         from plugin_resolve.reflection import parse_execution_checkout
 

@@ -3154,7 +3154,7 @@
         "plugins/agent-bridge/src/agent_bridge/reader_admission.py": "3114cdb53c6f11f82f2c01e1cf4d46b4afaeebd28aa34e2d7f8459bb7fcc23c3",
         "plugins/agent-containers/scripts/standalone_build.py": "76c7baa65fcdf2458cbb9ac426d5e95f352e2e183a3721d40f7eb4d9f6626ee9",
         "plugins/agent-containers/setup.py": "26029b05beca57b1d95aff89f6cc2ee25a7e0496496b7cdc386105605c283796",
-        "plugins/agent-containers/src/agent_containers/__main__.py": "c1ec085abf43720b1e97830f663d38d2e15cd1eb1b5309c7fd8015811623178f",
+        "plugins/agent-containers/src/agent_containers/__main__.py": "792a9b99b6c05357a6e1cecf0465bdbbfc97d186c70be38c57d080f0dba938a1",
         "plugins/agent-containers/src/agent_containers/lifecycle.py": "e9c89feb8174c3b1cf6a0ad7c1a4a1fd5c233ca626cc4c4b98cdbfb0c649a412",
         "plugins/agent-containers/src/agent_containers/resolver.py": "026e04d2cb009ef54ab1bd831329fa616fcca2e55334bdf08cde38d31908b885",
         "plugins/agent-dispatch/src/agent_dispatch/spawn_diagnostics.py": "370d3f57d33db75e42e98441426fe46ea56b8706db8bd8fbb1089b3efaac43aa",

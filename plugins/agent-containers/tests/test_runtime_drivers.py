@@ -603,3 +603,67 @@ def test_readiness_requires_ssh_only_for_ssh_capable_drivers(fake, monkeypatch, 
     )
     assert any("OpenSSH" in f for f in failures) is failing
     assert not any("docker" in f for f in failures)
+
+
+def test_readiness_reports_unlaunchable_driver_even_with_openssh(fake):
+    from agent_containers.installer_readiness import inspect_toolchain
+
+    script = fake.root / "not-a-program"
+    script.write_text("not a program\n")
+    script.chmod(0o755)
+    (fake.drivers / "broken-exec.json").write_text(json.dumps(
+        {"schema_version": 1, "name": "broken-exec", "command": [str(script)]},
+    ))
+    failures = inspect_toolchain(
+        driver_config(driver="broken-exec"), command_finder=lambda name: f"/usr/bin/{name}",
+    )
+    assert any("runtime_unavailable" in f for f in failures)
+
+
+def test_runtime_proxy_serves_bridge_hosting_checks(fake, no_docker, tmp_path, monkeypatch, capsys):
+    config = _write_config(tmp_path, monkeypatch)
+    fleet.reconcile_up(config, "example")
+    member_id = {c.name: c for c in lifecycle.list_containers(config)}["example-1"].container_id
+    runtime_drivers.clear_bindings()  # agent-bridge runs the proxy in a fresh process
+    assert cli.main(["runtime-proxy", "inspect", member_id]) == 0
+    [document] = json.loads(capsys.readouterr().out)
+    assert (document["Id"], document["State"]["Running"]) == (member_id, True)
+    runtime_drivers.clear_bindings()
+    assert cli.main(["runtime-proxy", "exec", "-u", "vscode", member_id,
+                     "/bin/sh", "-c", "echo policy-ok"]) == 0
+    assert capsys.readouterr().out == "policy-ok\n"
+    assert cli.main(["runtime-proxy", "inspect", "plain-1"]) == 1  # never a Docker fallback
+
+
+def test_session_host_state_reports_recreated_incarnation_missing(
+    fake, no_docker, tmp_path, monkeypatch, capsys,
+):
+    config = _write_config(tmp_path, monkeypatch)
+    fleet.reconcile_up(config, "example")
+    old = {c.name: c for c in lifecycle.list_containers(config)}["example-1"].container_id
+    lifecycle.remove_container("example-1", force=True)
+    fleet.reconcile_up(config, "example")
+    runtime_drivers.clear_bindings()
+    assert cli.main(["session-host-state", "example-1", "--expected-instance", old]) == 0
+    assert json.loads(capsys.readouterr().out)["state"] == "missing"
+
+
+def test_copilot_login_operations_route_through_driver(fake, no_docker, monkeypatch):
+    from agent_containers import copilot_login
+
+    member = _provisioned(driver_config(size=1))
+    read = copilot_login._run(
+        ["docker", "exec", "-u", "vscode", member.container_id, "bash", "-lc", "echo config"],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert (read.returncode, read.stdout) == (0, "config\n")
+    seen = []
+    monkeypatch.setattr(copilot_login.subprocess, "run", lambda argv, **kw: seen.append(argv)
+                        or subprocess.CompletedProcess(argv, 0))
+    copilot_login._run(
+        ["docker", "exec", "-it", "-u", "vscode", member.container_id, "copilot", "login"],
+        interactive=True,
+    )
+    request = json.loads(seen[0][seen[0].index("--request") + 1])
+    assert seen[0][2] == "exec-stream"
+    assert (request["id"], request["argv"]) == (member.container_id, ["copilot", "login"])

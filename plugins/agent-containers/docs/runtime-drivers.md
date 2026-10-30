@@ -212,6 +212,22 @@ nor `ssh_transport`, resolution and dispatch fail with an explicit error. Set
 `relay_enabled: false` for that fleet or use a driver with one of those
 capabilities.
 
+## agent-bridge integration
+
+The resolver publishes `venue.driver` for driver-backed members. agent-bridge's
+pre-launch repository-hosting check normally runs `docker inspect`/`docker
+exec` itself; for a venue with `driver` it runs the same Docker-shaped commands
+through `agent-containers runtime-proxy inspect|exec ...`, which reaches the
+member through its driver with the same instance pinning and refuses anything
+that is not a driver member. An agent-bridge without this support fails closed
+(its Docker inspection cannot find the member) rather than skipping the check.
+
+Standalone entry points that receive a member name or instance id in a fresh
+process (`session-host-state`, `session-host-cleanup`, `runtime-proxy`)
+enumerate driver fleets first so the handle routes to its driver; a
+recreated member's previous instance id is inspected through the member name
+and reported as missing.
+
 ## Not part of the protocol
 
 Restricted posture, rescue/session-evidence capture and `unpause` remain
