@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** serial proposal and implementation PRs against `dev`
 - **Created:** 2026-10-29
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/harness-guidance`, `attributable-context-budget`
 - **Umbrella issue:** #9609
 
@@ -75,28 +75,28 @@ The operator confirmed the slug `client-request-interpretation`.
 ## Plan
 
 ### Phase 1 - Review the interpretation contract
-- [ ] Land this proposal through the normal review and merge flow.
-- [ ] Preserve the original local-only, operator-owned one-shot boundary.
+- [x] Land this proposal through the normal review and merge flow.
+- [x] Preserve the original local-only, operator-owned one-shot boundary.
 
 ### Phase 2 - Align snapshot launch settings
-- [ ] Default to the operator's current model/effort/context preferences;
+- [x] Default to the operator's current model/effort/context preferences;
   preserve explicit overrides and fail clearly rather than inventing a model.
-- [ ] Use a 300-second default finite timeout and update the guidance.
+- [x] Use a 300-second default finite timeout and update the guidance.
 
 ### Phase 3 - Interpret locally by default
-- [ ] Write a local companion JSON report after successful capture, without
+- [x] Write a local companion JSON report after successful capture, without
   changing the raw bytes or printing private content to stdout.
-- [ ] Identify instruction full-content/body matches with source paths,
+- [x] Identify instruction full-content/body matches with source paths,
   transformations and overlapping/ambiguous-match accounting.
-- [ ] List observed skill and subagent metadata, distinguishing complete
+- [x] List observed skill and subagent metadata, distinguishing complete
   rendered metadata, names-only advertisements and source frontmatter matches.
-- [ ] List declared and advertised tools, configured-name MCP correlations,
+- [x] List declared and advertised tools, configured-name MCP correlations,
   builtin classifications and unknown ownership separately.
-- [ ] Describe observed discovery/search surfaces and their schema capabilities,
+- [x] Describe observed discovery/search surfaces and their schema capabilities,
   without claiming that searches ran or returned their full discoverable set.
-- [ ] Report memory counts/bytes and builtin-prompt byte accounting with
+- [x] Report memory counts/bytes and builtin-prompt byte accounting with
   observed, source-matched, unsupported and unknown states as appropriate.
-- [ ] Support offline interpretation of an existing local request.
+- [x] Support offline interpretation of an existing local request.
 
 **Agent-recommended implementation details:** reuse existing read-only
 inventory/settings helpers, keep payload-only operation, use exclusive local
@@ -107,9 +107,9 @@ supported attribution boundary exists; expose measured system totals and
 unclassified remainder separately instead of fabricating completeness.
 
 ### Phase 4 - Qualify, publish and reconcile
-- [ ] Validate with focused synthetic parser/launcher fixtures and applicable
+- [x] Validate with focused synthetic parser/launcher fixtures and applicable
   repository checks; preserve raw-body and privacy regressions.
-- [ ] Apply the offline analyzer to an operator-approved existing snapshot
+- [x] Apply the offline analyzer to an operator-approved existing snapshot
   locally, emitting only report metadata to the coordinating conversation.
 - [ ] Land the reviewed implementation and release changefile through the
   normal merge/promotion flow, without an installed-consumer rollout.
@@ -119,20 +119,20 @@ unclassified remainder separately instead of fabricating completeness.
 
 These are agent-recommended checks for the requested behavior.
 
-- [ ] Configured model/effort/context and explicit override precedence are
+- [x] Configured model/effort/context and explicit override precedence are
   exercised without a real provider call; missing/invalid settings fail clearly.
-- [ ] The default timeout is 300 seconds and an explicit timeout still wins.
-- [ ] Exact Unicode/raw JSON is preserved; companion output never overwrites
+- [x] The default timeout is 300 seconds and an explicit timeout still wins.
+- [x] Exact Unicode/raw JSON is preserved; companion output never overwrites
   an existing file or prints captured text, descriptions or memory bodies.
-- [ ] Fixtures cover instruction body versus selector reference, identical
+- [x] Fixtures cover instruction body versus selector reference, identical
   files, newline transformations and non-overlapping byte-span totals.
-- [ ] Fixtures distinguish rendered skill/agent metadata from names alone,
+- [x] Fixtures distinguish rendered skill/agent metadata from names alone,
   source frontmatter, loaded bodies and runtime execution.
-- [ ] Function and custom/grammar tools, builtin/MCP/unknown ownership,
+- [x] Function and custom/grammar tools, builtin/MCP/unknown ownership,
   deferred advertisements and discovery schemas remain distinguishable.
-- [ ] Absence of recognized memory boundaries is not reported as proof of
+- [x] Absence of recognized memory boundaries is not reported as proof of
   zero; system-message or leftover bytes are not exact builtin-prompt bytes.
-- [ ] Offline analysis works without inference, hook execution, a running
+- [x] Offline analysis works without inference, hook execution, a running
   sibling service or publication of private snapshots/inventories.
 - [ ] Required CI/review and release checks pass; limitations are reflected
   in the living skill/usage documentation and the local report.
@@ -151,3 +151,45 @@ Unavailable attribution is a visible result, not a zero or guessed origin.
 - Confirmed existing scanner/preference prior art and the distinction between
   rendered metadata, wire declarations and authenticated source provenance.
 - Implementation awaits the proposal's review and merge.
+
+### 2026-10-30 - Implementation and qualification
+- Proposal #9613 merged after approval and required CI.
+- Implemented current-preference translation, a 300-second default, exclusive
+  companion reports and the offline entrypoint. Shared scanner readers retain
+  their existing defaults and add explicit config-root/comment/command controls.
+- Synthetic capture, parser, offline-entrypoint and native CLI controls
+  exercised the new behavior; existing settings-reader compatibility cases
+  passed. Corrected duplicate newline-normalization evidence and continued
+  parsing registered agent records across unindented descriptions.
+- Independent review identified multiplicative metadata correlations. Indexed
+  candidates and bounded records, comparisons and expanded evidence repair
+  that issue; targeted independent verification reported no remaining issue.
+- An approved private snapshot was interpreted locally without another
+  inference call. Only counts/coverage were inspected in the coordinating
+  conversation, and the input artifact remained unchanged. No private snapshot
+  or inventory is part of the public branch.
+- Exact memory totals and builtin-origin bytes remain explicitly unknown when
+  the request lacks a supported provenance boundary. Measured system bytes and
+  source-matched/unclassified accounting are not relabeled as builtin content.
+- Implementation review/merge, normal release and final archival remain.
+- Implementation review found incomplete MCP source discovery and resource
+  accounting, plus caller-relative custom-instruction lookup. Added native
+  project precedence, wrapped/bare maps, plugin inline/declared MCP sources,
+  shared read quotas and bounded correlation evidence. Relative instruction
+  paths now use the selected harness while existing scanner callers retain
+  their default base. Focused regressions cover the supported forms and limits.
+- Follow-up review found discovery reads outside those shared quotas and
+  quoted metadata names that missed rendered aliases. Discovery now uses the
+  same bounded cache as instruction/MCP reads, including settings and manifests;
+  cached manifests remain usable at the quota boundary. Quoted skill and agent
+  names normalize before alias generation. Existing scanner discovery contracts
+  and focused inventory regressions pass.
+- Selector-reference and memory-marker evidence now have explicit candidate
+  and work limits, lower-bound counts on truncation, and sparse UTF-8 offset
+  checkpoints rather than repeated full-prefix encoding. Multibyte and
+  exhaustion regressions pass alongside the combined snapshot cases.
+- A later review exercised missing frontmatter names, nested grammar
+  definitions, and unterminated marker openings. Preserved agent filename
+  fallback and skill warnings, added the native nested grammar shape, and
+  replaced suffix-rescanning regexes with forward-only delimiter scans.
+  Failed candidates are bounded and disclosed rather than silently omitted.

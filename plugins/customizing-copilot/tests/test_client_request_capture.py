@@ -66,6 +66,7 @@ def test_missing_client_reports_failure_without_prompt(tmp_path, monkeypatch, ca
     assert capture.main([
         "--working-directory", str(tmp_path), "--output", str(tmp_path / "request.json"),
         "--prompt", "SYNTHETIC_PRIVATE_SENTINEL",
+        "--model", "synthetic-model",
     ]) == 1
     printed = capsys.readouterr().out
     assert "FileNotFoundError" in printed
@@ -84,8 +85,10 @@ def test_relative_client_is_pinned_before_entering_harness(tmp_path, monkeypatch
         return {"status": "captured"}
 
     monkeypatch.setattr(capture, "capture", selected_client)
+    monkeypatch.setattr(capture, "analyze_file", lambda *_a, **_k: {"warnings": []})
     assert capture.main([
         "--working-directory", str(harness), "--output", str(tmp_path / "request.json"),
+        "--model", "synthetic-model",
     ]) == 0
     assert seen == [([str(tmp_path / "selected-client.exe")], harness)]
     capsys.readouterr()

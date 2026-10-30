@@ -18,6 +18,14 @@ import sys
 import threading
 import time
 from typing import BinaryIO
+from uuid import uuid4
+
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from snapshot_artifacts import local_output, reserve_output, write_report
+from snapshot_preferences import PreferenceError, resolve_preferences
+from snapshot_report import analyze_file
 
 MAX_BODY_BYTES = 16 * 1024 * 1024
 REPLY = "LOCAL_REQUEST_CAPTURE_COMPLETE"
@@ -205,24 +213,11 @@ def child_environment(key: str, port: int, model: str) -> dict[str, str]:
     return environment
 
 
-def local_output(path: Path) -> Path:
-    expanded = path.expanduser()
-    if os.name == "nt" and str(expanded).startswith(("\\\\", "//")):
-        raise ValueError("output must be on a local drive, not a UNC share")
-    parent = expanded.parent.resolve(strict=True)
-    if os.name == "nt":
-        import ctypes
-
-        if ctypes.windll.kernel32.GetDriveTypeW(str(parent.anchor)) == 4:
-            raise ValueError("output must not be on a mapped network drive")
-    if not parent.is_dir():
-        raise ValueError("output parent must be an existing directory")
-    return parent / expanded.name
-
-
 def capture(
     command: list[str], working_directory: Path, output_path: Path, *,
     prompt: str, model: str, timeout: float,
+    reasoning_effort: str | None = None, context: str | None = None,
+    session_id: str | None = None,
 ) -> dict[str, object]:
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("timeout must be finite and positive")
@@ -252,6 +247,12 @@ def capture(
                 *command, "--no-auto-update", "--no-remote", "--model", model,
                 "--no-ask-user", "-p", prompt,
             ]
+            for flag, value in (("--reasoning-effort", reasoning_effort), ("--context", context)):
+                if value is not None:
+                    argv.extend([flag, value])
+            if session_id is not None:
+                argv.append(f"--session-id={session_id}")
+                result["session_id"] = session_id
             # headless-guard: allow standalone payload has no installed process runtime
             child = subprocess.Popen(
                 argv, cwd=cwd,
@@ -299,8 +300,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--working-directory", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--prompt", default="Reply with a short acknowledgement. Do not use tools.")
-    parser.add_argument("--model", default="gpt-4.1")
-    parser.add_argument("--timeout-seconds", type=float, default=120)
+    parser.add_argument("--model", help="override the operator's current model")
+    parser.add_argument("--reasoning-effort", help="override the operator's current effortLevel")
+    parser.add_argument("--context", help="override the operator's current contextTier")
+    parser.add_argument("--timeout-seconds", type=float, default=300)
+    parser.add_argument("--agent-worktrees-command", help="catalog command for registry-source inventory")
     args = parser.parse_args(argv)
     executable = shutil.which(args.copilot_command)
     if executable is None:
@@ -308,18 +312,50 @@ def main(argv: list[str] | None = None) -> int:
     executable = str(Path(executable).resolve())
     if os.name == "nt" and Path(executable).suffix.lower() in {".cmd", ".bat", ".ps1"}:
         parser.error("select the native Copilot executable, not a shell shim")
+    result = None
+    descriptor = None
+    report_path = None
+    report_written = False
     try:
-        result = capture(
-            [executable], args.working_directory, args.output, prompt=args.prompt,
-            model=args.model, timeout=args.timeout_seconds,
+        preferences = resolve_preferences(
+            model=args.model, reasoning_effort=args.reasoning_effort, context=args.context,
+            working_directory=args.working_directory,
         )
-    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        output = local_output(args.output)
+        report_path = output.with_name(output.stem + ".analysis.json")
+        descriptor = reserve_output(report_path)
+        session_id = str(uuid4())
+        result = capture(
+            [executable], args.working_directory, output, prompt=args.prompt,
+            model=preferences["model"], timeout=args.timeout_seconds,
+            reasoning_effort=preferences["reasoning_effort"], context=preferences["context"],
+            session_id=session_id,
+        )
+        result["launch_preferences"] = preferences
+        if result["status"] == "captured":
+            report = analyze_file(
+                output, args.working_directory, session_id=session_id,
+                agent_worktrees_command=args.agent_worktrees_command,
+                launch_preferences=preferences,
+            )
+            write_report(descriptor, report)
+            report_written = True
+            result["analysis_path"] = str(report_path)
+            result["analysis_warning_count"] = len(report["warnings"])
+            result["analysis_status"] = "completed_with_warnings" if report["warnings"] else "completed"
+    except (OSError, ValueError, RuntimeError, ImportError, subprocess.SubprocessError) as error:
         # Never echo exception text, CLI output or argv: any may contain the prompt.
-        print(json.dumps({
+        captured = result is not None and result.get("captured_bytes", 0) > 0
+        result = result or {
             "schema": "copilot-extensions.local-request-capture", "version": 1,
-            "status": "failed", "error": type(error).__name__,
-        }))
-        return 1
+        }
+        code = str(error) if isinstance(error, PreferenceError) else type(error).__name__
+        result.update(status="failed", error=("analysis_" if captured else "") + code)
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+            if not report_written:
+                report_path.unlink()
     print(json.dumps(result))
     return 0 if result["status"] == "captured" else 1
 
