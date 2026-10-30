@@ -119,7 +119,10 @@ def run_migrations(config_path: Path | None = None) -> list[Any]:
         from .config import config_dir
 
         config_path = config_dir() / "config.yaml"
-    return _run(managed_files(Path(config_path)), REGISTRY)
+    from .config_write import config_file_lock
+
+    with config_file_lock(Path(config_path)):
+        return _run(managed_files(Path(config_path)), REGISTRY)
 
 
 def migrate_loaded(doc: dict[str, Any], schema_id: str = SCHEMA_CONFIG) -> dict[str, Any]:
