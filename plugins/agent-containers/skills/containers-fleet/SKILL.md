@@ -61,7 +61,13 @@ Looked up from `$AGENT_CONTAINERS_CONFIG`, then
 in-repo location), then the legacy bare `./containers.yaml` (still readable),
 then `~/.agent-containers/containers.yaml`, then (only when agent-worktrees is present <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 and the current harness is bound to external state) a knowledge-overlay
-`containers.yaml`. Copy the starter example,
+`containers.yaml`. Fleets shipped by active plugins (a `containersConfig`
+fragment path in their `plugin.json`) merge **beneath** that file at lowest
+precedence: override only the keys you need (e.g. `size`, or a nested
+`environment` entry) per fleet, and run `<catalog argv[0]> config-sources` to
+see which source supplied each fleet and key. Fragments may define `fleets:`
+only; same-named fleets from two plugins resolve to the plugin whose
+`name@marketplace` sorts first. Copy the starter example,
 [`references/containers.yaml`](references/containers.yaml), and adapt. A fleet
 built from a devcontainer spec, at a glance:
 
@@ -291,6 +297,8 @@ util-linux `script` and `setsid` helpers in the restricted image.
 - `<catalog argv[0]> namespace-list` — bridge-facing provider CLI health. If
   bridge dispatch cannot see containers, check that the provider manifest exists
   under `~/.agent-bridge/providers.d/` and points at the absolute binstub. <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
+- `<catalog argv[0]> config-sources [--json]` — show the selected config file,
+  plugin-shipped fleet fragments, and which source supplied each fleet and key.
 - `<catalog argv[0]> config-migrate` — migrate/stamp only the machine-local
   `~/.agent-containers/containers.yaml`; repo/cwd configs are never rewritten. <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 
