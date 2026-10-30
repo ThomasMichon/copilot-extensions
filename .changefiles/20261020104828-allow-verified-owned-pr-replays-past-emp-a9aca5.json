@@ -1,9 +1,0 @@
-{
-  "comment": "Allow verified owned-PR replays past empty commits already in the pinned upstream base",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

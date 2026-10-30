@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit durable admission of selected authenticated client releases without executing or activating artifacts.",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

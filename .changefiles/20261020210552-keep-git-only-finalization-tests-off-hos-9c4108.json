@@ -1,9 +1,0 @@
-{
-  "comment": "Keep Git-only finalization tests off host mux and process termination.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
