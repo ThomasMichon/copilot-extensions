@@ -30,7 +30,7 @@ configuration, a successful deployment or authority to discard existing work.
 
 - **Topology:** reviewed proposal, then dependent implementation PRs.
 - **Host (owns PRs):** `placid-staple`.
-- **Delegates:** bounded PowerShell implementation/testing under host integration;
+- **Delegates:** bounded source implementation/testing under host integration;
   no independent publication, operational authority or workstream ownership.
 - **Handoff:** issue, effort checklists and merged source receipts; preserve
   unresolved release and installed-consumer qualification explicitly.
@@ -150,7 +150,7 @@ agent-recommended safeguards. It authorizes source work, not live recovery.
 ### Phase 5 - Diagnose and recover retained tasks
 
 - [x] Review the [task-recovery amendment](task-recovery.md) before implementation.
-- [ ] Deliver #9636's diagnostic snapshot and distinct fenced recovery actions
+- [x] Deliver #9636's diagnostic snapshot and distinct fenced recovery actions
       through the existing REST, client, CLI and MCP owners.
 - [ ] Resolve the amendment's complete validation and release checklist;
       retain Phase 4's independent installed-consumer gates.
