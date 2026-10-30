@@ -14,6 +14,163 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
+def _pretool_recovery_fixture(tmp_path, fault):
+    home = tmp_path / "home"
+    cwd = home / "consumer"
+    scripts = home / ".agent-worktrees" / "bin"
+    scripts.mkdir(parents=True)
+    (cwd / ".git").mkdir(parents=True)
+    (cwd / ".agent-worktrees").mkdir()
+    (cwd / ".agent-worktrees" / "config.yaml").write_text("stateless: true\n", encoding="utf-8")
+    for path in SCRIPTS.glob("*.py"):
+        shutil.copyfile(path, scripts / path.name)
+    shutil.copyfile(SCRIPTS / "pre-tool-hook.ps1", scripts / "pre-tool-hook.ps1")
+    interpreter = sys.executable.replace("'", "''")
+    (scripts / "resolve-runtime.ps1").write_text(
+        "param([string]$TraceMode)\n$AwPy = '" + interpreter + "'\n", encoding="utf-8-sig",
+    )
+    if fault == "missing-entry":
+        (scripts / "pre-tool-hook.ps1").unlink()
+        (scripts / "hook_client.py").unlink()
+    elif fault in ("compat-deny-failure", "compat-partial-failure"):
+        (scripts / "pre-tool-hook.ps1").unlink()
+        output = '{"permissionDecision":"deny","permissionDecisionReason":"confirmed fixture policy"}'
+        if fault == "compat-partial-failure":
+            output = '{"permissionDecision":'
+        (scripts / "hook_client.py").write_text(
+            "import sys\nsys.stdout.write(" + repr(output) + ")\nsys.stdout.flush()\nraise SystemExit(3)\n",
+            encoding="utf-8",
+        )
+    elif fault == "missing-policy":
+        (scripts / "hook_pre_policy.py").unlink()
+    elif fault == "broken-policy":
+        (scripts / "hook_pre_policy.py").write_text(
+            "raise RuntimeError('fixture policy import failed')\n", encoding="utf-8",
+        )
+    if fault.startswith("failed-component-"):
+        (scripts / "statelessness_guard.py").write_text(
+            "def decide(*args, **kwargs):\n    raise RuntimeError('fixture component failure')\n",
+            encoding="utf-8",
+        )
+        (scripts.parent / "repos.yaml").write_text(
+            "repos:\n  fixture:\n    class: worktree\n    windows: '" + str(cwd) + "'\n",
+            encoding="utf-8",
+        )
+    env = dict(os.environ, HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home))
+    if fault == "failed-component-ask":
+        env["ANCHOR_WRITE_GUARD_MODE"] = "ask"
+    for name in (
+        "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_RT_ROOT",
+        "AGENT_WORKTREES_PAYLOAD_ROOT", "AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION",
+    ):
+        env.pop(name, None)
+    env["PRETOOL_KILLSWITCH_STATE_FILE"] = str(home / "absent-stop.json")
+    return home, cwd, scripts, env
+
+
+def _assert_pretool_recovery_outcome(result):
+    assert "permissionDecision" not in result, result
+    context = result.get("additionalContext")
+    assert isinstance(context, str) and context, result
+    for field in ("agent-worktrees", "effect:", "next:", "retry:"):
+        assert field in context.lower(), context
+
+
+def _run_pretool_manifest(tmp_path, consumer, fault, protected=False, read=False, raw=False):
+    import shlex
+
+    from agent_procutil import no_window_kwargs
+    from test_session_start_hook_fail_open import _bash, _hooks, _powershell
+
+    home, cwd, scripts, env = _pretool_recovery_fixture(tmp_path, fault)
+    target = cwd / "efforts" / "active" / "fixture.md"
+    event = {
+        "toolName": "create" if protected else "view" if read else "powershell",
+        "cwd": str(cwd),
+        "toolArgs": {"path": str(target)} if protected or read else {
+            "command": "agent-worktrees doctor --json",
+        },
+    }
+    payload_text = "[]" if fault == "malformed-event" else json.dumps(event)
+    binaries = home / "bin"
+    binaries.mkdir()
+    if consumer == "powershell":
+        shell = _powershell()
+        argv = [shell, "-NoLogo", "-NoProfile", "-Command", _hooks("preToolUse")[0][consumer]]
+        if fault == "missing-runtime":
+            (scripts / "resolve-runtime.ps1").write_text(
+                "param([string]$TraceMode)\n$AwPy = $null\n", encoding="utf-8-sig",
+            )
+            env["PATH"] = str(binaries)
+    else:
+        shell = _bash()
+        if fault == "missing-runtime":
+            assert (scripts / "hook_client.py").is_file()
+            env["PATH"] = str(binaries)
+        else:
+            shim = binaries / "python3"
+            shim.write_text(
+                "#!/bin/sh\nexec " + shlex.quote(Path(sys.executable).as_posix()) + ' "$@"\n',
+                encoding="utf-8", newline="\n",
+            )
+            shim.chmod(0o755)
+            env["PATH"] = str(binaries) + os.pathsep + env.get("PATH", "")
+        argv = [shell, "-c", _hooks("preToolUse")[0][consumer]]
+    completed = subprocess.run(
+        argv, input=payload_text, capture_output=True, text=True, encoding="utf-8",
+        cwd=cwd, env=env, timeout=35, **no_window_kwargs(),
+    )
+    assert completed.returncode == 0, (completed.stdout, completed.stderr)
+    assert not target.exists()
+    if raw:
+        return completed
+    return json.loads(completed.stdout or "{}")
+
+
+@pytest.mark.parametrize("consumer", ["powershell", "bash"])
+@pytest.mark.parametrize("fault", [
+    "missing-entry", "missing-policy", "broken-policy", "missing-runtime", "malformed-event",
+])
+def test_pretool_manifest_unavailable_keeps_repair_usable(tmp_path, consumer, fault):
+    _assert_pretool_recovery_outcome(_run_pretool_manifest(tmp_path, consumer, fault))
+
+
+@pytest.mark.parametrize("consumer", ["powershell", "bash"])
+def test_pretool_manifest_unavailable_keeps_read_usable(tmp_path, consumer):
+    _assert_pretool_recovery_outcome(_run_pretool_manifest(tmp_path, consumer, "missing-runtime", read=True))
+
+
+@pytest.mark.parametrize("consumer", ["powershell", "bash"])
+def test_pretool_manifest_confirmed_violation_still_denied(tmp_path, consumer):
+    result = _run_pretool_manifest(tmp_path, consumer, "none", protected=True)
+    assert result.get("permissionDecision") == "deny", result
+    assert "personal" in result.get("permissionDecisionReason", "").lower(), result
+
+
+@pytest.mark.parametrize("consumer", ["powershell", "bash"])
+@pytest.mark.parametrize("decision", ["deny", "ask"])
+def test_pretool_manifest_component_failure_retains_protected_decision(tmp_path, consumer, decision):
+    result = _run_pretool_manifest(tmp_path, consumer, "failed-component-" + decision, protected=True)
+    assert result.get("permissionDecision") == decision, result
+    assert "anchor" in result.get("permissionDecisionReason", "").lower(), result
+    assert "statelessness_guard.py evaluation failed" in result.get("additionalContext", ""), result
+
+
+@pytest.mark.parametrize("consumer", ["powershell", "bash"])
+def test_pretool_compat_failed_entry_preserves_streamed_deny(tmp_path, consumer):
+    completed = _run_pretool_manifest(tmp_path, consumer, "compat-deny-failure", raw=True)
+    assert json.loads(completed.stdout) == {
+        "permissionDecision": "deny", "permissionDecisionReason": "confirmed fixture policy",
+    }
+    assert "output completeness is unknown" in completed.stderr
+
+
+@pytest.mark.parametrize("consumer", ["powershell", "bash"])
+def test_pretool_compat_partial_failure_does_not_append_replacement_json(tmp_path, consumer):
+    completed = _run_pretool_manifest(tmp_path, consumer, "compat-partial-failure", raw=True)
+    assert completed.stdout == '{"permissionDecision":'
+    assert "output completeness is unknown" in completed.stderr
+
 
 @pytest.fixture
 def client(monkeypatch):

@@ -827,14 +827,18 @@ def _merge_pre_decisions(current: dict, new: dict) -> dict:
     return result
 
 
+def _pre_unavailable(boundary: str) -> dict:
+    return {"additionalContext": (
+        f"[agent-worktrees pre-tool] Boundary: {boundary}. "
+        "Effect: this component could not evaluate policy; missing evidence is not authorization. This hook did not execute the tool; independent policy decisions remain in force. Next: inspect the selected installation pre-tool files and existing repairing-worktrees guidance; use its catalog command read-only doctor only if available. Retry: do not repeat the tool solely for this warning; inspect its result first, and retry evaluation only after this boundary changes."
+    )}
+
+
 def _fallback_pre(payload: dict, home: Path, *, require_policy: bool = False) -> dict:
     policy = _load_file(Path(__file__).resolve().with_name("hook_pre_policy.py"))
     decide_policy = getattr(policy, "decide", None)
     if not callable(decide_policy):
-        return {
-            "permissionDecision": "deny",
-            "permissionDecisionReason": "Required agent-worktrees pre-tool policy helper is unavailable",
-        }
+        return _pre_unavailable("hook_pre_policy.py unavailable")
     return decide_policy(
         payload, home=home, load_sibling=_load_sibling, merge_decisions=_merge_pre_decisions,
         budget_seconds=_FALLBACK_PRE_BUDGET_S, require_policy=require_policy,
@@ -870,6 +874,8 @@ def decide(
 ) -> dict:
     home = home or Path.home()
     contextual = bool(os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip())
+    if kind == "preToolUse" and not isinstance(payload, dict):
+        return _pre_unavailable("event payload is not an object")
     if kind == "preToolUse" and require_policy:
         return _fallback_pre(payload, home, require_policy=True)
     if (
@@ -922,8 +928,17 @@ def main(argv: list[str] | None = None) -> int:
             return 0
     try:
         raw = sys.stdin.read()
-        payload = json.loads(raw) if raw.strip() else {}
+        try:
+            payload = json.loads(raw) if raw.strip() else {}
+        except ValueError:
+            if kind != "preToolUse":
+                raise
+            sys.stdout.write(json.dumps(_pre_unavailable("event JSON invalid")))
+            return 0
         if not isinstance(payload, dict):
+            if kind == "preToolUse":
+                sys.stdout.write(json.dumps(_pre_unavailable("event payload is not an object")))
+                return 0
             payload = {}
         if kind == "sessionStart":
             payload = _enrich_session_payload(payload)
@@ -954,7 +969,8 @@ def main(argv: list[str] | None = None) -> int:
         elif kind != "sessionEnd" and (result or strict_policy):
             sys.stdout.write(json.dumps(result, separators=(",", ":")))
     except Exception:
-        pass
+        if kind == "preToolUse":
+            sys.stdout.write(json.dumps(_pre_unavailable("policy client evaluation failed")))
     # sessionStart always emits exactly one JSON object -- write it here,
     # outside the try block, so an exception anywhere above still leaves
     # valid, parseable stdout for the host.
