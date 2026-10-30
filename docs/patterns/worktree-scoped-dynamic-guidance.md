@@ -36,8 +36,9 @@ Creation and session start replace that copy, including while another session
 is running; replacement does not claim the model has reloaded it.
 Legacy checked-in delivery separates a concise
 `.github/instructions/**/*.instructions.md` selector from its lock-owned,
-non-auto-loaded full body in `.github/copilot/context-fallbacks/`; explicitly
-declared inline kernels retain their ambient policy. Relying only on the
+non-auto-loaded full body in `.github/copilot/context-fallbacks/`. Every newly
+maintained full fallback uses this pair, including former inline kernels.
+Relying only on the
 reviewed body as the source of truth would leave two gaps:
 
 1. **Sync-lag is user-facing, and the fix requires rights an ordinary
@@ -50,7 +51,7 @@ reviewed body as the source of truth would leave two gaps:
    bug.
 2. **Some launch paths have no hook and no session-state folder at all** (a
    fully headless, sandboxed, or cloud-hosted agent invocation). For those,
-   the checked-in selector plus reviewed fallback (or explicit inline kernel)
+   the checked-in selector plus reviewed fallback
    remains the usable offline path without cache writes. Other launch paths
    can acquire current managed copies instead. Plugin enablement and the
    declaration own source selection; a separate content-authentication graph is
@@ -286,35 +287,62 @@ this permissionless copy step.
 
 ### 2. Selectors, reviewed bodies, and exact authority
 
-Declarations explicitly choose `deliveryMode: "selector"` or `"inline"`.
-Undeclared mode remains legacy inline for compatibility; the shipped suite
-declares every source. A selector replaces the checked-in full body at the
+New authoring always produces a selector and a non-discovered reviewed body.
+Declarations may still contain legacy `deliveryMode: "inline"` or omit the mode;
+the maintenance provider accepts these inputs but normalizes their output to
+`"selector"`. `skipLocalCache` remains accepted legacy metadata, not a requirement
+for an automatically discovered control floor. Canonical policy templates remain
+unchanged and startup still copies their complete bodies.
+A selector replaces the checked-in full body at the
 existing `.github/instructions/<plugin>/...instructions.md` destination.
 Its complete reviewed body is owned separately at the derived literal path
 `.github/copilot/context-fallbacks/<plugin>/...md`, preserving the destination's
-subdirectories. This path is outside instruction discovery, has no instruction
-suffix, and is referenced using code spans rather than auto-expanding links.
+subdirectories. The entire derived path must exclude `.instructions.md`,
+case-insensitively, including repeated or embedded forms; its basename must not
+be a native `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` or
+`copilot-instructions.md` name. This path is outside instruction discovery and
+is referenced using code spans rather than auto-expanding links.
 
 The version-2 lock owns both artifacts, their digests and byte counts. Sync
 validates legacy version-1 lock/preimages before migrating; fallback, selector
 and lock participate in the same compare-before-replace rollback transaction.
-Changing a selector back to inline retires only its integrity-verified owned
-fallback in that transaction; rollback restores it. Foreign edits block
-retirement, and unrelated/orphan files are never swept automatically.
+An inline declaration cannot turn a selector back into an automatically
+discovered full body or retire its fallback. Foreign edits block updates,
+and unrelated/orphan files are never swept automatically.
 Missing/malformed reviewed content, foreign ownership and unsafe paths block
 offline reviewed maintenance, not available managed-copy selection.
 Source-update freshness remains an advisory distinct from those
 integrity failures. A new enabled source without reviewed artifacts blocks as
 `projection-missing` until its complete enabled canonical local body is verified;
-partial, forged or absent bodies do not qualify. A required cache-free inline
-control kernel still needs its static delivery floor. Authenticated complete
-local delivery permits advisory `projection-source-update` for pending reviewed
+partial, forged or absent bodies do not qualify. Complete canonical local
+delivery permits advisory `projection-source-update` for pending reviewed
 freshness; valid stale reviewed guidance remains advisory even without local
 refresh. An unowned existing destination or missing locked artifact still
 blocks. Adopted, consented
 deterministic maintenance normally refreshes reviewed projections once daily;
 ordinary work does not require synchronous checked-in resync. This does not
 assert that installed payloads or running systems have been updated.
+
+#### Provider-first upgrade and rollback window
+
+The existing declaration contract remains version 1 and the authored lock
+remains version 2; no command or argument is added. Current readers retain
+legacy version-1 inline locks and version-2 inline/selector pairs. A valid
+legacy inline preimage migrates through the same transaction, with rollback
+restoring its bytes and lock if any write fails. A malformed, edited, foreign
+or unsafe preimage is not migration authority.
+
+Readers that already support version-2 selector/fallback pairs can read newly
+authored pairs without an upgrade. Providers predating that pair format are
+outside this window: upgrade them before maintaining or reading these artifacts,
+rather than deleting lock fields or treating malformed output as success.
+Introduce the normalizing provider before migrating declarations or adopters.
+Then explicitly declare selectors and remove obsolete cache-free flags before
+allowing a prior selector-capable writer to resume maintenance. An older writer
+given an old inline declaration can recreate the duplicate automatic body;
+reader compatibility alone does not establish writer rollback safety or enforce
+the new startup-only requirement. Keep that writer paused until its supported
+declaration inputs are in place, or retain the upgraded provider.
 
 Generated projections are not an authoring surface: change the canonical
 template or declaration instead of touching its generated output. Adopters may
@@ -418,24 +446,15 @@ test executes the actual rendered argv with an empty PATH, exercising settings
 discovery and raw managed-copy selection rather than mocking the parser, including
 user, user-local, repository and repository-local activation.
 
-#### Inline decision kernels
+#### Decision kernels use the same delivery path
 
-The explicit inline allowlist retains existing policy prose intact:
-
-- `agent-conduct-guidance`: `process-hygiene-fallback` governs every spawn;
-  `delegation-fallback` governs the initial research/delegation decision;
-  `scratch-space-fallback` governs every ad hoc write;
-  `secret-masking-fallback` governs credential-shaped construction.
-- `ai-attribution:publication-safety` governs publication before it happens.
-- `copilot-extensions-harness:contribution-boundary` governs contribution intake.
-- `efforts:completion-gate` governs termination and completion claims.
-- `customizing-copilot:local-cache-catchall` is the recovery control kernel.
-
-This is a source-owned declaration list, not a substring classifier. Other
-sources are acquisition-gated procedures/pointers. No policy prose is slimmed
-to fabricate savings; inline kernels can remain duplicated when both copies
-are discovered, because their identified decision-point contract requires
-ambient retention.
+Safety, publication, completion and recovery kernels retain their complete
+canonical policy prose. Startup publishes those templates like other declared
+sources; periodic maintenance keeps only their thin selectors automatically
+discoverable. Their full offline copies wait outside discovery until needed.
+There is no inline allowlist authorizing a second automatic policy body.
+Repository-authored invariants remain repository-owned and are not removed by
+this plugin-source migration.
 
 ### 3. Full reads and late-source recovery
 
@@ -450,7 +469,7 @@ Selectors contain no body receipt. The pure envelope validator detects omitted
 middle bytes, truncated bodies, receipt-only summaries and quoted envelopes.
 It verifies byte completeness, **not model admission or compliance**.
 
-The catch-all remains unconditionally inline. It inventories managed copies
+The current generated catch-all inventories managed copies
 after startup because a bare launch can discover
 instructions before a hook writes local bodies. It covers late, partial and
 unpaired sources without treating a global marker as whole-corpus coverage.
@@ -605,8 +624,8 @@ Consented reviewable sync owns the checked-in selector, non-auto-loaded full
 fallback and lock as one transaction; permissionless local rendering never
 writes those artifacts. A write-incapable or hookless launch can read the
 owned reviewed fallback through its selector without installed-source
-freshness requirements. Explicit inline kernels, including the recovery
-control, remain ambient.
+freshness requirements. Former inline kernels, including the recovery control,
+use the same generated-current and on-demand-fallback paths.
 
 A new enabled source can be read from its managed copy without a checked-in
 selector, fallback or lock entry. The offline floor remains useful when there
@@ -692,7 +711,7 @@ boundary the Phase 7 wiring didn't already cover.
 and offline receipt bindings; `instruction_copies` selects declared managed
 copies without content admission; `instruction_delivery_io` validates reviewed
 fallback bytes; `instruction_projections` owns lock migration, sync and offline
-scanning. The inline catch-all and literal rendered
+scanning. The generated catch-all and literal rendered
 argv fixture cover recovery and executable resolver discovery. Historical
 preamble proofs do not substitute for current native host acceptance.
 

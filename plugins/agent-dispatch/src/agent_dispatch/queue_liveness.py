@@ -118,8 +118,12 @@ class LivenessMixin:
 
         - ``live``    -> leave it (the *same* owner still holds it, no matter how
           long -- there is **no** wall-clock expiry).
-        - ``gone``    -> **fenced** transition (owner confirmed gone). A
-          **headless** body (a fleet/local spawn-reservation owns it -- see
+        - ``gone``    -> **fenced** transition (owner confirmed gone).
+          An ordinary hosted task that already recorded its native owner is
+          suspended with that ownership intact: a stopped process does not
+          retire its conversation. Its unfinished claim or missing native
+          binding is retained for explicit reconciliation. Other **headless** bodies (a fleet/local
+          spawn-reservation owns them -- see
           :meth:`_active_headless_handle`) keeps the pre-existing behavior
           unchanged: requeue, or ``dead_letter`` past ``max_attempts``. A
           **CLI-embodied** ``started`` task (no headless reservation owns it) is
@@ -287,7 +291,18 @@ class LivenessMixin:
                 ).fetchone()
                 if restricted:
                     continue
-                suspend = cli_embodied and status == Status.STARTED
+                retained = conn.execute(
+                    "SELECT driver FROM spawn_reservations WHERE task_id=?"
+                    " AND state IN (?,?,?,?) ORDER BY attempt DESC LIMIT 1",
+                    (task_id, SpawnState.RESERVING, SpawnState.SPAWNED,
+                     SpawnState.COLD, SpawnState.RELEASING),
+                ).fetchone()
+                ordinary_native = (
+                    retained is not None and retained["driver"] == "ordinary-bridge"
+                )
+                if ordinary_native and (not owner_session_id or status != Status.STARTED):
+                    continue
+                suspend = (cli_embodied or ordinary_native) and status == Status.STARTED
                 if suspend:
                     to_status = Status.SUSPENDED
                 else:
@@ -339,7 +354,8 @@ class LivenessMixin:
                     if to_status == Status.QUEUED:
                         note = "owner-gone"
                     elif to_status == Status.SUSPENDED:
-                        note = "owner-gone: auto-suspended (CLI-embodied session ended)"
+                        kind = "ordinary native" if ordinary_native else "CLI-embodied"
+                        note = f"owner-gone: auto-suspended ({kind} session ended)"
                     else:
                         note = "owner-gone: abandoned (max attempts exhausted)"
                     self._audit(

@@ -161,6 +161,7 @@ def validate_start(
             return
     if rows and rows[0]["agent_info"]:
         from .ordinary_agent_facts import identity
+        from .ordinary_native_bindings import retained_start_generation
         ordinary = rows[0]
         info = json.loads(ordinary["agent_info"])
         actual = identity(info)
@@ -170,7 +171,7 @@ def validate_start(
             or native_id != actual.native
             or (ordinary["native_session_id"] and ordinary["native_session_id"] != actual.native)
             or actual.worktree != ordinary["reserved_worktree"]
-            or not info["task_generation"] <= task.generation <= info["task_generation"] + 1
+            or not retained_start_generation(conn, task, info)
             or ("/" in (task.owner or "") and task.owner.split("/", 1)[1] != ordinary["reserved_worktree"])
         ):
             raise TaskError("start owner does not match the ordinary created-agent reservation")

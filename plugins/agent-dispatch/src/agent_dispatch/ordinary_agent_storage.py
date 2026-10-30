@@ -8,12 +8,13 @@ from typing import Any
 from .ordinary_agent_facts import (
     identity, native_conflict, owner_record, validate_created, validate_resumed,
 )
-from .ordinary_native_bindings import inherited_retirement, native_bindings
+from .ordinary_native_bindings import inherited_retirement, native_bindings, retained_redrive_facts
 from .queue_records import SpawnReservation, SpawnState, Status, TaskError
 
 
 def reservation_native_facts(queue: Any, key: str) -> dict:
     with queue._connect() as conn:
+        conn.execute("BEGIN")
         row = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (key,)).fetchone()
         task = queue._fetch(conn, row["task_id"]) if row else None
         if row is None or task is None:
@@ -24,10 +25,17 @@ def reservation_native_facts(queue: Any, key: str) -> dict:
             error = _admission_error(conn, row, task)
         except TaskError as exc:
             known, retired, reconcile_retirement, error = [], [], False, str(exc)
+        redrive, redrive_error = None, None
+        if row["driver"] == "ordinary-bridge":
+            try:
+                redrive = retained_redrive_facts(conn, row, task)
+            except TaskError as exc:
+                redrive_error = str(exc)
     return {
         "known_native_session_ids": known, "retired_native_session_ids": retired,
         "ordinary_assignment_error": error,
         "inherited_retirement_reconcilable": reconcile_retirement,
+        "ordinary_redrive": redrive, "ordinary_redrive_error": redrive_error,
     }
 
 

@@ -199,16 +199,16 @@ def fallback_destination(destination: str) -> str:
         or not path.name.endswith(".instructions.md")
     ):
         raise ValueError("invalid selector destination")
-    if path.name.removesuffix(".instructions.md").casefold() in {
-        "agents", "claude", "gemini", "copilot-instructions",
+    fallback_name = path.name.removesuffix(".instructions.md") + ".md"
+    fallback = (
+        PurePosixPath(".github/copilot/context-fallbacks")
+        / PurePosixPath(*path.parts[2:]).with_name(fallback_name)
+    )
+    if ".instructions.md" in str(fallback).casefold() or fallback_name.casefold() in {
+        "agents.md", "claude.md", "gemini.md", "copilot-instructions.md",
     }:
         raise ValueError("fallback name would match automatic instruction discovery")
-    return str(
-        PurePosixPath(".github/copilot/context-fallbacks")
-        / PurePosixPath(*path.parts[2:]).with_name(
-            path.name.removesuffix(".instructions.md") + ".md"
-        )
-    )
+    return str(fallback)
 
 
 def _json(value: Mapping[str, object]) -> str:
