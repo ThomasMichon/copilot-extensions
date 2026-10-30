@@ -755,6 +755,11 @@ rows until the replacement generation completes. Unsupported authority is an
 actionable engine-upgrade error. Explicit `AGENT_WORKTREES_PICKER_STREAM=0`
 selects current one-shot reads, not a direct computation fallback.
 
+Machine-SSH listing and follow-feed calls suppress configured local and remote
+forwarding with `ClearAllForwardings=yes`; aliases, routing, identity, host trust
+and timeouts remain unchanged. Interactive launches and effectful commands retain
+their configured forwarding behavior.
+
 Pressing `r` immediately shows retry progress and preserves the selected source,
 including All. Before a first successful list, the list area distinguishes
 `Worktrees connection unavailable` from a reachable service whose worktrees

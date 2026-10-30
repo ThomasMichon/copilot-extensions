@@ -1431,6 +1431,46 @@ def test_remote_argv_carries_ssh_hardening():
         assert "ServerAliveInterval" in opts and "ServerAliveCountMax" in opts
 
 
+@pytest.mark.parametrize("shell", ["bash", "pwsh"])
+def test_listing_and_follow_suppress_profile_forwarding(monkeypatch, shell):
+    from worktree_manager.production_picker.picker_tui.loader_current_feed import feed_argv
+
+    monkeypatch.setattr(data_ssh, "_project", lambda: "proj")
+    listing = data_ssh._argv_for(shell, "peer-alias", "proj", classify=True)
+    source = data_ssh.Source("peer", "Linux", listing, alias="peer-alias", shell=shell)
+    stream = data_ssh._stream_argv(source)
+    follow = feed_argv(source)
+    expected = "proj list --json --current --classify --mux-details"
+    if shell == "pwsh":
+        expected += " --include-other-platforms"
+
+    for argv, suffix in ((listing, ""), (stream, " --stream"), (follow, " --stream --follow")):
+        assert argv[0] == "ssh"
+        assert argv[-2] == "peer-alias"
+        assert argv[1:-2].count("ClearAllForwardings=yes") == 1
+        assert argv[argv.index("ClearAllForwardings=yes") - 1] == "-o"
+        command = expected + suffix
+        assert data_ssh._remote_cmd_str(argv).endswith(
+            command if shell == "pwsh" else shlex.quote(command)
+        )
+        assert "StrictHostKeyChecking=no" not in argv
+        assert "ConnectTimeout=10" in argv
+
+
+@pytest.mark.parametrize("shell", ["bash", "pwsh"])
+def test_effectful_wrapper_preserves_profile_forwarding(shell):
+    inner = "proj cleanup --json"
+    generic = data_ssh._ssh_argv("peer-alias", inner)
+    effectful = data_ssh._wrap_remote(shell, "peer-alias", inner)
+    assert effectful[:-1] == generic[:-1]
+    assert generic[0] == "ssh"
+    assert generic[-2] == "peer-alias"
+    assert not any("Forward" in arg for arg in generic[1:-2])
+    assert data_ssh._remote_cmd_str(effectful).endswith(
+        inner if shell == "pwsh" else shlex.quote(inner)
+    )
+
+
 def test_classify_fallback_is_encoding_aware(monkeypatch):
     """The classify-unsupported retry must strip --classify from a pwsh
     -EncodedCommand argv too (the flag lives inside the base64 blob, so a plain
