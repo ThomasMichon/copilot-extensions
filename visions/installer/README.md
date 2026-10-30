@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-10-29
+- **Last revised:** 2026-10-30
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -508,6 +508,33 @@ health-gated activation, followed by inexpensive local integration. Verified
 progress survives retry. Transient failures receive safe retry and mitigation;
 authority, policy and integrity blockers remain explicit and durable. Existing
 lifecycle authorities, package governance and rollback remain intact.
+
+### reliable-working-footprint
+Install, update and repair retain responsibility for reaching a verified usable
+footprint. Slow delivery is an experience problem, not a reason to fail work
+that continues making progress. A partially prepared environment, selected but
+inoperable generation or reported success without usable commands and services
+does not satisfy installation.
+
+Genuine failure, detected hangs, interruption and cancellation preserve or
+restore an operable footprint rather than stranding the device. Preparation
+does not destroy the healthy incumbent before a replacement is ready; recovery
+continues through the existing installation authority. Keeping a healthy prior
+generation preserves operability but does not misreport the requested update
+as complete. Source, integrity and ownership requirements remain intact.
+
+### progress-renewed-hang-protection
+Installation supervision uses renewable inactivity protection, not a fixed
+total-runtime ceiling that terminates progressing work. Lower-level stdout or
+stderr activity is an accepted indication of progress. Each layer reports or
+relays progress so useful work remains visible through nested installation
+flows, without corrupting machine-readable results.
+
+A layer's quiet allowance outlasts the expected duration of its non-reporting
+atomic work. Genuine no-progress hangs remain detectable and recoverable;
+supervisors do not manufacture keepalives that conceal a stalled worker.
+Stopping hung work preserves native cleanup, cancellation and working-footprint
+recovery rather than abandoning installation state.
 
 ### historical-generated-command-migration
 Known generated commands from earlier versions migrate or retire automatically

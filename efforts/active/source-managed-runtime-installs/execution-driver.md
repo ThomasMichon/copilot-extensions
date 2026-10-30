@@ -167,6 +167,46 @@ to remove the automatic hold.
    clearing a hold are not successful fleet installation; actual update,
    selected/serving health, preservation and full timing remain required.
 
+### Reliable completion and renewable inactivity
+
+The [Installer vision](../../../visions/installer/README.md#reliable-working-footprint)
+requires a verified working footprint before speed optimization. Progressing
+installation is not failed merely for exceeding a total-time estimate.
+Lower-level stdio activity can renew a shorter inactivity window; each layer
+must report or relay progress, and its window must exceed its expected
+non-reporting atomic unit. Genuine hangs and inoperable installation state,
+not elapsed duration alone, are the functional failure concerns.
+
+**Agent-recommended implementation and validation:**
+
+1. Inventory existing observer, constructor, phase and child-process deadlines.
+   Separate caller observation limits from the admitted installer's lifetime
+   and reuse the existing execution/cleanup owners.
+2. Renew a monotonic inactivity window from actual stdout/stderr activity,
+   including output arriving before a newline. Forward progress through nested
+   boundaries without polluting machine-readable results or introducing a
+   parallel watchdog.
+3. Give quiet in-process work real progress reports and each atomic operation
+   a suitable quiet allowance. Do not mask a stalled child with timer-generated
+   supervisor keepalives.
+4. On genuine stalls or cancellation, settle the owned native process tree
+   and retain or restore verified operability through the current lifecycle.
+   Preserve failed-candidate truth, exclusive installation custody, source
+   policy and rollback; do not terminate unrelated processes.
+5. Qualify work that completes beyond old total limits while emitting progress,
+   quiet atomic work inside its allowance, real silent deadlock, both stdio
+   channels, cancellation and recovery with and without a healthy incumbent.
+   Verify usable commands/services rather than treating a no-error return as
+   a working footprint.
+6. Exercise the corrected ordinary path in admitted native environments and
+   record duration separately from functional acceptance. Existing unattended
+   holds and explicit/manual admission keep their independent meaning.
+
+Review this amendment before implementation. Existing watchdog and diagnostic
+contributors retain their implementation scopes; reuse and coordinate with
+those owners rather than creating a second installer or competing patch.
+This plan does not itself execute a host repair or relax integrity checks.
+
 The [fresh-default revision](fresh-default-installation.md) governs construction
 and replacement selection. Ordinary updates already select mostly fresh
 installation when incremental/ZDD recognition fails; that fallback is not an

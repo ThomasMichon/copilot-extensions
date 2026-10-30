@@ -267,6 +267,13 @@ class AdoReader:
                 records.extend(values)
                 if len(records) > MAX_RECORDS:
                     raise ProviderError("ADO iteration changes exceed the record limit")
+                if "nextSkip" not in body and "nextTop" not in body:
+                    if not values:
+                        return Collection(tuple(records))
+                    # Cursorless native responses need a real empty-page
+                    # witness; a short nonempty page is not terminal evidence.
+                    skip += len(values)
+                    continue
                 next_skip, next_top = body.get("nextSkip"), body.get("nextTop")
                 if (
                     type(next_skip) is not int or type(next_top) is not int
