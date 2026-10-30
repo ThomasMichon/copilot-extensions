@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import sys
 import shutil
+import subprocess
 
 import pytest
 
@@ -19,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from manager_suite_fixture import SCHEMA, exercise, prepare, require_venue, settle
 from manager_suite_fixture import _record
 import manager_suite_fixture as fixture
+import manager_suite_diagnostics as diagnostics
 
 
 def test_fullsuite_refuses_execution_outside_the_disposable_venue(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -76,6 +78,62 @@ def test_task_inventory_captures_only_owned_unicode_records(
     assert {row["name"] for row in rows} == {f"owned-{i}" for i in range(owned_count)}
     assert len(captured[0]) < 4096 and "foreign" not in captured[0]
     assert all("\u2014" in row["xml"] for row in rows)
+
+
+def test_diagnostics_copy_only_advertised_request_logs(tmp_path: Path) -> None:
+    root = tmp_path / "home" / ".copilot-extensions" / "update-driver"
+    root.mkdir(parents=True)
+    identifier = "a" * 32
+    (root / (identifier + ".log")).write_text("actual failure", encoding="utf-8")
+    (root / ("b" * 32 + ".log")).write_text("unrelated", encoding="utf-8")
+    (root / "witness.json").write_text("opaque witness", encoding="utf-8")
+    diagnostics.retain_driver_logs(tmp_path, f"Update request {identifier}: interrupted")
+    copied = list((tmp_path / "driver-logs").iterdir())
+    assert [path.name for path in copied] == [identifier + ".log"]
+    assert copied[0].read_text(encoding="utf-8") == "actual failure"
+    assert (root / "witness.json").read_text(encoding="utf-8") == "opaque witness"
+
+
+def test_diagnostics_bound_logs_without_mutating_the_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "home" / ".copilot-extensions" / "update-driver"
+    root.mkdir(parents=True)
+    identifier = "a" * 32
+    source = root / (identifier + ".log")
+    source.write_bytes(b"old lines\nactual failure")
+    monkeypatch.setattr(diagnostics, "MAX_LOG_BYTES", 14)
+    diagnostics.retain_driver_logs(tmp_path, f"Update request {identifier}; log:")
+    assert source.read_bytes() == b"old lines\nactual failure"
+    assert (tmp_path / "driver-logs" / source.name).read_bytes() == b"actual failure"
+    report = json.loads((tmp_path / "driver-diagnostics.json").read_text(encoding="utf-8"))
+    assert report[0]["truncated"] is True
+
+
+def test_missing_driver_log_does_not_replace_the_primary_error(tmp_path: Path) -> None:
+    diagnostics.retain_driver_logs(tmp_path, f"Update request {'a' * 32}: interrupted")
+    report = json.loads((tmp_path / "driver-diagnostics.json").read_text(encoding="utf-8"))
+    assert report[0]["error"].startswith("FileNotFoundError:")
+
+
+@pytest.mark.parametrize("check", (False, True))
+def test_failed_commands_retain_driver_evidence_without_changing_their_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, check: bool,
+) -> None:
+    from agent_procutil import _caller_owned
+
+    identifier = "a" * 32
+    root = tmp_path / "home" / ".copilot-extensions" / "update-driver"
+    root.mkdir(parents=True)
+    (root / (identifier + ".log")).write_text("inner failure", encoding="utf-8")
+    result = subprocess.CompletedProcess(["fixture"], 1, f"Update request {identifier}", "failure")
+    monkeypatch.setattr(_caller_owned, "run", lambda *args, **kwargs: result)
+    if check:
+        with pytest.raises(AssertionError, match="failure"):
+            fixture._run(["fixture"], tmp_path, check=True)
+    else:
+        assert fixture._run(["fixture"], tmp_path, check=False) is result
+    assert (tmp_path / "driver-logs" / (identifier + ".log")).read_text(encoding="utf-8") == "inner failure"
 
 
 @pytest.mark.parametrize("mode", ("normal", "repair"))
