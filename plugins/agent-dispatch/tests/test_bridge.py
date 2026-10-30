@@ -837,15 +837,14 @@ def test_resume_steered_owner_routes_remote_machine_over_ssh(monkeypatch):
     assert calls["kwargs"]["input"] == "resume now"
 
 
-def test_resume_steered_owner_uses_carrier_without_ssh(monkeypatch):
+def test_resume_steered_owner_uses_standard_command_not_carrier(monkeypatch):
     calls = {}
     monkeypatch.setattr(
         bridge.remote_dispatch, "local_machine", lambda: "coordinator"
     )
 
-    def send(_self, host, target, **kwargs):
-        calls.update(host=host, target=target, **kwargs)
-        return {"message_id": "message-1"}
+    def send(*_args, **_kwargs):
+        pytest.fail("owner delivery must use the standard Bridge command")
 
     monkeypatch.setattr(
         bridge.bridge_remote.LocalBridgeRemoteClient,
@@ -855,8 +854,13 @@ def test_resume_steered_owner_uses_carrier_without_ssh(monkeypatch):
     monkeypatch.setattr(
         bridge.shutil,
         "which",
-        lambda _name: pytest.fail("carrier-backed send must not resolve ssh"),
+        lambda name: "/usr/bin/ssh" if name == "ssh" else None,
     )
+    def run(argv, **kwargs):
+        calls.update(argv=argv, **kwargs)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(bridge, "run_ssh_command", run)
 
     assert bridge.resume_steered_owner(
         "  Worker-Host  /worktree-1",
@@ -865,19 +869,14 @@ def test_resume_steered_owner_uses_carrier_without_ssh(monkeypatch):
         owner_session_id="session-42",
         idempotency_key="wake:task-42:1:2",
     )
-    assert calls == {
-        "host": "worker-host",
-        "target": "worktree-1",
-        "sender": "agent-dispatch-steer",
-        "message": "resume now",
-        "kind": "prompt",
-        "expected_session_id": "session-42",
-        "idempotency_key": "wake:task-42:1:2",
-        "timeout": 20.0,
-    }
+    assert calls["argv"][5] == "worker-host"
+    assert calls["argv"][6].startswith("agent-bridge send ")
+    assert "--expected-session-id session-42" in calls["argv"][6]
+    assert "--idempotency-key wake:task-42:1:2" in calls["argv"][6]
+    assert calls["input"] == "resume now"
 
 
-def test_resume_steered_owner_does_not_fallback_after_carrier_error(monkeypatch):
+def test_resume_steered_owner_requires_standard_command_transport(monkeypatch):
     monkeypatch.setattr(
         bridge.remote_dispatch, "local_machine", lambda: "coordinator"
     )
@@ -891,7 +890,7 @@ def test_resume_steered_owner_does_not_fallback_after_carrier_error(monkeypatch)
     monkeypatch.setattr(
         bridge.shutil,
         "which",
-        lambda _name: pytest.fail("carrier operation errors must not fall back"),
+        lambda _name: None,
     )
 
     assert not bridge.resume_steered_owner(

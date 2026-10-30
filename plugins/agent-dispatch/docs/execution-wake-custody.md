@@ -65,6 +65,43 @@ the final current-token/task/closure check. Historical qualification cannot
 silently disappear into that legacy path. A qualified caller missing canonical
 provenance or the coordinator application incarnation refuses transport visibly.
 
+## Hosted native owners and CLI owners
+
+The default owner and detached-waiter drainers select delivery from the retained
+execution facts, not from the shape of the `machine/worktree` owner address.
+For a hosted body, the current reservation must retain matching Bridge, native,
+worktree, execution-project and host identity, with no retirement or release
+intent. Incomplete or conflicting hosted facts refuse delivery; they do not
+fall back to the represented CLI inbox.
+
+Native delivery uses the standard Bridge command:
+
+```text
+agent-bridge --json send <bridge-session> --expected-native-session-id <native-session> --idempotency-key <wake-id> --prompt-file - --no-wait
+```
+
+The original prompt goes through stdin. The native session is distinct from the
+Bridge handle; the existing outbox ID is the receipt key on every retry. Bridge
+owns exact-native admission, stopped-session recovery without recreation, live
+HTTP contract negotiation (generation 51) and same-key receipt recovery. Dispatch
+does not add an inbox, resume protocol or fallback after an unsupported,
+conflicting, busy or unknown send outcome. Busy native sessions currently refuse
+delivery; native queueing is not supported. Existing retry budgets and qualified
+unknown-custody holds remain independent constraints.
+
+Explicit CLI owners retain their existing queued prompt contract. Local and
+remote delivery both use standard Bridge commands; remote commands use the
+existing SSH transport rather than a separate message API. Source release is
+provider-first: install a Bridge CLI/provider supporting native keyed sends
+before adopting this Dispatch consumer. An older CLI rejects unsupported flags,
+and a current CLI refuses an unsupported receiving daemon before effects. There
+is no safe native-to-CLI downgrade. Legacy CLI-owner sends remain available.
+
+These selectors do not change wake leases, current task/owner/generation checks
+or final execution custody. The generation stored with initial agent creation is
+not the current task generation: claiming the task advances that generation.
+Current outbox fences and retained native history govern continuation.
+
 ## Remaining gates
 
 Focused tests exercise both actual drainers with synthetic transport and

@@ -686,7 +686,11 @@ started -> suspended -> started
   the stable wake id as the bridge idempotency key. Task
   generation, owner/session identity, lifecycle status, and latest-wake identity
   fence stale delivery after a requeue, completion, or newer wake. Delivery is
-  additionally fenced by the bridge against the exact captured session. Only
+  additionally fenced by the bridge against the exact captured session.
+  Hosted bodies use their retained Bridge/native identity and the standard
+  keyed native `send` command, never the represented CLI inbox. Explicit CLI
+  owners keep queued delivery; see [wake delivery and custody](docs/execution-wake-custody.md)
+  for compatibility, busy refusal and unknown-outcome limits. Only
   the active coordinator route claims wakes; short delivery leases let its
   promoted successor recover an interrupted claim without racing a live
   predecessor. Wakes are edge-triggered: the resumed/replacement worker runs
