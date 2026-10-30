@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .queue_records import SpawnReservation, SpawnState, TaskError
 from .queue_spawn_cooling import require_no_cooling
+from .queue_execution_wakes import require_no_wake_for_release
 
 
 class SpawnReleaseMixin:
@@ -33,6 +34,7 @@ class SpawnReleaseMixin:
                 conn.execute("ROLLBACK")
                 raise TaskError(f"no such reservation: {key}")
             require_no_cooling(row)
+            require_no_wake_for_release(self, conn, row)
             if row["state"] not in SpawnState.ACTIVE:
                 conn.execute("ROLLBACK")
                 raise TaskError(

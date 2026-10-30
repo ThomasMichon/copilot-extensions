@@ -50,6 +50,12 @@ def wake_custody_clear_sql(outbox: str) -> str:
         wake_clear
         + f" AND NOT EXISTS (SELECT 1 FROM spawn_reservations cooling"
         f" WHERE cooling.task_id = {outbox}.task_id AND cooling.cooling_token IS NOT NULL)"
+        + " AND NOT EXISTS (SELECT 1 FROM spawn_reservations releasing"
+        f" WHERE releasing.task_id = {outbox}.task_id"
+        " AND releasing.attempt = (SELECT MAX(attempt) FROM spawn_reservations latest"
+        " WHERE latest.task_id = releasing.task_id)"
+        " AND (releasing.release_requested = 1 OR releasing.conversation_retired = 1"
+        " OR releasing.state = 'releasing'))"
         + " AND NOT EXISTS (SELECT 1 FROM execution_send_custody c"
         " JOIN spawn_reservations r ON r.key = c.reservation_key"
         " JOIN tasks retained ON retained.id = c.task_id"
@@ -60,8 +66,10 @@ def wake_custody_clear_sql(outbox: str) -> str:
     )
 
 
-def require_no_wake_for_cooling(queue, conn: sqlite3.Connection, task) -> None:
-    """The existing outbox excludes a stop racing or following a native wake."""
+def _require_no_owner_wake(
+    queue, conn: sqlite3.Connection, task, *, operation: str, protect_pending: bool,
+) -> None:
+    """The existing outbox excludes retirement racing or following a native wake."""
     for table in TABLES:
         rows = conn.execute(
             f"SELECT * FROM {table} WHERE task_id = ? AND ("
@@ -72,7 +80,9 @@ def require_no_wake_for_cooling(queue, conn: sqlite3.Connection, task) -> None:
             if table == "run_waiter_wakes" and row["sender"] == CLAIM_RELEASE_SENDER:
                 continue
             if row["execution_send_state"] in {"pending", "unknown"} or row["status"] == "delivering":
-                raise TaskError("wake delivery excludes physical cooling")
+                raise TaskError(f"wake delivery excludes physical {operation}")
+            if row["status"] == "pending" and not protect_pending:
+                continue
             current = (
                 queue._wake_is_current(task, WakeOperation._from_row(row))
                 if table == "wake_outbox" else queue._run_waiter_wake_is_current(
@@ -80,7 +90,17 @@ def require_no_wake_for_cooling(queue, conn: sqlite3.Connection, task) -> None:
                 )
             )
             if current:
-                raise TaskError("current owner wake excludes physical cooling")
+                raise TaskError(f"current owner wake excludes physical {operation}")
+
+
+def require_no_wake_for_cooling(queue, conn: sqlite3.Connection, task) -> None:
+    _require_no_owner_wake(queue, conn, task, operation="cooling", protect_pending=True)
+
+
+def require_no_wake_for_release(queue, conn: sqlite3.Connection, reservation) -> None:
+    task = queue._fetch(conn, reservation["task_id"])
+    if task is not None:
+        _require_no_owner_wake(queue, conn, task, operation="release", protect_pending=False)
 
 
 def unresolved_wake_send(
@@ -191,6 +211,15 @@ class QueueExecutionWakesMixin:
                 " AND cooling_token IS NOT NULL LIMIT 1", (task.id,),
             ).fetchone():
                 raise ExecutionSendUnresolved("spawn cooling remains unresolved")
+            reservation = conn.execute(
+                "SELECT * FROM spawn_reservations WHERE task_id = ? ORDER BY attempt DESC LIMIT 1",
+                (task.id,),
+            ).fetchone()
+            if reservation and (
+                reservation["release_requested"] or reservation["conversation_retired"]
+                or reservation["state"] == "releasing"
+            ):
+                raise TaskError("wake reservation release or retirement advanced")
             require_execution_send_reconciliation(conn, task.id, exclusive_key=task.exclusive_key)
             if row["execution_send"] is not None:
                 raise TaskError("settled wake send is observation only; retain its transport history")

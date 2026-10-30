@@ -51,6 +51,7 @@ from .queue_spawn_release import SpawnReleaseMixin
 from .queue_spawn_cooling import require_no_cooling, validate_cooling_publication
 from .queue_execution_handoff import require_execution_admission
 from .queue_execution_custody import require_execution_send_reconciliation
+from .queue_execution_wakes import require_no_wake_for_release
 
 log = logging.getLogger("agent-dispatch.queue")
 
@@ -469,6 +470,8 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                 conn.execute("COMMIT")
                 raise TaskError(f"no such reservation: {key}")
             validate_cooling_publication(row, cooling_token, expected_startup_revision)
+            if release_requested or to_state in {SpawnState.FAILED, SpawnState.SETTLED, SpawnState.RELEASING}:
+                require_no_wake_for_release(self, conn, row)
             if row["state"] not in allowed_from:
                 conn.execute("COMMIT")
                 raise TaskError(

@@ -116,6 +116,16 @@ retains this protection until a natural newer waiter or changed task/owner
 incarnation supersedes it. Cleanup-only claim releases do not block cooling.
 There is no timeout-to-absence assumption or new delivery/cooling lease.
 
+Release and cleanup use the same outbox exclusion. A release request,
+retirement publication or cleanup claim cannot overtake an admitted wake.
+A release that wins before wake admission remains authoritative: the selector
+and final admission refuse its releasing/retired reservation, and the delivery
+adapter revalidates persisted task, target and native facts rather than using
+an earlier reservation snapshot. A pending, never-admitted wake alone does not
+prevent release. Current accepted wakes remain protected until the natural
+owner/waiter/task lifecycle advances; unknown send custody still requires its
+original reconciliation, including after task completion.
+
 ## Remaining gates
 
 Focused tests exercise both actual drainers with synthetic transport and

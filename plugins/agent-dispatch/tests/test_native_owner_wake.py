@@ -116,10 +116,11 @@ def test_native_wake_does_not_guess_local_machine_for_remote_owner(hosted, monke
 
 def test_native_wake_fleet_uses_same_standard_command_over_ssh(hosted, monkeypatch):
     queue, task_id = hosted
-    original = queue.latest_reservation(task_id)
-    monkeypatch.setattr(queue, "latest_reservation", lambda _id: replace(
-        original, session_handle=f"fleet-body:host-a:{BRIDGE}", creating_host="host-a",
-    ))
+    with queue._connect() as conn:
+        conn.execute(
+            "UPDATE spawn_reservations SET session_handle=?, creating_host=? WHERE task_id=?",
+            (f"fleet-body:host-a:{BRIDGE}", "host-a", task_id),
+        )
     monkeypatch.setattr(bridge.remote_dispatch, "local_machine", lambda: "coordinator")
     monkeypatch.setattr(bridge.shutil, "which", lambda name: "/usr/bin/ssh" if name == "ssh" else None)
     calls = []

@@ -7,8 +7,36 @@ from .bridge_command_delivery import native_prompt, steering_prompt
 from .ordinary_agent_facts import identity, native_conflict
 from .ordinary_native_bindings import native_bindings
 from .queue import TaskQueue
-from .queue_records import SpawnState, Status, TaskError
+from .queue_records import SpawnReservation, SpawnState, Status, TaskError
 from .spawn_factories import _parse_fleet_body_handle, _parse_local_body_handle
+
+
+def _require_retained_owner(task, reservation: SpawnReservation, owner, owner_session_id):
+    if (
+        task is None or task.owner != owner or task.owner_session_id != owner_session_id
+        or task.status not in Status.OWNED or not owner_session_id
+        or reservation.state not in {SpawnState.SPAWNED, SpawnState.COLD}
+        or reservation.conversation_retired or reservation.release_requested
+        or reservation.cooling_token is not None
+        or reservation.exclusive_key is not None and reservation.exclusive_released
+        or reservation.conclusion_state == "pending"
+        or not isinstance(reservation.agent_info, dict)
+    ):
+        raise TaskError("hosted wake owner or retained execution facts are unavailable")
+
+
+def _target_identity(reservation: SpawnReservation, task, owner: str) -> tuple[str, str]:
+    if reservation.driver == "restricted-bridge":
+        from .restricted_delivery import wake_identity
+        return wake_identity(reservation, task)
+    actual = identity(reservation.agent_info)
+    if (
+        actual.worktree != reservation.worktree
+        or actual.project != reservation.allocation_project
+        or "/" in owner and owner.partition("/")[2] != actual.worktree
+    ):
+        raise TaskError("hosted wake does not match captured native/worktree identity")
+    return actual.bridge, actual.native
 
 
 def deliver_owner_wake(
@@ -28,29 +56,8 @@ def deliver_owner_wake(
             idempotency_key=idempotency_key,
         )
     task = queue.get(task_id)
-    if (
-        task is None or task.owner != owner or task.owner_session_id != owner_session_id
-        or task.status not in Status.OWNED or not owner_session_id
-        or reservation.state not in {SpawnState.SPAWNED, SpawnState.COLD}
-        or reservation.conversation_retired or reservation.release_requested
-        or reservation.cooling_token is not None
-        or reservation.exclusive_key is not None and reservation.exclusive_released
-        or reservation.conclusion_state == "pending"
-        or not isinstance(reservation.agent_info, dict)
-    ):
-        raise TaskError("hosted wake owner or retained execution facts are unavailable")
-    if reservation.driver == "restricted-bridge":
-        from .restricted_delivery import wake_identity
-        bridge_id, native_id = wake_identity(reservation, task)
-    else:
-        actual = identity(reservation.agent_info)
-        if (
-            actual.worktree != reservation.worktree
-            or actual.project != reservation.allocation_project
-            or "/" in owner and owner.partition("/")[2] != actual.worktree
-        ):
-            raise TaskError("hosted wake does not match captured native/worktree identity")
-        bridge_id, native_id = actual.bridge, actual.native
+    _require_retained_owner(task, reservation, owner, owner_session_id)
+    bridge_id, native_id = _target_identity(reservation, task, owner)
     fleet = _parse_fleet_body_handle(handle)
     local = _parse_local_body_handle(handle)
     machine, separator, worktree = owner.partition("/")
@@ -67,7 +74,17 @@ def deliver_owner_wake(
         ).fetchone()
         if row is None:
             raise TaskError("hosted wake reservation is unavailable")
-        known, retired = native_bindings(conn, row, task)
+        current = SpawnReservation._from_row(row)
+        current_task = queue._fetch(conn, task_id)
+        _require_retained_owner(current_task, current, owner, owner_session_id)
+        if current_task.generation != task.generation or any(
+            getattr(current, field) != getattr(reservation, field)
+            for field in ("session_handle", "driver", "worktree", "allocation_project", "creating_host")
+        ):
+            raise TaskError("hosted wake retained target changed before transport")
+        if _target_identity(current, current_task, owner) != (bridge_id, native_id):
+            raise TaskError("hosted wake retained native identity changed before transport")
+        known, retired = native_bindings(conn, row, current_task)
     if native_conflict(native_id, known, retired):
         raise TaskError("hosted wake conflicts with known or retired native identity")
     host = fleet[0] if fleet else reservation.creating_host
