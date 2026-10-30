@@ -1661,10 +1661,13 @@ ref  = "canary"
 
 Git-backed acquisition uses per-command Windows long-path support for cloning,
 fetching and checkout, including Main and custom refs. It does not change
-user-level or machine-level Git configuration. Main and custom-ref checkouts
-materialize only `worktree-manager`, its shared `libs`, and `.gitattributes`,
+user-level or machine-level Git configuration. Routine Main and custom-ref
+self-update checkouts materialize only `worktree-manager`, its shared `libs`,
+and `.gitattributes`,
 including when reusing an existing staging checkout; unrelated plugin paths
 are not needed for Manager self-update.
+The standalone bootstrap expands retained sparse staging before construction:
+fresh engine repair also needs the owning `agent-worktrees` installer and SDK.
 
 If acquired Manager content differs from an already published slot with the
 same package version, installation uses a distinct immutable repair generation

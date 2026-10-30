@@ -84,15 +84,35 @@ def _fake_tools(bin_dir: Path, uv_exit: int, python_exit: int) -> None:
         uv.chmod(0o755)
 
 
+def _retained_sparse(repo: Path, root: Path) -> None:
+    installer = repo / "plugins" / "agent-worktrees" / "scripts" / "install.ps1"
+    installer.parent.mkdir(parents=True)
+    installer.write_text("# Engine installer fixture\n", encoding="utf-8")
+    installer.with_suffix(".sh").write_text("# Engine installer fixture\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), *_GIT_ID, "commit", "-qm", "engine"], check=True)
+    staging = root / "staging"
+    subprocess.run(["git", "clone", "-q", "--no-checkout", str(repo), str(staging)], check=True)
+    sparse = staging / ".git" / "info" / "sparse-checkout"
+    sparse.write_text("/worktree-manager/\n/libs/\n/.gitattributes\n", encoding="utf-8")
+    subprocess.run([
+        "git", "-c", "core.sparseCheckout=true", "-c", "core.sparseCheckoutCone=false",
+        "-C", str(staging), "checkout", "-q", "HEAD",
+    ], check=True)
+    assert not (staging / installer.relative_to(repo)).exists()
+
+
 def _run(
     tmp_path: Path, uv_exit: int, ref: str = "main", python_exit: int = 0,
     *, host: str | None = None, encoded: bool = False, linked_uv: bool = False,
     long_path: bool = False, incomplete_checkout: bool = False,
-    longpaths_disabled: bool = False,
+    longpaths_disabled: bool = False, retained_sparse: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     repo = _source_repo(tmp_path, long_path=long_path)
     root = tmp_path / "manager-root"
     root.mkdir()
+    if retained_sparse:
+        _retained_sparse(repo, root)
     (root / "config.toml").write_text(
         f'[source]\nrepo = "{repo.as_posix()}"\nref = "{ref}"\n', "utf-8"
     )
@@ -173,6 +193,18 @@ def test_failed_runtime_command_fails_the_bootstrap(tmp_path):
 def test_successful_uv_succeeds(tmp_path):
     result = _run(tmp_path, uv_exit=0)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_fresh_bootstrap_restores_engine_sdk_from_retained_sparse_staging(tmp_path):
+    from worktree_manager.core_install import install_script
+
+    result = _run(tmp_path, uv_exit=0, retained_sparse=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    staging = tmp_path / "manager-root" / "staging"
+    expected = staging / "plugins" / "agent-worktrees" / "scripts" / (
+        "install.ps1" if os.name == "nt" else "install.sh"
+    )
+    assert install_script(staging) == expected
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows Git long-path checkout")
