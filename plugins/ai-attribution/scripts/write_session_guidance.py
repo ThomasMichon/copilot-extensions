@@ -195,6 +195,10 @@ def _cache_profile(
             profile_guidance=guidance, profile_header=header,
             profile_environment={
                 "version": 1, "home": str(home), "repo": repo, "cwd": os.getcwd(),
+                "home_environment": (
+                    (os.environ.get("USERPROFILE") or os.environ.get("HOME", ""))
+                    if os.name == "nt" else os.environ.get("HOME", "")
+                ),
                 "dirs": os.environ.get("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", ""),
                 "xdg": os.environ.get("XDG_CONFIG_HOME", ""),
                 "appdata": os.environ.get("APPDATA", ""),

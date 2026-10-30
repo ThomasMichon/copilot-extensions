@@ -205,6 +205,8 @@ def test_large_profile_never_displaces_policy_or_tightening(monkeypatch, tmp_pat
     base = kernel + "x" * (base_bytes - len(kernel))
     monkeypatch.setattr(writer, "_run_contributor", lambda *args: base)
     monkeypatch.setenv("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", "")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     config = tmp_path / ".copilot" / "ai-attribution.json"
     config.parent.mkdir()
     config.write_text(json.dumps({"version": 1, "rules": [
@@ -270,6 +272,21 @@ def test_bad_profile_preserves_kernel_with_visible_diagnostic(monkeypatch, tmp_p
     actual = _target(tmp_path).read_text(encoding="utf-8")
     assert "Required disclosure." in actual
     assert "rejected" in actual
+    assert actual.startswith("Disclose AI for ALL contributions.\n\n")
+
+
+@pytest.mark.parametrize("directories", [
+    "~missing-attribution-user/instructions", ",".join(["x"] * 129),
+], ids=["missing-user", "entry-limit"])
+def test_discovery_errors_preserve_kernel(monkeypatch, tmp_path, directories):
+    monkeypatch.setattr(writer, "_run_contributor", lambda *args: "Required disclosure.")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", directories)
+    assert writer.write_session_guidance({"sessionId": "session-1"}, home=tmp_path)
+    actual = _target(tmp_path).read_text(encoding="utf-8")
+    assert "Required disclosure." in actual
+    assert "discovery rejected" in actual
     assert actual.startswith("Disclose AI for ALL contributions.\n\n")
 
 

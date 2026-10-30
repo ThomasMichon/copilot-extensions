@@ -131,7 +131,7 @@ try {
                             $context = $data.profile_environment
                             if (
                                 $context.version -ne 1 -or
-                                $context.home -ne $resolvedHome -or
+                                $context.home_environment -ne $resolvedHome -or
                                 $context.repo -ne $repoRoot -or
                                 $context.cwd -ne [System.IO.Directory]::GetCurrentDirectory() -or
                                 $context.dirs -ne [string]$env:COPILOT_CUSTOM_INSTRUCTIONS_DIRS -or

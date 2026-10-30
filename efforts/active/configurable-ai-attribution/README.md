@@ -253,3 +253,18 @@ network dependency, parallel policy registry or mandatory sibling plugin.
 - Focused validation passed 68 tests with 3 platform skips, including both
   budget cases and real native warm-cache reuse with Python absent. High-signal
   Python lint passed. Fresh review and exact-head CI still gate merge.
+
+### 2026-10-30 - Interpolation and discovery boundary review
+- Applied markup checks to assembled slots and historical variants in both
+  consumers, retaining escaped literal names and actual review-status text.
+  Escapes are interpreted across interpolation boundaries rather than allowing
+  an empty variable to assemble a hidden image marker.
+- Matched the native policy owner's 128-entry/65,536-character discovery
+  limits before probing. Overflow and missing-user expansion failures become
+  bounded diagnostics; they cannot suppress the policy kernel.
+- Cached discovery records the exact native home-environment representation,
+  avoiding Python/reader normalization disagreement on trailing separators.
+- Focused validation passed 87 tests with 3 platform skips, including assembled
+  markup in all four slot/variant fields, discovery failures, and native
+  warm reuse without Python under plain and trailing-separator home values.
+  High-signal lint passed; fresh review and exact-head CI remain required.

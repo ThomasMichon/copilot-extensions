@@ -32,7 +32,10 @@ slots:
    `$HOME/.config/ai-attribution/config.json`: platform personal override.
 
 Paths are resolved without evaluating shell expressions. Symlink/reparse paths
-are rejected. Each file is at most 64 KiB with 32 rules. Invalid layers produce a
+are rejected. Instruction-directory discovery is bounded to 128 entries and
+65,536 characters before probing; overflow or unresolved user directories
+produce a profile diagnostic, not a silently truncated configuration.
+Each file is at most 64 KiB with 32 rules. Invalid layers produce a
 bounded diagnostic without echoing their paths or data. Session guidance retains
 the safety kernel and requires disclosure for all contributions until the profile
 is resolved; the programmatic CLI fails explicitly
@@ -89,7 +92,9 @@ and formatting characters and are bounded literal text,
 escaped for Markdown and HTML; templates choose their own Markdown formatting.
 No HTML conversion is performed. Templates support visible text, emphasis,
 inline code and blockquotes, not raw HTML, character references, links/images,
-reference definitions, code fences or invisible formatting controls. Markup-only
+reference definitions, code fences or invisible formatting controls. These
+checks apply after interpolation too, including historical variants, without
+treating escaped literal identities as markup. Presentation containing only
 punctuation cannot suppress the visible default. Literal review claims, including
 claims assembled across template/variable boundaries or historical variants, are rejected:
 use `{review_status}`, which resolves to `not human-reviewed` unless the caller

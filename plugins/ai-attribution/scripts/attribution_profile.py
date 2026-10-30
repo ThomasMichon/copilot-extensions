@@ -36,11 +36,7 @@ def _object(pairs):
     return result
 
 
-def _template(value: object) -> str:
-    if not isinstance(value, str) or len(value.encode("utf-8")) > 512:
-        raise ProfileError("template must be a string of at most 512 bytes")
-    if any(ord(c) < 32 and c != "\n" for c in value) or "\x7f" in value:
-        raise ProfileError("template contains controls")
+def _check_markup(value: str) -> None:
     if (
         any(unicodedata.category(c) == "Cf" for c in value)
         or re.search(
@@ -50,6 +46,14 @@ def _template(value: object) -> str:
         )
     ):
         raise ProfileError("templates support visible text/emphasis, not hidden or active markup")
+
+
+def _template(value: object) -> str:
+    if not isinstance(value, str) or len(value.encode("utf-8")) > 512:
+        raise ProfileError("template must be a string of at most 512 bytes")
+    if any(unicodedata.category(c) == "Cc" and c != "\n" for c in value):
+        raise ProfileError("template contains controls")
+    _check_markup(value)
     try:
         for _, name, spec, conversion in string.Formatter().parse(value):
             if name is not None and (name not in FIELDS or spec or conversion):
@@ -110,10 +114,14 @@ def validate(value: object) -> dict:
 def profile_paths(home: Path, repo: Path | None, env: dict | None = None) -> list[Path]:
     """Repository presentation defaults, trusted instruction defaults, personal."""
     env = os.environ if env is None else env
+    raw_dirs = env.get("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", "")
+    if len(raw_dirs) > MAX_BYTES:
+        raise ProfileError("instruction directories exceed character limit")
+    directories = re.split("[" + re.escape(os.pathsep) + ",]", raw_dirs)
+    if len(directories) > 128:
+        raise ProfileError("instruction directories exceed entry limit")
     paths = [repo / ".github" / "ai-attribution.json"] if repo else []
-    for raw in re.split("[" + re.escape(os.pathsep) + ",]", env.get(
-        "COPILOT_CUSTOM_INSTRUCTIONS_DIRS", ""
-    )):
+    for raw in directories:
         if not raw.strip():
             continue
         directory = Path(raw.strip()).expanduser()
@@ -146,7 +154,11 @@ def _safe_file(path: Path) -> bool:
 def load_profile(home: Path, repo: Path | None, env: dict | None = None) -> tuple[dict, list[str]]:
     profile = {"version": 1, "variables": {}, "rules": [], "_inputs": [], "_probes": []}
     errors = []
-    for index, path in enumerate(profile_paths(home, repo, env)):
+    try:
+        paths = profile_paths(home, repo, env)
+    except (OSError, ValueError, RuntimeError):
+        return profile, ["profile discovery rejected"]
+    for index, path in enumerate(paths):
         probe = {"path": str(path), "sha256": None}
         profile["_probes"].append(probe)
         try:
@@ -176,12 +188,26 @@ def _literal_variables(profile: dict) -> dict:
     return {"operator": "the operator", "assistant": "Copilot", **profile.get("variables", {})}
 
 
-def _check_review_claim(template: str, variables: dict) -> str:
+def _escaped_variables(variables: dict) -> dict:
+    return {k: re.sub(r"([\\`*_\[\]{}!~])", r"\\\1", html.escape(v))
+            for k, v in variables.items()}
+
+
+def _checked_template(template: str, variables: dict) -> str:
     template = _template(template)
     if re.search(r"\breviewed\b", template.format_map(
         {**variables, "review_status": ""}
     ), re.I):
         raise ProfileError("review claims must use {review_status}")
+    # Mask only entities generated from literal variables, not entities assembled
+    # from template fragments. Then account for Markdown escapes across boundaries.
+    probe_variables = {
+        k: re.sub(r"&(?:amp|lt|gt|quot|#x27);", "x", v)
+        for k, v in _escaped_variables(variables).items()
+    }
+    probe = template.format_map({**probe_variables, "review_status": "x"})
+    probe = re.sub(r"\\[" + re.escape(string.punctuation) + "]", "x", probe)
+    _check_markup(probe)
     return template
 
 
@@ -216,16 +242,15 @@ def resolve(profile: dict, context: dict) -> dict:
     required = required or any(r.get("required") is True for r in matches)
     literals = _literal_variables(profile)
     for slot in SLOTS:
-        _check_review_claim(result[slot], literals)
+        _checked_template(result[slot], literals)
         for variant in result[slot + "_variants"]:
-            _check_review_claim(variant, literals)
+            _checked_template(variant, literals)
     variables = dict(literals)
     variables["review_status"] = (
         "human-reviewed" if context.get("human_reviewed") is True else "not human-reviewed"
     )
     # Variables are text, not markup. Templates themselves choose their formatting.
-    variables = {k: re.sub(r"([\\`*_\[\]{}])", r"\\\1", html.escape(v))
-                 for k, v in variables.items()}
+    variables = _escaped_variables(variables)
     for slot in SLOTS:
         result[slot] = _template(result[slot]).format_map(variables)
         result[slot + "_variants"] = [
@@ -269,9 +294,9 @@ def guidance(profile: dict) -> str:
     variables = _literal_variables(profile)
     for rule in profile["rules"]:
         for slot in SLOTS:
-            _check_review_claim(rule.get(slot, ""), variables)
+            _checked_template(rule.get(slot, ""), variables)
             for variant in rule.get(slot + "_variants", []):
-                _check_review_claim(variant, variables)
+                _checked_template(variant, variables)
     # JSON strings inside code spans keep templates visibly data rather than instructions.
     rows = [
         "## Signature profile",

@@ -91,6 +91,31 @@ def test_interpolated_review_claims_rejected_by_both_consumers(slot, template, v
         profile.guidance(data)
 
 
+@pytest.mark.parametrize("slot", ["header", "footer", "header_variants", "footer_variants"])
+@pytest.mark.parametrize("template,variable", [
+    ("!{assistant}[AI-assisted]\n\n", ""),
+    ("&{assistant};", "nbsp"),
+    (r"\{assistant}[AI-assisted]", "!"),
+])
+def test_assembled_markup_rejected_in_both_consumers(slot, template, variable):
+    data = parsed({slot: [template] if slot.endswith("_variants") else template},
+                  assistant=variable)
+    with pytest.raises(profile.ProfileError, match="markup"):
+        profile.resolve(data, CONTEXT)
+    with pytest.raises(profile.ProfileError, match="markup"):
+        profile.guidance(data)
+
+
+def test_assembled_validation_preserves_escaped_literal_identity_and_review_status():
+    data = parsed({"header": "[{assistant} for {operator}; {review_status}] "},
+                  assistant="![literal]", operator="<Example> & *Name*")
+    signature = profile.resolve(data, CONTEXT)
+    assert r"\!\[literal\]" in signature["header"]
+    assert "&lt;Example&gt; &amp;" in signature["header"]
+    assert "not human-reviewed" in signature["header"]
+    assert profile.guidance(data)
+
+
 @pytest.mark.parametrize("rule", [
     {"header": "{operator.__class__}"}, {"header": "{operator!r}"},
     {"header": "{operator:20}"}, {"header": "{"}, {"header": "x" * 513},
@@ -194,6 +219,28 @@ def test_load_authority_order_invalid_layer_and_target_contained_dirs(tmp_path):
     assert profile.resolve(data, CONTEXT)["header"] == "AI shared"
 
 
+@pytest.mark.parametrize("directories", ["x" * 65537, ",".join(["x"] * 129)],
+                         ids=["character-limit", "entry-limit"])
+def test_discovery_overflow_is_bounded_before_probing(monkeypatch, tmp_path, directories):
+    monkeypatch.setattr(profile, "_safe_file", lambda path: pytest.fail("must not probe"))
+    data, errors = profile.load_profile(tmp_path, None, {
+        "COPILOT_CUSTOM_INSTRUCTIONS_DIRS": directories,
+    })
+    assert errors == ["profile discovery rejected"]
+    assert not data["_probes"]
+
+
+def test_discovery_failure_becomes_profile_diagnostic(monkeypatch, tmp_path):
+    monkeypatch.setattr(Path, "expanduser", lambda path: (_ for _ in ()).throw(
+        RuntimeError("unavailable user")
+    ))
+    data, errors = profile.load_profile(tmp_path, None, {
+        "COPILOT_CUSTOM_INSTRUCTIONS_DIRS": "~missing-user/instructions",
+    })
+    assert errors == ["profile discovery rejected"]
+    assert not data["_probes"]
+
+
 def test_guidance_and_resolver_consume_same_effective_profile(tmp_path):
     config = tmp_path / ".copilot" / "ai-attribution.json"
     config.parent.mkdir()
@@ -244,12 +291,17 @@ def test_actual_cli_is_pure_and_invalid_config_is_visible(tmp_path):
                             text=True, capture_output=True, env=env)
     assert result.returncode == 2
     assert "error" in json.loads(result.stdout)
+    env["COPILOT_CUSTOM_INSTRUCTIONS_DIRS"] = "~missing-attribution-user/instructions"
+    result = subprocess.run(command, input="{}", text=True, capture_output=True, env=env)
+    assert result.returncode == 2
+    assert "discovery rejected" in json.loads(result.stdout)["error"]
 
 
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
-def test_native_hook_reads_profile_changes_with_warm_base_cache(tmp_path):
+@pytest.mark.parametrize("home_suffix", ["", os.sep], ids=["plain-home", "trailing-separator"])
+def test_native_hook_reads_profile_changes_with_warm_base_cache(tmp_path, home_suffix):
     shell = (shutil.which("pwsh") or shutil.which("powershell.exe")) if os.name == "nt" else shutil.which("bash")
     if not shell:
         pytest.skip("native shell unavailable")
@@ -258,7 +310,7 @@ def test_native_hook_reads_profile_changes_with_warm_base_cache(tmp_path):
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     config = home / ".copilot" / "ai-attribution.json"
     config.parent.mkdir()
-    env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home),
+    env = {**os.environ, "HOME": str(home) + home_suffix, "USERPROFILE": str(home) + home_suffix,
            "XDG_CONFIG_HOME": str(home / "config"), "COPILOT_CUSTOM_INSTRUCTIONS_DIRS": "",
            "COPILOT_PLUGIN_ROOT": str(SCRIPTS.parent),
            "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"]}

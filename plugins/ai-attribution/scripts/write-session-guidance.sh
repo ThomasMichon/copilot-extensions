@@ -97,7 +97,13 @@ if [[ -n "$session_id" && "$session_id" =~ $SESSION_ID_PATTERN \
                             --arg home "$resolved_home" --arg repo "$repo_root" --arg cwd "$(pwd -P)" \
                             --arg dirs "${COPILOT_CUSTOM_INSTRUCTIONS_DIRS:-}" \
                             --arg xdg "${XDG_CONFIG_HOME:-}" --arg appdata "${APPDATA:-}" \
-                            '.profile_environment == {version:1,home:$home,repo:$repo,cwd:$cwd,dirs:$dirs,xdg:$xdg,appdata:$appdata}
+                            '.profile_environment.version == 1
+                             and .profile_environment.home_environment == $home
+                             and .profile_environment.repo == $repo
+                             and .profile_environment.cwd == $cwd
+                             and .profile_environment.dirs == $dirs
+                             and .profile_environment.xdg == $xdg
+                             and .profile_environment.appdata == $appdata
                              and (.profile_probes | type) == "array" and (.profile_probes | length) > 0' >/dev/null 2>&1; then
                             run_python_fallback "$stdin_text"
                             exit 0
