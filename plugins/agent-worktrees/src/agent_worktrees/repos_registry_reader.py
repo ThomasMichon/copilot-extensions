@@ -40,6 +40,8 @@ def read_registry_report(path: Path, *, strict: bool = False) -> AcquisitionRepo
     """Report the original registry acquisition without replaying owner work."""
     with acquisition.capture_config_observations() as observations:
         value = read_registry(path, strict=strict)
+        if not any(o.source == str(path) and o.stage == "repository-registry" for o in observations):
+            acquisition.opaque_source("repository-registry")
     return AcquisitionReport("repository-registry", value, tuple(observations))
 
 

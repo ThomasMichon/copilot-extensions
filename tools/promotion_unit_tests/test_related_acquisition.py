@@ -696,3 +696,63 @@ def test_registry_consumer_boundary_uses_only_original_request_observations(api,
     assert any(f.reason == "owner-coverage-unavailable" for o in observations for f in o.findings) == (mode != "owned")
     assert any(o.stage == "registry-consumer" for o in observations) == (mode == "failed")
     assert "private helper failure" not in repr(observations)
+
+
+@pytest.mark.parametrize("kind, mode", [
+    ("mapping", "empty"), ("mapping", "populated"), ("mapping", "partial"),
+    ("registry", "empty"), ("registry", "populated"), ("registry", "partial"),
+    ("base", "empty"), ("base", "populated"), ("base", "partial"),
+])
+def test_report_wrappers_retain_missing_owner_uncertainty_without_replay(api, monkeypatch, kind, mode):
+    api.stub("config")
+    api.stub("config_dropins", scan_config_dropin_registry=lambda *a, **k: None)
+    registered, migration = _registered_owner(api, monkeypatch)
+    transaction = sys.modules[registered.__package__ + ".repos_registry_transaction"]
+    mapping = api.load("repos_configuration_sources")
+    api.stub("git_ops", git=lambda *a, **k: pytest.fail("report replayed Git acquisition"))
+    base = api.load("inrepo_config_source")
+    calls = []
+
+    class SyntheticSource:
+        def __str__(self):
+            return "synthetic-replacement.yaml"
+
+        def read_bytes(self):
+            calls.append("read")
+            return b"{}\n"
+
+        def exists(self):
+            pytest.fail("report added a presence probe")
+
+    path = SyntheticSource()
+    if kind == "registry":
+        registry_type = sys.modules[registered.__package__ + ".repos"].ReposRegistry
+        value = registry_type(repos={} if mode == "empty" else {"good": SimpleNamespace(name="good")})
+    else:
+        value = {} if mode == "empty" else {"marker": "available"}
+
+    def replacement(*args, **kwargs):
+        calls.append("owner")
+        if mode == "partial":
+            transaction.read_bytes(path)
+            if kind == "registry":
+                migration.migrate_loaded({}, migration.SCHEMA_REPOS)
+                calls.append("migration")
+        return value
+
+    monkeypatch.setattr(mapping, "parse_mapping", lambda *a: pytest.fail("report replayed parsing"))
+    if kind == "mapping":
+        monkeypatch.setattr(mapping, "mapping", replacement)
+        report = mapping.mapping_report(path)
+    elif kind == "registry":
+        monkeypatch.setattr(registered, "read_registry", replacement)
+        report = registered.read_registry_report(path)
+    else:
+        monkeypatch.setattr(base, "load_config_base", replacement)
+        report = base.load_config_base_report(path, (Path("config.yaml"),))
+    expected = ["owner", "read", "migration"] if mode == "partial" and kind == "registry" else (
+        ["owner", "read"] if mode == "partial" else ["owner"])
+    assert calls == expected
+    assert report.value is value
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert any(f.reason == "owner-coverage-unavailable" for f in report.findings)

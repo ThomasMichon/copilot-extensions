@@ -731,3 +731,43 @@ def test_native_routes_binding_and_real_tracked_pair_present_stale_absent(native
             records["knowledge"].unlink()
         elif expected == "stale":
             records["sample"].unlink()
+
+
+@pytest.mark.parametrize("mode", ["empty", "populated", "bytes-only"])
+def test_mapping_report_replacement_is_opaque_without_reacquisition(tmp_path, monkeypatch, mode):
+    from agent_worktrees import repos_configuration_sources as sources
+
+    path = tmp_path / "strict.yaml"
+    path.write_text("marker: disk\n", encoding="utf-8")
+    value = {} if mode == "empty" else {"marker": "available"}
+    calls = []
+    original_read, original_exists = Path.read_bytes, Path.exists
+
+    def read(selected):
+        if selected == path:
+            calls.append("native-read")
+        return original_read(selected)
+
+    def exists(selected):
+        if selected == path:
+            pytest.fail("report added a presence probe")
+        return original_exists(selected)
+
+    monkeypatch.setattr(Path, "read_bytes", read)
+    monkeypatch.setattr(Path, "exists", exists)
+
+    def replacement(selected):
+        assert selected == path
+        calls.append("mapping")
+        if mode == "bytes-only":
+            sources.read_bytes(selected)
+            calls.append("original-bytes")
+        return value
+
+    monkeypatch.setattr(sources, "mapping", replacement)
+    monkeypatch.setattr(sources, "parse_mapping", lambda *a: pytest.fail("report replayed the parser"))
+    report = sources.mapping_report(path)
+    assert report.value is value
+    assert calls == (["mapping", "native-read", "original-bytes"] if mode == "bytes-only" else ["mapping"])
+    assert report.authority.value == "indeterminate"
+    assert any(f.reason == "owner-coverage-unavailable" for f in report.findings)

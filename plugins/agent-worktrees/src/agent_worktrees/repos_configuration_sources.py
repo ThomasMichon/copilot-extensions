@@ -108,10 +108,22 @@ def mapping(path: Path) -> dict:
     return value
 
 
+def _mapping_observed(path: Path, observations) -> bool:
+    """Use original read-time absence or the original byte/parser pair."""
+    outcomes = {(o.stage, o.authority) for o in observations if o.source == str(path)}
+    return (
+        ("config-source-bytes", ScanAuthority.ABSENT) in outcomes
+        or {("config-source-bytes", ScanAuthority.COMPLETE),
+            ("strict-config-mapping", ScanAuthority.COMPLETE)} <= outcomes
+    )
+
+
 def mapping_report(path: Path) -> AcquisitionReport[dict]:
     """Report the original strict read and parse without repeating acquisition."""
     with acquisition.capture_config_observations() as observations:
         value = mapping(path)
+        if not _mapping_observed(path, observations):
+            acquisition.opaque_source("strict-config-file")
     return AcquisitionReport("strict-config-mapping", value, tuple(observations))
 
 

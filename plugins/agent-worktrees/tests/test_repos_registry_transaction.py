@@ -267,3 +267,46 @@ def test_registry_report_retains_strict_precheck_uncertainty(tmp_path):
     assert not report.value.repos
     assert report.value._baseline[1] == "absent"
     assert report.authority.value == "indeterminate"
+
+
+@pytest.mark.parametrize("mode", ["empty", "populated", "partial"])
+def test_registry_report_replacement_is_opaque_without_reacquisition(tmp_path, monkeypatch, mode):
+    from pathlib import Path
+    from agent_worktrees import config_migrations, repos_registry_reader as reader, repos_registry_transaction
+
+    path = tmp_path / "repos.yaml"
+    path.write_text("{}\n", encoding="utf-8")
+    value = repos.ReposRegistry() if mode == "empty" else repos.ReposRegistry(repos={
+        "sample": repos.RepoEntry(name="sample", default_branch="main"),
+    })
+    calls = []
+    original_read, original_exists = Path.read_bytes, Path.exists
+
+    def read(selected):
+        if selected == path:
+            calls.append("native-read")
+        return original_read(selected)
+
+    def exists(selected):
+        if selected == path:
+            pytest.fail("report added a presence probe")
+        return original_exists(selected)
+
+    monkeypatch.setattr(Path, "read_bytes", read)
+    monkeypatch.setattr(Path, "exists", exists)
+
+    def replacement(selected, *, strict=False):
+        assert selected == path and strict is False
+        calls.append("registry")
+        if mode == "partial":
+            repos_registry_transaction.read_bytes(selected)
+            config_migrations.migrate_loaded({}, config_migrations.SCHEMA_REPOS)
+            calls.append("original-bytes-and-migration")
+        return value
+
+    monkeypatch.setattr(reader, "read_registry", replacement)
+    report = reader.read_registry_report(path)
+    assert report.value is value
+    assert calls == (["registry", "native-read", "original-bytes-and-migration"] if mode == "partial" else ["registry"])
+    assert report.authority.value == "indeterminate"
+    assert any(f.reason == "owner-coverage-unavailable" for f in report.findings)
