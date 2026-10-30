@@ -125,7 +125,8 @@ class LocalReviewSource:
 
         def entry(commit, path, expected):
             if not any(char != "0" for char in expected):
-                if path in trees[commit]:
+                retained = trees[commit].get(path)
+                if retained is not None and retained[:2] != ("040000", "tree"):
                     raise SourceIncomplete("tree_entry_mismatch")
                 return None
             retained = trees[commit].get(path)
@@ -193,7 +194,7 @@ class LocalReviewSource:
                     if output and not output.endswith(b"\0"):
                         raise SourceIncomplete("unterminated_tree_entries")
                     for row in output.split(b"\0")[:-1]:
-                        match = re.fullmatch(rb"([0-7]{6}) (blob|commit) ([0-9a-f]+)\t(.+)", row, re.DOTALL)
+                        match = re.fullmatch(rb"([0-7]{6}) (blob|tree|commit) ([0-9a-f]+)\t(.+)", row, re.DOTALL)
                         if match is None:
                             raise SourceIncomplete("invalid_tree_entry")
                         path = match[4].decode("utf-8")
@@ -264,6 +265,9 @@ class LocalReviewSource:
             commands = ["start"]
             for role, commit in (("head", head), ("common", common)):
                 ref = reference + "/" + role
+                symbolic = git("symbolic-ref", "--quiet", ref, limit=256, codes=(0, 1, 128))
+                if symbolic.returncode == 0:
+                    raise SourceIncomplete("symbolic_retained_ref")
                 observed = git("show-ref", "--verify", "--hash", ref, limit=128, codes=(0, 1, 128))
                 if observed.returncode == 0:
                     if observed.stdout.decode().strip() != commit:
@@ -273,8 +277,11 @@ class LocalReviewSource:
                     commands.append(f"create {ref} {commit}")
                 result["retained_refs"][role] = {"ref": ref, "object_id": commit}
             result["effects"] = "local_refs_possible"
-            git("update-ref", "--stdin", input_text="\n".join([*commands, "prepare", "commit", ""]))
+            git("update-ref", "--no-deref", "--stdin", input_text="\n".join([*commands, "prepare", "commit", ""]))
             for retained in result["retained_refs"].values():
+                symbolic = git("symbolic-ref", "--quiet", retained["ref"], limit=256, codes=(0, 1, 128))
+                if symbolic.returncode == 0:
+                    raise SourceIncomplete("symbolic_retained_ref")
                 observed = git("show-ref", "--verify", "--hash", retained["ref"], limit=128)
                 if observed.stdout.decode().strip() != retained["object_id"]:
                     raise SourceIncomplete("retained_ref_readback_failed")

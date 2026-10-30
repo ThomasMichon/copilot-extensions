@@ -212,6 +212,16 @@ contract.
   process counts and deep Windows ref paths. Fix the two CI source-admission/
   generated-archive failures through their existing manifest/generator owners;
   no failing gate is waived.
+- The first four findings cleared re-review. Fix the two subsequent findings
+  with explicit symbolic-ref refusal/no-dereference publication/readback and
+  file/directory-transition mapping. Twenty-four native synthetic source cases
+  now pass. The required Linux unit job is confirmed successful at the repaired
+  source head; an optional local Windows full packet did not complete inside
+  its declared unit budget and is not claimed as qualification.
+- The remaining CI guard requires an append-only MCP scripts-producer footprint
+  revision for the regenerated shared caller-lifetime archive. Advance only that
+  producer through the footprint owner's digest/delta functions, preserving
+  existing effects, profile, recognizers and all published history.
 
 ### 2026-10-30 - Priority cursorless native change paging
 - Merged source PR #9697 as `eef6ddbd87f1c708a6ac334fa622f1dfa7abf44e`

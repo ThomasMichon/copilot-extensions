@@ -56,6 +56,9 @@ Only after complete mapping verification does the owner atomically create or
 verify deterministic immutable head/common refs. Conflicting refs are never
 force-moved. Prior ranges remain retained; cache rebuild has no ref-retirement
 authority. The existing workspace/resource lifetime remains authoritative.
+Symbolic retained refs are refused, including dangling symbols. The transaction
+uses no-dereference updates and readback repeats the symbolic-ref check, so
+another ref cannot redirect publication outside the source namespace.
 Internal Git commands disable repository hooks through Worktrees' existing
 mechanical-operation hook policy, so a reference-transaction hook cannot add
 effects. Git's long-path option is scoped to these commands, not persisted as
@@ -72,3 +75,7 @@ Discussion-only or target-only changes with the same authoritative source range
 do not themselves change those retained immutable objects. This initial API
 revalidates the selected range on every call; it does not claim automatic source
 attachment reuse, eviction or installed-owner adoption.
+
+For file/directory transitions, an actual tree container at a path is not a file
+side. The manifest retains absent file sides plus the complete separately mapped
+child paths; it does not misclassify the container as a missing blob.

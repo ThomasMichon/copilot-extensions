@@ -265,3 +265,49 @@ def test_wide_source_diff_batches_physical_git_operations(prepared):
     assert result["state"] == "ready", result["source"]["errors"]
     assert len(result["source"]["files"]) == 108
     assert len(checks) <= 40  # Two checkpoints per physical command, not per changed path.
+
+
+@pytest.mark.parametrize("target_exists", [True, False])
+def test_symbolic_source_refs_never_become_ready_or_redirect_publication(prepared, target_exists):
+    owner, generation, git, _ = prepared
+    first = attach(owner, generation)
+    retained = first["source"]["retained_refs"]["head"]["ref"]
+    outside = "refs/fixture/external-source"
+    if target_exists:
+        git("update-ref", outside, generation["revision"]["head_sha"])
+    git("symbolic-ref", retained, outside)
+    result = attach(owner, generation)
+    assert result["state"] == "incomplete"
+    assert result["source"]["errors"] == ["symbolic_retained_ref"]
+    assert git("symbolic-ref", retained) == outside
+    refs = git("for-each-ref", "--format=%(refname) %(objectname)", "refs/fixture")
+    assert refs == (f"{outside} {generation['revision']['head_sha']}" if target_exists else "")
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_file_directory_transitions_preserve_absent_file_sides(prepared, reverse):
+    from agent_pull_requests.review_workspace import _digest
+    owner, generation, git, _ = prepared
+    original_head = generation["revision"]["head_sha"]
+    blob = git("rev-parse", original_head + ":edit.txt")
+    leaf = git("mktree", "-z", data=f"100644 blob {blob}\tchild.txt\0".encode())
+    file_tree = git("mktree", "-z", data=f"100644 blob {blob}\tnode\0".encode())
+    directory_tree = git("mktree", "-z", data=f"040000 tree {leaf}\tnode\0".encode())
+    before, after = (directory_tree, file_tree) if reverse else (file_tree, directory_tree)
+    common = git("commit-tree", before, data=b"transition common\n")
+    head = git("commit-tree", after, "-p", common, data=b"transition head\n")
+    generation["revision"].update(head_sha=head, iteration_head_sha=head, common_sha=common, iteration=4)
+    generation["sections"]["pull_request"]["data"]["lastMergeSourceCommit"]["commitId"] = head
+    generation["sections"]["iterations"]["data"][0].update(
+        id=4, sourceRefCommit={"commitId": head}, commonRefCommit={"commitId": common},
+    )
+    changes = generation["sections"]["changes"]
+    changes["revision"].update(head_sha=head, common_sha=common, iteration=4)
+    changes["data"] = [{"changeType": "edit", "item": {"path": path}}
+                       for path in ("/node", "/node/child.txt")]
+    generation["id"] = _digest({key: value for key, value in generation.items() if key != "id"})
+    result = attach(owner, generation)
+    assert result["state"] == "ready", result["source"]["errors"]
+    files = {row["path"]: row for row in result["source"]["files"]}
+    assert files["node"]["before" if reverse else "after"] is None
+    assert files["node/child.txt"]["after" if reverse else "before"] is None
