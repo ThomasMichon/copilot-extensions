@@ -187,6 +187,10 @@ contract.
 ## Journal
 
 ### 2026-10-30 - Priority cursorless native change paging
+- Merged source PR #9697 as `eef6ddbd87f1c708a6ac334fa622f1dfa7abf44e`
+  after 112 contained tests, lint/install-contract gates, passing required CI
+  and assessed review. Fixed the review's documentation-impact omission.
+  Publication is not release, installation or live-owner qualification.
 - Preserved the open cache implementation PR and its remaining review findings
   while isolating native response compatibility under the same source objective.
 - Native change pages may omit both continuation fields. Probe with the actual
@@ -200,6 +204,13 @@ contract.
   #1803. It is not fixed or broadened into this source slice; no installed
   transport, authentication or service state is changed.
 
+### 2026-10-30 - Resume owned cache review after native compatibility
+- Restored the held #9693 implementation onto the merged compatibility base.
+  The original cache issue/PR remain owned; no competing cache PR is opened.
+- Address the two remaining review findings through explicit lock-held staging
+  recovery and post-retirement tombstone reclamation. Preserve unrelated-file
+  refusal, uncertain-clear ordering and replay/operation receipt isolation.
+
 ### 2026-10-30 - Priority native nullable-properties compatibility
 - Isolated the normalizer correction from the unpublished cache implementation,
   preserving that cache source checkpoint for continuation.
@@ -210,6 +221,35 @@ contract.
 - The focused source packet passed 68 cases. Backend qualification/retest remains
   with the existing authorized owner; this source lane makes no claim about a
   particular live failure frame and performs no live backend or auth changes.
+- #9689 merged as `216d31d4acd897013ad2a3411442a8c3514d97d4` after
+  current-head Copilot approval and required green checks; the contained focused
+  packet also passed 68 cases. Re-read the parent plan and retained all remaining
+  live/source/cache/submission acceptance items.
+- Prepared a committed-source SDK archive for the adopter's captured-data and
+  read-only retest. That test, not the source correction alone, determines the
+  particular live outcome. Cache continuation remains preserved and separate.
+
+### 2026-10-30 - Cache contract merged; bounded storage source
+- #9685 merged as `92473fa43ebcbdf27303c15932735734b4fb9d21` after
+  current-head Copilot approval and required green checks. Re-read the canonical
+  Plan/Validation Plan and reviewed storage contract before implementation.
+- Implemented explicit private/native or service-embedded generation storage
+  under the dedicated cache child, reusing atomic JSON and operation locks.
+  Complete target-scope keys, immutable objects and CAS pointers retain prior
+  state on conflict/quota/pre-replace failure and expose post-replace uncertainty.
+- Added retained lookup, explicit valid-cache rebuild with durable pointer
+  tombstones, namespace/service/descriptor checks and linked-path refusal.
+  Existing replay and unknown-operation sentinel bytes remain untouched.
+- The source packet passed 82 cases across real file/lock/concurrency/recovery
+  controls and existing generation/owner tests. No provider, daemon, live backend,
+  installed-cache adoption or operation effect was invoked.
+- Resumed the preserved cache checkpoint after the isolated native compatibility
+  correction. The current cache/generation/owner packet passed 87 cases while
+  retaining the merged nullable-properties behavior.
+- Review found that large scope strings could produce an unreadable current
+  pointer despite fitting storage quota. Added a pre-write encoded-pointer bound
+  and proved refusal leaves both artifact sets/current lookup/rebuild intact.
+  The updated source packet passed 88 cases and contained cache controls passed 20.
 
 ### 2026-10-30 - Protected embedding merged; next cache contract
 - #9676 merged as `69064505eb9db002e462f000bcf4d8aa42ab4f47` after

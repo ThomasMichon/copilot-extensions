@@ -859,3 +859,6 @@ service caching and submission are not yet supported by that entry point.
 The [protected owner-read embedding](docs/owner-read.md) provides the next
 source integration contract; an actual authorized owner must adopt it before
 any live owner-backed operation exists.
+The [explicit generation cache](docs/generation-cache.md) stores retained
+immutable views with CAS publication; it starts no provider read or service
+and is separate from replay state and submission receipts.
