@@ -3,6 +3,8 @@
 import pytest
 
 from agent_dispatch.restricted_delivery import record
+from agent_dispatch.acquisition_receipts import bind
+from agent_dispatch.queue import TaskError
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
 
@@ -59,3 +61,46 @@ def test_recovery_honors_each_drivers_completed_exact_absence_release(tmp_path, 
     [attachment] = queue.attachment_history(task.id)
     assert attachment.detached_at is not None
     assert attachment.session_id == native
+
+
+@pytest.mark.parametrize(
+    "operation", ["detach_agent", "reset_proposed", "reset_queued", "legacy_reset"],
+)
+def test_native_acquisition_before_spawn_publication_remains_owned(tmp_path, operation):
+    queue = TaskQueue(tmp_path / "tasks.db")
+    task = queue.create("work")
+    reservation, _ = queue.reserve_spawn(
+        task.id, reserved_by="supervisor", driver="cli",
+    )
+    queue.record_spawn_worktree(reservation.key, "workspace")
+    receipt = {
+        "reservation_key": reservation.key, "task_id": task.id,
+        "task_generation": task.generation, "worktree_id": "workspace",
+        "session_id": "bridge-1", "native_session_id": "native-1",
+        "mode": "cli", "delivery_id": "delivery-1",
+    }
+    bind(queue, receipt, evidence={
+        "delivery_id": "delivery-1", "stage": "launched", "state": "pending",
+        "recorded_result": {key: value for key, value in receipt.items() if key != "reservation_key"},
+    })
+    failed = queue.fail_spawn(reservation.key, detail="failure before spawn publication")
+    assert failed.agent_info is None
+    assert failed.session_handle is None
+    assert queue.get(task.id).owner_session_id is None
+    before = queue.get(task.id)
+    with pytest.raises(TaskError, match="native"):
+        if operation == "legacy_reset":
+            queue.reset(task.id)
+        else:
+            snapshot = queue.task_diagnostics(task.id)
+            assert not snapshot["actions"][operation]["allowed"]
+            queue.recover_task(
+                task.id, operation=operation, expected_revision=snapshot["revision"],
+                request_id="recovery-1", actor="operator", reason="must retain original acquisition",
+            )
+    assert queue.get(task.id) == before
+    with queue._connect() as conn:
+        assert conn.execute(
+            "SELECT native_session_id FROM acquisition_receipts WHERE reservation_key=?",
+            (reservation.key,),
+        ).fetchone()["native_session_id"] == "native-1"

@@ -22,6 +22,10 @@ recovery rather than treating an incomplete history as empty. Diagnostic output
 omits prompts, payloads, raw agent receipts, delivery tokens and send identity
 blobs. The opaque `revision` fences the captured task and retained records.
 Diagnostics never wake, claim, repair, start optional infrastructure or mutate.
+The CLI and default stdio MCP diagnostic factories use existing read-only
+client discovery: they do not ensure a local coordinator, open SSH failover or
+discover control credentials. An absent provider remains explicitly unavailable
+through the existing bounded read-retry behavior, not an empty task snapshot.
 
 An action's `allowed` value describes inspected prerequisites, **not authority,
 operator confirmation or a promise of successful execution**. Existing lifecycle
@@ -52,6 +56,9 @@ Retirement uses the existing driver's identity evidence and either its explicit
 conversation marker or the supported exact-absence release's terminal state.
 A terminal reservation's old `exclusive_released` flag alone is not active
 exclusive custody. Ordinary, restricted and CLI identities remain distinct.
+Native acquisition receipts count even before agent/session-handle publication.
+A failed reservation with only a launched acquisition receipt remains blocked
+until its native retirement is qualified.
 
 ### Fenced CLI mutations
 

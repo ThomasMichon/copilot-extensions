@@ -12,7 +12,7 @@ class TaskRecoveryToolsMixin:
 
     def task_diagnostics(self, task_id: str) -> dict:
         """Read redacted task recovery evidence and its opaque CAS revision."""
-        with self._client_factory() as client:
+        with self._observation_client_factory() as client:
             return client.task_diagnostics(task_id)
 
     def recover_task(

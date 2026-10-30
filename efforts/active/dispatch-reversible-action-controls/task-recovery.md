@@ -208,3 +208,21 @@ operator requests.
   installation, service repair or captured-result substitution was used.
 - This closes the missing local capture evidence, not independent review,
   required hosted CI, containing release or installed/native qualification.
+
+### 2026-10-30 - Diagnostic factory and acquisition-only review corrections
+
+- The next independent review cleared the five prior findings and identified
+  diagnostics using the default coordinator-ensuring factory. CLI and default
+  stdio MCP diagnostics now use existing read-only discovery: no coordinator
+  start, SSH failover or control-credential discovery. Actual default-factory
+  controls cover both available and absent providers without mocking past
+  the factory. Existing bounded read retries remain intact.
+- Native identity is now resolved for every reservation, not only retired
+  records or those with published agent/handle fields. Supported acquisition
+  binding followed by spawn failure proves an acquisition-only native remains
+  protected before spawn publication, across legacy reset and all strict actions.
+- The complete corrected recovery, observation, authority and adjacent-driver
+  packet passes 458 cases. Static and existing captured Bridge contract guards
+  also pass; this Dispatch-only correction changes no captured Bridge bytes.
+- Hosted CI passed the preceding revision but cannot waive these findings.
+  The new revision still requires independent review and its own CI before merge.

@@ -54,6 +54,12 @@ def _default_client() -> DispatchClient:
     return _resolve_cli_module()._client(argparse.Namespace())
 
 
+def _default_observation_client() -> DispatchClient:
+    from .loop_commands import _resolve_cli_module
+
+    return _resolve_cli_module()._client(argparse.Namespace(), ensure=False, read_only=True)
+
+
 class DispatchTools(TaskRecoveryToolsMixin):
     """Transport-free implementation of the dispatch MCP tools.
 
@@ -67,12 +73,13 @@ class DispatchTools(TaskRecoveryToolsMixin):
 
     def __init__(
         self,
-        client_factory: ClientFactory = _default_client,
+        client_factory: ClientFactory | None = None,
         identity_resolver: IdentityResolver = resolve_identity,
         repo_resolver: RepoResolver = resolve_repo,
         authority_resolver: Callable[[], Authority] = default_authority,
     ):
-        self._client_factory = client_factory
+        self._client_factory = client_factory or _default_client
+        self._observation_client_factory = client_factory or _default_observation_client
         self._identity = identity_resolver
         self._repo = repo_resolver
         self._authority = authority_resolver

@@ -84,17 +84,18 @@ def _blockers(conn: sqlite3.Connection, captured: dict) -> list[str]:
         ):
             reasons.append("reservation retains exclusive execution custody")
         retired = is_native_retired(row)
-        if (row["agent_info"] or row["session_handle"]) and not retired:
+        try:
+            native = reservation_native_identity(conn, row)
+        except (TaskError, TypeError, ValueError) as exc:
+            reasons.append(f"retained native identity is unproven: {exc}")
+            continue
+        if (native or row["agent_info"] or row["session_handle"]) and not retired:
             reasons.append("retained native conversation has not been retired")
         if retired and row["state"] not in SpawnState.ACTIVE:
-            try:
-                native = reservation_native_identity(conn, row)
-                if native is None:
-                    reasons.append("retired native identity is not qualified")
-                else:
-                    retired_sessions.add(native)
-            except (TaskError, TypeError, ValueError) as exc:
-                reasons.append(f"retired native identity is unproven: {exc}")
+            if native is None:
+                reasons.append("retired native identity is not qualified")
+            else:
+                retired_sessions.add(native)
     sessions = {
         row["session_id"] for row in captured["attachments"] if row["detached_at"] is None
     }

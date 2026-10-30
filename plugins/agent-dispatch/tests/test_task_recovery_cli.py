@@ -53,7 +53,7 @@ def requests(monkeypatch: pytest.MonkeyPatch) -> list[httpx.Request]:
     monkeypatch.setattr(
         core,
         "_client",
-        lambda args: DispatchClient(
+        lambda args, **_kwargs: DispatchClient(
             "https://dispatch.invalid",
             transport=httpx.MockTransport(handle),
         ),

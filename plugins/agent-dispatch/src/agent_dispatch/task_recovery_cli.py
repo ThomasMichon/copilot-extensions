@@ -68,7 +68,7 @@ def _validated_fields(args: argparse.Namespace, *names: str) -> dict[str, str] |
 
 
 def _cmd_task_diagnostics(args: argparse.Namespace) -> int:
-    with _core()._client(args) as client:
+    with _core()._client(args, ensure=False, read_only=True) as client:
         result = client.task_diagnostics(args.task_id)
     return _core()._emit(result)
 
