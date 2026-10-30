@@ -1320,3 +1320,186 @@ def test_installation_context_config_call_qualifies_actual_selected_owner(api, m
     if mode == "self-restoring":
         assert registry.installation_context is original
     assert report.reusable is False and api.config.current_observations() is None
+
+
+def _control_plane_owner(api, monkeypatch):
+    calls, project, pr = [], object(), {"enabled": True}
+    state = SimpleNamespace(anchor="control", plugins=["plugin"], error=None, rebind=False)
+
+    def discover():
+        calls.append("discover")
+        return state.anchor
+
+    def plugins():
+        calls.append("plugins")
+        return state.plugins
+
+    def local_path():
+        calls.append("local")
+        return "control"
+
+    def registry():
+        calls.append("registry")
+        return [SimpleNamespace(name="control", local_path=local_path)]
+
+    def rebound(*args, **kwargs):
+        pytest.fail("source callback was rebound after nested project argument evaluation")
+
+    def load_project(name, **kwargs):
+        calls.append(("project", name, kwargs))
+        if state.rebind:
+            monkeypatch.setattr(sources_module, "config_source_anchors", rebound)
+        return project
+
+    def sources(config, *, base_anchor):
+        if config is not project:
+            calls.append("execution-sources")
+            return []
+        assert base_anchor == "control"
+        calls.append("sources")
+        if state.error == "sources":
+            raise PermissionError("private source body")
+        return [SimpleNamespace(anchor="control", origin="harness"),
+                SimpleNamespace(anchor="knowledge", origin="knowledge")]
+
+    def graft(anchors):
+        calls.append(("graft", tuple(anchors)))
+        if state.error == "graft":
+            raise ValueError("private graft body")
+        return SimpleNamespace(related={
+            "target": SimpleNamespace(pr=pr), "empty": SimpleNamespace(pr={}), "missing": SimpleNamespace(),
+        })
+
+    api.stub("machine_identity", configured_machine_binding=lambda *a: "fixture")
+    api.stub("related", find_control_plane_anchor=discover, installed_plugin_related_anchors=plugins,
+             _anchor_key=lambda anchor: calls.append(("key", anchor)) or anchor,
+             config_contribution_anchor=lambda anchor, origin: f"{origin}:{anchor}", read_related_grafted=graft)
+    sources_module = api.stub("state_root", config_source_anchors=sources)
+    owner = _knowledge_owner(api, monkeypatch).owner
+    monkeypatch.setattr(sys.modules[owner.__package__ + ".repos"], "list_repos", registry, raising=False)
+    monkeypatch.setattr(owner, "load_project_config", load_project)
+    return SimpleNamespace(owner=owner, state=state, calls=calls, pr=pr, sources=sources, module=sources_module)
+
+
+@pytest.mark.parametrize("mode", ["unselected", "selected-bound-callee"])
+def test_control_plane_original_decision_keeps_children_opaque(api, monkeypatch, mode):
+    source = _control_plane_owner(api, monkeypatch)
+    if mode == "unselected":
+        source.state.anchor, source.state.plugins = None, []
+    else:
+        source.state.rebind = True
+    with api.config.capture_config_observations() as observations:
+        value = source.owner._control_plane_related_pr_map()
+    if mode == "unselected":
+        assert value == {} and source.calls == ["discover", "plugins"]
+    else:
+        assert value == {"target": source.pr} and value["target"] is source.pr
+        assert source.calls == [
+            "discover", "plugins", ("key", "control"), "registry", "local", "local", ("key", "control"),
+            ("project", "control", {"include_control_plane_related_pr": False}), "sources",
+            ("graft", ("plugin", "harness:control", "knowledge:knowledge")),
+        ]
+        assert source.module.config_source_anchors is not source.sources
+    report = api.config.AcquisitionReport("control-plane-related-pr", value, tuple(observations))
+    owned = [o for o in observations if o.stage == "control-plane-related-pr"]
+    assert len(owned) == 1 and owned[0].authority is ScanAuthority.COMPLETE
+    assert any(o.stage == "config-owner" and o.source == "control-plane-related-pr"
+               and o.authority is ScanAuthority.INDETERMINATE for o in observations)
+    assert report.authority is ScanAuthority.INDETERMINATE and report.reusable is False
+    assert api.config.current_observations() is None
+
+
+@pytest.mark.parametrize("mode", ["sources", "graft"], ids=["inner-fallback", "outer-caught"])
+def test_control_plane_caught_errors_preserve_fallback_and_sanitize(api, monkeypatch, mode):
+    source = _control_plane_owner(api, monkeypatch)
+    source.state.error = mode
+    with api.config.capture_config_observations() as observations:
+        value = source.owner._control_plane_related_pr_map()
+    assert source.calls[:9] == [
+        "discover", "plugins", ("key", "control"), "registry", "local", "local", ("key", "control"),
+        ("project", "control", {"include_control_plane_related_pr": False}), "sources",
+    ]
+    if mode == "sources":
+        assert value == {"target": source.pr} and value["target"] is source.pr
+        assert source.calls[9:] == [("graft", ("plugin", "harness:control"))]
+    else:
+        assert value == {}
+        assert source.calls[9:] == [("graft", ("plugin", "harness:control", "knowledge:knowledge"))]
+    report = api.config.AcquisitionReport("control-plane-related-pr", value, tuple(observations))
+    owned = [o for o in observations if o.stage == "control-plane-related-pr"]
+    assert owned and owned[-1].authority is ScanAuthority.INDETERMINATE
+    expected_type = "PermissionError" if mode == "sources" else "ValueError"
+    assert any(f.detail == expected_type for o in owned for f in o.findings)
+    assert "private source body" not in repr(observations) and "private graft body" not in repr(observations)
+    assert report.authority is ScanAuthority.INDETERMINATE and report.reusable is False
+    assert api.config.current_observations() is None
+
+
+@pytest.mark.parametrize("mode", ["same-globals", "self-restoring", "nested-original"])
+def test_control_plane_caller_qualifies_actual_selected_callback(api, monkeypatch, mode):
+    from types import FunctionType
+
+    source = _control_plane_owner(api, monkeypatch)
+    owner, calls, built = source.owner, [], []
+    original = owner._control_plane_related_pr_map
+    replacement_pr = {"enabled": False}
+    machine, global_path = Path("synthetic-machine.yaml"), Path("synthetic-global.yaml")
+
+    def wrapper():
+        calls.append("replacement")
+        if mode == "self-restoring":
+            monkeypatch.setattr(owner, "_control_plane_related_pr_map", original)
+        assert original()["target"] is source.pr
+        if mode == "nested-original":
+            assert original()["target"] is source.pr
+        return {"target": replacement_pr}
+
+    replacement = FunctionType(wrapper.__code__, original.__globals__, closure=wrapper.__closure__)
+    assert replacement.__globals__ is original.__globals__
+
+    def read(path):
+        calls.append(("yaml", path))
+        if path == global_path:
+            return {}
+        assert path == machine
+        monkeypatch.setattr(owner, "_control_plane_related_pr_map", replacement)
+        return {"repo_name": "target", "platform": "windows", "machine": "fixture",
+                "repos": {"target": {"anchor": "target"}}}
+
+    def build(raw, anchor, worktree_root):
+        built.append(raw)
+        return SimpleNamespace(anchor=anchor)
+
+    def premature():
+        pytest.fail("control-plane callback was selected before config acquisition")
+
+    monkeypatch.setattr(owner, "_control_plane_related_pr_map", premature)
+    monkeypatch.setattr(owner, "global_config_path", lambda: global_path)
+    monkeypatch.setattr(owner, "_load_yaml_safe", read)
+    monkeypatch.setattr(owner, "_load_config_d", lambda *a, **k: {})
+    monkeypatch.setattr(owner, "_load_inrepo_config", lambda *a, **k: {})
+    monkeypatch.setattr(owner, "_resolve_adoption_defaults_from_registry", lambda *a: {})
+    monkeypatch.setattr(owner, "derive_worktree_root", lambda anchor: "worktrees")
+    monkeypatch.setattr(owner, "_build_repo_config", build)
+    monkeypatch.setattr(owner, "_parse_profile_assignment", lambda *a: None)
+    monkeypatch.setattr(owner, "detect_machine", lambda value=None: value or "fixture")
+    report = api.config.load_config_report(machine, include_knowledge_preferences=False)
+    assert calls == [("yaml", global_path), ("yaml", machine), "replacement"]
+    assert report.value.repos["target"].anchor == "target"
+    assert len(built) == 1 and built[0]["pr"] == replacement_pr
+    original_calls = 2 if mode == "nested-original" else 1
+    assert source.calls.count("discover") == original_calls
+    assert source.calls.count("plugins") == original_calls
+    assert source.calls.count("registry") == original_calls
+    assert source.calls.count("local") == original_calls * 2
+    assert source.calls.count("sources") == original_calls
+    assert source.calls.count(("graft", ("plugin", "harness:control", "knowledge:knowledge"))) == original_calls
+    assert source.calls[-1] == "execution-sources"
+    if mode == "self-restoring":
+        assert owner._control_plane_related_pr_map is original
+    owned = [o for o in report.observations if o.stage == "control-plane-related-pr"]
+    assert sum(o.authority is ScanAuthority.COMPLETE for o in owned) == original_calls
+    assert owned[-1].authority is ScanAuthority.INDETERMINATE
+    assert any(f.reason == "owner-coverage-unavailable" for f in owned[-1].findings)
+    assert report.authority is ScanAuthority.INDETERMINATE and report.reusable is False
+    assert api.config.current_observations() is None
