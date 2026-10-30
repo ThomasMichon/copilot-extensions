@@ -190,3 +190,21 @@ operator requests.
   zero daemon ensure/start. Preparation preserves all existing fixture and
   provenance declarations; it is not itself a capture or a passing CI gate.
   Fresh committed capture, re-review, release and running qualification remain.
+
+### 2026-10-30 - Actual capability evidence captured
+
+- The existing HTTP-51 portfolio executed all four required source-bound
+  probes, including both fixture installation modes. Actual ordinary and
+  keyed receipt-only client factories recorded zero daemon ensure/start calls;
+  unavailable-provider, missing-receipt and old-capability cases retained
+  their conservative outcomes without a prompt.
+- The capture owner published its current capability observations and complete
+  source closure, then a separate no-write execution verified the same outputs.
+  The exact PR-diff contract guard passes: two contracts and 884 fixtures.
+  Earlier HTTP generations and ordered provenance remain retained.
+- The first invocation lacked the capture process library in its interpreter
+  and stopped before observations/publication. Preparing only the canonical
+  test environment resolved that explicit missing dependency; no runtime
+  installation, service repair or captured-result substitution was used.
+- This closes the missing local capture evidence, not independent review,
+  required hosted CI, containing release or installed/native qualification.
