@@ -123,10 +123,16 @@ The source implementation continuation is admitted; operational effects are not.
   adopters without a qualified typed credential owner, without inventing one.
 - [ ] Add coherent cache generations, completeness/freshness, bounded recovery
   and materialized local read views.
-  The next [immutable generation-cache slice](generation-cache-slice.md) reuses
-  the existing PR storage owner and keeps operation receipts separate.
+  The [immutable generation-cache slice](generation-cache-slice.md) merged in
+  #9693, reusing the existing PR storage owner and keeping operation receipts
+  separate. Service/client adoption and materialized source views remain open.
+- [x] Implement the reviewed source-only immutable generation cache, scoped CAS,
+  retained lookup, explicit bounded recovery and receipt-isolation controls.
 - [ ] Attach exact shallow source/head/common-baseline workspaces through the
   existing source owner; retain previous review generations and refs.
+  The [exact local source-attachment slice](source-attachment-slice.md) starts
+  with already prepared objects through the existing workspace/resource owner;
+  it does not invent a fetcher or silently adopt a read-only reference checkout.
 - [ ] Preserve existing GitHub behavior and use a provider-neutral contract.
 
 ### Phase 3 - Build explicit submission and reconciliation after admission
@@ -210,6 +216,14 @@ contract.
 - Address the two remaining review findings through explicit lock-held staging
   recovery and post-retirement tombstone reclamation. Preserve unrelated-file
   refusal, uncertain-clear ordering and replay/operation receipt isolation.
+- Merged #9693 as `f337b407a4d799544961ff5c12be6a2e83db6ab7` after both
+  remaining findings were fixed, 69 contained cache/workspace controls passed,
+  lint/install-contract gates passed, and the fresh current-head review
+  explicitly approved with no active issues alongside passing required CI.
+- The source-only cache subtask is complete, not this effort or Phase 2.
+  Continue the original exact-source attachment contract/implementation next;
+  submission/reconciliation and actual adopter qualification remain open.
+  No release, installed runtime, backend effect or service activation is claimed.
 
 ### 2026-10-30 - Priority native nullable-properties compatibility
 - Isolated the normalizer correction from the unpublished cache implementation,
