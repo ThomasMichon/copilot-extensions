@@ -172,3 +172,78 @@ def test_refusal_has_no_writes_and_no_purpose_escape(tmp_path: Path) -> None:
     after = sorted(str(path.relative_to(tmp_path)) for path in tmp_path.rglob("*"))
     assert before == after
     assert load_agent_policy(tmp_path).to_dict()["version"] == 1
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("text,allowed", [
+    (None, True),
+    ("expose_agent: true\n", True),
+    ("expose_agent: false\n", False),
+    ('expose_agent: "false"\n', False),
+    ("expose_agent: false\nexpose_agent: true\n", False),
+])
+def test_fresh_guest_reader_uses_canonical_policy_without_installed_packages(
+    tmp_path: Path, text: str | None, allowed: bool,
+) -> None:
+    import json
+    import os
+    import subprocess
+    import sys
+
+    from repository_policy.guest_probe import build_guest_policy_probe
+
+    (tmp_path / ".git").mkdir()
+    if text is not None:
+        write(tmp_path, text)
+    nested = tmp_path / "source"
+    nested.mkdir()
+    reader_temp = tmp_path / "reader-temp"
+    reader_temp.mkdir()
+    before = sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*"))
+    script, payload = build_guest_policy_probe()
+    environment = dict(os.environ)
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    environment.update(TMP=str(reader_temp), TEMP=str(reader_temp), TMPDIR=str(reader_temp))
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", script, str(nested)],
+        input=payload, capture_output=True, timeout=10, env=environment,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.stderr == b"", result.stderr
+    answer = json.loads(result.stdout)
+    assert result.returncode == (0 if allowed else 3), answer
+    if allowed:
+        assert answer["allowed"] is True
+        assert answer["repository"] == str(tmp_path)
+        assert answer["sources"] == ([str(tmp_path / CANONICAL)] if text is not None else [])
+    else:
+        assert answer["code"] in {
+            "repository-agent-exposure-denied", "repository-agent-exposure-invalid",
+        }
+    assert sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*")) == before
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+def test_fresh_guest_reader_cannot_downgrade_explicit_installation_context(tmp_path: Path) -> None:
+    import json
+    import os
+    import subprocess
+    import sys
+
+    from repository_policy.guest_probe import build_guest_policy_probe
+
+    script, payload = build_guest_policy_probe()
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", script, str(tmp_path)],
+        input=payload, capture_output=True, timeout=10,
+        env=dict(os.environ, COPILOT_EXTENSIONS_CONTEXT="unvalidated-context"),
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 3
+    answer = json.loads(result.stdout)
+    assert answer["code"] == "repository-agent-exposure-invalid"
+    assert "context" in answer["error"]

@@ -153,7 +153,7 @@ async def prepare_plugins(manager, name: str, repo: str | None, config, workspac
     from .hosting_policy import require_guest_hosting
 
     if hosting_required and not live_attachment:
-        await require_guest_hosting(manager, name, workspace)
+        await require_guest_hosting(manager, name, workspace, preflight=True)
     script = prelude + "\n" + build_prepare_script(
         plan, workspace,
         **({"include_prepared_context": True} if prepared_context is not None and include_compiled_context else {}),

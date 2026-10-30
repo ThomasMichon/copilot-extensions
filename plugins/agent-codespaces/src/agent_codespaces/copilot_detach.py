@@ -223,19 +223,7 @@ def _send_refs(name: str, upload: tuple[str, bytes, list[tuple[str, int]]]) -> s
     )
 
 
-# A fresh CodeSpace can carry the agent-worktrees plugin payload (staged by
-# CodeSpace-scoped plugin registration) without its runtime/binstub, and the
-# shared best-effort preflight may not have installed agent-bridge (whose
-# extension registers the session). Both are hard preconditions here, so the
-# launch completes them idempotently: install agent-bridge if absent, and run
-# the agent-worktrees payload's own documented installer if the binstub is.
-_VENUE_TOOLING = (
-    'P="$HOME/.copilot/installed-plugins/copilot-extensions"; '
-    '{ [ -d "$P/agent-bridge" ] || copilot plugin install agent-bridge@copilot-extensions >&2 || true; } && '
-    '{ command -v agent-worktrees >/dev/null 2>&1 || '  # marketplace-isolation: allow registry
-    '{ [ -f "$P/agent-worktrees/scripts/install.sh" ] && bash "$P/agent-worktrees/scripts/install.sh" install >&2; } || true; } && '
-    'export PATH="$HOME/.local/bin:$PATH"'
-)
+_VENUE_TOOLING = copilot_detach_startup.VENUE_TOOLING
 
 
 def _pane_tail(name: str, mux: str, lines: int = 40) -> str:

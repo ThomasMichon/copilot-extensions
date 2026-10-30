@@ -162,7 +162,7 @@ def test_manifest_enablement_and_worktree_payload_precedence_are_independent(
 
 
 @pytest.mark.asyncio
-async def test_provider_selection_registers_before_consumer(tmp_path):
+async def test_provider_selection_registers_before_consumer(tmp_path, monkeypatch):
     control = tmp_path / "control"
     payload = control / ".ai" / "sample"
     payload.mkdir(parents=True)
@@ -187,6 +187,15 @@ async def test_provider_selection_registers_before_consumer(tmp_path):
         source_paths=[control], codespace_plugins=[{"source": "sample@synthetic"}],
     )
     shared = Path(__file__).resolve().parents[3] / "libs" / "plugin-resolve" / "src"
+
+    async def local_policy(_manager, _name, workspace, *, preflight):
+        from repository_policy import require_agent_hosting
+
+        assert workspace == str(target)
+        assert preflight is True
+        require_agent_hosting(workspace)
+
+    monkeypatch.setattr("agent_codespaces.hosting_policy.require_guest_hosting", local_policy)
 
     class Transport:
         async def exec_command(self, _name, command, *, input_bytes, timeout):
@@ -229,6 +238,10 @@ async def test_explicit_worktree_uses_the_native_resolve_contract_before_prepare
         SimpleNamespace(exit_code=0, stdout=json.dumps({
             "launch": {"action": "exec", "worktree_id": "selected", "work_dir": "/workspaces/selected"},
         }), stderr=""),
+        SimpleNamespace(exit_code=0, stdout=json.dumps({
+            "version": 1, "allowed": True, "repository": "/workspaces/selected",
+            "expose_agent": None, "sources": [], "denied_by": [],
+        }), stderr=""),
         SimpleNamespace(exit_code=0, stdout='__VENUE_PLUGINS__{}\n__VENUE_PLUGIN_CONTEXT__'
                         '{"version":1,"cwd":"/workspaces/selected","plugins":[],"logical_payloads":{}}', stderr=""),
     ]))
@@ -237,10 +250,11 @@ async def test_explicit_worktree_uses_the_native_resolve_contract_before_prepare
         manager, "synthetic", "example/project", object(), "/workspaces/anchor",
         worktree_id="selected", prepared_context=context,
     )
-    first, second = manager.exec_command.await_args_list
+    first, policy, second = manager.exec_command.await_args_list
     assert 'WORKTREES=$(command -v agent-worktrees)' in first.args[1]
     assert 'resolve --json --dry-run' in first.args[1]
     assert '--worktree-id selected' in first.args[1]
+    assert "agent-policy check" in policy.args[1] and "/workspaces/selected" in policy.args[1]
     encoded = re.search(
         r"request=json.loads\(base64.b64decode\('([^']+)'\)\)",
         second.kwargs["input_bytes"].decode(),
@@ -372,14 +386,19 @@ async def test_relay_is_proven_and_prelude_exported_before_installer(monkeypatch
     )
     manager = SimpleNamespace(exec_command=AsyncMock(side_effect=[
         SimpleNamespace(exit_code=0, stdout="", stderr=""),
+        SimpleNamespace(exit_code=0, stdout=json.dumps({
+            "version": 1, "allowed": True, "repository": "/workspaces/project",
+            "expose_agent": None, "sources": [], "denied_by": [],
+        }), stderr=""),
         SimpleNamespace(exit_code=0, stdout="__VENUE_PLUGINS__{}", stderr=""),
     ]))
     await prepare_plugins(
         manager, "synthetic", "example/project", object(), "/workspaces/project",
         prelude="export SYNTHETIC_CONTEXT=ready;", relay_port=12001,
     )
-    probe, install = manager.exec_command.await_args_list
+    probe, policy, install = manager.exec_command.await_args_list
     assert "ping" in probe.args[1] and "pong" in probe.args[1]
+    assert "agent-policy check" in policy.args[1]
     assert install.kwargs["input_bytes"].startswith(b"export SYNTHETIC_CONTEXT=ready;")
 
 

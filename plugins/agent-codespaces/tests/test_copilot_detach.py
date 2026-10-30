@@ -786,6 +786,104 @@ def test_venue_tooling_prefix_is_valid_bash(tmp_path):
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("initial,repair,bridge,context,allowed,action", [
+    ("healthy", "healthy", True, False, True, None),
+    ("unhealthy", "healthy", True, False, True, "repair"),
+    ("unhealthy", "failed", True, False, False, "repair"),
+    ("unhealthy", "unhealthy", True, False, False, "repair"),
+    ("missing", "healthy", True, False, True, "install"),
+    ("healthy", "healthy", False, False, False, None),
+    ("unhealthy", "healthy", True, True, False, None),
+    ("healthy", "healthy", True, True, False, None),
+    ("missing", "healthy", True, True, False, None),
+])
+def test_venue_tooling_checks_real_command_before_launch_effects(
+    tmp_path, initial, repair, bridge, context, allowed, action,
+):
+    import os
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    from agent_codespaces.copilot_detach_startup import build_owned_command
+
+    bash = shutil.which("bash")
+    if bash and "system32" in bash.lower():
+        git = shutil.which("git")
+        native = Path(git).parent.parent / "bin" / "bash.exe" if git else None
+        bash = str(native) if native and native.is_file() else None
+    if not bash or "WindowsApps" in bash:
+        pytest.skip("no POSIX bash")
+    payloads = tmp_path / ".copilot" / "installed-plugins" / "copilot-extensions"
+    scripts = payloads / "agent-worktrees" / "scripts"
+    scripts.mkdir(parents=True)
+    if bridge:
+        (payloads / "agent-bridge").mkdir()
+    binaries = tmp_path / ".local" / "bin"
+    binaries.mkdir(parents=True)
+    tool = """#!/usr/bin/env bash
+touch "$HOME/provision-attempt"
+printf '%s\\n' "probe:$*" >> "$HOME/trace"
+[ "$1" = --help ] || exit 98
+[ -f "$HOME/healthy" ] || { printf 'runtime unhealthy\\n' >&2; exit 7; }
+"""
+    source = tmp_path / "fixture-tool"
+    source.write_text(tool, encoding="utf-8", newline="\n")
+    source.chmod(0o755)
+    if initial != "missing":
+        target = binaries / "agent-worktrees"
+        target.write_text(tool, encoding="utf-8", newline="\n")
+        target.chmod(0o755)
+    if initial == "healthy":
+        (tmp_path / "healthy").touch()
+    (scripts / "install.sh").write_text(
+        'printf "%s\\n" "$1" >> "$HOME/actions"\n'
+        + ("exit 9\n" if repair == "failed" else "")
+        + 'cp "$HOME/fixture-tool" "$HOME/.local/bin/agent-worktrees"\n'
+        + 'chmod +x "$HOME/.local/bin/agent-worktrees"\n'
+        + ('touch "$HOME/healthy"\n' if repair == "healthy" else ""),
+        encoding="utf-8", newline="\n",
+    )
+    (binaries / "copilot").write_text("#!/usr/bin/env bash\nexit 9\n", encoding="utf-8", newline="\n")
+    (binaries / "copilot").chmod(0o755)
+    environment = dict(os.environ)
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    if context:
+        environment["COPILOT_EXTENSIONS_CONTEXT"] = "selected-installation"
+    command = build_owned_command(
+        [], captured={"prepared_context": {"plugin_context": {
+            "version": 1, "cwd": tmp_path.as_posix(), "plugins": [],
+        }}},
+        plan={"identity": "synthetic", "anchor": False, "scope_id": "synthetic"},
+        args=_args(), seed_ready_timeout=1, copilot_args=[],
+        reservation={"reservation_id": "synthetic"}, seed=None,
+        build_command=lambda *args, **kwargs: 'printf launch > "$HOME/launched"',
+        tooling=detach._VENUE_TOOLING,
+        trust_folder=lambda workspace: 'printf trusted > "$HOME/trusted"',
+    )
+    result = subprocess.run(
+        [bash, "-c", 'export HOME="$PWD"; export PATH="$HOME/.local/bin:/usr/bin:/bin"; '
+         + command],
+        cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert (result.returncode == 0) is allowed, result.stderr
+    assert (tmp_path / "launched").exists() is allowed
+    assert (tmp_path / "trusted").exists() is allowed
+    actions = tmp_path / "actions"
+    assert (actions.read_text().splitlines() if actions.exists() else []) == (
+        [action] if action else []
+    )
+    if not allowed:
+        assert result.stderr.strip(), "tooling refusal must be visible"
+    if context:
+        assert not (tmp_path / "provision-attempt").exists()
+        assert not (tmp_path / "trace").exists()
+
+
 def test_new_session_id_added_unless_resuming():
     fresh = detach.with_new_session(["--no-ask-user"])
     assert fresh[0] == "--no-ask-user" and fresh[1].startswith("--session-id=")

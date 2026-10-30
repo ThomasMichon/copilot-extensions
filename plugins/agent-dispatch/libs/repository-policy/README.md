@@ -40,6 +40,30 @@ error fields. A bare policy object's `to_dict()` is not an admission answer.
 Validation checks the answer's shape; it never replaces a fresh check against
 the receiver's actual execution checkout.
 
+For an unprovisioned legacy guest, `repository_policy.guest_probe` supplies
+`build_guest_policy_probe()`: Python source plus a stdin ZIP containing this
+canonical resolver, PyYAML's portable source and both license notices. Run the
+source with `python3 -I -S -c <source> <actual-checkout>`, supplying the ZIP on
+stdin. It evaluates current guest bytes with the same resolver and YAML loader,
+without guest site packages, runtime installation or checkout writes. Its private
+temporary archive is removed on success and refusal. Python must support the
+library's normal minimum version; missing prerequisites fail visibly.
+
+This is a provisionless preflight read, not a launch grant or installed receiver.
+It refuses an explicit `COPILOT_EXTENSIONS_CONTEXT`: the selected installation's
+receiver must validate its own marketplace context and overlays, never silently
+downgrade to legacy policy. Callers must still retain the fresh installed-owner
+check before actual managed launch. An installed but incompatible or failing
+receiver is not permission to substitute this reader.
+
+The fresh-reader subprocess controls are explicit T3 tests, not automatic
+unit-only CI. Run them from the repository root with
+`python tools/run-plugin-tests.py repository-policy --test-file tests/test_repository_policy.py --allow-explicit-tiers`.
+The consumer's allow/deny preparation control runs with
+`python tools/run-plugin-tests.py agent-codespaces --test-file tests/test_hosting_policy.py --allow-explicit-tiers`.
+These disposable controls exercise isolated Python without site packages; they
+do not qualify a live CodeSpace, remote SSH transport or installed-host rollout.
+
 In development, consumers use a UV editable pointer to this canonical library.
 Release materialization includes a standalone local copy in each consumer.
 Source-only allocation, Git/PR workflows, saved handoffs and externally hosted
