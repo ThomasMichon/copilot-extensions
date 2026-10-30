@@ -26,7 +26,7 @@ BRIDGE = "bridge-a"
 @pytest.fixture
 def hosted(tmp_path, monkeypatch):
     queue = TaskQueue(tmp_path / "tasks.db")
-    task = queue.create("review", repo="queue-project")
+    task = queue.create("review", repo="queue-project", source="wake-test")
     reservation, _ = queue.reserve_spawn(
         task.id, reserved_by="supervisor", driver="ordinary-bridge",
     )

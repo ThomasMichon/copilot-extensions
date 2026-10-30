@@ -122,7 +122,12 @@ A release that wins before wake admission remains authoritative: the selector
 and final admission refuse its releasing/retired reservation, and the delivery
 adapter revalidates persisted task, target and native facts rather than using
 an earlier reservation snapshot. A pending, never-admitted wake alone does not
-prevent release. Current accepted wakes remain protected until the natural
+prevent release: it must have zero delivery attempts and no settled acceptance.
+The existing attempt count retains uncertainty after an unqualified send or
+interrupted caller; requeueing does not turn it into proof of absence.
+Accepted `sent` custody remains acceptance even when lease recovery or waiter
+claim-release failure returns the same row to pending.
+Current accepted or attempted wakes remain protected until the natural
 owner/waiter/task lifecycle advances; unknown send custody still requires its
 original reconciliation, including after task completion.
 

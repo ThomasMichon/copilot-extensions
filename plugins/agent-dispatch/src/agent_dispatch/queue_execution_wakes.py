@@ -81,7 +81,10 @@ def _require_no_owner_wake(
                 continue
             if row["execution_send_state"] in {"pending", "unknown"} or row["status"] == "delivering":
                 raise TaskError(f"wake delivery excludes physical {operation}")
-            if row["status"] == "pending" and not protect_pending:
+            if (
+                row["status"] == "pending" and not protect_pending
+                and row["execution_send_state"] != "sent" and row["attempts"] == 0
+            ):
                 continue
             current = (
                 queue._wake_is_current(task, WakeOperation._from_row(row))
