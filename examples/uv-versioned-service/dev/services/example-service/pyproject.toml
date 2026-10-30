@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools==83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "uv-slot-example-service"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["uv-slot-example-message==0.1.0"]
+
+[tool.uv]
+exclude-newer = "7 days"
+
+[tool.uv.sources]
+uv-slot-example-message = { path = "../../libs/example-message", editable = true }
+
+[tool.setuptools.packages.find]
+where = ["src"]

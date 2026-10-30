@@ -38,6 +38,7 @@ Usage::
 
     python tools/materialize_main.py --dest /path/to/main-snapshot
     python tools/materialize_main.py --candidate --dest /path/to/candidate
+    python tools/materialize_main.py --uv-example --dest /path/to/example-main
 """
 from __future__ import annotations
 
@@ -696,7 +697,11 @@ def _ignore(_dir: str, names: list[str]) -> set[str]:
     } or n.endswith((".pyc", ".pyo")) or n.endswith(".egg-info")}
 
 
-def build(dest: Path, *, source_root: Path = REPO, replace_existing: bool = True) -> list[str]:
+def build(
+    dest: Path, *, source_root: Path = REPO, replace_existing: bool = True,
+    uv_example: bool = False,
+    uv_suite: bool = False,
+) -> list[str]:
     if dest.exists():
         if not replace_existing:
             raise ValueError("candidate destination must not already exist")
@@ -711,7 +716,18 @@ def build(dest: Path, *, source_root: Path = REPO, replace_existing: bool = True
     # per-pointer check then still catches and refuses a symlinked
     # canonical lib source specifically.
     shutil.copytree(source_root, dest, ignore=_ignore, symlinks=True)
-    return materialize(dest, canonical_root=source_root)
+    log = materialize(dest, canonical_root=source_root)
+    if uv_example and not any(line.startswith("SKIP") for line in log):
+        helper = source_root / "examples" / "uv-versioned-service" / "assembly.py"
+        spec = importlib.util.spec_from_file_location("uv_example_assembly", helper)
+        assert spec and spec.loader
+        assembly = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(assembly)
+        log.extend(assembly.assemble(dest, source_root, materialize_uv_editable_ref_into))
+    if uv_suite and not any(line.startswith("SKIP") for line in log):
+        import materialize_uv_projects
+        log.extend(materialize_uv_projects.assemble(dest, source_root))
+    return log
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -721,7 +737,13 @@ def main(argv: list[str] | None = None) -> int:
                      help="directory to build the materialized 'main' snapshot into")
     ap.add_argument("--candidate", action="store_true",
                     help="build committed HEAD with a verified whole-tree source receipt")
+    ap.add_argument("--uv-example", action="store_true",
+                    help="also assemble and lock the isolated uv example (requires uv)")
+    ap.add_argument("--uv-suite", action="store_true",
+                    help="compose portable locked environments for all declared Python runtime owners")
     args = ap.parse_args(argv)
+    if args.candidate and (args.uv_example or args.uv_suite):
+        ap.error("uv environment experiments are ordinary materialization, not candidate qualification")
 
     print(f"Snapshotting {REPO} -> {args.dest} ...")
     if args.candidate:
@@ -739,7 +761,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"candidate materialization failed: {error}", file=sys.stderr)
             return 1
     else:
-        log = build(args.dest, source_root=REPO)
+        log = build(
+            args.dest, source_root=REPO, uv_example=args.uv_example, uv_suite=args.uv_suite,
+        )
     for line in log:
         print(line)
     ok = sum(1 for line in log if line.startswith("OK"))

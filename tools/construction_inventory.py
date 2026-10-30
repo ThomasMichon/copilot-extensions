@@ -220,7 +220,12 @@ def inventory(root: Path, tracked_projects: list[str]) -> dict:
                 raise InventoryError(f"vendored library identity mismatch: {path}")
             vendored_inputs.append({"project": path, "canonical": canonical})
             break
-    unclassified = sorted(remaining - {item["project"] for item in vendored_inputs})
+    experimental_fixtures = sorted(
+        path for path in remaining if path.startswith("examples/uv-versioned-service/dev/")
+    )
+    unclassified = sorted(
+        remaining - {item["project"] for item in vendored_inputs} - set(experimental_fixtures)
+    )
     return {
         "schema": "copilot-extensions.construction-source-inventory",
         "version": 1,
@@ -229,6 +234,7 @@ def inventory(root: Path, tracked_projects: list[str]) -> dict:
         "shared_library_inputs": library_inputs,
         "vendored_library_inputs": vendored_inputs,
         "unclassified_python_projects": unclassified,
+        "experimental_fixture_projects": experimental_fixtures,
         "source_owner_inventory_complete": not unclassified,
         "runtime_qualification": "not-performed",
         "remaining_classification": [

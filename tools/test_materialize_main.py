@@ -132,7 +132,13 @@ def test_materialize_refuses_linked_source_content(tmp_path, native_file_symlink
         f'[tool.uv.sources]\ndependency = {{ path = "{reference}" }}\n',
     )
     log = mm.materialize(tmp_path, canonical_root=tmp_path)
-    assert any("linked" in line for line in log), log
+    expected = {"linked"}
+    if os.name == "nt" and kind == "outside-traversal":
+        # Win32 normalizes link/.. before following this outside symlink.
+        expected.add("not relative to its own payload")
+    assert any(
+        line.startswith("SKIP") and any(reason in line for reason in expected) for line in log
+    ), log
 
 
 def test_materialized_closure_allows_an_aliased_parent(tmp_path, native_file_symlink):
