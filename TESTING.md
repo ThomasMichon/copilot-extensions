@@ -5103,6 +5103,11 @@ delivery and credentials; the planner, constructors, launchers and scheduled
 registrations remain real. Missing prerequisite or resident-attribution evidence
 fails acceptance rather than reducing the portfolio.
 
+The Index host role is written as YAML readable by both native and
+dependency-free role resolvers. Preparation explicitly provisions its full
+independent engine through the native installer; ordinary Manager updates
+preserve that separately managed engine rather than provisioning it implicitly.
+
 Cold preparation and exercise each have a 900-second owned-process deadline;
 assertions retain a separate 300-second runner boundary and the usual pytest
 item limit. Settlement runs independently after success, stage failure or
