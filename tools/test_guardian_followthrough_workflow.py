@@ -83,8 +83,23 @@ def test_manual_selector_is_isolated_and_preserves_existing_routes():
         }
         assert enabled and "guardian-followthrough-macos" not in enabled
         for name in enabled:
-            assert "inputs." + selector in jobs[name]["if"]
-            assert not _enabled(jobs[name]["if"], defaults)
+            if name in {
+                "windows-broker-portable", "windows-broker-probe",
+                "windows-native-process", "windows-broker-consumers",
+            }:
+                assert "inputs." + selector in jobs[name]["if"]
+                assert not _enabled(jobs[name]["if"], defaults)
+            else:
+                assert jobs[name]["if"] == "${{ inputs." + selector + " }}"
+
+
+def test_non_broker_routes_cannot_expand_to_another_manual_input(monkeypatch):
+    monkeypatch.setitem(
+        WORKFLOW["jobs"]["native-seed-reply-macos"],
+        "if", "${{ (inputs.native_launch || inputs.immutable_runtime) }}",
+    )
+    with pytest.raises(AssertionError):
+        test_manual_selector_is_isolated_and_preserves_existing_routes()
 
 
 @pytest.mark.parametrize("broker", ["windows_broker_probe", "windows_broker_consumers"])

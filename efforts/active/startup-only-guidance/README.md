@@ -306,3 +306,7 @@ existing review, custody and explicit approval gates.
 - Kept the suite-wide publication/discovery test in the ordinary integration
   suite, not the fast guard packet. The declaration-only selector guard remains
   the lightweight check; no new per-source Git subprocess matrix is added to it.
+- Retained exact single-input expressions for every non-broker route. Only the
+  four broker jobs use the alternative/exclusion checks above; a mutation
+  control proves adding an unrelated input to a native route is rejected.
+  The workflow contract now passes all 29 cases.
