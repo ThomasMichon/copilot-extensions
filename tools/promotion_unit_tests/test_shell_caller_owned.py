@@ -178,6 +178,7 @@ def test_posix_watcher_signals_only_its_still_occupied_original_scope(
     def exit_process(code: int) -> None:
         raise Retired
 
+    monkeypatch.setattr(owner, "signal", SimpleNamespace(SIGKILL=9))
     monkeypatch.setattr(
         owner, "open", lambda path, mode: nullcontext(SimpleNamespace(fileno=lambda: 99)),
         raising=False,

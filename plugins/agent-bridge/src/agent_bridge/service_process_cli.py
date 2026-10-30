@@ -239,10 +239,12 @@ def _ensure_retired_daemon_exited(
 
 
 def _pid_is_agent_bridge(pid: int, timeout: float = 15.0) -> bool:
-    """True if *pid* is a live process running the ``agent_bridge`` module."""
+    """True if *pid* has a supported Bridge daemon entrypoint command line."""
     if pid <= 0:
         return False
     import subprocess as sp
+
+    from .service_process_identity import bridge_daemon_argv, split_windows_command
 
     try:
         if sys.platform == "win32":
@@ -250,6 +252,7 @@ def _pid_is_agent_bridge(pid: int, timeout: float = 15.0) -> bool:
                 [
                     _powershell_host(),
                     "-NoProfile",
+                    "-NonInteractive",
                     "-Command",
                     "(Get-CimInstance Win32_Process -Filter "
                     f"'ProcessId={pid}' -ErrorAction SilentlyContinue).CommandLine",
@@ -257,19 +260,23 @@ def _pid_is_agent_bridge(pid: int, timeout: float = 15.0) -> bool:
                 capture_output=True,
                 text=True,
                 timeout=timeout,
+                **_core().no_window_kwargs(),
             )
-            return "agent_bridge" in (out.stdout or "")
+            return out.returncode == 0 and bool((out.stdout or "").strip()) and bridge_daemon_argv(
+                split_windows_command((out.stdout or "").strip()),
+            )
         try:
             with open(f"/proc/{pid}/cmdline", "rb") as fh:
-                return b"agent_bridge" in fh.read()
+                return bridge_daemon_argv(
+                    [os.fsdecode(argument) for argument in fh.read().rstrip(b"\0").split(b"\0")],
+                )
         except OSError:
-            out = sp.run(
-                ["ps", "-p", str(pid), "-o", "command="],
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-            return "agent_bridge" in (out.stdout or "")
+            import psutil
+
+            try:
+                return bridge_daemon_argv(psutil.Process(pid).cmdline())
+            except psutil.Error:
+                return False
     except (OSError, sp.TimeoutExpired, ValueError):
         return False
 
@@ -753,7 +760,7 @@ def _service_stop() -> None:
         # stale pid-file/port/lock entry whose pid has since been reused by
         # an unrelated process must never be killed.
         #
-        # `_pid_is_agent_bridge` is a cmdline-substring check, and `_kill_pid`
+        # `_pid_is_agent_bridge` checks the daemon entrypoint, and `_kill_pid`
         # itself now closes the remaining window to its own signal: it
         # re-verifies identity through an OS-object-bound termination
         # (`zdd.diagnostics.terminate_pid_if_identity`) using a start-time
