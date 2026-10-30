@@ -185,6 +185,30 @@ def test_marketplace_related_overlay_retains_pr_only_when_omitted(tmp_path: Path
     assert selected.pr == ({} if explicit else policy)
 
 
+@pytest.mark.parametrize("clear", [{}, None, "invalid", {"enabled": False}])
+def test_repository_clear_survives_metadata_overlay_before_plugin_grafting(tmp_path, monkeypatch, clear):
+    plugin = _make_installed_plugin(tmp_path / "installed", "example", "example-harness",
+        RelatedConfig(related={"target": RelatedEntry(name="target", pr={
+            "provider": "azure-devops", "repository": "Project/repository",
+            "api_base": "https://dev.azure.com/example", "token_env": "EXAMPLE_PR_TOKEN",
+        })}))
+    repo = tmp_path / "repo"
+    path = related.related_path(repo)
+    path.parent.mkdir(parents=True)
+    path.write_text(yaml.safe_dump({"related": {"target": {"pr": clear}}}), encoding="utf-8")
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", json.dumps({"marketplaceId": "example-cell"}))
+    overlay = repo / related.MARKETPLACE_OVERLAYS_DIR / "example-cell" / related.RELATED_FILENAME
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text("related:\n  target:\n    summary: metadata only\n", encoding="utf-8")
+
+    composed = related.read_related(repo).related["target"]
+    assert composed.pr_declared
+    assert composed.pr == (clear if isinstance(clear, dict) else {})
+    grafted = related.read_related_grafted([plugin, repo]).related["target"]
+    assert grafted.pr == composed.pr
+    assert "token_env" not in grafted.pr
+
+
 def test_grafted_single_anchor_matches_ungrafted(tmp_path: Path):
     base = tmp_path / "harness"
     _write_related(base, RelatedConfig(

@@ -209,7 +209,7 @@ class RelatedEntry:
     # own in-repo ``pr`` and below a machine-local ``repos.<name>.pr`` override);
     # a raw mapping here, never a parsed object. Empty ``{}`` for most entries.
     pr: dict[str, Any] = field(default_factory=dict)
-    # Distinguish an omitted policy from an explicit empty/invalid block.
+    # Retain explicit PR intent across composed layers, including empty clears.
     pr_declared: bool = field(default=False, compare=False, repr=False)
     # The checkout anchor this entry was **read from**, set by the state-root
     # config-graft (:func:`read_related_grafted`) so a knowledge-repo overlay

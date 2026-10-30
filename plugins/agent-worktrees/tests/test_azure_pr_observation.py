@@ -183,6 +183,37 @@ def test_conflicting_native_and_legacy_vote_actors_remain_unknown():
     assert not read(reader).observation.complete
 
 
+@pytest.mark.parametrize("value", [None, {}, {"$value": None}, {"$value": ""}, {"$value": False}, ""])
+def test_present_malformed_index_property_cannot_fall_back_to_legacy_actor(value):
+    reader = Reader()
+    row = event()
+    row["properties"]["CodeReviewVotedByIdentity"] = value
+    reader.thread_rows = Collection((row,))
+    result = read(reader)
+    assert not result.observation.complete
+    assert "read_evidence" in result.observation.to_dict()["unknown"]
+    assert not result.observation.to_dict()["all_required_satisfied"]
+
+
+@pytest.mark.parametrize("reference,actor", [("", "reviewer"), (" ", "reviewer"), ("1", " ")])
+def test_empty_index_or_actor_is_not_native_identity_evidence(reference, actor):
+    reader = Reader()
+    row = event()
+    row["properties"]["CodeReviewVotedByIdentity"] = {"$value": reference}
+    row["identities"] = {reference: {"id": actor}}
+    reader.thread_rows = Collection((row,))
+    assert not read(reader).observation.complete
+
+
+@pytest.mark.parametrize("value", [10.5, True, None, "010", " 10 "])
+def test_malformed_native_vote_value_does_not_become_an_approval(value):
+    reader = Reader()
+    row = event()
+    row["properties"]["CodeReviewVoteResult"] = {"$value": value}
+    reader.thread_rows = Collection((row,))
+    assert not read(reader).observation.complete
+
+
 @pytest.mark.parametrize("value", [-5, -10])
 def test_enabling_reviews_does_not_invent_an_existing_negative_vote_event(value):
     reader = Reader()

@@ -122,7 +122,7 @@ def overlay_path(anchor: Path, observations: list[SourceObservation] | None = No
 
 def _overlay_entry(previous, entry):
     if previous is not None and not entry.pr_declared and not entry.pr:
-        return replace(entry, pr=dict(previous.pr))
+        return replace(entry, pr=dict(previous.pr), pr_declared=previous.pr_declared)
     return entry
 
 
