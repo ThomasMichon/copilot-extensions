@@ -302,3 +302,15 @@ network dependency, parallel policy registry or mandatory sibling plugin.
   native exclusion/junction transitions in both HOME forms. High-signal lint
   passed. The current review gate remains open until the corrected revision
   receives its verdict and required checks.
+
+### 2026-10-30 - Batched native probe parsing
+- Removed Bash's three JSON-parser children per probe and child process per
+  ancestor. One NUL-delimited parser pass handles all probes; shell builtins
+  walk ancestors without losing path whitespace/control boundaries.
+- Added an actual native work-count regression comparing one and 128 missing
+  instruction directories with Python absent. It requires equal bounded
+  parser counts and zero ancestor-tool launches.
+- Local affected validation passed 93 tests with 5 platform/tool skips; Bash
+  syntax and high-signal lint passed. The new POSIX work-count case is skipped
+  on this Windows host, so no native Linux count/latency result is claimed.
+  The existing periodic lane does not enroll this explicit-tier family.

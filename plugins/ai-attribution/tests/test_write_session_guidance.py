@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -608,6 +609,61 @@ def test_bash_wrapper_serves_warm_cache_without_spawning_python(monkeypatch, tmp
     content = _target(home).read_text(encoding="utf-8")
     assert "cached policy only" in content
     assert "unavailable" not in content
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+def test_bash_warm_missing_roster_uses_constant_parser_processes(monkeypatch, tmp_path):
+    bash, jq, sha = _bash_prereqs()
+    if os.name == "nt" or not (bash and jq and sha):
+        pytest.skip("native POSIX bash/jq/hash tools unavailable")
+    repo, home, tools = (tmp_path / name for name in ("repo", "home", "tools"))
+    home.mkdir()
+    tools.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(writer, "_run_contributor", lambda *args: "Required disclosure.")
+    for tool in ("git", "sha256sum", "shasum", "cat", "cut", "date", "awk",
+                 "wc", "mkdir", "mv", "rm"):
+        source = shutil.which(tool)
+        if source:
+            (tools / tool).symlink_to(source)
+    for tool in ("jq", "dirname"):
+        source = shutil.which(tool)
+        assert source
+        wrapper = tools / tool
+        wrapper.write_text(
+            "#!/bin/sh\nprintf '" + tool + "\\n' >> \"$CALL_LOG\"\nexec "
+            + shlex.quote(source) + " \"$@\"\n", encoding="utf-8"
+        )
+        wrapper.chmod(0o700)
+    log = tmp_path / "calls"
+    counts = []
+    for size in (1, 128):
+        directories = [tmp_path / f"missing-{i}" for i in range(size)]
+        monkeypatch.setenv("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", os.pathsep.join(map(str, directories)))
+        assert writer.write_session_guidance(
+            {"sessionId": f"seed-{size}", "cwd": str(repo)}, home=home
+        )
+        log.write_text("", encoding="utf-8")
+        env = {**os.environ, "PATH": str(tools), "CALL_LOG": str(log),
+               "COPILOT_PLUGIN_ROOT": str(_PLUGIN)}
+        env.pop("AI_ATTRIBUTION_FORCE_REFRESH", None)
+        session = f"warm-{size}"
+        result = subprocess.run(
+            [bash, str(_PLUGIN / "scripts" / "write-session-guidance.sh")],
+            input=json.dumps({"sessionId": session, "cwd": str(repo)}),
+            text=True, capture_output=True, env=env, check=True, timeout=30,
+        )
+        assert result.stdout == "{}"
+        target = home / ".copilot" / "session-state" / session / "instructions" / "ai-attribution" / "session-guidance.instructions.md"
+        assert "Required disclosure." in target.read_text(encoding="utf-8")
+        calls = log.read_text(encoding="utf-8").splitlines()
+        assert "dirname" not in calls
+        counts.append(calls.count("jq"))
+    assert 0 < counts[0] == counts[1] <= 12
 
 
 def test_bash_wrapper_falls_back_on_cold_cache(tmp_path):

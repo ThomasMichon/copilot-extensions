@@ -108,18 +108,21 @@ if [[ -n "$session_id" && "$session_id" =~ $SESSION_ID_PATTERN \
                             run_python_fallback "$stdin_text"
                             exit 0
                         fi
-                        while IFS= read -r probe; do
-                            profile_path="$(printf '%s' "$probe" | jq -er '.path' 2>/dev/null)"
-                            expected="$(printf '%s' "$probe" | jq -r '.sha256 // empty' 2>/dev/null)"
+                        while IFS= read -r -d '' profile_path \
+                            && IFS= read -r -d '' expected \
+                            && IFS= read -r -d '' kind; do
                             component="$profile_path"
                             while [[ "$component" != "/" && "$component" != "." ]]; do
                                 if [[ -L "$component" ]]; then
                                     run_python_fallback "$stdin_text"
                                     exit 0
                                 fi
-                                component="$(dirname -- "$component")"
+                                case "$component" in
+                                    */*) component="${component%/*}"; component="${component:-/}" ;;
+                                    *) component="." ;;
+                                esac
                             done
-                            if [[ "$(printf '%s' "$probe" | jq -r '.kind // empty')" == "excluded" ]]; then
+                            if [[ "$kind" == "excluded" ]]; then
                                 continue
                             fi
                             if [[ -z "$expected" ]]; then
@@ -142,7 +145,8 @@ if [[ -n "$session_id" && "$session_id" =~ $SESSION_ID_PATTERN \
                                 run_python_fallback "$stdin_text"
                                 exit 0
                             fi
-                        done < <(printf '%s' "$data" | jq -c '.profile_probes[]')
+                        done < <(printf '%s' "$data" | jq -j \
+                            '.profile_probes[] | .path, "\u0000", (.sha256 // ""), "\u0000", (.kind // ""), "\u0000"')
                         guidance="$(printf '%s' "$data" | jq -er '.profile_guidance // empty' 2>/dev/null)"
                         profile_header="$(printf '%s' "$data" | jq -er '.profile_header // empty' 2>/dev/null)"
                         if [[ -z "$guidance" ]] || [[ "$profile_header" != "# AI attribution session guidance" \

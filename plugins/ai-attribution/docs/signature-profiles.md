@@ -12,6 +12,8 @@ profile-enabled cold/changed launches enter that writer. Native warm shortcuts
 reuse rendered profile guidance only after checking the discovery environment
 and bounded present/missing-file probes produced by the Python owner. Native
 wrappers do not repeat its directory normalization or containment decisions.
+The Bash reader extracts all probe fields in one NUL-delimited JSON pass and
+walks lexical ancestors with shell builtins, not a child process per ancestor.
 Changed, added, removed, reordered or unsafe inputs fall back to the shared
 writer. A base-only cache is not eligible for native reuse: profile discovery
 must have completed, including an explicit snapshot for an unconfigured launch.
