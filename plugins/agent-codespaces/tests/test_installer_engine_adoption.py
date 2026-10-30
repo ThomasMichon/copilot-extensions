@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from agent_procutil.owned_process import run_caller_owned
+
 from .installer_test_support import (
     assert_installer_isolated,
     guard_installer_payload,
@@ -111,7 +113,6 @@ def _function(ext: str, name: str) -> str:
 
 
 def _run(ext: str, script: str, tmp_path: Path, env: dict[str, str], *, timeout=45):
-    from agent_procutil.owned_process import run_caller_owned
     path = tmp_path / f"harness.{ext}"
     path.write_text(script, encoding="utf-8")
     command = ["bash", str(path)] if ext == "sh" else [PWSH, "-NoProfile", "-File", str(path)]
@@ -132,6 +133,8 @@ def _fake_uv(tmp_path: Path) -> Path:
         """import json, os, subprocess, sys, tomllib
 from pathlib import Path
 args = sys.argv[1:]
+if args[:2] == ["pip", "install"]:
+    assert "--no-editable" not in args and "--editable" not in args
 if "--show-settings" in args:
     print('''PipInstallSettings { settings: PipSettings {
         index_locations: IndexLocations { indexes: [], flat_index: [], },
@@ -146,12 +149,11 @@ def unseasoned(arguments):
             next(items)
         elif argument == "--config-setting":
             assert next(items) == "editable_mode=compat"
-        elif argument not in ("--reinstall", "--no-editable"):
+        elif argument != "--reinstall":
             result.append(argument)
     return result
 expected_sources = json.loads(os.environ.get("TEST_UV_EXPECTED_SOURCES", "{}"))
 if expected_sources and args[:2] == ["pip", "install"]:
-    assert "--no-editable" in args and "--editable" not in args
     config = Path(args[args.index("--config-file") + 1]).resolve()
     private_root = config.parent
     assert config.is_file() and not config.is_symlink()
@@ -163,7 +165,12 @@ if expected_sources and args[:2] == ["pip", "install"]:
         source = Path(argument)
         if not source.is_dir() or not (source / "pyproject.toml").is_file():
             continue
-        project = tomllib.loads((source / "pyproject.toml").read_text())["project"]
+        retained = tomllib.loads((source / "pyproject.toml").read_text())
+        project = retained["project"]
+        for entries in retained.get("tool", {}).get("uv", {}).get("sources", {}).values():
+            for entry in entries if isinstance(entries, list) else [entries]:
+                if "path" in entry:
+                    assert not entry.get("editable", False)
         original = Path(expected_sources[project["name"]])
         assert source.resolve() != original.resolve()
         assert any(parent.samefile(private_root) for parent in source.resolve().parents)
@@ -243,7 +250,8 @@ raise SystemExit(2)
 
 def _without_policy_arguments(arguments):
     assert "--exclude-newer" in arguments and "--reinstall" in arguments
-    assert "--no-editable" in arguments and arguments[arguments.index("--link-mode") + 1] == "copy"
+    assert "--no-editable" not in arguments and "--editable" not in arguments
+    assert arguments[arguments.index("--link-mode") + 1] == "copy"
     result = []
     items = iter(arguments)
     for argument in items:
@@ -251,7 +259,7 @@ def _without_policy_arguments(arguments):
             next(items)
         elif argument == "--config-setting":
             assert next(items) == "editable_mode=compat"
-        elif argument not in ("--reinstall", "--no-editable"):
+        elif argument != "--reinstall":
             result.append(argument)
     return result
 
@@ -918,6 +926,46 @@ def test_codespaces_explicit_canonical_fixture_materializes(tmp_path):
         assert not spec.get("editable", False)
 
 
+def test_codespaces_stamp_reuses_native_directory_copy():
+    materialize = _function("ps1", "Materialize-SnapshotDependencies")
+    assert "Copy-InstallerStageDirectory -Source $source -Destination $destination" in materialize
+    assert "Copy-Item -LiteralPath $source -Destination $destination -Recurse" not in materialize
+    assert "$PayloadCopied -and $payloadLibrary" in materialize
+    stamp = _function("ps1", "Invoke-Stamp")
+    assert "$_.PSIsContainer" in stamp
+    assert "Copy-InstallerStageDirectory -Source $_.FullName -Destination $destination" in stamp
+    assert "Materialize-SnapshotDependencies -SnapshotDir $snapTmp -PayloadCopied" in stamp
+    assert "Remove-Item $snapTmp -Recurse -Force -ErrorAction Stop" in stamp
+    assert "New-Item -ItemType Directory -Path $snapTmp -ErrorAction Stop" in stamp
+
+
+def test_codespaces_stamp_cleanup_failure_precedes_copy_and_publication(tmp_path):
+    if PWSH is None:
+        pytest.skip("pwsh unavailable")
+    script = _prelude("ps1") + _function("ps1", "Invoke-Stamp") + """
+$SrcVersion='1.2.3'
+$InstallDir='C:\\fixture\\runtime'
+$LocalBin='C:\\fixture\\bin'
+$script:SourceRuntimeIdentity=$null
+function Write-ServiceErr { throw 'unexpected version refusal' }
+function Assert-SourceRuntime {}
+function Test-Path { return $true }
+function Remove-Item {
+    [CmdletBinding()]
+    param($Path,[switch]$Recurse,[switch]$Force)
+    Write-Error 'synthetic stage cleanup blocked'
+}
+function New-Item { throw 'unexpected staging admission' }
+function Copy-InstallerStageDirectory { throw 'unexpected payload copy' }
+function Deploy-SelfProvisioningBinstub { throw 'unexpected publication' }
+try { Invoke-Stamp; throw 'missing cleanup refusal' } catch {
+    if ($_.Exception.Message -notmatch 'synthetic stage cleanup blocked') { throw }
+}
+"""
+    result = _run("ps1", script, tmp_path, _env(tmp_path))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.fixture(scope="module", params=[False, True])
 def codespaces_stamped_snapshot(tmp_path_factory, request):
     if PWSH is None:
@@ -962,23 +1010,23 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
     env["TEST_UV_MODE"] = "fatal"
     guard_installer_payload(payload)
     root = tmp_path / "home" / ".agent-codespaces"
-    stamp = subprocess.run(
-        [
-            PWSH,
-            "-NoProfile",
-            "-File",
-            str(payload / "scripts" / "install.ps1"),
-            "stamp",
-            "-InstallDir",
-            str(root),
-        ],
-        env=env,
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        timeout=45,
-        check=False,
-    )
+    try:
+        stamp = run_caller_owned(
+            [
+                PWSH, "-NoProfile", "-File", str(payload / "scripts" / "install.ps1"),
+                "stamp", "-InstallDir", str(root),
+            ],
+            env=env,
+            cwd=tmp_path,
+            timeout=45,
+            max_stdout_bytes=1024 * 1024,
+            max_stderr_bytes=1024 * 1024,
+        )
+    except subprocess.TimeoutExpired as error:
+        pytest.fail(
+            f"stamp fixture timeout (materialized={materialized}); "
+            f"stdout: {error.stdout!r}; stderr: {error.stderr!r}"
+        )
     assert stamp.returncode == 0, stamp.stdout + stamp.stderr
     snapshot = Path((root / "payload-dir").read_text().strip())
     for ext in ("sh", "ps1"):
@@ -1021,9 +1069,11 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
     return tmp_path, root, snapshot, fake_bin, env
 
 
+# Include real source staging plus independently bounded stamp and consumer calls.
+@pytest.mark.timeout(180)
 def test_codespaces_stamp_snapshot_is_standalone_status(codespaces_stamped_snapshot):
     tmp_path, root, snapshot, fake_bin, env = codespaces_stamped_snapshot
-    status = subprocess.run(
+    status = run_caller_owned(
         [
             PWSH,
             "-NoProfile",
@@ -1035,16 +1085,15 @@ def test_codespaces_stamp_snapshot_is_standalone_status(codespaces_stamped_snaps
         ],
         env=env,
         cwd=tmp_path,
-        capture_output=True,
-        text=True,
         timeout=30,
-        check=False,
+        max_stdout_bytes=1024 * 1024,
+        max_stderr_bytes=1024 * 1024,
     )
     # A stamped payload deliberately has no runtime yet.
     assert status.returncode != 0
     assert "Venv missing" in status.stdout
     if os.name != "nt":
-        status_sh = subprocess.run(
+        status_sh = run_caller_owned(
             [
                 "bash",
                 str(snapshot / "scripts" / "install.sh"),
@@ -1054,18 +1103,18 @@ def test_codespaces_stamp_snapshot_is_standalone_status(codespaces_stamped_snaps
             ],
             env=env,
             cwd=tmp_path,
-            capture_output=True,
-            text=True,
             timeout=30,
-            check=False,
+            max_stdout_bytes=1024 * 1024,
+            max_stderr_bytes=1024 * 1024,
         )
         assert status_sh.returncode == 0, status_sh.stdout + status_sh.stderr
     assert_installer_isolated(fake_bin)
 
 
+@pytest.mark.timeout(180)
 def test_codespaces_stamp_snapshot_is_standalone(codespaces_stamped_snapshot):
     tmp_path, root, _snapshot, fake_bin, env = codespaces_stamped_snapshot
-    first_use = subprocess.run(
+    first_use = run_caller_owned(
         [
             PWSH,
             "-NoProfile",
@@ -1075,10 +1124,9 @@ def test_codespaces_stamp_snapshot_is_standalone(codespaces_stamped_snapshot):
         ],
         env=env,
         cwd=tmp_path,
-        capture_output=True,
-        text=True,
         timeout=45,
-        check=False,
+        max_stdout_bytes=1024 * 1024,
+        max_stderr_bytes=1024 * 1024,
     )
     assert first_use.returncode != 0
     assert "permanent failure" in first_use.stdout + first_use.stderr, (
