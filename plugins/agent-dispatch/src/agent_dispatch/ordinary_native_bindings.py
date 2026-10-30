@@ -9,6 +9,47 @@ from .ordinary_agent_facts import identity
 from .queue_records import SpawnState, Status, TaskError
 
 
+def is_native_retired(row: Any) -> bool:
+    """Use the reservation owner's marker or completed exact-absence release."""
+    return bool(row["conversation_retired"]) or bool(
+        row["release_requested"]
+        and row["state"] in {SpawnState.FAILED, SpawnState.SETTLED, SpawnState.REARMED}
+    )
+
+
+def reservation_native_identity(conn: Any, history: Any) -> str | None:
+    """Read one driver's retained native identity, including acquisition evidence."""
+    handle = history["session_handle"]
+    if "native_session_id" in history.keys():
+        native = history["native_session_id"]
+    else:
+        receipt = conn.execute(
+            "SELECT native_session_id FROM acquisition_receipts WHERE reservation_key=?",
+            (history["key"],),
+        ).fetchone()
+        native = receipt["native_session_id"] if receipt is not None else None
+    if history["agent_info"]:
+        info = json.loads(history["agent_info"])
+        if not isinstance(info, dict):
+            raise TaskError("retained native identity is not an object")
+        if history["driver"] == "restricted-bridge":
+            from .restricted_delivery import validate_receipt
+            validate_receipt(info)
+            actual = info.get("native_session_id")
+            if handle and handle != f"local-body:{info.get('session_id')}":
+                raise TaskError("retained restricted bridge handle conflicts")
+        else:
+            actual = identity(info).native
+        if native and actual != native:
+            raise TaskError("retained native identity evidence conflicts")
+        native = actual
+    if history["driver"] == "cli" and handle and not handle.startswith("local-body:"):
+        if native and native != handle:
+            raise TaskError("retained CLI native identity evidence conflicts")
+        native = handle
+    return native
+
+
 def _validate_origin(conn: Any, row: Any, origin: str | None) -> None:
     source = conn.execute(
         "SELECT * FROM spawn_reservations WHERE key=?", (origin,),
@@ -64,24 +105,7 @@ def native_bindings(conn: Any, row: Any, task: Any) -> tuple[list[str], list[str
     evidence: list[tuple[Any, str | None]] = []
     for history in histories:
         handle = history["session_handle"]
-        native = history["native_session_id"] if "native_session_id" in history.keys() else None
-        if history["agent_info"]:
-            info = json.loads(history["agent_info"])
-            if history["driver"] == "restricted-bridge":
-                from .restricted_delivery import validate_receipt
-                validate_receipt(info)
-                actual = info.get("native_session_id")
-                if handle and handle != f"local-body:{info.get('session_id')}":
-                    raise TaskError("retained restricted bridge handle conflicts")
-            else:
-                actual = identity(info).native
-            if native and actual != native:
-                raise TaskError("retained native identity evidence conflicts")
-            native = actual
-        if history["driver"] == "cli" and handle and not handle.startswith("local-body:"):
-            if native and native != handle:
-                raise TaskError("retained CLI native identity evidence conflicts")
-            native = handle
+        native = reservation_native_identity(conn, history)
         if native:
             if handle:
                 if handle in handle_natives and handle_natives[handle] != native:
@@ -91,10 +115,7 @@ def native_bindings(conn: Any, row: Any, task: Any) -> tuple[list[str], list[str
     for history, native in evidence:
         handle = history["session_handle"]
         native = native or handle_natives.get(handle)
-        is_retired = bool(history["conversation_retired"]) or bool(
-            history["release_requested"]
-            and history["state"] in {SpawnState.FAILED, SpawnState.SETTLED, SpawnState.REARMED}
-        )
+        is_retired = is_native_retired(history)
         if native:
             known.add(native)
             if is_retired:

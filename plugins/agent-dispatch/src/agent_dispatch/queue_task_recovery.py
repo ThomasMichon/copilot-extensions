@@ -10,8 +10,9 @@ from .queue_common import _task_transition_spec
 from .queue_execution_custody import require_execution_send_reconciliation
 from .queue_records import SpawnState, Status, TaskError
 from .queue_run_waiter_transition_cleanup import CLAIM_RELEASE_SENDER
+from .ordinary_native_bindings import is_native_retired, reservation_native_identity
+from .wake_recovery_target import HISTORY_LIMIT, reconciliation_plan
 
-HISTORY_LIMIT = 100
 RECOVERY_OPERATIONS = ("detach_agent", "reset_proposed", "reset_queued")
 RESET_FIELDS = {
     "owner": None, "owner_session_id": None, "lease_expires_at": None,
@@ -48,6 +49,7 @@ def _captured(queue, conn: sqlite3.Connection, task_id: str) -> dict:
         "run_waiter_wakes": _history(conn, "run_waiter_wakes", task_id),
         "sends": _history(conn, "execution_send_custody", task_id),
         "waiters": _history(conn, "run_waiters", task_id),
+        "acquisitions": _history(conn, "acquisition_receipts", task_id),
     }
 
 
@@ -76,22 +78,23 @@ def _blockers(conn: sqlite3.Connection, captured: dict) -> list[str]:
             reasons.append("reservation cooling remains unresolved")
         if row["state"] in SpawnState.ACTIVE:
             reasons.append("retained reservation still owns execution; conclude it through its owner")
-        if row["exclusive_key"] is not None and not row["exclusive_released"]:
+        if (
+            row["state"] in SpawnState.ACTIVE
+            and row["exclusive_key"] is not None and not row["exclusive_released"]
+        ):
             reasons.append("reservation retains exclusive execution custody")
-        if row["agent_info"] and not row["conversation_retired"]:
+        retired = is_native_retired(row)
+        if (row["agent_info"] or row["session_handle"]) and not retired:
             reasons.append("retained native conversation has not been retired")
-        if row["conversation_retired"] and row["state"] not in SpawnState.ACTIVE:
+        if retired and row["state"] not in SpawnState.ACTIVE:
             try:
-                info = json.loads(row["agent_info"] or "{}")
-            except (TypeError, ValueError):
-                reasons.append("retired native identity is unreadable")
-                continue
-            if isinstance(info, dict):
-                from .ordinary_agent_facts import identity
-                try:
-                    retired_sessions.add(identity(info).native)
-                except TaskError:
+                native = reservation_native_identity(conn, row)
+                if native is None:
                     reasons.append("retired native identity is not qualified")
+                else:
+                    retired_sessions.add(native)
+            except (TaskError, TypeError, ValueError) as exc:
+                reasons.append(f"retired native identity is unproven: {exc}")
     sessions = {
         row["session_id"] for row in captured["attachments"] if row["detached_at"] is None
     }
@@ -153,6 +156,11 @@ class TaskRecoveryMixin:
             for table in ("wake_outbox", "run_waiter_wakes"):
                 for row in captured[table][:HISTORY_LIMIT]:
                     state = row["execution_send_state"]
+                    try:
+                        reconciliation_plan(captured, table, row["id"])
+                        reconcile_reasons = []
+                    except TaskError as exc:
+                        reconcile_reasons = [str(exc)]
                     wakes.append({
                         "outbox": table, "id": row["id"], "status": row["status"],
                         "attempts": row["attempts"],
@@ -160,7 +168,8 @@ class TaskRecoveryMixin:
                         "owner_session_id": row["owner_session_id"],
                         "outcome": state or ("unknown" if row["attempts"] else "not_attempted"),
                         "qualified_custody": row["execution_send"] is not None,
-                        "reconcile_supported": row["execution_send"] is not None,
+                        "reconcile_supported": not reconcile_reasons,
+                        "reconcile_reasons": reconcile_reasons,
                     })
             return {
                 "contract": "task_recovery/v1", "task": task, "revision": _revision(captured),
@@ -205,9 +214,11 @@ class TaskRecoveryMixin:
                     ),
                     "rearm": _action(["inspect the exact failed reservation with rearm before acting"], command="rearm"),
                     "reconcile_wake": _action(
-                        [] if any(row["reconcile_supported"] for row in wakes) else [
-                            "no qualified original wake send; legacy history remains unknown"
-                        ], command="reconcile-wake",
+                        [] if any(row["reconcile_supported"] for row in wakes) else (
+                            list(dict.fromkeys(
+                                reason for row in wakes for reason in row["reconcile_reasons"]
+                            )) or ["no retained wake to reconcile"]
+                        ), command="reconcile-wake",
                     ),
                 },
             }

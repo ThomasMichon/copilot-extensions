@@ -48,6 +48,10 @@ owner; a stopped status, absent prompt, lease expiry or caller assertion is not
 retirement. These controls do not terminate or abandon the old execution,
 discard independent holds or release an exclusive key. The legacy reset path
 also enforces these retained-execution fences.
+Retirement uses the existing driver's identity evidence and either its explicit
+conversation marker or the supported exact-absence release's terminal state.
+A terminal reservation's old `exclusive_released` flag alone is not active
+exclusive custody. Ordinary, restricted and CLI identities remain distinct.
 
 ### Fenced CLI mutations
 
@@ -102,6 +106,9 @@ A positive original admission receipt can settle pending/unknown custody to
 rechecks the original snapshot after observation before settling. Original
 wake ID, delivery identity, attempts and reservation stay unchanged. A retry of
 an accepted settlement is observational; it does not repeat delivery.
+Per-wake `reconcile_supported` and refusal reasons use these same queue-only
+identity, state and adapter checks. A retained identity blob alone is not
+reconciliation support. Transport availability is still checked when invoked.
 
 Missing/corrupt/conflicting receipts, unavailable/old providers, represented CLI
 or restricted targets without this adapter, and legacy attempted sends without

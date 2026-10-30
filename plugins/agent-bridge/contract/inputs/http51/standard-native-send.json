@@ -2,7 +2,28 @@
   "schema": "http51-standard-native-send-cases-v1",
   "generation": 51,
   "requests": {
-    "prompt": "Continue the original assignment.\nKeep \"prior context\"."
+    "prompt": "Continue the original assignment.\nKeep \"prior context\".",
+    "receipt_route": "/api/v1/sessions/bridge-a/turns/native-bound/send/receipt",
+    "receipt_command": [
+      "--json", "send", "bridge-a", "--expected-native-session-id", "native-a",
+      "--idempotency-key", "same-operation", "--caller", "fixture-controller",
+      "--prompt-file", "-", "--receipt-only", "--no-wait"
+    ],
+    "keyed_receipt_command": [
+      "--json", "send", "bridge-a", "--expected-native-session-id", "native-a",
+      "--native-invocation-file", "-", "--receipt-only", "--no-wait"
+    ],
+    "keyed_receipt_request": {
+      "version": 1, "invocation_key": "fixture-keyed-operation",
+      "expected_native_session_id": "native-a", "prompt": "Fixture keyed prompt.",
+      "binding": {
+        "task_id": "fixture-task", "admission_generation": 0,
+        "original_reservation_key": "fixture-reservation", "creation_key": "fixture-creation",
+        "allocation_revision": 1, "expected_turn_index": 0, "origin_kind": "created",
+        "worktree_id": "fixture-worktree", "project": "fixture", "path": ".",
+        "creation_nonce": "fixture-nonce"
+      }
+    }
   },
   "expected": {
     "advertised": {"protocol_version": 51, "min_protocol_version": 1},
@@ -16,6 +37,45 @@
     "malformed_receipt": {"exit": 70, "outcome": "unknown", "recovered_turn": 0, "turns": 2},
     "caller_provenance": {"content": "Continue the original assignment.\nKeep \"prior context\".", "source": "agent-bridge", "caller_id": "fixture-controller"},
     "no_inbox": true,
-    "unauthenticated": 401
+    "unauthenticated": 401,
+    "receipt_only": {
+      "capability": 1,
+      "found": {
+        "status": 200,
+        "body": {"version": 1, "session_id": "bridge-a", "native_session_id": "native-a", "invocation_key": "same-operation", "turn_index": 0, "queued": false, "admission": "accepted"}
+      },
+      "cli_found": {
+        "exit": 0,
+        "body": {"version": 1, "session_id": "bridge-a", "native_session_id": "native-a", "invocation_key": "same-operation", "turn_index": 0, "queued": false, "admission": "accepted", "outcome": "accepted"},
+        "posts": ["/api/v1/sessions/bridge-a/turns/native-bound/send/receipt"],
+        "ensure": false, "ensure_calls": 0, "daemon_start_calls": 0
+      },
+      "missing": {"status": 404, "body": {"detail": {"code": "native_receipt_missing"}}},
+      "cli_missing": {
+        "exit": 69, "outcome": "refused_unavailable", "reason": "native_receipt_missing",
+        "retryable": false, "posts": ["/api/v1/sessions/bridge-a/turns/native-bound/send/receipt"],
+        "ensure": false, "ensure_calls": 0, "daemon_start_calls": 0
+      },
+      "old_capability": {
+        "exit": 69, "outcome": "refused_unavailable", "reason": "unsupported_protocol",
+        "retryable": false, "posts": [],
+        "ensure": false, "ensure_calls": 0, "daemon_start_calls": 0
+      },
+      "missing_provider": {
+        "exit": 70, "outcome": "unknown", "reason": "native_receipt_unproven",
+        "retryable": false, "posts": [],
+        "ensure": false, "ensure_calls": 0, "daemon_start_calls": 0
+      },
+      "keyed_missing_provider": {
+        "exit": 1, "json_output": false, "unavailable_error": true, "posts": [],
+        "ensure": false, "ensure_calls": 0, "daemon_start_calls": 0
+      },
+      "stopped_preserved": true,
+      "busy": {"status": 200, "same_receipt": true, "preserved": true},
+      "wrong_identity": {"prompt": 409, "caller_id": 409, "expected_native_session_id": 409},
+      "corrupt": {"status": 409, "body": {"detail": {"code": "native_admission_history_unproven"}}},
+      "no_effects": true,
+      "unauthenticated": 401
+    }
   }
 }

@@ -252,7 +252,7 @@ def _command(
         def resolve_live_session(self, *args, **kwargs):
             pytest.fail("native send must not use a represented inbox")
 
-    monkeypatch.setattr(core, "_get_client", lambda: Client())
+    monkeypatch.setattr(core, "_get_client", lambda **_kwargs: Client())
     monkeypatch.setattr(core, "_caller_id_for", lambda args: "fixture-controller")
     monkeypatch.setattr(core, "_connection_identity", lambda *args: {})
     args = core.build_parser().parse_args([

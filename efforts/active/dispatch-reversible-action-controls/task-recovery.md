@@ -165,3 +165,28 @@ operator requests.
 - Independent implementation review, containing release and separately
   authorized running/native qualification remain open. No live task,
   reservation, wake, installation or worker was operated.
+
+### 2026-10-30 - Observation and retirement review corrections
+
+- Independent review identified receipt-client construction ensuring a daemon
+  before observation. Both ordinary and keyed receipt-only commands now use
+  the real non-ensuring client factory; unavailable-provider controls forbid
+  daemon ensure/start rather than mocking past that boundary.
+- Reuse canonical driver-specific native classification and the existing
+  terminal exact-absence release predicate. Terminal historical exclusive
+  flags do not imply active custody. Supported release/retire regressions
+  cover ordinary, restricted and CLI assignments without manually asserting
+  the conversation marker.
+- Diagnostics and settlement share one queue-only wake eligibility planner.
+  Unsupported adapters, contradictory settled state, incomplete identity and
+  truncated history report concrete refusal instead of advertised support.
+- The corrected recovery/adjacent-driver packet passes 372 cases; ordinary
+  and keyed receipt observation passes 183. Seven synthetic declaration-tool
+  controls pass without expanding the required unit inventory. The existing
+  3,052-unit packet passed after re-admitting the changed protocol constants.
+- CI also exposed missing source-bound contract declarations/capture evidence.
+  The existing HTTP-51 capture owner now prepares only committed semantic
+  declarations and then requires actual receipt-only observations, including
+  zero daemon ensure/start. Preparation preserves all existing fixture and
+  provenance declarations; it is not itself a capture or a passing CI gate.
+  Fresh committed capture, re-review, release and running qualification remain.

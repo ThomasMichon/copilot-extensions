@@ -435,3 +435,35 @@ def test_real_cli_receipt_only_rejects_mixed_delivery_before_client(
         args.func(args)
     assert invalid.value.code == 2
     assert json.loads(capsys.readouterr().out)["reason"] == "invalid_native_receipt_options"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unavailable", [False, True])
+async def test_receipt_cli_uses_real_client_factory_without_daemon_ensure(
+    native_send, monkeypatch, capsys, unavailable,
+):
+    from agent_bridge import __main__ as core
+    from agent_bridge.client import BridgeClient, BridgeConnectionError
+
+    await _seed(native_send)
+    original_get_client = core._get_client
+    args, _calls = _receipt_command(native_send, monkeypatch)
+    client = core._get_client()
+    client.assert_client_supported = lambda: None
+    if unavailable:
+        def disconnected(*_args, **_kwargs):
+            raise BridgeConnectionError("synthetic unavailable provider")
+        client._request = disconnected
+    monkeypatch.setattr(BridgeClient, "from_config", lambda: client)
+    monkeypatch.setattr(core, "_get_client", original_get_client)
+    monkeypatch.setattr(
+        core, "_ensure_daemon", lambda: pytest.fail("receipt observation started Bridge"),
+    )
+    if unavailable:
+        with pytest.raises(SystemExit) as refused:
+            args.func(args)
+        assert refused.value.code == 70
+        assert json.loads(capsys.readouterr().out)["outcome"] == "unknown"
+    else:
+        args.func(args)
+        assert json.loads(capsys.readouterr().out)["outcome"] == "accepted"

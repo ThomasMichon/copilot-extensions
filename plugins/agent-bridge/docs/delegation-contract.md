@@ -145,6 +145,9 @@ Providers below HTTP 51 or without integer capability version 1 or newer refuse
 before the receipt POST. The base HTTP generation stays 51: this optional
 capability does not invalidate existing ordinary-send generation evidence. Invalid
 native identity/key or mixed delivery options refuse before connecting.
+Ordinary and keyed-invocation receipt-only commands construct their client
+with daemon ensure disabled. An unavailable Bridge remains unavailable; the
+query cannot start it and trigger startup recovery or retained-host prompts.
 Malformed receipt replies or observation transport failures remain `"unknown"`
 (exit 70, reason `native_receipt_unproven`). Existing
 `--native-invocation-file ... --receipt-only` keeps its protocol-45 endpoint,

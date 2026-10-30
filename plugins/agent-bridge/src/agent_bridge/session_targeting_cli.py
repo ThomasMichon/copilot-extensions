@@ -110,7 +110,7 @@ def _send(args: argparse.Namespace) -> None:
         from .native_keyed_client import send, validate_options
         from .hosting_admission_cli import configure_client as configure_hosting
         validate_options(args)
-        client = core._get_client()
+        client = core._get_client(ensure=False) if getattr(args, "receipt_only", False) else core._get_client()
         configure_hosting(client, args)
         send(args, client)
         return

@@ -187,11 +187,10 @@ def test_native_observer_invokes_receipt_only_once_without_mutation_fallback(hos
 
 def test_retired_native_assignment_detaches_without_unpinning(hosted):
     queue, task_id = hosted
-    with queue._connect() as conn:
-        conn.execute(
-            "UPDATE spawn_reservations SET state='settled',conversation_retired=1,"
-            "exclusive_released=1 WHERE task_id=?", (task_id,),
-        )
+    reservation = queue.latest_reservation(task_id)
+    queue.request_spawn_release(reservation.key, disposition="settled")
+    queue.retire_spawn(reservation.key, exact_absence=True)
+    assert not queue.latest_reservation(task_id).conversation_retired
     snapshot = queue.task_diagnostics(task_id)
     assert snapshot["actions"]["detach_agent"]["allowed"]
     result = queue.recover_task(
@@ -203,4 +202,34 @@ def test_retired_native_assignment_detaches_without_unpinning(hosted):
     [attachment] = queue.attachment_history(task_id)
     assert attachment.detached_at is not None
     assert attachment.detach_reason.startswith("detach_agent:")
-    assert queue.latest_reservation(task_id).conversation_retired
+    assert queue.latest_reservation(task_id).release_requested
+
+
+@pytest.mark.parametrize("unsupported", ["not_sent", "cli", "restricted-bridge", "identity"])
+def test_diagnostics_and_reconciliation_share_exact_queue_eligibility(retained, unsupported):
+    queue, task_id, wake = retained
+    with queue._connect() as conn:
+        if unsupported == "not_sent":
+            conn.execute(
+                f"UPDATE {wake_table(wake)} SET execution_send_state='not_sent' WHERE id=?",
+                (wake.id,),
+            )
+        elif unsupported == "identity":
+            conn.execute(
+                f"UPDATE {wake_table(wake)} SET execution_send='{{}}' WHERE id=?",
+                (wake.id,),
+            )
+        else:
+            conn.execute(
+                "UPDATE spawn_reservations SET driver=? WHERE task_id=?",
+                (unsupported, task_id),
+            )
+    snapshot = queue.task_diagnostics(task_id)
+    [reported] = snapshot["wakes"]
+    assert reported["qualified_custody"]
+    assert not reported["reconcile_supported"]
+    assert reported["reconcile_reasons"]
+    assert not snapshot["actions"]["reconcile_wake"]["allowed"]
+    with pytest.raises(TaskError) as refused:
+        reconcile(queue, task_id, wake, lambda *a, **k: pytest.fail("ineligible provider query"))
+    assert str(refused.value) in reported["reconcile_reasons"]

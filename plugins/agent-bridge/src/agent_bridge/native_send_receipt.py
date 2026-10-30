@@ -32,7 +32,7 @@ def send(args: argparse.Namespace) -> None:
     from .send_outcome import emit
 
     validate_options(args)
-    client = core._get_client()
+    client = core._get_client(ensure=False)
     configure_client(client, args)
     result = observe(
         client, args.target, _resolve_prompt(args, required=True),
