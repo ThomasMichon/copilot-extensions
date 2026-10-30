@@ -10,7 +10,8 @@
     A native PowerShell lifecycle owner tracks the WSL transport and its
     `sleep infinity`. A windowless VBS launcher uses conhost --headless so
     neither PowerShell nor wsl.exe allocates a visible console. The owner and
-    shared instance binding are installed together; no Python is required.
+    shared instance binding and source archive are installed together.
+    Setup-provided Python 3.10+ must be available as python on PATH.
     A logon trigger re-establishes the production keepalive after each reboot.
 
     Run from the copilot-extensions repo root:
@@ -88,7 +89,7 @@ function New-KeepaliveVbs {
 }
 
 function Publish-KeepaliveInstanceHelpers {
-    foreach ($name in @('wsl-keepalive-owner.ps1', 'daemon_instances.ps1')) {
+    foreach ($name in @('wsl-keepalive-owner.ps1', 'daemon_instances.ps1', 'daemon_instance_runtime.pyz')) {
         $source = Join-Path $PSScriptRoot $name
         $entry = Get-Item -LiteralPath $source -Force -ErrorAction Stop
         if ($entry.PSIsContainer -or ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
@@ -96,7 +97,7 @@ function Publish-KeepaliveInstanceHelpers {
         }
     }
     [void][IO.Directory]::CreateDirectory($InstallDir)
-    foreach ($name in @('wsl-keepalive-owner.ps1', 'daemon_instances.ps1')) {
+    foreach ($name in @('wsl-keepalive-owner.ps1', 'daemon_instances.ps1', 'daemon_instance_runtime.pyz')) {
         $source = Join-Path $PSScriptRoot $name
         $destination = Join-Path $InstallDir $name
         if ([IO.Path]::GetFullPath($source) -ne [IO.Path]::GetFullPath($destination)) {

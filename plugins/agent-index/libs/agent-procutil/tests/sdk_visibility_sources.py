@@ -13,6 +13,7 @@ PACKAGE_FILES = (
     "__init__.py", "_async.py", "_caller_owned.py", "_daemon_instance_child.py",
     "_daemon_instance_cli.py", "_daemon_instance_clock.py", "_daemon_instance_identity.py",
     "_daemon_instance_linux.py", "_daemon_instance_native.py", "_daemon_instance_owner.py",
+    "_daemon_instance_records.py", "_daemon_instance_shell.py", "_daemon_instance_shell_windows.py",
     "_daemon_instance_store.py", "_darwin_caller_owned.py", "_interactive_groups.py",
     "_interactive_session.py", "_interactive_terminal.py", "_interpreter.py",
     "_job_scopes.py", "_linux_pidfd.py", "_retirement_channel.py", "_retirement_custodian.py",

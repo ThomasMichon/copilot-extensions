@@ -111,11 +111,25 @@ coercions and caller `setdefault` precedence. Original projects parser/reader
 and callback boundaries retain per-call coverage; replaced wrappers cannot turn
 successful sibling or discarded child observations into complete coverage for
 their replacement value. Reporting never normalizes those replacement values.
-Knowledge preferences, control-plane PR discovery, installation context and
-execution-machine discovery still have opaque boundaries. Non-default committed
-parser callbacks likewise lack parser coverage. A valid `Config` or mapping does
-not certify those owners. Fatal loads propagate their original exceptions,
-never a success-shaped report. These observations are not stable input witnesses.
+Knowledge-preference observations describe the original owner's decision, not
+complete acquisition of its child sources. Unbound, non-stateless and
+unregistered gates can complete that decision while returning no preferences.
+An owner-`complete` observation does not upgrade uncertain child reads, opaque
+registry/in-repo boundaries or negative native `exists()` results; those findings
+remain independently visible and keep the aggregate report indeterminate.
+Originally suppressed unexpected exceptions retain type-only uncertainty, without
+error bodies. The selected preference, in-repo-reader and anchor-resolver
+callbacks remain unqualified when replaced, including wrappers that call an
+original owner or restore themselves before returning. Reporting adds no replay,
+read, parse or probe, and preserves the existing portable-key allowlist, tier
+precedence, values and cache behavior. These reports remain `reusable=False`;
+owner completion is not reusable-data certification.
+
+Control-plane PR discovery, installation context and execution-machine discovery
+still have opaque boundaries. Non-default committed parser callbacks likewise
+lack parser coverage. A valid `Config` or mapping does not certify those owners.
+Fatal loads propagate their original exceptions, never a success-shaped report.
+These observations are not stable input witnesses.
 
 Disk candidate/marketplace presence selection preserves the existing single
 `Path.exists()` call and its exact native return/throw behavior. A negative result

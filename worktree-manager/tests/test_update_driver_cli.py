@@ -650,5 +650,37 @@ def test_engine_handoff_is_explicit_only_for_mutating_update_commands(args, carr
     assert ("UPDATE_DRIVER_WITNESS" in seen["env"]) == carries_witness
     if carries_witness and engine_client.os.name == "nt":
         assert seen["creationflags"] & engine_client.subprocess.CREATE_NO_WINDOW
+        assert seen["stdout"] is driver.sys.stdout
+        assert seen["stderr"] is driver.sys.stderr
     elif not carries_witness:
         assert "creationflags" not in seen
+        assert "stdout" not in seen and "stderr" not in seen
+
+
+@pytest.mark.skipif(driver.os.name != "nt", reason="native Windows no-window stream inheritance")
+def test_scoped_engine_passthrough_retains_both_channels_and_native_exit():
+    import subprocess
+    import sys
+    from agent_procutil import no_window_kwargs
+
+    child = (
+        "import sys;"
+        "[(print('engine-out-'+str(i),flush=True),"
+        "print('engine-err-'+str(i),file=sys.stderr,flush=True)) for i in range(3)];"
+        "sys.exit(23)"
+    )
+    parent = """
+import sys, update_driver
+from worktree_manager import engine_client
+update_driver.participant_environment = lambda: {"UPDATE_DRIVER_WITNESS": "fixture"}
+engine_client.set_engine_command([sys.executable, "-I", "-B", "-c", sys.argv[1]])
+sys.exit(engine_client.run_engine_passthrough(None, ["update", "--no-manager"], timeout=15))
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", parent, child],
+        capture_output=True, text=True, timeout=20, stdin=subprocess.DEVNULL,
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 23, result.stdout + result.stderr
+    assert result.stdout.splitlines() == [f"engine-out-{i}" for i in range(3)]
+    assert result.stderr.splitlines() == [f"engine-err-{i}" for i in range(3)]

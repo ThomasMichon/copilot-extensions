@@ -159,11 +159,12 @@ def _qualify_native_shell(root: Path, environment, pu) -> list[dict]:
             "$ErrorActionPreference='Stop'\n"
             "Write-Output 'native caller loading admission'\n"
             f". {literal(native)}\n"
+            f". {literal(native.with_name('daemon_instances.ps1'))}\n"
             "Write-Output 'native caller starting daemon'\n"
             f"$p=Start-NativeDaemon -Script {literal(worker)} -Arguments @('fixture') "
             f"-WorkingDirectory {literal(directory)} -LogPath {literal(directory / 'daemon.log')}\n"
             "Write-Output 'native caller received admission'\n"
-            "@{pid=$p.Id;birth=[CopilotExtensions.DaemonInstanceNative]::Birth($p)} "
+            "@{pid=$p.Id;birth=(Get-DaemonInstanceProcessBirth $p)} "
             f"| ConvertTo-Json -Compress | Set-Content -LiteralPath {literal(directory / 'outcome.json')} "
             "-Encoding UTF8\n$p.Dispose()\n",
             encoding="utf-8",

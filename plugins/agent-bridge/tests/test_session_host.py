@@ -3114,6 +3114,7 @@ def test_session_host_bundle_preserves_procutil_and_portable_receiver_closures(t
     archive, _digest = bundle.build_session_host_bundle(tmp_path / "bundle")
     with zipfile.ZipFile(archive) as contents:
         names = set(contents.namelist())
+        assert "agent_procutil/_daemon_instance_records.py" in names
         for module in bundle._PROCUTIL_MODULES:
             assert "agent_procutil/" + module in names
         assert contents.read("agent_bridge/hosting_policy.py") == (
