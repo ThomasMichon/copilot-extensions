@@ -240,3 +240,26 @@ operator requests.
 - The complete final recovery/authority/driver packet passes 471 cases.
   This meaningful final revision still needs its own review; the preceding
   approval is not carried forward.
+
+### 2026-10-30 - Integrate the current target without erasing evidence
+
+- The complete frontend revision received current-head independent approval
+  and green CI, but a newly merged related-plugin change conflicted with
+  current HTTP-51 artifacts. Preserve both source changes and both ordered
+  provenance streams rather than choosing an entire registry side.
+- Guarded synchronization retained the reviewed tip and stopped without
+  modification. The subsequent private-branch rebase merged only declaration
+  deltas and existing committed observations, preserving the target history
+  plus the original capture records. No synthetic observation was introduced.
+- Prepare and genuinely recapture the combined committed source through the
+  existing owner, then repeat no-write verification. All four probes and the
+  exact new-base guard pass; earlier generations remain retained. Dispatch
+  implementation/test bytes are unchanged by the target integration.
+- Integration exposed stale venue-test fixtures: a local case targeted this
+  source-only repository, controller-only cases omitted their independent
+  positive hosting prerequisite, and a minimal recovery double omitted the
+  canonical timeout policy. Correct only those fixtures; production hosting
+  admission and controller assertions remain unchanged. The actual hosting
+  policy and venue packet passes 163 cases.
+- Re-review of the integrated head, required CI, release and running/native
+  qualification remain separate gates.
