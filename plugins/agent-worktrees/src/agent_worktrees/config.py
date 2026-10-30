@@ -1007,11 +1007,10 @@ def _load_config_uncached(
     # Control-plane related.yaml (+ ``<repo>-harness`` plugin) ``pr:`` overlays,
     # computed once: a checked-in control-plane view of how to land PRs in a
     # FOREIGN repo, layered per-repo below. Fail-safe -> ``{}``.
-    cp_related_pr = (
-        _control_plane_related_pr_map()
-        if include_control_plane_related_pr
-        else {}
-    )
+    cp_related_pr = config_acquisition.owner_call(
+        _control_plane_related_pr_map, _CONTROL_PLANE_PR_OWNER,
+        source="control-plane-related-pr",
+    ) if include_control_plane_related_pr else {}
 
     # Build the set of repos to resolve: those named in the machine-local file,
     # plus the active project (so a convention-adopted repo with no
@@ -1370,17 +1369,18 @@ _KNOWLEDGE_ANCHOR_OWNER = _resolve_anchor_from_registry
 
 
 @contextlib.contextmanager
-def _knowledge_preference_outcome():
+def _config_owner_outcome(source, *, complete=True):
     start = config_acquisition.registry_call_started()
     try:
         yield
     except Exception as exc:
         config_acquisition.failed(
-            config_acquisition.current_observations(), "knowledge-preferences", "knowledge-preferences",
-            "knowledge-preferences-failed", type(exc).__name__,
+            config_acquisition.current_observations(), source, source,
+            f"{source}-failed", type(exc).__name__,
         )
     else:
-        config_acquisition.knowledge_outcome(start)
+        if complete:
+            config_acquisition.owner_outcome(start, source)
 
 
 def _load_knowledge_overlay_config(
@@ -1394,7 +1394,7 @@ def _load_knowledge_overlay_config(
     ``{}``. A completed owner decision does not certify child acquisition:
     child failures remain uncertain, and reports are never reusable input data.
     """
-    with _knowledge_preference_outcome():
+    with _config_owner_outcome("knowledge-preferences"):
         knowledge_repo = (
             machine_raw.get("knowledge_repo")
             or global_raw.get("knowledge_repo")
@@ -1629,7 +1629,7 @@ def _control_plane_related_pr_map() -> dict[str, dict[str, Any]]:
     ``repos.<name>.pr`` override.
     """
     config_acquisition.opaque_source("control-plane-related-pr")
-    try:
+    with _config_owner_outcome("control-plane-related-pr"):
         from . import related
         from . import repos
         from . import state_root
@@ -1637,7 +1637,8 @@ def _control_plane_related_pr_map() -> dict[str, dict[str, Any]]:
         cp = related.find_control_plane_anchor()
         anchors: list[str] = list(related.installed_plugin_related_anchors())
         if cp:
-            try:
+            cp_sources = []
+            with _config_owner_outcome("control-plane-related-pr", complete=False):
                 cp_key = related._anchor_key(cp)
                 cp_project = next(
                     (
@@ -1658,8 +1659,6 @@ def _control_plane_related_pr_map() -> dict[str, dict[str, Any]]:
                     if cp_project
                     else []
                 )
-            except Exception:
-                cp_sources = []
             if cp_sources:
                 anchors.extend(
                     related.config_contribution_anchor(source.anchor, source.origin)
@@ -1678,8 +1677,10 @@ def _control_plane_related_pr_map() -> dict[str, dict[str, Any]]:
             for name, entry in rc.related.items()
             if getattr(entry, "pr", None)
         }
-    except Exception:
-        return {}
+    return {}
+
+
+_CONTROL_PLANE_PR_OWNER = _control_plane_related_pr_map
 
 
 def _parse_pr(raw: Any) -> PRConfig:
