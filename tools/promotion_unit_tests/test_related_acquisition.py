@@ -756,3 +756,225 @@ def test_report_wrappers_retain_missing_owner_uncertainty_without_replay(api, mo
     assert report.value is value
     assert report.authority is ScanAuthority.INDETERMINATE
     assert any(f.reason == "owner-coverage-unavailable" for f in report.findings)
+
+
+class _ProjectsSource:
+    def __init__(self, calls, content, *, present=True, error=None, on_read=None):
+        self.calls, self.content = calls, content
+        self.present, self.error, self.on_read = present, error, on_read
+
+    def __str__(self):
+        return "synthetic-projects.yaml"
+
+    def exists(self):
+        self.calls.append("exists")
+        return self.present
+
+    def read_text(self, *, encoding):
+        assert encoding == "utf-8"
+        self.calls.append("read")
+        if self.error is not None:
+            raise self.error
+        if self.on_read is not None:
+            self.on_read()
+        return self.content
+
+
+def _projects_owner(api, monkeypatch):
+    registered, migration = _registered_owner(api, monkeypatch)
+    strict = api.load("strict_yaml")
+    owner = api.load("projects_registry")
+    return owner, migration, strict, registered
+
+
+@pytest.mark.parametrize("mode", [
+    "empty-document", "empty-mapping", "populated", "negative-exists", "read-error",
+    "malformed", "invalid-shape", "migration-unavailable", "migration-error",
+])
+def test_projects_owner_retains_original_acquisition_outcomes(api, monkeypatch, mode):
+    import yaml
+
+    owner, migration, strict, _ = _projects_owner(api, monkeypatch)
+    calls, decoded = [], []
+    error = PermissionError("private original projects read")
+    content = {
+        "empty-document": "", "empty-mapping": "{}\n", "malformed": "projects: [\n",
+        "invalid-shape": "projects: []\n",
+    }.get(mode, "schema_version: 2\nprojects: {sample: {default_branch: 42, base_repo: true}}\n")
+    source = _ProjectsSource(calls, content, present=mode != "negative-exists",
+                             error=error if mode == "read-error" else None)
+    native_parse = strict._StrictLoader.get_single_data
+
+    def parse(loader):
+        calls.append("parse")
+        value = native_parse(loader)
+        decoded.append(value)
+        return value
+
+    def migrate(doc, schema_id, registry):
+        calls.append("migrate")
+        assert schema_id == migration.SCHEMA_PROJECTS
+        if mode == "migration-error":
+            raise ValueError("private original migration body")
+        return doc, False
+
+    monkeypatch.setattr(strict._StrictLoader, "get_single_data", parse)
+    monkeypatch.setattr(migration, "migrate_doc", migrate)
+    monkeypatch.setattr(migration, "_AVAILABLE", mode != "migration-unavailable")
+    value = None
+    with api.config.capture_config_observations() as observations:
+        if mode == "read-error":
+            with pytest.raises(PermissionError) as caught:
+                owner.parse_projects_registry(source)
+            assert caught.value is error
+        elif mode in ("malformed", "invalid-shape"):
+            with pytest.raises((ValueError, yaml.YAMLError)):
+                owner.parse_projects_registry(source)
+        else:
+            value = owner.parse_projects_registry(source)
+    expected = ["exists"]
+    if mode != "negative-exists":
+        expected.append("read")
+    if mode not in ("negative-exists", "read-error"):
+        expected.append("parse")
+    if mode not in ("negative-exists", "read-error", "malformed", "empty-document", "migration-unavailable"):
+        expected.append("migrate")
+    assert calls == expected
+    if mode in ("negative-exists", "empty-document", "empty-mapping"):
+        assert value == {"projects": {}}
+    elif mode not in ("read-error", "malformed", "invalid-shape"):
+        assert value is decoded[0]
+        assert value["projects"]["sample"] == {"default_branch": 42, "base_repo": True}
+    complete = mode in ("empty-document", "empty-mapping", "populated")
+    owned = [o for o in observations if o.source == str(source) and o.stage == "projects-registry"]
+    assert len(owned) == 1
+    assert owned[0].authority is (ScanAuthority.COMPLETE if complete else ScanAuthority.INDETERMINATE)
+    assert not any(o.authority is ScanAuthority.ABSENT for o in owned)
+    if mode in ("migration-unavailable", "migration-error"):
+        reason = "migration-unavailable" if mode == "migration-unavailable" else "migration-failed"
+        assert any(o.source == migration.SCHEMA_PROJECTS and f.reason == reason
+                   for o in observations for f in o.findings)
+    assert api.config.current_observations() is None
+    assert all(text not in repr(observations) for text in (
+        "private original projects read", "private original migration body", "base_repo", "default_branch",
+    ))
+
+
+@pytest.mark.parametrize("mode", ["repository-first", "projects-fallback", "repository-failure", "opaque-reader"])
+def test_adoption_defaults_keep_original_order_and_replacement_opacity(api, monkeypatch, mode):
+    owner, _migration, _strict, registered = _projects_owner(api, monkeypatch)
+    calls, discarded = [], []
+    branch = "registry" if mode == "repository-first" else ""
+
+    class RepositorySource:
+        def __str__(self):
+            return "synthetic-repos.yaml"
+
+        def resolve(self):
+            calls.append("repository-resolve")
+            return self
+
+        def read_bytes(self):
+            calls.append("repository-read")
+            return f"repos: {{sample: {{default_branch: '{branch}'}}}}\n".encode("utf-8")
+
+    repository_source = RepositorySource()
+    projects_source = _ProjectsSource(
+        calls, "schema_version: 2\nprojects: {sample: {default_branch: 42, base_repo: true}}\n",
+    )
+
+    def repository():
+        calls.append("repository")
+        if mode == "repository-failure":
+            raise PermissionError("private repository consumer failure")
+        return registered.read_registry(repository_source)
+
+    def projects():
+        calls.append("projects")
+        return owner.parse_projects_registry(projects_source)
+
+    def replacement():
+        discarded.append(projects())
+        return {"projects": {"sample": {"default_branch": "replacement", "base_repo": False}}}
+
+    monkeypatch.setattr(sys.modules[owner.__package__ + ".repos"], "read_registry", repository, raising=False)
+    api.stub("installer", read_projects_registry=replacement if mode == "opaque-reader" else projects,
+             _ORIGINAL_PROJECTS_READER=projects)
+    helper = api.load("config_adoption_defaults")
+    with api.config.capture_config_observations() as observations:
+        value = helper.resolve_adoption_defaults("sample", "windows")
+    assert calls[0] == "repository" and calls.count("repository") == calls.count("projects") == 1
+    assert calls.count("repository-read") == (mode != "repository-failure")
+    assert calls[-3:] == ["projects", "exists", "read"]
+    assert value == ({"default_branch": "replacement", "base_repo": False} if mode == "opaque-reader" else {
+        "default_branch": branch or "42", "base_repo": True,
+    })
+    assert any(o.source == str(projects_source) and o.stage == "projects-registry"
+               and o.authority is ScanAuthority.COMPLETE for o in observations)
+    assert any(o.source == "adoption-projects-registry" and o.findings for o in observations) == (mode == "opaque-reader")
+    assert any(o.source == "adoption-repository-registry" and o.findings for o in observations) == (mode == "repository-failure")
+    assert len(discarded) == (mode == "opaque-reader")
+    assert not any(o.source == "adoption-default-registries" for o in observations)
+    assert "private repository consumer failure" not in repr(observations)
+    assert api.config.current_observations() is None
+
+
+@pytest.mark.parametrize("mode", ["same-globals-migration", "self-restoring-loader", "read-time-swap"])
+def test_projects_callbacks_bind_actual_callable_identity_and_selection(api, monkeypatch, mode):
+    from types import FunctionType
+
+    owner, migration, strict, _ = _projects_owner(api, monkeypatch)
+    calls, discarded = [], []
+    value = {"schema_version": 2, "projects": {"sample": {"base_repo": True}}}
+    native_loader = owner.load_projects_document
+    native_parse = strict._StrictLoader.get_single_data
+
+    def parse(loader):
+        calls.append("parse")
+        return native_parse(loader)
+
+    def restore_loader(content):
+        discarded.append(native_loader(content))
+        monkeypatch.setattr(owner, "load_projects_document", native_loader)
+        return value
+
+    def swapped_loader(content):
+        calls.append("replacement")
+        return {"schema_version": 2, "projects": {"sample": {"base_repo": False}}}
+
+    def replacement_migration(doc, schema_id):
+        namespace = globals()
+        original = namespace["_ORIGINAL_MIGRATE_LOADED"](doc, schema_id)
+        namespace["_cohort_discarded"].append(original)
+        return namespace["_cohort_value"]
+
+    monkeypatch.setattr(strict._StrictLoader, "get_single_data", parse)
+    if mode == "same-globals-migration":
+        monkeypatch.setattr(migration, "_cohort_discarded", discarded, raising=False)
+        monkeypatch.setattr(migration, "_cohort_value", value, raising=False)
+        wrapper = FunctionType(replacement_migration.__code__, vars(migration))
+        monkeypatch.setattr(migration, "migrate_loaded", wrapper)
+    elif mode == "self-restoring-loader":
+        monkeypatch.setattr(owner, "load_projects_document", restore_loader)
+    source = _ProjectsSource(
+        calls, "schema_version: 2\nprojects: {sample: {base_repo: true}}\n" if mode == "read-time-swap" else "projects: {}\n",
+        on_read=(lambda: monkeypatch.setattr(owner, "load_projects_document", swapped_loader))
+        if mode == "read-time-swap" else None,
+    )
+    with api.config.capture_config_observations() as observations:
+        result = owner.parse_projects_registry(source)
+    assert calls == ["exists", "read", "parse"]
+    assert result["projects"]["sample"]["base_repo"] is True
+    if mode == "read-time-swap":
+        assert owner.load_projects_document is swapped_loader
+    else:
+        assert result is value and len(discarded) == 1 and discarded[0] is not value
+    if mode == "self-restoring-loader":
+        assert owner.load_projects_document is native_loader
+    assert any(o.stage == "projects-parser" and o.authority is ScanAuthority.COMPLETE for o in observations)
+    assert any(o.source == migration.SCHEMA_PROJECTS and o.stage == "config-migration"
+               and o.authority is ScanAuthority.COMPLETE for o in observations)
+    owned = [o for o in observations if o.source == str(source) and o.stage == "projects-registry"]
+    assert len(owned) == 1
+    assert owned[0].authority is (ScanAuthority.COMPLETE if mode == "read-time-swap" else ScanAuthority.INDETERMINATE)
+    assert api.config.current_observations() is None

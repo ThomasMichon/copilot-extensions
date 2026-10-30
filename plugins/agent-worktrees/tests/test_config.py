@@ -3145,7 +3145,417 @@ def test_registered_config_helpers_preserve_owner_calls_and_independent_defaults
     })
     assert any(o.stage == "repository-registry" for o in observations) == (mode in ("owner", "projects-failure"))
     assert any(o.source == "repository-anchor-registry" for o in observations) == (mode in ("failure", "replacement"))
-    assert any(o.source == "adoption-default-registries" for o in observations)
+    assert any(o.source == "adoption-projects-registry" for o in observations)
+    assert not any(o.source == "adoption-default-registries" for o in observations)
     if mode in ("failure", "projects-failure"):
         assert any(o.stage == "registry-consumer" and o.findings for o in observations)
     assert "synthetic private" not in repr(observations)
+
+
+@pytest.fixture
+def projects_acquisition_sources(tmp_path, monkeypatch):
+    from agent_worktrees import installer, repos as repos_mod, repos_registry_reader
+
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    machine = tmp_path / "config.yaml"
+    machine.write_text(
+        "repo_name: sample\nplatform: windows\nmachine: fixture\n"
+        f"repos:\n  sample:\n    anchor: '{anchor}'\n"
+        "    default_branch: machine\n    base_repo: false\n",
+        encoding="utf-8",
+    )
+    registry = tmp_path / "repos.yaml"
+    registry.write_text(
+        "repos:\n  sample:\n    default_branch: registry\n", encoding="utf-8",
+    )
+    projects = tmp_path / "projects.yaml"
+    calls = []
+
+    def registered():
+        calls.append("repos")
+        return repos_registry_reader.read_registry(registry)
+
+    monkeypatch.setattr(repos_mod, "read_registry", registered)
+    monkeypatch.setattr(installer, "projects_yaml_path", lambda: projects)
+    monkeypatch.setattr(cfg, "_load_inrepo_config", lambda *a, **k: {
+        "default_branch": "inrepo", "base_repo": True,
+    })
+    options = dict(project="sample", include_control_plane_related_pr=False,
+                   include_knowledge_preferences=False)
+    return machine, projects, calls, options
+
+
+@pytest.mark.parametrize("presence", ["native", "direct-os"])
+@pytest.mark.parametrize("mode,body", [
+    ("missing", None),
+    ("disappeared", "projects: {}\n"),
+    ("denied", "projects: {}\n"),
+    ("empty-document", ""),
+    ("empty-mapping", "{}\n"),
+    ("populated", "schema_version: 2\nprojects: {sample: {base_repo: true}}\n"),
+    ("malformed", "projects: [\n"),
+    ("document-shape", "- not-a-mapping\n"),
+    ("projects-shape", "projects: []\n"),
+    ("duplicate", "projects: {}\nprojects: {}\n"),
+])
+def test_projects_acquisition_original_outcomes_reach_full_config_report(
+    monkeypatch, projects_acquisition_sources, mode, body, presence,
+):
+    import os
+
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_migrations, strict_yaml
+
+    machine, projects, calls, options = projects_acquisition_sources
+    native_exists, native_stat, native_read = Path.exists, Path.stat, Path.read_text
+    native_parse = strict_yaml._StrictLoader.get_single_data
+    native_migrate = config_migrations.migrate_doc
+
+    def exists(path):
+        if path == projects:
+            calls.append("exists")
+            if presence == "direct-os":
+                return os.path.exists(path)
+        return native_exists(path)
+
+    def stat(path, *args, **kwargs):
+        if path == projects:
+            calls.append("stat")
+        return native_stat(path, *args, **kwargs)
+
+    def read(path, *args, **kwargs):
+        if path == projects:
+            calls.append("read")
+            if mode == "disappeared":
+                path.unlink()
+            elif mode == "denied":
+                raise PermissionError("synthetic private projects bytes")
+        return native_read(path, *args, **kwargs)
+
+    def parse(loader):
+        calls.append("parse")
+        return native_parse(loader)
+
+    def migrate(doc, schema, *args, **kwargs):
+        if schema == config_migrations.SCHEMA_PROJECTS:
+            calls.append("migrate")
+        return native_migrate(doc, schema, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "exists", exists)
+    monkeypatch.setattr(Path, "stat", stat)
+    monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.setattr(strict_yaml._StrictLoader, "get_single_data", parse)
+    monkeypatch.setattr(config_migrations, "migrate_doc", migrate)
+    results, call_records = [], []
+    for loader in (cfg.load_config, cfg.load_config_report):
+        if body is not None:
+            projects.write_text(body, encoding="utf-8")
+        calls.clear()
+        results.append(loader(machine, **options))
+        expected = ["repos", "exists"]
+        if mode != "missing":
+            expected.append("read")
+        if mode not in ("missing", "disappeared", "denied"):
+            expected.append("parse")
+        if mode in ("empty-mapping", "populated", "projects-shape"):
+            expected.append("migrate")
+        assert calls.count("stat") <= 1
+        assert [call for call in calls if call != "stat"] == expected
+        call_records.append(tuple(calls))
+    assert call_records[0] == call_records[1]
+    legacy, report = results
+    assert report.value == legacy
+    assert report.value.repos["sample"].default_branch == "machine"
+    assert report.value.repos["sample"].base_repo is False
+    assert report.reusable is False
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert "synthetic private" not in repr(report.observations)
+    owned = [o for o in report.observations if o.source == str(projects)]
+    assert owned, "original projects acquisition outcomes are missing from load_config_report"
+    if mode.startswith("empty-") or mode == "populated":
+        assert any(o.authority is ScanAuthority.COMPLETE for o in owned)
+        assert not any(o.authority is ScanAuthority.INDETERMINATE for o in owned)
+        assert not any(o.source == "adoption-default-registries" for o in report.observations)
+    else:
+        assert any(o.authority is ScanAuthority.INDETERMINATE and o.findings for o in owned)
+        assert not any(o.authority is ScanAuthority.ABSENT for o in owned)
+
+
+@pytest.mark.parametrize("replacement", ["parser", "reader", "parser-wrapper", "reader-wrapper"])
+def test_projects_acquisition_replacements_keep_value_identity_but_not_coverage(
+    monkeypatch, projects_acquisition_sources, replacement,
+):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import installer, projects_registry
+
+    machine, projects, calls, options = projects_acquisition_sources
+    value = {"projects": {"sample": {"default_branch": "fallback", "base_repo": True}}}
+    projects.write_text("schema_version: 2\nprojects: {}\n", encoding="utf-8")
+    original = projects_registry.parse_projects_registry if replacement.startswith("parser") else installer.read_projects_registry
+
+    def provider(*args, **kwargs):
+        calls.append("projects-replacement")
+        if replacement.endswith("wrapper"):
+            original(*args, **kwargs)
+        return value
+
+    if replacement.startswith("parser"):
+        monkeypatch.setattr(projects_registry, "parse_projects_registry", provider)
+    else:
+        monkeypatch.setattr(installer, "read_projects_registry", provider)
+    assert installer.read_projects_registry() is value
+    calls.clear()
+    defaults = cfg._resolve_adoption_defaults_from_registry("sample", "windows")
+    assert defaults == {"default_branch": "registry", "base_repo": True}
+    assert calls == ["repos", "projects-replacement"]
+    calls.clear()
+    report = cfg.load_config_report(machine, **options)
+    assert calls == ["repos", "projects-replacement"]
+    assert report.value.repos["sample"].default_branch == "machine"
+    assert report.value.repos["sample"].base_repo is False
+    assert report.reusable is False
+    assert any(
+        o.source in (str(projects), "adoption-projects-registry")
+        and o.authority is ScanAuthority.INDETERMINATE and o.findings
+        for o in report.observations
+    ), "a completed repository owner cannot certify its opaque projects peer"
+
+
+def test_projects_acquisition_legacy_exception_identity_and_permissive_fallback(tmp_path, monkeypatch):
+    from agent_worktrees import installer, projects_registry
+
+    projects = tmp_path / "projects.yaml"
+    projects.write_text("projects: {}\n", encoding="utf-8")
+    monkeypatch.setattr(installer, "projects_yaml_path", lambda: projects)
+    error = PermissionError("synthetic private original read")
+    calls = []
+    native_read = Path.read_text
+
+    def read(path, *args, **kwargs):
+        if path == projects:
+            calls.append(path)
+            raise error
+        return native_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    with pytest.raises(PermissionError) as direct:
+        projects_registry.parse_projects_registry(projects)
+    with pytest.raises(PermissionError) as strict:
+        installer.read_projects_registry(strict=True)
+    assert direct.value is strict.value is error
+    assert installer.read_projects_registry() == {"projects": {}}
+    assert calls == [projects, projects, projects]
+
+
+@pytest.mark.parametrize("repository_branch", ["registry", ""])
+def test_projects_acquisition_populated_defaults_preserve_missing_key_fallback(
+    monkeypatch, projects_acquisition_sources, repository_branch,
+):
+    from dropin_registry import ScanAuthority
+
+    machine, projects, calls, options = projects_acquisition_sources
+    machine.write_text(
+        f"repo_name: sample\nplatform: windows\nmachine: fixture\n"
+        f"repos: {{sample: {{anchor: '{machine.parent / 'anchor'}'}}}}\n", encoding="utf-8",
+    )
+    (machine.parent / "repos.yaml").write_text(
+        f"repos: {{sample: {{default_branch: '{repository_branch}'}}}}\n", encoding="utf-8",
+    )
+    projects.write_text(
+        "schema_version: 2\nprojects: {sample: {default_branch: 42, base_repo: true}}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cfg, "_load_inrepo_config", lambda *a, **k: {})
+    report = cfg.load_config_report(machine, **options)
+    assert calls == ["repos"]
+    assert report.value.repos["sample"].default_branch == (repository_branch or "42")
+    assert report.value.repos["sample"].base_repo is True
+    owned = [o for o in report.observations if o.source == str(projects) and o.stage == "projects-registry"]
+    assert len(owned) == 1 and owned[0].authority is ScanAuthority.COMPLETE
+    assert report.reusable is False
+
+
+@pytest.mark.parametrize("mode", ["unavailable", "failure"])
+def test_projects_acquisition_original_migration_fallback_retains_input_identity(
+    monkeypatch, projects_acquisition_sources, mode,
+):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_acquisition as acquisition, config_migrations, projects_registry, strict_yaml
+
+    machine, projects, calls, options = projects_acquisition_sources
+    projects.write_text("schema_version: 2\nprojects: {sample: {base_repo: true}}\n", encoding="utf-8")
+    decoded = []
+    native_parse = strict_yaml._StrictLoader.get_single_data
+    native_migrate = config_migrations.migrate_doc
+
+    def parse(loader):
+        value = native_parse(loader)
+        decoded.append(value)
+        return value
+
+    def migrate(doc, schema, *args, **kwargs):
+        if schema == config_migrations.SCHEMA_PROJECTS:
+            raise ValueError("synthetic private migration body")
+        return native_migrate(doc, schema, *args, **kwargs)
+
+    monkeypatch.setattr(strict_yaml._StrictLoader, "get_single_data", parse)
+    if mode == "unavailable":
+        monkeypatch.setattr(config_migrations, "_AVAILABLE", False)
+    else:
+        monkeypatch.setattr(config_migrations, "migrate_doc", migrate)
+    with acquisition.capture_config_observations():
+        value = projects_registry.parse_projects_registry(projects)
+    assert value is decoded[0]
+    report = cfg.load_config_report(machine, **options)
+    reason = "migration-unavailable" if mode == "unavailable" else "migration-failed"
+    assert any(f.entry == config_migrations.SCHEMA_PROJECTS and f.reason == reason for f in report.findings)
+    owned = [o for o in report.observations if o.source == str(projects) and o.stage == "projects-registry"]
+    assert len(owned) == 1 and owned[0].authority is ScanAuthority.INDETERMINATE
+    assert report.value.repos["sample"].base_repo is False
+    assert "synthetic private" not in repr(report.observations)
+    assert report.reusable is False
+
+
+@pytest.mark.parametrize("replacement", ["loader", "partial-loader", "migration-wrapper"])
+def test_projects_acquisition_partial_callbacks_cannot_borrow_original_completion(
+    monkeypatch, projects_acquisition_sources, replacement,
+):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_migrations, projects_registry
+
+    machine, projects, calls, options = projects_acquisition_sources
+    projects.write_text("schema_version: 2\nprojects: {}\n", encoding="utf-8")
+    value = {"schema_version": 2, "projects": {"sample": {"base_repo": True}}}
+    native_loader = projects_registry.load_projects_document
+    native_migrate = config_migrations.migrate_loaded
+
+    def loader(content):
+        if replacement == "partial-loader":
+            native_loader(content)
+        return value
+
+    def migrate(doc, schema):
+        original = native_migrate(doc, schema)
+        return value if schema == config_migrations.SCHEMA_PROJECTS else original
+
+    if replacement == "migration-wrapper":
+        monkeypatch.setattr(config_migrations, "migrate_loaded", migrate)
+    else:
+        monkeypatch.setattr(projects_registry, "load_projects_document", loader)
+    legacy = cfg.load_config(machine, **options)
+    report = cfg.load_config_report(machine, **options)
+    assert report.value == legacy
+    assert calls == ["repos", "repos"]
+    owned = [o for o in report.observations if o.source == str(projects) and o.stage == "projects-registry"]
+    assert len(owned) == 1 and owned[0].authority is ScanAuthority.INDETERMINATE
+    assert owned[0].findings and report.reusable is False
+
+
+def test_projects_acquisition_same_globals_migration_wrapper_cannot_borrow_completion(
+    monkeypatch, projects_acquisition_sources,
+):
+    from types import FunctionType
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_migrations
+
+    machine, projects, calls, options = projects_acquisition_sources
+    projects.write_text("schema_version: 2\nprojects: {}\n", encoding="utf-8")
+    machine.write_text(machine.read_text(encoding="utf-8").replace("    base_repo: false\n", ""), encoding="utf-8")
+    monkeypatch.setattr(cfg, "_load_inrepo_config", lambda *a, **k: {})
+    value = {"schema_version": 2, "projects": {"sample": {"base_repo": True}}}
+    discarded = []
+    monkeypatch.setattr(config_migrations, "_test_replacement_value", value, raising=False)
+    monkeypatch.setattr(config_migrations, "_test_discarded_results", discarded, raising=False)
+    namespace = {}
+    exec(
+        "def replacement(doc, schema):\n"
+        "    original = _ORIGINAL_MIGRATE_LOADED(doc, schema)\n"
+        "    if schema == SCHEMA_PROJECTS:\n"
+        "        _test_discarded_results.append(original)\n"
+        "        return _test_replacement_value\n"
+        "    return original\n",
+        namespace,
+    )
+    wrapper = FunctionType(namespace["replacement"].__code__, vars(config_migrations))
+    monkeypatch.setattr(config_migrations, "migrate_loaded", wrapper)
+    report = cfg.load_config_report(machine, **options)
+    assert len(discarded) == 1 and discarded[0] is not value
+    assert calls == ["repos"]
+    assert report.value.repos["sample"].base_repo is True
+    assert any(o.source == config_migrations.SCHEMA_PROJECTS and o.stage == "config-migration"
+               and o.authority is ScanAuthority.COMPLETE for o in report.observations)
+    owned = [o for o in report.observations if o.source == str(projects) and o.stage == "projects-registry"]
+    assert len(owned) == 1 and owned[0].authority is ScanAuthority.INDETERMINATE
+    assert report.reusable is False
+
+
+def test_projects_acquisition_self_restoring_loader_cannot_borrow_completion(
+    monkeypatch, projects_acquisition_sources,
+):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import projects_registry
+
+    machine, projects, calls, options = projects_acquisition_sources
+    projects.write_text("schema_version: 2\nprojects: {}\n", encoding="utf-8")
+    machine.write_text(machine.read_text(encoding="utf-8").replace("    base_repo: false\n", ""), encoding="utf-8")
+    monkeypatch.setattr(cfg, "_load_inrepo_config", lambda *a, **k: {})
+    original = projects_registry.load_projects_document
+    value = {"schema_version": 2, "projects": {"sample": {"base_repo": True}}}
+    discarded = []
+
+    def replacement(content):
+        discarded.append(original(content))
+        monkeypatch.setattr(projects_registry, "load_projects_document", original)
+        return value
+
+    monkeypatch.setattr(projects_registry, "load_projects_document", replacement)
+    report = cfg.load_config_report(machine, **options)
+    assert len(discarded) == 1 and discarded[0] is not value
+    assert calls == ["repos"]
+    assert projects_registry.load_projects_document is original
+    assert report.value.repos["sample"].base_repo is True
+    assert any(o.stage == "projects-parser" and o.authority is ScanAuthority.COMPLETE
+               for o in report.observations)
+    owned = [o for o in report.observations if o.source == str(projects) and o.stage == "projects-registry"]
+    assert len(owned) == 1 and owned[0].authority is ScanAuthority.INDETERMINATE
+    assert report.reusable is False
+
+
+def test_projects_acquisition_read_time_loader_swap_preserves_original_evaluation_order(
+    monkeypatch, projects_acquisition_sources,
+):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import projects_registry, strict_yaml
+
+    machine, projects, calls, options = projects_acquisition_sources
+    projects.write_text("schema_version: 2\nprojects: {sample: {base_repo: true}}\n", encoding="utf-8")
+    machine.write_text(machine.read_text(encoding="utf-8").replace("    base_repo: false\n", ""), encoding="utf-8")
+    monkeypatch.setattr(cfg, "_load_inrepo_config", lambda *a, **k: {})
+    native_read = Path.read_text
+    native_parse = strict_yaml._StrictLoader.get_single_data
+
+    def replacement(content):
+        calls.append("replacement")
+        return {"schema_version": 2, "projects": {"sample": {"base_repo": False}}}
+
+    def read(path, *args, **kwargs):
+        content = native_read(path, *args, **kwargs)
+        if path == projects:
+            calls.append("read")
+            monkeypatch.setattr(projects_registry, "load_projects_document", replacement)
+        return content
+
+    def parse(loader):
+        calls.append("parse")
+        return native_parse(loader)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.setattr(strict_yaml._StrictLoader, "get_single_data", parse)
+    report = cfg.load_config_report(machine, **options)
+    assert projects_registry.load_projects_document is replacement
+    assert calls == ["repos", "read", "parse"]
+    assert report.value.repos["sample"].base_repo is True
+    owned = [o for o in report.observations if o.source == str(projects) and o.stage == "projects-registry"]
+    assert len(owned) == 1 and owned[0].authority is ScanAuthority.COMPLETE
+    assert report.reusable is False

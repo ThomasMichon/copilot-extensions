@@ -60,11 +60,11 @@ def registry_call_started() -> int | None:
     return len(observations) if observations is not None else None
 
 
-def registry_call_finished(start: int | None, source: str) -> None:
+def registry_call_finished(start: int | None, source: str, *, stage: str = "repository-registry") -> None:
     """Keep replacements opaque unless this call supplied registry-owner evidence."""
     observations = current_observations()
     if observations is not None and start is not None and not any(
-        o.stage == "repository-registry" for o in observations[start:]
+        o.stage == stage for o in observations[start:]
     ):
         opaque_source(source)
 

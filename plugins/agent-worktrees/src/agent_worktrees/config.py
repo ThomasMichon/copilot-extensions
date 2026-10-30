@@ -1430,31 +1430,9 @@ def _resolve_adoption_defaults_from_registry(
     Only keys with a usable registry value are returned; the caller fills them
     with ``setdefault`` so overlay/in-repo settings still win. Never raises.
     """
-    config_acquisition.opaque_source("adoption-default-registries")
-    out: dict[str, Any] = {}
-    start = config_acquisition.registry_call_started()
-    try:
-        from . import repos as repos_mod
+    from .config_adoption_defaults import resolve_adoption_defaults
 
-        entry = repos_mod.read_registry().repos.get(name)
-        if entry is not None and entry.default_branch:
-            out["default_branch"] = entry.default_branch
-    except Exception as exc:
-        config_acquisition.registry_call_failed("adoption-repository-registry", exc)
-    finally:
-        config_acquisition.registry_call_finished(start, "adoption-repository-registry")
-    try:
-        from . import installer
-
-        proj = (installer.read_projects_registry().get("projects") or {}).get(name)
-        if isinstance(proj, dict):
-            if "default_branch" not in out and proj.get("default_branch"):
-                out["default_branch"] = str(proj["default_branch"])
-            if proj.get("base_repo") is not None:
-                out["base_repo"] = bool(proj["base_repo"])
-    except Exception as exc:
-        config_acquisition.registry_call_failed("adoption-projects-registry", exc)
-    return out
+    return resolve_adoption_defaults(name, platform)
 
 
 def peek_base_repo(project: str | None = None) -> bool | None:

@@ -97,12 +97,25 @@ Lazy migration observations describe only its original success, unavailable or
 caught-error branch. Fallback still returns the exact input object, and successful
 migration returns its original result; neither reporting nor consumers retry it.
 Anchor/default helpers borrow the original registry observations and retain
-originally suppressed failures. Replacements without owner observations remain
-opaque. Projects/adoption-default selection, knowledge preferences, control-plane
-PR discovery, installation context and execution-machine discovery still have
-opaque boundaries. Non-default committed parser callbacks likewise lack parser
-coverage. A valid `Config` or mapping does not certify those owners. Fatal loads
-propagate their original exceptions, never a success-shaped report.
+originally suppressed failures. Projects acquisition observes its original presence,
+UTF-8 read, strict parser, lazy migration and shape outcomes. A negative native
+`exists()` remains indeterminate: it does not expose a raw stat result and is not
+authoritative absence. Disappearance after positive presence and other caught
+read/parser/shape errors remain indeterminate before installer suppression.
+Parsed empty documents are complete without migration; mapping results require
+original successful migration coverage. Failed/unavailable migration retains
+its original input value and uncertainty, without retry.
+
+Adoption defaults preserve repository-first branch selection, projects fallback
+coercions and caller `setdefault` precedence. Original projects parser/reader
+and callback boundaries retain per-call coverage; replaced wrappers cannot turn
+successful sibling or discarded child observations into complete coverage for
+their replacement value. Reporting never normalizes those replacement values.
+Knowledge preferences, control-plane PR discovery, installation context and
+execution-machine discovery still have opaque boundaries. Non-default committed
+parser callbacks likewise lack parser coverage. A valid `Config` or mapping does
+not certify those owners. Fatal loads propagate their original exceptions,
+never a success-shaped report. These observations are not stable input witnesses.
 
 Disk candidate/marketplace presence selection preserves the existing single
 `Path.exists()` call and its exact native return/throw behavior. A negative result
