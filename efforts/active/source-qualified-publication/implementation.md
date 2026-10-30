@@ -291,6 +291,73 @@ false settled success; no indefinite higher-priority optimistic overlay.
 
 ## Staged PR graph and exact ownership
 
+### Private F3 model checkpoint
+
+The independently staged `source_publications.py` candidate has no production
+importer. Its underscore-prefixed types are not a public adapter API. It reuses
+the actual merged F1 `parse_current_rows`, `CurrentFeed` and observation
+advance validators, including optional `derivations.closure`; it does not
+import the Worktrees runtime. This candidate accepts negotiated v2 only and
+explicitly rejects v1/unknown envelopes rather than changing existing v1
+consumers.
+
+The caller supplies selected source, project and requested point identity;
+reply labels never select a partition. `begin_epoch` is a pure cancellation
+operation. Only a complete current-quality full source/project snapshot
+(`selected_count == roster_count`), explicitly admitted as fresh, may select
+a different opaque generation. A filtered point envelope cannot replace the
+roster. Same-generation reconnect cannot rewind the complete-feed cursor;
+an equal-cursor reconnect preserves higher row floors. Feed transactions use
+the F1 wire frames and their own cursor, never a point floor as their base.
+Incomplete transactions fail without changing either view. Retained point
+rows absent from an older complete feed remain in their prior relative order
+after that feed's committed order until newer authoritative evidence arrives.
+Complete-roster absence also fences identities never seen locally, and advances
+retained tombstones; a delayed point cannot resurrect an identity omitted by
+a newer complete publication. Equal-cursor snapshots must match the committed
+feed roster and order, independently of newer point overlays. Canonical F1
+`worktree` frames with `phase: current` are supported. Current-quality snapshots
+retain validated stale availability warnings, including at an equal cursor;
+they do not silently relabel last-good rows as healthy.
+Incoming rows are checked against the **previous** complete-roster membership
+and absence fence before either is replaced, for both snapshots and feeds.
+Source availability has its own publication revision, separate from reload/
+generation-reset staleness. Older availability cannot override newer evidence;
+at equal revision a warning is conservative until an explicitly fresh snapshot
+or canonical current-epoch availability control clears it. A healthy point or
+feed cannot clear a pending snapshot/reset fence.
+
+A lone validated heartbeat delegates to the existing receiver's read-only
+heartbeat checks without copying the partition, feed, frames or rows. Epoch,
+frame shape, open barrier, generation and cursor checks remain intact. This
+is a no-op fast path only, not a broader copy-on-write or parser redesign.
+
+Canonical standalone F1 `availability` controls reuse `CurrentFeed.receive`:
+the selected source epoch/project, receiver barrier, generation and exact
+current feed projection must agree. They update availability metadata only,
+without a synthetic commit, cursor/row-floor advance, tombstone, observation
+renewal or receipt settlement. A newer point/snapshot availability revision
+continues to outrank an older feed control. At the same publication revision,
+an admitted current-epoch control can report stale or clear stale in normal
+serialized feed order. Pending reload/generation-reset fences remain separate.
+The existing admission method returns true for accepted metadata controls;
+that return does not claim a semantic publication. Mixed controls/transactions
+are refused. There is no new shared parser, wire field, generic API or importer.
+
+`_Receipt` is an optional **private intent**, not an F2 response decoder or
+evidence that any owner endpoint exists. A future adapter would have to prove
+request/source/identity correlation and supply its durable exact-row
+observation fence. The model checks actual covered F1 fact revisions, not a
+larger project cursor or heartbeat; pending/degraded intents prove nothing.
+Pending/degraded intents may receive a later confirmed intent for the same
+request; conflicting confirmed intents require a new request. Generation
+replacement invalidates old intents. There is no effect execution or replay
+path. Absence confirmation requires a committed revision-qualified tombstone.
+Returned records/status are recursively read-only detached values.
+
+These are model admission choices for review, not production wiring admission.
+F2, production F3, F4, F5 and their native/installed gates remain open.
+
 No participant is authorized to implement merely by being listed here.
 
 | PR slice | Owned functional files (all relative to prefixes above) | Dependency / collision |
