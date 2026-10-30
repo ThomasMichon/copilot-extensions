@@ -364,3 +364,7 @@ existing review, custody and explicit approval gates.
   separate gates before adopter migration and native delivery qualification.
   This effort remains Active; no Plan or Validation Plan outcome is transferred
   merely by merging the prerequisite repair.
+- Normal promotion subsequently released #9649 as Bridge `0.9.227-dev1`.
+  This closes its source-release gate, not selected installation or running
+  acceptance. The unified update has not been retried while #9489 remains with
+  its existing owner, and adopter migration is still held.
