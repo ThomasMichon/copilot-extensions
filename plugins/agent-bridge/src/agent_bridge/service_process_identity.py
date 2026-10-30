@@ -13,20 +13,30 @@ def _basename(value: str) -> str:
     return ntpath.basename(value).lower() if sys.platform == "win32" else posixpath.basename(value)
 
 
+def _starts_daemon(arguments: list[str]) -> bool:
+    for argument in arguments:
+        if argument != "--json":
+            return argument == "start"
+    return False
+
+
 def bridge_daemon_argv(arguments: list[str]) -> bool:
     """Match the supported Python-module and installed console daemon launches."""
     if not arguments:
         return False
     scripts = {"agent-bridge", "agent-bridge.exe", "agent-bridge-script.py"}
     if _basename(arguments[0]) in scripts:
-        return arguments[1:2] == ["start"]
+        return _starts_daemon(arguments[1:])
     if not re.fullmatch(r"pythonw?(?:\d+(?:\.\d+)*)?(?:\.exe)?", _basename(arguments[0])):
         return False
     index = 1
     while index < len(arguments):
         option = arguments[index]
         if option == "-m":
-            return arguments[index + 1:index + 3] == ["agent_bridge", "start"]
+            return (
+                arguments[index + 1:index + 2] == ["agent_bridge"]
+                and _starts_daemon(arguments[index + 2:])
+            )
         if option == "--":
             index += 1
             break
@@ -41,7 +51,7 @@ def bridge_daemon_argv(arguments: list[str]) -> bool:
     return (
         index + 1 < len(arguments)
         and _basename(arguments[index]) in scripts
-        and arguments[index + 1] == "start"
+        and _starts_daemon(arguments[index + 1:])
     )
 
 

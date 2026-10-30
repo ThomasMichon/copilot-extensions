@@ -25,6 +25,10 @@ from agent_bridge.service_process_identity import bridge_daemon_argv, split_wind
     [r"C:\Runtime\Scripts\agent-bridge.exe", "start"],
     [r"C:\Runtime\Scripts\AGENT-BRIDGE.EXE", "start"],
     ["python", "--", "/runtime/bin/agent-bridge", "start"],
+    ["python", "-m", "agent_bridge", "--json", "start"],
+    ["python", "/runtime/bin/agent-bridge", "--json", "start"],
+    [r"C:\Runtime\Scripts\agent-bridge.exe", "--json", "start"],
+    ["agent-bridge", "--json", "--json", "start"],
 ])
 def test_supported_daemon_entrypoint(monkeypatch, arguments):
     if "\\" in arguments[0]:
@@ -48,6 +52,12 @@ def test_supported_daemon_entrypoint(monkeypatch, arguments):
     ["python", "-W", "/runtime/bin/agent-bridge", "start"],
     ["python", "-X"],
     ["python", "", "/runtime/bin/agent-bridge", "start"],
+    ["python", "-m", "agent_bridge", "--json", "status"],
+    ["python", "/runtime/bin/agent-bridge", "--json", "status"],
+    ["agent-bridge", "--json", "status", "start"],
+    ["python", "-c", "pass", "agent_bridge", "--json", "start"],
+    ["python", "other.py", "/runtime/bin/agent-bridge", "--json", "start"],
+    ["agent-bridge", "--unknown", "start"],
 ])
 def test_other_process_is_not_a_daemon(arguments):
     assert not bridge_daemon_argv(arguments)
@@ -141,6 +151,20 @@ def test_pid_guard_query_failure_refuses(monkeypatch):
     monkeypatch.setattr(psutil, "Process", denied)
     assert service._pid_is_agent_bridge(1234, timeout=2) is False
     assert service._pid_is_agent_bridge(0) is False
+
+
+@pytest.mark.parametrize("arguments", [
+    ["-m", "agent_bridge", "--json", "start"],
+    ["/runtime/bin/agent-bridge", "--json", "start"],
+])
+def test_json_daemon_shape_matches_actual_root_parser(arguments):
+    from agent_bridge.__main__ import build_parser
+
+    cli = arguments[2:] if arguments[0] == "-m" else arguments[1:]
+    parsed = build_parser().parse_args(cli)
+    assert parsed.command == "start"
+    assert parsed.json is True
+    assert bridge_daemon_argv(["python", *arguments])
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="native Windows command-line quoting")
