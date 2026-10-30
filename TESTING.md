@@ -1401,6 +1401,7 @@ still contains no Python.
 The installed foundation's SDK home must be inside the private fixture, proving
 it did not borrow that lifecycle interpreter. These are bounded consumer
 controls, not proof of escape from a caller cleanup Job.
+
 Windows runs recipe refusals, actual bootstrap hooks and the concurrent cold
 consumer in three separate contained packets. A filtered invocation combines
 its selected files, so each packet names only its own file. All three keep the
@@ -1419,11 +1420,6 @@ not cleanup-Job escape: it retains its strict test-owned Job until native owner
 settlement and closes it in final cleanup. Separate native controls retain
 strict-Job production refusal and contained-child exit on Job closure. Actual
 production Job-survival acceptance remains a separate unresolved requirement.
-
-Windows runs recipe refusals, actual bootstrap hooks and the concurrent cold
-consumer in three separate contained packets. A filtered invocation combines
-its selected files, so each packet names only its own file. All three keep the
-canonical storage cap and retain every selected test.
 
 ## Optional CodeSpaces bootstrap adoption
 
