@@ -39,7 +39,7 @@ _GUIDANCE_HEADER = "# AI attribution session guidance\n\n"
 #: read/write failure of any kind always falls through to a full recompute; a
 #: stale-but-unexpired cache is the only risk this introduces, bounded by the
 #: TTL below.
-_CACHE_FORMAT_VERSION = 1
+_CACHE_FORMAT_VERSION = 2
 _CACHE_TTL_SECONDS = int(os.environ.get("AI_ATTRIBUTION_CACHE_TTL_SECONDS", "3600"))
 #: Escape hatch for an operator (or a future setup/refresh skill step) who
 #: knows policy/config changed and does not want to wait out the TTL.
@@ -179,7 +179,7 @@ def _write_cached_guidance(home: Path, cwd: str, guidance: str, *, key: str | No
         pass
 
 
-def _cache_profile(home: Path, key: str, inputs: list, guidance: str) -> None:
+def _cache_profile(home: Path, key: str, profile: dict, guidance: str, repo: str) -> None:
     """Keep base policy separate so removing the last profile cannot replay it."""
     temporary = None
     try:
@@ -187,7 +187,16 @@ def _cache_profile(home: Path, key: str, inputs: list, guidance: str) -> None:
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             return
-        data.update(profile_inputs=inputs, profile_guidance=guidance)
+        data.update(
+            profile_inputs=profile["_inputs"], profile_probes=profile["_probes"],
+            profile_guidance=guidance,
+            profile_environment={
+                "version": 1, "home": str(home), "repo": repo, "cwd": os.getcwd(),
+                "dirs": os.environ.get("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", ""),
+                "xdg": os.environ.get("XDG_CONFIG_HOME", ""),
+                "appdata": os.environ.get("APPDATA", ""),
+            },
+        )
         with tempfile.NamedTemporaryFile(
             mode="w", encoding="utf-8", dir=path.parent,
             prefix=".ai-attribution-profile.", suffix=".tmp", delete=False,
@@ -270,9 +279,9 @@ def write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
                 )
                 if len((_GUIDANCE_HEADER + guidance + notice + "\n").encode("utf-8")) <= _GUIDANCE_MAX_BYTES:
                     guidance += notice
-        if cwd and not errors and profile["_inputs"]:
+        if cwd and not errors:
             _cache_profile(
-                home, _repo_cache_key(cwd, root=repo_root), profile["_inputs"], guidance
+                home, _repo_cache_key(cwd, root=repo_root), profile, guidance, repo_root
             )
     if guidance:
         content = _GUIDANCE_HEADER + guidance + "\n"

@@ -9,9 +9,11 @@ The exact-session writer and optional pure helper share
 `scripts/attribution_profile.py` (Python 3.9+ standard library). The native policy
 emitters remain dependency-free. The hook already uses Python on a cold path;
 profile-enabled cold/changed launches enter that writer. Native warm shortcuts
-reuse rendered profile guidance only after checking the complete ordered input
-roster and each bounded file's SHA-256 digest. Changed, added, removed, reordered
-or unsafe inputs fall back to the shared writer. The legacy policy kernel stays
+reuse rendered profile guidance only after checking the discovery environment
+and bounded present/missing-file probes produced by the Python owner. Native
+wrappers do not repeat its directory normalization or containment decisions.
+Changed, added, removed, reordered or unsafe inputs fall back to the shared
+writer. The cache format is migrated automatically. The legacy policy kernel stays
 separate, so removing the last profile cannot replay its old presentation.
 
 ## Files and authority
@@ -83,17 +85,24 @@ Templates are literal text, at most 512 UTF-8 bytes, with only `{operator}`,
 `}}`). Expressions, field traversal, format specifiers, conversions and control
 characters other than newlines are rejected. Variables are bounded literal text,
 escaped for Markdown and HTML; templates choose their own Markdown formatting.
-No HTML conversion is performed. Literal review claims in templates are rejected:
+No HTML conversion is performed. Templates support visible text, emphasis,
+inline code and blockquotes, not raw HTML, character references, links/images,
+reference definitions, code fences or invisible formatting controls. Markup-only
+punctuation cannot suppress the visible default. Literal review claims are rejected:
 use `{review_status}`, which resolves to `not human-reviewed` unless the caller
 supplies the actual boolean `human_reviewed: true` for this exact draft.
 Configuration never proves review.
 
 `header_variants` and `footer_variants` optionally name up to four previous
 **owned** marker templates per slot. They use the same interpolation. The
-decorator recognizes exact markers only at their intended outer boundaries,
-replacing them with the current marker. It does not fuzzy-match AI mentions,
+decorator recognizes exact markers only at their intended outer boundaries.
+An already-current boundary is preserved before considering historical variants,
+so overlapping old markers cannot consume draft content on repeated decoration.
+Otherwise at most one historical marker is replaced per slot. It does not fuzzy-match AI mentions,
 search quoted body content, or remove another operator's acknowledgement.
 Never configure another author's text as an owned variant.
+Variants are applied only for a nonempty current slot; a suppressed slot does
+not destructively remove old text without a replacement boundary.
 
 ## Guidance and pure helper
 

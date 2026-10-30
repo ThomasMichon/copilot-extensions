@@ -97,6 +97,61 @@ def test_dedup_only_owned_boundary_variants_not_quotes_or_other_authors():
     assert profile.decorate(draft, signature) == draft
 
 
+def test_current_marker_wins_over_overlapping_historical_variant():
+    signature = profile.resolve(parsed({
+        "header": "[AI-assisted] ",
+        "header_variants": ["[AI-assisted] Drafted with Copilot.\n\n"],
+    }), CONTEXT)
+    draft = "Drafted with Copilot.\n\nDetails"
+    once = profile.decorate(draft, signature)
+    assert once == "[AI-assisted] " + draft
+    assert profile.decorate(once, signature) == once
+    signature = profile.resolve(parsed({
+        "header": "", "footer": " [AI-assisted]",
+        "footer_variants": ["\n\nDrafted with Copilot. [AI-assisted]"],
+    }), CONTEXT)
+    draft = "Details\n\nDrafted with Copilot."
+    once = profile.decorate(draft, signature)
+    assert once == draft + " [AI-assisted]"
+    assert profile.decorate(once, signature) == once
+    signature = profile.resolve(parsed({
+        "footer": "", "footer_variants": [" [old AI]"],
+    }), CONTEXT)
+    draft = "Details [old AI] [old AI]"
+    once = profile.decorate(draft, signature)
+    assert once == "[AI-assisted] " + draft
+    assert profile.decorate(once, signature) == once
+
+
+@pytest.mark.parametrize("header", [
+    "<!-- AI-assisted -->", "<span hidden>AI-assisted</span>",
+    "[](#AI-assisted)", "[hidden]: https://example.com/AI-assisted",
+    "&nbsp;", "\u200bAI-assisted", "```AI-assisted\n```",
+])
+def test_hidden_or_active_markup_is_not_a_disclosure(header):
+    with pytest.raises(profile.ProfileError, match="markup"):
+        parsed({"header": header})
+    signature = profile.resolve(parsed({"header": "***", "footer": ""}), CONTEXT)
+    assert profile.decorate("body", signature) == "[AI-assisted] body"
+
+
+def test_symlinked_instruction_directory_is_rejected_before_resolution(tmp_path):
+    repo, target, link = tmp_path / "repo", tmp_path / "target", tmp_path / "link"
+    repo.mkdir()
+    target.mkdir()
+    (target / "ai-attribution.json").write_text(json.dumps(parsed({"header": "AI marker"})),
+                                              encoding="utf-8")
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are unavailable")
+    data, errors = profile.load_profile(tmp_path, repo, {
+        "COPILOT_CUSTOM_INSTRUCTIONS_DIRS": str(link),
+    })
+    assert errors == ["profile layer 2 rejected"]
+    assert not data["_inputs"]
+
+
 def test_load_authority_order_invalid_layer_and_target_contained_dirs(tmp_path):
     home = tmp_path / "home"
     repo = tmp_path / "repo"
@@ -182,6 +237,23 @@ def test_native_hook_reads_profile_changes_with_warm_base_cache(tmp_path):
     env.pop("AI_ATTRIBUTION_FORCE_REFRESH", None)
     script = SCRIPTS / ("write-session-guidance.ps1" if os.name == "nt" else "write-session-guidance.sh")
     command = [shell, "-NoProfile", "-File", str(script)] if os.name == "nt" else [shell, str(script)]
+    warm_env = dict(env)
+    if os.name == "nt":
+        warm_env["PATH"] = os.pathsep.join((
+            str(Path(shutil.which("git")).parent), str(Path(shell).parent),
+            str(Path(os.environ["SystemRoot"]) / "System32"),
+        ))
+    elif shutil.which("jq") and (shutil.which("sha256sum") or shutil.which("shasum")):
+        tools = tmp_path / "native-tools"
+        tools.mkdir()
+        for name in ("git", "jq", "sha256sum", "shasum", "cat", "cut", "date",
+                     "awk", "dirname", "wc", "mkdir", "mv", "rm"):
+            executable = shutil.which(name)
+            if executable:
+                (tools / name).symlink_to(executable)
+        warm_env["PATH"] = str(tools)
+    else:
+        warm_env = None
     for index, template in enumerate((None, "[AI first] ", "[AI updated] ", None)):
         if template is None:
             config.unlink(missing_ok=True)
@@ -196,12 +268,7 @@ def test_native_hook_reads_profile_changes_with_warm_base_cache(tmp_path):
         assert "[owner: ai-attribution@" in text
         if template:
             assert template in text
-            if os.name == "nt":
-                warm_env = dict(env)
-                warm_env["PATH"] = os.pathsep.join((
-                    str(Path(shutil.which("git")).parent), str(Path(shell).parent),
-                    str(Path(os.environ["SystemRoot"]) / "System32"),
-                ))
+            if warm_env is not None:
                 warm_session = session + "-no-python"
                 warm = subprocess.run(
                     command, input=json.dumps({"sessionId": warm_session, "cwd": str(repo)}),
@@ -231,3 +298,25 @@ def test_native_hook_reads_profile_changes_with_warm_base_cache(tmp_path):
         assert target.read_text(encoding="utf-8").index(directories[0].name) < target.read_text(
             encoding="utf-8"
         ).index(directories[1].name)
+    contained = repo / "contained"
+    contained.mkdir()
+    (contained / "ai-attribution.json").write_text(
+        json.dumps(parsed({"header": "AI excluded"})), encoding="utf-8"
+    )
+    env["COPILOT_CUSTOM_INSTRUCTIONS_DIRS"] = os.pathsep.join(map(str, (
+        shared[0], shared[0], contained, shared[1],
+    )))
+    session = "roster-normalized"
+    subprocess.run(command, input=json.dumps({"sessionId": session, "cwd": str(repo)}),
+                   text=True, capture_output=True, env=env, check=True)
+    target = home / ".copilot" / "session-state" / session / "instructions" / "ai-attribution" / "session-guidance.instructions.md"
+    expected = target.read_text(encoding="utf-8")
+    assert "AI excluded" not in expected
+    assert expected.count("[AI shared-a]") == 1
+    if warm_env is not None:
+        warm_env["COPILOT_CUSTOM_INSTRUCTIONS_DIRS"] = env["COPILOT_CUSTOM_INSTRUCTIONS_DIRS"]
+        session += "-no-python"
+        subprocess.run(command, input=json.dumps({"sessionId": session, "cwd": str(repo)}),
+                       text=True, capture_output=True, env=warm_env, check=True)
+        target = target.parents[3] / session / "instructions" / "ai-attribution" / target.name
+        assert target.read_text(encoding="utf-8") == expected

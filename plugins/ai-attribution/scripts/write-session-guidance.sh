@@ -18,7 +18,7 @@ script="$root/scripts/write_session_guidance.py"
 
 MAX_INPUT_BYTES=65536
 GUIDANCE_MAX_BYTES=4096
-CACHE_FORMAT_VERSION=1
+CACHE_FORMAT_VERSION=2
 GUIDANCE_HEADER=$'# AI attribution session guidance\n\n'
 SESSION_ID_PATTERN='^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
 
@@ -70,26 +70,6 @@ if [[ -n "$session_id" && "$session_id" =~ $SESSION_ID_PATTERN \
         if top="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)" && [[ -n "$top" ]]; then
             repo_root="$top"
         fi
-        # Only reuse a rendered profile when its complete input set still matches.
-        profile_paths=("$repo_root/.github/ai-attribution.json")
-        IFS=':,' read -r -a profile_dirs <<<"${COPILOT_CUSTOM_INSTRUCTIONS_DIRS:-}"
-        for directory in "${profile_dirs[@]}"; do
-            directory="${directory#"${directory%%[![:space:]]*}"}"
-            directory="${directory%"${directory##*[![:space:]]}"}"
-            [[ -z "$directory" ]] || profile_paths+=("$directory/ai-attribution.json")
-        done
-        profile_paths+=("$resolved_home/.copilot/ai-attribution.json"
-            "${XDG_CONFIG_HOME:-$resolved_home/.config}/ai-attribution/config.json")
-        active_profiles=()
-        for profile_path in "${profile_paths[@]}"; do
-            case "$profile_path" in
-                /*) ;;
-                *) run_python_fallback "$stdin_text"; exit 0 ;;
-            esac
-            if [[ -e "$profile_path" || -L "$profile_path" ]]; then
-                active_profiles+=("$profile_path")
-            fi
-        done
         if [[ "$sha256_uses_shasum" -eq 1 ]]; then
             key="$(printf '%s' "$repo_root" | shasum -a 256 | cut -c1-16)"
         else
@@ -111,14 +91,27 @@ if [[ -n "$session_id" && "$session_id" =~ $SESSION_ID_PATTERN \
                 if [[ "$version" == "$CACHE_FORMAT_VERSION" && -n "$computed_at" && -n "$guidance" ]] \
                     && age="$(awk -v now="$now" -v c="$computed_at" 'BEGIN { print (now - c) }')" \
                     && awk -v age="$age" -v ttl="$ttl" 'BEGIN { exit !(age <= ttl) }'; then
-                    if [[ "${#active_profiles[@]}" -gt 0 ]]; then
-                        inputs_count="$(printf '%s' "$data" | jq -er '.profile_inputs | length' 2>/dev/null)"
-                        if [[ "$inputs_count" != "${#active_profiles[@]}" ]]; then
+                    if printf '%s' "$data" | jq -e '.profile_environment != null' >/dev/null 2>&1; then
+                        # The Python owner supplies the normalized discovery probes.
+                        if ! printf '%s' "$data" | jq -e \
+                            --arg home "$resolved_home" --arg repo "$repo_root" --arg cwd "$(pwd -P)" \
+                            --arg dirs "${COPILOT_CUSTOM_INSTRUCTIONS_DIRS:-}" \
+                            --arg xdg "${XDG_CONFIG_HOME:-}" --arg appdata "${APPDATA:-}" \
+                            '.profile_environment == {version:1,home:$home,repo:$repo,cwd:$cwd,dirs:$dirs,xdg:$xdg,appdata:$appdata}
+                             and (.profile_probes | type) == "array" and (.profile_probes | length) > 0' >/dev/null 2>&1; then
                             run_python_fallback "$stdin_text"
                             exit 0
                         fi
-                        profile_index=0
-                        for profile_path in "${active_profiles[@]}"; do
+                        while IFS= read -r probe; do
+                            profile_path="$(printf '%s' "$probe" | jq -er '.path' 2>/dev/null)"
+                            expected="$(printf '%s' "$probe" | jq -r '.sha256 // empty' 2>/dev/null)"
+                            if [[ -z "$expected" ]]; then
+                                if [[ -e "$profile_path" || -L "$profile_path" ]]; then
+                                    run_python_fallback "$stdin_text"
+                                    exit 0
+                                fi
+                                continue
+                            fi
                             component="$profile_path"
                             while [[ "$component" != "/" && "$component" != "." ]]; do
                                 if [[ -L "$component" ]]; then
@@ -131,8 +124,6 @@ if [[ -n "$session_id" && "$session_id" =~ $SESSION_ID_PATTERN \
                                 run_python_fallback "$stdin_text"
                                 exit 0
                             fi
-                            canonical="$(cd -- "$(dirname -- "$profile_path")" && printf '%s/%s' "$(pwd -P)" "$(basename -- "$profile_path")")"
-                            expected="$(printf '%s' "$data" | jq -er --arg path "$canonical" --argjson index "$profile_index" '.profile_inputs[$index] | select(.path == $path) | .sha256' 2>/dev/null)"
                             if [[ "$sha256_uses_shasum" -eq 1 ]]; then
                                 actual="$(shasum -a 256 -- "$profile_path" | cut -d ' ' -f 1)"
                             else
@@ -142,13 +133,33 @@ if [[ -n "$session_id" && "$session_id" =~ $SESSION_ID_PATTERN \
                                 run_python_fallback "$stdin_text"
                                 exit 0
                             fi
-                            profile_index=$((profile_index + 1))
-                        done
+                        done < <(printf '%s' "$data" | jq -c '.profile_probes[]')
                         guidance="$(printf '%s' "$data" | jq -er '.profile_guidance // empty' 2>/dev/null)"
                         if [[ -z "$guidance" ]]; then
                             run_python_fallback "$stdin_text"
                             exit 0
                         fi
+                    else
+                        # Legacy base-only caches may serve unchanged unconfigured launches.
+                        profile_paths=("$repo_root/.github/ai-attribution.json"
+                            "$resolved_home/.copilot/ai-attribution.json"
+                            "${XDG_CONFIG_HOME:-$resolved_home/.config}/ai-attribution/config.json")
+                        IFS=':,' read -r -a profile_dirs <<<"${COPILOT_CUSTOM_INSTRUCTIONS_DIRS:-}"
+                        for directory in "${profile_dirs[@]}"; do
+                            directory="${directory#"${directory%%[![:space:]]*}"}"
+                            directory="${directory%"${directory##*[![:space:]]}"}"
+                            [[ -z "$directory" ]] || profile_paths+=("$directory/ai-attribution.json")
+                        done
+                        for profile_path in "${profile_paths[@]}"; do
+                            case "$profile_path" in
+                                /*) ;;
+                                *) run_python_fallback "$stdin_text"; exit 0 ;;
+                            esac
+                            if [[ -e "$profile_path" || -L "$profile_path" ]]; then
+                                run_python_fallback "$stdin_text"
+                                exit 0
+                            fi
+                        done
                     fi
                     content="${GUIDANCE_HEADER}${guidance}"$'\n'
                     content_bytes=${#content}

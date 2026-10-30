@@ -217,3 +217,24 @@ network dependency, parallel policy registry or mandatory sibling plugin.
 - The repository headless guard passed and the final affected consumer packet
   passed 42 tests, including a direct process-kwargs regression. High-signal
   lint passed. Exact-head CI and Copilot review still gate merge.
+
+### 2026-10-30 - Automated review findings corrected
+- Preserved expanded lexical instruction-directory paths for safety checks,
+  resolving copies only for target containment. Symlinked paths are rejected
+  before loading, including missing-file paths through unsafe ancestors.
+- Restricted templates to visible text/Markdown presentation, rejecting raw
+  HTML, hidden/active markup and invisible formatting. Punctuation-only slots
+  retain the visible disclosure baseline.
+- Current markers take precedence over overlapping historical variants;
+  replacement is at most once per nonempty slot, preserving draft content and
+  idempotence even when a slot is suppressed.
+- Native cache reuse now validates environment identity and present/missing
+  probes produced by the single Python discovery owner, rather than repeating
+  its normalization, deduplication and containment logic. The cache format
+  migration invalidates older rendered-profile records.
+- All four reported reproductions are covered. The final affected packet
+  passed 54 tests with 3 platform skips, including warm operation without
+  Python under duplicate/target-contained directories. Lint, documentation
+  consistency, module-size and Bash syntax checks passed.
+- The actual adopter profile fits the canonical session budget: 2,675 bytes
+  including the real policy kernel and profile, below 4,096 bytes.

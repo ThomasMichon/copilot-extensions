@@ -11,6 +11,7 @@ import os
 import re
 import string
 import sys
+import unicodedata
 from pathlib import Path
 
 MAX_BYTES = 65536
@@ -40,6 +41,15 @@ def _template(value: object) -> str:
         raise ProfileError("template must be a string of at most 512 bytes")
     if any(ord(c) < 32 and c != "\n" for c in value) or "\x7f" in value:
         raise ProfileError("template contains controls")
+    if (
+        any(unicodedata.category(c) == "Cf" for c in value)
+        or re.search(
+            r"<|&(?:#[^;]*;|[A-Za-z][A-Za-z0-9]*;)|"
+            r"!?\[[^\]\n]*\]\s*[\[(]|^\s{0,3}\[[^\]\n]+\]:|`{3}|~{3}",
+            value, re.M,
+        )
+    ):
+        raise ProfileError("templates support visible text/emphasis, not hidden or active markup")
     try:
         for _, name, spec, conversion in string.Formatter().parse(value):
             if name is not None and (name not in FIELDS or spec or conversion):
@@ -106,9 +116,14 @@ def profile_paths(home: Path, repo: Path | None, env: dict | None = None) -> lis
     )):
         if not raw.strip():
             continue
-        directory = Path(raw.strip()).expanduser().resolve()
-        if repo and directory.is_relative_to(repo.resolve()):
-            continue
+        directory = Path(raw.strip()).expanduser()
+        if not directory.is_absolute():
+            directory = Path.cwd() / directory
+        try:
+            if repo and directory.resolve().is_relative_to(repo.resolve()):
+                continue
+        except (OSError, RuntimeError):
+            pass
         paths.append(directory / "ai-attribution.json")
     paths.append(home / ".copilot" / "ai-attribution.json")
     platform = env.get("XDG_CONFIG_HOME") or (
@@ -129,19 +144,22 @@ def _safe_file(path: Path) -> bool:
 
 
 def load_profile(home: Path, repo: Path | None, env: dict | None = None) -> tuple[dict, list[str]]:
-    profile = {"version": 1, "variables": {}, "rules": [], "_inputs": []}
+    profile = {"version": 1, "variables": {}, "rules": [], "_inputs": [], "_probes": []}
     errors = []
     for index, path in enumerate(profile_paths(home, repo, env)):
+        probe = {"path": str(path), "sha256": None}
+        profile["_probes"].append(probe)
         try:
-            if not path.exists():
-                continue
             if not _safe_file(path):
                 raise ProfileError("unsafe config path")
+            if not path.exists():
+                continue
             with path.open("rb") as handle:
                 raw = handle.read(MAX_BYTES + 1)
             if len(raw) > MAX_BYTES:
                 raise ProfileError("config exceeds byte limit")
             layer = validate(json.loads(raw, object_pairs_hook=_object))
+            probe["sha256"] = hashlib.sha256(raw).hexdigest()
             profile["_inputs"].append({
                 "path": str(path.resolve()), "sha256": hashlib.sha256(raw).hexdigest(),
             })
@@ -196,7 +214,10 @@ def resolve(profile: dict, context: dict) -> dict:
         result[slot + "_variants"] = [
             _template(v).format_map(variables) for v in result[slot + "_variants"]
         ]
-    if required and not any(result[s].strip() for s in SLOTS):
+    if required and not any(
+        c.isalnum() or unicodedata.category(c) == "So"
+        for s in SLOTS for c in result[s]
+    ):
         result.update(DEFAULTS)
     result["required"] = required
     return result
@@ -208,16 +229,21 @@ def decorate(draft: str, signature: dict) -> str:
         return draft
     body = draft
     for slot in SLOTS:
-        variants = [signature[slot], *signature[slot + "_variants"]]
+        current = signature[slot]
+        if not current:
+            continue
+        at_boundary = lambda text: (
+            body.startswith(text) if slot == "header" else body.endswith(text)
+        )
+        if at_boundary(current):
+            continue
+        variants = signature[slot + "_variants"]
         variants = sorted({v for v in variants if v}, key=len, reverse=True)
-        while True:
-            found = next((v for v in variants if (
-                body.startswith(v) if slot == "header" else body.endswith(v)
-            )), None)
-            if found is None:
-                break
+        found = next((v for v in variants if at_boundary(v)), None)
+        if found is not None:
             body = body[len(found):] if slot == "header" else body[:-len(found)]
-    return signature["header"] + body + signature["footer"]
+        body = current + body if slot == "header" else body + current
+    return body
 
 
 def guidance(profile: dict) -> str:
