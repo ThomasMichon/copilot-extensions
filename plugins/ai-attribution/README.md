@@ -23,6 +23,7 @@ resilient safety boundary through the exact-session dynamic-guidance pattern.
 | checked-in instruction projections | Every adopting repository | Preserve a static publication-safety fallback and a load-before-action pointer to the exact-session guidance file. |
 | `ai-attribution` skill | Preparing or auditing code, issues, pull requests, comments, releases, docs, or other published artifacts | Walks through audience and ownership classification, disclosure placement, public writing, sanitization, and live post-publication verification. |
 | `ai-attribution-setup` skill | Adopting or repairing the plugin in a repository | Idempotently reconciles the marked always-on fallback, configures host-qualified operator policy, and validates hook-less launch paths. |
+| optional signature profile / pure helper | Configuring header/footer wording for a surface, visibility and activity | Renders fresh layered JSON defaults/overrides in session guidance; optionally resolves/decorates a draft before approval, without publishing it. |
 
 The ambient policy requires agents to:
 
@@ -31,7 +32,8 @@ The ambient policy requires agents to:
   bot's own comment thread, or a response to another party's PR/issue/thread)
   and whether the target host is configured as operator-only (`internal_host`)
   before publishing;
-- prominently disclose AI assistance at the top of a contribution addressing
+- prominently disclose AI assistance (at the top by default, or in configured
+  signature slots) for a contribution addressing
   another party -- in every repository, public or private, including one the
   operator owns -- even when it also engages with bot findings;
 - omit disclosure by default only for a genuinely self-authored contribution,
@@ -71,6 +73,8 @@ inference is treated as proof, and uncertainty uses the third-party policy.
 The safe generic policy is emitted when no config exists. See
 [docs/configuration.md](docs/configuration.md) for the exact `key=value`
 grammar, keys, precedence, authority boundaries, and diagnostics.
+For sparse JSON signature slots, shared defaults, private overrides and the
+optional pure decorator, see [docs/signature-profiles.md](docs/signature-profiles.md).
 
 ## What this plugin provides - and what it doesn't
 
@@ -96,8 +100,8 @@ grammar, keys, precedence, authority boundaries, and diagnostics.
   belong in public repo config.
 - Automatic publication, hosting-service API access, or live-surface fetching.
   The agent uses the target repository's normal tools and workflow.
-- Enforcement by mutating a contribution. The hook supplies policy; the agent
-  applies it.
+- Automatic contribution mutation. The hook supplies policy; the agent applies
+  it. The optional helper decorates only an explicitly supplied draft.
 - Mutation without an explicit setup action. The `ai-attribution-setup` skill is
   the idempotent adoption mechanism for the fallback and operator policy.
 
@@ -111,7 +115,9 @@ grammar, keys, precedence, authority boundaries, and diagnostics.
   UTF-8, including non-ASCII repository paths, and restores the caller's
   console output encoding when it finishes.
 - The plugin is independently installable and assumes no sibling plugin,
-  Python, jq, YAML module, network access, or authenticated account.
+  jq, YAML module, network access, or authenticated account.
+- The exact-session writer and optional JSON profile helper use Python 3.9+
+  (standard library only); the native policy emitters remain dependency-free.
 - The hook receives a JSON `sessionStart` payload on stdin and uses its `cwd`;
   process working directory is deliberately not authoritative.
 

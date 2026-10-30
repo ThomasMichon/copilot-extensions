@@ -23,7 +23,7 @@ $script = Join-Path (Join-Path $root 'scripts') 'write_session_guidance.py'
 
 $MaxInputBytes = 65536
 $GuidanceMaxBytes = 4096
-$CacheFormatVersion = 1
+$CacheFormatVersion = 3
 $GuidanceHeader = "# AI attribution session guidance`n`n"
 $SessionIdPattern = '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
 
@@ -127,6 +127,52 @@ try {
                         ($now - [double]$data.computed_at) -le $ttl
                     ) {
                         $guidance = $data.guidance
+                        if ($null -ne $data.profile_environment) {
+                            $context = $data.profile_environment
+                            if (
+                                $context.version -ne 1 -or
+                                $context.home_environment -ne $resolvedHome -or
+                                $context.repo -ne $repoRoot -or
+                                $context.cwd -ne [System.IO.Directory]::GetCurrentDirectory() -or
+                                $context.dirs -ne [string]$env:COPILOT_CUSTOM_INSTRUCTIONS_DIRS -or
+                                $context.xdg -ne [string]$env:XDG_CONFIG_HOME -or
+                                $context.appdata -ne [string]$env:APPDATA -or
+                                $data.profile_guidance -isnot [string] -or
+                                $data.profile_header -notin @($GuidanceHeader, "Disclose AI for ALL contributions.`n`n") -or
+                                @($data.profile_probes).Count -lt 1
+                            ) { throw 'Profile discovery context changed' }
+                            foreach ($probe in $data.profile_probes) {
+                                $profilePath = $probe.path
+                                $componentPath = $profilePath
+                                while ($componentPath) {
+                                    $component = Get-Item -LiteralPath $componentPath -Force -ErrorAction SilentlyContinue
+                                    if ($component -and $component.Attributes.HasFlag([System.IO.FileAttributes]::ReparsePoint)) {
+                                        throw 'Unsafe profile path'
+                                    }
+                                    $parentPath = Split-Path -Parent $componentPath
+                                    if ($parentPath -eq $componentPath) { break }
+                                    $componentPath = $parentPath
+                                }
+                                if ($probe.kind -eq 'excluded') { continue }
+                                if ($null -eq $probe.sha256) {
+                                    if (Get-Item -LiteralPath $profilePath -Force -ErrorAction SilentlyContinue) {
+                                        throw 'A profile appeared'
+                                    }
+                                    continue
+                                }
+                                $component = Get-Item -LiteralPath $profilePath -Force -ErrorAction Stop
+                                if ($component.PSIsContainer -or $component.Length -gt 65536) {
+                                    throw 'Invalid profile file'
+                                }
+                                if (
+                                    (Get-FileHash -LiteralPath $profilePath -Algorithm SHA256 -ErrorAction Stop).Hash -ne $probe.sha256
+                                ) { throw 'Profile content changed' }
+                            }
+                            $guidance = $data.profile_guidance
+                            $GuidanceHeader = $data.profile_header
+                        } else {
+                            throw 'Profile discovery has not completed'
+                        }
                         $content = $GuidanceHeader + $guidance + "`n"
                         if (
                             [System.Text.Encoding]::UTF8.GetByteCount($content) -gt $GuidanceMaxBytes -and
