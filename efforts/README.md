@@ -11,7 +11,7 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Startup-Only Guidance](active/startup-only-guidance/README.md) | Active; declarations released, approved adoption held on installer prerequisites | Bounded #5993 follow-up; preserves periodic sync, existing delivery/native owners and separately owned #9489 repair |
-| [PR Review Workspaces](active/pr-review-workspaces/README.md) | Active; source continuation admitted, initial read-generation contract amendment | #9535; successor PR plugin/service cache, existing #6007/#7188 and #7051 owners retained; no rollout |
+| [PR Review Workspaces](active/pr-review-workspaces/README.md) | Active; offline generations merged, finite acquisition source slice | #9535; successor PR plugin/service cache, existing #6007/#7188 and #7051 owners retained; no rollout |
 | [Native Startup Prompts](active/native-startup-prompts/README.md) | Active; ordinary cold-launch consumer #9374 merged, native POSIX/full-mux and installed qualification remain | #9364; preserves #7116/#8375/#7942/#8669/#5579 owners; no rollout or retained-session restart |
 | [Dispatch Reversible Action Controls](active/dispatch-reversible-action-controls/README.md) | Active; controls and task-recovery suite released; installed/native qualification open | #9334/#9636; reuses existing lifecycle owners; live adoption and action authority remain gated |
 | [Cached Source Wheel Assembly](active/cached-source-wheel-assembly/README.md) | Active; source reuse qualified, release-first ordinary consumer amendment proposed before implementation | #9290; preserves #8873/#8949 verification, #5851 staging, #6937/#6941 release locks and #9453 producer ownership |

@@ -6,6 +6,11 @@ events, source-push/iteration evidence, discussion resolution, policy evaluation
 and bounded build diagnostics. Callers do not construct forge requests or
 acquire credentials themselves.
 
+The separately selected [finite review-evidence exporter](pr-review-evidence.md)
+provides the source-only acquisition seam for the successor PR workspace
+contract. It reuses this reader and credential owner, not the watch daemon or
+a second HTTP implementation.
+
 ## Read and wait
 
 Use the exact agent-worktrees command selected for the caller:

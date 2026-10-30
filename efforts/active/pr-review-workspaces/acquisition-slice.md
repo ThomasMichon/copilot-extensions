@@ -66,14 +66,14 @@ old clients keep their existing paths. No retirement or deployment is included.
 
 ## Acceptance
 
-- [ ] Fixed-target identity and PR scope checks reject wrong identities before
+- [x] Fixed-target identity and PR scope checks reject wrong identities before
   publishing a generation; no credential bytes appear in output/errors.
-- [ ] Synthetic reader/transport controls cover complete acquisition, explicit
+- [x] Synthetic reader/transport controls cover complete acquisition, explicit
   empty sections, unavailable policies, missing/repeated change pagination,
   credential expiry/loss, and finite budget exhaustion.
-- [ ] Pushes during acquisition expose the newer head/iteration and retain old
+- [x] Pushes during acquisition expose the newer head/iteration and retain old
   changes as incomplete; completion settings and other reviewers remain reads.
-- [ ] Exercise exporter output through the actual generation builder and
+- [x] Exercise exporter output through the actual generation builder and
   source-selected parser, without a live backend or runtime installation.
 - [ ] Publish through normal source gates. Separately coordinate authorized
   read-only live consumer feedback; source tests do not establish live access
