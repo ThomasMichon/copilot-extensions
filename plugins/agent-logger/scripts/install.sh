@@ -1113,7 +1113,7 @@ _materialize_snapshot_libs() {
     mkdir -p "$libs_dir" || {
         _fail "Snapshot libraries directory cannot be prepared: $libs_dir"; return 1;
     }
-    for lib in config-migrate agent-procutil dropin-registry plugin-resolve plugin-activation single-instance-lease update-driver; do
+    for lib in config-migrate agent-procutil zdd dropin-registry plugin-resolve plugin-activation single-instance-lease update-driver; do
         src="$PLUGIN_DIR/libs/$lib"
         if [[ ! -f "$src/pyproject.toml" ]]; then
             src="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/$lib" || {

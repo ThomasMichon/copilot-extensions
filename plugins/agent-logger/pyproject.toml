@@ -81,6 +81,8 @@ ignore = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "setuptools>=83.0.0",
+    "wheel",
 ]
 
 [tool.pytest.ini_options]

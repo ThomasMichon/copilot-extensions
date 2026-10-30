@@ -820,6 +820,8 @@ def test_windows_stamp_publishes_complete_command_family(tmp_path: Path) -> None
     )
 
     assert result.returncode == 0, result.stderr
+    snapshot = Path((home / ".agent-logger/payload-dir").read_text().strip())
+    assert (snapshot / "libs/zdd/pyproject.toml").is_file()
     local_bin = home / ".local" / "bin"
     for command in _COMMANDS:
         assert (local_bin / f"{command}.ps1").is_file(), command
