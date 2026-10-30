@@ -2967,3 +2967,143 @@ def test_config_source_report_default_selection_preserves_bypass_and_fallback_co
     else:
         assert [(source.anchor, source.origin) for source in report.value] == [(str(current), "harness")]
         assert report.authority is ScanAuthority.COMPLETE
+
+
+def test_full_config_report_preserves_partial_layers_and_precedence(tmp_path, monkeypatch):
+    from dropin_registry import ScanAuthority
+
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    machine = tmp_path / "config.yaml"
+    machine.write_text(
+        f"repo_name: sample\nplatform: windows\nmachine: fixture\n"
+        f"repos:\n  sample:\n    anchor: '{anchor}'\n    remote: machine\n",
+        encoding="utf-8",
+    )
+    global_path = tmp_path / "global.yaml"
+    global_path.write_text("profiles: [\n", encoding="utf-8")
+    monkeypatch.setattr(cfg, "global_config_path", lambda: global_path)
+    monkeypatch.setattr(cfg, "_resolve_adoption_defaults_from_registry", lambda *a: {})
+    monkeypatch.setattr(cfg.registry_paths, "installation_context", lambda: {})
+    monkeypatch.setattr(cfg.inrepo_config_source, "_offline_remote_head_branch", lambda *a: None)
+    directory = tmp_path / "config.d"
+    directory.mkdir()
+    (directory / "a-invalid.yaml").write_text("repos: [\n", encoding="utf-8")
+    (directory / "b-valid.yaml").write_text(
+        "repos:\n  sample:\n    remote: dropin\n    default_branch: dev\n", encoding="utf-8",
+    )
+    options = dict(include_control_plane_related_pr=False, include_knowledge_preferences=False)
+    legacy = cfg.load_config(machine, **options)
+    assert legacy.repos["sample"].remote == "machine"
+    assert legacy.repos["sample"].default_branch == "dev"
+    report = cfg.load_config_report(machine, **options)
+    assert report.value == legacy
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert {str(global_path), str(directory / "a-invalid.yaml")} <= {
+        f.entry for f in report.findings
+    }
+    assert report.reusable is False
+    assert "stable-owner-input-frontier" in report.missing_coverage
+
+
+def test_full_config_report_cache_hit_without_provenance_never_reacquires(tmp_path, monkeypatch):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees.config_cache import cached_load_config_scope
+
+    value = cfg.Config(srcroot="", machine="fixture", platform="windows", repo_name="sample")
+    calls = []
+
+    def acquire(*args, **kwargs):
+        calls.append((args, kwargs))
+        return value
+
+    monkeypatch.setattr(cfg, "_load_config_uncached", acquire)
+    options = dict(include_control_plane_related_pr=False, include_knowledge_preferences=False)
+    with cached_load_config_scope():
+        assert cfg.load_config(tmp_path / "config.yaml", **options) is value
+        report = cfg.load_config_report(tmp_path / "config.yaml", **options)
+    assert len(calls) == 1
+    assert report.value is value
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert any(f.reason == "cached-config-unattributed" for f in report.findings)
+    assert report.reusable is False
+
+
+def test_full_config_report_preserves_fatal_no_repo_exception(tmp_path):
+    options = dict(project="sample", include_control_plane_related_pr=False,
+                   include_knowledge_preferences=False)
+    path = tmp_path / "missing.yaml"
+    with pytest.raises(cfg.ProjectNotRegisteredError) as legacy:
+        cfg.load_config(path, **options)
+    with pytest.raises(cfg.ProjectNotRegisteredError) as diagnostic:
+        cfg.load_config_report(path, **options)
+    assert str(diagnostic.value) == str(legacy.value)
+
+
+
+def test_config_report_nested_requests_and_exceptions_restore_collection(tmp_path, monkeypatch):
+    from agent_worktrees import config_acquisition as acquisition
+
+    paths = {name: tmp_path / (name + ".yaml") for name in ("outer", "inner", "failed", "later")}
+    for path in paths.values():
+        path.write_text("marker: fixture\n", encoding="utf-8")
+    value = cfg.Config(srcroot="", machine="fixture", platform="windows", repo_name="sample")
+    failure = ValueError("synthetic failure")
+    nested = []
+
+    def load(path, **kwargs):
+        acquisition.full_load_started()
+        cfg._load_yaml_safe(path)
+        if path == paths["failed"]:
+            raise failure
+        if path == paths["outer"]:
+            outer_collector = acquisition.current_observations()
+            nested.append(cfg.load_config_report(paths["inner"]))
+            assert acquisition.current_observations() is outer_collector
+            with pytest.raises(ValueError) as caught:
+                cfg.load_config_report(paths["failed"])
+            assert caught.value is failure
+            assert acquisition.current_observations() is outer_collector
+        return value
+
+    monkeypatch.setattr(cfg, "load_config", load)
+    outer = cfg.load_config_report(paths["outer"])
+    assert acquisition.current_observations() is None
+    later = cfg.load_config_report(paths["later"])
+    assert acquisition.current_observations() is None
+    for report, name in ((outer, "outer"), (nested[0], "inner"), (later, "later")):
+        assert {o.source for o in report.observations if o.stage == "config-yaml"} == {str(paths[name])}
+        assert report.reusable is False
+
+
+def test_config_report_copied_context_does_not_share_collectors_between_threads(tmp_path, monkeypatch):
+    import contextvars
+    from concurrent.futures import ThreadPoolExecutor
+    from agent_worktrees import config_acquisition as acquisition
+
+    path = tmp_path / "worker.yaml"
+    path.write_text("marker: worker\n", encoding="utf-8")
+    value = cfg.Config(srcroot="", machine="fixture", platform="windows", repo_name="sample")
+
+    def load(*args, **kwargs):
+        acquisition.full_load_started()
+        cfg._load_yaml_safe(path)
+        return value
+
+    monkeypatch.setattr(cfg, "load_config", load)
+
+    def worker():
+        assert acquisition.current_observations() is None
+        cfg._load_yaml_safe(path)
+        report = cfg.load_config_report(path)
+        assert acquisition.current_observations() is None
+        return report
+
+    with acquisition.capture_config_observations() as outer:
+        context = contextvars.copy_context()
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            report = pool.submit(context.run, worker).result(timeout=5)
+        assert outer == []
+        assert acquisition.current_observations() is outer
+    assert acquisition.current_observations() is None
+    assert {o.source for o in report.observations if o.stage == "config-yaml"} == {str(path)}

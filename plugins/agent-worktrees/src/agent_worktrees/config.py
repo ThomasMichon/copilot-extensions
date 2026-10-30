@@ -33,6 +33,7 @@ from . import config_acquisition
 from .config_acquisition import (
     _load_config_d_report as _load_config_d_report,
     _load_yaml_safe_report as _load_yaml_safe_report,
+    load_config_report as load_config_report,
 )
 
 from . import config_migrations, inrepo_config_source, project_state, publication_deadline, registry_paths
@@ -935,6 +936,7 @@ def _load_config_uncached(
         ValueError: If no repo can be resolved (no machine-local repos and no
             registry anchor for the active project).
     """
+    config_acquisition.full_load_started()
     if path is None:
         path = default_config_path()
 
@@ -1260,6 +1262,7 @@ def _load_inrepo_config(anchor: str, *, strict: bool = False) -> dict[str, Any]:
 
     merged = inrepo_config_source.load_config_base(root, rel_candidates, strict=strict)
 
+    config_acquisition.opaque_source("installation-context")
     context = registry_paths.installation_context()
     marketplace_id = (
         str(context.get("marketplaceId", "")).strip()
@@ -1273,7 +1276,7 @@ def _load_inrepo_config(anchor: str, *, strict: bool = False) -> dict[str, Any]:
             / marketplace_id
             / GLOBAL_CONFIG_FILENAME
         )
-        if overlay_path.exists():
+        if config_acquisition.source_exists(overlay_path, "marketplace-config"):
             merged = _deep_merge(merged, inrepo_config_source.load_config_file(overlay_path, strict=strict))
     return merged
 
@@ -1334,6 +1337,7 @@ def _resolve_anchor_from_registry(name: str, platform: str) -> str | None:
     machine-specific path comes from the registry, the settings from the
     repo's own in-repo config. Never raises.
     """
+    config_acquisition.opaque_source("repository-anchor-registry")
     try:
         from . import repos as repos_mod
 
@@ -1375,6 +1379,7 @@ def _load_knowledge_overlay_config(
     knowledge repo, or any error yields ``{}`` -- so the hot config path is
     byte-identical off the stateless track.
     """
+    config_acquisition.opaque_source("knowledge-preferences")
     try:
         knowledge_repo = (
             machine_raw.get("knowledge_repo")
@@ -1422,6 +1427,7 @@ def _resolve_adoption_defaults_from_registry(
     Only keys with a usable registry value are returned; the caller fills them
     with ``setdefault`` so overlay/in-repo settings still win. Never raises.
     """
+    config_acquisition.opaque_source("adoption-default-registries")
     out: dict[str, Any] = {}
     try:
         from . import repos as repos_mod
@@ -1619,6 +1625,7 @@ def _control_plane_related_pr_map() -> dict[str, dict[str, Any]]:
     ABOVE the foreign repo's own in-repo ``pr`` and BELOW a machine-local
     ``repos.<name>.pr`` override.
     """
+    config_acquisition.opaque_source("control-plane-related-pr")
     try:
         from . import related
         from . import repos
