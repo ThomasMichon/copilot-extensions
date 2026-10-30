@@ -113,7 +113,7 @@ def _task_command_parts(tier: str, *, home: Path | None = None) -> list[str]:
     # project-scoped tier; today's single "sweep" tier runs a global update.
     if tier not in TIER_SPECS:
         raise ValueError(f"unknown fleet-update tier: {tier}")
-    return [task_binstub_path(home), "update"]
+    return [task_binstub_path(home), "update", "--auto"]
 
 
 def task_description(tier: str) -> str:

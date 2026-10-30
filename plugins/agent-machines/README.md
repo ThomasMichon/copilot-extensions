@@ -469,23 +469,35 @@ declaratively, including removing tasks that have since been opted out.
 
 ### Update intent and schedule convergence
 
-Fleet-update and self-update are independently requested maintenance, including
-their separately opted-in schedules. Their update commands do not add `--auto`:
-that marker belongs to Manager's optional maintenance before session launch or
-resume, not to every noninteractive caller. See the
+Fleet-update and self-update tiers are unattended maintenance. Their update
+commands pass `--auto`, including their independently opted-in schedules. Those
+opt-ins remain required but do not exempt automatic updates from the hold.
+Running an unattended tier by hand retains that tier's automatic update intent;
+use an explicit project `update` for ordinary manual admission. See the
 [update admission contract](../../docs/install-contract.md#runtime-self-reconcile-and-command-glossary-session-start-hooks)
 for manual defaults and the separate ownership and interruption gates.
 
-Existing fleet tasks containing `--auto` are stale. Under separate deployment
-authority, the existing scheduled-task/timer reconciliation owner replaces their
-action with ordinary `update`, retaining its existing opt-in and desired-state rules.
-Self-update tasks retain their stable binstub, whose updated sweep emits ordinary
-update calls. An old running producer retains its loaded behavior until upgraded.
-No schedule is changed by publishing this source, and no live installer may be
-terminated or an interrupted transaction cleared merely to converge a trigger.
-Re-read the owner's status after authorized reconciliation; skipped, deferred or
-failed registration is not convergence. Neither this admission choice nor the
-Manager hold replaces a schedule's own opt-in or domain policy.
+An old unmarked fleet task could bypass the hold after its receiver gains manual
+defaults. Under separate deployment authority, sequence the existing owners:
+
+1. Inspect fleet/self-update status and resolve any active or interrupted
+   execution through its owner. Do not terminate an installer to migrate a trigger.
+2. Quiesce future triggers with the existing fleet/self-update `uninstall`
+   commands before upgrading the receiver. Confirm they are unregistered and
+   separately quiesce external cron/task producers and concurrent restore.
+   Timer removal does not settle a running service or interrupted request.
+3. Keep the hold intact and perform the separately authorized unified manual
+   update; do not infer force or recovery authority from manual admission.
+4. Reconcile configured opt-ins with the existing fleet/self-update `install`
+   commands. Require matching `status --json` readback before re-enabling
+   maintenance. The Windows owner compares complete tokenized expected arguments;
+   the POSIX owner compares generated service content. Both include `--auto`.
+
+Self-update tasks retain their stable binstub, whose updated sweep submits
+automatic project updates. An old running producer retains loaded behavior until
+upgraded. Source publication changes no deployed schedule. Skipped, deferred or
+failed registration is not convergence, and the hold does not replace a
+schedule's own opt-in or domain policy.
 
 ## Playwright CLI provisioning
 
