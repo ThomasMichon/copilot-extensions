@@ -333,9 +333,12 @@ def _default_root_owner(api, monkeypatch):
     environment = {"synthetic": "repository-identity-environment"}
     api.stub("git_ops", repository_identity_env=lambda: environment)
     api.stub("repos")
+    boundary = ModuleType("agent_procutil")
+    boundary.no_window_kwargs = lambda: {"creationflags": 1234}
+    monkeypatch.setitem(sys.modules, "agent_procutil", boundary)
     sources = api.load("config_sources")
     owner = api.load("state_root")
-    monkeypatch.setattr(owner, "no_window_kwargs", lambda: {"creationflags": 1234})
+    assert owner.no_window_kwargs is boundary.no_window_kwargs
     return sources, owner, environment
 
 
@@ -399,3 +402,24 @@ def test_config_sources_uses_root_owner_once_and_preserves_explicit_bypass(api, 
     assert len(calls) == (0 if selection == "explicit" else 1)
     assert report.authority is (ScanAuthority.COMPLETE if selection == "explicit" else ScanAuthority.INDETERMINATE)
     assert "private Git" not in repr(report.observations)
+
+
+
+def test_default_root_fixture_loads_without_ambient_procutil(api, monkeypatch):
+    attempts = []
+
+    class DenyRealProcutil:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "agent_procutil":
+                attempts.append(fullname)
+                raise ModuleNotFoundError("real procutil is outside the pure boundary", name=fullname)
+            return None
+
+    monkeypatch.delitem(sys.modules, "agent_procutil", raising=False)
+    monkeypatch.setattr(sys, "meta_path", [DenyRealProcutil(), *sys.meta_path])
+    _, owner, _ = _default_root_owner(api, monkeypatch)
+    boundary = sys.modules["agent_procutil"]
+    assert isinstance(boundary, ModuleType)
+    assert owner.no_window_kwargs is boundary.no_window_kwargs
+    assert owner.no_window_kwargs() == {"creationflags": 1234}
+    assert attempts == []
