@@ -3149,7 +3149,16 @@
         "tools/promotion_unit_tests/test_related_acquisition.py::test_knowledge_preference_callbacks_capture_actual_selection[same-globals-resolver]",
         "tools/promotion_unit_tests/test_related_acquisition.py::test_knowledge_preference_callbacks_capture_actual_selection[self-restoring-resolver]",
         "tools/promotion_unit_tests/test_related_acquisition.py::test_knowledge_preference_callbacks_capture_actual_selection[same-globals-preferences]",
-        "tools/promotion_unit_tests/test_related_acquisition.py::test_knowledge_preference_callbacks_capture_actual_selection[self-restoring-preferences]"
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_knowledge_preference_callbacks_capture_actual_selection[self-restoring-preferences]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_installation_context_original_decision_keeps_delegation_opaque[unselected]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_installation_context_original_decision_keeps_delegation_opaque[selected]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_installation_context_original_decision_keeps_delegation_opaque[helper-error]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_installation_context_original_decision_keeps_delegation_opaque[resolver-error]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_installation_context_original_decision_keeps_delegation_opaque[bound-method]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_installation_context_config_call_qualifies_actual_selected_owner[late-selection]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_installation_context_config_call_qualifies_actual_selected_owner[same-globals]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_installation_context_config_call_qualifies_actual_selected_owner[self-restoring]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_installation_context_config_call_qualifies_actual_selected_owner[nested-original]"
     ],
     "sources": {
         "tools/core_python_artifacts.py": "cfeae35bfee4537022e1026ffae498b61b23508426a676d9dc09ca8ab8d4b4a0",
@@ -3504,7 +3513,7 @@
         "plugins/agent-machines/tests/test_cell_installer.py": "de004be5b70e1d4bed4945e766f393c167db0682979853eba4fa40814e01bf14",
         "plugins/agent-machines/scripts/cell_installer.py": "041a28230551d926c65ff00866213f5944ff5d1e0596c75e37ffa8cd0af64795",
         "libs/versioned-runtime/versioned_runtime_construction.py": "df703e23675c232079f28c74eb85977b3460aef252e2bb2079bbf9081ad1480d",
-        "tools/promotion_unit_tests/test_related_acquisition.py": "bc06a1b9ac66fb7d149d97bd09b0509171bcb228972d0e51e244c9c0695ccfe2",
+        "tools/promotion_unit_tests/test_related_acquisition.py": "1bbe83dfc2b256d5d8a93998cb0c3d016c182f2ec441892699bfe8bbb931cc85",
         "plugins/agent-worktrees/src/agent_worktrees/acquisition_report.py": "a83793221939d9744aa1be72c839bf631d279cee1fc2bb67601ca8fe68c8deed",
         "plugins/agent-worktrees/src/agent_worktrees/related_acquisition.py": "085a6a6745c793e781dbf8db9c56c14c140e0f379550af8fd3d34b32770139c9",
         "plugins/agent-worktrees/src/agent_worktrees/config_acquisition.py": "fa79d5377fdf75ddf3ec9fc730dfee5b9c169911d677e79f240892efc9270cd6",
@@ -3513,7 +3522,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/state_root.py": "c885e37c248086b63ba2822453c11c45be758437e71682f57e11d2c017ccf215",
         "plugins/agent-worktrees/src/agent_worktrees/config_sources.py": "af6f2d7632d492635cb1ba5f7085de2066a2a3e50fd81f7c7b3f6a466e07e637",
         "plugins/agent-worktrees/src/agent_worktrees/inrepo_config_source.py": "2385210a728f529d107e321c3d4fb41edc4968937d3d32f32ae2b9c62576fb27",
-        "plugins/agent-worktrees/src/agent_worktrees/config.py": "8e57c11886bad40cbf030bcf6c2ac44adc212df97a824ba2a493dea454412bf6",
+        "plugins/agent-worktrees/src/agent_worktrees/config.py": "67d3134ec740a6bfa21d75af28f87dd83b94a05c3173231ee4d5c99cc8b72c70",
         "plugins/agent-worktrees/src/agent_worktrees/repos_registry_transaction.py": "5c761e347aa55d8345902679929761696bae29aa6eb5411ac5f13af3c3f6adf5",
         "plugins/agent-worktrees/src/agent_worktrees/repos_configuration_sources.py": "11d2f57beac5d2b734971b06491ba2852c85fc9d0dcb01c44d0946f681bc910e",
         "plugins/agent-worktrees/src/agent_worktrees/repos_registry_reader.py": "5264a28fbe56b7aa3a134409a481f8f9e29f6d94fa391b05a7f28d4afb8970df",
@@ -3523,7 +3532,8 @@
         "plugins/agent-worktrees/src/agent_worktrees/strict_yaml.py": "98c2abc729a4544129c8fc60d723aa45fb4b49142c7194b21f41e0e84ef018d3",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_records.py": "722d48c76e5a9ac285f09868bd83291ba448fa1aa8a66c8e7854e9354e4fe4d4",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell.py": "e8a7e27c1e80d04b175d0ee782fc7f790b50ecc30cf18ef4f0cb2bf782c1fb88",
-        "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell_windows.py": "d75e1e2988b64d78cffe6ee13f78f27c52c2a300dede3d32ede5191734907aa4"
+        "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell_windows.py": "d75e1e2988b64d78cffe6ee13f78f27c52c2a300dede3d32ede5191734907aa4",
+        "plugins/agent-worktrees/src/agent_worktrees/registry_paths.py": "8277d19eaab961d72f3f743fea97ac418c14e49866e4e7c9e30c31685b41bca6"
     },
     "coverage_targets": [
         "tools/core_runtime_profile.py",
@@ -3697,7 +3707,8 @@
         "plugins/agent-worktrees/src/agent_worktrees/config_adoption_defaults.py",
         "plugins/agent-worktrees/src/agent_worktrees/projects_registry.py",
         "plugins/agent-worktrees/src/agent_worktrees/strict_yaml.py",
-        "plugins/agent-worktrees/src/agent_worktrees/config.py"
+        "plugins/agent-worktrees/src/agent_worktrees/config.py",
+        "plugins/agent-worktrees/src/agent_worktrees/registry_paths.py"
     ],
     "max_seconds": 300
 }

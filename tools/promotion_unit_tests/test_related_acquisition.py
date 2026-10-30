@@ -999,7 +999,8 @@ def _knowledge_owner(api, monkeypatch):
     monkeypatch.setitem(sys.modules, "machine_transport", transport)
     for name in ("project_state", "machine_instructions"):
         api.stub(name)
-    api.stub("registry_paths", installation_context=lambda: {})
+    registry = api.load("registry_paths")
+    monkeypatch.setattr(registry, "installation_context", lambda: {})
     api.stub("publication_deadline", DEFAULT_PUSH_TIMEOUT=30)
     api.stub("codename_config", CodenameConfig=SimpleNamespace, parse_codename=lambda value: value)
     api.stub("pr_observation_config", ObservationConfig=SimpleNamespace, parse_observation=lambda value: value)
@@ -1202,3 +1203,120 @@ def test_knowledge_preference_callbacks_capture_actual_selection(api, monkeypatc
     elif mode.startswith("self-restoring"):
         assert getattr(owner, callback_name) is original
     assert api.config.current_observations() is None
+
+
+@pytest.mark.parametrize("mode", ["unselected", "selected", "helper-error", "resolver-error", "bound-method"])
+def test_installation_context_original_decision_keeps_delegation_opaque(api, monkeypatch, mode):
+    import os
+
+    registry = api.load("registry_paths")
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", " " if mode == "unselected" else "synthetic-context")
+    result, root, calls = {"marketplaceId": "example"}, Path("synthetic-payload"), []
+    error = ValueError("private helper bytes") if mode == "helper-error" else PermissionError("private context bytes")
+
+    def resolve(**kwargs):
+        calls.append("resolve")
+        assert kwargs["payload_root"] is root and kwargs["environment"] is os.environ
+        if mode == "resolver-error":
+            raise error
+        return result
+
+    def rebound(**kwargs):
+        pytest.fail("resolver method was selected after payload-root argument evaluation")
+
+    helper = SimpleNamespace(resolve_registry_context=resolve)
+
+    def select_helper():
+        calls.append("helper")
+        if mode == "helper-error":
+            raise error
+        return helper
+
+    def payload():
+        calls.append("payload")
+        if mode == "bound-method":
+            helper.resolve_registry_context = rebound
+        return root
+
+    monkeypatch.setattr(registry, "_helper", select_helper)
+    monkeypatch.setattr(registry, "_payload_root", payload)
+    with api.config.capture_config_observations() as observations:
+        if mode.endswith("-error"):
+            with pytest.raises(type(error)) as caught:
+                registry.installation_context_call(registry.installation_context)
+            assert caught.value is error
+            value = None
+        else:
+            value = registry.installation_context_call(registry.installation_context)
+            if mode == "selected":
+                assert registry.installation_context_call(registry.installation_context) is result
+    expected = [] if mode == "unselected" else ["helper"]
+    if mode not in ("unselected", "helper-error"):
+        expected += ["payload", "resolve"]
+    assert calls == expected * (2 if mode == "selected" else 1)
+    if not mode.endswith("-error"):
+        assert value is (None if mode == "unselected" else result)
+    report = api.config.AcquisitionReport("installation-context", value, tuple(observations))
+    owned = [o for o in observations if o.stage == "installation-context"]
+    assert len(owned) == (2 if mode == "selected" else 1)
+    authority = ScanAuthority.INDETERMINATE if mode.endswith("-error") else ScanAuthority.COMPLETE
+    assert all(o.authority is authority for o in owned)
+    children = [o for o in observations if o.source == "installation-context-helper"]
+    assert len(children) == (0 if mode == "unselected" else len(owned))
+    assert all(o.authority is ScanAuthority.INDETERMINATE for o in children)
+    if mode.endswith("-error"):
+        assert any(f.detail == type(error).__name__ for o in owned for f in o.findings)
+    assert "private" not in repr(observations)
+    assert report.authority is (ScanAuthority.COMPLETE if mode == "unselected" else ScanAuthority.INDETERMINATE)
+    assert report.reusable is False and api.config.current_observations() is None
+
+
+@pytest.mark.parametrize("mode", ["late-selection", "same-globals", "self-restoring", "nested-original"])
+def test_installation_context_config_call_qualifies_actual_selected_owner(api, monkeypatch, mode):
+    from types import FunctionType
+
+    source = _knowledge_owner(api, monkeypatch)
+    owner = source.owner
+    registry = sys.modules[owner.__package__ + ".registry_paths"]
+    original = registry._INSTALLATION_CONTEXT_OWNER
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "")
+    calls, base = [], {"headless": True}
+
+    def wrapper():
+        calls.append("replacement")
+        if mode == "self-restoring":
+            monkeypatch.setattr(registry, "installation_context", original)
+        assert original() is None
+        if mode == "nested-original":
+            assert original() is None
+        return None
+
+    selected = original if mode == "late-selection" else FunctionType(
+        wrapper.__code__, original.__globals__, closure=wrapper.__closure__,
+    )
+    assert selected.__globals__ is original.__globals__
+
+    def base_read(*args, **kwargs):
+        calls.append("base")
+        monkeypatch.setattr(registry, "installation_context", selected)
+        return base
+
+    monkeypatch.setattr(registry, "installation_context", lambda: pytest.fail("callback selected before base"))
+    monkeypatch.setattr(owner.inrepo_config_source, "load_config_base", base_read)
+    with api.config.capture_config_observations() as observations:
+        value = owner._load_inrepo_config("synthetic-launch")
+    assert value is base
+    assert calls == (["base"] if mode == "late-selection" else ["base", "replacement"])
+    report = api.config.AcquisitionReport("installation-context", value, tuple(observations))
+    owned = [o for o in observations if o.stage == "installation-context"]
+    completed = [o for o in owned if o.authority is ScanAuthority.COMPLETE]
+    assert len(completed) == (2 if mode == "nested-original" else 1)
+    if mode == "late-selection":
+        assert len(owned) == 1 and report.authority is ScanAuthority.COMPLETE
+    else:
+        assert len(owned) == len(completed) + 1 and report.authority is ScanAuthority.INDETERMINATE
+        assert owned[-1].authority is ScanAuthority.INDETERMINATE
+        assert any(f.reason == "owner-coverage-unavailable" for f in owned[-1].findings)
+    if mode == "self-restoring":
+        assert registry.installation_context is original
+    assert report.reusable is False and api.config.current_observations() is None

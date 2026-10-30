@@ -1264,8 +1264,7 @@ def _load_inrepo_config(anchor: str, *, strict: bool = False) -> dict[str, Any]:
 
     merged = inrepo_config_source.load_config_base(root, rel_candidates, strict=strict)
 
-    config_acquisition.opaque_source("installation-context")
-    context = registry_paths.installation_context()
+    context = registry_paths.installation_context_call(registry_paths.installation_context)
     marketplace_id = (
         str(context.get("marketplaceId", "")).strip()
         if isinstance(context, dict)
