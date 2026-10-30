@@ -797,6 +797,8 @@ def test_venue_tooling_prefix_is_valid_bash(tmp_path):
     ("missing", "healthy", True, False, True, "install"),
     ("healthy", "healthy", False, False, False, None),
     ("unhealthy", "healthy", True, True, False, None),
+    ("healthy", "healthy", True, True, False, None),
+    ("missing", "healthy", True, True, False, None),
 ])
 def test_venue_tooling_checks_real_command_before_launch_effects(
     tmp_path, initial, repair, bridge, context, allowed, action,
@@ -823,6 +825,7 @@ def test_venue_tooling_checks_real_command_before_launch_effects(
     binaries = tmp_path / ".local" / "bin"
     binaries.mkdir(parents=True)
     tool = """#!/usr/bin/env bash
+touch "$HOME/provision-attempt"
 printf '%s\\n' "probe:$*" >> "$HOME/trace"
 [ "$1" = --help ] || exit 98
 [ -f "$HOME/healthy" ] || { printf 'runtime unhealthy\\n' >&2; exit 7; }
@@ -876,6 +879,9 @@ printf '%s\\n' "probe:$*" >> "$HOME/trace"
     )
     if not allowed:
         assert result.stderr.strip(), "tooling refusal must be visible"
+    if context:
+        assert not (tmp_path / "provision-attempt").exists()
+        assert not (tmp_path / "trace").exists()
 
 
 def test_new_session_id_added_unless_resuming():

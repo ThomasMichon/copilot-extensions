@@ -13,12 +13,12 @@ import uuid
 VENUE_TOOLING = """\
 prepare_venue_tooling() {
     local P="$HOME/.copilot/installed-plugins/copilot-extensions" action=install
+    if [ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]; then
+        printf 'Selected installation requires its own venue tooling preparation\\n' >&2
+        return 1
+    fi
     export PATH="$HOME/.local/bin:$PATH"
     if [ ! -d "$P/agent-bridge" ]; then
-        if [ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]; then
-            printf 'Selected installation requires its own agent-bridge preparation\\n' >&2
-            return 1
-        fi
         copilot plugin install agent-bridge@copilot-extensions >&2 || {
             local status=$?
             printf 'agent-bridge payload installation failed (exit %s)\\n' "$status" >&2
@@ -34,10 +34,6 @@ prepare_venue_tooling() {
             return 0
         fi
         action=repair
-    fi
-    if [ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]; then
-        printf 'Selected installation requires its own agent-worktrees health repair\\n' >&2
-        return 1
     fi
     [ -f "$P/agent-worktrees/scripts/install.sh" ] || {
         printf 'agent-worktrees owning installer is unavailable\\n' >&2

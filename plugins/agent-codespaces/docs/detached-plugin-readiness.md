@@ -23,9 +23,10 @@ keeps that installer's distinct-generation, health and publication rules; this
 caller neither rebuilds a completed slot in place nor changes a version marker.
 It checks the command again after preparation. Installer failure, missing
 installer, failed post-check or failed Bridge payload installation stops startup
-with a visible error. An explicit installation context never falls back to this
-legacy installation/repair path; its selected installation must be prepared by
-its owner. This is local command health, not serving or model readiness.
+with a visible error. An explicit installation context refuses this legacy
+preparation path before even invoking its health shim: a first-use shim can
+provision state even for `--help`. Its selected installation must be prepared
+by its owner. This is local command health, not serving or model readiness.
 
 The actual constructed-command controls use private synthetic tools under the
 contained runner and are opt-in T3, not automatic unit-only CI:
