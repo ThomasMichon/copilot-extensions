@@ -295,3 +295,11 @@ existing review, custody and explicit approval gates.
 - The full isolated customization suite remains at 680 passes with two skips;
   the focused workflow contract passes all 26 tests. Current-head re-review
   and addressed-thread resolution remain required before merge.
+- The next review identified the immutable-ref compatibility window: the
+  optional packet must select either the prior or renamed guard when checking
+  an older source commit. Its bounded selector now accepts both names and
+  passes against the actual pre-rename source.
+- Replaced the hard-coded expression example with checks of the real workflow's
+  enabled job sets for each broker input and each owner exclusion. The combined
+  workflow/delivery packet passes 160 tests; the pre-rename selector passes its
+  one intended guard. Current-head review remains open.

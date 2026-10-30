@@ -87,24 +87,34 @@ def test_manual_selector_is_isolated_and_preserves_existing_routes():
             assert not _enabled(jobs[name]["if"], defaults)
 
 
-@pytest.mark.parametrize("probe,consumers,watch_owner,expected", [
-    (False, False, False, False),
-    (True, False, False, True),
-    (False, True, False, True),
-    (True, True, True, False),
-])
-def test_selector_evaluator_supports_grouped_alternative_routes(
-    probe, consumers, watch_owner, expected,
-):
-    expression = (
-        "${{ (inputs.windows_broker_probe || inputs.windows_broker_consumers) "
-        "&& !inputs.watch_owner }}"
-    )
-    assert _enabled(expression, {
-        "windows_broker_probe": probe,
-        "windows_broker_consumers": consumers,
-        "watch_owner": watch_owner,
-    }) is expected
+@pytest.mark.parametrize("broker", ["windows_broker_probe", "windows_broker_consumers"])
+@pytest.mark.parametrize("owner", [None, "watch_owner", "dispatch_delegation"])
+def test_real_broker_routes_preserve_alternatives_and_owner_exclusions(broker, owner):
+    trigger = WORKFLOW.get("on", WORKFLOW.get(True))
+    selected = {
+        name: item["default"]
+        for name, item in trigger["workflow_dispatch"]["inputs"].items()
+        if item["type"] == "boolean"
+    }
+    selected[broker] = True
+    expected = {"windows-broker-portable", "windows-broker-consumers"}
+    expected.add("windows-broker-probe" if broker == "windows_broker_probe" else "windows-native-process")
+    if owner:
+        selected[owner] = True
+        expected = {
+            "watch_owner": {
+                "watch-owner-native-linux", "watch-owner-native-windows",
+                "watch-owner-macos-refusal", "watch-owner-boundaries-linux",
+                "watch-owner-boundaries-windows",
+            },
+            "dispatch_delegation": {
+                "dispatch-delegation-linux", "dispatch-delegation-windows",
+            },
+        }[owner]
+    assert {
+        name for name, job in WORKFLOW["jobs"].items()
+        if _enabled(job["if"], selected)
+    } == expected
 
 
 @pytest.mark.parametrize("requested", ["", "A" * 40, "1234567890abcdef" * 2 + "12345678"])
@@ -283,6 +293,7 @@ def test_exact_packet_has_no_broad_suite_or_timeout_override():
         ("agent-worktrees", "tests/test_creation_tail_repair.py",
          "test_creation_retains_companion_lifecycle_through_guidance_against_cmd_embody"),
         ("customizing-copilot", "tests/test_instruction_delivery.py",
+         "test_shipped_inline_allowlist_is_explicit_and_substantive or "
          "test_shipped_sources_all_declare_non_discovered_fallbacks"),
         ("copilot-extensions-harness", "tests/test_reviewer_source.py",
          "test_windows_command_shim_uses_cmd"),
