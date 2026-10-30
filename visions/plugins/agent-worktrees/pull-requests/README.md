@@ -9,7 +9,7 @@
 - **Scope:** leaf (child of the
   [agent-worktrees](../README.md) plugin vision)
 - **Status:** Draft
-- **Last revised:** 2026-10-18
+- **Last revised:** 2026-10-30
 - **Reality docs:** the agent-worktrees plugin `docs/`;
   `skills/worktree/references/pr-workflow.md` (the "Addressing a foreign
   repo" section is the authoritative, maintained description of
@@ -104,6 +104,16 @@ The PR capability supports reading a PR's current diff and surrounding code
 context, reading and posting comments, reading and resolving review
 threads, and publishing a verdict — as first-class provider operations, not
 something a reviewer flow builds beside the capability.
+
+### exact-review-source-attachment
+
+Reviewers can attach exact reviewed head and authoritative common-baseline
+source to a PR-domain review generation through the existing source-workspace
+owner. Changed paths, renames, deletions and unavailable or binary blobs remain
+explicit. Previous reviewed revisions are retained; target-only movement does
+not silently replace the reviewed range. Source readiness is distinct from
+metadata readability and does not require merging, building or restoring
+dependencies.
 
 ### foreign-repo-pr-operations
 
