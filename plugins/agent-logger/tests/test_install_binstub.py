@@ -361,6 +361,12 @@ def _isolated_install_env(home: Path) -> dict[str, str]:
         path.mkdir(parents=True, exist_ok=True)
     env.update({name: str(path) for name, path in roots.items()})
     env["COPILOT_PLUGIN_INSTALL_STAGED"] = "1"
+    if sys.platform == "linux" and env.get("COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT"):
+        lifecycle = home / "lifecycle-python"
+        venv.EnvBuilder(with_pip=False, symlinks=False).create(lifecycle)
+        interpreter = lifecycle / "bin/python"
+        interpreter.chmod(0o700)
+        env["COPILOT_EXTENSIONS_DAEMON_PYTHON"] = str(interpreter)
     for name in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV"):
         env.pop(name, None)
     return env
@@ -396,6 +402,20 @@ def _stage_payload(tmp_path: Path) -> Path:
     ):
         shutil.copytree(_PLUGIN_ROOT.parents[1] / "libs" / lib, staged_libs / lib)
     return payload
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux lifecycle interpreter custody")
+def test_snapshot_fixture_supervisor_has_native_interpreter_custody(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT", "fixture-context")
+    env = _isolated_install_env(tmp_path / "home")
+    interpreter = Path(env["COPILOT_EXTENSIONS_DAEMON_PYTHON"])
+    assert interpreter.is_relative_to(tmp_path) and not interpreter.is_symlink()
+    result = subprocess.run(
+        ["bash", "-c", 'source "$1"; _di_lifecycle lease-fields 30 60',
+         "bash", str(_PLUGIN_ROOT / "scripts/daemon_instances.sh")],
+        env=env, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0 and result.stdout, result.stdout + result.stderr
 
 
 def _stage_release_payload(tmp_path: Path) -> Path:
