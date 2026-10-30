@@ -60,6 +60,12 @@ def _default_observation_client() -> DispatchClient:
     return _resolve_cli_module()._client(argparse.Namespace(), ensure=False, read_only=True)
 
 
+def _default_recovery_client() -> DispatchClient:
+    from .loop_commands import _resolve_cli_module
+
+    return _resolve_cli_module()._client(argparse.Namespace(), ensure=False, allow_ssh_failover=False)
+
+
 class DispatchTools(TaskRecoveryToolsMixin):
     """Transport-free implementation of the dispatch MCP tools.
 
@@ -78,8 +84,13 @@ class DispatchTools(TaskRecoveryToolsMixin):
         repo_resolver: RepoResolver = resolve_repo,
         authority_resolver: Callable[[], Authority] = default_authority,
     ):
-        self._client_factory = client_factory or _default_client
-        self._observation_client_factory = client_factory or _default_observation_client
+        self._client_factory = _default_client if client_factory is None else client_factory
+        self._observation_client_factory = (
+            _default_observation_client if client_factory is None else client_factory
+        )
+        self._recovery_client_factory = (
+            _default_recovery_client if client_factory is None else client_factory
+        )
         self._identity = identity_resolver
         self._repo = repo_resolver
         self._authority = authority_resolver

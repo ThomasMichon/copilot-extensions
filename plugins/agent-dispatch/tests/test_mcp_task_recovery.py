@@ -25,6 +25,27 @@ FIELDS = {
 }
 
 
+def test_falsey_explicit_client_factory_is_not_replaced():
+    class Factory:
+        def __bool__(self):
+            return False
+
+        def __call__(self):
+            return DispatchClient("https://dispatch.invalid", transport=httpx.MockTransport(
+                lambda request: httpx.Response(
+                    200, json=HEALTH if request.url.path == "/health" else {"fixture": True},
+                ),
+            ))
+
+    factory = Factory()
+    tools = DispatchTools(client_factory=factory)
+    assert tools._client_factory is factory
+    assert tools._observation_client_factory is factory
+    assert tools._recovery_client_factory is factory
+    assert tools.task_diagnostics("task-a") == {"fixture": True}
+    assert tools.detach_agent("task-a", **FIELDS) == {"fixture": True}
+
+
 @pytest.fixture
 def tools_and_requests() -> tuple[DispatchTools, list[httpx.Request]]:
     recorded: list[httpx.Request] = []

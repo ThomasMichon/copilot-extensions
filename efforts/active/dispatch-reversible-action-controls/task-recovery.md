@@ -226,3 +226,17 @@ operator requests.
   also pass; this Dispatch-only correction changes no captured Bridge bytes.
 - Hosted CI passed the preceding revision but cannot waive these findings.
   The new revision still requires independent review and its own CI before merge.
+
+### 2026-10-30 - Complete the frontend activation boundary
+
+- The diagnostic/acquisition correction received exact-head independent
+  approval and green CI. Before delivery, apply the same no-implicit-start
+  class fix to the new strict recovery and receipt-reconciliation frontends:
+  no coordinator ensure or SSH failover before admission, while keeping
+  control-authority discovery and legacy Proposed reset behavior.
+- Production-factory controls now cover every new CLI/stdio recovery path
+  with available and absent providers. Preserve explicitly injected factories
+  by testing `None`, not callback truthiness.
+- The complete final recovery/authority/driver packet passes 471 cases.
+  This meaningful final revision still needs its own review; the preceding
+  approval is not carried forward.

@@ -26,6 +26,11 @@ The CLI and default stdio MCP diagnostic factories use existing read-only
 client discovery: they do not ensure a local coordinator, open SSH failover or
 discover control credentials. An absent provider remains explicitly unavailable
 through the existing bounded read-retry behavior, not an empty task snapshot.
+New strict recovery and wake-reconciliation frontends also require an existing
+coordinator rather than implicitly starting it or opening SSH failover; they
+retain normal control-authority discovery. Legacy Proposed reset keeps its
+original client behavior. Explicit injected MCP client factories remain
+authoritative, including callable objects with false truth values.
 
 An action's `allowed` value describes inspected prerequisites, **not authority,
 operator confirmation or a promise of successful execution**. Existing lifecycle

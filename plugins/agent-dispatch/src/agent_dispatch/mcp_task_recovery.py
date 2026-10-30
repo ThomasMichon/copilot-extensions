@@ -25,7 +25,7 @@ class TaskRecoveryToolsMixin:
         reason: str,
     ) -> dict:
         """Apply one explicit recovery action using coordinator control authority."""
-        with self._client_factory() as client:
+        with self._recovery_client_factory() as client:
             return client.recover_task(
                 task_id,
                 operation=operation,
@@ -80,7 +80,7 @@ class TaskRecoveryToolsMixin:
             with self._client_factory() as client:
                 return client.reset(task_id, reason=reason, expected_status=expected_status)
         operation, fields = request
-        with self._client_factory() as client:
+        with self._recovery_client_factory() as client:
             return client.recover_task(task_id, operation=operation, **fields)
 
     def reconcile_wake(
@@ -93,7 +93,7 @@ class TaskRecoveryToolsMixin:
         reason: str,
     ) -> dict:
         """Observe retained original send evidence without sending or accepting an outcome."""
-        with self._client_factory() as client:
+        with self._recovery_client_factory() as client:
             return client.reconcile_wake(
                 task_id,
                 outbox=outbox,

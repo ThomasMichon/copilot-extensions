@@ -77,7 +77,7 @@ def _cmd_detach_agent(args: argparse.Namespace) -> int:
     fields = _validated_fields(args, "expected_revision", "request_id", "actor", "reason")
     if fields is None:
         return 2
-    with _core()._client(args) as client:
+    with _core()._client(args, ensure=False, allow_ssh_failover=False) as client:
         result = client.recover_task(args.task_id, operation="detach_agent", **fields)
     return _core()._emit(result)
 
@@ -104,7 +104,7 @@ def _cmd_reset(args: argparse.Namespace) -> int:
             )
         return _core()._emit(result)
     operation, fields = request
-    with _core()._client(args) as client:
+    with _core()._client(args, ensure=False, allow_ssh_failover=False) as client:
         result = client.recover_task(args.task_id, operation=operation, **fields)
     return _core()._emit(result)
 
@@ -113,6 +113,6 @@ def _cmd_reconcile_wake(args: argparse.Namespace) -> int:
     fields = _validated_fields(args, "outbox", "wake_id", "expected_revision", "actor", "reason")
     if fields is None:
         return 2
-    with _core()._client(args) as client:
+    with _core()._client(args, ensure=False, allow_ssh_failover=False) as client:
         result = client.reconcile_wake(args.task_id, **fields)
     return _core()._emit(result)

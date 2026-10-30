@@ -203,7 +203,7 @@ def test_unsupported_provider_is_reported_without_post(
     monkeypatch.setattr(
         core,
         "_client",
-        lambda args: DispatchClient(
+        lambda args, **_kwargs: DispatchClient(
             "https://dispatch.invalid",
             transport=httpx.MockTransport(handle),
         ),
