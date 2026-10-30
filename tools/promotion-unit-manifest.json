@@ -3165,7 +3165,9 @@
         "tools/promotion_unit_tests/test_related_acquisition.py::test_control_plane_caught_errors_preserve_fallback_and_sanitize[outer-caught]",
         "tools/promotion_unit_tests/test_related_acquisition.py::test_control_plane_caller_qualifies_actual_selected_callback[same-globals]",
         "tools/promotion_unit_tests/test_related_acquisition.py::test_control_plane_caller_qualifies_actual_selected_callback[self-restoring]",
-        "tools/promotion_unit_tests/test_related_acquisition.py::test_control_plane_caller_qualifies_actual_selected_callback[nested-original]"
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_control_plane_caller_qualifies_actual_selected_callback[nested-original]",
+        "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_control_cleanup_deadline_uses_observer_epoch_not_host_clock[early-host-epoch]",
+        "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_control_cleanup_deadline_uses_observer_epoch_not_host_clock[late-host-epoch]"
     ],
     "sources": {
         "tools/core_python_artifacts.py": "cfeae35bfee4537022e1026ffae498b61b23508426a676d9dc09ca8ab8d4b4a0",
@@ -3511,7 +3513,7 @@
         "tools/promotion_unit_tests/test_shell_caller_owned.py": "0723f365986fc1e537f4507ab681a290b22abe99fd4a688eddfd02861df6cb5a",
         "libs/agent-procutil/tests/sdk_desktop_observer.py": "94611376383991ec78de7a1d29eb4256c592a4aa9be0bcf98b7df6f6e415e022",
         "libs/agent-procutil/tests/sdk_visibility.py": "ef36a2c6548e7cd671b770f06e0e4db0a0b403b409e75a34b3fa4f89cb0f2062",
-        "tools/promotion_unit_tests/test_sdk_desktop_observer.py": "bf7a2cf2cfc1092e6cc2973eabd2c9abf138135e8c784ff0c61c0ae100c2af17",
+        "tools/promotion_unit_tests/test_sdk_desktop_observer.py": "2f54f9e1af5c2a32ad6e385848827b7e455cdfc6e44e6ef117d3691b438af201",
         "libs/agent-procutil/tests/sdk_visibility_sources.py": "1369a38abd05304d5bb1c9dfd546a0ac1c2f7b4463d90024d07374b5ab08aa7d",
         "libs/agent-procutil/tests/sdk_visibility_cases.py": "6cf438b387e7123eca6baeec1fed5d14e4297a1c336f029de4ec66dc99ad2972",
         "libs/installation-context/_installation_context_worker.py": "6c10396cb0555736155b25bf3f52d507c9e36b189eb06a175d0a27fc778f6c8d",
