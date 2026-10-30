@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent repair PRs against `dev`
 - **Created:** 2026-10-29
-- **Status:** Active
+- **Status:** Done
 - **Vision:** existing plugin-services progress/timeout and explicit-failure contracts
 - **Umbrella issue:** #9520
 - **Sub-issues:** existing #5512 and #5761 retain their original scope
@@ -74,22 +74,22 @@ authorize a shared runtime rollout, service restart or live venue retry.
 
 ### Phase 2 - Explicit failure and diagnostic preservation
 
-- [ ] Make monitor restart report a real spawn failure through its exit status;
+- [x] Make monitor restart report a real spawn failure through its exit status;
   preserve disabled/already-current behavior and existing installer cutover
   handling. Do not equate spawning with acquired ownership or serving readiness.
 - [x] Preserve structured refusal details through the shared owned-delivery
   parser and detached-launch refusal consumer, without granting resend or
   replacement authority. Preserve the normal pending-seed helper's existing
   typed/deferred/unconfirmed/lost behavior.
-- [ ] Retain bounded, sanitized failed readiness observations through ordinary
+- [x] Retain bounded, sanitized failed readiness observations through ordinary
   control cleanup, reusing the existing storage owner and retention machinery.
   Preserve control cancellation and successful cleanup semantics.
 
 ### Phase 3 - Preparation and deadline correctness
 
-- [ ] Repair fresh-guest preflight ordering through the canonical hosting-policy
+- [x] Repair fresh-guest preflight ordering through the canonical hosting-policy
   owner, preserving denial before launch effects and avoiding a second evaluator.
-- [ ] Verify and repair present-but-unhealthy guest preparation using the owning
+- [x] Verify and repair present-but-unhealthy guest preparation using the owning
   health/repair contract; do not merely add another command-existence check.
 - [x] Deferred to `#8051`: compose relay/SSH progress and independent process
   budgets, including the actual preparation consumer's slow-healthy and failure
@@ -106,11 +106,13 @@ authorize a shared runtime rollout, service restart or live venue retry.
 
 ### Phase 4 - Delivery and disposition
 
-- [ ] Land each eligible source repair with mandatory changefiles, required CI
-  and real current-head reviews; finalize its dedicated source worktree.
+- [x] Land each eligible source repair with mandatory changefiles, required CI
+  and real current-head reviews; finalize its dedicated repair-only worktree.
+  The journal-owning coordinator retires after this archive clears review and
+  merges, rather than deleting the workspace holding unpublished closeout.
 - [x] Record the disposition of every intake area, including exact external
   owners or missing evidence for items not safely implementable here.
-- [ ] Close this source effort only when every implementation and validation
+- [x] Close this source effort only when every implementation and validation
   item is resolved or explicitly transferred to a named tracked objective.
 
 ## Validation Plan
@@ -129,7 +131,10 @@ authorize a shared runtime rollout, service restart or live venue retry.
   a mocked result is not live or installed acceptance evidence.
 - [x] Record reasons for any skipped external lane. Live service mutation,
   installed rollout and venue retries remain outside this source-only scope.
-- [ ] Verify provider merge state and managed finalization for every opened PR.
+- [x] Verify provider merge state for all five repair PRs and managed
+  finalization of all four repair-only worktrees. Retain the coordinator until
+  the reviewed archive is upstream, then release its completed effort binding
+  and finalize it through the managed lifecycle.
 
 ## Proposal
 
@@ -265,3 +270,91 @@ depends on the mere existence of one of these source defects.
   A newer base conflict still needs reconciliation before merge.
 - #9548 and #9549 still await their required Copilot verdicts. The source
   effort remains Active; no installed rollout or live venue retry is authorized.
+
+### 2026-10-30 - Two further source deliveries and preparation review
+
+- #9543 merged at `435a4eea5` and #9547 at `5445343f4` after actual
+  current-head Copilot approval, renewed Maintainer acceptance, passing required
+  CI and resolved review threads. Their implementation items are complete.
+  Managed finalization verified #9547 on `origin/dev` and settled its parent
+  claim. The coordinator worktree remains open for the rest of this effort.
+- Copilot identified a High finding in #9548: the provisionless preflight
+  fallback also reaches direct stdio's final admission helper. Restrict that
+  fallback explicitly to preflight and prove missing installed receivers
+  cannot reach direct stdio launch, including skipped plugin preparation.
+- Copilot identified a Medium finding in #9549: invoking a legacy shim for
+  its health probe can provision before refusing an unresolved explicit
+  context. Refuse before that legacy invocation and cover its actual side
+  effects with a contained shell consumer.
+- Both preparation implementation and delivery gates remain open. No source
+  merge or test result authorizes an installed update or live venue retry.
+
+### 2026-10-30 - Preparation review corrections published
+
+- #9548 now limits the provisionless reader to explicit preflight callers.
+  Final direct stdio admission retains a strict installed-receiver requirement.
+  The real CLI/SSH consumer regression first reproduced a successful launch
+  without that receiver under `--no-provision`, then passed with the correction.
+  All 83 hosting/preparation/stdio and 125 detached-consumer controls pass
+  through the contained runner, alongside Ruff and 13 install-contract checks.
+  The correction is published at `99fb382211d4122ce76e1b58264ced5c261a8f34`.
+- #9549 now refuses explicit installation context before invoking any legacy
+  health shim, selecting its PATH or preparing a Bridge payload. A real Bash
+  consumer models first-use provisioning writes: the unhealthy shim previously
+  wrote state before refusal, and the healthy shim incorrectly reached launch.
+  Both now refuse without invoking the shim. All 134 detached-consumer controls
+  pass, including nine explicit T3 matrix cases, alongside Ruff and all
+  install-contract checks. The correction is published at
+  `ad84b93e85555def60412fd9efc3a7f5b49d231c`.
+- Both original blocking threads were answered with exact red/green evidence
+  and resolved. PR descriptions preserve the source-only qualification limits.
+  Fresh current-head reviews, required CI, mergeability and actual merge remain
+  delivery gates; neither preparation implementation is counted as delivered.
+- Disposable fresh-home and isolated-reader process controls are not full
+  clean-room installation, native POSIX, live guest or installed-host proof.
+  Those external lanes remain outside the authorized source scope. No installed
+  update, service restart, live venue retry or product execution occurred.
+
+### 2026-10-30 - Preparation source delivered
+
+- Provider receipts confirm the Maintainer merged #9548 at `e7624bdac` at
+  06:32:19 UTC and #9549 at `daca1e7c7` at 06:33:03 UTC. Both have real
+  current-head Copilot approval, renewed Maintainer acceptance and resolved
+  implementation threads at the exact correction heads recorded above.
+  Their Phase 3 implementation items are complete.
+- The provider's aggregate check history still includes earlier failed
+  attribution checks. The repaired attribution checks succeeded at 06:29:13
+  and 06:29:16 UTC respectively; the latest guards/lint runs also succeeded
+  before merge. This journal does not erase those historical failures or
+  equate the aggregate history with a fresh all-green observation.
+- All five planned source repairs are now merged. The remaining source slice
+  is managed finalization of the preparation worktrees, followed by reviewed
+  publication and archival of this journal and retirement of its coordinator.
+  The previously transferred objectives retain their own completion gates.
+- This records source delivery only. Installed rollout, shared service
+  mutation, native external-venue qualification and product execution remain
+  outside the authorization and are not represented as complete.
+
+### 2026-10-30 - Source scope complete and archive prepared
+
+- Managed finalization verified #9548 and #9549 against `origin/dev`, settled
+  their creating coordinator's claims and marked both worktrees finalized.
+  As with #9545 and #9547, an active shell can retain the folder and branch;
+  that is normal lifecycle behavior, not an instruction to remove them by hand.
+- Every implementation and validation item is complete or transferred to the
+  named existing objective. The source effort is Done and moves to
+  `efforts/2026/10/30 launch-boundary-repairs/`. Its active index entry is
+  replaced by a completed entry. The source PR coordinator explicitly moves
+  from Phase 2 to Phase 4 for final journal publication and retirement.
+- The coordinator's own restart source was merged in #9543. Its remaining
+  publication is this documentation-only closeout, subject to the normal
+  review and CI gate; it will release the completed effort binding and
+  finalize only after that archive is merged. #9520 retains this final
+  publication/retirement receipt until then.
+- Durable behavior and qualification limits already live in the changed
+  plugin/library documentation; this journal is an execution record, not a
+  second runtime specification. Documentation-only archival adds no new unit,
+  clean-room, native POSIX or external-venue behavior to qualify.
+- #8051, #5761, #9322 and #5512 remain independently owned and are not closed
+  by this source effort. Normal release publication and separately authorized
+  rollout remain outside this source-only completion claim.
