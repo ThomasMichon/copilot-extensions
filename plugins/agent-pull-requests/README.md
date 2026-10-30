@@ -850,3 +850,9 @@ while stage-observed execution completed in 26.92 seconds and was still doing
 native source verification near the former cap. Only that native parameter
 gets the additional margin; the other parameters, subprocess deadlines,
 group/plugin budgets, production code and all assertions remain unchanged.
+## Review workspace candidate
+
+The first offline, source-invokable read-generation slice is documented in
+[review workspaces](docs/review-workspaces.md). It normalizes supplied ADO
+evidence and reports synchronization deltas; live acquisition, exact source,
+service caching and submission are not yet supported by that entry point.

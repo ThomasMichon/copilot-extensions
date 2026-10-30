@@ -1,0 +1,59 @@
+{
+  "schema": "agent-pull-requests.review-evidence",
+  "version": 1,
+  "scope": {
+    "provider": "azure-devops",
+    "endpoint": "https://dev.azure.com/example",
+    "project_id": "project-id",
+    "repository_id": "repository-id",
+    "principal_id": "reviewer-id",
+    "number": 42
+  },
+  "sections": {
+    "pull_request": {
+      "observed_from": "2026-10-30T00:00:00Z",
+      "observed_to": "2026-10-30T00:00:01Z",
+      "complete": true,
+      "errors": [],
+      "data": {
+        "pullRequestId": 42,
+        "repository": {"id": "repository-id", "project": {"id": "project-id"}},
+        "title": "Synthetic example",
+        "status": "active",
+        "isDraft": false,
+        "lastMergeSourceCommit": {"commitId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        "lastMergeTargetCommit": {"commitId": "cccccccccccccccccccccccccccccccccccccccc"},
+        "autoCompleteSetBy": null,
+        "completionOptions": {"deleteSourceBranch": false}
+      }
+    },
+    "iterations": {
+      "observed_from": "2026-10-30T00:00:01Z",
+      "observed_to": "2026-10-30T00:00:02Z",
+      "complete": true,
+      "errors": [],
+      "data": [{
+        "id": 3,
+        "sourceRefCommit": {"commitId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        "targetRefCommit": {"commitId": "cccccccccccccccccccccccccccccccccccccccc"},
+        "commonRefCommit": {"commitId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+      }]
+    },
+    "changes": {
+      "observed_from": "2026-10-30T00:00:02Z",
+      "observed_to": "2026-10-30T00:00:03Z",
+      "complete": true,
+      "errors": [],
+      "revision": {
+        "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "iteration": 3,
+        "common_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "data": [{
+        "changeTrackingId": 7,
+        "changeType": "edit",
+        "item": {"path": "/example.txt", "gitObjectType": "blob"}
+      }]
+    }
+  }
+}
