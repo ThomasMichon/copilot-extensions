@@ -66,7 +66,15 @@ def native_bindings(conn: Any, row: Any, task: Any) -> tuple[list[str], list[str
         handle = history["session_handle"]
         native = history["native_session_id"] if "native_session_id" in history.keys() else None
         if history["agent_info"]:
-            actual = identity(json.loads(history["agent_info"])).native
+            info = json.loads(history["agent_info"])
+            if history["driver"] == "restricted-bridge":
+                from .restricted_delivery import validate_receipt
+                validate_receipt(info)
+                actual = info.get("native_session_id")
+                if handle and handle != f"local-body:{info.get('session_id')}":
+                    raise TaskError("retained restricted bridge handle conflicts")
+            else:
+                actual = identity(info).native
             if native and actual != native:
                 raise TaskError("retained native identity evidence conflicts")
             native = actual

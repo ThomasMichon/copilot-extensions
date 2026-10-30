@@ -33,15 +33,13 @@ def _default_deliver(
     wake_id: str,
     sender: str,
     owner_session_id: str | None,
+    *,
+    queue: TaskQueue,
 ) -> bool:
-    from . import bridge
+    from .owner_wake_delivery import deliver_owner_wake
 
-    return bridge.resume_steered_owner(
-        owner,
-        task_id,
-        message,
-        owner_session_id=owner_session_id,
-        idempotency_key=wake_id,
+    return deliver_owner_wake(
+        queue, owner, owner_session_id, task_id, message, wake_id,
     )
 
 
@@ -49,7 +47,7 @@ async def drain_run_waiter_wakes(
     queue: TaskQueue,
     *,
     interval: float = 0.25,
-    deliver: DeliverWake = _default_deliver,
+    deliver: DeliverWake | None = None,
     release_claim: ReleaseClaim | None = None,
     max_attempts: int = 8,
     retry_base: float = 1.0,
@@ -58,6 +56,9 @@ async def drain_run_waiter_wakes(
     execution_incarnation: str | None = None,
 ) -> None:
     """Drain pending detached-waiter wake deliveries until cancelled."""
+    if deliver is None:
+        from functools import partial
+        deliver = partial(_default_deliver, queue=queue)
     while True:
         if is_active is not None:
             try:
