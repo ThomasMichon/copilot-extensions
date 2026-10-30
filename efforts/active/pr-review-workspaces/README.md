@@ -217,6 +217,10 @@ contract.
   issuer, provenance, read-count or delegation-time requirement. The embedding
   reuses existing authorized owner gates; its explicit work/payload contracts
   remain separate.
+- Follow-up review found the provider checkpoint wrapper still reclassified an
+  actual `PermissionError`. Removed that conversion and proved an in-collection
+  revocation preserves the original owner exception and stops further reads.
+  The updated complete source packet passed 205 cases.
 
 ### 2026-10-30 - Acquisition merged; live owner adoption remains gated
 - #9667 merged as `14ef6f358ad3dfa0991ea0e9bcfeca63d0172755` after

@@ -80,12 +80,9 @@ def acquire_owned_evidence(
     def checkpoint():
         nonlocal checkpoint_count
         remaining()
-        try:
-            result = owner.checkpoint()
-        except (PermissionError, RuntimeError, ValueError):
-            raise ObservationCredentialError("ADO read-owner authority is unavailable") from None
+        result = owner.checkpoint()
         if result is not None:
-            raise ObservationCredentialError("ADO read-owner checkpoint must enforce context")
+            raise ValueError("ADO read-owner checkpoint must enforce context")
         checkpoint_count += 1
         remaining()
 

@@ -399,7 +399,7 @@ def protected_owner(forge, state):
     def checkpoint():
         state["checks"] = state.get("checks", 0) + 1
         if not state.get("allowed", True):
-            raise PermissionError("synthetic owner request revoked")
+            raise state.get("denial", PermissionError("synthetic owner request revoked"))
 
     def factory(number, remaining, page_checkpoint):
         class ProtectedReader(AdoReader):
@@ -471,7 +471,7 @@ def test_protected_owner_authority_and_namespace_refusals_precede_pr_read(failur
     else:
         state["allowed"] = False
     owner = protected_owner(forge, state)
-    with pytest.raises((ProviderError, ObservationCredentialError)):
+    with pytest.raises(PermissionError if failure == "revoked" else ProviderError):
         acquire_owned_evidence(owner, 42, budget=30)
     assert not any(path.endswith("/pullRequests/42") for path, _ in forge.requests)
 
@@ -488,3 +488,26 @@ def test_protected_owner_final_probe_rejects_a_switch_after_collection():
     assert forge.identity_reads == 2
     assert forge.pr_reads == forge.iteration_reads == 2
     assert any(path.endswith("/evaluations") for path, _ in forge.requests)
+
+
+def test_in_collection_owner_permission_denial_retains_the_original_exception():
+    from agent_worktrees.providers.azure_owned_evidence import acquire_owned_evidence
+
+    forge = Forge()
+    forge.authorized_actor = "effective-actor"
+    denied = PermissionError("existing owner pipeline revoked this operation")
+    state = {"denial": denied}
+    original = forge.open
+
+    def revoke_during_read(request, timeout):
+        response = original(request, timeout)
+        if urlsplit(request.full_url).path.endswith("/threads"):
+            state["allowed"] = False
+        return response
+
+    forge.open = revoke_during_read
+    with pytest.raises(PermissionError) as failure:
+        acquire_owned_evidence(protected_owner(forge, state), 42, budget=30)
+    assert failure.value is denied
+    assert any(path.endswith("/threads") for path, _ in forge.requests)
+    assert not any(path.endswith("/evaluations") for path, _ in forge.requests)
