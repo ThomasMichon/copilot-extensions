@@ -8,10 +8,6 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
-from dropin_registry import ScanAuthority
-
-from . import config_acquisition as acquisition
-
 
 def _legacy_root() -> Path:
     override = os.environ.get("AGENT_HOME", "").strip()
@@ -73,6 +69,10 @@ def registry_root(legacy_root: Path | None = None) -> Path:
 
 def installation_context() -> dict | None:
     """Report this original decision, not complete acquisition by its helper."""
+    from dropin_registry import ScanAuthority
+
+    from . import config_acquisition as acquisition
+
     try:
         if not os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
             context = None
@@ -99,6 +99,8 @@ _INSTALLATION_CONTEXT_OWNER = installation_context
 
 def installation_context_call(callback):
     """Keep the selected callback opaque when it is not the original owner."""
+    from . import config_acquisition as acquisition
+
     try:
         return callback()
     finally:

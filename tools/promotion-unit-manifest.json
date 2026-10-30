@@ -3533,7 +3533,7 @@
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_records.py": "722d48c76e5a9ac285f09868bd83291ba448fa1aa8a66c8e7854e9354e4fe4d4",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell.py": "e8a7e27c1e80d04b175d0ee782fc7f790b50ecc30cf18ef4f0cb2bf782c1fb88",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell_windows.py": "d75e1e2988b64d78cffe6ee13f78f27c52c2a300dede3d32ede5191734907aa4",
-        "plugins/agent-worktrees/src/agent_worktrees/registry_paths.py": "8277d19eaab961d72f3f743fea97ac418c14e49866e4e7c9e30c31685b41bca6"
+        "plugins/agent-worktrees/src/agent_worktrees/registry_paths.py": "5824b9349a74795f99deb7c078ab2179362ff9bbd9a7f8e488e8dd2e29464e89"
     },
     "coverage_targets": [
         "tools/core_runtime_profile.py",
