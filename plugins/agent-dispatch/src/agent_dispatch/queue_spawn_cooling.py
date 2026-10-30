@@ -82,6 +82,8 @@ class SpawnCoolingMixin:
             ):
                 raise TaskError("dormant startup changed or remains incomplete")
             require_no_cooling(row)
+            from .queue_execution_wakes import require_no_wake_for_cooling
+            require_no_wake_for_cooling(self, conn, task)
             conn.execute(
                 "UPDATE spawn_reservations SET cooling_token=?, updated_at=? WHERE key=?",
                 (uuid.uuid4().hex, self._now(now), key),

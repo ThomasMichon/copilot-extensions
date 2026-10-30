@@ -115,6 +115,24 @@ def validate_start(row, task, native_id: str | None) -> None:
         raise TaskError("restricted start owner or delivery incarnation changed")
 
 
+def wake_identity(reservation: SpawnReservation, task) -> tuple[str, str]:
+    """Keep restricted receipts distinct from ordinary worktree creation facts."""
+    info = reservation.agent_info
+    if not isinstance(info, dict):
+        raise TaskError("restricted wake requires retained delivery facts")
+    validate_receipt(info)
+    if (
+        info.get("delivered") is not True
+        or info["worker_id"] != task.owner
+        or info["worker_id"] != f"dispatch-{reservation.key}"
+        or info["task_generation"] != task.generation
+        or info.get("native_session_id") != task.owner_session_id
+        or reservation.worktree is not None or reservation.allocation_project is not None
+    ):
+        raise TaskError("restricted wake owner or delivery incarnation changed")
+    return info["session_id"], info["native_session_id"]
+
+
 def register_routes(app, queue, bus, control_token: str | None, *, authenticated_ingress: bool) -> None:
     auth = _make_control_auth(
         control_token, lambda kind, detail: bus.publish({"type": kind, **detail}),

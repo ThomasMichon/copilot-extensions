@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, replace
 
 from .queue_common import RunWaiterWakeOperation, WakeOperation
 from .queue_execution_custody import (
-    SendOutcome, execution_scope_qualified, require_custody_scope,
+    ExecutionSendUnresolved, SendOutcome, execution_scope_qualified, require_custody_scope,
     require_execution_send_reconciliation,
 )
 from .queue_execution_handoff import _scope_key, require_execution_admission
@@ -48,6 +48,8 @@ def wake_custody_clear_sql(outbox: str) -> str:
     )
     return (
         wake_clear
+        + f" AND NOT EXISTS (SELECT 1 FROM spawn_reservations cooling"
+        f" WHERE cooling.task_id = {outbox}.task_id AND cooling.cooling_token IS NOT NULL)"
         + " AND NOT EXISTS (SELECT 1 FROM execution_send_custody c"
         " JOIN spawn_reservations r ON r.key = c.reservation_key"
         " JOIN tasks retained ON retained.id = c.task_id"
@@ -56,6 +58,29 @@ def wake_custody_clear_sql(outbox: str) -> str:
         + execution_lineage_match_sql("retained", "current")
         + " OR r.exclusive_key = current.exclusive_key))"
     )
+
+
+def require_no_wake_for_cooling(queue, conn: sqlite3.Connection, task) -> None:
+    """The existing outbox excludes a stop racing or following a native wake."""
+    for table in TABLES:
+        rows = conn.execute(
+            f"SELECT * FROM {table} WHERE task_id = ? AND ("
+            "status IN ('pending', 'delivering', 'delivered', 'failed')"
+            " OR execution_send_state IN ('pending', 'unknown'))", (task.id,),
+        ).fetchall()
+        for row in rows:
+            if table == "run_waiter_wakes" and row["sender"] == CLAIM_RELEASE_SENDER:
+                continue
+            if row["execution_send_state"] in {"pending", "unknown"} or row["status"] == "delivering":
+                raise TaskError("wake delivery excludes physical cooling")
+            current = (
+                queue._wake_is_current(task, WakeOperation._from_row(row))
+                if table == "wake_outbox" else queue._run_waiter_wake_is_current(
+                    conn, task, RunWaiterWakeOperation._from_row(row),
+                )
+            )
+            if current:
+                raise TaskError("current owner wake excludes physical cooling")
 
 
 def unresolved_wake_send(
@@ -161,6 +186,11 @@ class QueueExecutionWakesMixin:
             )
             if not current or task is None:
                 raise TaskError("wake send task fence advanced")
+            if conn.execute(
+                "SELECT 1 FROM spawn_reservations WHERE task_id = ?"
+                " AND cooling_token IS NOT NULL LIMIT 1", (task.id,),
+            ).fetchone():
+                raise ExecutionSendUnresolved("spawn cooling remains unresolved")
             require_execution_send_reconciliation(conn, task.id, exclusive_key=task.exclusive_key)
             if row["execution_send"] is not None:
                 raise TaskError("settled wake send is observation only; retain its transport history")

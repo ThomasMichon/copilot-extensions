@@ -39,7 +39,10 @@ def hosted(tmp_path, monkeypatch):
         },
     }
     record_created_agent(queue, reservation.key, task_generation=task.generation, agent_info=info)
-    queue.record_spawn(reservation.key, session_handle=f"local-body:{BRIDGE}")
+    queue.record_spawn(
+        reservation.key, session_handle=f"local-body:{BRIDGE}",
+        startup_complete=True, startup_revision=reservation.startup_revision,
+    )
     queue.claim_one(OWNER, task_id=task.id)
     queue.start(task.id, OWNER, owner_session_id=NATIVE)
     queue.suspend(task.id, OWNER, reason="external")
@@ -142,6 +145,7 @@ def test_native_wake_fleet_uses_same_standard_command_over_ssh(hosted, monkeypat
     {"conversation_retired": True},
     {"release_requested": True},
     {"conclusion_state": "pending"},
+    {"cooling_token": "unsettled-stop"},
     {"exclusive_key": "review-slot", "exclusive_released": True},
     {"state": "failed"},
     {"agent_info": None},

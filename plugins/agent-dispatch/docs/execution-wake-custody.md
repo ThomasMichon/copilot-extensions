@@ -69,10 +69,13 @@ provenance or the coordinator application incarnation refuses transport visibly.
 
 The default owner and detached-waiter drainers select delivery from the retained
 execution facts, not from the shape of the `machine/worktree` owner address.
-For a hosted body, the current reservation must retain matching Bridge, native,
+For an ordinary hosted body, the current reservation must retain matching Bridge, native,
 worktree, execution-project and host identity, with no retirement or release
 intent. Incomplete or conflicting hosted facts refuse delivery; they do not
 fall back to the represented CLI inbox.
+Restricted bodies instead validate their own retained receipt and exact
+worker/native/task generation; they do not invent an ordinary worktree or
+allocation project. Native-history readers distinguish these receipt formats.
 
 Native delivery uses the standard Bridge command:
 
@@ -101,6 +104,17 @@ These selectors do not change wake leases, current task/owner/generation checks
 or final execution custody. The generation stored with initial agent creation is
 not the current task generation: claiming the task advances that generation.
 Current outbox fences and retained native history govern continuation.
+
+Physical cooling and wake delivery exclude one another through the existing
+database transactions. Outbox selection defers a held cooling operation without
+spending an attempt; final wake admission checks it again before taking send
+custody. Cooling checks outstanding/current owner wakes before acquiring its
+stop token. It cannot stop a body between native acceptance and the owner's
+next lifecycle action merely because the task still appears suspended.
+A current detached-waiter wake, including one whose delivery exhausted retries,
+retains this protection until a natural newer waiter or changed task/owner
+incarnation supersedes it. Cleanup-only claim releases do not block cooling.
+There is no timeout-to-absence assumption or new delivery/cooling lease.
 
 ## Remaining gates
 
