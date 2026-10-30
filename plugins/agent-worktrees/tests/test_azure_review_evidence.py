@@ -176,7 +176,7 @@ def test_change_pagination_and_credentials_are_bounded_by_actual_pages():
     assert sum(path.endswith("/changes") for path, _ in forge.requests) == 2
 
 
-@pytest.mark.parametrize("failure", ["missing", "repeated", "nonadvancing"])
+@pytest.mark.parametrize("failure", ["missing", "repeated", "repeated_terminal", "nonadvancing"])
 def test_bad_change_continuation_retains_known_records_as_incomplete(failure):
     forge = Forge()
     if failure == "missing":
@@ -187,11 +187,14 @@ def test_bad_change_continuation_retains_known_records_as_incomplete(failure):
         forge.pages[0].update(nextSkip=100, nextTop=100)
         forge.pages[100] = copy.deepcopy(forge.pages[0])
         forge.pages[100]["nextSkip"] = 200
+        if failure == "repeated_terminal":
+            forge.pages[100].update(nextSkip=0, nextTop=0)
     result = acquire(forge)
     changes = result["sections"]["changes"]
     assert not changes["complete"]
     assert changes["errors"] == ["changes_incomplete"]
     assert changes["data"][0]["item"]["path"] == "/example.txt"
+    assert len(changes["data"]) == 1
 
 
 def test_new_material_is_identity_checked_and_principal_switch_aborts():
@@ -280,11 +283,16 @@ def test_source_cli_strict_syntax_and_redacted_failures(monkeypatch, capsys):
     with pytest.raises(SystemExit) as failure:
         main(["read", "--rep", "project/repository"])
     assert failure.value.code == 2
-    monkeypatch.setattr(pr_credential_command, "command_source", lambda _: material)
+    def selected_source(_serialized, *, remaining):
+        assert remaining() == 1.0
+        return material
+
+    monkeypatch.setattr(pr_credential_command, "command_source", selected_source)
 
     def refused(*args, **kwargs):
         assert kwargs["budget"] == 30
         assert kwargs["expected_principal"] == "actor-id"
+        assert kwargs["credential_source_factory"](lambda: 1.0) is material
         raise ObservationCredentialError("synthetic-secret-must-not-be-echoed")
 
     monkeypatch.setattr(azure_review_evidence, "acquire_evidence", refused)
@@ -324,3 +332,23 @@ def test_total_evidence_budget_is_checked_before_publication(monkeypatch):
     monkeypatch.setattr(azure_review_evidence, "MAX_EVIDENCE_BYTES", 256)
     with pytest.raises(ProviderError, match="byte budget"):
         acquire(Forge())
+
+
+def test_credential_factory_receives_the_shared_decreasing_operation_budget():
+    forge = Forge()
+    ticks = [0.0]
+    limits = []
+
+    def factory(remaining):
+        def source():
+            limits.append(remaining())
+            ticks[0] += 1
+            return material()
+        return source
+
+    result = acquire_evidence(
+        "project/repository", 42, ENDPOINT, credential_source_factory=factory,
+        budget=30, reader_factory=forge.factory, clock=lambda: ticks[0],
+    )
+    assert limits == [30, 29, 28, 27, 26, 25, 24]
+    assert result["acquisition"]["duration_ms"] == 7000

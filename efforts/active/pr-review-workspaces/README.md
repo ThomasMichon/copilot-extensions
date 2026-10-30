@@ -202,6 +202,15 @@ contract.
   budget refusal passed. No live backend call, source attachment, submission
   or service effect has occurred; live qualification needs the caller's existing
   authorized typed observation-credential command.
+- Acquisition review identified terminal-page replay being accepted as complete
+  and the helper's fixed timeout exceeding the caller's remaining budget.
+  Corrected replay detection before appending/termination and passed the shared
+  deadline to the existing credential-command owner, preserving its bounded
+  cleanup and unchanged legacy default. The focused source packet passed
+  132 cases, including a real slow-helper retirement control.
+- Clarified that the CLI consumes a credential DTO, not a shipped ADO issuer:
+  adopters must supply their existing authorized owner/adapter. The expected
+  principal is the full ADO `authorizedUser.id`, not an AAD identity or label.
 
 ### 2026-10-30 - Offline read-generation source candidate
 - #9641 merged after current-head Copilot approval with no findings and required

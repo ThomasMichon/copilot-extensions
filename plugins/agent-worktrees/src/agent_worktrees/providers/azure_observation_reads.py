@@ -259,6 +259,11 @@ class AdoReader:
                     or any(not isinstance(row, dict) for row in values)
                 ):
                     raise ProviderError("ADO iteration changes have an invalid page")
+                signature = json.dumps(values, sort_keys=True)
+                if values and signature in seen:
+                    raise ProviderError("ADO iteration changes repeated a page")
+                if values:
+                    seen.add(signature)
                 records.extend(values)
                 if len(records) > MAX_RECORDS:
                     raise ProviderError("ADO iteration changes exceed the record limit")
@@ -270,10 +275,8 @@ class AdoReader:
                     raise ProviderError("ADO iteration changes lack continuation evidence")
                 if next_top == 0:
                     return Collection(tuple(records))
-                signature = json.dumps(values, sort_keys=True)
-                if not values or next_skip <= skip or signature in seen:
+                if not values or next_skip <= skip:
                     raise ProviderError("ADO iteration changes repeated or failed to advance")
-                seen.add(signature)
                 skip = next_skip
             raise ProviderError("ADO iteration changes exceed the page limit")
         except ObservationCredentialError:

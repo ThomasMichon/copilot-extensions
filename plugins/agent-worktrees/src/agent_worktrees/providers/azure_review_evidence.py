@@ -36,13 +36,17 @@ def _pr_scope(value: dict, number: int) -> tuple[str, str]:
 
 
 def acquire_evidence(
-    repo: str, number: int, endpoint: str, *, credential_source, budget: float,
+    repo: str, number: int, endpoint: str, *, credential_source=None,
+    credential_source_factory=None, budget: float,
     expected_principal: str | None = None, reader_factory=AdoReader,
     clock=time.monotonic, instant=lambda: datetime.now(timezone.utc).isoformat(),
 ) -> dict:
     """Renew observe credentials per request and bind each new token to one principal."""
     if (
-        type(number) is not int or number <= 0 or not callable(credential_source)
+        type(number) is not int or number <= 0
+        or (credential_source is None) == (credential_source_factory is None)
+        or credential_source is not None and not callable(credential_source)
+        or credential_source_factory is not None and not callable(credential_source_factory)
         or not isinstance(repo, str) or not repo or not isinstance(endpoint, str) or not endpoint
         or type(budget) not in (int, float) or not math.isfinite(budget) or budget <= 0
     ):
@@ -54,9 +58,6 @@ def acquire_evidence(
     started = clock()
     deadline = started + budget
     observed_from = instant()
-    credentials = ObservationCredentials(
-        credential_source, provider="azure-devops", api_base=endpoint, repository=repo,
-    )
     principal = None
     principal_changed = False
     verified = {}
@@ -67,6 +68,14 @@ def acquire_evidence(
         if value <= 0:
             raise ProviderError("ADO review acquisition budget exhausted", transient=True)
         return value
+
+    if credential_source_factory is not None:
+        credential_source = credential_source_factory(remaining)
+    if not callable(credential_source):
+        raise ProviderError("ADO review credential factory did not return a callable owner")
+    credentials = ObservationCredentials(
+        credential_source, provider="azure-devops", api_base=endpoint, repository=repo,
+    )
 
     def bound_source():
         nonlocal principal, identity_checks, principal_changed

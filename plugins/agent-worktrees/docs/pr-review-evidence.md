@@ -35,11 +35,63 @@ evidence, files or diagnostics. If that callable owner is unavailable, the live
 lane is unavailable; do not install, mint another identity or fall back to
 ambient auth.
 
-`--budget` is a required finite positive operation deadline, shared across all
-reads and identity checks. The example's 60 seconds is illustrative, not a
+`--budget` is a required finite positive operation work deadline, shared across
+all reads, identity checks and credential-command waits. Each helper wait is
+capped at the smaller of the remaining budget and its existing 15-second
+timeout. Timeout still performs the existing bounded owned-process cleanup;
+cleanup grace is not permission to continue acquisition after the deadline.
+The example's 60 seconds is illustrative, not a
 provider/bridge timeout policy. Capabilities are reported by the exact executing
 module, independently of package version. An older installation without this
 module is explicitly unavailable; normal clients are not automatically migrated.
+
+### Exact credential adapter contract
+
+This feature consumes an existing credential contract; it does **not** ship or
+name an operational ADO token-acquisition command. The adopter supplies an
+already trusted command from its authorized credential owner, or a narrow adapter
+around that owner. Formatting a DTO does not issue access, downscope a token or
+establish a granted binding. The owner must supply the actual permitted
+provider/endpoint/repository/authentication binding; an adapter must not invent
+scope values, relabel another credential, log in, copy caches or select ambient
+auth to make the shape pass.
+
+The request is exactly the configured non-secret JSON argv: no additional JSON
+request or scope is sent on stdin. The executable must be an absolute existing
+file (not a `.cmd`/`.bat` implicit shell); additional arguments identify the
+owner's already-adopted binding. Every acquisition invokes that same command.
+It must exit zero and emit one JSON object with exactly these fields:
+
+```json
+{
+  "schema": "fleet-manager.forge-credential",
+  "version": 1,
+  "token": "<owner-supplied-opaque-material>",
+  "expires_at": 2000000000,
+  "forge": {
+    "provider": "azure-devops",
+    "api_base": "https://dev.azure.com/example",
+    "repository": "project/repository",
+    "permission": "observe",
+    "authentication": "bearer"
+  }
+}
+```
+
+This is a synthetic shape, not working credential material. `expires_at` is the
+owner's actual future Unix-epoch expiry. `authentication` is the owner's existing
+`bearer` or `basic` mode; `basic` uses the ADO PAT form. Duplicate/extra fields,
+wrong scope, expired material and malformed output fail closed. Captured streams
+are bounded at 64 KiB stdout / 8 KiB stderr; credential data and raw helper errors
+are never echoed. Unconfirmed child cleanup preserves the existing owned-process
+custody error and must not be blindly retried.
+
+`--expected-principal` and output `scope.principal_id` are in the ADO identity
+namespace: the complete provider `connectionData.authorizedUser.id`, **not** an
+AAD object ID, account display name, email or truncated identifier. This ID is
+not another field to add to the credential DTO. The exporter observes it using
+the actual material and compares it exactly; it never converts an AAD identity
+into an ADO identity by assumption.
 
 ## Acquisition and account scope
 
@@ -82,6 +134,8 @@ syntax failure. Partial records and per-section errors survive. The output
 includes measured duration, observation intervals, identity-check count, omitted
 sections, `snapshot_atomic: false` and `effects: none`. The normalizer owns
 generation consistency and analysis invalidations, not this transport adapter.
+Sanitized ordinary failures also include measured duration and a bounded reason
+code; cleanup-custody failures retain their separate existing owner boundary.
 
 The existing byte/record/page limits and shared deadline remain enforced; total
 evidence must fit the version-1 8 MiB input budget. Exhaustion is not empty success.

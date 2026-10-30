@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -26,7 +27,10 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({
             "schema": "agent-worktrees.review-evidence-capabilities", "version": 1,
             "evidence_versions": [1], "providers": ["azure-devops"],
-            "capabilities": ["finite_acquisition", "renewable_observe_credentials", "principal_binding"],
+            "capabilities": [
+                "finite_acquisition", "renewable_observe_credentials",
+                "principal_binding", "credential_budget",
+            ],
             "effects": "none", "submission": False, "source_attachment": False,
         }))
         return 0
@@ -41,10 +45,13 @@ def main(argv: list[str] | None = None) -> int:
             "effects": "none",
         }))
         return 1
+    started = time.monotonic()
     try:
         result = acquire_evidence(
             args.repo, args.number, args.endpoint,
-            credential_source=command_source(args.credential_command),
+            credential_source_factory=lambda remaining: command_source(
+                args.credential_command, remaining=remaining,
+            ),
             budget=args.budget, expected_principal=args.expected_principal,
         )
         print(json.dumps(result, sort_keys=True, separators=(",", ":"), allow_nan=False))
@@ -60,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
             "category": "credential" if isinstance(exc, ObservationCredentialError) else "provider_or_input",
             "reason": known_reasons.get(str(exc), "credential_or_read_unavailable"),
             "transient": bool(getattr(exc, "transient", False)), "effects": "none",
+            "duration_ms": round((time.monotonic() - started) * 1000, 3),
         }))
         return 1
 
