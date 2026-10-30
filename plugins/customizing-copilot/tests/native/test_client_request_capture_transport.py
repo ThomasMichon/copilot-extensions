@@ -52,7 +52,7 @@ scheme = "Bear" + "er "
 key = os.environ["COPILOT_PROVIDER_API_KEY"]
 headers = {"Authorization": scheme + (key if mode != "auth" else "wrong-key")}
 connection = http.client.HTTPConnection(endpoint.hostname, endpoint.port, timeout=5)
-route = "/v1/chat/completions" if mode != "route" else "/shared"
+route = "/shared" if mode in {"route", "route-nonzero"} else "/v1/chat/completions"
 if mode in {"truncated", "oversize"}:
     connection.putrequest("POST", route)
     for name, value in headers.items():
@@ -78,6 +78,8 @@ if mode in {"valid", "stream", "unicode"}:
 else:
     assert response.status >= 400
 connection.close()
+if mode == "route-nonzero":
+    sys.exit(9)
 '''
 
 
@@ -120,6 +122,7 @@ def test_exact_request_and_terminal_completion(tmp_path, monkeypatch, capsys, mo
 @pytest.mark.parametrize("mode,error", [
     ("auth", "unexpected_client"),
     ("route", "unexpected_route"),
+    ("route-nonzero", "unexpected_route"),
     ("json", "invalid_json"),
     ("truncated", "incomplete_body"),
     ("oversize", "body_size_limit"),

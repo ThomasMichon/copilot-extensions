@@ -139,3 +139,9 @@ made by GitHub's hosted provider.
 - Independent implementation review reported no significant issues. Source
   skill, customization, headless-launch and touched-code lint checks passed.
   Implementation PR merge and final effort reconciliation remain.
+- Implementation review identified relative executable selection and rejection
+  diagnostics improvements; both received focused regressions. CI also found
+  the new bounded CLI launch missing from the lifecycle census; classified its
+  existing finite-worker behavior without weakening the guard.
+- All twenty controls, including actual native CLI qualification, passed after
+  those corrections; the lifecycle census and touched-code lint passed.

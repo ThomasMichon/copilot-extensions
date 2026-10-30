@@ -265,7 +265,7 @@ def capture(
             else:
                 result["client_exit_code"] = child.returncode
                 if child.returncode != 0:
-                    result["error"] = "client_exit_failed"
+                    result["error"] = server.failure or "client_exit_failed"
                 elif not server.finished.wait(timeout=max(0, deadline - time.monotonic())):
                     result["error"] = "no_request"
                 elif not server.captured_bytes:
@@ -304,6 +304,7 @@ def main(argv: list[str] | None = None) -> int:
     executable = shutil.which(args.copilot_command)
     if executable is None:
         parser.error("Copilot executable was not found; supply --copilot-command")
+    executable = str(Path(executable).resolve())
     if os.name == "nt" and Path(executable).suffix.lower() in {".cmd", ".bat", ".ps1"}:
         parser.error("select the native Copilot executable, not a shell shim")
     try:

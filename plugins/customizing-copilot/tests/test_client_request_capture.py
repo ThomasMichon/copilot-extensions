@@ -66,3 +66,21 @@ def test_missing_client_reports_failure_without_prompt(tmp_path, monkeypatch, ca
     assert "FileNotFoundError" in printed
     assert "SYNTHETIC_PRIVATE_SENTINEL" not in printed
     assert not (tmp_path / "request.json").exists()
+
+
+def test_relative_client_is_pinned_before_entering_harness(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(capture.shutil, "which", lambda _: "selected-client.exe")
+    harness = tmp_path / "different-harness"
+    seen = []
+
+    def selected_client(command, working_directory, *_args, **_kwargs):
+        seen.append((command, working_directory))
+        return {"status": "captured"}
+
+    monkeypatch.setattr(capture, "capture", selected_client)
+    assert capture.main([
+        "--working-directory", str(harness), "--output", str(tmp_path / "request.json"),
+    ]) == 0
+    assert seen == [([str(tmp_path / "selected-client.exe")], harness)]
+    capsys.readouterr()
