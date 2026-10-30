@@ -435,7 +435,7 @@ def test_actual_logger_cold_concurrent_install_keeps_selection_and_six_installed
         })
     source = inputs / "update-driver"
     root = area / "cold"
-    env = cold_environment(installation, project, area)
+    env = cold_environment(installation, project, area, python_prerequisite=True)
     env.pop("AGENT_VAULT_HOME")
     env["AGENT_LOGGER_HOME"] = str(installation)
     foreign = area / "foreign-project"
