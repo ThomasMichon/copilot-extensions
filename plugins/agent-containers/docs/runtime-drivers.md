@@ -143,16 +143,23 @@ response.
 | `capabilities` | -- | `capabilities` (object), optional `driver: {name, version}` |
 | `provision` | `member: {name, fleet, instance}`, `workspaceFolder`, `execUser`, `environment` | `member` (must match `member.name`) |
 | `list` | -- | `members`: every member of `fleet`, including stopped ones |
-| `inspect` | `name` | `member`, or error `not_found` |
+| `inspect` | `name`, optional `id` | `member`, or error `not_found` |
 | `start` | `name`, optional `id` | -- |
 | `stop` | `name`, optional `id` | -- |
 | `remove` | `name`, optional `id`, `force` | -- |
-| `exec` | `name`, `argv`, `user`, `env`, `workdir`, `stdin` (string or null), `timeoutSeconds` | `exitCode`, `stdout`, `stderr` |
-| `copy-in` | `name`, `source` (absolute host path, file or directory), `target` (member path) | -- |
+| `exec` | `name`, optional `id`, `argv`, `user`, `env`, `workdir`, `stdin` (string or null), `timeoutSeconds` | `exitCode`, `stdout`, `stderr` |
+| `copy-in` | `name`, optional `id`, `source` (absolute host path, file or directory), `target` (member path) | -- |
 
-When `id` is present the driver should refuse with `conflict` if the member's
-current incarnation differs (agent-containers pins lifecycle calls to the
-incarnation it observed). `provision` must leave the member running.
+**Incarnation pinning.** When a caller addresses a member by its instance id
+(for example a Session Host bound to the exact container it prepared), every
+request for that member -- including `exec-stream` -- carries that `id`. The
+driver must apply the operation to that incarnation only, atomically, and
+otherwise fail with `conflict` (`exec-stream`: a non-zero exit before running
+anything). A request with only `name` targets the current incarnation, like
+`docker exec <name>`. Member names and ids are routing handles; a handle that
+two drivers or two members report is treated as ambiguous and refused, so
+address members by their unique fleet name in that case. `provision` must
+leave the member running.
 `exec` runs `argv` directly (no shell) as `user` (null: the runtime default)
 with `env` added to the member environment and `workdir` as the working
 directory; a non-zero `exitCode` is a successful call.
@@ -166,8 +173,8 @@ Interactive streaming exec carries the ACP stdio channel and, for
 <command...> exec-stream --json --request '<request JSON>'
 ```
 
-The request (same common fields plus `name`, `argv`, `user`, `env`,
-`inheritEnv`, `workdir`) is an **argument** because stdin belongs to the
+The request (same common fields plus `name`, optional `id`, `argv`, `user`,
+`env`, `inheritEnv`, `workdir`) is an **argument** because stdin belongs to the
 stream. The driver connects its own stdin/stdout/stderr to the process in the
 member, without a TTY and without adding output of its own, and exits with
 that process's exit code. Because the request is visible in host argv, `env`

@@ -45,7 +45,6 @@ from .runtime_drivers import (
     ExecResult,
     RuntimeDriver,
     bind_member,
-    bound_id,
 )
 
 log = logging.getLogger("agent-containers")
@@ -302,22 +301,26 @@ class ExternalDriver(RuntimeDriver):
                               "members must be a list")
         return [self._member_or_error("list", member) for member in members]
 
-    def _inspect_member(self, name: str):
+    def _inspect_member(self, name: str, instance_id: str | None = None):
         try:
-            response = self.call("inspect", {"name": name})
+            response = self.call("inspect", self._identity(name, instance_id))
         except DriverError as exc:
-            if exc.code == "not_found":
+            if exc.code in ("not_found", "conflict"):
                 return None
             raise
-        return self._member_or_error("inspect", response.get("member"), name)
+        info = self._member_or_error("inspect", response.get("member"), name)
+        if instance_id and info.container_id != instance_id:
+            return None
+        return info
 
-    def inspect(self, name: str) -> dict:
-        info = self._inspect_member(name)
+    def inspect(self, name: str, *, instance_id: str | None = None) -> dict:
+        info = self._inspect_member(name, instance_id)
         if info is None:
             from .lifecycle import ContainerNotFoundError
 
             raise ContainerNotFoundError(
-                f"runtime driver '{self.name}' reports no member {name!r}"
+                f"No such container: {instance_id or name} "
+                f"(runtime driver '{self.name}')"
             )
         return {
             "Id": info.container_id,
@@ -327,30 +330,28 @@ class ExternalDriver(RuntimeDriver):
             "HostConfig": {},
         }
 
-    def state(self, name: str) -> str | None:
-        info = self._inspect_member(name)
+    def state(self, name: str, *, instance_id: str | None = None) -> str | None:
+        info = self._inspect_member(name, instance_id)
         return info.state if info else None
 
-    def _identity(self, name: str) -> dict[str, str]:
-        identity = {"name": name}
-        member_id = bound_id(name)
-        if member_id:
-            identity["id"] = member_id
-        return identity
+    @staticmethod
+    def _identity(name: str, instance_id: str | None) -> dict[str, str]:
+        return {"name": name, **({"id": instance_id} if instance_id else {})}
 
-    def start(self, name: str) -> None:
-        self.call("start", self._identity(name))
+    def start(self, name: str, *, instance_id: str | None = None) -> None:
+        self.call("start", self._identity(name, instance_id))
 
-    def stop(self, name: str) -> None:
-        self.call("stop", self._identity(name))
+    def stop(self, name: str, *, instance_id: str | None = None) -> None:
+        self.call("stop", self._identity(name, instance_id))
 
-    def remove(self, name: str, *, force: bool = False) -> None:
-        self.call("remove", {**self._identity(name), "force": bool(force)})
+    def remove(self, name: str, *, force: bool = False,
+               instance_id: str | None = None) -> None:
+        self.call("remove", {**self._identity(name, instance_id), "force": bool(force)})
 
     def exec(self, name, argv, *, user=None, env=None, workdir=None,
-             stdin=None, timeout=30.0) -> ExecResult:
+             stdin=None, timeout=30.0, instance_id=None) -> ExecResult:
         response = self.call("exec", {
-            "name": name, "argv": list(argv), "user": user,
+            **self._identity(name, instance_id), "argv": list(argv), "user": user,
             "env": dict(env or {}), "workdir": workdir, "stdin": stdin,
             "timeoutSeconds": timeout,
         }, timeout=timeout + 15.0)
@@ -363,16 +364,17 @@ class ExternalDriver(RuntimeDriver):
         )
 
     def stream_exec_argv(self, name, argv, *, user=None, env=None,
-                         inherit_env=None, workdir=None) -> list[str]:
+                         inherit_env=None, workdir=None, instance_id=None) -> list[str]:
         request = self._request({
-            "name": name, "argv": list(argv), "user": user,
+            **self._identity(name, instance_id), "argv": list(argv), "user": user,
             "env": dict(env or {}), "inheritEnv": list(inherit_env or []),
             "workdir": workdir,
         })
         return [*self.spec.command, "exec-stream", "--json", "--request",
                 json.dumps(request, separators=(",", ":"))]
 
-    def copy_in(self, name: str, source: Path, target: str) -> None:
-        self.call("copy-in", {"name": name, "source": str(Path(source).resolve()),
-                              "target": target})
+    def copy_in(self, name: str, source: Path, target: str, *,
+                instance_id: str | None = None) -> None:
+        self.call("copy-in", {**self._identity(name, instance_id),
+                              "source": str(Path(source).resolve()), "target": target})
 

@@ -8,15 +8,6 @@ import json
 from .external_driver import PATH_PREFIX, drivers_dir, scan_drivers
 
 
-def add_drivers_parser(sub) -> None:
-    parser = sub.add_parser(
-        "drivers",
-        help="List registered external runtime drivers and invalid entries",
-    )
-    parser.add_argument("--json", action="store_true", help="Emit JSON")
-    parser.set_defaults(func=cmd_drivers)
-
-
 def cmd_drivers(args: argparse.Namespace) -> int:
     specs, findings = scan_drivers()
     if args.json:

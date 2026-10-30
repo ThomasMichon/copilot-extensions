@@ -186,9 +186,9 @@ def _ensure_host_key() -> tuple[Path, str]:
 
 
 def _container_id(container: str) -> str:
-    owner = runtime_drivers.owner_of(container)
-    if owner is not None:
-        return owner[0].inspect(owner[1])["Id"]
+    route = runtime_drivers.owner_of(container)
+    if route is not None:
+        return route.driver.inspect(route.name, instance_id=route.instance_id)["Id"]
     inspected = _run(["docker", "inspect", "--format", "{{.Id}}", container])
     container_id = inspected.stdout.strip()
     if inspected.returncode != 0 or not re.fullmatch(

@@ -216,6 +216,11 @@ def cmd_copilot(
         relay_env: dict[str, str] = {}
         relay_port = None
         _forward, relay_enabled = config.credentials_for(target.fleet)
+        from .runtime_drivers import launch_plan
+
+        relay_enabled = launch_plan(
+            target.fleet, args.name, relay_enabled, require_ssh=True,
+        ).agent_relay
         if not args.no_relay and relay_enabled:
             host_relay_port = require_live_relay_port()
             if not relay_healthy(host_relay_port):

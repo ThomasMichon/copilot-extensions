@@ -219,8 +219,10 @@ def test_enumerate_inspect_start_stop_remove(fake, no_docker):
     document = lifecycle.inspect_container("example-1")
     assert document["Id"] == member.container_id
     assert document["State"]["Status"] == "running"
+    # Addressed by name: the current incarnation, like `docker stop <name>`.
     stop_call = [c for c in fake.state()["calls"] if c["verb"] == "stop"][0]
-    assert stop_call["request"]["id"] == member.container_id
+    assert stop_call["request"]["name"] == "example-1"
+    assert "id" not in stop_call["request"]
 
     assert fleet.remove_fleet(config, "example", force=True).removed == ["example-1"]
     assert lifecycle.list_containers(config) == []
@@ -442,3 +444,82 @@ def test_external_driver_rejects_foreign_member_reports(fake):
                                           "state": "running"})
     assert raised.value.code == "protocol_error"
     assert external_driver.PROTOCOL_VERSION == 1
+
+
+# -- incarnation pinning and routing handles ---------------------------------
+
+
+def test_stale_incarnation_is_refused_after_recreation(fake, no_docker):
+    config = driver_config(size=1)
+    old = _provisioned(config)
+    lifecycle.remove_container("example-1", force=True)
+    fleet.reconcile_up(config, "example")
+    new = {c.name: c for c in lifecycle.list_containers(config)}["example-1"]
+    assert new.container_id != old.container_id
+
+    with pytest.raises(DriverError) as raised:
+        lifecycle.remove_container(old.container_id, force=True)
+    assert raised.value.code == "conflict"
+    with pytest.raises(DriverError):
+        runtime_drivers.run_routed(["docker", "exec", old.container_id, "true"])
+    with pytest.raises(lifecycle.ContainerNotFoundError):
+        lifecycle.inspect_container(old.container_id)
+    stale_stream = runtime_drivers.stream_routed(
+        ["docker", "exec", "-i", old.container_id, "true"],
+    )
+    assert json.loads(stale_stream[stale_stream.index("--request") + 1])["id"] == old.container_id
+    assert subprocess.run(stale_stream, capture_output=True, timeout=60).returncode == 125
+    # The replacement is untouched and still addressable by name and new id.
+    assert lifecycle.inspect_state("example-1") == "running"
+    assert lifecycle.inspect_container(new.container_id)["Id"] == new.container_id
+
+
+def test_handles_reported_by_two_runtimes_are_refused(fake, no_docker):
+    config = ContainersConfig(fleets={
+        "example": driver_fleet(size=1),
+        "other": driver_fleet(size=1, name_prefix="other"),
+    })
+    fleet.reconcile_up(config, "example")
+    fleet.reconcile_up(config, "other")
+    members = {c.name: c for c in lifecycle.list_containers(config)}
+    assert set(members) == {"example-1", "other-1"}
+    clash = lifecycle.DockerContainerInfo(
+        name="other-1", container_id=members["example-1"].container_id,
+        image="", state="running", status="", fleet="other",
+    )
+    other_driver = runtime_drivers.owner_of("other-1").driver
+    runtime_drivers.bind_member(other_driver, clash)
+    with pytest.raises(RuntimeError, match="more than one runtime driver"):
+        lifecycle.remove_container(members["example-1"].container_id, force=True)
+    assert lifecycle.inspect_state("example-1") == "running"
+
+
+def test_shared_docker_executor_routes_driver_members(fake, tmp_path, monkeypatch):
+    empty = tmp_path / "no-docker-bin"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))  # no Docker CLI on this host
+    member = _provisioned(driver_config(size=1))
+    done = lifecycle._docker(
+        ["exec", "-u", "vscode", member.container_id, "/bin/sh", "-c", "echo routed"],
+    )
+    assert (done.returncode, done.stdout) == (0, "routed\n")
+
+
+def test_standalone_session_host_state_discovers_driver_members(
+    fake, no_docker, tmp_path, monkeypatch, capsys,
+):
+    config = _write_config(tmp_path, monkeypatch)
+    fleet.reconcile_up(config, "example")
+    member_id = {c.name: c for c in lifecycle.list_containers(config)}["example-1"].container_id
+    runtime_drivers.clear_bindings()  # a fresh CLI process
+    assert cli.main(["session-host-state", "example-1", "--expected-instance", member_id]) == 0
+    state = json.loads(capsys.readouterr().out)
+    assert (state["state"], state["container_id"]) == ("running", member_id)
+
+
+def test_ssh_only_launches_require_ssh_capability(fake, no_docker, monkeypatch):
+    config = driver_config(size=1, relay_enabled=True)
+    monkeypatch.setenv("FAKE_DRIVER_CAPS", json.dumps({"owns_relay": True}))
+    _provisioned(config)
+    with pytest.raises(RuntimeError, match="needs the trusted SSH transport"):
+        runtime_drivers.launch_plan(config.fleets["example"], "example-1", True, require_ssh=True)

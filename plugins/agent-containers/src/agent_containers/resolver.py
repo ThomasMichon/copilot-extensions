@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING
 from agent_procutil import no_window_flags
 from plugin_resolve.reflection import selection_spec
 
-from . import lifecycle, runtime_drivers
+from . import lifecycle
 from ._invoke import payload_command_argv
 from .config import (
     DISPATCH_ONLY_LABEL,
@@ -750,7 +750,9 @@ class ContainerResolver:
             spec["venue"]["ready"] = False
             spec["venue"]["capabilities"]["task_projection"] = True
         plan = None
-        if fleet.driver and not restricted:
+        if getattr(fleet, "driver", None) and not restricted:
+            from . import runtime_drivers
+
             # Fails closed when the driver lacks a capability the fleet needs.
             plan = await asyncio.to_thread(
                 runtime_drivers.launch_plan, fleet, name, relay_enabled,

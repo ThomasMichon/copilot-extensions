@@ -119,8 +119,8 @@ def main(argv: list[str]) -> int:
 
     if verb == "exec-stream":
         name = request["name"]
-        if name not in members:
-            print(f"no member {name}", file=sys.stderr)
+        if name not in members or request.get("id") not in (None, members[name]["id"]):
+            print(f"no member {name} at the requested incarnation", file=sys.stderr)
             return 125
         env = os.environ.copy()
         env.update(request.get("env") or {})
