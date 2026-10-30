@@ -10,7 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Local Request Capture](active/local-request-capture/README.md) | Draft; portable operator-owned raw-request capture proposal | #9581; one-shot local debugging only, no shared inference logging or rollout |
+| [Local Request Capture](active/local-request-capture/README.md) | Active; proposal reviewed, standalone capture and synthetic Windows/CLI evidence ready | #9581; implementation review/merge remains; no shared inference logging or rollout |
 | [PR Review Workspaces](active/pr-review-workspaces/README.md) | Draft; ADO-first vision and architecture proposal only | #9535; successor PR plugin/service cache, existing #6007/#7188 and #7051 owners retained; no implementation or rollout |
 | [Launch Boundary Repairs](active/launch-boundary-repairs/README.md) | Draft; reviewed source-repair intake before implementation | #9520; preserves #5512/#5761 and open #9322; no rollout or live venue retry |
 | [Native Startup Prompts](active/native-startup-prompts/README.md) | Active; ordinary cold-launch consumer #9374 merged, native POSIX/full-mux and installed qualification remain | #9364; preserves #7116/#8375/#7942/#8669/#5579 owners; no rollout or retained-session restart |

@@ -1,6 +1,6 @@
 {
   "name": "customizing-copilot",
-  "description": "Customize, diagnose, and extend the GitHub Copilot CLI -- authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, diagnosing startup hangs, hoisting plugin agents around a delegation limitation, componentizing oversized modules, authoring <repo>-harness plugins, and setting up an instruction-projection sync worker -- with the per-skill folder conventions and Agent Skills best practices baked in. Ships eleven focused skills.",
+  "description": "Customize, diagnose, and extend the GitHub Copilot CLI -- authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, capturing an operator's own raw client request locally, diagnosing startup hangs, hoisting plugin agents around a delegation limitation, componentizing oversized modules, authoring <repo>-harness plugins, and setting up an instruction-projection sync worker -- with the per-skill folder conventions and Agent Skills best practices baked in.",
   "version": "0.1.0-dev97",
   "author": {
     "name": "Thomas Michon"
