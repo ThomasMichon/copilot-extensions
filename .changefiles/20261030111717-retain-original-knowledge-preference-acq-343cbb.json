@@ -1,0 +1,9 @@
+{
+  "comment": "Retain original knowledge-preference acquisition outcomes without replay, and keep Windows test-root overrides unambiguous.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

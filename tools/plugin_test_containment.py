@@ -300,6 +300,10 @@ def isolated_environment(
         for name in _CREDENTIAL_NAMES:
             env.pop(name, None)
         for name, relative in _ROOT_ENV.items():
+            if os.name == "nt":
+                for inherited_name in tuple(env):
+                    if inherited_name.casefold() == name.casefold():
+                        env.pop(inherited_name)
             value = root.joinpath(*relative.split("/"))
             value.mkdir(parents=True, exist_ok=True)
             env[name] = str(value)
