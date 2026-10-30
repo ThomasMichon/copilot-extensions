@@ -33,9 +33,11 @@ _HARNESS_TIMEOUT_SECONDS = 20
 
 def _offline_uv(tmp_path: Path, env: dict[str, str]) -> Path:
     """Emulate UV's package effects offline, not runtime construction or health."""
+    native_uv = shutil.which("uv", path=env["PATH"])
+    assert native_uv is not None
     fixture = tmp_path / "offline-uv"
     fixture.mkdir()
-    for name in ("PyYAML",):
+    for name in ("PyYAML", "setuptools", "wheel"):
         distribution = metadata.distribution(name)
         target = fixture / name
         for file in distribution.files or ():
@@ -47,18 +49,11 @@ def _offline_uv(tmp_path: Path, env: dict[str, str]) -> Path:
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(source, destination)
         assert any(target.rglob("METADATA")), name
-    # The double copies local source instead of building wheels; setuptools is
-    # build-only here, while every runtime import still uses real package code.
-    build_info = fixture / "setuptools" / "setuptools-83.0.0.dist-info"
-    build_info.mkdir(parents=True)
-    (build_info / "METADATA").write_text(
-        "Metadata-Version: 2.1\nName: setuptools\nVersion: 83.0.0\n",
-        encoding="utf-8",
-    )
     calls = fixture / "installs.jsonl"
     driver = fixture / "driver.py"
     driver.write_text(
         f"""#!{sys._base_executable}
+import hashlib
 import json
 import os
 import re
@@ -67,7 +62,10 @@ import subprocess
 import sys
 import sysconfig
 import tomllib
+import urllib.parse
+import urllib.request
 import venv
+import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -77,6 +75,18 @@ args = sys.argv[1:]
 if args == ['--version']:
     print('uv 0.12.5 (offline test fixture)')
     raise SystemExit(0)
+if args[:2] == ['cache', 'dir']:
+    cache = fixture / 'cache'
+    cache.mkdir(exist_ok=True)
+    print(cache)
+    raise SystemExit(0)
+if args[:1] == ['build']:
+    assert '--offline' in args and '--no-build-isolation' in args
+    result = subprocess.run(
+        [{native_uv!r}, *args], check=False,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+    )
+    raise SystemExit(result.returncode)
 if args[:1] == ['venv']:
     target = Path(args[1])
     assert target.resolve().is_relative_to(root.resolve())
@@ -114,7 +124,7 @@ if '--show-settings' in args:
     exclude_newer: ExcludeNewer {{ global: None, package: ExcludeNewerPackage({{}}), }},
 }}, }}''')
     raise SystemExit(0)
-assert '--reinstall' in args
+assert '--reinstall' in args or '--only-binary' in args
 assert '--no-deps' not in args and '--no-build-isolation' not in args
 cutoff = datetime.fromisoformat(args[args.index('--exclude-newer') + 1].replace('Z', '+00:00'))
 assert cutoff <= datetime.now(timezone.utc) - timedelta(days=7)
@@ -158,25 +168,45 @@ def install_local(project, installed):
         launcher.write_text('#!' + str(python) + '\\nfrom agent_logger.__main__ import main\\nraise SystemExit(main())\\n')
         launcher.chmod(0o755)
 
-if 'setuptools>=83.0.0' in args:
-    assert '--quiet' in args
-    shutil.copytree(fixture / 'setuptools', site, dirs_exist_ok=True)
-if 'pyyaml>=6.0' in args:
-    assert '--quiet' in args
-    shutil.copytree(fixture / 'PyYAML', site, dirs_exist_ok=True)
+prerequisites = [
+    name for name in ('setuptools', 'wheel', 'PyYAML')
+    if any(re.match(re.escape(name) + r'(?:[<>=!~].*)?$', arg, re.I) for arg in args)
+]
+if prerequisites:
+    assert '--quiet' in args or '--only-binary' in args
+    for name in prerequisites:
+        shutil.copytree(fixture / name, site, dirs_exist_ok=True)
 else:
     sources = [Path(a) for a in args if (Path(a) / 'pyproject.toml').is_file()]
+    wheels = []
+    for argument in args:
+        url = urllib.parse.urlsplit(argument.split(' @ ', 1)[-1])
+        if url.scheme == 'file' and url.path.endswith('.whl'):
+            wheel = Path(urllib.request.url2pathname(url.path))
+            assert wheel.resolve().is_relative_to(root.resolve())
+            assert url.fragment == 'sha256=' + hashlib.sha256(wheel.read_bytes()).hexdigest()
+            wheels.append(wheel)
+    for wheel in wheels:
+        with zipfile.ZipFile(wheel) as archive:
+            assert all(not Path(name).is_absolute() and '..' not in Path(name).parts
+                       for name in archive.namelist())
+            archive.extractall(site)
     names = {{tomllib.loads((p / 'pyproject.toml').read_text())['project']['name'] for p in sources}}
-    if names == {{'agent-procutil', 'agent-single-instance-lease', 'agent-update-driver'}}:
-        assert len(sources) == 3 and '--no-editable' in args and '--link-mode' in args
+    if wheels:
+        assert not sources
+    elif names in (
+        {{'agent-procutil', 'agent-single-instance-lease', 'agent-update-driver'}},
+        {{'agent-procutil', 'agent-single-instance-lease', 'agent-zdd', 'agent-update-driver'}},
+    ):
+        assert len(sources) == len(names) and '--no-editable' not in args and '--link-mode' in args
         assert args[args.index('--link-mode') + 1] == 'copy'
     elif 'agent-logger' in names:
         expected = {{'agent-config-migrate', 'agent-procutil', 'agent-single-instance-lease',
                     'agent-update-driver', 'agent-dropin-registry', 'agent-plugin-resolve',
                     'agent-plugin-activation', 'agent-logger'}}
-        assert names == expected and len(sources) == 8 and '--no-editable' in args, args
+        assert names == expected and len(sources) == 8 and '--no-editable' not in args, args
         assert {{args[i + 1] for i, arg in enumerate(args) if arg == '--reinstall-package'}} == expected
-        assert (site / 'setuptools-83.0.0.dist-info').is_dir()
+        assert any(site.glob('setuptools-*.dist-info'))
         assert (site / 'yaml').is_dir()
     else:
         assert len(sources) == 1 and '--quiet' in args, args
@@ -345,6 +375,7 @@ def _stage_payload(tmp_path: Path) -> Path:
         "versioned-runtime",
         "config-migrate",
         "agent-procutil",
+        "zdd",
         "dropin-registry",
         "plugin-resolve",
         "single-instance-lease",
@@ -389,7 +420,8 @@ def _stage_release_payload(tmp_path: Path) -> Path:
         )
     finally:
         sys.path[:] = previous_path
-    assert not any(line.startswith("SKIP ") for line in log), log
+    skipped = [line for line in log if line.startswith("SKIP ")]
+    assert not skipped, "\n".join(skipped)
     source_paths = re.findall(
         r'path\s*=\s*"([^"]+)"',
         (payload / "pyproject.toml").read_text(encoding="utf-8"),
@@ -555,6 +587,8 @@ def test_windows_stamp_publishes_complete_command_family(tmp_path: Path) -> None
     )
 
     assert result.returncode == 0, result.stderr
+    snapshot = Path((home / ".agent-logger/payload-dir").read_text().strip())
+    assert (snapshot / "libs/zdd/pyproject.toml").is_file()
     local_bin = home / ".local" / "bin"
     for command in _COMMANDS:
         assert (local_bin / f"{command}.ps1").is_file(), command

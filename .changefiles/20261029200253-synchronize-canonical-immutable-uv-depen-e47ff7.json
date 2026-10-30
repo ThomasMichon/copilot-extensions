@@ -1,0 +1,9 @@
+{
+  "comment": "Synchronize canonical immutable UV dependency policy and native lifecycle assets",
+  "changes": [
+    {
+      "plugin": "agent-procutil",
+      "type": "patch"
+    }
+  ]
+}

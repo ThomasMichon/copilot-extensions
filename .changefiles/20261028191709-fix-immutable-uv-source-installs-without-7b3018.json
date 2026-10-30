@@ -1,5 +1,5 @@
 {
-  "comment": "Fix immutable UV source installs without unsupported pip options; reuse native copying for Codespaces stamped source snapshots",
+  "comment": "Fix immutable UV source installs without unsupported pip options; reuse native copying for Codespaces and Logger snapshots and retain Logger's transitive ZDD input",
   "changes": [
     {
       "plugin": "agent-bridge",

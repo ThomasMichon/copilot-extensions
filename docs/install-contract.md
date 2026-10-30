@@ -2166,7 +2166,7 @@ The byte-identical `payload-copy` block follows required output initialization
 and precedes contextual staging. Worktrees also uses it for its structured
 payload copy, without changing context selection, canonical-library handling,
 staging paths or watchdog ownership.
-Codespaces stamps reuse it for snapshot directories and dependency trees.
+Codespaces and Logger stamps reuse it for snapshot directories and dependency trees.
 Freshly copied materialized libraries retain that first copy; metadata rewriting
 still runs, while independent materialization still replaces its destination.
 Guards:
