@@ -42,6 +42,110 @@
         "turn_index": 0,
         "version": 1
       },
+      "receipt_only": {
+        "busy": {
+          "preserved": true,
+          "same_receipt": true,
+          "status": 200
+        },
+        "capability": 1,
+        "cli_found": {
+          "body": {
+            "admission": "accepted",
+            "invocation_key": "same-operation",
+            "native_session_id": "native-a",
+            "outcome": "accepted",
+            "queued": false,
+            "session_id": "bridge-a",
+            "turn_index": 0,
+            "version": 1
+          },
+          "daemon_start_calls": 0,
+          "ensure": false,
+          "ensure_calls": 0,
+          "exit": 0,
+          "posts": [
+            "/api/v1/sessions/bridge-a/turns/native-bound/send/receipt"
+          ]
+        },
+        "cli_missing": {
+          "daemon_start_calls": 0,
+          "ensure": false,
+          "ensure_calls": 0,
+          "exit": 69,
+          "outcome": "refused_unavailable",
+          "posts": [
+            "/api/v1/sessions/bridge-a/turns/native-bound/send/receipt"
+          ],
+          "reason": "native_receipt_missing",
+          "retryable": false
+        },
+        "corrupt": {
+          "body": {
+            "detail": {
+              "code": "native_admission_history_unproven"
+            }
+          },
+          "status": 409
+        },
+        "found": {
+          "body": {
+            "admission": "accepted",
+            "invocation_key": "same-operation",
+            "native_session_id": "native-a",
+            "queued": false,
+            "session_id": "bridge-a",
+            "turn_index": 0,
+            "version": 1
+          },
+          "status": 200
+        },
+        "keyed_missing_provider": {
+          "daemon_start_calls": 0,
+          "ensure": false,
+          "ensure_calls": 0,
+          "exit": 1,
+          "json_output": false,
+          "posts": [],
+          "unavailable_error": true
+        },
+        "missing": {
+          "body": {
+            "detail": {
+              "code": "native_receipt_missing"
+            }
+          },
+          "status": 404
+        },
+        "missing_provider": {
+          "daemon_start_calls": 0,
+          "ensure": false,
+          "ensure_calls": 0,
+          "exit": 70,
+          "outcome": "unknown",
+          "posts": [],
+          "reason": "native_receipt_unproven",
+          "retryable": false
+        },
+        "no_effects": true,
+        "old_capability": {
+          "daemon_start_calls": 0,
+          "ensure": false,
+          "ensure_calls": 0,
+          "exit": 69,
+          "outcome": "refused_unavailable",
+          "posts": [],
+          "reason": "unsupported_protocol",
+          "retryable": false
+        },
+        "stopped_preserved": true,
+        "unauthenticated": 401,
+        "wrong_identity": {
+          "caller_id": 409,
+          "expected_native_session_id": 409,
+          "prompt": 409
+        }
+      },
       "same_retry": true,
       "unauthenticated": 401,
       "wrong_native": 409
@@ -86,6 +190,110 @@
         "session_id": "bridge-a",
         "turn_index": 0,
         "version": 1
+      },
+      "receipt_only": {
+        "busy": {
+          "preserved": true,
+          "same_receipt": true,
+          "status": 200
+        },
+        "capability": 1,
+        "cli_found": {
+          "body": {
+            "admission": "accepted",
+            "invocation_key": "same-operation",
+            "native_session_id": "native-a",
+            "outcome": "accepted",
+            "queued": false,
+            "session_id": "bridge-a",
+            "turn_index": 0,
+            "version": 1
+          },
+          "daemon_start_calls": 0,
+          "ensure": false,
+          "ensure_calls": 0,
+          "exit": 0,
+          "posts": [
+            "/api/v1/sessions/bridge-a/turns/native-bound/send/receipt"
+          ]
+        },
+        "cli_missing": {
+          "daemon_start_calls": 0,
+          "ensure": false,
+          "ensure_calls": 0,
+          "exit": 69,
+          "outcome": "refused_unavailable",
+          "posts": [
+            "/api/v1/sessions/bridge-a/turns/native-bound/send/receipt"
+          ],
+          "reason": "native_receipt_missing",
+          "retryable": false
+        },
+        "corrupt": {
+          "body": {
+            "detail": {
+              "code": "native_admission_history_unproven"
+            }
+          },
+          "status": 409
+        },
+        "found": {
+          "body": {
+            "admission": "accepted",
+            "invocation_key": "same-operation",
+            "native_session_id": "native-a",
+            "queued": false,
+            "session_id": "bridge-a",
+            "turn_index": 0,
+            "version": 1
+          },
+          "status": 200
+        },
+        "keyed_missing_provider": {
+          "daemon_start_calls": 0,
+          "ensure": false,
+          "ensure_calls": 0,
+          "exit": 1,
+          "json_output": false,
+          "posts": [],
+          "unavailable_error": true
+        },
+        "missing": {
+          "body": {
+            "detail": {
+              "code": "native_receipt_missing"
+            }
+          },
+          "status": 404
+        },
+        "missing_provider": {
+          "daemon_start_calls": 0,
+          "ensure": false,
+          "ensure_calls": 0,
+          "exit": 70,
+          "outcome": "unknown",
+          "posts": [],
+          "reason": "native_receipt_unproven",
+          "retryable": false
+        },
+        "no_effects": true,
+        "old_capability": {
+          "daemon_start_calls": 0,
+          "ensure": false,
+          "ensure_calls": 0,
+          "exit": 69,
+          "outcome": "refused_unavailable",
+          "posts": [],
+          "reason": "unsupported_protocol",
+          "retryable": false
+        },
+        "stopped_preserved": true,
+        "unauthenticated": 401,
+        "wrong_identity": {
+          "caller_id": 409,
+          "expected_native_session_id": 409,
+          "prompt": 409
+        }
       },
       "same_retry": true,
       "unauthenticated": 401,
@@ -662,12 +870,12 @@
       "sha256": "f7046b822a93802d04f747497a83ec5e35f557b55a2097338c247c052bf7845e"
     },
     "libs/plugin-resolve/src/plugin_resolve/reflection.py": {
-      "blob": "e840cd9b65903ed6e199fd4d7f22680fe5221cff",
-      "sha256": "bfa516c57573eecc8943ad5d72c8b51903c6e2fcee6d54bca6ebdba4aeba72f0"
+      "blob": "92cbb1e4a6d6d67d0738d496b57c3ddce622eed3",
+      "sha256": "2da0dbcf5e09d3d99f39020e6197fcb1ec1bacd675aa1ff9864783180558e027"
     },
     "libs/plugin-resolve/src/plugin_resolve/registration.py": {
-      "blob": "955299faf24e441e4ad4fbad68b9acbf7c30b210",
-      "sha256": "7c3aec8ed9db8b8660a786a2b8b4903ec90a234a21062b2dfb3e029acb8cbe1b"
+      "blob": "d6f7bb3632cde008a1885f877a2abf3c58936c25",
+      "sha256": "3c7b572d2652291511c69a07a988970654f52bf6d64dbc3379dcf6be8a88f2cd"
     },
     "libs/plugin-resolve/src/plugin_resolve/remote_identity.py": {
       "blob": "89b9bc063c3b9b5ddde133bc2f1007ece4c15d54",
@@ -752,6 +960,10 @@
     "libs/repository-policy/src/repository_policy/__init__.py": {
       "blob": "273edd5ffe8a4a11082fa588b60df4caecb58929",
       "sha256": "c5afd82f3c064bd03e6e962919237200b3c7c43305ad5960e54251d050552c68"
+    },
+    "libs/repository-policy/src/repository_policy/guest_probe.py": {
+      "blob": "1d51b092d48e85ddb3963765973c3f911b13deb8",
+      "sha256": "d322482c823209d771c05774bfb5c9eb4039f18bacae4ba445d4f0f99ca29a74"
     },
     "libs/session-liveness-probe/src/session_liveness_probe/__init__.py": {
       "blob": "faed9a146ceec292b6ac12a37a99e21bcfe10490",
@@ -1122,8 +1334,8 @@
       "sha256": "e900f12a8fa567d75e872ee4cd818865ee83c4cab5448d68be61725847bf87c4"
     },
     "plugins/agent-bridge/contract/inputs/http51/standard-native-send.json": {
-      "blob": "548986ed9845c8907d6b5603ac5f1c319f3c2b3c",
-      "sha256": "793657e7a7883a5749ab4c7ba559543971cf830cba710fd7bfa4d85effe29109"
+      "blob": "daea275cce7800d77500bec3b0eb0b66f322841a",
+      "sha256": "09ba56e727a2918682c7ffbd40014579a59c4b2c312cdd9768162e0ddd39732b"
     },
     "plugins/agent-bridge/contract/provenance.schema.json": {
       "blob": "a109ef5c7dfe3b9cbb80456101731365dff094dd",
@@ -1942,16 +2154,20 @@
       "sha256": "563f1434eec03007285af53775bb38a8d5ca9dffc0bd419c7cb0ec77da8e01c3"
     },
     "plugins/agent-bridge/src/agent_bridge/native_keyed_admission.py": {
-      "blob": "4315ecac711b571204714e55eef33d54d6dfc033",
-      "sha256": "1e508a16a85b3ebf5fd070d51a3492991f266e3a0f1928737ba7d55214ae8768"
+      "blob": "43f0b9bb8cefbc3a2821f71896b0ea801667fff8",
+      "sha256": "e6825e2382b1da3616b664aead754ce20bae75ff9fb2787a24f50d4a07cee02d"
     },
     "plugins/agent-bridge/src/agent_bridge/native_keyed_client.py": {
-      "blob": "142ca2e35db995444ef7775bff391af341dd1bd0",
-      "sha256": "98a839dcf60825c58f00ad771b58e174de789f7ea2c4fec46bc37fe8234564ce"
+      "blob": "5a017378d3a02c1f5e7fcc2da64e59e2f48635b0",
+      "sha256": "50ddc0b503361e86dec517dc3fed3a6e9c40fb99ec20b575b6561bd9abd50057"
     },
     "plugins/agent-bridge/src/agent_bridge/native_send_admission.py": {
-      "blob": "290f09e0bf7eed1e6f18a9307d240f7c672d86a5",
-      "sha256": "8afb6d2907c781365693fee95f4cc99fc5d624e507b5d449836a241ac2e736f3"
+      "blob": "9be20fa7e8f57b473392e75920061d4b46762bb1",
+      "sha256": "d464d9356ac41592ec6145b01ace168f5b7bb931a9a8cd491b346aadd84d40a8"
+    },
+    "plugins/agent-bridge/src/agent_bridge/native_send_receipt.py": {
+      "blob": "72fe49330249219f1f6122935abc2667b9507bde",
+      "sha256": "ab03a12e579c8a2ded40e0d355f0dae27198e50a91ea16765373871d30f75357"
     },
     "plugins/agent-bridge/src/agent_bridge/native_turn_transport.py": {
       "blob": "0e2729de7cec66b882626d8379103a827b2d4a0f",
@@ -2006,8 +2222,8 @@
       "sha256": "c8fc03580dd580f50bac1307cc3882fcd3a2e29766ddc006aa3f815203ebcdfb"
     },
     "plugins/agent-bridge/src/agent_bridge/protocol.py": {
-      "blob": "267f1b6d242faf8e1000605016086e479aa5461d",
-      "sha256": "d55054a3b6d82093e25f0b56a44870b25a2ff72a3d1a78a1c9c11d7c6c97b09d"
+      "blob": "ca386a7ce17b875311df39e3b7c0ca76b419d49f",
+      "sha256": "eafd9847bf1572c00a03dc891c830f66818416b66d458ac7397e7502be1f09bd"
     },
     "plugins/agent-bridge/src/agent_bridge/provider_creation.py": {
       "blob": "8552dcbf41bd484cb2fa58f56bb3b89cdf7dfe6a",
@@ -2214,8 +2430,8 @@
       "sha256": "07794ef92a888079afbeb4c4c428ec73b2e1e856d1c586048f383272049ac255"
     },
     "plugins/agent-bridge/src/agent_bridge/routes/health.py": {
-      "blob": "f58c73520d31488587e80b3ebd2c8b8148d13f06",
-      "sha256": "0767b1371b9738c3c4b524e3e06d4610f8ceefb7c7dea80392506b72a30f474b"
+      "blob": "ead5cd314ca146aee6d7c374804dcb61394044a1",
+      "sha256": "e19e8ca5d092c8eac30fc7cf7fe25a9b3cee2c6e2d42a2dc6bf2e0d9aae3ebcf"
     },
     "plugins/agent-bridge/src/agent_bridge/routes/live_inbox.py": {
       "blob": "20b5c129d6556fa1c2fd44a3a60f15c7206d6931",
@@ -2234,8 +2450,8 @@
       "sha256": "f33d32da7b32dafb9e1338995daa4d6b3154e495dd093e516d936cb77aeaf7fd"
     },
     "plugins/agent-bridge/src/agent_bridge/routes/prompts.py": {
-      "blob": "7d4a84252dcf0b2bf644337f7d1d0fe9d458d70b",
-      "sha256": "4367054015068112102fdfc0b6e6f0f1a5d659341c547d254c023a5ea2b054ef"
+      "blob": "a91c6758127d184a6bb93d10deb528282d4e1651",
+      "sha256": "c9a3c025b345af02a91fd9a17d9c62d8f86799a2f2fcd105e40697c1cc13c192"
     },
     "plugins/agent-bridge/src/agent_bridge/routes/relationships.py": {
       "blob": "e81850ca0e0cb8091fe60fe93e771c1ac9ce0baf",
@@ -2322,8 +2538,8 @@
       "sha256": "2b2de2dc9b2291a29def2b745095af9685f891e6f7032f7a63047d35d1a4b53e"
     },
     "plugins/agent-bridge/src/agent_bridge/send_outcome.py": {
-      "blob": "f17be4b31ba9f7fbc289f8ed707ab30ddca847a6",
-      "sha256": "304bd3abcd3f61db4193902de057b344196dd48794c964779fdcc348b408af37"
+      "blob": "434063fce73e41922b84d33d684118c1b8dd89e0",
+      "sha256": "7b132be6acd5324b67c8ea3a950cd43b18740f10942be6e60cc1cc64231bc3da"
     },
     "plugins/agent-bridge/src/agent_bridge/service_process_cli.py": {
       "blob": "4efe076cab411afaa3052b36de9896d848c3e536",
@@ -2554,8 +2770,8 @@
       "sha256": "401c179286a95746281d86441428c38a9fd98935bde5d01273b13c7ca7e2e588"
     },
     "plugins/agent-bridge/src/agent_bridge/session_targeting_cli.py": {
-      "blob": "d2d8c878caba12d6a3861f9bc455ee50a3664c62",
-      "sha256": "b2cdc7b01fc394665ab65b682c2089550f738b683b122f6016e5c18904f87730"
+      "blob": "f74b22523f221aa98ae1203e1301497de888cb19",
+      "sha256": "054ab7ac458bd2a518b59e649dcd08a20caaec03e2eeaba7d00dac5f8e265e11"
     },
     "plugins/agent-bridge/src/agent_bridge/singleton.py": {
       "blob": "e6edc2996aef1391d35b78d734008cf574829bb2",
@@ -2701,6 +2917,10 @@
       "blob": "5b5c00f693391128a740db10a5e6588c576b359e",
       "sha256": "26e074557053fbd691b1975ae585f7b276f0d2a5c2760706d13e4a73ca3f41da"
     },
+    "plugins/agent-bridge/tests/http51_receipt_probes.py": {
+      "blob": "5c5807408df25c0420b8d3cb6f46ca0e148ddc84",
+      "sha256": "7e3a3749b695858b7ceee2e8b9c980a8c5b266ef12222b8e95767ab088e65539"
+    },
     "plugins/agent-bridge/tests/test_cold_drain.py": {
       "blob": "eb3ee6e8fe4f7467e9edc4470d7e8dcc7d44028b",
       "sha256": "940b07866791dc8e0f88d4cc698e758afc04eca285fa8f83436327f82dde8849"
@@ -2742,8 +2962,8 @@
       "sha256": "c04f8bd5df6d6e69eb35413bc4e99db347ef571030f91e09b188bdd4d1f3c51e"
     },
     "plugins/agent-bridge/tests/test_http51_capture_probes.py": {
-      "blob": "319ac79bd8323c8b2d47f4ef7d7e6181fd66b221",
-      "sha256": "44f958f8f147e16ae9ba00dbf68f440def43be30fd78a5f0da00eee03612510d"
+      "blob": "6dad8aafd8f73725b96df54c2a6aa16c7aa90e27",
+      "sha256": "2d05f8c3aef3c6089e43709fc83fa9e0b8f6ddb8d41d5988fc2e430787321f2c"
     },
     "plugins/agent-bridge/tests/test_live_inbox_runtime.py": {
       "blob": "942cf585e13d20435822296e0681c9b76b77f8c4",
@@ -2758,8 +2978,8 @@
       "sha256": "2602317a92559363de5fa5d80b5ac0436161383c79d251d153d8b713413bda96"
     },
     "plugins/agent-bridge/tests/test_native_send_admission.py": {
-      "blob": "7b90318d91d55959b094e713aa8db3d5cc253390",
-      "sha256": "a57374ecaa3ef65e43690c95d208ea302e4a3bd371d04f3dc6ec17e24e4d3d06"
+      "blob": "1389ff0bd030b4b147d1bd2f90cfdc827904871b",
+      "sha256": "d2f4766d3486cdb141ebd7679604f3c81ad989145e894f1a48c6bec78d8745f9"
     },
     "plugins/agent-bridge/tests/test_session_host.py": {
       "blob": "57281ef210afb57f2444ca3fbb4d98a93a46738f",
@@ -2853,9 +3073,13 @@
       "blob": "83a663b092a5a597fd19f34fc3442eb5291714ec",
       "sha256": "3e70c4bfd512395d7387a368e5612c65cdd1cdbd617c4e8476c976705bffbe0e"
     },
+    "tools/bridge_http51_declarations.py": {
+      "blob": "276ef041d3b79b0ebd73eb16cdf88b4d1d011f2b",
+      "sha256": "9b3ab3191b37516d3c9284e9771a373790083c4760c7797b9fd499d431d83c11"
+    },
     "tools/bridge_http51_evidence.py": {
-      "blob": "c94cf6de10b16c9ac14754c6ae1891dffbd67927",
-      "sha256": "b0df391b7f1f8db988c0d5a38945dafebe34fefe41851d0053480fb424216919"
+      "blob": "297a024e06b18612caa2ca32a43f714175737858",
+      "sha256": "4baae7b90cae9e2d4efdaba547c88efb37be571f6ea6b70d2a1a09951a686795"
     },
     "tools/bridge_http_retained_evidence.py": {
       "blob": "3c3f2949b5cbd95dfc8c0af23ce995522721c9a9",
@@ -2906,8 +3130,8 @@
       "sha256": "41bd046ac78874576f3147b89a16ed351b68cc942b74e3610ad985c68cb2dd5d"
     },
     "tools/capture_bridge_http51.py": {
-      "blob": "5982f7411fb8f28f1ab484b2ef4d633b21854513",
-      "sha256": "9ae23a550f6e152d94b8415f9f9dd1402698912ce2c907c56a16ec327e73ee04"
+      "blob": "4cb173ca7626ee92af34976a9d9e1b9f71954116",
+      "sha256": "4389f1fd47e0cd23542208d3727d56f44163ba0715f2dba064bde0c2d53aa2fe"
     },
     "tools/changefile.py": {
       "blob": "4620fb262bac4ead042ae764ae7aa794a6f705c7",
@@ -3517,6 +3741,10 @@
       "blob": "72f18cf5d1b4f1d651c1294a2292b3d69f7da39b",
       "sha256": "6bc48c98d93f153cb457427acf50ba799fe0676eb390b3081aafec47d4ae4d6b"
     },
+    "tools/test_bridge_http51_declarations.py": {
+      "blob": "87cf9e202430a46d7bd992fd35ae46308722ae13",
+      "sha256": "f5939a62de953102b8ede2d6b28e5499772dfedc2c6bc1a992f4840ae07736d9"
+    },
     "tools/test_budget_packaged_installer.py": {
       "blob": "4736f3d017ac4d54183c80dae457d242f27f6d84",
       "sha256": "33cc247a886564a2cfc89bae4f91805687b0cb87eade3ac7d42fd295d534298f"
@@ -3734,8 +3962,8 @@
       "sha256": "c7c41a7b4df5897c4214bed25dde9a60a604c90f47e9595974b87fa149f04d73"
     },
     "tools/test_guardian_followthrough_workflow.py": {
-      "blob": "95d0973dcde23e610f302aa5d7f031bbf360babb",
-      "sha256": "bee6e1b99c56fdda75dda70bcb3042237d39a3cac2e8c1ff1b8b8633738db5df"
+      "blob": "bd00585c2c4076982751628d2e451fd2c7a2dcb3",
+      "sha256": "6983bdd2c5d6424f4047da51de854933f4868bf6c6f70d9828e2a28d0454746b"
     },
     "tools/test_hook_interpreter.py": {
       "blob": "c28a5d2708be18b6cb2ba981258de9ebc7fb12f9",
@@ -4098,8 +4326,8 @@
       "sha256": "2cae8316bc279bdcf56aa07435c9125650e693fe0441ecb7dfa84918efb27464"
     },
     "tools/test_run_tests_in_devcontainer.py": {
-      "blob": "ec8e3f513c2f81107fb76c52d5a7faf042abe942",
-      "sha256": "e28f9e1d0fc9cd267cfc097a105ac28ad989c848766f02ae42a148276f60de4c"
+      "blob": "2beded10fd09f20f975a38630170c1f16990e9c5",
+      "sha256": "c796978b8e953924b3ebb87105e3d296b71a123536d15ce5c03d8ad55f80fd67"
     },
     "tools/test_runtime_feed_configuration.py": {
       "blob": "63a4fb7c954bd0700507b7783f6a06481fd14399",
@@ -4326,7 +4554,7 @@
       "sha256": "ae65db0f90938124b3695c082c3e65cffeeef39c0ac7697e1baa00bcd58e1909"
     }
   },
-  "execution_closure_sha256": "7c1e3f9d6e5e48622ee6f1b8b46327637d88e5ddd61d2189ed6689e0912aa5d4",
+  "execution_closure_sha256": "b52f88bd7ce37a8fbb844585d50ac82211bcc814308249b256b02e74cd3a2a78",
   "runtime_binding_policy": "every-owned-interpreter-source-and-entrypoint-v1",
   "runtime_roles": [
     "observer"
@@ -4353,7 +4581,7 @@
     "plugins/agent-bridge/scripts/installation-context/_installation_context_source.py",
     "plugins/agent-bridge/scripts/installation-context/installation_context.py"
   ],
-  "input_sha256": "793657e7a7883a5749ab4c7ba559543971cf830cba710fd7bfa4d85effe29109",
+  "input_sha256": "09ba56e727a2918682c7ffbd40014579a59c4b2c312cdd9768162e0ddd39732b",
   "checked_probes": {
     "test_http51_capture_actual_observations": 2,
     "test_concurrent_stopped_retries_reconcile_after_actual_resume_state_race": 1,
@@ -4361,11 +4589,11 @@
   },
   "scope": "model-free native-send ASGI/journal evidence; not SDK/native qualification",
   "captured_from": {
-    "commit": "0d32ad183a03788a6a818e861acbbd631da5160d",
+    "commit": "de7207f728b9c754fd2387a40cb21ca00f358fbe",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 51,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-    "source_git_blob": "267f1b6d242faf8e1000605016086e479aa5461d",
-    "source_sha256": "d55054a3b6d82093e25f0b56a44870b25a2ff72a3d1a78a1c9c11d7c6c97b09d"
+    "source_git_blob": "ca386a7ce17b875311df39e3b7c0ca76b419d49f",
+    "source_sha256": "eafd9847bf1572c00a03dc891c830f66818416b66d458ac7397e7502be1f09bd"
   }
 }

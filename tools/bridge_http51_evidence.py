@@ -19,11 +19,13 @@ FAMILY = "http51-standard-native-send-asgi-v1"
 AFFECTED = tuple(previous.PREFIX + name for name in (
     "protocol.py", "native_send_admission.py", "native_bound_prompt.py",
     "native_keyed_admission.py", "routes/prompts.py", "send_outcome.py",
-    "session_prompts.py", "session_targeting_cli.py",
+    "session_prompts.py", "session_targeting_cli.py", "native_send_receipt.py",
+    "native_keyed_client.py", "routes/health.py",
 ))
 TEST = "plugins/agent-bridge/tests/test_http51_capture_probes.py"
 EXTRA_PATHS = (
     INPUT, TEST, "plugins/agent-bridge/tests/test_native_send_admission.py",
+    "plugins/agent-bridge/tests/http51_receipt_probes.py",
     "plugins/agent-bridge/tests/test_native_bound_prompt.py",
     "plugins/agent-bridge/tests/test_live_inbox_runtime.py",
     "plugins/agent-bridge/tests/test_loop_governance_custody.py",
@@ -41,6 +43,7 @@ contract = common.contract
 SPEC = common.EvidenceSpec(
     GENERATION, INPUT, PRIMARY, FAMILY, AFFECTED, EXTRA_PATHS, PROBES,
     (("NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION", 51),
+     ("NATIVE_SEND_RECEIPT_CAPABILITY_VERSION", 1),
      ("RETAINED_INBOX_PROTOCOL_VERSION", 48), ("RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION", 49),
      ("RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION", 50)),
     scope=SCOPE,

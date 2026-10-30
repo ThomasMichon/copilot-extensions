@@ -15,13 +15,29 @@ from ..prompt_models import (
 from ..session_manager import DaemonDrainingError, ProviderTargetRefreshError
 from ..session_status import SessionStatus
 from ..native_keyed_admission import KeyedNativePrompt, submit as keyed_submit
-from ..native_send_admission import NativeSendPrompt, submit as native_send
+from ..native_send_admission import NativeSendPrompt, read_receipt, submit as native_send
 from ..acquisition_contract import AcquisitionRefused
 
 if TYPE_CHECKING:
     from ..session_manager import SessionManager
 
 router = APIRouter()
+
+
+@router.post("/{session_id}/turns/native-bound/send/receipt")
+async def read_native_send(
+    session_id: str, req: NativeSendPrompt, request: Request,
+) -> dict:
+    """Missing historical evidence is unproven, never permission to send."""
+    try:
+        result = await read_receipt(request.app.state.session_manager, session_id, req)
+    except KeyError as exc:
+        raise HTTPException(404, detail={"code": "native_session_unavailable"}) from exc
+    except ValueError as exc:
+        raise HTTPException(409, detail={"code": str(exc)}) from exc
+    if result is None:
+        raise HTTPException(404, detail={"code": "native_receipt_missing"})
+    return result
 
 
 @router.post("/{session_id}/turns/native-bound/send")

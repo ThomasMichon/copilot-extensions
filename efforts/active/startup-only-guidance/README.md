@@ -106,7 +106,7 @@ details below are **agent-recommended**, not additional operator requests.
 - [x] Migrate suite declarations and control-floor/catch-all instructions to
   the reviewed contract without deleting canonical templates or inclusion
   declarations. Preserve repository-authored invariants and exact-session writers.
-- [ ] Inventory each selected adopter's tracked full bodies, locators, fallback
+- [x] Inventory each selected adopter's tracked full bodies, locators, fallback
   files and maintenance configuration. Obtain itemized move/delete approval
   before retiring any tracked files; do not silently remove authored content.
 - [ ] Migrate approved artifacts through the adopter's reviewed workflow.
@@ -310,3 +310,61 @@ existing review, custody and explicit approval gates.
   four broker jobs use the alternative/exclusion checks above; a mutation
   control proves adding an unrelated input to a native route is rejected.
   The workflow contract now passes all 29 cases.
+
+### 2026-10-30 - Declaration migration merged; adopter approval remains open
+
+- #9627 merged after all concrete findings were addressed, every review thread
+  was resolved and the required checks passed. The owner-authored final Comment
+  had no open Medium/High issue; its documentation concern was assessed against
+  the existing delivery pattern and the explicitly retained native/adoption gates.
+- Re-read the complete effort after the merge. Provider authoring and all
+  twelve declaration migrations are landed, with periodic offline maintenance
+  and complete canonical templates retained.
+- The selected adopter inventory contains eight tracked full policy bodies and
+  twenty selectors. Replacing those eight full bodies with thin selectors and
+  moving their content into ordinary non-discovered fallbacks still requires
+  itemized mutation approval. No adopter instruction has been rewritten yet.
+- Its effective enabled roster declares 32 sources, so four additional
+  selector/fallback pairs are also missing from the tracked inventory. Existing
+  periodic-maintenance consent remains enabled. Migration must cover the whole
+  selected roster without changing plugin activation or repository-authored rules.
+- Source merge is not a promoted release or an installed update. Selected
+  creation/startup qualification, native model admission and authorized rollout
+  remain open; the effort stays Active.
+
+### 2026-10-30 - Approved adoption held on installer prerequisites
+
+- The selected adopter inventory and itemized migration approval are complete:
+  replace eight tracked full policy bodies with selectors and ordinary
+  fallbacks, refresh twenty existing pairs, and add four newly declared pairs.
+  Preserve the existing periodic-maintenance owner, repository-authored rules,
+  canonical templates, exact-session guidance and plugin activation.
+- The declaration release was promoted. The separately authorized selected
+  unified update refreshed payloads but did not complete successfully. Bridge
+  serving reconciliation rejected its legitimate console entrypoint; two
+  other runtime candidates failed the shared UV settings probe. Their previous
+  selected runtimes remained in place. No adopter rewrite is claimed.
+- Read-only diagnosis distinguished the failures: the Bridge PID guard only
+  recognized the module spelling. In the observed UV 0.12.23 settings probe,
+  one `--no-editable` option was accepted and the second occurrence appended by
+  the shared installer was rejected. #9489 separately records UV 0.10.12
+  rejecting even one occurrence as unsupported. These related version-specific
+  failures remain with that repair owner; deduplication alone is not claimed
+  to repair the supported UV range. Neither failure proves disk exhaustion,
+  a dead daemon or permission to bypass seasoning.
+- The operator selected the bounded Bridge-only repair. #9649 merged after
+  current-head Copilot approval, resolved feedback and required green checks.
+  It recognizes supported module/console daemon argument positions, including
+  the root `--json` option, while retaining routed health, process-generation,
+  credential and cutover checks. Contained native module/console fixtures and
+  negative identity controls pass; native Windows-only cases remain explicit.
+- #9489 retains the separately owned UV repair. Do not duplicate that work,
+  patch installed code, force an update or weaken immutable-install policy.
+  Bridge repair promotion and a successful authorized selected update remain
+  separate gates before adopter migration and native delivery qualification.
+  This effort remains Active; no Plan or Validation Plan outcome is transferred
+  merely by merging the prerequisite repair.
+- Normal promotion subsequently released #9649 as Bridge `0.9.227-dev1`.
+  This closes its source-release gate, not selected installation or running
+  acceptance. The unified update has not been retried while #9489 remains with
+  its existing owner, and adopter migration is still held.

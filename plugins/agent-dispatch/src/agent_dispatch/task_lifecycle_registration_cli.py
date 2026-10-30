@@ -353,6 +353,7 @@ def register_task_lifecycle_commands(sub) -> None:
 
     p = sub.add_parser(
         "reset",
+        allow_abbrev=False,
         help="Phase 2's gentler 'not like this': discard the current attempt's "
         "embodiment state and re-admit the task for a fresh attempt",
     )
@@ -360,9 +361,19 @@ def register_task_lifecycle_commands(sub) -> None:
     p.add_argument(
         "--to",
         default="proposed",
-        help="target state (only 'proposed' is implemented today)",
+        metavar="{proposed,queued}",
+        help="target state (default: proposed; queued requires explicit recovery fencing)",
     )
     p.add_argument("--reason", help="optional note recorded in the audit trail")
+    p.add_argument(
+        "--expected-revision",
+        help="opaque task-diagnostics revision; selects strict recovery",
+    )
+    p.add_argument(
+        "--request-id",
+        help="stable recovery idempotency key; selects strict recovery",
+    )
+    p.add_argument("--actor", help="explicit recovery actor; selects strict recovery")
     p.add_argument(
         "--expected-status",
         dest="expected_status",

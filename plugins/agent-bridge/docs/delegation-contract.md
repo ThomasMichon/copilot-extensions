@@ -37,6 +37,7 @@ delegated-agent facade.
 | Reuse or create for this caller | `send <agent> <prompt>` | Client-side resolve/reuse followed by session creation when absent | Existing or new bridge session |
 | Submit a turn | `send <session> <prompt>` | `POST /api/v1/sessions/{id}/turns` | Immediate `turn_index`, or a queued result when `queue=true` |
 | Retry an exact native follow-up | Standard `send` with `--expected-native-session-id` and `--idempotency-key` | `POST .../turns/native-bound/send`, protocol 51 | Original native turn receipt; a stopped context is strictly resumed without recreation |
+| Observe an exact native follow-up without sending | Standard native `send` with `--receipt-only` | `POST .../turns/native-bound/send/receipt`, HTTP 51 plus `native_send_receipt: 1` | Historical admission only; missing evidence stays unproven, even for a stopped or busy session |
 | Handle a busy hosted session | Default `send` refuses (exit 75; with `--json`, `outcome: refused_busy`); `send ... --queue` preserves the turn; `send ... --force` ends/replaces it | Default prompt submission returns 409; `queue=true` persists FIFO work | Reject, queue identity/position, or a fresh unlinked session depending on the explicit mode; `send --json` names the hosted result as `delivered`, `queued`, or a `refused_*` with a distinct exit code. Represented sends use receipt stages `admitted`, `sdk_accepted`, or `consumed`, or `duplicate`; `steered`, `interrupted`, and `accepted` are legacy-daemon outcomes, not current receipt evidence. |
 | Manage pending prompts | Queue flags through `send` | Queue snapshot, delete-one, and clear-all endpoints | Durable FIFO queue maintenance |
 | Observe a live turn | attached `send`, bare `wait`, or following `read` | `GET .../events` plus cursor acknowledgement | Collapsed event stream |
@@ -102,6 +103,59 @@ This guarded combination currently refuses a busy target and does not support
 `--queue` or `--force`. Unkeyed sends and the ordinary hosted FIFO queue retain
 their previous behavior. An older daemon refuses the new combination before
 effects; package or payload freshness alone is not support evidence.
+
+#### Read-only ordinary-send receipt observation
+
+The optional `native_send_receipt` capability (version 1, HTTP baseline 51)
+adds an observation-only mode, separate from retrying admission:
+
+```bash
+agent-bridge --json send <bridge-session> \
+  --expected-native-session-id <native-session> --idempotency-key <original-key> \
+  --caller <original-caller> --prompt-file - --receipt-only --no-wait
+```
+
+Stdin must contain the exact original prompt. Use the original **Bridge session
+ID**, not an alias or worktree resolver. The route accepts the same
+`NativeSendPrompt` JSON as ordinary keyed send:
+`{"invocation_key":"original-key","expected_native_session_id":"native-session","prompt":"original prompt","caller_id":"original-caller"}`.
+The holder lock fences the Bridge/native identity and the turn journal checks
+the original key, prompt and caller. A stopped or busy session remains unchanged;
+no observation resumes, recreates, submits, queues, or falls back to another
+transport. This also applies during daemon draining.
+
+A found receipt returns HTTP 200:
+`{"version":1,"session_id":"bridge-session","native_session_id":"native-session","invocation_key":"original-key","turn_index":0,"queued":false,"admission":"accepted"}`.
+The CLI adds `"outcome":"accepted"` and exits 0. This proves only historical
+admission, not consumption, a current running turn, or completion.
+
+A missing receipt returns HTTP 404
+`{"detail":{"code":"native_receipt_missing"}}`. The CLI exits 69 with
+`"outcome":"refused_unavailable"`, `"reason":"native_receipt_missing"` and
+`"retryable":false`. This means **unproven**, never `not_sent` or no-effect
+evidence; do not turn an observation miss into a new send. Missing session
+history similarly returns 404 `native_session_unavailable`. Changed native
+identity, caller, prompt or Bridge binding refuses with 409; a different key
+without retained evidence remains a 404 miss. Malformed or corrupt retained
+history refuses with 409 rather than granting fresh admission.
+
+The CLI freshly checks the receiving daemon's advertised protocol and
+`/health.capabilities.native_send_receipt` before every request attempt.
+Providers below HTTP 51 or without integer capability version 1 or newer refuse
+before the receipt POST. The base HTTP generation stays 51: this optional
+capability does not invalidate existing ordinary-send generation evidence. Invalid
+native identity/key or mixed delivery options refuse before connecting.
+Ordinary and keyed-invocation receipt-only commands construct their client
+with daemon ensure disabled. An unavailable Bridge remains unavailable; the
+query cannot start it and trigger startup recovery or retained-host prompts.
+Malformed receipt replies or observation transport failures remain `"unknown"`
+(exit 70, reason `native_receipt_unproven`). Existing
+`--native-invocation-file ... --receipt-only` keeps its protocol-45 endpoint,
+binding checks, output and mixed-option restrictions.
+
+Only receipts actually retained by the original ordinary-send operation can be
+observed. This capability cannot retroactively qualify legacy or otherwise
+unknown historical sends, and no missing receipt proves that a send had no effect.
 
 Source anchors:
 

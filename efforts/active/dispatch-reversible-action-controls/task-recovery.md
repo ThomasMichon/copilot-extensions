@@ -129,3 +129,137 @@ operator requests.
   evidence; no private live state is copied into source fixtures.
 - Proposal only. No runtime implementation, task mutation, process effect,
   installation update or reconciliation is claimed.
+
+### 2026-10-30 - Amendment reviewed
+
+- #9638 merged as `9fd66497ff` after current-head Copilot approval with no open
+  findings and successful required checks. Managed reconciliation retained the
+  prior source ref and aligned the existing worktree to the reviewed proposal.
+- Re-read the canonical Plan and Validation Plan. Only proposal review is
+  complete; implementation, release and every independent consumer gate remain.
+- Begin bounded queue diagnostics and recovery regressions, with a separate
+  receipt-only transport observation prerequisite. Missing transport history
+  remains unknown; source changes authorize no actual recovery operation.
+
+### 2026-10-30 - Recovery source implementation
+
+- Added bounded queue evidence and action-refusal reporting, distinct
+  revision-fenced assignment detachment and Proposed/Queued reset, atomic
+  recovery receipts, control-only REST/MCP admission and compatible client/CLI
+  surfaces. Existing reset also preserves unresolved execution custody.
+- Original-wake reconciliation observes Bridge's new receipt-only native
+  interface. A positive original receipt can settle acceptance; absence,
+  unsupported targets and unqualified historical traffic remain unknown.
+  No new prompt, timeout-to-absence conversion or universal credential exists.
+- Actual isolated regression packets pass: 156 task-recovery cases, including
+  both outboxes, restart replay, authority, truncation, retired attachment and
+  the receipt-only command; 211 Bridge receipt/admission/capability cases.
+  The earlier integrated recovery/adjacent lifecycle packet passed 294 cases
+  before the final edge-case extensions. Static source, module-size,
+  installation-contract and documentation guards pass.
+- A suspended-assignment control exposed detachment retaining the suspended
+  state; use the existing owned-state set when returning detached work to
+  Queued. The fixture and implementation now agree. A module-size refusal
+  moved the cohesive receipt CLI branch into its focused module rather than
+  widening the general send router.
+- Independent implementation review, containing release and separately
+  authorized running/native qualification remain open. No live task,
+  reservation, wake, installation or worker was operated.
+
+### 2026-10-30 - Observation and retirement review corrections
+
+- Independent review identified receipt-client construction ensuring a daemon
+  before observation. Both ordinary and keyed receipt-only commands now use
+  the real non-ensuring client factory; unavailable-provider controls forbid
+  daemon ensure/start rather than mocking past that boundary.
+- Reuse canonical driver-specific native classification and the existing
+  terminal exact-absence release predicate. Terminal historical exclusive
+  flags do not imply active custody. Supported release/retire regressions
+  cover ordinary, restricted and CLI assignments without manually asserting
+  the conversation marker.
+- Diagnostics and settlement share one queue-only wake eligibility planner.
+  Unsupported adapters, contradictory settled state, incomplete identity and
+  truncated history report concrete refusal instead of advertised support.
+- The corrected recovery/adjacent-driver packet passes 372 cases; ordinary
+  and keyed receipt observation passes 183. Seven synthetic declaration-tool
+  controls pass without expanding the required unit inventory. The existing
+  3,052-unit packet passed after re-admitting the changed protocol constants.
+- CI also exposed missing source-bound contract declarations/capture evidence.
+  The existing HTTP-51 capture owner now prepares only committed semantic
+  declarations and then requires actual receipt-only observations, including
+  zero daemon ensure/start. Preparation preserves all existing fixture and
+  provenance declarations; it is not itself a capture or a passing CI gate.
+  Fresh committed capture, re-review, release and running qualification remain.
+
+### 2026-10-30 - Actual capability evidence captured
+
+- The existing HTTP-51 portfolio executed all four required source-bound
+  probes, including both fixture installation modes. Actual ordinary and
+  keyed receipt-only client factories recorded zero daemon ensure/start calls;
+  unavailable-provider, missing-receipt and old-capability cases retained
+  their conservative outcomes without a prompt.
+- The capture owner published its current capability observations and complete
+  source closure, then a separate no-write execution verified the same outputs.
+  The exact PR-diff contract guard passes: two contracts and 884 fixtures.
+  Earlier HTTP generations and ordered provenance remain retained.
+- The first invocation lacked the capture process library in its interpreter
+  and stopped before observations/publication. Preparing only the canonical
+  test environment resolved that explicit missing dependency; no runtime
+  installation, service repair or captured-result substitution was used.
+- This closes the missing local capture evidence, not independent review,
+  required hosted CI, containing release or installed/native qualification.
+
+### 2026-10-30 - Diagnostic factory and acquisition-only review corrections
+
+- The next independent review cleared the five prior findings and identified
+  diagnostics using the default coordinator-ensuring factory. CLI and default
+  stdio MCP diagnostics now use existing read-only discovery: no coordinator
+  start, SSH failover or control-credential discovery. Actual default-factory
+  controls cover both available and absent providers without mocking past
+  the factory. Existing bounded read retries remain intact.
+- Native identity is now resolved for every reservation, not only retired
+  records or those with published agent/handle fields. Supported acquisition
+  binding followed by spawn failure proves an acquisition-only native remains
+  protected before spawn publication, across legacy reset and all strict actions.
+- The complete corrected recovery, observation, authority and adjacent-driver
+  packet passes 458 cases. Static and existing captured Bridge contract guards
+  also pass; this Dispatch-only correction changes no captured Bridge bytes.
+- Hosted CI passed the preceding revision but cannot waive these findings.
+  The new revision still requires independent review and its own CI before merge.
+
+### 2026-10-30 - Complete the frontend activation boundary
+
+- The diagnostic/acquisition correction received exact-head independent
+  approval and green CI. Before delivery, apply the same no-implicit-start
+  class fix to the new strict recovery and receipt-reconciliation frontends:
+  no coordinator ensure or SSH failover before admission, while keeping
+  control-authority discovery and legacy Proposed reset behavior.
+- Production-factory controls now cover every new CLI/stdio recovery path
+  with available and absent providers. Preserve explicitly injected factories
+  by testing `None`, not callback truthiness.
+- The complete final recovery/authority/driver packet passes 471 cases.
+  This meaningful final revision still needs its own review; the preceding
+  approval is not carried forward.
+
+### 2026-10-30 - Integrate the current target without erasing evidence
+
+- The complete frontend revision received current-head independent approval
+  and green CI, but a newly merged related-plugin change conflicted with
+  current HTTP-51 artifacts. Preserve both source changes and both ordered
+  provenance streams rather than choosing an entire registry side.
+- Guarded synchronization retained the reviewed tip and stopped without
+  modification. The subsequent private-branch rebase merged only declaration
+  deltas and existing committed observations, preserving the target history
+  plus the original capture records. No synthetic observation was introduced.
+- Prepare and genuinely recapture the combined committed source through the
+  existing owner, then repeat no-write verification. All four probes and the
+  exact new-base guard pass; earlier generations remain retained. Dispatch
+  implementation/test bytes are unchanged by the target integration.
+- Integration exposed stale venue-test fixtures: a local case targeted this
+  source-only repository, controller-only cases omitted their independent
+  positive hosting prerequisite, and a minimal recovery double omitted the
+  canonical timeout policy. Correct only those fixtures; production hosting
+  admission and controller assertions remain unchanged. The actual hosting
+  policy and venue packet passes 163 cases.
+- Re-review of the integrated head, required CI, release and running/native
+  qualification remain separate gates.

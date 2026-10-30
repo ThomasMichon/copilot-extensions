@@ -202,6 +202,14 @@ def controller(monkeypatch, tmp_path):
     return caller, owner
 
 
+@pytest.fixture
+def hosting_allowed(monkeypatch):
+    """Keep hosting admission a positive prerequisite in controller-focused cases."""
+    admission = AsyncMock()
+    monkeypatch.setattr("agent_bridge.hosting_policy.require_target_hosting", admission)
+    return admission
+
+
 def _native_provider_workspace_cd():
     """Read the actual producer constant without importing its sibling runtime."""
     import ast
@@ -683,7 +691,9 @@ async def test_session_manager_callback_preserves_controller_context(
 
 
 @pytest.mark.asyncio
-async def test_local_session_does_not_require_or_resolve_controller(monkeypatch, session_manager):
+async def test_local_session_does_not_require_or_resolve_controller(
+    monkeypatch, session_manager, tmp_path,
+):
     from unittest.mock import MagicMock
     from agent_bridge.transport import SpawnTarget
 
@@ -692,12 +702,14 @@ async def test_local_session_does_not_require_or_resolve_controller(monkeypatch,
     monkeypatch.setattr(session_manager, "_connect_via_session_host", AsyncMock(return_value=(
         MagicMock(is_running=True, pid=12345), "acp-synthetic",
     )))
-    await session_manager.start_session(SpawnTarget(type="local", cwd="."))
+    await session_manager.start_session(SpawnTarget(type="local", cwd=str(tmp_path)))
     controller.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_container_context_refusal_precedes_provider_setup(monkeypatch, session_manager, controller):
+async def test_container_context_refusal_precedes_provider_setup(
+    monkeypatch, session_manager, controller, hosting_allowed,
+):
     from unittest.mock import MagicMock
     from agent_bridge.models import SessionStatus
     from agent_bridge.transport import SpawnTarget
@@ -860,7 +872,7 @@ async def test_provider_refresh_preserves_controller_provenance(
     "explicit-equals-affinity",
 ])
 async def test_native_venue_controller_context_start_and_recovery(
-    monkeypatch, session_manager, controller, kind, recovery, context,
+    monkeypatch, session_manager, controller, hosting_allowed, kind, recovery, context,
 ):
     import os
     from types import SimpleNamespace
@@ -1109,6 +1121,7 @@ async def test_cold_remote_spawn_authenticates_before_preparation_and_child(monk
 @pytest.mark.asyncio
 async def test_legacy_dynamic_workspace_recovery_resolves_persists_then_prepares(monkeypatch, controller):
     from types import SimpleNamespace
+    from agent_bridge.models import PhasedTimeouts
     from agent_bridge.transport import SpawnTarget
     from agent_bridge.session_host_recovery import _SessionHostRecoveryMixin
 
@@ -1138,6 +1151,7 @@ async def test_legacy_dynamic_workspace_recovery_resolves_persists_then_prepares
         return "client", "acp-session"
 
     manager = SimpleNamespace(
+        _timeouts=PhasedTimeouts(),
         _codespace_lock_sessions=set(), _acquire_codespace_lock=lambda *a: None,
         _release_codespace_lock=lambda *a: None,
         _session_host_unexpected_reap_seconds=60, _session_host_active_reap_seconds=0,

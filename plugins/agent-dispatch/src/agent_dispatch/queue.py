@@ -117,6 +117,7 @@ from .queue_spawn_reservations import (  # noqa: F401 -- re-exported for existin
     spawn_key,
 )
 from .queue_storage import QueueStorageMixin
+from .queue_task_recovery import TaskRecoveryMixin
 from .queue_steering import QueueSteeringMixin
 from .queue_suspend import QueueSuspendMixin
 from .queue_submission_rejection import QueueSubmissionRejectionMixin
@@ -158,6 +159,7 @@ class _ClosingConnection(sqlite3.Connection):
 
 
 class TaskQueue(
+    TaskRecoveryMixin,
     QueueExecutionWakesMixin,
     QueueExecutionRuntimesMixin,
     QueueExecutionScopesMixin,
@@ -280,6 +282,7 @@ class TaskQueue(
             self._migrate_execution_scopes(conn)
             self._migrate_execution_runtimes(conn)
             self._migrate_execution_wakes(conn)
+            self._migrate_task_recovery(conn)
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS coordinator_fencing ("
                 " singleton INTEGER PRIMARY KEY CHECK (singleton = 1),"

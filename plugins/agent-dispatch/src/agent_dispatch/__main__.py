@@ -193,7 +193,6 @@ from .task_lifecycle_cli import (  # noqa: F401 -- re-exported for existing call
     _cmd_reattach,
     _cmd_release,
     _cmd_reopen,
-    _cmd_reset,
     _cmd_resume,
     _cmd_show,
     _cmd_start,
@@ -202,6 +201,13 @@ from .task_lifecycle_cli import (  # noqa: F401 -- re-exported for existing call
     _cmd_unpause,
     _cmd_worktree_status,
     _cmd_yield,
+)
+from .task_recovery_cli import (  # noqa: F401 -- CLI registration and compatibility exports
+    _cmd_detach_agent,
+    _cmd_reconcile_wake,
+    _cmd_reset,
+    _cmd_task_diagnostics,
+    register_task_recovery_commands,
 )
 
 from .execution_cli import (  # noqa: F401 -- re-exported for existing call sites/tests
@@ -676,6 +682,7 @@ def build_parser() -> argparse.ArgumentParser:
     register_registrar_commands(sub)
 
     register_task_lifecycle_commands(sub)
+    register_task_recovery_commands(sub)
 
     register_steering_commands(sub)
     register_attention_commands(sub)
