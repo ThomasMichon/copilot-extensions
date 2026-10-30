@@ -293,8 +293,9 @@ class LivenessMixin:
                     continue
                 retained = conn.execute(
                     "SELECT driver FROM spawn_reservations WHERE task_id=?"
-                    " AND state IN (?,?) ORDER BY attempt DESC LIMIT 1",
-                    (task_id, SpawnState.SPAWNED, SpawnState.COLD),
+                    " AND state IN (?,?,?,?) ORDER BY attempt DESC LIMIT 1",
+                    (task_id, SpawnState.RESERVING, SpawnState.SPAWNED,
+                     SpawnState.COLD, SpawnState.RELEASING),
                 ).fetchone()
                 ordinary_native = (
                     retained is not None and retained["driver"] == "ordinary-bridge"

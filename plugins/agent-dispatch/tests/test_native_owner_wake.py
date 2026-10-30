@@ -240,6 +240,40 @@ def test_liveness_does_not_erase_unfinished_ordinary_owner_binding(
     assert queue.latest_reservation(task_id) == reservation
 
 
+@pytest.mark.parametrize("release", [False, True])
+def test_liveness_preserves_claim_before_ordinary_spawn_publication(tmp_path, release):
+    queue = TaskQueue(tmp_path / "tasks.db")
+    task = queue.create("review", repo="queue-project", source="wake-test")
+    reservation, _ = queue.reserve_spawn(
+        task.id, reserved_by="supervisor", driver="ordinary-bridge",
+    )
+    queue.record_spawn_allocation(reservation.key, "execution-project")
+    record_created_agent(queue, reservation.key, task_generation=task.generation, agent_info={
+        "session_id": BRIDGE, "ready": True, "status": "awaiting_first_prompt",
+        "connection": {
+            "native_session_id": NATIVE, "worktree_id": "worktree-a",
+            "repo": "execution-project", "target_dir": str(tmp_path / "worktree-a"),
+        },
+    })
+    queue.claim_one(OWNER, task_id=task.id)
+    if release:
+        queue.request_spawn_release(reservation.key, detail="release overlaps startup claim")
+    before, retained = queue.get(task.id), queue.latest_reservation(task.id)
+    assert before.status == "claimed" and before.owner_session_id is None
+    assert retained.state == ("releasing" if release else "reserving")
+    assert queue.attachment_history(task.id) == []
+
+    counts = queue.reconcile_liveness(resolver=lambda *_args: "gone")
+
+    assert counts["gone"] == 1
+    assert counts["suspended"] == counts["requeued"] == 0
+    after = queue.get(task.id)
+    assert (after.status, after.owner, after.owner_session_id, after.generation, after.attempts) == (
+        before.status, before.owner, before.owner_session_id, before.generation, before.attempts,
+    )
+    assert queue.latest_reservation(task.id) == retained
+
+
 def test_original_native_can_normally_reclaim_a_retained_queued_task(
     hosted: tuple[TaskQueue, str],
 ) -> None:

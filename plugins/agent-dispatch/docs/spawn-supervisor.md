@@ -1088,7 +1088,9 @@ reservation failed, and the next cycle can reserve a fresh attempt. This legacy
 replacement rule does not apply to `ordinary-bridge` or `restricted-bridge`
 reservations: process absence does not retire their native conversation. Ordinary
 started owners are suspended with their owner, native identity and reservation
-intact; unfinished claims remain held for reconciliation. Restricted owners retain
+intact; unfinished claims remain held for reconciliation, including a claim
+before spawn publication or while the original reservation is releasing.
+Restricted owners retain
 their existing immutable binding. Stranded-cold cleanup likewise does not release
 either driver's conversation to make a replacement. `live` bodies
 are heartbeated; `unknown` bodies are left untouched. A confirmed-alive but quiet
