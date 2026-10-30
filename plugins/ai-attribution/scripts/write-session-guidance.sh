@@ -18,7 +18,7 @@ script="$root/scripts/write_session_guidance.py"
 
 MAX_INPUT_BYTES=65536
 GUIDANCE_MAX_BYTES=4096
-CACHE_FORMAT_VERSION=2
+CACHE_FORMAT_VERSION=3
 GUIDANCE_HEADER=$'# AI attribution session guidance\n\n'
 SESSION_ID_PATTERN='^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
 
@@ -135,10 +135,13 @@ if [[ -n "$session_id" && "$session_id" =~ $SESSION_ID_PATTERN \
                             fi
                         done < <(printf '%s' "$data" | jq -c '.profile_probes[]')
                         guidance="$(printf '%s' "$data" | jq -er '.profile_guidance // empty' 2>/dev/null)"
-                        if [[ -z "$guidance" ]]; then
+                        profile_header="$(printf '%s' "$data" | jq -er '.profile_header // empty' 2>/dev/null)"
+                        if [[ -z "$guidance" ]] || [[ "$profile_header" != "# AI attribution session guidance" \
+                            && "$profile_header" != "Disclose AI for ALL contributions." ]]; then
                             run_python_fallback "$stdin_text"
                             exit 0
                         fi
+                        GUIDANCE_HEADER="${profile_header}"$'\n\n'
                     else
                         # Legacy base-only caches may serve unchanged unconfigured launches.
                         profile_paths=("$repo_root/.github/ai-attribution.json"

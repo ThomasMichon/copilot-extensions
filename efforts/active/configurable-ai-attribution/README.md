@@ -238,3 +238,18 @@ network dependency, parallel policy registry or mandatory sibling plugin.
   consistency, module-size and Bash syntax checks passed.
 - The actual adopter profile fits the canonical session budget: 2,675 bytes
   including the real policy kernel and profile, below 4,096 bytes.
+
+### 2026-10-30 - Conservative budget fallback and assembled-data validation
+- The second review exposed a tightening loss when valid profile guidance did
+  not fit. A compact disclose-all header now overrides baseline exemptions until
+  the profile is resolved, including when no diagnostic notice fits. Cache
+  format 3 preserves that mode in both native wrappers.
+- Rejected shortcut/reference image openers, Unicode control/format characters
+  in literal variables, and review claims assembled across template/variable
+  boundaries, including historical variants. Both consumers share the latter
+  validation without treating escaped names as template markup.
+- Deep JSON is rejected explicitly instead of dropping the safety kernel.
+  CLI/cache readers handle the same recursion failure class.
+- Focused validation passed 68 tests with 3 platform skips, including both
+  budget cases and real native warm-cache reuse with Python absent. High-signal
+  Python lint passed. Fresh review and exact-head CI still gate merge.

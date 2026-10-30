@@ -23,7 +23,7 @@ $script = Join-Path (Join-Path $root 'scripts') 'write_session_guidance.py'
 
 $MaxInputBytes = 65536
 $GuidanceMaxBytes = 4096
-$CacheFormatVersion = 2
+$CacheFormatVersion = 3
 $GuidanceHeader = "# AI attribution session guidance`n`n"
 $SessionIdPattern = '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
 
@@ -138,6 +138,7 @@ try {
                                 $context.xdg -ne [string]$env:XDG_CONFIG_HOME -or
                                 $context.appdata -ne [string]$env:APPDATA -or
                                 $data.profile_guidance -isnot [string] -or
+                                $data.profile_header -notin @($GuidanceHeader, "Disclose AI for ALL contributions.`n`n") -or
                                 @($data.profile_probes).Count -lt 1
                             ) { throw 'Profile discovery context changed' }
                             foreach ($probe in $data.profile_probes) {
@@ -163,6 +164,7 @@ try {
                                 ) { throw 'Profile content changed' }
                             }
                             $guidance = $data.profile_guidance
+                            $GuidanceHeader = $data.profile_header
                         } else {
                             # Legacy base-only caches can serve unchanged unconfigured launches.
                             $profilePaths = @(

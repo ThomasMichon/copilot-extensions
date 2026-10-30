@@ -196,30 +196,81 @@ def test_over_budget_content_writes_explicit_status(monkeypatch, tmp_path):
     assert "omitted because" in _target(tmp_path).read_text(encoding="utf-8")
 
 
-def test_large_profile_never_displaces_policy_kernel(monkeypatch, tmp_path):
-    base = "Required disclosure. " + "x" * 3800
+@pytest.mark.parametrize("base_bytes", [3400, 4050])
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+def test_large_profile_never_displaces_policy_or_tightening(monkeypatch, tmp_path, base_bytes):
+    kernel = "Self-authored contributions may omit disclosure."
+    base = kernel + "x" * (base_bytes - len(kernel))
     monkeypatch.setattr(writer, "_run_contributor", lambda *args: base)
     monkeypatch.setenv("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", "")
     config = tmp_path / ".copilot" / "ai-attribution.json"
     config.parent.mkdir()
-    config.write_text(json.dumps({"version": 1, "rules": [{"header": "AI " * 150}]}),
+    config.write_text(json.dumps({"version": 1, "rules": [
+        {"header": "AI " * 150, "required": True},
+    ]}),
                       encoding="utf-8")
-    assert writer.write_session_guidance({"sessionId": "session-1"}, home=tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    assert writer.write_session_guidance(
+        {"sessionId": "session-1", "cwd": str(repo)}, home=tmp_path
+    )
     actual = _target(tmp_path).read_text(encoding="utf-8")
     assert base in actual
+    assert actual.startswith("Disclose AI for ALL contributions.\n\n")
     assert len(actual.encode("utf-8")) <= 4096
+    cache = json.loads(next(writer._cache_dir(tmp_path).glob("*.json")).read_text())
+    assert cache["profile_header"] + cache["profile_guidance"] + "\n" == actual
+    shell = (shutil.which("pwsh") or shutil.which("powershell.exe")) if os.name == "nt" else shutil.which("bash")
+    if not shell:
+        pytest.skip("native shell unavailable")
+    if os.name == "nt":
+        native_path = os.pathsep.join((
+            str(Path(shutil.which("git")).parent), str(Path(shell).parent),
+            str(Path(os.environ["SystemRoot"]) / "System32"),
+        ))
+        command = [shell, "-NoProfile", "-File", str(_PLUGIN / "scripts" / "write-session-guidance.ps1")]
+    else:
+        tools = tmp_path / "native-tools"
+        tools.mkdir()
+        for name in ("git", "jq", "sha256sum", "shasum", "cat", "cut", "date",
+                     "awk", "dirname", "wc", "mkdir", "mv", "rm"):
+            executable = shutil.which(name)
+            if executable:
+                (tools / name).symlink_to(executable)
+        if not shutil.which("jq") or not (shutil.which("sha256sum") or shutil.which("shasum")):
+            pytest.skip("native JSON/hash tools unavailable")
+        native_path = str(tools)
+        command = [shell, str(_PLUGIN / "scripts" / "write-session-guidance.sh")]
+    env = {**os.environ, "PATH": native_path, "HOME": str(tmp_path),
+           "USERPROFILE": str(tmp_path), "COPILOT_PLUGIN_ROOT": str(_PLUGIN)}
+    env.pop("AI_ATTRIBUTION_FORCE_REFRESH", None)
+    result = subprocess.run(
+        command, input=json.dumps({"sessionId": "session-2", "cwd": str(repo)}),
+        text=True, capture_output=True, env=env, check=True,
+    )
+    assert json.loads(result.stdout) == {}
+    warm_target = _target(tmp_path).parents[3] / "session-2" / "instructions" / "ai-attribution" / _target(tmp_path).name
+    assert warm_target.read_text(encoding="utf-8") == actual
 
 
-def test_bad_profile_preserves_kernel_with_visible_diagnostic(monkeypatch, tmp_path):
+@pytest.mark.parametrize("raw", [
+    "invalid", '{"version":1,"rules":' + "[" * 10000 + "]" * 10000 + "}",
+    json.dumps({"version": 1, "variables": {"assistant": "human-review"},
+                "rules": [{"header": "{assistant}ed"}]}),
+], ids=["invalid-json", "deep-json", "review-claim"])
+def test_bad_profile_preserves_kernel_with_visible_diagnostic(monkeypatch, tmp_path, raw):
     monkeypatch.setattr(writer, "_run_contributor", lambda *args: "Required disclosure.")
     monkeypatch.setenv("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", "")
     config = tmp_path / ".copilot" / "ai-attribution.json"
     config.parent.mkdir()
-    config.write_text("invalid", encoding="utf-8")
+    config.write_text(raw, encoding="utf-8")
     assert writer.write_session_guidance({"sessionId": "session-1"}, home=tmp_path)
     actual = _target(tmp_path).read_text(encoding="utf-8")
     assert "Required disclosure." in actual
-    assert "profile layer 1 rejected" in actual
+    assert "rejected" in actual
+    assert actual.startswith("Disclose AI for ALL contributions.\n\n")
 
 
 @pytest.mark.parametrize("session_id", ("", "../escape", "slash/value", "a" * 129))

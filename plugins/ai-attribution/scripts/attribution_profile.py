@@ -45,7 +45,7 @@ def _template(value: object) -> str:
         any(unicodedata.category(c) == "Cf" for c in value)
         or re.search(
             r"<|&(?:#[^;]*;|[A-Za-z][A-Za-z0-9]*;)|"
-            r"!?\[[^\]\n]*\]\s*[\[(]|^\s{0,3}\[[^\]\n]+\]:|`{3}|~{3}",
+            r"!\[|\[[^\]\n]*\]\s*[\[(]|^\s{0,3}\[[^\]\n]+\]:|`{3}|~{3}",
             value, re.M,
         )
     ):
@@ -72,7 +72,7 @@ def validate(value: object) -> dict:
     for text in variables.values():
         if (
             not isinstance(text, str) or len(text.encode("utf-8")) > 120
-            or any(ord(c) < 32 or ord(c) == 127 for c in text)
+            or any(unicodedata.category(c) in {"Cc", "Cf"} for c in text)
         ):
             raise ProfileError("invalid variable")
     rules = value.get("rules", [])
@@ -167,9 +167,22 @@ def load_profile(home: Path, repo: Path | None, env: dict | None = None) -> tupl
             profile["rules"].extend(
                 {**rule, "_layer": index} for rule in layer.get("rules", [])
             )
-        except (OSError, ValueError, UnicodeError):
+        except (OSError, ValueError, UnicodeError, RecursionError):
             errors.append(f"profile layer {index + 1} rejected")
     return profile, errors
+
+
+def _literal_variables(profile: dict) -> dict:
+    return {"operator": "the operator", "assistant": "Copilot", **profile.get("variables", {})}
+
+
+def _check_review_claim(template: str, variables: dict) -> str:
+    template = _template(template)
+    if re.search(r"\breviewed\b", template.format_map(
+        {**variables, "review_status": ""}
+    ), re.I):
+        raise ProfileError("review claims must use {review_status}")
+    return template
 
 
 def resolve(profile: dict, context: dict) -> dict:
@@ -201,8 +214,12 @@ def resolve(profile: dict, context: dict) -> dict:
             raise ProfileError("equally specific selectors conflict")
         result[field] = values[0]
     required = required or any(r.get("required") is True for r in matches)
-    variables = {"operator": "the operator", "assistant": "Copilot"}
-    variables.update(profile.get("variables", {}))
+    literals = _literal_variables(profile)
+    for slot in SLOTS:
+        _check_review_claim(result[slot], literals)
+        for variant in result[slot + "_variants"]:
+            _check_review_claim(variant, literals)
+    variables = dict(literals)
     variables["review_status"] = (
         "human-reviewed" if context.get("human_reviewed") is True else "not human-reviewed"
     )
@@ -249,6 +266,12 @@ def decorate(draft: str, signature: dict) -> str:
 def guidance(profile: dict) -> str:
     if not profile["rules"] and not profile["variables"]:
         return ""
+    variables = _literal_variables(profile)
+    for rule in profile["rules"]:
+        for slot in SLOTS:
+            _check_review_claim(rule.get(slot, ""), variables)
+            for variant in rule.get(slot + "_variants", []):
+                _check_review_claim(variant, variables)
     # JSON strings inside code spans keep templates visibly data rather than instructions.
     rows = [
         "## Signature profile",
@@ -261,8 +284,6 @@ def guidance(profile: dict) -> str:
         "`not human-reviewed` unless this exact draft was actually reviewed. "
         "Decorate before final preview/approval, never afterwards.",
     ]
-    variables = {"operator": "the operator", "assistant": "Copilot",
-                 **profile["variables"]}
     def literal(value):
         return json.dumps(value, ensure_ascii=True).replace("`", "\\u0060").replace(
             "<", "\\u003c").replace(">", "\\u003e")
@@ -298,7 +319,7 @@ def main() -> int:
                 output["draft"] = decorate(request["draft"], signature)
         print(json.dumps(output, ensure_ascii=True))
         return 0
-    except (OSError, ValueError, KeyError, TypeError) as exc:
+    except (OSError, ValueError, KeyError, TypeError, RecursionError) as exc:
         print(json.dumps({"error": str(exc)}))
         return 2
 

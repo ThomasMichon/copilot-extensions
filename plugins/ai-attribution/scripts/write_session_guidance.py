@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from attribution_profile import guidance as profile_guidance, load_profile
+from attribution_profile import ProfileError, guidance as profile_guidance, load_profile
 
 _SESSION_IDENTIFIER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$")
 _MAX_INPUT_BYTES = 64 * 1024
@@ -28,6 +28,7 @@ _GUIDANCE_MAX_BYTES = 4 * 1024
 _SUBPROCESS_TIMEOUT_S = 10.0
 _GIT_SUBPROCESS_TIMEOUT_S = 5.0
 _GUIDANCE_HEADER = "# AI attribution session guidance\n\n"
+_CONSERVATIVE_HEADER = "Disclose AI for ALL contributions.\n\n"
 
 #: The full policy computation (spawn a fresh shell interpreter to run
 #: emit-policy.*, which itself shells out to git and reads config files) costs
@@ -39,7 +40,7 @@ _GUIDANCE_HEADER = "# AI attribution session guidance\n\n"
 #: read/write failure of any kind always falls through to a full recompute; a
 #: stale-but-unexpired cache is the only risk this introduces, bounded by the
 #: TTL below.
-_CACHE_FORMAT_VERSION = 2
+_CACHE_FORMAT_VERSION = 3
 _CACHE_TTL_SECONDS = int(os.environ.get("AI_ATTRIBUTION_CACHE_TTL_SECONDS", "3600"))
 #: Escape hatch for an operator (or a future setup/refresh skill step) who
 #: knows policy/config changed and does not want to wait out the TTL.
@@ -54,7 +55,7 @@ def _read_bounded_stdin() -> bytes:
 def _additional_context(raw: bytes) -> str:
     try:
         value = json.loads(raw.decode("utf-8"))
-    except (UnicodeError, TypeError, ValueError):
+    except (UnicodeError, TypeError, ValueError, RecursionError):
         return ""
     context = value.get("additionalContext") if isinstance(value, dict) else None
     return context.strip() if isinstance(context, str) else ""
@@ -141,7 +142,7 @@ def _read_cached_guidance(home: Path, cwd: str, *, key: str | None = None) -> st
     try:
         path = _cache_dir(home) / f"{key or _repo_cache_key(cwd)}.json"
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return None
     if not isinstance(data, dict) or data.get("version") != _CACHE_FORMAT_VERSION:
         return None
@@ -179,7 +180,9 @@ def _write_cached_guidance(home: Path, cwd: str, guidance: str, *, key: str | No
         pass
 
 
-def _cache_profile(home: Path, key: str, profile: dict, guidance: str, repo: str) -> None:
+def _cache_profile(
+    home: Path, key: str, profile: dict, guidance: str, repo: str, header: str
+) -> None:
     """Keep base policy separate so removing the last profile cannot replay it."""
     temporary = None
     try:
@@ -189,7 +192,7 @@ def _cache_profile(home: Path, key: str, profile: dict, guidance: str, repo: str
             return
         data.update(
             profile_inputs=profile["_inputs"], profile_probes=profile["_probes"],
-            profile_guidance=guidance,
+            profile_guidance=guidance, profile_header=header,
             profile_environment={
                 "version": 1, "home": str(home), "repo": repo, "cwd": os.getcwd(),
                 "dirs": os.environ.get("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", ""),
@@ -204,7 +207,7 @@ def _cache_profile(home: Path, key: str, profile: dict, guidance: str, repo: str
             temporary = Path(handle.name)
             json.dump(data, handle)
         os.replace(temporary, path)
-    except (OSError, ValueError, TypeError):
+    except (OSError, ValueError, TypeError, RecursionError):
         if temporary is not None:
             try:
                 temporary.unlink(missing_ok=True)
@@ -260,31 +263,38 @@ def write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
     guidance = _run_contributor_cached(
         _plugin_root(), raw_payload, home=home, cwd=cwd, repo_root=repo_root
     )
+    header = _GUIDANCE_HEADER
     if guidance:
         profile, errors = load_profile(home, Path(repo_root) if repo_root else None)
-        addition = profile_guidance(profile)
+        try:
+            addition = profile_guidance(profile)
+        except ProfileError:
+            addition = ""
+            errors.append("assembled signature rejected")
         if errors:
+            header = _CONSERVATIVE_HEADER
             addition = "Signature profile unavailable: " + "; ".join(errors) + (
-                ". Use the policy's default disclosure; do not infer an exemption."
+                ". Disclose on all contributions until the profile is resolved."
             )
         if addition:
-            candidate = _GUIDANCE_HEADER + guidance + "\n\n" + addition + "\n"
+            candidate = header + guidance + "\n\n" + addition + "\n"
             if len(candidate.encode("utf-8")) <= _GUIDANCE_MAX_BYTES:
                 guidance += "\n\n" + addition
             else:
+                header = _CONSERVATIVE_HEADER
                 notice = (
-                    "\n\nSignature profile exceeds the session budget. Use default "
-                    "disclosure or resolve the profile with attribution_profile.py "
-                    "before preview/approval; the policy above still applies."
+                    "\n\nSignature profile exceeds the session budget. Disclose on ALL "
+                    "contributions until attribution_profile.py resolves the profile "
+                    "before preview/approval. Baseline exemptions do not apply meanwhile."
                 )
-                if len((_GUIDANCE_HEADER + guidance + notice + "\n").encode("utf-8")) <= _GUIDANCE_MAX_BYTES:
+                if len((header + guidance + notice + "\n").encode("utf-8")) <= _GUIDANCE_MAX_BYTES:
                     guidance += notice
         if cwd and not errors:
             _cache_profile(
-                home, _repo_cache_key(cwd, root=repo_root), profile, guidance, repo_root
+                home, _repo_cache_key(cwd, root=repo_root), profile, guidance, repo_root, header
             )
     if guidance:
-        content = _GUIDANCE_HEADER + guidance + "\n"
+        content = header + guidance + "\n"
     else:
         content = (
             _GUIDANCE_HEADER
@@ -293,7 +303,7 @@ def write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
         )
     if guidance and len(content.encode("utf-8")) > _GUIDANCE_MAX_BYTES:
         content = (
-            _GUIDANCE_HEADER
+            header
             + "Current AI attribution guidance was omitted because it exceeded "
             "the bounded file budget. Treat guidance as unavailable for this "
             "session-start invocation.\n"

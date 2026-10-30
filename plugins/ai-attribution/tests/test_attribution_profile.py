@@ -70,6 +70,27 @@ def test_interpolation_is_text_and_review_facts_are_not_assumed():
         parsed({"header": "Copilot; human reviewed this"})
 
 
+@pytest.mark.parametrize("variable", ["AI\u202e", "AI\u200b", "AI\u0085"])
+def test_variables_reject_display_controls(variable):
+    with pytest.raises(profile.ProfileError, match="variable"):
+        parsed({"header": "{assistant}"}, assistant=variable)
+
+
+@pytest.mark.parametrize("slot,template,variable", [
+    ("header", "{assistant}", "human-reviewed"),
+    ("footer", "{assistant}ed", "human-review"),
+    ("header_variants", "{assistant}", "human-reviewed"),
+    ("footer_variants", "{assistant}ed", "human-review"),
+])
+def test_interpolated_review_claims_rejected_by_both_consumers(slot, template, variable):
+    data = parsed({slot: [template] if slot.endswith("_variants") else template},
+                  assistant=variable)
+    with pytest.raises(profile.ProfileError, match="review claims"):
+        profile.resolve(data, {**CONTEXT, "human_reviewed": False})
+    with pytest.raises(profile.ProfileError, match="review claims"):
+        profile.guidance(data)
+
+
 @pytest.mark.parametrize("rule", [
     {"header": "{operator.__class__}"}, {"header": "{operator!r}"},
     {"header": "{operator:20}"}, {"header": "{"}, {"header": "x" * 513},
@@ -127,6 +148,7 @@ def test_current_marker_wins_over_overlapping_historical_variant():
     "<!-- AI-assisted -->", "<span hidden>AI-assisted</span>",
     "[](#AI-assisted)", "[hidden]: https://example.com/AI-assisted",
     "&nbsp;", "\u200bAI-assisted", "```AI-assisted\n```",
+    "![AI-assisted] ", "![AI-assisted][]", "![AI-assisted][logo]",
 ])
 def test_hidden_or_active_markup_is_not_a_disclosure(header):
     with pytest.raises(profile.ProfileError, match="markup"):
@@ -187,7 +209,8 @@ def test_guidance_and_resolver_consume_same_effective_profile(tmp_path):
 
 @pytest.mark.parametrize("raw", [
     b'{"version":1,"version":1}', b" " * (65536 + 1), b'{"version":true}',
-], ids=["duplicate-key", "oversized-file", "boolean-version"])
+    b'{"version":1,"rules":' + b"[" * 10000 + b"]" * 10000 + b"}",
+], ids=["duplicate-key", "oversized-file", "boolean-version", "deep-json"])
 def test_invalid_profile_file_is_rejected_as_a_layer(tmp_path, raw):
     config = tmp_path / ".copilot" / "ai-attribution.json"
     config.parent.mkdir()
@@ -216,6 +239,11 @@ def test_actual_cli_is_pure_and_invalid_config_is_visible(tmp_path):
     result = subprocess.run(command, input="{}", text=True, capture_output=True, env=env)
     assert result.returncode == 2
     assert "rejected" in json.loads(result.stdout)["error"]
+    config.unlink()
+    result = subprocess.run(command, input="[" * 10000 + "]" * 10000,
+                            text=True, capture_output=True, env=env)
+    assert result.returncode == 2
+    assert "error" in json.loads(result.stdout)
 
 
 @pytest.mark.portfolio_tier("T3")
