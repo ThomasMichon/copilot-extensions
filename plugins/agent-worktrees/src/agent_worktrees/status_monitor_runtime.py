@@ -719,7 +719,7 @@ def cmd_status_monitor_restart(args: argparse.Namespace) -> int:
     """``status-monitor-restart`` -- reap+respawn the resident monitor.
 
     Prints a one-line summary and exits nonzero when spawning fails. The
-    installer's separate cutover handling remains advisory."""
+    installer's separate cutover failure handling is unchanged."""
     r = _restart_status_monitor()
     if not r.get("enabled"):
         print("status-monitor: disabled for this test run -- skipped")

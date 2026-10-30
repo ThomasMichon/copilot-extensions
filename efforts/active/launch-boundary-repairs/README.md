@@ -75,9 +75,9 @@ authorize a shared runtime rollout, service restart or live venue retry.
 ### Phase 2 - Explicit failure and diagnostic preservation
 
 - [ ] Make monitor restart report a real spawn failure through its exit status;
-  preserve disabled/already-current behavior and existing installer advisory
+  preserve disabled/already-current behavior and existing installer cutover
   handling. Do not equate spawning with acquired ownership or serving readiness.
-- [ ] Preserve structured refusal details through the shared owned-delivery
+- [x] Preserve structured refusal details through the shared owned-delivery
   parser and detached-launch refusal consumer, without granting resend or
   replacement authority. Preserve the normal pending-seed helper's existing
   typed/deferred/unconfirmed/lost behavior.
@@ -243,3 +243,25 @@ depends on the mere existence of one of these source defects.
   escalated on #9520. Maintainer conceptual approvals and green CI do not
   replace that gate. Implementation and finalization checkboxes remain
   open; no installed update, repair, restart or live venue retry occurred.
+
+### 2026-10-30 - First repair delivered and review follow-through
+
+- #9545 merged at `5735996e6` after current-head Copilot approval,
+  Maintainer acceptance, passing required CI and no open review threads.
+  The structured-refusal implementation item is complete. Managed finalization
+  verified the source on `origin/dev` and settled the parent worktree's claim.
+- Copilot reviewed #9543 and identified a Low-severity documentation error:
+  the separate installers fail an incomplete monitor cutover rather than
+  treating it as advisory. Corrected the command docstring and plan wording
+  without changing either installer's behavior.
+  All 18 focused restart/installer-cutover controls, Ruff and whitespace
+  checks pass. This documentation-only correction adds no runtime behavior
+  requiring another clean-room or external-venue qualification.
+- #9547 received current-head Maintainer approval at `2ce0f3abe` after the
+  second registry-only rebase and Copilot approval on that same head.
+  Its five implementation, documentation, test and changefile blobs remained
+  unchanged by the rebase; 56 focused cases, 13 install-contract checks,
+  two Bridge contracts with 883 fixtures, Ruff and required CI passed.
+  A newer base conflict still needs reconciliation before merge.
+- #9548 and #9549 still await their required Copilot verdicts. The source
+  effort remains Active; no installed rollout or live venue retry is authorized.
