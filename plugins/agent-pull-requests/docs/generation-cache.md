@@ -51,6 +51,9 @@ pointer. Generation names are validated full hexadecimal content IDs. Current
 objects and descriptor versions/types are validated on read; missing/corrupt
 current objects never become empty-success lookups. Historical lookup accepts
 `generation_id=` and still verifies the selected scope.
+Publication also checks the encoded scope pointer against its 16 KiB read
+budget before writing either object or pointer; large valid generation metadata
+cannot publish an unreadable current reference.
 
 ## Publication outcomes and source freshness
 

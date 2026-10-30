@@ -308,3 +308,25 @@ def test_unprovisioned_cache_never_bootstraps_on_read(tmp_path, evidence):
     with pytest.raises(CacheUnavailable):
         value.lookup(generation(evidence)["scope"])
     assert not value.root.exists()
+
+
+def test_oversized_scope_pointer_refuses_before_writing_either_artifact(cache, evidence):
+    first = generation(evidence)
+    cache.publish(first, expected_current=None)
+    before = {
+        str(path.relative_to(cache.root)): path.read_bytes()
+        for directory in (cache.generations, cache.targets)
+        for path in directory.iterdir()
+    }
+    large = generation(evidence, principal="x" * 17000)
+    with pytest.raises(ValueError, match="pointer exceeds"):
+        cache.publish(large, expected_current=None)
+    after = {
+        str(path.relative_to(cache.root)): path.read_bytes()
+        for directory in (cache.generations, cache.targets)
+        for path in directory.iterdir()
+    }
+    assert after == before
+    assert cache.lookup(first["scope"])["generation"] == first
+    cache.rebuild()
+    assert cache.lookup(first["scope"])["found"] is False

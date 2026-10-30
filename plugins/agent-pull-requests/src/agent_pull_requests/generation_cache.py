@@ -17,6 +17,7 @@ from .watch_storage import StateCommitUncertain, _atomic_write_json
 
 SCHEMA = "agent-pull-requests.generation-cache"
 POINTER_SCHEMA = "agent-pull-requests.generation-cache-current"
+MAX_POINTER_BYTES = 16384
 
 
 class CacheUnavailable(RuntimeError):
@@ -201,7 +202,7 @@ class GenerationCache:
         path = self.targets / (_digest(scope) + ".json")
         if not path.exists() and not path.is_symlink():
             return None
-        value = self._read(path, 16384)
+        value = self._read(path, MAX_POINTER_BYTES)
         if (
             set(value) != {"schema", "version", "scope", "generation_id"}
             or value["schema"] != POINTER_SCHEMA or type(value["version"]) is not int
@@ -253,6 +254,8 @@ class GenerationCache:
         pointer = {
             "schema": POINTER_SCHEMA, "version": 1, "scope": scope, "generation_id": identifier,
         }
+        if len(_encoded(pointer)) > MAX_POINTER_BYTES:
+            raise ValueError("cache pointer exceeds its read budget")
         with self._transaction() as lock:
             current = self._current(scope)
 
@@ -319,7 +322,7 @@ class GenerationCache:
                 value = self._read(path, MAX_GENERATION_BYTES)
                 self._load_generation(path.stem, _scope(value.get("scope")))
             for path in pointers:
-                value = self._read(path, 16384)
+                value = self._read(path, MAX_POINTER_BYTES)
                 scope = _scope(value.get("scope"))
                 if path.stem != _digest(scope):
                     raise CacheInvalid("cache pointer filename does not match its scope")
@@ -328,7 +331,7 @@ class GenerationCache:
             # during the clear leaves old pointers referencing still-held data.
             for path in pointers:
                 self._check(lock)
-                value = self._read(path, 16384)
+                value = self._read(path, MAX_POINTER_BYTES)
                 value["generation_id"] = None
                 _atomic_write_json(path, value)
             for path in generations:

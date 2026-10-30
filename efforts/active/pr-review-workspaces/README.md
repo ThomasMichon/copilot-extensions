@@ -235,6 +235,10 @@ contract.
 - Resumed the preserved cache checkpoint after the isolated native compatibility
   correction. The current cache/generation/owner packet passed 87 cases while
   retaining the merged nullable-properties behavior.
+- Review found that large scope strings could produce an unreadable current
+  pointer despite fitting storage quota. Added a pre-write encoded-pointer bound
+  and proved refusal leaves both artifact sets/current lookup/rebuild intact.
+  The updated source packet passed 88 cases and contained cache controls passed 20.
 
 ### 2026-10-30 - Protected embedding merged; next cache contract
 - #9676 merged as `69064505eb9db002e462f000bcf4d8aa42ab4f47` after
