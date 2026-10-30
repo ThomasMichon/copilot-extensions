@@ -226,7 +226,8 @@ def test_logger_never_replaces_queued_source(owning_logger, area, change):
 
 
 @pytest.fixture
-def materialized_logger(owning_logger, area):
+def materialized_logger(owning_logger, area, rename_source):
+    print("Logger fixture: staging source", file=sys.stderr, flush=True)
     payload, installation, project = owning_logger
     candidate = area / "materialized/plugins/agent-logger"
     shutil.copytree(REPOSITORY / "plugins/agent-logger", candidate, ignore=shutil.ignore_patterns(
@@ -239,8 +240,10 @@ def materialized_logger(owning_logger, area):
     finally:
         sys.path[:] = previous
     assert not any(line.startswith("SKIP ") for line in result), result
+    print("Logger fixture: materialization complete", file=sys.stderr, flush=True)
     shutil.rmtree(payload)
-    shutil.copytree(candidate, payload)
+    rename_source(candidate, payload)
+    print("Logger fixture: ready", file=sys.stderr, flush=True)
     return payload, installation, project
 
 
