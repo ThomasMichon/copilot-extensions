@@ -9,6 +9,8 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import threading
+import time
 
 import pytest
 
@@ -641,3 +643,81 @@ def test_source_wheel_verification_uses_a_fresh_bounded_io_budget(tmp_path, monk
     for now in (1000, 2000):
         monkeypatch.setattr(builds.time, "monotonic", lambda: now)
         inputs.verify()
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_source_tree_overlaps_bounded_reads_and_joins_before_return(tmp_path, monkeypatch, fail):
+    for index in range(8):
+        (tmp_path / f"input-{index}.py").write_bytes(f"VALUE={index}\n".encode())
+    digest_file = builds._digest_file
+    walk = builds.os.walk
+
+    def descending(*args, **options):
+        for directory, children, names in walk(*args, **options):
+            yield directory, children, sorted(names, reverse=True)
+
+    monkeypatch.setattr(builds.os, "walk", descending)
+    barrier = threading.Barrier(4)
+    lock = threading.Lock()
+    active = peak = finished = 0
+
+    def observe(path, *args, **options):
+        nonlocal active, peak, finished
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        try:
+            index = barrier.wait(timeout=10)
+            if fail and index == 0:
+                raise builds.WheelError("synthetic read failure")
+            return digest_file(path, *args, **options)
+        finally:
+            with lock:
+                active -= 1
+                finished += 1
+
+    monkeypatch.setattr(builds, "_digest_file", observe)
+    if fail:
+        with pytest.raises(builds.WheelError, match="synthetic read failure"):
+            builds._tree(tmp_path, time.monotonic() + 30)
+        assert finished == 4
+    else:
+        result = builds._tree(tmp_path, time.monotonic() + 30)
+        assert result == {
+            path.name: (
+                "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest(),
+                path.stat().st_mode & 0o7777,
+            ) for path in tmp_path.iterdir()
+        }
+        assert finished == 8
+    assert peak == 4 and active == 0
+
+
+@pytest.mark.parametrize("budget", ["files", "bytes"])
+def test_source_tree_checks_aggregate_budget_before_dispatching_reads(tmp_path, monkeypatch, budget):
+    for index in range(2):
+        (tmp_path / f"input-{index}.py").write_bytes(b"abcd")
+    monkeypatch.setattr(
+        builds, "_MAX_SOURCE_FILES" if budget == "files" else "_MAX_SOURCE_BYTES",
+        1 if budget == "files" else 7,
+    )
+    monkeypatch.setattr(
+        builds, "_digest_file",
+        lambda *_args, **_options: pytest.fail("over-budget tree dispatched file I/O"),
+    )
+    with pytest.raises(builds.WheelError, match="byte or file budget"):
+        builds._tree(tmp_path, time.monotonic() + 30)
+
+
+def test_source_tree_retains_selected_metadata_until_held_read(tmp_path, monkeypatch):
+    path = tmp_path / "input.py"
+    path.write_bytes(b"original")
+    open_input = builds._open
+
+    def mutate(selected):
+        selected.write_bytes(b"replaced with different bytes")
+        return open_input(selected)
+
+    monkeypatch.setattr(builds, "_open", mutate)
+    with pytest.raises(builds.WheelError, match="input changed"):
+        builds._tree(tmp_path, time.monotonic() + 30)

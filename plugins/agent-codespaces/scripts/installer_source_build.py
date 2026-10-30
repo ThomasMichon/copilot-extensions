@@ -8,6 +8,7 @@ ordinary isolated-build path.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 import ast
 import hashlib
@@ -84,8 +85,9 @@ def _canonical(value) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
 
 
-def _digest_file(path: Path, limit: int, deadline: float) -> str:
-    before = _ordinary(path)
+def _digest_file(path: Path, limit: int, deadline: float, *, before=None) -> str:
+    if before is None:
+        before = _ordinary(path)
     with _open(path) as stream:
         opened = _unchanged(path, before, stream)
         digest, _size = _digest(stream, limit, deadline)
@@ -101,8 +103,9 @@ def _ignored_source(relative: Path, excluded: set[str]) -> bool:
     } or name.endswith((".egg-info", ".dist-info", ".pyc", ".pyo"))
 
 
-def _manifest_digest(path: Path, limit: int, deadline: float) -> str:
-    before = _ordinary(path)
+def _manifest_digest(path: Path, limit: int, deadline: float, *, before=None) -> str:
+    if before is None:
+        before = _ordinary(path)
     if before.st_size > limit:
         raise WheelError("source wheel manifest exceeds its byte budget")
     _check_deadline(deadline)
@@ -119,7 +122,7 @@ def _tree(
     root: Path, deadline: float, *, installed: bool = False, excluded: set[str] | None = None,
 ) -> dict:
     excluded = excluded or set()
-    result, total = {}, 0
+    files, total = [], 0
     for directory, children, names in os.walk(root, followlinks=False):
         for name in list(children):
             path = Path(directory) / name
@@ -143,17 +146,25 @@ def _tree(
             ):
                 continue
             info = _ordinary(path)
-            if len(result) >= _MAX_SOURCE_FILES or info.st_size > _MAX_SOURCE_BYTES - total:
+            if len(files) >= _MAX_SOURCE_FILES or info.st_size > _MAX_SOURCE_BYTES - total:
                 raise WheelError("source wheel input tree exceeds its byte or file budget")
-            digest = (
-                _manifest_digest(path, _MAX_SOURCE_BYTES - total, deadline)
-                if not installed and relative == Path("pyproject.toml")
-                else _digest_file(path, _MAX_SOURCE_BYTES - total, deadline)
-            )
-            result[relative.as_posix()] = (
-                digest, stat.S_IMODE(info.st_mode),
-            )
+            files.append((path, relative, info))
             total += info.st_size
+
+    def read(item):
+        path, relative, info = item
+        digest = (
+            _manifest_digest(path, info.st_size, deadline, before=info)
+            if not installed and relative == Path("pyproject.toml")
+            else _digest_file(path, info.st_size, deadline, before=info)
+        )
+        return relative.as_posix(), (digest, stat.S_IMODE(info.st_mode))
+
+    result = {}
+    with ThreadPoolExecutor(max_workers=4, thread_name_prefix="source-wheel-input") as pool:
+        for offset in range(0, len(files), 4):
+            _check_deadline(deadline)
+            result.update(pool.map(read, files[offset:offset + 4]))
     return result
 
 

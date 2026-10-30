@@ -4499,6 +4499,10 @@ including older Setuptools contracts that report `wheel` dynamically.
 An exact cache hit does not rerun this hook.
 Corrupt or incomplete entries fail explicitly instead of being
 silently rebuilt. Source or tool mutation during a build refuses publication.
+Tree verification reserves the aggregate file/byte budget before reading,
+then overlaps at most four held-input reads per batch. Selected file metadata,
+per-file size bounds and the shared deadline still apply, and all reads finish
+before return or error cleanup. Project builds and runtime activation stay serial.
 This storage is byte custody, not source, feed or installation authority.
 The assembly diagnostic reports built/reused project counts and tools/total
 elapsed time on stderr; those counts describe local wheels, not completed
