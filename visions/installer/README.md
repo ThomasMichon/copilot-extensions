@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-10-28
+- **Last revised:** 2026-10-29
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -349,13 +349,20 @@ incremental construction and zero-downtime replacement. Missing or incompatible
 recognition selects a mostly fresh installation within the same requested
 scope; it does not veto updating or demand an extra repair flag.
 
-Fresh replacement retires known disposable runtime state, old managed processes,
-reactivation registrations and non-config generated globals. It preserves
-configuration, durable application data, unrelated installations and protected
-session-hosting and machine-connectivity dependencies. Success means the
-selected installation is ready and the displaced version is silent, including
-its restart paths. Unknown compatibility is not authority to delete unknown
-content, and an actual construction, scope or retirement failure stays explicit.
+Ordinary updates and repair/force-install publish and start the incoming
+generation independently of the old version's existence, health or cooperation.
+They do not require uninstalling, deleting, unregistering or stopping the old
+runtime first. Current binstubs and applicable task registrations select the new
+generation; brief overlap is expected. The outgoing owner recognizes that it
+is no longer current and retires itself after the incoming owner starts.
+Installer-driven teardown is not the replacement mechanism.
+
+Replacement preserves configuration, durable application data, unrelated
+installations and protected session/connectivity dependencies. Readiness,
+current routing and confirmed self-retirement are distinct observed facts;
+uncertain convergence stays explicit without turning incumbent inspection into
+an admission gate. Explicit uninstall or independently scoped reclamation is a
+separate operation, not a prerequisite for updating.
 
 ### recognizer-manifests
 Each installed footprint has a maintained declarative manifest with two
@@ -431,8 +438,9 @@ version waits or queues behind the active installation. Fresh installation is
 the default convergence path; recognizers enable incremental/ZDD optimization.
 Absent reuse evidence, stale control records or an incompatible old runtime do
 not require a separate force/repair request merely to complete the selected
-update. The same execution owner settles displaced writers and known runtime
-effects before replacement; competing callers never become concurrent writers.
+update. The same execution owner preserves exclusive installation custody; competing
+callers never become concurrent writers. That serialization does not require
+outgoing service-runtime teardown before incoming startup.
 Blocking acquisition, I/O, permission or execution failures leave explicit
 failed-candidate state without activating a failed version. Compatible handoff
 is preferred, not a veto on bounded cold replacement.
@@ -440,12 +448,15 @@ is preferred, not a veto on bounded cold replacement.
 Explicit force/repair installation gives any intact authorized installer a
 bounded way to request disruptive recovery or an explicit replacement target.
 It is not the switch that enables the normal fresh fallback. Agents request
-operator approval before a concrete disruptive host operation. It may briefly attempt
-cooperation, then terminates previous installers and older managed service
-daemons within that installation's process scope, invalidates stale ownership
-and installation-control state, and converges on its explicitly selected code.
-An old installer cannot veto its replacement. Competing repair callers still
-converge on one active writer rather than repeatedly killing one another.
+operator approval before a concrete disruptive host operation. Ordinary and
+repair replacement use the same start-first/self-retirement lifecycle:
+establish and start the selected generation, update its invocation and
+activation routes, and let the outgoing runtime observe supersession and exit.
+An old runtime cannot veto construction or startup of its replacement.
+An active installation writer remains subject to the existing execution owner;
+competing repair callers do not become concurrent writers or repeatedly kill
+one another. Separately authorized stuck-writer recovery is not the routine
+service-replacement path.
 
 An explicit operator order to repair, clean-install or force-reinstall is
 sufficient authorization for that recovery mode. Historical cleanup proof,

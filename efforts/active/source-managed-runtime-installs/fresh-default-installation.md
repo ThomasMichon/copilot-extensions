@@ -28,14 +28,26 @@ old, corrupt or incompatible reuse evidence selects the mostly fresh path,
 not an update refusal or a demand for a separate repair flag. Receipts prove
 the ability to reuse; they do not grant permission to update.
 
-The fresh path clears known disposable runtime state, retires known managed
-processes and scheduled/startup registrations, and replaces non-config
-generated globals so the old version cannot serve or reactivate. Preserve
-configuration, the same durable data, unrelated installations and the protected
-session/connectivity substrate. Do not equate an unknown incremental layout
-with permission to recursively remove its entire root.
+Both ordinary updates and repair/force-install publish and start the incoming
+generation independently of the incumbent. They do not require a successful
+prior-install existence check, old-runtime inspection, uninstall, deletion,
+unregistration or installer-driven old-process shutdown before applying and
+starting the replacement. Replace the generated binstubs and update applicable
+task registrations through their existing owners. Brief runtime overlap is
+expected; the old owner notices it is no longer current and retires itself
+after the new owner starts. Recognition may optimize construction or compatible
+handoff, but inability to inspect or cooperate with the old version must not
+become an admission gate for the selected replacement.
 
-The [verbatim requests](inception-transcript.md#fresh-default-upstream-installation-orchestration)
+Preserve configuration, the same durable data, unrelated installations and the
+protected session/connectivity substrate. Existing native single-writer and
+exclusive-work custody still applies during overlap. Explicit uninstall and
+separately scoped cleanup are not implied by an ordinary or repair update;
+maintained disposable inventory is not an instruction to reclaim old code on
+the update's critical path.
+
+The [independent replacement clarification](inception-transcript.md#independent-v1-to-v2-repair-acceptance),
+[verbatim requests](inception-transcript.md#fresh-default-upstream-installation-orchestration)
 and [manifest refinement](inception-transcript.md#recognizer-manifests-and-footprint-migrations)
 are authoritative. This proposal changes source contracts only; it does not
 authorize a concrete host cleanup, rollout, service stop or maintenance hold.
@@ -72,12 +84,13 @@ owner. Keep its two decisions separate:
    or stale PID alone cannot select a deletion or termination target.
 2. **Incremental compatibility:** expected markers, supported footprint and
    lifecycle contract ranges, and the historical transitions needed to reuse
-   an existing installation. A failure here selects fresh construction using
-   the reset inventory; it does not invalidate that inventory wholesale.
+   an    existing installation. A failure here selects fresh construction without
+   requiring old-footprint interrogation or reset first. The disposable
+   inventory remains available for explicitly addressed cleanup/uninstall.
 
-An unrecognized artifact is preserved unless it falls within an explicitly
-declared disposable class. A required foreign/edited command collision or an
-unretirable owner has a precise failure outcome; neither justifies deleting
+An unrecognized artifact is preserved unless an explicitly scoped removal
+operation owns its declared disposable class. A required foreign/edited command
+collision or uncertain convergence has a precise failure outcome; neither justifies deleting
 unrelated content or a generic "unrecognized install cannot update" response.
 Use existing provenance, custody and path protections without adding manifest
 signing, renderer handshakes or a second installation-permission receipt.
@@ -93,20 +106,22 @@ descriptor may remain valid even when its incremental contract is unsupported.
 
 Resolve the exact source, installation and desired target once. The existing
 caller-independent driver holds exclusive custody across acquisition,
-construction, old-owner settlement, selection and integration. Concurrent
+construction, selection and integration. Concurrent
 same-target callers share/coalesce; different targets queue or follow the
 existing desired-target policy. Neither path bypasses maintenance holds,
 managed-publication restrictions or the authorization of the requested scope.
 These checks do not depend on the old installation's health.
 
-Build the selected immutable candidate before disruptive retirement where
-possible, without modifying a completed slot. Recognition chooses reusable
-inputs and compatible handoff; otherwise use fresh construction and bounded
-retirement of declared old effects. Settle the prior installer and its owned
-children before allowing the new writer to mutate. Invalidate stale runtime
-control and reactivation state, not durable request/failure history or
-application data. Corrupt old receipts cannot veto that supported fresh path;
-unsettled real process effects cannot be relabeled successful cleanup either.
+Build and start the selected immutable candidate without modifying a completed
+slot or requiring teardown of the old runtime. Recognition chooses reusable
+inputs and compatible handoff; otherwise use independent fresh construction.
+An active installation writer remains subject to existing exclusive custody:
+runtime overlap is not permission for two installers to mutate concurrently.
+Preserve durable request/failure history and application data. Corrupt old
+receipts or inability to interrogate the incumbent cannot veto replacement.
+The outgoing runtime observes supersession and stops itself after incoming
+startup; the installer must not substitute old-process termination for that
+behavior.
 
 Use the same root and authority when establishing or recovering the driver.
 Do not require the broken runtime to approve replacement, a kernel restart,
@@ -114,13 +129,23 @@ a new cell, a copied database or manual queue surgery. Preserve pending work
 with its original outcome/source semantics; requesting a new install is not
 silently replaying an uncertain old operation.
 
-Success requires selected-runtime health and silence of every displaced
-declared installer/daemon and restart route. If construction, scoped settlement
+Success requires selected-runtime health, current command/registration routing
+and confirmed old-owner self-retirement. Starting V2 and completing convergence
+are separate observed facts. An uncooperative V1 is a convergence failure, not
+permission to kill it or a reason to require V1 cooperation before starting V2.
+If construction, supersession
 or integration fails, retain an attributable failure and describe any loss of
 service; do not claim readiness, silence or an untouched healthy predecessor
 unless actually established.
 
 ### Bounded MCP control-state reset - agent-recommended
+
+**Historical source qualification, not the new update sequence:** the earlier
+bounded reset implementation remains evidence for its finite controls. The
+newer ordinary/repair start-first contract supersedes mandatory old-owner
+settlement and reset as prerequisites to incoming startup. Reuse an existing
+primitive only where its actual behavior fits the new contract; do not carry
+its old call ordering forward merely because its tests passed.
 
 The next implementation slice clears declared disposable MCP control state,
 not the entire installation. It closes the reset portion of the installer
@@ -203,7 +228,38 @@ not merely a nonzero return. Exercise the recognized incremental path as a
 positive control. Source fixtures do not satisfy the separately authorized
 installed survival, complete portfolio or same-existing-data adoption gates.
 
+### Independent V1-to-V2 repair acceptance - operator-requested
+
+The [2026-10-29 request](inception-transcript.md#independent-v1-to-v2-repair-acceptance)
+adds a decisive suite-level repair test:
+
+1. Install suite V1 and get its applicable services/tools running.
+2. Force-install suite V2 through repair without needing to establish that
+   V1 exists, and without uninstalling, deleting, unregistering or touching V1.
+3. Apply and start V2, replace all binstubs and update task registrations.
+   Brief overlap between running V1 and V2 is expected, not a reason to stop V1.
+4. Prove V1 notices that it is no longer current and shuts itself down after
+   V2 starts. Installer-driven old-owner retirement must not be required for
+   this test to pass.
+
+An external test observer may establish the before/after process and registration
+facts; those observations must not become installer prerequisites. Continued
+use of the same durable data and critical connectivity remains governed by
+the parent effort, not waived by a successful synthetic suite test.
+
+The operator confirmed the same publish/start-first model for **ordinary updates
+and repair/force-install**. Exercise both entry paths; repair is the strongest
+independence case, not a separate lifecycle. The pending agent-recommended
+removal implementation below is unpublished and retained separately. It cannot
+satisfy either test by stopping or removing V1 itself. This section authorizes
+no live install or cleanup.
+
 ### Bounded MCP displaced-code retirement - agent-recommended
+
+**Status:** superseded as a required normal/repair update step. The unpublished
+prototype is retained, not an accepted implementation of the newer contract.
+Any future reclamation work must be separately scoped after replacement and
+must not restore an old-version teardown prerequisite.
 
 The next slice retires MCP's declared old executable footprints and restart
 routes during fresh fallback, under the existing native installer/execution
@@ -279,10 +335,17 @@ survival as separate pending parent gates.
 3. Route global update interception and upstream bootstrap through one
    override/target resolver. Preserve diagnostics and read-only operations,
    independent source choices, exit/input semantics and standalone installation.
-4. Integrate both incremental and fresh plans with the same execution driver
-   and existing native cleanup/cutover primitives. Retire receipt-as-permission
-   branches only with tests for their fresh replacement behavior.
-5. Qualify the complete installed inventory and actual same-data/native
+4. Build the contained V1-to-V2 suite acceptance first through actual Manager
+   ordinary-update and repair entry points. Observe incumbent continuity,
+   incoming startup, temporary overlap, generated-command/task routing and
+   old-owner self-retirement. Prohibit installer actions against V1 as a
+   prerequisite; do not replace the real producers with a parallel test installer.
+5. Integrate both incremental and fresh construction with the same execution
+   driver and incoming-start/supersession owners. Remove mandatory predecessor
+   teardown/reset from update admission and ordering. Preserve explicit
+   uninstall/recovery operations, protected resources and one installation
+   writer; retain cooperative handoff as an optimization.
+6. Qualify the complete installed inventory and actual same-data/native
    consumers. Keep isolated fixtures, released source, authorized rollout and
    live survival evidence distinct.
 
@@ -302,9 +365,12 @@ survival as separate pending parent gates.
 - Prove exact disposable reset scope and byte/data continuity for configuration,
   databases, unrelated/foreign content and protected sessions/connectivity.
   Include path indirection, edited global commands and unknown artifacts.
-- Observe real identity-bound old-process/child retirement and scheduled,
-  startup and maintenance reactivation prevention. A successful new marker
-  alone does not establish old-version silence.
+- Observe real old-owner self-retirement only after incoming startup, plus
+  effective scheduled/startup/maintenance routing to the new generation.
+  Assert no installer uninstall, delete, unregister or old-process-stop action
+  is required in either ordinary-update or repair execution. Separately observe
+  new readiness and complete convergence; a successful new marker alone proves
+  neither. Preserve V1 code bytes throughout this acceptance.
 - Exercise concurrent callers, active and abandoned installers, caller loss,
   corrupt control records, interrupted native effects and same-boot recovery
   through the existing driver. Prove one actual writer, retained pending/failure

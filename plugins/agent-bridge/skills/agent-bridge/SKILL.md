@@ -203,10 +203,68 @@ spawn defaults. Re-adopt against canonical source paths, then restore any
 recorded defaults.
 
 
+## New-session mode preference
+
+Before a **new** launch, consult the native owner instead of asking the operator
+to choose ACP versus CLI. An explicit task mode wins. First confirm support
+against the **selected runtime**, not the skill payload or package version:
+`<agent-bridge catalog argv[0]> config session-mode --help` must advertise
+`agent-bridge.session-mode/v1`. If an older runtime rejects this verb or reports
+another contract, report unsupported preference capability and the need for an
+authorized runtime update. Do not guess a mode, ask a routine mode question,
+automatically update/restart, or replace a retained session. Previously supported
+operations on existing sessions remain available. Once supported, read:
+
+```bash
+<agent-bridge catalog argv[0]> config session-mode --operator-repo "<absolute-config-repo-root>" --repo example --venue codespace --default acp --json
+```
+
+Omit `--operator-repo` when no operator configuration repository is configured.
+Set on the operator's behalf only at an explicit destination. For machine-local
+global/venue policy and readback:
+
+```bash
+<agent-bridge catalog argv[0]> config session-mode --machine-local --set acp --json
+<agent-bridge catalog argv[0]> config session-mode --machine-local --venue codespace --set cli --json
+<agent-bridge catalog argv[0]> config session-mode --venue codespace --json
+```
+
+For versioned policy, replace `--machine-local` with `--operator-repo
+"<absolute-authorized-config-worktree-root>"`, resolved through that repository's
+workspace owner; never guess or edit an anchor. Publish through its normal flow.
+
+Missing optional files select ACP; unreadable or malformed present policy is an
+error, not permission to ask a mode question or switch modes. `--default` is
+only an adopter fallback: it never overrides an operator's global preference.
+Do not offer a switch after inventory, CI, provisioning or launch failures;
+follow the owning troubleshooting procedure. Safety and administrative approvals
+are unchanged.
+
+The resolver reads operator repository policy, then current checkout policy,
+then the active service configuration, then the fallback. Within each owner:
+repository+venue > repository default > venue > global. Repository names match
+exactly and case-sensitively; venues are `codespace`, `container`, `ssh`, `local`.
+It reports the effective mode and attributable file/scope. Canonical
+`.copilot-extensions/agent-bridge/config.yaml` wins over legacy
+`.agent-bridge/config.yaml`; explicit marketplace overlays retain their existing
+precedence. See [session-mode configuration](references/session-mode.md).
+
+Use the existing ACP launch for `acp`. For `cli` on CodeSpace, trusted-container
+or SSH targets, use existing explicit `create <venue-target> --cli --detach`
+when coordinating hands-off, not attached observation. For local CLI creation,
+use the existing `agent-worktrees:worktree` / `copilot` launch owner, not a
+fabricated Bridge `local:` CLI target.
+CLI is session instantiation, not another transport or a requirement for a human
+to watch it. Both modes retain Bridge/provider/SSH/authentication/claims.
+The helper does not change `create`/`send` semantics: callers apply the result
+only when instantiating a new session. Existing `send`/`resume` retain their mode,
+identity and custody; never replace a session to apply a changed preference.
+
 ## CLI Commands
 
-All commands connect to the local agent-bridge HTTP API; the service must be
+Conversation commands connect to the local agent-bridge HTTP API; the service must be
 running (`agent-bridge start`). <!-- marketplace-isolation: allow service-management -->
+`config session-mode` is offline and does not start or restart a service.
 The essential one is **send**:
 
 ```bash
@@ -807,13 +865,14 @@ two capabilities without the destructive take-over:
   reads and steers it with `send`, while a human can attach its real terminal
   or use `ui` to watch it in a browser.
 
-**Durable work gets a CLI body, not a headless one.** When you *dispatch* work
-meant to outlive its caller, prefer a **CLI-backed autopilot session** (via
+**Durable work retains its launch owner.** When you *dispatch* work
+meant to outlive its caller, consult the new-session preference above. A
+**CLI-backed autopilot session** (via
 `agent-dispatch create --spawn --spawn-backend embody` <!-- marketplace-isolation: allow agent-dispatch-management -->
 → `agent-worktrees embody --new`, <!-- marketplace-isolation: allow agent-worktrees-management -->
-`driven_by=agent-dispatch`) over a headless ACP worker — it is durable,
-NF-viewable, and completes its task explicitly. Ephemeral, caller-bounded helpers
-still use headless bridge agents (`send`/`create`). A **handoff** is the in-place
+`driven_by=agent-dispatch`) is durable,
+NF-viewable, and completes its task explicitly. Caller-bounded helpers may use
+ACP bridge agents (`send`/`create`) when selected by policy. A **handoff** is the in-place
 variant: a live cutover replaces the current CLI in its mux with a successor that
 takes the work over (see the `context-handoff:context-handoff` and `agent-dispatch:agent-dispatch` skills).
 
