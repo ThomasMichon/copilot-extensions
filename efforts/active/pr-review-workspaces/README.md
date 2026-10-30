@@ -179,6 +179,42 @@ contract.
 
 ## Journal
 
+### 2026-10-30 - Offline slice merged; acquisition implementation
+- #9647 merged as `fdd60cfc27c6cf14c803e8b610c6462dbc9d6efe` after
+  current-head Copilot approval, all five findings fixed/resolved, and required
+  green checks including eligible units with coverage. The final contained
+  workspace regression packet passed 39 cases; the isolated source CLI smoke
+  passed without installed-runtime selection.
+- Re-read this README and its remaining acceptance items. The offline slice is
+  delivered; the campaign remains Active. Its reviewed acquisition amendment
+  now admits the next finite source slice, not operational rollout.
+- Implementing the provider-owned exporter using existing typed observe
+  credentials and HTTP reader. Each new opaque credential is bound to an
+  observed provider principal before PR reads; retained identity digests are
+  operation-local, not a credential store or another issuer.
+- Added fixed identity and iteration-change reads, explicit pagination evidence,
+  fresh metadata/iteration bracketing and source-selected CLI capabilities.
+  The contained acquisition/existing-observation packet passed 89 cases; all
+  17 current exporter controls passed in the owned isolated source environment,
+  including additional wrong-PR/scope and total-byte-budget negatives.
+- Touched Python lint, quiescent install-contract and documentation-consistency
+  checks passed. Actual source-module capabilities and a pre-network invalid-
+  budget refusal passed. No live backend call, source attachment, submission
+  or service effect has occurred; live qualification needs the caller's existing
+  authorized typed observation-credential command.
+- Acquisition review identified terminal-page replay being accepted as complete
+  and the helper's fixed timeout exceeding the caller's remaining budget.
+  Corrected replay detection before appending/termination and passed the shared
+  deadline to the existing credential-command owner, preserving its bounded
+  cleanup and unchanged legacy default. The focused source packet passed
+  132 cases, including a real slow-helper retirement control.
+- Clarified that the CLI consumes a credential DTO, not a shipped ADO issuer:
+  adopters must supply their existing authorized owner/adapter. The expected
+  principal is the full ADO `authorizedUser.id`, not an AAD identity or label.
+- Follow-up review found that continuation `nextTop` was validated but not used.
+  Subsequent page requests now honor both native continuation values, with a
+  differing-page-size regression and explicit oversized-continuation refusal.
+
 ### 2026-10-30 - Offline read-generation source candidate
 - #9641 merged after current-head Copilot approval with no findings and required
   green checks. Re-read this effort before starting the admitted source slice.

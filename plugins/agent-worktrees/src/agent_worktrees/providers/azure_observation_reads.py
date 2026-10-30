@@ -107,10 +107,19 @@ class Collection:
 class AdoReader:
     def __init__(self, provider, repo, number, api_base, token, *, opener=None,
                  clock=time.monotonic, budget=120, credential_source: CredentialSource | None = None):
-        parsed = urlsplit(api_base)
-        if parsed.scheme != "https" or not parsed.netloc or parsed.query or parsed.fragment:
+        try:
+            parsed = urlsplit(api_base)
+            invalid = (
+                parsed.scheme != "https" or not parsed.hostname or parsed.query or parsed.fragment
+                or parsed.username is not None or parsed.password is not None
+            )
+            _ = parsed.port
+        except ValueError:
+            invalid = True
+        if invalid:
             raise ProviderError("ADO observation requires a configured HTTPS organization endpoint")
         project, repository = provider._split_repo(repo)
+        self.api_base = api_base.rstrip("/")
         self.base = (api_base.rstrip("/") + "/" + quote(project, safe="")
                      + "/_apis/git/repositories/" + quote(repository, safe="")
                      + f"/pullRequests/{number}")
@@ -224,6 +233,58 @@ class AdoReader:
         if continuation:
             raise ProviderError("ADO PR metadata unexpectedly requires continuation")
         return body
+
+    def identity(self) -> dict:
+        body, continuation = self.json(
+            self.api_base + "/_apis/connectionData?api-version=7.1-preview.1",
+        )
+        if continuation:
+            raise ProviderError("ADO identity unexpectedly requires continuation")
+        return body
+
+    def iteration_changes(self, iteration: int) -> Collection:
+        if type(iteration) is not int or iteration <= 0:
+            raise ProviderError("ADO changes require a positive iteration")
+        records, seen = [], set()
+        skip, top = 0, 100
+        try:
+            for _ in range(201):
+                body, continuation = self.json(
+                    self.base + f"/iterations/{iteration}/changes?api-version=7.1",
+                    query={"$compareTo": 0, "$top": top, "$skip": skip},
+                )
+                values = body.get("changeEntries")
+                if (
+                    continuation or not isinstance(values, list)
+                    or any(not isinstance(row, dict) for row in values)
+                ):
+                    raise ProviderError("ADO iteration changes have an invalid page")
+                signature = json.dumps(values, sort_keys=True)
+                if values and signature in seen:
+                    raise ProviderError("ADO iteration changes repeated a page")
+                if values:
+                    seen.add(signature)
+                records.extend(values)
+                if len(records) > MAX_RECORDS:
+                    raise ProviderError("ADO iteration changes exceed the record limit")
+                next_skip, next_top = body.get("nextSkip"), body.get("nextTop")
+                if (
+                    type(next_skip) is not int or type(next_top) is not int
+                    or next_skip < 0 or next_top < 0
+                ):
+                    raise ProviderError("ADO iteration changes lack continuation evidence")
+                if next_top == 0:
+                    return Collection(tuple(records))
+                if next_top > MAX_RECORDS:
+                    raise ProviderError("ADO iteration change continuation exceeds the record budget")
+                if not values or next_skip <= skip:
+                    raise ProviderError("ADO iteration changes repeated or failed to advance")
+                skip, top = next_skip, next_top
+            raise ProviderError("ADO iteration changes exceed the page limit")
+        except ObservationCredentialError:
+            raise
+        except ProviderError as exc:
+            return Collection(tuple(records[:MAX_RECORDS]), str(exc))
 
     def iterations(self) -> Collection:
         return self.collection(self.base + "/iterations?api-version=7.1")

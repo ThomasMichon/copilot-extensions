@@ -53,6 +53,43 @@ def test_explicit_command_renews_with_bounded_captured_streams(monkeypatch):
     })] * 2
 
 
+def test_each_renewal_caps_the_existing_timeout_to_the_remaining_budget(monkeypatch):
+    observed = []
+    limits = iter([40.0, 1.25, 0.5])
+
+    def run(argv, **kwargs):
+        observed.append(kwargs["timeout"])
+        return subprocess.CompletedProcess(argv, 0, json.dumps(envelope()), "")
+
+    monkeypatch.setattr(pr_credential_command, "run_caller_owned", run)
+    source = command_source(json.dumps([sys.executable]), remaining=lambda: next(limits))
+    for _ in range(3):
+        source()
+    assert observed == [15.0, 1.25, 0.5]
+
+
+def test_exhausted_remaining_budget_refuses_before_launch(monkeypatch):
+    monkeypatch.setattr(
+        pr_credential_command, "run_caller_owned",
+        lambda *_args, **_kwargs: pytest.fail("exhausted helper launched"),
+    )
+    source = command_source(json.dumps([sys.executable]), remaining=lambda: 0.0)
+    with pytest.raises(ObservationCredentialError):
+        source()
+
+
+def test_real_slow_helper_is_retired_at_the_remaining_budget(tmp_path):
+    helper = tmp_path / "slow_credential.py"
+    helper.write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
+    started = time.monotonic()
+    source = command_source(
+        json.dumps([sys.executable, str(helper)]), remaining=lambda: 0.25,
+    )
+    with pytest.raises(ObservationCredentialError):
+        source()
+    assert time.monotonic() - started < 8
+
+
 @pytest.mark.parametrize("serialized", [
     "not-json", "{}", "[]", '["relative-command"]', '[""]', '["x", null]', '["x", "\\u0000"]',
     "[" * 2000, json.dumps([sys.executable, "x" * 16384]),
