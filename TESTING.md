@@ -5432,6 +5432,12 @@ this repo's CI already runs a dedicated `windows-latest` job covering the
 Windows-specific containment paths described above, so a devcontainer adds
 nothing there.
 
+The isolation container bootstraps pinned, SHA-256-verified `uv` and Node.js
+interpreters before dependency preparation. Node 22.15.0 supports the native
+extension contract tests without relying on a host installation; only its
+interpreter is extracted, not npm. Both x86-64 and ARM64 archives are pinned.
+The actual suites still run after every container network has been disconnected.
+
 ```bash
 python tools/run_tests_in_devcontainer.py agent-worktrees
 python tools/run_tests_in_devcontainer.py --changed

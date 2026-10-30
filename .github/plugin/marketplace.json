@@ -146,7 +146,7 @@
     {
       "name": "budget-guidance",
       "description": "Provider-neutral current usage-budget posture with strict static readings, deterministic field-level source resolution, sustainable-rate arithmetic, and shared human and machine-readable status.",
-      "version": "0.1.82-dev1",
+      "version": "0.1.83-dev1",
       "source": "plugins/budget-guidance"
     },
     {
