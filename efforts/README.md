@@ -10,7 +10,6 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Local Request Capture](active/local-request-capture/README.md) | Active; proposal reviewed, standalone capture and synthetic Windows/CLI evidence ready | #9581; implementation review/merge remains; no shared inference logging or rollout |
 | [PR Review Workspaces](active/pr-review-workspaces/README.md) | Draft; ADO-first vision and architecture proposal only | #9535; successor PR plugin/service cache, existing #6007/#7188 and #7051 owners retained; no implementation or rollout |
 | [Launch Boundary Repairs](active/launch-boundary-repairs/README.md) | Draft; reviewed source-repair intake before implementation | #9520; preserves #5512/#5761 and open #9322; no rollout or live venue retry |
 | [Native Startup Prompts](active/native-startup-prompts/README.md) | Active; ordinary cold-launch consumer #9374 merged, native POSIX/full-mux and installed qualification remain | #9364; preserves #7116/#8375/#7942/#8669/#5579 owners; no rollout or retained-session restart |
@@ -152,6 +151,7 @@ that pattern to this repository.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Local Request Capture](2026/10/29%20local-request-capture/README.md) | Done; portable operator-owned raw capture merged in #9589, synthetic transport and actual native Windows CLI qualified | #9581; normal promotion #3336, no shared-service logging or installed rollout |
 | [Effort Agenda Companion](2026/10/28%20effort-agenda-companion/README.md) | Done; worktree-journal-local guidance and read-only next/check helper merged in #9421/#9429, paired spike and manual/Windows/Linux qualification recorded | #9377; normal promotion remains #3336, no installed rollout; #3581/#3582/#3583 ownership retained |
 | [Direct Instruction Propagation](2026/10/27%20direct-instruction-propagation/README.md) | Done; direct-copy publisher, reader and independent compatibility source merged in #9336/#9350, qualified without runtime instruction attestation | #9329; #9097 owner retained; normal promotion and separately authorized rollout |
 | [Machine Alias Compatibility and Locality](2026/10/26%20machine-alias-compatibility-and-locality/README.md) | Done; qualified and authorized native/guest installation, ordinary tuple acceptance, all 362 native records/current rosters and actual direct-login/SSH agent readiness verified; exact validation resources retired | #5674 · #6945 · #7057; reviewed #7097 integrity intake remains with authoritative-daemon; original source/resources and wider transport owners preserved |

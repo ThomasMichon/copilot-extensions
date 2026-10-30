@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent proposal and implementation PRs against `dev`
 - **Created:** 2026-10-29
-- **Status:** Active
+- **Status:** Done
 - **Vision:** `visions/harness-guidance`, `attributable-context-budget`
 - **Umbrella issue:** #9581
 
@@ -86,9 +86,9 @@ loopback binding is not an operating-system egress sandbox.
 
 ### Phase 3 - Qualify and publish
 - [x] Exercise the public script boundary using synthetic requests/clients.
-- [ ] Complete independent review, required repository checks and the normal
+- [x] Complete independent review, required repository checks and the normal
   implementation PR merge.
-- [ ] Reconcile the effort's entire Plan and Validation Plan, then archive.
+- [x] Reconcile the effort's entire Plan and Validation Plan, then archive.
 
 ## Validation Plan
 
@@ -148,3 +148,15 @@ made by GitHub's hosted provider.
 - The next review found three additional ambient GitHub credential variables
   missing from the documented child filter. Added them and extended the
   environment regression; no broader harness credential sanitization is claimed.
+
+### 2026-10-29 - Source completion
+- Implementation #9589 merged as `b1ad20501a2a3001b2aeb8e7033051b30ed282e6`
+  after current-head review, resolution of the substantive findings, explicit
+  performance assessment and required CI. The merged `dev` CI also passed.
+- All Plan and Validation Plan items are resolved. Archived the source effort;
+  living usage and privacy boundaries remain in the plugin's capture skill and
+  reference, not this historical journal.
+- Marketplace publication remains the normal #3336 promotion pipeline;
+  installed-consumer updates require their ordinary separate authorization.
+  No installed rollout, live operator harness capture, shared inference
+  logging or POSIX native qualification is claimed.

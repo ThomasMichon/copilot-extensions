@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -21,6 +22,43 @@ from test_installer_wheel_acquisition import CERTIFICATE, feeds as feeds  # noqa
 from wheel_input_fixture import wheel_bytes
 
 import installer_source_build as builds
+
+
+def test_source_phase_allowances_are_independent_and_report_the_expired_phase(monkeypatch, capsys):
+    import installer_wheel_inputs as wheels
+
+    now = [100.0]
+    clock = SimpleNamespace(monotonic=lambda: now[0])
+    monkeypatch.setattr(builds, "time", clock)
+    monkeypatch.setattr(wheels, "time", clock)
+    elapsed = {}
+    with builds._source_phase("acquisition", 10, elapsed) as acquisition:
+        assert acquisition == 110
+        now[0] = 109
+    with pytest.raises(wheels.WheelDeadlineError, match="offline.*deadline") as failure:
+        with builds._source_phase("offline", 10, elapsed) as offline:
+            assert offline == 119
+            now[0] = 120
+            wheels._check_deadline(offline)
+    assert isinstance(failure.value.__cause__, wheels.WheelDeadlineError)
+    assert elapsed == {"acquisition": 9, "offline": 11}
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "phase=acquisition state=completed" in output.err
+    assert "phase=offline state=failed" in output.err
+
+
+def test_source_phase_integrity_failure_preserves_its_original_cause(capsys):
+    error = builds.WheelError("source or installed build tools changed")
+    elapsed = {}
+    with pytest.raises(builds.WheelError) as failure:
+        with builds._source_phase("offline", 10, elapsed):
+            raise error
+    assert failure.value is error
+    assert "offline" in elapsed
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "phase=offline state=failed" in output.err
 
 
 @pytest.fixture
@@ -490,6 +528,41 @@ def get_requires_for_build_wheel(config_settings=None):
     assert len(admitted_tools) == 4
     assert len({python for python, _requirements in admitted_tools}) == 4
     assert {values for _python, values in admitted_tools} == {(value,) for value in requirements}
+
+
+def test_all_requirement_groups_are_acquired_before_the_feed_becomes_unavailable(
+    engine, ordinary, tmp_path, monkeypatch, capsys,
+):
+    plugin, _uv, counter, state = ordinary
+    requirements = ("setuptools>=83", "setuptools>=83.0.0")
+    for package in engine._package_roots(plugin):
+        manifest = package / "pyproject.toml"
+        selected = requirements[1] if package.name == "leaf" else requirements[0]
+        manifest.write_text(manifest.read_text().replace("setuptools>=83", selected))
+    child = engine._child
+    acquired = []
+    offline_requests = []
+
+    def trace(argv, **options):
+        if argv[1:3] == ["pip", "install"] and "--only-binary" in argv:
+            assert not offline_requests, "dependency acquisition ran after offline construction began"
+            acquired.append(tuple(value for value in argv if value.startswith("setuptools")))
+        if argv[1:2] == ["build"]:
+            assert set(acquired) == {(value,) for value in requirements}
+            assert "--offline" in argv and options["environment"]["UV_OFFLINE"] == "1"
+            if not offline_requests:
+                offline_requests.append(len(state["requests"]))
+                state["routes"].clear()
+        return child(argv, **options)
+
+    monkeypatch.setattr(engine, "_child", trace)
+    with _candidate(engine, tmp_path / "installation", ordinary, "1.0.0") as ready:
+        assert _value(engine, ready) == 1
+    assert len(acquired) == 2 and len(counter.read_text().splitlines()) == 3
+    assert offline_requests == [len(state["requests"])]
+    output = capsys.readouterr()
+    assert "phase=acquisition state=completed" in output.err
+    assert "phase=offline state=completed" in output.err
 
 
 @pytest.mark.parametrize("shared_executable", ["uv", "python", "helper"])

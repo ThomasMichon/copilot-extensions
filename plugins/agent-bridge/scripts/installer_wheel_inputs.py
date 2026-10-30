@@ -26,6 +26,10 @@ class WheelError(ValueError):
     """An unreadable, inconsistent, unsafe or over-budget wheel."""
 
 
+class WheelDeadlineError(WheelError):
+    """The selected input-reading deadline is invalid or exhausted."""
+
+
 _WINDOWS_DEVICES = {
     "con", "prn", "aux", "nul", "conin$", "conout$",
     *(f"{kind}{number}" for kind in ("com", "lpt") for number in "123456789\u00b9\u00b2\u00b3"),
@@ -84,7 +88,7 @@ def _check_deadline(deadline: float) -> None:
         type(deadline) not in (int, float) or not math.isfinite(deadline)
         or time.monotonic() >= deadline
     ):
-        raise WheelError("wheel inspection deadline exhausted or invalid")
+        raise WheelDeadlineError("wheel inspection deadline exhausted or invalid")
 
 
 def _single(metadata: Message, name: str, *, optional: bool = False) -> str:
