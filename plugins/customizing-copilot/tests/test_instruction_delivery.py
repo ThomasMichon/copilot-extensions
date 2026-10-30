@@ -17,11 +17,11 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "skills/reviewing-customizations/scripts"
 sys.path.insert(0, str(SCRIPTS))
-import instruction_delivery as delivery
-import instruction_delivery_io as delivery_io
-import instruction_projections as projections
-import projection_reflect as reflect
-import projection_sync_worker as worker
+import instruction_delivery as delivery  # noqa: E402
+import instruction_delivery_io as delivery_io  # noqa: E402
+import instruction_projections as projections  # noqa: E402
+import projection_reflect as reflect  # noqa: E402
+import projection_sync_worker as worker  # noqa: E402
 
 
 def fixture(root: Path, mode: str = "selector") -> tuple[Path, SimpleNamespace, object]:
@@ -53,6 +53,25 @@ def local_path(repo: Path, destination: str) -> Path:
     path = repo / projections.local_sibling_destination(destination)
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def seed_legacy_inline(
+    repo: Path, spec: projections.ProjectionSpec, *, lock_version: int = 2,
+) -> projections.ProjectionSpec:
+    legacy = replace(spec, delivery_mode="inline")
+    rendered = projections.render_projection(legacy)
+    path = repo / legacy.destination
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(rendered.content)
+    lock = repo / projections.LOCK_RELATIVE
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_bytes(projections._canonical_json({
+        "schema": projections.LOCK_SCHEMA,
+        "version": lock_version,
+        "projections": [rendered.lock_entry()],
+    }, pretty=True))
+    assert rendered.fallback_content is None
+    return legacy
 
 
 def managed_path(repo: Path, destination: str) -> Path:
@@ -331,7 +350,9 @@ def test_runtime_source_discovery_does_not_probe_versions_or_git_provenance(
         monkeypatch.setattr(scan_plugin_sources, name, lambda *a: pytest.fail(
             "runtime copy discovery must not collect authoring provenance"
         ))
-    sources = projections.discover_enabled_sources(repo, runtime=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    sources = projections.discover_enabled_sources(repo, runtime=True, home=home)
     assert [item.origin for item in sources] == ["market/policy"]
     assert sources[0].payload_root == payload
     assert sources[0].version == sources[0].commit == ""
@@ -469,7 +490,7 @@ def test_non_string_delivery_kind_returns_blocking_scan_and_cli_json(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     repo, source, spec = fixture(tmp_path, "inline")
-    assert not projections.sync_repository(repo, [source]).blocking
+    seed_legacy_inline(repo, spec)
     path = repo / spec.destination
     raw = path.read_bytes()
     marker = delivery.parse_marker(raw)
@@ -499,13 +520,13 @@ def test_non_string_delivery_kind_returns_blocking_scan_and_cli_json(
     assert "Traceback" not in output.err
 
 
-def test_legacy_lock_migrates_only_with_validated_preimages(tmp_path: Path) -> None:
+@pytest.mark.parametrize("lock_version", [1, 2])
+def test_legacy_lock_migrates_only_with_validated_preimages(
+    tmp_path: Path, lock_version: int,
+) -> None:
     repo, source, spec = fixture(tmp_path, "inline")
-    assert not projections.sync_repository(repo, [source]).blocking
+    seed_legacy_inline(repo, spec, lock_version=lock_version)
     lock_path = repo / projections.LOCK_RELATIVE
-    lock = json.loads(lock_path.read_bytes())
-    lock["version"] = 1
-    lock_path.write_bytes(projections._canonical_json(lock, pretty=True))
     declaration = source.payload_root / "instruction-projections.json"
     data = json.loads(declaration.read_bytes())
     data["projections"][0]["deliveryMode"] = "selector"
@@ -523,7 +544,7 @@ def test_migration_rollback_restores_selector_fallback_and_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo, source, spec = fixture(tmp_path, "inline")
-    assert not projections.sync_repository(repo, [source]).blocking
+    seed_legacy_inline(repo, spec)
     path = repo / spec.destination
     lock_path = repo / projections.LOCK_RELATIVE
     before = path.read_bytes(), lock_path.read_bytes()
@@ -605,10 +626,13 @@ def test_fake_discovery_before_late_write_and_new_context(tmp_path: Path) -> Non
     assert not delivery.complete_body(reconstructed_summary, late.marker)
 
 
-def test_budget_separates_automatic_payload_from_on_demand_fallback(tmp_path: Path) -> None:
+def test_budget_separates_automatic_payload_from_on_demand_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repo, source, spec = fixture(tmp_path)
     assert not projections.sync_repository(repo, [source]).blocking
     from context_budget import build_context_budget
+    monkeypatch.delenv("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", raising=False)
     budget = build_context_budget(repo, home=tmp_path / "home")
     roles = budget["instruction_delivery"]["categories"]
     assert roles["selectors"]["count"] == 1
@@ -986,21 +1010,23 @@ def switch_to_inline(source: object) -> None:
     path.write_text(json.dumps(data))
 
 
-def test_selector_to_inline_retires_only_owned_fallback_transactionally(tmp_path: Path) -> None:
+def test_inline_declaration_cannot_reintroduce_an_automatic_fallback_body(tmp_path: Path) -> None:
     repo, source, spec = fixture(tmp_path)
     assert not projections.sync_repository(repo, [source]).blocking
     fallback = repo / delivery.fallback_destination(spec.destination)
+    before = fallback.read_bytes(), (repo / spec.destination).read_bytes()
     switch_to_inline(source)
     result = projections.sync_repository(repo, [source])
     assert not result.blocking, result.findings
-    assert not fallback.exists()
-    assert fallback.relative_to(repo).as_posix() in result.changed
+    assert (fallback.read_bytes(), (repo / spec.destination).read_bytes()) == before
+    assert result.changed == []
+    assert delivery.parse_marker(before[1])["deliveryKind"] == "selector"
     scan = projections.scan_repository(repo, [source])
     assert not scan.blocking
     assert not any(finding.check == "projection-orphan-fallback" for finding in scan.findings)
 
 
-def test_retirement_rollback_restores_fallback_selector_and_lock(
+def test_periodic_update_rollback_restores_fallback_selector_and_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo, source, spec = fixture(tmp_path)
@@ -1011,6 +1037,9 @@ def test_retirement_rollback_restores_fallback_selector_and_lock(
     ]
     before = {path: path.read_bytes() for path in paths}
     switch_to_inline(source)
+    (source.payload_root / spec.template).write_bytes(
+        spec.template_content.replace(b"authorization.", b"authorization or custody.")
+    )
     atomic = projections._atomic_write
     failed = False
 
@@ -1018,7 +1047,7 @@ def test_retirement_rollback_restores_fallback_selector_and_lock(
         nonlocal failed
         if path == paths[-1] and not failed:
             failed = True
-            raise OSError("injected retirement failure")
+            raise OSError("injected periodic update failure")
         atomic(path, content)
 
     monkeypatch.setattr(projections, "_atomic_write", fail_once)
@@ -1044,7 +1073,7 @@ def test_inline_second_read_rejects_concurrent_uncommitted_projection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo, source, spec = fixture(tmp_path, "inline")
-    assert not projections.sync_repository(repo, [source]).blocking
+    spec = seed_legacy_inline(repo, spec)
     uncommitted = projections.render_projection(replace(spec, plugin_version="2.0.0")).content
     original = delivery_io.resolve_reviewed
     path = repo / spec.destination
@@ -1093,7 +1122,7 @@ def test_new_source_blocks_missing_complete_delivery_without_hook_or_maintenance
     assert not (repo / projections.LOCK_RELATIVE).exists()
 
 
-def test_missing_static_control_floor_is_not_replaced_by_local_body(tmp_path: Path) -> None:
+def test_legacy_cache_flag_does_not_require_an_inline_control_floor(tmp_path: Path) -> None:
     repo, source, spec = fixture(tmp_path, "inline")
     declaration = source.payload_root / "instruction-projections.json"
     data = json.loads(declaration.read_bytes())
@@ -1102,7 +1131,10 @@ def test_missing_static_control_floor_is_not_replaced_by_local_body(tmp_path: Pa
     local = repo / projections.local_sibling_destination(spec.destination)
     local.parent.mkdir(parents=True)
     local.write_bytes(projections.render_projection(spec, include_prefer_local=False).content)
-    assert projections.scan_repository(repo, [source]).blocking
+    result = projections.scan_repository(repo, [source])
+    assert not result.blocking
+    assert any(f.check == "projection-source-update" for f in result.findings)
+    assert not (repo / spec.destination).exists()
 
 
 def test_valid_stale_reviewed_guidance_remains_advisory_without_local_refresh(tmp_path: Path) -> None:
@@ -1309,12 +1341,12 @@ def test_malformed_scope_refused_as_structured_declaration(tmp_path: Path, scala
 
 
 def test_inline_envelope_adoption_reports_render_digest_delta(tmp_path: Path) -> None:
-    repo, source, _ = fixture(tmp_path, "inline")
+    repo, source, spec = fixture(tmp_path, "inline")
     declaration = source.payload_root / "instruction-projections.json"
     data = json.loads(declaration.read_bytes())
     data["projections"][0].pop("deliveryMode")
     declaration.write_text(json.dumps(data))
-    assert not projections.sync_repository(repo, [source]).blocking
+    seed_legacy_inline(repo, replace(spec, delivery_declared=False))
     data["projections"][0]["deliveryMode"] = "inline"
     declaration.write_text(json.dumps(data))
     result = projections.scan_repository(repo, [source])

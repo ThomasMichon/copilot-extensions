@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 from .ordinary_agent_facts import identity
-from .queue_records import SpawnState, TaskError
+from .queue_records import SpawnState, Status, TaskError
 
 
 def _validate_origin(conn: Any, row: Any, origin: str | None) -> None:
@@ -112,3 +112,111 @@ def inherited_retirement(conn: Any, row: Any, task: Any) -> bool:
         return False
     _, retired = native_bindings(conn, row, task)
     return bool(retired)
+
+
+def retained_start_generation(conn: Any, task: Any, info: dict) -> bool:
+    """Later normal claims require the original native's real attachment history."""
+    generation = info.get("task_generation")
+    if type(generation) is not int or task.generation < generation:
+        return False
+    if task.generation <= generation + 1:
+        return True
+    previous = conn.execute(
+        "SELECT session_id,worktree_id,machine FROM task_attachments "
+        "WHERE task_id=? ORDER BY id DESC LIMIT 1", (task.id,),
+    ).fetchone()
+    actual = identity(info)
+    return bool(
+        previous is not None
+        and previous["session_id"] == actual.native
+        and previous["worktree_id"] == actual.worktree
+        and previous["machine"] is not None
+        and task.owner == f"{previous['machine']}/{actual.worktree}"
+    )
+
+
+def retained_redrive_facts(conn: Any, row: Any, task: Any) -> dict:
+    """Describe a same-native queued continuation; never authorize replacement."""
+    from .bridge_remote import normalize_host
+    from .ordinary_agent_facts import native_conflict
+    from .queue_execution_custody import (
+        execution_scope_qualified, require_execution_send_reconciliation,
+    )
+    from .queue_run_waiter_transition_cleanup import CLAIM_RELEASE_SENDER
+
+    if (
+        row["driver"] != "ordinary-bridge"
+        or row["state"] != SpawnState.SPAWNED
+        or row["startup_fenced"] or row["release_requested"]
+        or row["conversation_retired"] or row["cooling_token"] is not None
+        or row["conclusion_state"] == "pending"
+        or row["exclusive_key"] and row["exclusive_released"]
+        or task.status != Status.QUEUED or task.owner is not None
+        or task.owner_session_id is not None or task.hold_reason is not None
+        or task.awaiting_steer or task.exclusive_key != row["exclusive_key"]
+        or task.target_worktree is not None and task.target_worktree != row["worktree"]
+        or not row["agent_info"]
+    ):
+        raise TaskError("retained native redrive task/reservation fence changed")
+    if conn.execute(
+        "SELECT 1 FROM spawn_reservations WHERE task_id=? AND attempt>? LIMIT 1",
+        (task.id, row["attempt"]),
+    ).fetchone():
+        raise TaskError("retained native redrive is not the current attempt")
+    if conn.execute(
+        "SELECT 1 FROM spawn_reservations WHERE key<>? "
+        "AND (worktree=? OR exclusive_key IS NOT NULL AND exclusive_key=? AND exclusive_released=0) "
+        "AND (state IN ('reserving','spawned','cold','releasing') OR conclusion_state='pending')",
+        (row["key"], row["worktree"], row["exclusive_key"]),
+    ).fetchone():
+        raise TaskError("retained native redrive has conflicting execution custody")
+    if execution_scope_qualified(conn, task.repo, task.source):
+        raise TaskError("retained native redrive requires enrolled supervisor send admission")
+    require_execution_send_reconciliation(conn, task.id, exclusive_key=task.exclusive_key)
+    if conn.execute(
+        "SELECT 1 FROM run_waiters WHERE task_id=? AND state IN ('active','preparing')",
+        (task.id,),
+    ).fetchone():
+        raise TaskError("retained native redrive has an active detached waiter")
+    for table in ("wake_outbox", "run_waiter_wakes"):
+        wakes = conn.execute(f"SELECT * FROM {table} WHERE task_id=?", (task.id,)).fetchall()
+        if any(
+            not (table == "run_waiter_wakes" and wake["sender"] == CLAIM_RELEASE_SENDER)
+            and (
+                wake["execution_send_state"] in {"pending", "unknown"}
+                or wake["status"] in {"pending", "delivering", "failed"}
+                or wake["attempts"] > 0 and wake["status"] != "delivered"
+            )
+            for wake in wakes
+        ):
+            raise TaskError("retained native redrive has unresolved wake custody")
+    actual = identity(json.loads(row["agent_info"]))
+    previous = conn.execute(
+        "SELECT session_id,worktree_id,machine FROM task_attachments "
+        "WHERE task_id=? ORDER BY id DESC LIMIT 1", (task.id,),
+    ).fetchone()
+    if (
+        previous is None or previous["session_id"] != actual.native
+        or previous["worktree_id"] != actual.worktree or not previous["machine"]
+        or actual.worktree != row["worktree"]
+        or actual.project != row["allocation_project"] or actual.path != row["worktree_path"]
+    ):
+        raise TaskError("retained native redrive has no matching original attachment")
+    host = previous["machine"]
+    handle = row["session_handle"]
+    if handle not in {f"local-body:{actual.bridge}", f"fleet-body:{host}:{actual.bridge}"} or (
+        row["creating_host"] and normalize_host(row["creating_host"]) != normalize_host(host)
+    ):
+        raise TaskError("retained native redrive execution host or handle changed")
+    known, retired = native_bindings(conn, row, task)
+    if native_conflict(actual.native, known, retired):
+        raise TaskError("retained native redrive conflicts with native identity history")
+    from .ordinary_native_redrive import redrive_invocation
+
+    return {
+        "version": 2, "task_id": task.id, "task_generation": task.generation,
+        "reservation_key": row["key"], "session_id": actual.bridge,
+        "native_session_id": actual.native, "worktree_id": actual.worktree, "machine": host,
+        "startup_revision": row["startup_revision"],
+        "invocation": redrive_invocation(row, host),
+    }

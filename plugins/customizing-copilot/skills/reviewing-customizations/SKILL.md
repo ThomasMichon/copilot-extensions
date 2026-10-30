@@ -118,20 +118,20 @@ ownership, safely detectable `applyTo` overlap, orphaned lock/file entries,
 legacy marked `AGENTS.md` regions, 4 KiB per-file and 12 KiB aggregate budgets,
 and dynamic/session-specific content that cannot be checked in safely.
 New enabled sources with neither reviewed artifacts nor a verified complete
-enabled canonical local body block as `projection-missing`; required inline
-control floors cannot be replaced by a cache. Once valid guidance is available,
+enabled canonical local body block as `projection-missing`. Former inline and
+cache-free declarations use the same selector/offline-body pair. Once valid guidance is available,
 stale reviewed freshness remains advisory `projection-source-update`, owned by
 adopted maintenance rather than per-session resync. Missing locked artifacts,
 foreign ownership and unsafe paths remain blocking.
 
 ### Static fail-safe projection sync
 
-Until the supported Copilot CLI version floor proves native composition of every
-plugin-owned `sessionStart` `additionalContext` value, checked-in projections
-plus exact-session guidance files are the reliable ambient-policy path. A plugin
-declares a bounded, data-only pointer or fallback template and, when guidance is
-dynamic, uses an output-free `sessionStart` hook to write the exact session's
-file. Synchronize enabled declarations with the companion manager:
+Creation/startup copies are the normal automatic full-body delivery path.
+Periodically maintained checked-in fallbacks remain available for offline
+recovery, not a second automatically loaded policy copy. A plugin declares its
+canonical template and, when guidance is dynamic, uses an output-free
+`sessionStart` hook to write the exact session's file.
+Synchronize enabled declarations with the companion manager:
 
 ```bash
 python3 <skill-dir>/scripts/manage-instruction-projections.py sync <repo-root>
@@ -145,8 +145,9 @@ trust, then reads only the explicit declaration and canonical template from
 each enabled payload (personal activation does not change a shared checked-in
 projection). Malformed settings and unavailable enabled payloads block the
 operation. It creates or updates only the declared
-`.github/instructions/<plugin>/` destination, writes deterministic UTF-8/LF
-bytes with machine-readable provenance, and commits all changed projections and
+`.github/instructions/<plugin>/` thin selector and its derived ordinary `.md`
+body under `.github/copilot/context-fallbacks/`, writes deterministic UTF-8/LF
+bytes with machine-readable provenance, and commits both artifacts and
 the deterministic lock as one serialized, compare-before-replace,
 rollback-protected transaction. It refuses
 unmarked files, malformed or missing ownership, different owners, local body
@@ -154,7 +155,11 @@ edits, nonportable or case-conflicting destinations, path escape, and
 symlink/reparse indirection. Scheduled adopters may explicitly consent to
 repairing content edits on valid, already-owned generated artifacts with
 `overwriteExistingManaged`; ordinary sync preserves edits by default.
-See `docs/patterns/worktree-scoped-dynamic-guidance.md` for that narrow
+Full fallback paths exclude `.instructions.md` anywhere, case-insensitively,
+and native instruction filenames. Legacy inline declarations are accepted but
+normalize to selector/body output; they cannot reintroduce a duplicate automatic
+body. See `docs/patterns/worktree-scoped-dynamic-guidance.md` for the
+provider-first reader/writer upgrade and rollback window and narrow
 transactional repair boundary. It never deletes repository-owned files; orphaned
 projections and old managed regions are review findings for a human or ordinary
 repository change to remove.

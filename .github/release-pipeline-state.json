@@ -8,14 +8,14 @@
         ".github/workflows/copilot-code-review.yml": "e4e9b375d839f3b791c128739f59da3c9d6051a4",
         ".github/workflows/validate-and-promote.yml": "31302abf0db562ce28ce987a37cac3b94ddb4b1e"
       },
-      "main_head": "2ef3c816409e0e1cdbd805943634bc57ae49eae5",
+      "main_head": "2c989fb223463a2c8ddb6ea4ea8b42505f998f41",
       "manifest_blob": "afab28d33694384f5167b7d268e0586be2b691c5"
     },
-    "dev_head": "daca1e7c742e5cdec6f315fd00fe7e5027e33936",
-    "main_before": "2ef3c816409e0e1cdbd805943634bc57ae49eae5",
-    "promoted_at": "2026-10-30T06:37:48Z",
-    "release_id": "daca1e7c742e5cdec6f315fd00fe7e5027e33936",
-    "tag": "promote-dev-daca1e7c742e5cdec6f315fd00fe7e5027e33936"
+    "dev_head": "beba508d9163b86d4f4f6ed505b3cb89032241b6",
+    "main_before": "2c989fb223463a2c8ddb6ea4ea8b42505f998f41",
+    "promoted_at": "2026-10-30T06:45:53Z",
+    "release_id": "beba508d9163b86d4f4f6ed505b3cb89032241b6",
+    "tag": "promote-dev-beba508d9163b86d4f4f6ed505b3cb89032241b6"
   },
   "last_rollback": null,
   "pause_reason": null,

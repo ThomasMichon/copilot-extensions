@@ -1084,13 +1084,74 @@ The supervisor now has the positive-death signal the earlier design deferred to:
 
 For a confirmed-gone body, the supervisor yields the task on the dead owner's
 behalf when it is still leased (preserving `goal` and `progress_log`), marks the
-reservation failed, and the next cycle can reserve a fresh attempt. `live` bodies
+reservation failed, and the next cycle can reserve a fresh attempt. This legacy
+replacement rule does not apply to `ordinary-bridge` or `restricted-bridge`
+reservations: process absence does not retire their native conversation. Ordinary
+started owners are suspended with their owner, native identity and reservation
+intact; unfinished claims remain held for reconciliation, including a claim
+before spawn publication or while the original reservation is releasing.
+Restricted owners retain
+their existing immutable binding. Stranded-cold cleanup likewise does not release
+either driver's conversation to make a replacement. `live` bodies
 are heartbeated; `unknown` bodies are left untouched. A confirmed-alive but quiet
 worktree body can also be nudged once per stall window (`nudge_stalled`) instead
 of being recovered. The remaining unsupported recovery path is **CLI/mux fleet**
 auto-recovery: without a headless bridge session handle, a synthetic-owner fleet
 body is still not auto-joined to the origin's live-session registry; use
 headless fleet for recoverable remote sweeps.
+
+**Queued ordinary continuation.** When a previously attached ordinary native
+owner's task is queued and unowned, `redrive_unclaimed_spawns` can address that
+same conversation from its retained `spawned` reservation. Queued `cold`
+reservations remain held: redrive does not bypass cold-resume capacity admission. The existing
+reservation read exposes version-2 `ordinary_redrive` facts and an `ordinary_redrive_error`
+when unavailable. Missing support on an older coordinator is a hold, not a CLI
+fallback; unsupported fact versions likewise hold before transport. Older readers
+ignore the additive fields without changing their existing reservation semantics.
+The snapshot checks the latest real task attachment, native/history,
+worktree, allocation, host and reservation custody. A hold, release, retirement,
+cooling, conflicting reservation, active waiter or unresolved owner/waiter wake
+prevents the send; failed or superseded attempted wakes are not absence proof.
+Qualified execution scopes remain held until supervisor send enrollment is
+implemented, even if the owner-wake list is empty.
+
+Before transport, the existing `record_spawn` operation atomically rechecks the
+snapshot and records a pending startup revision together with the frozen
+continuation invocation in reservation metadata. Terminal cleanup and capacity
+release remain blocked while that startup is incomplete. An UNKNOWN return
+retains the revision; a restarted supervisor can retry only that operation,
+after fresh queued-task/native/custody admission. An unrelated pending startup
+cannot use this path. Successful transport closes only the matching revision
+and invocation, preserving any concurrent release state and intent. Generic
+startup completion cannot close a retained continuation's pending revision.
+Its historical marker does not own a later normal cold-resume startup revision;
+that caller can complete normally without discarding the frozen redrive bytes.
+
+The supervisor uses standard Bridge `send` with the captured native target,
+one reservation-bound `:redrive` idempotency key and an explicit operation-bound
+caller. The caller and frozen continuation prompt stay identical across retries,
+supervisor launch contexts, restarts and later task-claim generations;
+this is not a replay of the accepted startup invocation. No `--queue`, force,
+replacement session or supervisor-side task claim is used. The original worker
+must claim normally and start with its captured `--owner-session-id`; later
+claims require matching original-native attachment history. A successful send
+does not itself establish that the worker reclaimed or completed the task.
+
+Version 2 negotiates the pending-startup request through the existing reservation
+read before sending the additive `ordinary_redrive` field to `record_spawn`.
+Version-1, missing and unknown declarations hold before publication or transport;
+older callers keep their existing `record_spawn` syntax.
+The supervisor also verifies that the startup-publication response contains its
+exact pending revision and frozen operation before transport. A coordinator
+rollback between discovery and publication cannot silently drop the new field
+and still trigger a send. A lost publication response retains startup custody;
+a later supported retry reconciles the stored operation, never infers absence.
+An unavailable delivery identity/runtime is logged per candidate and retains
+its pending startup; it does not abort processing the remaining reservations.
+Native owner/waiter wake
+commands also use an explicit key-bound caller. A receipt previously bound to a
+different implicit caller is not permission to change its key or replay accepted
+work: a conflict stays unresolved for reconciliation.
 
 **Retiring an unleased worktree-only reservation.** A `release_requested`
 reservation whose task never reached a captured `owner_session_id` (the normal
@@ -1228,7 +1289,7 @@ local Bridge carrier (`embody.fleet_body_verdict`, with bounded direct SSH only
 when the command capability is absent)
 for the same tri-state verdict: a **confirmed-live** body is heartbeated
 (`hold_live_leases`) so a quiet-but-alive sweep isn't wrongly recovered, and a
-**confirmed-gone** body (its ACP session terminal or absent) has its reservation
+**confirmed-gone** legacy body (its ACP session terminal or absent) has its reservation
 released (`recover_gone`) so the next cycle re-embodies it — resuming from the
 task's `progress_log`. As always, an `unknown` probe (ssh/bridge unreachable,
 lagging reconcile) is never treated as death, so recovery cannot double-spawn a
@@ -1242,7 +1303,8 @@ Session Host release capacity while the ACP session record, task owner,
 worktree, and reservation remain durable. A later steer or Resume sends the
 next turn to that same session id, starts a fresh child, and returns the cold
 reservation to `spawned`; it does not release the task for a new embodiment.
-Confirmed session loss still follows the ordinary liveness recovery path.
+Ordinary and restricted native reservations retain their conversations on process
+loss; only the legacy drivers follow replacement-based liveness recovery.
 
 If retry preparation retains a worktree but the bridge recovery handle was
 never captured, the headless factory resolves that worktree's existing

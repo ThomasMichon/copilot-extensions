@@ -21,11 +21,14 @@ def test_normal_projection_contains_the_complete_bounded_standby_policy(tmp_path
     assert not unknown and result.blocking == 0, result.findings
     spec, = [item for item in specs if item.source_id == "maintenance-standby"]
     assert spec.destination == DESTINATION and spec.apply_to == "**"
-    assert spec.delivery_mode == "inline"
+    assert spec.delivery_mode == "selector"
     rendered = projections.render_projection(spec)
     assert spec.template_bytes <= projections.MAX_TEMPLATE_BYTES
     assert rendered.byte_count <= projections.MAX_PROJECTION_BYTES
-    text = rendered.content.decode("utf-8")
+    assert rendered.marker["deliveryKind"] == "selector"
+    assert b"[owner: agent-conduct-guidance]" not in rendered.content
+    assert rendered.fallback_content is not None
+    text = rendered.fallback_content.decode("utf-8")
     for required in (
         "[owner: agent-conduct-guidance]", "~/.copilot-extensions/maintenance.json",
         "current OS user's home", "ownerSessionId", "your own durable Copilot session ID",
@@ -49,11 +52,21 @@ def test_reviewed_standby_survives_payload_removal_without_activating_a_hold(tmp
     assert result.blocking == 0, result.findings
     destination = adopter / DESTINATION
     before = destination.read_bytes()
-    assert b"copilot-guidance-body-end:v1" in before
+    fallback_relative = projections.delivery.fallback_destination(DESTINATION)
+    fallback = adopter / fallback_relative
+    fallback_before = fallback.read_bytes()
+    assert b"copilot-guidance-body-end:v1" not in before
+    assert projections.delivery.complete_body(
+        fallback_before, projections.delivery.parse_marker(fallback_before),
+    )
+    assert b"exactly one native" in fallback_before
     shutil.rmtree(payload)
     offline = projections.scan_repository(adopter)
     assert offline.blocking == 0, offline.findings
     assert destination.read_bytes() == before
+    assert fallback.read_bytes() == fallback_before
+    selected = projections.resolve_instruction_source(adopter, DESTINATION)
+    assert selected["selectedPath"] == fallback_relative
     assert not (adopter / ".copilot-extensions/maintenance.json").exists()
 
 

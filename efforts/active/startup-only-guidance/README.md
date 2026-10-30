@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Sequential proposal and implementation PRs against `dev`
 - **Created:** 2026-10-29
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Harness guidance](../../../visions/harness-guidance/README.md):
   `authoritative-ownership`, `simple-local-static-delivery`,
   `resilient-safety-boundary`
@@ -77,28 +77,28 @@ details below are **agent-recommended**, not additional operator requests.
   taking its separate whole-issue acceptance or #9097 ownership.
 - [x] Capture both requests, the confirmed slug and the periodic-fallback
   clarification; reconcile the vision's inline-fallback exception.
-- [ ] Review and merge this proposal before changing implementation or adopters.
+- [x] Review and merge this proposal before changing implementation or adopters.
 
 ### Phase 2 - Make fallback authoring non-discoverable
 
-- [ ] Extend the existing renderer, declaration handling, reader and scanner
+- [x] Extend the existing renderer, declaration handling, reader and scanner
   together so every maintained full fallback is a non-discovered `.md` body,
   including former inline/control-floor declarations. Thin recovery locators
   may remain automatically discoverable; they must not reproduce policy bodies.
-- [ ] Keep periodic sync, consent/ownership protections, atomic lock updates,
+- [x] Keep periodic sync, consent/ownership protections, atomic lock updates,
   worker/reconciler integration and complete fallback accounting. Do not require
   fallback synchronization at creation/startup or on every agent read.
-- [ ] Enforce safe fallback filenames, including embedded or repeated
+- [x] Enforce safe fallback filenames, including embedded or repeated
   `.instructions.md` forms and other native instruction-discovery names.
   Validate the whole candidate path as well as its final suffix.
-- [ ] Preserve managed-copy-first raw lookup and independent publication.
+- [x] Preserve managed-copy-first raw lookup and independent publication.
   Do not restore hash, fingerprint, version or receipt admission for generated
   content, or let fallback age block usable current guidance.
-- [ ] Implement provider-first compatibility before changing declarations or
+- [x] Implement provider-first compatibility before changing declarations or
   adopted artifacts. Preserve existing CLI operations and strict argument
   rejection; describe supported old/new maintenance readers, rollback and
   truthful incompatible-state errors rather than assuming lockstep updates.
-- [ ] Update owning patterns, setup/review guidance and focused tests; add a
+- [x] Update owning patterns, setup/review guidance and focused tests; add a
   changefile for every changed plugin without hand-editing versions.
 
 ### Phase 3 - Migrate declarations and adopted copies
@@ -182,3 +182,49 @@ existing review, custody and explicit approval gates.
   the phased compatibility and validation mechanisms are agent-recommended.
 - Claimed the bounded follow-up in #5993 without closing or taking its retained
   whole-outcome acceptance. Proposal review remains the next execution gate.
+
+### 2026-10-29 - Proposal merged; provider implementation admitted
+
+- #9610 merged after current-head Copilot approval, complete review assessment
+  and required green checks. The proposal changed documentation only.
+- Re-read the complete effort after merge. Phase 2 now owns provider-side
+  fallback naming, authoring and discovery behavior before declaration or
+  adopter migration. Periodic maintenance remains part of the target.
+- No installed payload, service, tracked instruction artifact or machine
+  setting changed. Source merge is not release or adoption.
+
+### 2026-10-29 - Provider slice implemented and qualified
+
+- Maintenance authoring normalizes legacy inline, omitted-mode and selector
+  declarations to thin selectors plus ordinary non-discovered fallback bodies.
+  Complete canonical templates and the periodic worker remain intact.
+- Whole derived fallback paths reject embedded/repeated `.instructions.md`
+  forms and case variants; native instruction basenames are also refused.
+  Managed-copy-first runtime reading remains free of content-admission gates.
+- Updated legacy fixtures preserve actual inline lock/preimage migration,
+  foreign-file refusal, concurrency, rollback and old oversize-file controls.
+  The isolated, network-disconnected full customization suite passes 679 tests
+  with two existing skips. Documentation, install-contract and customization
+  checks pass their blocking gates.
+- Qualified the actual prior selector-capable provider in both reader/writer
+  directions, including rollback maintenance after explicit selector inputs.
+  An older writer with an inline declaration remains outside the startup-only
+  guarantee; the owning pattern documents the required input migration.
+- Independent review found no code defect and one stale pattern-index summary,
+  now corrected. Added the provider's release changefile.
+- This is implementation and qualification, not a merged or released provider.
+  Declarations, adopter artifacts, installed payloads and native delivery
+  qualification remain unchanged; Phase 3 waits for this provider slice to land.
+
+### 2026-10-29 - Dependent policy consumers qualified during review
+
+- Current-head review identified four conduct-guidance tests retaining inline
+  output assumptions. Reproduced all four failures, then adapted the consumers
+  to assert thin selectors and complete fallback policy bodies instead.
+- Preserved and strengthened offline recovery after payload removal: both
+  artifacts remain byte-identical, the fallback retains a complete envelope,
+  and offline source lookup selects the owned fallback.
+- The focused consumer packet passes all 24 cases. Its full isolated,
+  network-disconnected plugin suite passes 103 tests with 41 existing skips.
+  Added that plugin's patch changefile; no policy template or declaration changed.
+- The implementation PR remains review-gated until the updated head is assessed.
