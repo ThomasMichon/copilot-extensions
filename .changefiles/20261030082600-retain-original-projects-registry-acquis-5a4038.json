@@ -1,0 +1,9 @@
+{
+  "comment": "Retain original projects-registry acquisition and adoption-default provenance without replaying reads or changing legacy defaults.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
