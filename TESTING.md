@@ -1411,6 +1411,8 @@ Fixture staging moves the already-materialized private payload into its installe
 location rather than copying the complete graph again.
 Bounded phase markers distinguish fixture readiness, owner acknowledgement,
 foundation observation and ordinary-result waits; diagnostic paths are fixture-relative.
+Terminal foundation failures, interrupted requests and owner exit without a
+receipt fail the observer immediately rather than consuming its remaining wait.
 
 Windows runs recipe refusals, actual bootstrap hooks and the concurrent cold
 consumer in three separate contained packets. A filtered invocation combines
