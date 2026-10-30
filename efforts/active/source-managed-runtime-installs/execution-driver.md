@@ -123,6 +123,45 @@ This amendment clears its own review gate before foundation implementation.
 
 ## Normal and force/repair operation
 
+### Explicit calls and automatic-update inhibition
+
+The automatic-update hold applies only to automatic work, not an explicit
+`<repo> update` invocation. Public-safe capture, with only the repository
+command name generalized:
+
+> that update hold should only block *auto*-updates, not calls to `<repo> update`
+
+> We should probably update the other call flows to pass `--auto` to make it clear, and have *those* no-op
+
+The portable requirement is explicit/manual update by default, with `--auto`
+on genuine background update callers. An active automatic hold makes those
+automatic requests visibly no-op without executing installers. It does not
+silently convert a manual update into a force rebuild or require the operator
+to remove the automatic hold.
+
+**Agent-recommended implementation and validation:**
+
+1. Review this amendment, then carry explicit automatic intent through the
+   existing repository-command parser, Manager bootstrap, request adapter and
+   durable execution owner. Preserve strict parsing, existing force/repair
+   options and declared version-skew compatibility. Reuse existing request
+   authority rather than adding a second queue or a parallel inhibition flag.
+2. Inventory and migrate actual background update producers to `--auto`.
+   Preserve selected source, publication and authentication policy. An
+   interactive invocation with no flag remains ordinary manual update.
+3. Qualify manual update under an active hold, automatic no-op under that
+   same hold, automatic execution without the hold, and mode propagation
+   through bootstrap and engine requests. Manual and automatic requests
+   must not coalesce into an outcome with the wrong inhibition semantics.
+4. Preserve interrupted-transaction recovery and exclusive live-installer
+   custody independently of the automatic hold. Manual intent does not
+   fabricate successful settlement, bypass artifact/dependency admission,
+   steal a live writer or grant unrelated administrative actions.
+5. Exercise the real supported command/adapter boundary and native platform
+   controls, then publish through review, CI and promotion. Source tests or
+   clearing a hold are not successful fleet installation; actual update,
+   selected/serving health, preservation and full timing remain required.
+
 The [fresh-default revision](fresh-default-installation.md) governs construction
 and replacement selection. Ordinary updates already select mostly fresh
 installation when incremental/ZDD recognition fails; that fallback is not an
