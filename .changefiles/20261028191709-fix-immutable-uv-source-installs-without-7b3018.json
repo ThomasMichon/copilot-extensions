@@ -1,5 +1,5 @@
 {
-  "comment": "Fix immutable UV source installs without unsupported pip options",
+  "comment": "Fix immutable UV source installs without unsupported pip options; reuse native copying for Codespaces stamped source snapshots",
   "changes": [
     {
       "plugin": "agent-bridge",
