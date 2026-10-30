@@ -186,6 +186,20 @@ contract.
 
 ## Journal
 
+### 2026-10-30 - Priority cursorless native change paging
+- Preserved the open cache implementation PR and its remaining review findings
+  while isolating native response compatibility under the same source objective.
+- Native change pages may omit both continuation fields. Probe with the actual
+  consumed-record offset and unchanged requested page size until an explicit
+  empty page; never infer completion from a short nonempty page.
+- Keep partially supplied/malformed cursors, repeated pages, nonadvancing cursors,
+  HTTPS/redirect, deadline and payload/record/page holds unchanged. Synthetic
+  credential and protected-owner paths prove reader-to-generation completeness
+  only after a real terminal witness, with owner checkpoints on physical pages.
+- The separate warm-host large-response framing gap is already tracked in
+  #1803. It is not fixed or broadened into this source slice; no installed
+  transport, authentication or service state is changed.
+
 ### 2026-10-30 - Priority native nullable-properties compatibility
 - Isolated the normalizer correction from the unpublished cache implementation,
   preserving that cache source checkpoint for continuation.
