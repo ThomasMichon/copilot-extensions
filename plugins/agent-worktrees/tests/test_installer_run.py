@@ -221,6 +221,55 @@ def test_live_output_fd_cannot_silently_discard_log(tmp_path):
         )
 
 
+def test_inherited_output_keeps_native_bytes_and_channels(tmp_path, monkeypatch):
+    with (tmp_path / "stdout").open("w", encoding="utf-8") as stdout, (
+        tmp_path / "stderr"
+    ).open("w", encoding="utf-8") as stderr, monkeypatch.context() as patched:
+        patched.setattr(installer_run.sys, "stdout", stdout)
+        patched.setattr(installer_run.sys, "stderr", stderr)
+        run = installer_run.run_installer(
+            [sys.executable, "-c", "import os;os.write(1,b'\\xffout');os.write(2,b'\\xfeerr')"],
+            cwd=tmp_path, env=os.environ, deadline_s=10,
+        )
+    assert run.status == "OK"
+    assert (tmp_path / "stdout").read_bytes() == b"\xffout"
+    assert (tmp_path / "stderr").read_bytes() == b"\xfeerr"
+
+
+@pytest.mark.parametrize("output", ["log", "fd"])
+def test_productive_installer_renews_inactivity_timeout(tmp_path, monkeypatch, output):
+    script = tmp_path / "progress.py"
+    ready = tmp_path / "progress.ready"
+    script.write_text(textwrap.dedent("""
+        import pathlib, sys, time
+        pathlib.Path(sys.argv[1]).write_text("ready")
+        for index in range(20):
+            stream = sys.stdout if index % 2 == 0 else sys.stderr
+            stream.write(f"progress{index:02d} ")
+            stream.flush()
+            time.sleep(.25)
+    """), encoding="utf-8")
+    original_spawn = installer_run._spawn
+    monkeypatch.setattr(
+        installer_run, "_spawn",
+        lambda command, *args, **kwargs: _spawn_ready(
+            original_spawn, command, *args, ready=ready, **kwargs,
+        ),
+    )
+    lines = []
+    with (tmp_path / "output").open("wb") as stream:
+        run = installer_run.run_installer(
+            [sys.executable, str(script), str(ready)],
+            cwd=tmp_path, env=os.environ, deadline_s=2,
+            target_version="2.0.0", receipt=lambda: "2.0.0",
+            **({"log": lines.append} if output == "log" else {"output_fd": stream.fileno()}),
+        )
+    assert run.status == "OK" and run.receipt_complete
+    assert run.duration_s > 4
+    text = " ".join(lines) if output == "log" else (tmp_path / "output").read_text()
+    assert all(f"progress{index:02d}" in text for index in range(20))
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process groups")
 def test_posix_group_killed(tmp_path, stub):
     run = installer_run.run_installer(

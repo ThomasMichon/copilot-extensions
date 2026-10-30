@@ -2234,6 +2234,16 @@ worktrees self-installer retains its existing 600-second minimum, extended when
 a positive watchdog override plus cleanup grace exceeds it. Invalid deadline
 values fail explicitly before launching the installer.
 
+The receipt-owned Python installer runner interprets that allowance as **inactivity**, not a maximum
+elapsed installation duration. Newly read stdout or stderr bytes renew it,
+including partial lines. It relays raw native bytes to their original channels
+or the admitted human-output descriptor; captured log callbacks receive complete
+lines and a final partial line. Retiring the owned tree precedes output drain,
+so a root exit cannot leave a pipe-holding descendant writing a late slot.
+Receipt validation and watchdog exit `124` still determine the actual outcome.
+This does not change a native self-stage parent's separate watchdog policy or
+legacy non-receipt subprocess adapters.
+
 The shared command-lifecycle runner passes the caller's stdout and stderr
 explicitly to its native installer child, including the strict Windows Job
 containment path. On Windows, a hidden child with only implicit OS stream
@@ -3500,7 +3510,7 @@ presentation-gap notice. Such a producer is not reported as successfully
 captured or universally time-framed.
 
 The human-output adapter retains the updater's installer process-tree owner,
-deadline and deployed-version receipt judgment. Streaming output does not turn
+inactivity protection and deployed-version receipt judgment. Streaming output does not turn
 a zero exit with a missing target receipt, an expired deadline or a failed
 cutover into a successful operation.
 
@@ -4518,6 +4528,18 @@ The assembly diagnostic reports built/reused project counts and tools,
 acquisition, offline and total elapsed time on stderr; named phase transitions
 are flushed separately without altering result framing. Those counts describe
 local wheels, not completed runtime generations or the whole update duration.
+
+Ordinary source-wheel phases now renew their quiet allowance from actual child
+stdout/stderr and completed file, copy and verification units. The owned
+constructor relays child bytes immediately, including partial lines; its
+Windows retention guardian keeps the final completion JSON on stdout and
+relays progress separately on stderr. A silent child still times out and must
+settle every owned writer before construction or retention custody is released.
+Source-cache publication reads the phase's current allowance rather than a
+stale pre-build wall-clock limit. Explicit caller-supplied absolute deadlines
+for closed-wheel acquisition/inspection remain absolute, and all byte, file,
+identity, seasoning and publication checks remain unchanged. No supervisor
+generates periodic output to conceal an idle backend.
 
 Ordinary immutable source candidates request UV hardlinks from its extracted
 wheel cache, with UV's normal copy fallback when linking is unavailable.

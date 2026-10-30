@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import importlib.util
+from importlib import import_module
 import json
 import math
 import os
@@ -23,6 +24,11 @@ class ChildLaunchError(RuntimeError):
 
 class ChildTimeoutExpired(subprocess.TimeoutExpired):
     """The child's deadline expired and every owned writer has settled."""
+
+
+def _output_capture(process, procutil, on_output):
+    capture = import_module(procutil.__name__ + ".streaming").SyncProcessOutput
+    return capture(process, on_output=on_output)
 
 
 def _settle(operation: Callable[[], object]) -> None:
@@ -49,6 +55,7 @@ def run_owned(
     runtime_root: Path | None = None, runtime_version: str | None = None,
     runtime_path: Path | None = None,
     deadline: float | None = None,
+    on_output: Callable[[str, bytes], None] | None = None,
 ) -> subprocess.CompletedProcess:
     """Settle owned writers before returning or propagating a timeout.
 
@@ -60,6 +67,8 @@ def run_owned(
         raise ValueError("installer child timeout must be finite and positive")
     if os.name == "nt" and procutil is None:
         raise ValueError("Windows installer children require native process utilities")
+    if on_output is not None and procutil is None:
+        raise ValueError("incremental installer output requires native process utilities")
     if deadline is not None:
         if isinstance(deadline, bool) or not isinstance(deadline, (int, float)) or not math.isfinite(deadline):
             raise ValueError("installer child deadline must be finite")
@@ -74,12 +83,26 @@ def run_owned(
             return _retained_windows(
                 argv, cwd=cwd, env=env, timeout=timeout, procutil=procutil,
                 root=runtime_root, version=runtime_version, runtime_path=runtime_path,
+                on_output=on_output,
                 **({"deadline": deadline} if deadline is not None else {}),
             )
     options = dict(cwd=cwd, env=env, stdin=subprocess.DEVNULL,
                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                    encoding="utf-8", errors="replace")
     timeout_error = None
+    capture = None
+
+    def communicate():
+        if capture is None:
+            return process.communicate(
+                timeout=timeout if deadline is None else max(0, min(timeout, deadline - time.monotonic())),
+            )
+        capture.wait(timeout, deadline=deadline, wait_for_eof=False)
+        return capture.output()
+
+    def finish(grace):
+        return capture.finish(grace) if capture is not None else process.communicate(timeout=grace)
+
     if os.name == "nt":
         # An explicit application path avoids MAX_PATH command-token parsing.
         try:
@@ -91,9 +114,9 @@ def run_owned(
         except procutil.SyncProcessLaunchError as error:
             raise ChildLaunchError(f"Installer child could not start: {error}") from error
         try:
-            stdout, stderr = process.communicate(
-                timeout=timeout if deadline is None else max(0, min(timeout, deadline - time.monotonic())),
-            )
+            if on_output is not None:
+                capture = _output_capture(process, procutil, on_output)
+            stdout, stderr = communicate()
         except subprocess.TimeoutExpired as error:
             timeout_error = error
         finally:
@@ -101,6 +124,7 @@ def run_owned(
                 _settle(lambda: job.terminate_and_wait(10))
             finally:
                 _settle(lambda: process.wait(timeout=10))
+                stdout, stderr = _settle_output(finish, 10)
     else:
         owner_read, owner_write = os.pipe()
         try:
@@ -118,15 +142,15 @@ def run_owned(
             os.close(owner_read)
             owner_read = -1
             try:
-                stdout, stderr = process.communicate(
-                    timeout=timeout if deadline is None else max(0, min(timeout, deadline - time.monotonic())),
-                )
+                if on_output is not None:
+                    capture = _output_capture(process, procutil, on_output)
+                stdout, stderr = communicate()
             except subprocess.TimeoutExpired as error:
                 timeout_error = error
             finally:
                 os.close(owner_write)
                 owner_write = -1
-                _settle(lambda: process.communicate(timeout=30))
+                stdout, stderr = _settle_output(finish, 30)
         finally:
             if owner_read >= 0:
                 os.close(owner_read)
@@ -136,7 +160,6 @@ def run_owned(
         timeout_error = subprocess.TimeoutExpired(argv, timeout, output=stdout, stderr=stderr)
     if timeout_error is not None:
         # Read both captured streams only after every owned writer has settled.
-        stdout, stderr = process.communicate(timeout=10)
         raise ChildTimeoutExpired(
             timeout_error.cmd, timeout_error.timeout, output=stdout, stderr=stderr,
         ) from timeout_error
@@ -145,11 +168,21 @@ def run_owned(
     return result
 
 
-def _retained_windows(argv, *, cwd, env, timeout, procutil, root, version, runtime_path, deadline=None):
+def _settle_output(finish, grace):
+    result = []
+    _settle(lambda: result.append(finish(grace)))
+    return result[0]
+
+
+def _retained_windows(
+    argv, *, cwd, env, timeout, procutil, root, version, runtime_path, deadline=None,
+    on_output=None,
+):
     import msvcrt
 
     reader, writer = os.pipe()
     process = None
+    capture = None
     try:
         handle = msvcrt.get_osfhandle(reader)
         startup = subprocess.STARTUPINFO()
@@ -163,6 +196,7 @@ def _retained_windows(argv, *, cwd, env, timeout, procutil, root, version, runti
                      "--runtime-version", version, "--runtime-path", str(runtime_path),
                      "--procutil-path", str(Path(procutil.__file__).resolve()),
                      "--timeout", str(timeout),
+                     *(["--progress-output"] if on_output is not None else []),
                      *(["--deadline", str(deadline)] if deadline is not None else []), "--", *argv],
                     cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
@@ -176,14 +210,26 @@ def _retained_windows(argv, *, cwd, env, timeout, procutil, root, version, runti
         os.close(reader)
         reader = -1
         try:
-            stdout, stderr = process.communicate(timeout=timeout + 30)
+            if on_output is None:
+                stdout, stderr = process.communicate(timeout=timeout + 30)
+            else:
+                capture = _output_capture(
+                    process, procutil, lambda name, data: on_output(name, data) if name == "stderr" else None,
+                )
+                capture.wait(timeout + 30, deadline=deadline, wait_for_eof=False)
         finally:
             os.close(writer)
             writer = -1
             # The guardian releases retention only after its Job has no writers.
-            _settle(lambda: process.communicate(timeout=30))
+            stdout, stderr = _settle_output(
+                capture.finish if capture is not None else lambda grace: process.communicate(timeout=grace),
+                30,
+            )
         if process.returncode != 0:
-            raise RuntimeError("installer retention guardian did not confirm settlement")
+            raise RuntimeError(
+                f"installer retention guardian did not confirm settlement "
+                f"(exit {process.returncode}): {stderr[-4096:]}",
+            )
         try:
             outcome = json.loads(stdout)
         except ValueError:
@@ -273,25 +319,47 @@ def _supervise_windows(args, argv):
             if absolute_deadline is not None:
                 deadline = min(deadline, absolute_deadline)
             timed_out = False
+            capture = None
             try:
-                while True:
-                    if disconnected():
-                        raise RuntimeError("installer caller exited during child execution")
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        timed_out = True
-                        break
+                if args.progress_output:
+                    def relay(_name, data):
+                        sys.stderr.buffer.write(data)
+                        sys.stderr.buffer.flush()
+
+                    def observe_owner():
+                        if disconnected():
+                            raise RuntimeError("installer caller exited during child execution")
+
+                    capture = _output_capture(process, procutil, relay)
                     try:
-                        stdout, stderr = process.communicate(timeout=min(remaining, 0.1))
-                        break
+                        capture.wait(
+                            args.timeout, deadline=absolute_deadline,
+                            on_wait=observe_owner, wait_for_eof=False,
+                        )
                     except subprocess.TimeoutExpired:
-                        continue
+                        timed_out = True
+                else:
+                    while True:
+                        if disconnected():
+                            raise RuntimeError("installer caller exited during child execution")
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            timed_out = True
+                            break
+                        try:
+                            stdout, stderr = process.communicate(timeout=min(remaining, 0.1))
+                            break
+                        except subprocess.TimeoutExpired:
+                            continue
             finally:
                 try:
                     _settle(lambda: job.terminate_and_wait(10))
                 finally:
                     _settle(lambda: process.wait(timeout=10))
-            stdout, stderr = process.communicate(timeout=10)
+            stdout, stderr = _settle_output(
+                capture.finish if capture is not None else lambda grace: process.communicate(timeout=grace),
+                10,
+            )
             return {
                 "returncode": process.returncode, "stdout": stdout,
                 "stderr": stderr, "timed_out": timed_out, "launch_error": None,
@@ -382,6 +450,7 @@ if __name__ == "__main__":
     parser.add_argument("--procutil-path")
     parser.add_argument("--timeout", type=float)
     parser.add_argument("--deadline", type=float)
+    parser.add_argument("--progress-output", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if not args.command or args.command[0] != "--" or len(args.command) < 2:

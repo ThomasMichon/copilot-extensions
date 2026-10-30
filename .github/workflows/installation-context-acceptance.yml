@@ -573,6 +573,17 @@ jobs:
       - name: Prepare isolated update test tooling
         id: tooling
         run: python tools/run-plugin-tests.py agent-worktrees --prepare-only
+      - name: Qualify progress-renewed updater inactivity and tree settlement
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers
+          --test-file tests/test_installer_run.py
+      - name: Qualify productive constructors, quiet stalls and retained output failures
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers
+          --test-file tests/test_python_installer_engine.py
+          -k "owned_child or productive or source_phase or unsettled_job or child_failure or child_timeout or child_preserves or failed_isolated_health or numbered_reuse or health_callable or real_first_builders"
       - name: Qualify bounded native credential routing
         if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
         run: >-

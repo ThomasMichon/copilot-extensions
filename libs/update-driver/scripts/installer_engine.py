@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import importlib.util
+import codecs
 import hashlib
 import json
 import os
@@ -400,6 +401,7 @@ def _child(
     timeout: float, delays: tuple[float, ...] = (), transient: str = "",
     environment: dict[str, str] | None = None, cwd: Path | None = None,
     candidate: Path | None = None,
+    on_progress: Callable[[], None] | None = None,
 ) -> subprocess.CompletedProcess:
     env = dict(os.environ if environment is None else environment)
     if environment is None:
@@ -407,6 +409,15 @@ def _child(
             env.pop(name, None)
     procutil = _procutil(inputs)
     for attempt in range(len(delays) + 1):
+        decoders = {name: codecs.getincrementaldecoder("utf-8")(errors="replace")
+                    for name in ("stdout", "stderr")}
+
+        def relay(name, data):
+            sys.stderr.write(decoders[name].decode(data))
+            sys.stderr.flush()
+            if on_progress is not None:
+                on_progress()
+
         remaining = timeout
         if inputs.wheel_inputs is not None:
             _check_deadline(inputs.wheel_inputs.deadline)
@@ -415,6 +426,7 @@ def _child(
             result = run_owned(
                 argv, cwd=cwd or Path(Path(argv[0]).resolve().anchor), env=env, timeout=remaining,
                 procutil=procutil, construction_fd=descriptor,
+                on_output=relay,
                 **({
                     "runtime_root": candidate.parent.parent, "runtime_version": candidate.name,
                     "runtime_path": Path(runtime.__file__),
@@ -447,6 +459,10 @@ def _child(
                 file=sys.stderr, flush=True,
             )
             raise
+        finally:
+            for decoder in decoders.values():
+                sys.stderr.write(decoder.decode(b"", final=True))
+            sys.stderr.flush()
     raise AssertionError("installer retry loop did not settle")
 
 

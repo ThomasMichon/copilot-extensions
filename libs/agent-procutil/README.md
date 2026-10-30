@@ -4,6 +4,14 @@ Shared **Windows-headless / detached / bounded-owned** process primitives for
 Copilot CLI plugins. One vendored helper keeps launch flags and finite child
 containment consistent instead of reimplementing them in each consumer.
 
+`agent_procutil.streaming.SyncProcessOutput` drains synchronous stdout/stderr
+in byte chunks, including output without newlines. Its optional inactivity
+window renews only on newly read bytes; an explicitly supplied absolute cap
+remains absolute. The caller still owns launch, cancellation and tree retirement,
+and must retire writers before `finish()` after an error. Relay-only callers
+can disable retained capture; this helper does not create keepalive output
+or change the existing generic owned-process timeout policy.
+
 `agent_procutil.process_retirement.PinnedProcess` is a finite external-process
 primitive for application-owned incumbent retirement on Windows and Linux.
 It validates the original birth against a retained process handle/pidfd,

@@ -398,23 +398,99 @@ def procutil(engine):
     return engine._procutil(engine.FrozenInputs(package, (package,), "unused"))
 
 
-def test_owned_child_captures_both_streams_and_surfaces_failure(engine, procutil, tmp_path):
+@pytest.mark.parametrize("progress", [False, True])
+def test_owned_child_captures_both_streams_and_surfaces_failure(engine, procutil, tmp_path, progress):
+    observed = []
+    options = {"on_output": lambda name, data: observed.append((name, data))} if progress else {}
     with engine.runtime.construction_lease(tmp_path, "1.0") as descriptor:
         result = engine.run_owned(
             [sys.executable, "-c", "import sys;print('out'*20000);print('err'*20000,file=sys.stderr)"],
             cwd=tmp_path, env=dict(os.environ), timeout=10,
             procutil=procutil, construction_fd=descriptor,
+            **options,
         )
         assert result.stdout.strip() == "out" * 20000
         assert result.stderr.strip() == "err" * 20000
+        if progress:
+            assert {name for name, _data in observed} == {"stdout", "stderr"}
         with pytest.raises(subprocess.CalledProcessError) as failure:
             engine.run_owned(
                 [sys.executable, "-c", "import sys;print('diagnostic',file=sys.stderr);sys.exit(7)"],
                 cwd=tmp_path, env=dict(os.environ), timeout=10,
                 procutil=procutil, construction_fd=descriptor,
+                **options,
             )
         assert failure.value.returncode == 7
         assert "diagnostic" in failure.value.stderr
+
+
+@pytest.mark.parametrize("retained", [False, True])
+def test_productive_owned_child_renews_timeout_and_relays_before_completion(
+    engine, procutil, tmp_path, retained,
+):
+    observed = []
+    engine.runtime.slot(tmp_path, "1.0")
+    with engine.runtime.construction_lease(tmp_path, "1.0") as descriptor:
+        started = time.monotonic()
+        result = engine.run_owned(
+            [sys.executable, "-c",
+             "import sys,time\n"
+             "for index in range(20):\n"
+             " stream=sys.stdout if index%2==0 else sys.stderr\n"
+             " stream.write(f'progress{index:02d} ');stream.flush();time.sleep(.25)\n"],
+            cwd=tmp_path, env=dict(os.environ), timeout=2,
+            procutil=procutil, construction_fd=descriptor,
+            on_output=lambda name, data: observed.append((time.monotonic(), name, data)),
+            **({
+                "runtime_root": tmp_path, "runtime_version": "1.0",
+                "runtime_path": Path(engine.runtime.__file__),
+            } if retained else {}),
+        )
+        finished = time.monotonic()
+        assert result.returncode == 0 and finished - started > 4
+        assert "progress18" in result.stdout and "progress19" in result.stderr
+        assert observed[0][0] < finished - 3
+        assert all(
+            f"progress{index:02d}".encode() in b"".join(data for _at, _name, data in observed)
+            for index in range(20)
+        )
+    with engine.runtime.construction_lease(tmp_path, "1.0", timeout=0):
+        pass
+
+
+def test_source_phase_and_cache_keep_productive_child_progress(
+    engine, procutil, tmp_path, monkeypatch, capsys,
+):
+    import installer_source_build as builds
+
+    monkeypatch.setattr(engine, "_procutil", lambda _inputs: procutil)
+    elapsed = {}
+    with engine.runtime.construction_lease(tmp_path, "1.0") as descriptor:
+        with builds._source_phase("offline", 2, elapsed) as progress:
+            def build(directory):
+                wheel = directory / "example-1.0-py3-none-any.whl"
+                engine._child(
+                    [sys.executable, "-c",
+                     "import pathlib,sys,time\n"
+                     "for index in range(16):\n"
+                     " sys.stdout.write('work ');sys.stdout.flush();time.sleep(.25)\n"
+                     "pathlib.Path(sys.argv[1]).write_bytes(b'validated wheel')", str(wheel)],
+                    inputs=SimpleNamespace(wheel_inputs=None), descriptor=descriptor, timeout=2,
+                    on_progress=progress.renew,
+                )
+                return wheel
+
+            def validate(path):
+                assert path.read_bytes() == b"validated wheel"
+
+            selected = builds.cached_source_wheel(
+                tmp_path, b"source-progress", None, build=build, validate=validate,
+                max_archive_bytes=1024, deadline=progress.deadline,
+                progress_deadline=lambda: progress.deadline,
+            )
+    assert selected.is_file() and elapsed["offline"] > 3
+    diagnostic = capsys.readouterr().err
+    assert "work work" in diagnostic and "phase=offline state=completed" in diagnostic
 
 
 def _writer_tree(marker: Path) -> str:
@@ -451,8 +527,10 @@ def _assert_writers_dead(engine, pids: list[int]):
     pytest.fail(f"installer writers survived ownership settlement: {live}")
 
 
-def test_owned_child_timeout_reaps_descendants_before_lease_release(engine, procutil, tmp_path):
+@pytest.mark.parametrize("retained", [False, True])
+def test_owned_child_timeout_reaps_descendants_before_lease_release(engine, procutil, tmp_path, retained):
     marker = tmp_path / "writers"
+    engine.runtime.slot(tmp_path, "1.0")
     with engine.runtime.construction_lease(tmp_path, "1.0") as descriptor:
         with pytest.raises(subprocess.TimeoutExpired) as failure:
             engine.run_owned(
@@ -462,10 +540,42 @@ def test_owned_child_timeout_reaps_descendants_before_lease_release(engine, proc
                  + _writer_tree(marker)],
                 cwd=tmp_path, env=dict(os.environ), timeout=2,
                 procutil=procutil, construction_fd=descriptor,
+                on_output=lambda _name, _data: None,
+                **({
+                    "runtime_root": tmp_path, "runtime_version": "1.0",
+                    "runtime_path": Path(engine.runtime.__file__),
+                } if retained else {}),
             )
         _assert_writers_dead(engine, _wait_for_writer(marker))
         assert "backend stdout" in failure.value.stdout
         assert "backend stderr" in failure.value.stderr
+    with engine.runtime.construction_lease(tmp_path, "1.0", timeout=0):
+        pass
+
+
+def test_owned_child_output_callback_failure_settles_before_releasing_custody(
+    engine, procutil, tmp_path,
+):
+    marker = tmp_path / "writers"
+    failure = OSError("progress sink closed")
+    calls = []
+
+    def failed_output(name, data):
+        calls.append(name)
+        raise failure
+
+    program = _writer_tree(marker).replace(
+        "time.sleep(60)\n", "sys.stdout.write('progress'*2000);sys.stdout.flush();time.sleep(60)\n",
+    )
+    with engine.runtime.construction_lease(tmp_path, "1.0") as descriptor:
+        with pytest.raises(OSError) as caught:
+            engine.run_owned(
+                [sys.executable, "-c", program],
+                cwd=tmp_path, env=dict(os.environ), timeout=10,
+                procutil=procutil, construction_fd=descriptor, on_output=failed_output,
+            )
+        assert caught.value is failure and calls == ["stdout"]
+        _assert_writers_dead(engine, _wait_for_writer(marker))
     with engine.runtime.construction_lease(tmp_path, "1.0", timeout=0):
         pass
 
@@ -1361,7 +1471,10 @@ def test_unsettled_job_teardown_keeps_frozen_inputs_and_construction_custody(
             root=root, frozen=inputs.plugin, marker=marker, observations=observations,
             writer=_writer_tree(marker),
         )
-        return SimpleNamespace(__file__=injected, no_window_kwargs=owned.no_window_kwargs)
+        return SimpleNamespace(
+            __file__=injected, no_window_kwargs=owned.no_window_kwargs,
+            __name__=owned.__name__,
+        )
 
     monkeypatch.setattr(engine, "_procutil", instrument)
     with pytest.raises(RuntimeError, match="guardian did not confirm settlement"):

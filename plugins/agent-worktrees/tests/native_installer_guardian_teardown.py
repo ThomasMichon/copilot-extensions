@@ -32,6 +32,7 @@ root=Path(CONFIG["root"])
 report=Path(CONFIG["observations"])
 marker=Path(CONFIG["marker"])
 SyncProcessLaunchError=procutil.SyncProcessLaunchError
+__path__=procutil.__path__
 no_window_kwargs=procutil.no_window_kwargs
 original=procutil.JobHandle.terminate_and_wait
 

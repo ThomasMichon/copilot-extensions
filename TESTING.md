@@ -1,5 +1,14 @@
 # Testing copilot-extensions
 
+The optional `update_diagnostics` lane runs the native installer inactivity
+packet separately from the focused constructor packet on Linux and Windows.
+Real children emit stdout/stderr without newlines beyond their quiet window;
+quiet stalls, failed output sinks, retained guardian settlement, native byte
+and channel preservation, unchanged receipt judgment and incumbent health
+remain independent controls. Source-phase units also advance through verified
+file batches. These checks do not qualify every native self-stage watchdog,
+initial source retention or an installed whole-update footprint.
+
 The optional `update_diagnostics` lane includes Manager's actual scoped
 engine handoff under a no-window captured parent. It verifies repeated stdout
 and stderr, the unchanged native nonzero result and unaffected unscoped
