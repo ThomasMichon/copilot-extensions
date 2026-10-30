@@ -133,8 +133,11 @@ command name generalized:
 
 > We should probably update the other call flows to pass `--auto` to make it clear, and have *those* no-op
 
-The portable requirement is explicit/manual update by default, with `--auto`
-on genuine background update callers. An active automatic hold makes those
+The clarified portable boundary (#9679) is explicit/manual update by default,
+with `--auto` only on Manager's optional maintenance before session launch or
+resume. Independently requested fleet/self-update operations and their opted-in
+schedules retain ordinary admission and their own policy controls.
+An active automatic hold makes marked
 automatic requests visibly no-op without executing installers. It does not
 silently convert a manual update into a force rebuild or require the operator
 to remove the automatic hold.
@@ -146,9 +149,11 @@ to remove the automatic hold.
    durable execution owner. Preserve strict parsing, existing force/repair
    options and declared version-skew compatibility. Reuse existing request
    authority rather than adding a second queue or a parallel inhibition flag.
-2. Inventory and migrate actual background update producers to `--auto`.
-   Preserve selected source, publication and authentication policy. An
-   interactive invocation with no flag remains ordinary manual update.
+2. Inventory Manager's pre-launch/resume update producers and mark those
+   `--auto`, without marking separately requested fleet/self-update operations
+   or their independently opted-in schedules. Preserve selected source,
+   publication and authentication policy. Any operator or agent invocation
+   with no flag remains ordinary manual update.
 3. Qualify manual update under an active hold, automatic no-op under that
    same hold, automatic execution without the hold, and mode propagation
    through bootstrap and engine requests. Manual and automatic requests

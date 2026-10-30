@@ -614,7 +614,7 @@ function Get-DaemonInstanceHelperRoot {
     }
     foreach ($root in $roots) {
         $valid = $true
-        foreach ($name in @('daemon_instances.ps1', 'installer-instance-reconcile.ps1')) {
+        foreach ($name in @('daemon_instances.ps1', 'daemon_instance_runtime.pyz', 'installer-instance-reconcile.ps1')) {
             $path = Join-Path $root $name
             if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or
                 ([IO.File]::GetAttributes($path) -band [IO.FileAttributes]::ReparsePoint)) {
@@ -630,7 +630,7 @@ function Get-DaemonInstanceHelperRoot {
 function Install-Shortcut {
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
     $helperRoot = Get-DaemonInstanceHelperRoot
-    foreach ($name in @('daemon_instances.ps1', 'installer-instance-reconcile.ps1')) {
+    foreach ($name in @('daemon_instances.ps1', 'daemon_instance_runtime.pyz', 'installer-instance-reconcile.ps1')) {
         $source = Join-Path $helperRoot $name
         $destination = Join-Path $InstallDir $name
         if ([IO.Path]::GetFullPath($source) -ne [IO.Path]::GetFullPath($destination)) {

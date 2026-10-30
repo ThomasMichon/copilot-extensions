@@ -206,6 +206,10 @@ def main() -> int:
         return 1
     instance_pairs.extend((archive, consumer / "scripts" / ARCHIVE_NAME) for consumer in consumers)
     archive_paths = {consumer / "scripts" / ARCHIVE_NAME for consumer in consumers}
+    wsl = REPO / "plugins" / "wsl-setup" / "skills" / "setting-up-wsl" / "references"
+    if (wsl / "wsl-keepalive.ps1").is_file():
+        instance_pairs.append((archive, wsl / ARCHIVE_NAME))
+        archive_paths.add(wsl / ARCHIVE_NAME)
     package_archive = REPO / "libs" / "agent-procutil" / "src" / "agent_procutil" / ARCHIVE_NAME
     instance_pairs.append((archive, package_archive))
     archive_paths.add(package_archive)

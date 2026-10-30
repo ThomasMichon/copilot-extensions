@@ -1,4 +1,4 @@
-"""Linux lease timestamps share a boot and time-namespace clock domain."""
+"""Lease clock bounds; Linux timestamps also share a boot/namespace domain."""
 
 from __future__ import annotations
 
@@ -36,3 +36,41 @@ def bounds(record: dict[str, str]) -> tuple[float, float]:
     ):
         raise ValueError("invalid daemon monotonic expiry policy")
     return deadline, hard
+
+
+class WallLeaseObservation:
+    """Keep a schema-1 lease's original hard cap on an observer-local clock."""
+
+    def __init__(self, record: dict[str, str], *, wall: float, monotonic: float):
+        deadline, self.hard_wall = self._bounds(record)
+        self.hard_monotonic = monotonic + max(0, self.hard_wall - wall)
+        self.soft_monotonic = monotonic + max(0, deadline - wall)
+        self.updated = record["updated"]
+
+    @staticmethod
+    def _bounds(record: dict[str, str]) -> tuple[float, float]:
+        if record.get("schema") != "1" or record.get("purpose") not in (
+            "unattended-test", "interactive-test",
+        ):
+            raise ValueError("observer requires a disposable schema-1 lease")
+        deadline, hard = float(record["deadline"]), float(record["hard_deadline"])
+        if not all(math.isfinite(value) for value in (deadline, hard)) or not (
+            0 < deadline <= hard
+        ):
+            raise ValueError("invalid daemon expiry policy")
+        return deadline, hard
+
+    def past_hard(self, monotonic: float) -> bool:
+        return monotonic >= self.hard_monotonic
+
+    def expired(self, record: dict[str, str], *, wall: float, monotonic: float) -> bool:
+        deadline, hard = self._bounds(record)
+        if hard != self.hard_wall:
+            raise ValueError("daemon hard bound changed after admission")
+        if record["updated"] != self.updated:
+            self.soft_monotonic = monotonic + max(0, deadline - wall)
+            self.updated = record["updated"]
+        return (
+            wall >= deadline or monotonic >= self.soft_monotonic
+            or self.past_hard(monotonic)
+        )

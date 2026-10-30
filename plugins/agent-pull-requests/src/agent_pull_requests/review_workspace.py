@@ -150,11 +150,14 @@ def _record(name: str, value: dict) -> dict:
             "threadContext", "pullRequestThreadContext",
         ))
         if "properties" in value:
-            if not isinstance(value["properties"], dict):
-                raise ValueError("discussion properties must be an object")
-            result["properties"] = _select(value["properties"], (
-                "CodeReviewThreadType", "CodeReviewVoteResult", "CodeReviewVotedByTfId",
-            ))
+            if value["properties"] is None:
+                result["properties"] = None
+            elif isinstance(value["properties"], dict):
+                result["properties"] = _select(value["properties"], (
+                    "CodeReviewThreadType", "CodeReviewVoteResult", "CodeReviewVotedByTfId",
+                ))
+            else:
+                raise ValueError("discussion properties must be an object or null")
         if "comments" in value:
             if not isinstance(value["comments"], list):
                 raise ValueError("discussion comments must be a list")
@@ -274,17 +277,45 @@ def _bounded(value: object, budget: int) -> None:
 def _generation(value: object, scope: dict) -> dict:
     _bounded(value, MAX_GENERATION_BYTES)
     if not isinstance(value, dict):
-        raise ValueError("previous generation must be an object")
+        raise ValueError("generation must be an object")
     body = {key: item for key, item in value.items() if key != "id"}
+    revision = value.get("revision")
+    required_revision = {"head_sha", "iteration", "iteration_target_sha", "common_sha", "target_sha"}
+    valid_revision = isinstance(revision, dict) and required_revision <= set(revision)
+    if valid_revision:
+        valid_revision = (
+            revision["iteration"] is None
+            or type(revision["iteration"]) is int and revision["iteration"] > 0
+        ) and all(
+            revision.get(key) is None
+            or isinstance(revision[key], str)
+            and re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", revision[key])
+            for key in (*sorted(required_revision - {"iteration"}), "iteration_head_sha")
+        )
+    sections = value.get("sections")
+    required_section = {"data", "complete", "errors", "observed_from", "observed_to"}
+    valid_sections = isinstance(sections, dict) and set(sections) == set(SECTIONS)
+    if valid_sections:
+        valid_sections = all(
+            isinstance(section, dict) and required_section <= set(section)
+            and type(section["complete"]) is bool
+            and isinstance(section["errors"], list)
+            and all(isinstance(error, str) for error in section["errors"])
+            and (
+                section["data"] is None and not section["complete"]
+                or isinstance(section["data"], dict if name == "pull_request" else list)
+            )
+            for name, section in sections.items()
+        )
     if (
         value.get("schema") != GENERATION_SCHEMA or type(value.get("version")) is not int
         or value["version"] != 1 or value.get("id") != _digest(body)
-        or value.get("scope") != scope or not isinstance(value.get("sections"), dict)
-        or set(value["sections"]) != set(SECTIONS)
-        or any(not isinstance(section, dict) for section in value["sections"].values())
-        or not isinstance(value.get("revision"), dict)
+        or value.get("scope") != scope or not valid_sections or not valid_revision
+        or type(value.get("complete")) is not bool
+        or not isinstance(value.get("source_attachment"), dict)
     ):
-        raise ValueError("previous generation is incompatible, corrupt or outside this scope")
+        raise ValueError("generation is incompatible, corrupt or outside this scope")
+    _scope(value["scope"])
     return value
 
 
@@ -320,6 +351,21 @@ def build_generation(evidence: object, previous: object = None) -> dict:
     }
     generation = {**body, "id": _digest(body)}
     _bounded(generation, MAX_GENERATION_BYTES)
+    return _compare(generation, previous)
+
+
+def compare_generations(generation: object, previous: object) -> dict:
+    """Compare owner-returned immutable snapshots locally, without another read."""
+    if not isinstance(generation, dict) or not isinstance(previous, dict):
+        raise ValueError("comparison requires current and previous generation objects")
+    scope = _scope(generation.get("scope"))
+    return _compare(_generation(generation, scope), previous)
+
+
+def _compare(generation: dict, previous: object) -> dict:
+    scope, sections, revision = (
+        generation["scope"], generation["sections"], generation["revision"],
+    )
     before = _generation(previous, scope) if previous is not None else None
     changed = [
         name for name in SECTIONS if before is None

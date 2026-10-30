@@ -138,6 +138,39 @@ def test_counted_classification_cannot_cover_second_launch(tmp_path):
     assert any("count 1 != actual 2" in problem for problem in GUARD.verify(tmp_path))
 
 
+def test_powershell_instance_helpers_keep_caller_containment_and_canonical_source():
+    root = Path(__file__).resolve().parents[1]
+    census = json.loads((root / "tools/daemon-coverage.json").read_text())
+    canonical = root / "libs/agent-procutil/src/agent_procutil/daemon_instances.ps1"
+    adapters = [
+        *sorted((root / "plugins").glob("*/scripts/daemon_instances.ps1")),
+        root / "worktree-manager/scripts/daemon_instances.ps1",
+        root / "plugins/wsl-setup/skills/setting-up-wsl/references/daemon_instances.ps1",
+    ]
+    assert adapters
+    for path in adapters:
+        key = f"r:{path.relative_to(root).as_posix()}::<script>::Process.Start"
+        assert census["sites"]["caller-contained"][key] == 1
+        assert GUARD.native_sites(path.read_text()) == {("<script>", "Process.Start"): 1}
+        assert path.read_bytes() == canonical.read_bytes()
+        assert all(
+            key not in sites for kind, sites in census["sites"].items()
+            if kind != "caller-contained"
+        )
+    backend = (canonical.parent / "_daemon_instance_shell.py").read_text()
+    tree = ast.parse(backend)
+    assert any(
+        isinstance(node, ast.ImportFrom) and node.level == 1
+        and node.module == "_shell_caller_owned" and any(alias.name == "serve" for alias in node.names)
+        for node in ast.walk(tree)
+    )
+    assert any(
+        isinstance(node, ast.Return) and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name) and node.value.func.id == "serve"
+        for node in ast.walk(tree)
+    )
+
+
 def test_stale_classification_fails(tmp_path):
     fixture(tmp_path, "def serve():\n    return 0\n", {
         "finite-worker": {"s:service.py::serve::Popen": 1},

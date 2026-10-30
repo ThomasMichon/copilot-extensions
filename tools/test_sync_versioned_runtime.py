@@ -140,7 +140,7 @@ def test_instance_only_sync_preserves_unrelated_runtime_bytes(repository, monkey
         assert (scripts / name).read_bytes() == source.read_bytes()
 
 
-def test_instance_only_sync_ships_only_native_ps_pair_to_wsl_payload(repository, monkeypatch):
+def test_instance_only_sync_ships_ps_binding_and_complete_source_to_wsl_payload(repository, monkeypatch):
     references = sync.REPO / "plugins" / "wsl-setup" / "skills" / "setting-up-wsl" / "references"
     references.mkdir(parents=True)
     (references / "wsl-keepalive.ps1").write_text("# explicit installer\n")
@@ -150,8 +150,10 @@ def test_instance_only_sync_ships_only_native_ps_pair_to_wsl_payload(repository,
     sources = sync.installer_instance_sources(sync.REPO)
     for name in ("daemon_instances.ps1", "installer-instance-reconcile.ps1"):
         assert (references / name).read_bytes() == sources[name].read_bytes()
+    assert (references / sync.ARCHIVE_NAME).read_bytes() == sync.lifecycle_archive(sync.REPO)
     assert {path.name for path in references.iterdir()} == {
         "wsl-keepalive.ps1", "daemon_instances.ps1", "installer-instance-reconcile.ps1",
+        sync.ARCHIVE_NAME,
     }
 
 

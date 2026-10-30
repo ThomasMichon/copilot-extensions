@@ -153,7 +153,7 @@ os._exit(0)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="stock Windows native binding")
-def test_python_free_native_protocol_and_expiry(tmp_path):
+def test_compiler_free_powershell_protocol_and_original_process_expiry(tmp_path):
     helper = Path(__file__).parents[1] / "src" / "agent_procutil" / "daemon_instances.ps1"
     registry = tmp_path / "native-registry"
     shell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
@@ -174,6 +174,7 @@ def test_python_free_native_protocol_and_expiry(tmp_path):
         assert process.returncode == 1, error.decode(errors="replace")
         records = inspect_instances(registry)
         assert len(records) == 1
+        assert records[0]["pid"] == records[0]["launcher_pid"] == str(process.pid)
         assert records[0]["purpose"] == "unattended-test"
         assert records[0]["birth"].startswith("windows:")
         before = os.environ.get("COPILOT_EXTENSIONS_OWNED_JOB_SCOPES", "").split(";")
