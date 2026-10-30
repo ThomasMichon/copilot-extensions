@@ -215,3 +215,16 @@ existing review, custody and explicit approval gates.
 - This is implementation and qualification, not a merged or released provider.
   Declarations, adopter artifacts, installed payloads and native delivery
   qualification remain unchanged; Phase 3 waits for this provider slice to land.
+
+### 2026-10-29 - Dependent policy consumers qualified during review
+
+- Current-head review identified four conduct-guidance tests retaining inline
+  output assumptions. Reproduced all four failures, then adapted the consumers
+  to assert thin selectors and complete fallback policy bodies instead.
+- Preserved and strengthened offline recovery after payload removal: both
+  artifacts remain byte-identical, the fallback retains a complete envelope,
+  and offline source lookup selects the owned fallback.
+- The focused consumer packet passes all 24 cases. Its full isolated,
+  network-disconnected plugin suite passes 103 tests with 41 existing skips.
+  Added that plugin's patch changefile; no policy template or declaration changed.
+- The implementation PR remains review-gated until the updated head is assessed.
