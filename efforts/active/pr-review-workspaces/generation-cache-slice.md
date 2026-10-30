@@ -91,14 +91,14 @@ from this storage contract.
 
 ## Validation and admission
 
-- [ ] Review this contract before cache implementation.
-- [ ] Initial/unchanged/changed-head generations retain exact scope, structure,
+- [x] Review this contract before cache implementation (#9685).
+- [x] Initial/unchanged/changed-head generations retain exact scope, structure,
   completeness and section times; lookups never claim fresh backend evidence.
-- [ ] Two writers with the same predecessor produce one confirmed publication
+- [x] Two writers with the same predecessor produce one confirmed publication
   and one conflict, with no half-current generation.
-- [ ] Pre-replace interruption, post-replace uncertainty/readback, full cache,
+- [x] Pre-replace interruption, post-replace uncertainty/readback, full cache,
   corruption and missing objects retain honest outcomes and prior state.
-- [ ] Cross-principal/endpoint/target or linked-path state refuses without
+- [x] Cross-principal/endpoint/target or linked-path state refuses without
   fallback or repair; existing replay/receipt sentinel bytes remain unchanged
   through cache provisioning, writes and explicit cache-only rebuild.
 - [ ] Exercise the actual atomic file/lock consumer in the contained source
