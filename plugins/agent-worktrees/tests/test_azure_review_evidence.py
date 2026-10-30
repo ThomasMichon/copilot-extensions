@@ -54,6 +54,10 @@ class Forge:
         self.fail_policies = False
         self.fail_final_iterations = False
         self.fail_threads_auth = False
+        self.authorized_actor = "actor-id"
+        self.authenticated_actor = "actor-id"
+        self.identity_reads = 0
+        self.authorized_actor_after = None
         self.pages = {
             0: {"changeEntries": [{"changeTrackingId": 7, "changeType": "edit",
                                    "item": {"path": "/example.txt"}}],
@@ -65,8 +69,17 @@ class Forge:
         path, query = parsed.path, parse_qs(parsed.query)
         self.requests.append((path, query))
         if path.endswith("/connectionData"):
-            actor = "other-actor" if "other-token" in request.get_header("Authorization") else "actor-id"
-            return Response({"authorizedUser": {"id": actor}})
+            self.identity_reads += 1
+            actor = (
+                "other-actor" if "other-token" in request.get_header("Authorization")
+                else self.authorized_actor
+            )
+            if self.identity_reads > 1 and self.authorized_actor_after is not None:
+                actor = self.authorized_actor_after
+            result = {"authenticatedUser": {"id": self.authenticated_actor}}
+            if actor is not None:
+                result["authorizedUser"] = {"id": actor}
+            return Response(result)
         if path.endswith("/pullRequests/42"):
             self.pr_reads += 1
             return Response({
@@ -359,3 +372,142 @@ def test_credential_factory_receives_the_shared_decreasing_operation_budget():
     )
     assert limits == [30, 29, 28, 27, 26, 25, 24]
     assert result["acquisition"]["duration_ms"] == 7000
+
+
+def test_effective_authorized_identity_is_not_the_transport_authenticated_identity():
+    forge = Forge()
+    forge.authorized_actor, forge.authenticated_actor = "effective-actor", "transport-actor"
+    result = acquire(forge, expected_principal="effective-actor")
+    assert result["scope"]["principal_id"] == "effective-actor"
+    assert result["acquisition"]["principal_semantics"] == "connectionData.authorizedUser.id"
+    with pytest.raises(ObservationCredentialError):
+        acquire(forge, expected_principal="transport-actor")
+
+
+def test_authenticated_identity_cannot_fill_in_a_missing_authorized_identity():
+    forge = Forge()
+    forge.authorized_actor = None
+    with pytest.raises(ObservationCredentialError):
+        acquire(forge)
+    assert not any(path.endswith("/pullRequests/42") for path, _ in forge.requests)
+
+
+def protected_owner(forge, state):
+    from agent_worktrees.providers.azure_devops import AzureDevOpsProvider
+    from agent_worktrees.providers.azure_owned_evidence import AdoReadOwner
+
+    def checkpoint():
+        state["checks"] = state.get("checks", 0) + 1
+        if not state.get("allowed", True):
+            raise state.get("denial", PermissionError("synthetic owner request revoked"))
+
+    def factory(number, remaining, page_checkpoint):
+        class ProtectedReader(AdoReader):
+            def json(self, url, *, query=None):
+                page_checkpoint()
+                result = super().json(url, query=query)
+                page_checkpoint()
+                return result
+
+        # The synthetic owner keeps its material inside its own reader. No
+        # forge-credential DTO or caller-side issuer is involved.
+        return ProtectedReader(
+            AzureDevOpsProvider(), "project/repository", number, ENDPOINT,
+            "synthetic-owner-internal-material", opener=forge, budget=remaining(),
+        )
+
+    return AdoReadOwner(
+        ENDPOINT, "project/repository", "project-id", "repository-id",
+        "effective-actor", "synthetic-owner-context", checkpoint, factory,
+    )
+
+
+def test_protected_owner_uses_effective_identity_without_exporting_credentials(monkeypatch):
+    from agent_worktrees.providers.azure_owned_evidence import acquire_owned_evidence
+
+    root = Path(__file__).resolve().parents[3]
+    monkeypatch.syspath_prepend(str(root / "plugins" / "agent-pull-requests" / "src"))
+    from agent_pull_requests.owner_read import OwnerReadBinding, OwnerReadHandler
+
+    forge = Forge()
+    forge.authorized_actor, forge.authenticated_actor = "effective-actor", "transport-actor"
+    state = {}
+    owner = protected_owner(forge, state)
+    scope = {
+        "provider": "azure-devops", "endpoint": ENDPOINT, "project_id": "project-id",
+        "repository_id": "repository-id", "principal_id": "effective-actor",
+    }
+    binding = OwnerReadBinding(
+        scope, owner.context_id, owner.checkpoint,
+        lambda number, remaining: acquire_owned_evidence(owner, number, budget=remaining()),
+    )
+    handler = OwnerReadHandler(
+        lambda reference, remaining: binding if reference == "example-read-binding" else None,
+        max_work_seconds=30, max_payload_bytes=65536,
+    )
+    response = handler.read({
+        "schema": "agent-pull-requests.owner-read-request", "version": 1,
+        "binding_ref": "example-read-binding", "number": 42, "budget_seconds": 30,
+        "expected_principal": "effective-actor",
+    })
+    assert response["generation"]["scope"]["principal_id"] == "effective-actor"
+    assert response["acquisition"]["owner_identity_checks"] == 2
+    assert response["acquisition"]["principal_semantics"] == "connectionData.authorizedUser.id"
+    assert state["checks"] >= 2 * len(forge.requests)
+    assert "synthetic-owner-internal-material" not in json.dumps(response)
+
+
+@pytest.mark.parametrize("failure", ["wrong_authorized", "missing_authorized", "revoked"])
+def test_protected_owner_authority_and_namespace_refusals_precede_pr_read(failure):
+    from agent_worktrees.providers.azure_owned_evidence import acquire_owned_evidence
+
+    forge = Forge()
+    forge.authorized_actor, forge.authenticated_actor = "effective-actor", "transport-actor"
+    state = {}
+    if failure == "wrong_authorized":
+        forge.authorized_actor = "another-effective-actor"
+    elif failure == "missing_authorized":
+        forge.authorized_actor = None
+    else:
+        state["allowed"] = False
+    owner = protected_owner(forge, state)
+    with pytest.raises(PermissionError if failure == "revoked" else ProviderError):
+        acquire_owned_evidence(owner, 42, budget=30)
+    assert not any(path.endswith("/pullRequests/42") for path, _ in forge.requests)
+
+
+def test_protected_owner_final_probe_rejects_a_switch_after_collection():
+    from agent_worktrees.providers.azure_owned_evidence import acquire_owned_evidence
+
+    forge = Forge()
+    forge.authorized_actor, forge.authenticated_actor = "effective-actor", "transport-actor"
+    forge.authorized_actor_after = "another-effective-actor"
+    owner = protected_owner(forge, {})
+    with pytest.raises(ObservationCredentialError, match="effective principal mismatch"):
+        acquire_owned_evidence(owner, 42, budget=30)
+    assert forge.identity_reads == 2
+    assert forge.pr_reads == forge.iteration_reads == 2
+    assert any(path.endswith("/evaluations") for path, _ in forge.requests)
+
+
+def test_in_collection_owner_permission_denial_retains_the_original_exception():
+    from agent_worktrees.providers.azure_owned_evidence import acquire_owned_evidence
+
+    forge = Forge()
+    forge.authorized_actor = "effective-actor"
+    denied = PermissionError("existing owner pipeline revoked this operation")
+    state = {"denial": denied}
+    original = forge.open
+
+    def revoke_during_read(request, timeout):
+        response = original(request, timeout)
+        if urlsplit(request.full_url).path.endswith("/threads"):
+            state["allowed"] = False
+        return response
+
+    forge.open = revoke_during_read
+    with pytest.raises(PermissionError) as failure:
+        acquire_owned_evidence(protected_owner(forge, state), 42, budget=30)
+    assert failure.value is denied
+    assert any(path.endswith("/threads") for path, _ in forge.requests)
+    assert not any(path.endswith("/evaluations") for path, _ in forge.requests)

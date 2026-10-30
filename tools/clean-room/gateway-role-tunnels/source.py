@@ -38,15 +38,20 @@ RUNNER_FILES = frozenset({
 PROCUTIL_MODULES = frozenset("""
 __init__ _async _caller_owned _daemon_instance_child _daemon_instance_cli _daemon_instance_clock
 _daemon_instance_identity _daemon_instance_linux _daemon_instance_native _daemon_instance_owner
-_daemon_instance_store _darwin_caller_owned _interactive_groups
+_daemon_instance_records _daemon_instance_shell _daemon_instance_shell_windows
+_daemon_instance_store _darwin_caller_owned _interactive_groups _job_scopes
 _interactive_session _interactive_terminal _interpreter _linux_pidfd
+_retirement_channel _retirement_custodian _shell_caller_owned _windows_parent_job
 _windows_caller_owned daemon daemon_broker daemon_instances diagnostics
-interactive metrics metrics_accounting native_child owned_process startup streaming wsl
+interactive metrics metrics_accounting native_child owned_process process_retirement retirement_custody
+startup streaming windows_broker_cell windows_broker_entry windows_broker_installation
+windows_broker_native windows_broker_protocol windows_broker_retention windows_task_broker wsl
 """.split())
 PROCUTIL_RESOURCES = frozenset("""
 daemon_instances.ps1 daemon_instances.sh
 daemon_instance_runtime.pyz
 native_daemon.ps1 native_daemon.sh native_owned.ps1 native_owned.sh
+windows_broker_task.ps1
 """.split())
 REQUIRED = frozenset({
     "fleet-manager/pyproject.toml", "fleet-manager/setup.py", "fleet-manager/README.md",

@@ -112,6 +112,8 @@ The source implementation continuation is admitted; operational effects are not.
 ### Phase 2 - Build the ADO read and source path after admission
 - [x] Implement the admitted offline read-generation builder and comparison
   entry point with synthetic contract tests; live acquisition remains open below.
+- [x] Implement the reviewed protected-owner embedding and shared provider
+  collection seam; actual owner adoption and live qualification remain open.
 - [ ] Provide initial normalized load and section-aware incremental sync using
   the existing provider and credential authorities.
   Next is the finite [authorized acquisition slice](acquisition-slice.md),
@@ -181,6 +183,44 @@ submission recovery and remaining decisions. It is not a shipped CLI or wire
 contract.
 
 ## Journal
+
+### 2026-10-30 - Protected owner embedding source
+- #9670 merged as `9466727cd34e9eed526dc60e1dc4c7b78db4c05d` after
+  current-head Copilot approval and required green checks. Re-read the parent
+  plan before implementing the reviewed generic contract.
+- Added a strict small owner request, protected binding/handler callbacks and
+  explicit owner work/payload limits. The offline inspector reports no
+  operational owner or backend access; it cannot authorize an operation.
+- Reused the native acquisition orchestration through an owner reader seam,
+  without a credential DTO, issuer or second HTTP/pagination implementation.
+  Added local comparison of returned immutable generations.
+- Made the principal decoder/metadata explicit and shared: only full native
+  `connectionData.authorizedUser.id` establishes effective scope. Delegated
+  `authenticatedUser.id` may differ and cannot be a fallback. Both profiles
+  carry synthetic positive and refusal controls for that distinction.
+- Generic component, scope/authority-loss, budget/payload, parser and delegated-
+  identity controls passed: 198 in the owned source environment, then 140
+  Worktrees and 58 PR-domain cases through the contained runners. The install
+  contract gate also passed. Actual protected
+  owner transport/adoption is still an external qualification prerequisite;
+  no live ADO call or deployment occurred in this source lane.
+- Review corrections reject correctly hashed but structurally malformed
+  generations before comparison, with structured CLI errors, and prove that a
+  principal switch seen only by the final identity probe prevents publication.
+  The current source packet passed 204 cases, including unchanged propagation
+  of an actual owner permission denial separately from interface unavailability.
+- A cold native multi-helper fixture exhausted its old outer setup-inclusive
+  budget after one synthetic request. Its bounded outer fixture/cleanup allowance
+  now covers cold SDK/venv startup; production credential/owner work deadlines
+  are unchanged. Re-ran the native controls and complete focused packet.
+- Clarified that agent/process context isolation is not an extra permission,
+  issuer, provenance, read-count or delegation-time requirement. The embedding
+  reuses existing authorized owner gates; its explicit work/payload contracts
+  remain separate.
+- Follow-up review found the provider checkpoint wrapper still reclassified an
+  actual `PermissionError`. Removed that conversion and proved an in-collection
+  revocation preserves the original owner exception and stops further reads.
+  The updated complete source packet passed 205 cases.
 
 ### 2026-10-30 - Acquisition merged; live owner adoption remains gated
 - #9667 merged as `14ef6f358ad3dfa0991ea0e9bcfeca63d0172755` after

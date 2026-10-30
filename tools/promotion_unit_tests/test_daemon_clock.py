@@ -66,3 +66,46 @@ def test_invalid_publication_refuses(monkeypatch, ttl, maximum, now):
     monkeypatch.setattr(clock, "domain", lambda: pytest.fail("invalid policy acquired a domain"))
     with pytest.raises(ValueError, match="invalid daemon monotonic lifetime"):
         clock.fields(ttl, maximum, now)
+
+
+def _wall_record():
+    return {
+        "schema": "1", "purpose": "unattended-test", "deadline": "110",
+        "hard_deadline": "130", "updated": "100",
+    }
+
+
+def test_schema1_retains_original_monotonic_soft_and_hard_bounds():
+    record = _wall_record()
+    observed = clock.WallLeaseObservation(record, wall=100, monotonic=200)
+    assert not observed.expired(record, wall=80, monotonic=209)
+    assert observed.expired(record, wall=80, monotonic=210)
+    assert observed.past_hard(230)
+
+
+def test_schema1_renewal_never_reanchors_original_hard_limit():
+    record = _wall_record()
+    observed = clock.WallLeaseObservation(record, wall=100, monotonic=200)
+    renewed = {**record, "deadline": "125", "updated": "105"}
+    assert not observed.expired(renewed, wall=105, monotonic=205)
+    assert observed.expired(renewed, wall=80, monotonic=225)
+    assert observed.hard_monotonic == 230
+
+
+def test_schema1_rejects_changed_or_nonfinite_hard_bound():
+    record = _wall_record()
+    observed = clock.WallLeaseObservation(record, wall=100, monotonic=200)
+    for hard in ("131", "129", "inf", "nan", "-1"):
+        with pytest.raises(ValueError):
+            observed.expired({**record, "hard_deadline": hard}, wall=105, monotonic=205)
+        assert observed.hard_monotonic == 230
+
+
+def test_schema1_observation_rejects_production_and_other_schemas():
+    for change in (
+        {"schema": "2"}, {"purpose": "production"}, {"deadline": "inf"},
+        {"hard_deadline": "inf"}, {"deadline": "nan"}, {"deadline": "0"},
+        {"deadline": "131"},
+    ):
+        with pytest.raises(ValueError):
+            clock.WallLeaseObservation({**_wall_record(), **change}, wall=100, monotonic=200)

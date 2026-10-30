@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 import time
 
-from .review_workspace import MAX_BYTES, MAX_GENERATION_BYTES, build_generation
+from .review_workspace import MAX_BYTES, MAX_GENERATION_BYTES, build_generation, compare_generations
 
 
 def _unique(pairs: list[tuple[str, object]]) -> dict:
@@ -44,6 +44,9 @@ def main(argv: list[str] | None = None) -> int:
     sync = commands.add_parser("sync", allow_abbrev=False)
     sync.add_argument("--evidence", required=True)
     sync.add_argument("--previous", required=True, help="previous generation JSON (not sync envelope)")
+    compare = commands.add_parser("compare", allow_abbrev=False)
+    compare.add_argument("--generation", required=True)
+    compare.add_argument("--previous", required=True)
     args = parser.parse_args(argv)
     start = time.monotonic()
     try:
@@ -55,6 +58,14 @@ def main(argv: list[str] | None = None) -> int:
                 "capabilities": ["normalize", "compare"], "effects": "none",
                 "acquisition": False, "source_attachment": False, "submission": False,
             }
+        elif args.command == "compare":
+            if args.generation == args.previous == "-":
+                raise ValueError("current and previous cannot both consume stdin")
+            result = compare_generations(
+                _read(args.generation, MAX_GENERATION_BYTES),
+                _read(args.previous, MAX_GENERATION_BYTES),
+            )
+            result["duration_ms"] = round((time.monotonic() - start) * 1000, 3)
         else:
             if args.command == "sync" and args.evidence == args.previous == "-":
                 raise ValueError("evidence and previous cannot both consume stdin")

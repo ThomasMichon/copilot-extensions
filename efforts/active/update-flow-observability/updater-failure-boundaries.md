@@ -70,6 +70,18 @@ The following implementation choices are _(agent-recommended)_:
 
 ## Journal
 
+- A bounded follow-up implements only the Manager-to-engine stream-preservation
+  item from this reviewed plan. Native Windows reproduction through an actual
+  no-window captured parent retained the engine's exit23 but lost its stdout
+  and stderr. The scoped Windows handoff now explicitly supplies both existing
+  parent streams; environment, participant witness, native result and ordinary
+  interactive behavior are unchanged. The retained-child, settlement and
+  independent installer-diagnostics scopes above remain with their existing
+  owners. The focused Manager packet passed128 controls with3 explicit skips,
+  including the real captured-parent regression; workflow-scope checks passed91
+  controls. Exact-head review, hosted native qualification, release and installed
+  default-path acceptance are still required. Reproducing output loss does not
+  establish the cause of the original engine exit1.
 - Recorded the explicit bounded ownership transfer and public #7743 claim.
   Source investigation confirms both missing-stream sites and the current
   handle-dependent recovery loop. No implementation or installed update has

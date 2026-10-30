@@ -42,14 +42,34 @@ launch envelopes. Redaction handles known credential forms and supplied known
 values after control normalization; it is best-effort, not a guarantee about
 arbitrary third-party output.
 
-## Python-free Windows bootstrap admission
+## Windows bootstrap and shell admission
 
 ### Compiler-free migration boundary
 
-The existing compiled PowerShell entrypoints below have not yet migrated.
+`daemon_instances.ps1` uses the shared standard-library Python owner. The
+compiled `native_daemon.ps1` and `native_owned.ps1` process launchers below
+remain separate migration boundaries.
 Python is an existing harness prerequisite owned by machine provisioning;
 a cold plugin runtime does not authorize another Python download or a
 helper-owned interpreter installation.
+
+The private `_daemon_instance_records` transactions retain the shared registry,
+locks, lease checks and filesystem checks while naming an adapter's original
+process rather than the helper that performs the transaction. An identity value
+is not authorization: an external adapter must authenticate and retain its
+original process object before invoking these operations. The public Python
+entrypoints remain current-process-only and accept no caller-identity override.
+The shell adapter composes those transactions with its authenticated transport
+and lifetime owner; the record functions alone grant neither.
+
+### Compiler-free PowerShell instance custody
+
+`daemon_instances.ps1` lazily uses one original-shell-owned Python helper,
+not another daemon or inventory. Its
+[PowerShell custody reference](docs/powershell-instances.md) owns the protocol,
+guard, native-handle, finite Job and fresh-process compatibility details.
+Portable facade/transaction controls and actual Windows process/desktop
+qualification remain distinct.
 
 The private `_windows_parent_job.transfer_lifetime_to_parent` primitive is
 a startup-only building block for a qualified, sacrificial Python helper.
@@ -134,8 +154,10 @@ it does not infer abort custody from a nonzero process exit. See Windows'
 
 ### Existing compiled entrypoints
 
-The packaged `native_daemon.ps1` and `native_owned.ps1` expose the native
-counterparts needed before a Python interpreter exists. These are internal
+The packaged `native_daemon.ps1` and `native_owned.ps1` retain compiled process
+creation/control while their compiler-free replacements remain open. Their
+instance binding now requires setup-provided Python even before a plugin
+runtime exists. These are internal
 process primitives, not an installer, a request queue, an arbitrary-command
 installation CLI or a new lifecycle owner. A bootstrap must first validate
 its fixed source/recipe, acquire the canonical operation lock, and journal
@@ -190,7 +212,7 @@ The native fixtures exercise actual stock Windows PowerShell, canonical
 Python/native lock contention, caller-Job closure, contained controls,
 descendant settlement and owner death. The explicit
 `PROCUTIL_NATIVE_DAEMON_LIFETIME=1` lane runs two production and two contained
-cycles with a PATH containing neither Python nor uv and the canonical
+cycles with setup-provided PATH Python and the canonical
 console/foreground observer. This is Windows admission evidence, not a
 fresh-host foundation installation or Linux/macOS qualification.
 The cleanup controls also force a verified pre-acknowledgement refusal,
@@ -392,7 +414,7 @@ the group; the command's frame alone does not certify settlement. These
 helpers reserve FDs 5-8 and require non-interactive Bash with job control off.
 
 `native_daemon.sh` provides `start_native_daemon <script> <working-directory>
-<log> <arguments...>`, the Python-free Linux counterpart of the canonical
+<log> <arguments...>`, the Bash application frontend of the canonical
 POSIX daemon launch. It uses a new session with redirected stdio, closes
 unrelated inherited descriptors and acknowledges the admitted application's
 actual process identity before executing the selected script. With
@@ -719,7 +741,7 @@ Missing inventories remain absent; empty inventories create no progress files.
 Invalid, redirected, inaccessible or foreign controls fail visibly without
 repair. Inspection never advances the cursor.
 
-The standalone Python-free binding is `daemon_instances.ps1`, with
+The PowerShell binding is `daemon_instances.ps1`, with
 `New-DaemonInstanceReservation`, `Set-DaemonInstanceProcess`, `Enter-DaemonInstance`,
 `Exit-DaemonInstance`, and `Invoke-DaemonInstanceReconcile`. Bash exposes
 `new_daemon_instance_reservation`, `enter_daemon_instance`,
@@ -755,9 +777,9 @@ live cleanup rather than guessing a conversion. Older readers reject schema 2;
 finish disposable work under its original owner before upgrading or rolling
 back. Production records remain schema 1 and never expire. A missing
 facility refuses disposable admission or holds cleanup with diagnostics;
-there is no numeric-PID signaling fallback. Windows' pre-Python binding is
-unchanged by this Linux replacement and retains its separate compiler-free
-migration gate. Darwin external
+there is no numeric-PID signaling fallback. Windows uses the compiler-free
+PowerShell instance adapter described above; its retained compiled process
+launchers and actual native qualification remain separate gates. Darwin external
 termination currently holds when kernel-pinned custody cannot be established.
 
 Renewable expiry is decided from the current record while holding its mutation

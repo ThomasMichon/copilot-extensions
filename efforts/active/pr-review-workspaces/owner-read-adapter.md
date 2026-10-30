@@ -3,8 +3,9 @@
 Parent contract: [PR Review Workspaces](README.md).
 Existing source slice: [authorized acquisition](acquisition-slice.md).
 
-This is an **agent-recommended proposal**, not an implemented interface,
-credential grant, operational command or rollout instruction.
+This **agent-recommended contract** cleared review in #9670. Its generic
+embedding source does not establish an operational owner, credential grant,
+installed command or rollout authority.
 
 ## Concrete dependency
 
@@ -84,11 +85,11 @@ package before the executing owner actually supports it.
 
 ## Validation and admission
 
-- [ ] Review this proposal before changing the generic transport contract.
-- [ ] Synthetic adopted-owner controls prove allowed fixed reads, wrong
+- [x] Review this proposal before changing the generic transport contract (#9670).
+- [x] Synthetic adopted-owner controls prove allowed fixed reads, wrong
   caller/account/target and expired-context refusal, principal change,
   request/page deadline propagation and owned cleanup without credential export.
-- [ ] Missing/unadopted owner profiles refuse before provider access; old
+- [x] Missing/unadopted owner profiles refuse before provider access; old
   credential consumers retain their supported behavior, including rollback.
 - [ ] Exercise the owner handler and successor normalization with actual parser/
   transport boundaries, including partial paging and head/iteration drift.
