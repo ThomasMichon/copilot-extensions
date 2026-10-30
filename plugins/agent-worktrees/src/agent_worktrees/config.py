@@ -11,6 +11,7 @@ or an explicit ``--project``; it is threaded in-process, not read from
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import socket
@@ -994,7 +995,8 @@ def _load_config_uncached(
     # for portable operator-preference keys (never machine-specifics or the
     # binding). Gated + fail-open -> ``{}`` for a normal (non-stateless) repo, so
     # the hot config path is unchanged off the stateless track.
-    knowledge_raw = _load_knowledge_overlay_config(
+    knowledge_raw = config_acquisition.knowledge_call(
+        _load_knowledge_overlay_config, _KNOWLEDGE_OVERLAY_OWNER,
         machine_raw, global_raw, repo_name, platform
     ) if include_knowledge_preferences else {}
 
@@ -1364,26 +1366,36 @@ _KNOWLEDGE_OVERLAY_TOP_KEYS: tuple[str, ...] = (
 )
 
 
+_KNOWLEDGE_READ_OWNER = _load_inrepo_config
+_KNOWLEDGE_ANCHOR_OWNER = _resolve_anchor_from_registry
+
+
+@contextlib.contextmanager
+def _knowledge_preference_outcome():
+    start = config_acquisition.registry_call_started()
+    try:
+        yield
+    except Exception as exc:
+        config_acquisition.failed(
+            config_acquisition.current_observations(), "knowledge-preferences", "knowledge-preferences",
+            "knowledge-preferences-failed", type(exc).__name__,
+        )
+    else:
+        config_acquisition.knowledge_outcome(start)
+
+
 def _load_knowledge_overlay_config(
     machine_raw: dict[str, Any], global_raw: dict[str, Any],
     repo_name: str, platform: str,
 ) -> dict[str, Any]:
     """The E1e config.yaml **knowledge overlay** tier (portable operator prefs).
 
-    Returns the bound knowledge repo's ``config.yaml`` filtered to
-    :data:`_KNOWLEDGE_OVERLAY_TOP_KEYS` when the launch repo is a **stateless
-    harness** bound to a knowledge repo; ``{}`` otherwise. This lets portable
-    operator preferences live (versioned) in the knowledge repo as a tier between
-    the harness in-repo base and the machine-local config, so machine-local stays
-    minimal (just the binding + true machine-specifics).
-
-    This is the config-READ knowledge overlay for ``config.yaml`` itself. Gated +
-    fail-open: a non-stateless launch repo, an unbound harness, an unregistered
-    knowledge repo, or any error yields ``{}`` -- so the hot config path is
-    byte-identical off the stateless track.
+    A bound stateless harness receives only ``_KNOWLEDGE_OVERLAY_TOP_KEYS``
+    between its in-repo and machine-local tiers. Other gates and errors yield
+    ``{}``. A completed owner decision does not certify child acquisition:
+    child failures remain uncertain, and reports are never reusable input data.
     """
-    config_acquisition.opaque_source("knowledge-preferences")
-    try:
+    with _knowledge_preference_outcome():
         knowledge_repo = (
             machine_raw.get("knowledge_repo")
             or global_raw.get("knowledge_repo")
@@ -1399,22 +1411,30 @@ def _load_knowledge_overlay_config(
             block = machine_repos.get(repo_name)
             if isinstance(block, dict):
                 launch_anchor = block.get("anchor")
-        launch_anchor = launch_anchor or _resolve_anchor_from_registry(
-            repo_name, platform
+        launch_anchor = launch_anchor or config_acquisition.knowledge_call(
+            _resolve_anchor_from_registry, _KNOWLEDGE_ANCHOR_OWNER, repo_name, platform,
         )
         if not launch_anchor:
             return {}
-        inrepo = _load_inrepo_config(launch_anchor)
+        inrepo = config_acquisition.knowledge_call(
+            _load_inrepo_config, _KNOWLEDGE_READ_OWNER, launch_anchor,
+        )
         if not (inrepo.get("stateless")
                 or inrepo.get("requires_external_state_root")):
             return {}
-        kpath = _resolve_anchor_from_registry(knowledge_repo, platform)
+        kpath = config_acquisition.knowledge_call(
+            _resolve_anchor_from_registry, _KNOWLEDGE_ANCHOR_OWNER, knowledge_repo, platform,
+        )
         if not kpath:
             return {}
-        kcfg = _load_inrepo_config(kpath)
+        kcfg = config_acquisition.knowledge_call(
+            _load_inrepo_config, _KNOWLEDGE_READ_OWNER, kpath,
+        )
         return {k: kcfg[k] for k in _KNOWLEDGE_OVERLAY_TOP_KEYS if k in kcfg}
-    except Exception:
-        return {}
+    return {}
+
+
+_KNOWLEDGE_OVERLAY_OWNER = _load_knowledge_overlay_config
 
 
 def _resolve_adoption_defaults_from_registry(

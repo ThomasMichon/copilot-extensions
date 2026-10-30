@@ -183,3 +183,25 @@ def _load_config_d_report(config_d: Path, *, project_name="", warn=False) -> Acq
     observations: list[SourceObservation] = []
     value = dropin_value(config_d, project_name=project_name, warn=warn, observations=observations)
     return AcquisitionReport("config-dropins", value, tuple(observations))
+
+
+def knowledge_call(callback, original, *args):
+    """Qualify the selected callable, including replacements that restore themselves."""
+    try:
+        return callback(*args)
+    finally:
+        if callback is not original:
+            failed(current_observations(), "knowledge-preferences", "knowledge-preferences",
+                   "owner-coverage-unavailable", "selected knowledge callback is not the original owner")
+
+
+def knowledge_outcome(start: int | None) -> None:
+    """Complete only the original decision, never its child acquisition or reuse frontier."""
+    observations = current_observations()
+    if observations is not None and start is not None:
+        uncertain = any(
+            o.stage == "knowledge-preferences" and o.authority is ScanAuthority.INDETERMINATE
+            for o in observations[start:]
+        )
+        observe(observations, "knowledge-preferences", "knowledge-preferences",
+                ScanAuthority.INDETERMINATE if uncertain else ScanAuthority.COMPLETE)
