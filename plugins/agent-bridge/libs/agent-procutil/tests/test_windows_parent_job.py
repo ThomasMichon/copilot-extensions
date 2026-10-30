@@ -28,6 +28,10 @@ class Kernel:
     def GetCurrentProcess(self) -> int:
         return -1
 
+    def GetNamedPipeServerProcessId(self, handle: int, output: object) -> int:
+        output._obj.value = os.getppid()
+        return self.result("pipe-server", handle)
+
     def WaitForSingleObject(self, handle: int, timeout: int) -> int:
         self.calls.append(("wait-parent", handle, timeout))
         return next(self.states)
@@ -170,6 +174,61 @@ def test_failed_duplication_output_is_not_handle_custody(
     with pytest.raises(OSError, match="native API failed"):
         transfer(native)
     assert [call[0] for call in native.kernel.calls][-2:] == ["close-202", "close-101"]
+
+
+def test_pipe_server_can_own_a_worker_beyond_an_interpreter_launcher(
+    native: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = native.pid
+    monkeypatch.setattr(owner.os, "getppid", lambda: original + 100000)
+
+    def server(handle: int, output: object) -> int:
+        output._obj.value = original
+        return native.kernel.result("pipe-server", handle)
+
+    monkeypatch.setattr(native.kernel, "GetNamedPipeServerProcessId", server)
+    offer = owner.offer_lifetime_to_pipe_server(
+        parent_pid=original, parent_birth="windows:12", pipe_handle=505,
+    )
+    receipt = offer.receipt
+    assert receipt.parent_pid == original
+    assert receipt.parent_handle == 303
+    assert offer.parent == 101
+    assert native.kernel.calls[-1][0] == "close-202"
+    offer.accept()
+    names = [call[0] for call in native.kernel.calls]
+    assert names[:3] == ["open-parent", "pipe-server", "wait-parent"]
+    assert names[-3:] == ["assign-self", "close-202", "close-101"]
+
+
+@pytest.mark.parametrize("handle", [False, 0, -1, "505", None])
+def test_invalid_pipe_handle_never_reaches_native_access(
+    native: SimpleNamespace, handle: object,
+) -> None:
+    with pytest.raises(ValueError, match="inherited pipe handle"):
+        owner.offer_lifetime_to_pipe_server(
+            parent_pid=native.pid, parent_birth="windows:12", pipe_handle=handle,
+        )
+    assert native.kernel.calls == []
+
+
+@pytest.mark.parametrize("failure", ["wrong-server", "pipe-server"])
+def test_unconfirmed_pipe_server_refuses_before_creating_a_job(
+    native: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    def server(handle: int, output: object) -> int:
+        output._obj.value = native.pid + 100000
+        return native.kernel.result("pipe-server", handle)
+
+    monkeypatch.setattr(native.kernel, "GetNamedPipeServerProcessId", server)
+    native.kernel.fail = failure
+    with pytest.raises((ProcessLookupError, OSError)):
+        owner.offer_lifetime_to_pipe_server(
+            parent_pid=native.pid, parent_birth="windows:12", pipe_handle=505,
+        )
+    assert [call[0] for call in native.kernel.calls] == [
+        "open-parent", "pipe-server", "close-101",
+    ]
 
 
 def test_empty_success_handle_refuses_before_assignment(

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import ctypes
-from ctypes import wintypes
-from dataclasses import dataclass
-from functools import lru_cache
 import os
 import re
 import threading
-from typing import Any
+from ctypes import wintypes
+from dataclasses import dataclass
+from functools import lru_cache
+from typing import Any, Literal, overload
 
 from agent_procutil import _build_job_extended_limit_info, _is_windows
 from agent_procutil._daemon_instance_identity import _windows_birth
@@ -27,6 +27,49 @@ class ParentJob:
     parent_handle: int
 
 
+@dataclass
+class ParentJobOffer:
+    """Pending custody through the same birth-pinned parent process handle.
+
+    Publish ``receipt`` and wait for an authenticated caller decision before
+    application work. Call ``accept`` only after adoption, ``abort`` only after
+    an explicit unadopted declaration, or ``abandon`` when custody is unknown.
+    A failed or partial publication never proves that the caller did not adopt.
+    """
+    receipt: ParentJob
+    kernel: Any
+    parent: int
+
+    def accept(self) -> None:
+        """The caller adopted the handle; never touch its numeric value again."""
+        self._release_parent()
+
+    def abort(self) -> None:
+        """Only an explicit unadopted declaration permits remote reclamation."""
+        if not self.parent:
+            raise RuntimeError("parent Job offer is already settled")
+        parent, self.parent = self.parent, 0
+        try:
+            recovered = wintypes.HANDLE()
+            _check(self.kernel.DuplicateHandle(
+                parent, wintypes.HANDLE(self.receipt.parent_handle),
+                self.kernel.GetCurrentProcess(), ctypes.byref(recovered), 0, False, 1 | 2,
+            ))
+            _check(self.kernel.CloseHandle(recovered))
+        finally:
+            _check(self.kernel.CloseHandle(parent))
+
+    def abandon(self) -> None:
+        """Release only the process reference; remote Job custody is unknown."""
+        self._release_parent()
+
+    def _release_parent(self) -> None:
+        if not self.parent:
+            raise RuntimeError("parent Job offer is already settled")
+        parent, self.parent = self.parent, 0
+        _check(self.kernel.CloseHandle(parent))
+
+
 _transferred = False
 
 
@@ -41,6 +84,10 @@ def _api() -> Any:
     ]
     kernel.DuplicateHandle.restype = wintypes.BOOL
     kernel.AssignProcessToJobObject.restype = wintypes.BOOL
+    kernel.GetNamedPipeServerProcessId.argtypes = [
+        wintypes.HANDLE, ctypes.POINTER(wintypes.ULONG),
+    ]
+    kernel.GetNamedPipeServerProcessId.restype = wintypes.BOOL
     return kernel
 
 
@@ -74,6 +121,45 @@ def transfer_lifetime_to_parent(*, parent_pid: int, parent_birth: str) -> Parent
     closing its last Job handle may terminate it before Python can unwind.
     Callers must never continue application work following a failed transfer.
     """
+    return _transfer(parent_pid=parent_pid, parent_birth=parent_birth, pipe_handle=None)
+
+
+def offer_lifetime_to_pipe_server(
+    *, parent_pid: int, parent_birth: str, pipe_handle: int,
+) -> ParentJobOffer:
+    """Bind to the original caller that created an inherited input pipe.
+
+    Unlike the direct-parent entry point, this permits an ordinary interpreter
+    launcher between caller and worker. The kernel's pipe-server identity and
+    the same pinned process birth establish the owner, not a numeric ancestry
+    walk. The retained offer must be settled after receipt publication using
+    its accept/abort/abandon protocol, before application work. In particular,
+    publication failure requires an explicit caller decision or abandonment,
+    never reopening a parent PID or blindly reclaiming a remote numeric handle.
+    This does not admit an interpreter or source.
+    """
+    if type(pipe_handle) is not int or pipe_handle <= 0:
+        raise ValueError("original caller requires an inherited pipe handle")
+    return _transfer(
+        parent_pid=parent_pid, parent_birth=parent_birth, pipe_handle=pipe_handle, offer=True,
+    )
+
+
+@overload
+def _transfer(
+    *, parent_pid: int, parent_birth: str, pipe_handle: int | None, offer: Literal[True],
+) -> ParentJobOffer: ...
+
+
+@overload
+def _transfer(
+    *, parent_pid: int, parent_birth: str, pipe_handle: int | None, offer: Literal[False] = False,
+) -> ParentJob: ...
+
+
+def _transfer(
+    *, parent_pid: int, parent_birth: str, pipe_handle: int | None, offer: bool = False,
+) -> ParentJob | ParentJobOffer:
     global _transferred
     if not _is_windows():
         raise OSError("parent-owned Job transfer requires native Windows")
@@ -83,7 +169,8 @@ def transfer_lifetime_to_parent(*, parent_pid: int, parent_birth: str) -> Parent
         raise RuntimeError("this worker already transferred its lifetime")
     if (
         type(parent_pid) is not int or not 0 < parent_pid <= 0xFFFFFFFF
-        or parent_pid == os.getpid() or parent_pid != os.getppid()
+        or parent_pid == os.getpid()
+        or (pipe_handle is None and parent_pid != os.getppid())
     ):
         raise ValueError("lifetime owner must be this worker's original direct parent")
     if (
@@ -105,9 +192,15 @@ def transfer_lifetime_to_parent(*, parent_pid: int, parent_birth: str) -> Parent
     duplicated = False
     assigned = False
     close_attempted = False
+    offered = False
     try:
         if _windows_birth(parent) != parent_birth:
             raise ProcessLookupError("original parent birth identity changed")
+        if pipe_handle is not None:
+            server = wintypes.ULONG()
+            _check(kernel.GetNamedPipeServerProcessId(pipe_handle, ctypes.byref(server)))
+            if server.value != parent_pid:
+                raise ProcessLookupError("inherited pipe does not belong to the original caller")
         _parent_live(kernel, parent)
         current = kernel.GetCurrentProcess()
         worker_birth = _windows_birth(current)
@@ -132,10 +225,15 @@ def transfer_lifetime_to_parent(*, parent_pid: int, parent_birth: str) -> Parent
         close_attempted = True
         _check(kernel.CloseHandle(job))
         job = None
-        return ParentJob(parent_pid, parent_birth, os.getpid(), worker_birth, remote.value)
+        receipt = ParentJob(parent_pid, parent_birth, os.getpid(), worker_birth, remote.value)
+        if offer:
+            pending = ParentJobOffer(receipt, kernel, parent)
+            offered = True
+            return pending
+        return receipt
     finally:
         try:
-            if duplicated and remote.value and not assigned:
+            if duplicated and remote.value and (not assigned or (offer and not offered)):
                 # The parent has not received the handle yet and cannot use it.
                 # CLOSE_SOURCE closes it even on failure; never retry its value.
                 recovered = wintypes.HANDLE()
@@ -149,4 +247,5 @@ def transfer_lifetime_to_parent(*, parent_pid: int, parent_birth: str) -> Parent
                 if job and not close_attempted:
                     _check(kernel.CloseHandle(job))
             finally:
-                _check(kernel.CloseHandle(parent))
+                if not offered:
+                    _check(kernel.CloseHandle(parent))

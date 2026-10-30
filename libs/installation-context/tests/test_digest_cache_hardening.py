@@ -10,8 +10,11 @@ import sys
 import time
 from pathlib import Path
 from threading import Event, Thread
+from types import SimpleNamespace
 
 import pytest
+
+from _powershell_fixture import _run_owner_probe
 
 LIB = Path(__file__).resolve().parents[1]
 POSIX_SCRIPT = LIB / "installation-context.sh"
@@ -54,14 +57,6 @@ def _posix_source() -> str:
     return source.replace(assignment, f"SCRIPT_DIR={shlex.quote(str(LIB))}", 1)
 
 
-def _powershell_source() -> str:
-    source = POWERSHELL_SCRIPT.read_text(encoding="utf-8")
-    companion = ". (Join-Path $PSScriptRoot 'guest-environment.ps1')"
-    assert source.count(companion) == 1
-    path = str(LIB / "guest-environment.ps1").replace("'", "''")
-    return source.replace(companion, f". '{path}'", 1)
-
-
 def _run_canonical_shell_digest(
     shell: str,
     root: Path,
@@ -89,22 +84,12 @@ def _run_canonical_shell_digest(
         probe.chmod(0o755)
         command = (str(probe), str(root))
     else:
-        source = _powershell_source()
-        prefix, marker, _ = source.partition("\ntry {\n    Assert-ExactChoice")
-        assert marker
-        probe = work_root / "digest.ps1"
-        quoted_root = str(root).replace("'", "''")
-        probe.write_text(
-            prefix
-            + "\n"
-            + (
-                "Get-SnapshotContentSha256 "
-                f"'{quoted_root}' "
-                f"{max_entries} {max_path_bytes} {max_content_bytes}\n"
-            ),
-            encoding="utf-8-sig",
+        return _run_owner_probe(
+            work_root,
+            f"print(_snapshot_content_sha256(Path({str(root)!r}), "
+            f"max_entries={max_entries}, max_path_bytes={max_path_bytes}, "
+            f"max_content_bytes={max_content_bytes}))",
         )
-        command = (str(POWERSHELL), "-NoProfile", "-File", str(probe), "probe")
     return subprocess.run(
         command,
         capture_output=True,
@@ -115,35 +100,56 @@ def _run_canonical_shell_digest(
     )
 
 
-def test_powershell_darwin_stat_abi_selects_by_process_architecture() -> None:
+def test_powershell_uses_python_owned_native_identity_and_publication() -> None:
     script = POWERSHELL_SCRIPT.read_text(encoding="utf-8")
+    python = _assembled_python_source()
+    worker = (LIB / "_installation_context_worker.py").read_text(encoding="utf-8")
+    assert "'installation_context.py'" in script
+    assert "'_installation_context_worker.py'" in script
+    assert 'runpy.run_path(request["sdk"]' in worker
+    assert 'sdk["_powershell_main"](' in worker
+    for forbidden in ("Add-Type", "Reflection.Emit", "DllImport", "fstat$INODE64"):
+        assert forbidden not in script
+    reader = python.split("def _read_regular_file(", 1)[1].split(
+        "def _read_regular_file_bytes(", 1,
+    )[0]
+    assert "os.fstat(descriptor)" in reader
+    assert "os.lstat(path)" in reader
+    assert "_stat_identity(named_stat) == _stat_identity(opened_stat)" in reader
+    publication = python.split("def _publish_json_no_replace(", 1)[1]
+    assert "os.link(temporary, path)" in publication
+    assert "except FileExistsError:" in publication
 
-    assert 'EntryPoint = "fstat$INODE64"' in script
-    assert 'EntryPoint = "lstat$INODE64"' in script
-    assert 'EntryPoint = "fstat"' in script
-    assert 'EntryPoint = "lstat"' in script
-    assert "RuntimeInformation.ProcessArchitecture == Architecture.X64" in script
-    assert "RuntimeInformation.ProcessArchitecture == Architecture.Arm64" in script
-    assert "DarwinX64Fstat(descriptor, out information)" in script
-    assert "DarwinArm64Fstat(descriptor, out information)" in script
-    assert "DarwinX64Lstat(path, out information)" in script
-    assert "DarwinArm64Lstat(path, out information)" in script
-    publication = script.split("function Publish-RuntimeSlotCompletion", 1)[1]
-    publication = publication.split("function Invoke-SlotComplete", 1)[0]
-    assert "[CeAtomicDirectory]::MoveWindows" in publication
-    assert "[CeAtomicDirectory]::MoveLinux" in publication
-    assert "[CeAtomicDirectory]::MoveDarwin" in publication
-    assert "[IO.File]::Move" not in publication
+
+@pytest.mark.parametrize("occupied", (False, True))
+def test_python_completion_publication_never_replaces_existing_identity(
+    occupied: bool, tmp_path: Path,
+) -> None:
+    module = _load_python_module()
+    target = tmp_path / "completion.json"
+    if occupied:
+        target.write_bytes(b'{"existing":true}\n')
+        before = target.stat(), target.read_bytes()
+    assert module._publish_json_no_replace(target, {"new": True}, locks=()) is (not occupied)
+    if occupied:
+        assert target.read_bytes() == before[1]
+        assert module._stat_identity(target.stat()) == module._stat_identity(before[0])
+    else:
+        assert module.read_json(target) == {"new": True}
+    assert list(tmp_path.iterdir()) == [target]
 
 
 def test_shell_metadata_tokens_retain_posix_subsecond_precision() -> None:
-    powershell = POWERSHELL_SCRIPT.read_text(encoding="utf-8")
+    module = _load_python_module()
     posix = POSIX_SCRIPT.read_text(encoding="utf-8")
 
-    assert powershell.count("information.Modified.Nanoseconds") >= 2
-    assert powershell.count("information.Changed.Nanoseconds") >= 2
-    assert "linuxInformation.Modified.Nanoseconds" in powershell
-    assert "linuxInformation.Changed.Nanoseconds" in powershell
+    first = SimpleNamespace(
+        st_mode=0o100600, st_size=8,
+        st_mtime_ns=1_000_000_001, st_ctime_ns=2_000_000_001,
+    )
+    for field in ("st_mtime_ns", "st_ctime_ns"):
+        changed = SimpleNamespace(**{**vars(first), field: getattr(first, field) + 1})
+        assert module._stat_metadata(first) != module._stat_metadata(changed)
     assert "%F|%d|%i|%s|%y|%z" in posix
     assert "ensure_kernel_name" in posix
     assert 'if [[ "$KERNEL_NAME" == Darwin ]]; then' in posix
@@ -295,7 +301,6 @@ def test_python_validation_cache_is_isolated_between_threads(
 def test_completion_read_stability_matches_marker_mutability() -> None:
     python = _assembled_python_source()
     posix = POSIX_SCRIPT.read_text(encoding="utf-8")
-    powershell = POWERSHELL_SCRIPT.read_text(encoding="utf-8")
 
     reader = python.split("def _read_regular_json_object(", 1)[1].split(
         "def _validated_build_completion",
@@ -323,29 +328,13 @@ def test_completion_read_stability_matches_marker_mutability() -> None:
         'capture_json_for_validation actual_document "$actual" "Runtime slot completion"'
         in posix
     )
-    build_ps = powershell.split("function Read-BuildCompletion(", 1)[1].split(
-        "function New-RuntimeSlotCompletion",
-        1,
-    )[0]
-    assert "Read-RegularFileBytes $actual 'Build completion evidence'" in build_ps
-    assert "-RequireSameIdentity" not in build_ps
-    completion_ps = powershell.split(
-        "function Validate-RuntimeSlotCompletionCore(",
-        1,
-    )[1].split("function Invoke-SlotCompletionValidate", 1)[0]
-    assert "$receipt = Read-Json $actual" in completion_ps
 
 
 def test_digest_limits_and_scalable_sorting_are_present_everywhere() -> None:
     python = _assembled_python_source()
     posix = POSIX_SCRIPT.read_text(encoding="utf-8")
-    powershell = POWERSHELL_SCRIPT.read_text(encoding="utf-8")
     python_digest = python.split("def _snapshot_content_sha256(", 1)[1].split(
         "def _atomic_write_json(",
-        1,
-    )[0]
-    powershell_tree = powershell.split("function Get-SnapshotTreeState(", 1)[1].split(
-        "function Assert-SnapshotTreeStateEqual",
         1,
     )[0]
 
@@ -358,14 +347,9 @@ def test_digest_limits_and_scalable_sorting_are_present_everywhere() -> None:
     assert "MAX_SNAPSHOT_ENTRIES=100000" in posix
     assert "MAX_SNAPSHOT_PATH_BYTES=4096" in posix
     assert "MAX_SNAPSHOT_CONTENT_BYTES=4294967296" in posix
-    assert "$script:SnapshotMaxEntries = 100000" in powershell
-    assert "$script:SnapshotMaxPathBytes = 4096" in powershell
-    assert "$script:SnapshotMaxContentBytes = 4294967296" in powershell
     assert "sort -t $'\\t' -k1,1" in posix
-    assert "SortedDictionary[string, object]" in powershell
-    assert "[IO.Directory]::EnumerateFileSystemEntries(" in powershell_tree
-    assert "@(Get-ChildItem" not in powershell_tree
-    assert "for ($index = 1; $index -lt $files.Count; $index++)" not in powershell
+    assert "with os.scandir(" in python_digest
+    assert "sorted(records, key=lambda item: item[0])" in python_digest
 
     for script in EXEMPLAR_SCRIPTS:
         source = script.read_text(encoding="utf-8")
@@ -389,7 +373,6 @@ def test_digest_limits_and_scalable_sorting_are_present_everywhere() -> None:
 def test_slot_complete_reconfirms_digest_immediately_before_publication() -> None:
     python = _assembled_python_source()
     posix = POSIX_SCRIPT.read_text(encoding="utf-8")
-    powershell = POWERSHELL_SCRIPT.read_text(encoding="utf-8")
 
     python_publish = python.split(
         "desired = _runtime_slot_completion_value(",
@@ -406,14 +389,6 @@ def test_slot_complete_reconfirms_digest_immediately_before_publication() -> Non
     assert 'confirmed_snapshot_content_sha256="$(digest_snapshot_contents' in posix_publish
     assert posix_publish.index("confirmed_snapshot_content_sha256") < posix_publish.index(
         "publish_completion_json_no_replace"
-    )
-    powershell_publish = powershell.split(
-        "$receipt = New-RuntimeSlotCompletion",
-        1,
-    )[1].split("$result = Validate-RuntimeSlotCompletionCore", 1)[0]
-    assert "$confirmedSnapshotContentSha256 = Get-SnapshotContentSha256" in powershell_publish
-    assert powershell_publish.index("$confirmedSnapshotContentSha256") < powershell_publish.index(
-        "Publish-RuntimeSlotCompletion"
     )
 
 
@@ -678,9 +653,8 @@ def test_deep_snapshot_tree_cross_runner_parity_under_recursion_limit(
         )
 
         shells = (
-            ("posix",)
-            if os.name != "nt"
-            else (("powershell",) if POWERSHELL is not None else ())
+            *(("posix",) if os.name != "nt" else ()),
+            *(("powershell",) if POWERSHELL is not None else ()),
         )
         for shell in shells:
             result = _run_canonical_shell_digest(
@@ -772,32 +746,6 @@ capture_regular_file "$1" "Probe file" "$2" true true
 def test_powershell_cache_hit_hashes_same_size_same_second_rewrite(
     tmp_path: Path,
 ) -> None:
-    script = _powershell_source()
-    prefix, marker, _ = script.partition("\ntry {\n    Assert-ExactChoice")
-    assert marker
-    probe = tmp_path / "digest-cache-probe.ps1"
-    probe.write_text(
-        prefix
-        + r'''
-$path = $env:CE_DIGEST_CACHE_PATH
-$replacement = $env:CE_DIGEST_CACHE_REPLACEMENT
-[void](Get-FileSha256 $path -RequireSameIdentity)
-$originalWriteTime = (Get-Item -LiteralPath $path).LastWriteTimeUtc
-[IO.File]::WriteAllBytes($path, [IO.File]::ReadAllBytes($replacement))
-(Get-Item -LiteralPath $path).LastWriteTimeUtc = $originalWriteTime
-$cacheKey = [IO.Path]::GetFullPath($path)
-$current = Open-RegularFileHandle $path 'File' -RequireExactPath
-try {
-    $script:ValidatedFileSha256[$cacheKey].identity = $current.identity
-    $script:ValidatedFileSha256[$cacheKey].metadata = $current.metadata
-}
-finally {
-    $current.value.Dispose()
-}
-[void](Get-FileSha256 $path -RequireSameIdentity)
-''',
-        encoding="utf-8-sig",
-    )
     target = tmp_path / "target.txt"
     replacement = tmp_path / "replacement.txt"
     target.write_bytes(b"original")
@@ -807,14 +755,27 @@ finally {
     environment["CE_DIGEST_CACHE_PATH"] = str(target)
     environment["CE_DIGEST_CACHE_REPLACEMENT"] = str(replacement)
 
-    result = subprocess.run(
-        (str(POWERSHELL), "-NoProfile", "-File", str(probe), "probe"),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=environment,
-        check=False,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    result = _run_owner_probe(
+        tmp_path,
+        """@_validation_scope
+def probe():
+    path = Path(os.environ['CE_DIGEST_CACHE_PATH'])
+    replacement = Path(os.environ['CE_DIGEST_CACHE_REPLACEMENT'])
+    _sha256_file(path)
+    original = path.stat()
+    path.write_bytes(replacement.read_bytes())
+    os.utime(path, ns=(original.st_atime_ns, original.st_mtime_ns))
+    current = path.stat()
+    cache = _VALIDATED_FILE_SHA256.get()
+    assert cache is not None
+    key = _file_cache_key(path)
+    cached = cache[key]
+    cache[key] = _ValidatedFileDigest(
+        digest=cached.digest, identity=_stat_identity(current), metadata=_stat_metadata(current),
+    )
+    _sha256_file(path)
+probe()""",
+        environment=environment,
     )
 
     assert result.returncode != 0

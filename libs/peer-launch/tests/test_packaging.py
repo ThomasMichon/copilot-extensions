@@ -13,7 +13,10 @@ def test_all_packaged_launchers_and_validators_match():
     canonical = ROOT / "libs" / "peer-launch" / "peer_launch.py"
     primitive_dir = ROOT / "libs" / "installation-context"
     primitive = primitive_dir / "installation_context.py"
-    fragments = sorted(path.name for path in primitive_dir.glob("_installation_context_*.py"))
+    fragments = sorted(
+        path.name for path in primitive_dir.glob("_installation_context_*.py")
+        if path.name != "_installation_context_worker.py"
+    )
     for plugin, filename in (
         ("agent-bridge", "_peer_launch.py"),
         ("agent-dispatch", "peer_launch.py"), ("agent-codespaces", "_peer_launch.py"),
@@ -28,6 +31,11 @@ def test_all_packaged_launchers_and_validators_match():
         assert (package / "_installation_context.py").read_bytes() == primitive.read_bytes()
         for fragment in fragments:
             assert (package / fragment).read_bytes() == (primitive_dir / fragment).read_bytes()
+        worker = "_installation_context_worker.py"
+        assert not (package / worker).exists()
+        assert (
+            ROOT / "plugins" / plugin / "scripts" / "installation-context" / worker
+        ).read_bytes() == (primitive_dir / worker).read_bytes()
 
 
 def _import_roots(source: str) -> set[str]:

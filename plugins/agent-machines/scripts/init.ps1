@@ -38,7 +38,8 @@ param(
     [string]$SnapshotId,
     [string]$RuntimeVersion,
     [string]$MaintenanceToken,
-    [switch]$Force
+    [switch]$Force,
+    [Parameter(DontShow)][switch]$CellWatchdogChild
 )
 
 Set-StrictMode -Version 2.0
@@ -101,7 +102,7 @@ if ($Action -in @('cell-repair', 'cell-uninstall', 'cell-attribute-legacy', 'cel
     if (-not $python) { throw 'Cell lifecycle management requires an existing Python 3.10+ interpreter' }
     Set-Location -LiteralPath $env:USERPROFILE
     [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
-    & $python.Source -I (Join-Path $PSScriptRoot 'cell_lifecycle.py') @lifecycleArgs
+    & $python.Source -I -B (Join-Path $PSScriptRoot 'cell_lifecycle.py') @lifecycleArgs
     exit $LASTEXITCODE
 }
 
@@ -189,10 +190,34 @@ $cellSlotAction = $Action -in @(
 if ($cellSlotAction) {
     Set-Location -LiteralPath $env:USERPROFILE
     [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
-}
-$cellSlotDirect = $cellSlotAction -and -not $env:COPILOT_PLUGIN_INSTALL_STAGED
-if ($cellSlotDirect) {
-    $env:COPILOT_PLUGIN_INSTALL_STAGED = 'cell-slot-action'
+    if (-not $CellWatchdogChild) {
+        $deadline = 480
+        $deadlineText = $env:AGENT_MACHINES_INSTALL_DEADLINE_SEC
+        if (-not $deadlineText) { $deadlineText = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC }
+        if ($deadlineText -and (
+            -not [int]::TryParse($deadlineText, [ref]$deadline) -or $deadline -le 0
+        )) { throw 'Cell installer deadline must be a positive number of seconds.' }
+        $forward = @()
+        foreach ($key in $PSBoundParameters.Keys) {
+            $value = $PSBoundParameters[$key]
+            if ($value -is [Management.Automation.SwitchParameter]) {
+                if ($value.IsPresent) { $forward += "-$key" }
+            } else {
+                $forward += @("-$key", [string]$value)
+            }
+        }
+        $request = @{
+            argv = @($probeHost, '-NoProfile', '-ExecutionPolicy', 'Bypass',
+                '-File', $PSCommandPath, '-CellWatchdogChild') + $forward
+            cwd = $env:USERPROFILE
+            payload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+            timeout = $deadline
+        }
+        & (Join-Path $PSScriptRoot 'installation-context/shell-caller-owned.ps1') `
+            -Worker (Join-Path $PSScriptRoot 'cell_installer.py') `
+            -Request $request -TimeoutSeconds $deadline
+        exit $LASTEXITCODE
+    }
 }
 
 # Review finding (round 10): `stamp-binstub` (#3303, full-harness-startup-
@@ -207,10 +232,10 @@ if ($cellSlotDirect) {
 # Invoke-StampBinstubOnly only ever reads/writes via $probePayload/
 # $InstallDir (never $PluginDir, since the round-7 fix), so it needs no
 # staged copy to run correctly.
-if ($Action -eq 'stamp-binstub' -and -not $env:COPILOT_PLUGIN_INSTALL_STAGED) {
-    $env:COPILOT_PLUGIN_INSTALL_STAGED = 'stamp-binstub-fast-path'
-}
+$skipLegacyStage = $cellSlotAction -or $Action -eq 'stamp-binstub'
 
+# The common guard deliberately distrusts inherited stage markers.
+if (-not $skipLegacyStage) {
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
@@ -342,7 +367,7 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
     }
 }
 # === end install-contract:v4 self-stage ===
-if ($cellSlotDirect) { Remove-Item Env:COPILOT_PLUGIN_INSTALL_STAGED }
+}
 
 # === install-contract:v4 smoke seam (test-only) -- keep byte-identical ===
 # #935 install-flow test hook. When COPILOT_PLUGIN_INSTALL_SMOKE is set, prove
@@ -740,6 +765,13 @@ function Ensure-CellSnapshot {
         [void](Remove-OwnedCellSnapshot -Root $stage)
         throw 'Cannot copy the payload into the cell snapshot staging directory'
     }
+    try {
+        Assert-CellPayloadIdentity -Payload $stage
+        Assert-SourceRuntimeIdentity
+    } catch {
+        [void](Remove-OwnedCellSnapshot -Root $stage)
+        throw
+    }
     if (
         (Test-Path -LiteralPath $SnapshotRoot) -or
         $null -ne (Get-Item -LiteralPath $SnapshotRoot -Force -ErrorAction SilentlyContinue)
@@ -909,6 +941,7 @@ function Initialize-SourceRuntime {
 
 function Assert-SourceRuntimeIdentity {
     param([string]$Payload = $PluginDir)
+    Assert-CellPayloadIdentity -Payload $Payload
     $metadataPresent = $true
     try {
         [IO.File]::GetAttributes((Join-Path $Payload 'runtime-source.json')) | Out-Null
@@ -923,6 +956,27 @@ function Assert-SourceRuntimeIdentity {
             throw 'Source runtime identity changed after runtime selection; refusing publication'
         }
     }
+}
+
+function Assert-CellPayloadIdentity {
+    param([string]$Payload = $PluginDir)
+    if ($env:AGENT_MACHINES_EXPECTED_PAYLOAD_HASH) {
+        $identity = Get-CellPayloadIdentity -Payload $Payload
+        if ($identity -cne $env:AGENT_MACHINES_EXPECTED_PAYLOAD_HASH) {
+            throw 'Payload content changed after selection; refusing publication'
+        }
+    }
+}
+
+function Get-CellPayloadIdentity {
+    param([string]$Payload = $PluginDir)
+    $python = @(Get-Command python -CommandType Application -ErrorAction Stop)[0]
+    $detail = Invoke-Hidden -FilePath $python.Path -ArgList @(
+        '-I', '-B', (Join-Path $PluginDir 'scripts/cell_installer.py'), 'identity',
+        '--payload', $Payload, '--version', $PackageVersion
+    )
+    if ($LASTEXITCODE -ne 0) { throw 'Selected cell payload identity validation failed.' }
+    return $detail.Trim()
 }
 
 function Get-GitInfo {
@@ -944,6 +998,14 @@ function Get-GitInfo {
 
 $PackageVersion = $SrcVersion
 Initialize-SourceRuntime
+if ($cellSlotAction) {
+    $script:SelectedPayloadHash = Get-CellPayloadIdentity
+    if ($env:AGENT_MACHINES_EXPECTED_PAYLOAD_HASH -and
+        $env:AGENT_MACHINES_EXPECTED_PAYLOAD_HASH -cne $SelectedPayloadHash) {
+        throw 'Payload changed across the installation transaction'
+    }
+    $env:AGENT_MACHINES_EXPECTED_PAYLOAD_HASH = $SelectedPayloadHash
+}
 $selectedSourceIdentity = if ($SourceRuntimeIdentity) { $SourceRuntimeIdentity } else { '{}' }
 if ($env:AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY -and
     $env:AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY -cne $selectedSourceIdentity) {
@@ -1880,7 +1942,7 @@ function Invoke-VersionedSlotClean {
     if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
         $nativeError = ''
         $helpers = (Invoke-Hidden -FilePath $py `
-            -ArgList @('-I', $vr, '--root', $InstallDir, 'construction-shell', '--shell', 'ps1') `
+            -ArgList @('-I', '-B', $vr, '--root', $InstallDir, 'construction-shell', '--shell', 'ps1') `
             -ErrorOutput ([ref]$nativeError) | Out-String)
         if ($nativeError) { [Console]::Error.Write($nativeError) }
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
@@ -2453,9 +2515,9 @@ foreach ($lib in @(
     }
     if (Test-Path (Join-Path $libDir 'pyproject.toml')) {
         if ($haveUv) {
-            & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --reinstall-package $lib.Pkg "$libDir" --quiet 2>&1 | Out-Null
+            & $VenvPython -I -B (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --reinstall-package $lib.Pkg "$libDir" --quiet 2>&1 | Out-Null
         } else {
-            & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --quiet "$libDir" 2>&1 | Out-Null
+            & $VenvPython -I -B (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --quiet "$libDir" 2>&1 | Out-Null
         }
         if ($LASTEXITCODE -ne 0) {
             Write-Fail "$($lib.Dir) library install failed"
@@ -2473,17 +2535,17 @@ $ErrorActionPreference = 'Continue'
 Remove-ConsoleTrampolines -VenvDir $VenvDir
 if (Get-Command uv -ErrorAction SilentlyContinue) {
     if ($CellMode) {
-        & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython "$PluginDir" --quiet 2>&1 |
+        & $VenvPython -I -B (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython "$PluginDir" --quiet 2>&1 |
             ForEach-Object { Write-Host $_ }
     } else {
-        & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython "$PluginDir" --quiet 2>&1 | Out-Null
+        & $VenvPython -I -B (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython "$PluginDir" --quiet 2>&1 | Out-Null
     }
 } else {
     if ($CellMode) {
-        & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --quiet "$PluginDir" 2>&1 |
+        & $VenvPython -I -B (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --quiet "$PluginDir" 2>&1 |
             ForEach-Object { Write-Host $_ }
     } else {
-        & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --quiet "$PluginDir" 2>&1 | Out-Null
+        & $VenvPython -I -B (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --quiet "$PluginDir" 2>&1 | Out-Null
     }
 }
 $pkgResult = $LASTEXITCODE
@@ -2508,7 +2570,7 @@ if ($VersionedRuntime) {
     $VrScript = Join-Path $PSScriptRoot 'versioned_runtime.py'
     # Health-gate: never swap the stable `.venv` link onto a slot whose package
     # does not import -- a broken build must not become the live runtime.
-    & $VenvPython -c 'import agent_machines' 2>$null
+    & $VenvPython -B -c 'import agent_machines' 2>$null
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
         exit 1
@@ -2675,7 +2737,7 @@ $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 $importOk = $false
 for ($i = 0; $i -lt 3; $i++) {
-    & $VenvPython -c 'import agent_machines' 2>$null
+    & $VenvPython -B -c 'import agent_machines' 2>$null
     if ($LASTEXITCODE -eq 0) { $importOk = $true; break }
     Start-Sleep -Seconds 1
 }

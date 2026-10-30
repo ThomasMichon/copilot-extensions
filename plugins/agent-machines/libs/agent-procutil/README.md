@@ -70,6 +70,45 @@ whole-descendant settlement and observation of the original helper's exit.
 A receipt is not a settlement witness. Transfer failure is terminal for the
 sacrificial helper; it must never continue application work.
 
+`offer_lifetime_to_pipe_server` is a distinct entry point for a trusted
+interpreter launcher between the shell and Python. It retains the same
+birth-pinned process handle and strict Job transfer, but requires the kernel's
+inherited-pipe server PID to name that original caller. It does not weaken the
+direct-parent API or walk/reopen numeric ancestry. It returns a `ParentJobOffer`,
+not an immediate transfer that discards its process reference before delivery.
+Publish `offer.receipt`, then call `accept()` only after the caller adopts the
+handle and acknowledges its actual worker's birth. Only an explicit unadopted
+declaration permits `abort()` to reclaim the offer through that retained parent.
+On failed/partial publication or unknown adoption, keep awaiting the caller's
+decision or call `abandon()` to release only the process reference and report
+unknown custody. Never infer non-adoption from an I/O failure. Every decision
+is one-shot, including a failed close; the direct-parent primitive is unchanged.
+
+The private `_shell_caller_owned.serve` adapter supplies this startup receipt,
+acknowledgement and correlated completion framing for synchronous shell
+callbacks. Windows keeps the continuing Job handle exclusively in the original
+shell; cancellation or shell death closes it. Before creating a Windows offer,
+the worker requires the shell's explicit permission after complete request
+delivery. The offer retains the same birth-pinned parent process handle until
+adoption or an explicit nonce-bound **unadopted** abort. Only that abort permits
+remote-handle reclamation; EOF or a malformed acknowledgement preserves explicit
+uncertainty and never closes a numeric handle the shell might already have
+disposed or reused. A failed receipt write still consumes that decision.
+If the shell sees receipt EOF, it unwinds to send its abort or close input
+before waiting for the worker and diagnostics; waiting first would deadlock
+a worker that is still awaiting the handoff decision.
+Linux/macOS retain the original shell's private stdin lifetime pipe in an
+independent forked watcher member, established before releasing the callback.
+The watcher's own membership pins the original group even if its leader dies;
+pipe loss retires that still-occupied group. Normal callback exit uses the
+existing leader-owned group retirement. The callback never inherits an application-input
+pipe or a continuing lifetime writer. The shell must reject missing completion
+or an unexpected owner-exit status; it closes the Job before awaiting captured
+pipe EOF, and its interruptible waits permit cancellation to run that cleanup.
+This is a caller-bounded helper, not a daemon, another service or a new registry.
+The source-only lifecycle archive packages the same implementation for cold
+shell callers; it contains Python source, not a compiled helper.
+
 This primitive does not select or admit an interpreter, authenticate a
 command, acquire an operation lock, or switch an existing bootstrap caller.
 Interpreter/complete-source admission, bounded shell framing, native desktop
@@ -77,7 +116,21 @@ qualification and migration of the compiled implementations remain open in
 the [compiler-free amendment](../../efforts/active/lean-runtime-dependencies/compiler-free-execution.md).
 The portable controls and separate native parent-exit, explicit-handle-close
 and stale-parent-birth controls test this building block, not that complete
-bootstrap contract.
+bootstrap contract. `test_shell_caller_owned_native.py` separately exercises the
+actual PowerShell SDK's callback completion, abrupt exit, original caller death
+and runspace cancellation, observing pinned descendants before test cleanup.
+Its native offer controls hold preallocated fixture process/I/O resources
+constant across a separately gated cold SDK invocation. Raw parent-handle counts
+must show exactly the correlated offered Job, if any, and return to the same
+baseline after that known Job closes, before fixture disposal. This avoids
+attributing subprocess setup or reader-thread resources to the SDK; it does not
+permit a tolerance, warmup, garbage-collection workaround or unknown-handle close.
+An explicit unadopted abort closes the worker's last kill-on-close Job handle
+and may terminate it before Python can raise an error. The fixture therefore
+checks the exact offered handle is invalid (`ERROR_INVALID_HANDLE`), no callback
+or completion was published, and the same exact handle balance is restored;
+it does not infer abort custody from a nonzero process exit. See Windows'
+[last-Job-handle termination contract](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects#managing-job-objects).
 
 ### Existing compiled entrypoints
 

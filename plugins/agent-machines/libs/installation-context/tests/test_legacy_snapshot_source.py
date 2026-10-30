@@ -21,7 +21,7 @@ from test_runtime_deployment_adapters import _run_adapter
 def test_snapshot_source_revalidates_identity_and_live_policy(
     tmp_path: Path, runner: str, case: str, receipt_version: int,
 ) -> None:
-    module = _load_module()
+    module = _load_module(native_environment=True)
     publisher = tmp_path / "publisher"
     publisher.mkdir()
     durable = tmp_path / "durable"

@@ -81,6 +81,8 @@ def _run_ps(
         encoding="utf-8",
         env=process_env,
         check=False,
+        timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     if check and result.returncode:
         raise AssertionError(
@@ -520,7 +522,8 @@ def test_stamp_rejects_string_typed_lock_version(tmp_path: Path) -> None:
     )
     rejected = _run_ps(*arguments, check=False)
     assert rejected.returncode != 0
-    assert "owner receipt is invalid" in rejected.stderr
+    assert "Installation lock owner receipt" in rejected.stderr
+    assert "is invalid." in rejected.stderr
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
@@ -541,6 +544,7 @@ def test_concurrent_first_stamp_leaves_one_untorn_receipt(tmp_path: Path) -> Non
             text=True,
             encoding="utf-8",
             env=environment,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         for _ in range(2)
     ]
@@ -1151,7 +1155,10 @@ def test_existing_junction_root_cannot_escape_plugin_root(tmp_path: Path) -> Non
     outside.mkdir()
     state = Path(layout["plugin_root"]) / "state"
     command = ["cmd.exe", "/d", "/c", "mklink", "/J", str(state), str(outside)]
-    created = subprocess.run(command, capture_output=True, text=True, check=False)
+    created = subprocess.run(
+        command, capture_output=True, text=True, check=False, timeout=10,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
     if created.returncode != 0:
         pytest.skip(f"cannot create junction: {created.stderr or created.stdout}")
     result = _run_ps(
