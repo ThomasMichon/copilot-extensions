@@ -10,7 +10,7 @@ from pathlib import Path
 import subprocess
 import sys
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from agent_procutil import no_window_kwargs, windowless_python
@@ -421,13 +421,34 @@ async def test_proxy_cancellation_reaps_hung_child(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_proxy_cleanup_aborts_a_writer_that_will_not_close(monkeypatch, caplog):
+    async def stalled_close():
+        await asyncio.Event().wait()
+
+    writer = SimpleNamespace(
+        close=Mock(), wait_closed=stalled_close, transport=SimpleNamespace(abort=Mock()),
+    )
+    broker = proxy._ProxyBroker(["unused"], None)
+    monkeypatch.setattr(proxy, "_DRAIN_TIMEOUT", 0.01)
+
+    await asyncio.wait_for(broker._cleanup_connection(None, [], writer, None), timeout=1)
+
+    writer.close.assert_called_once()
+    writer.transport.abort.assert_called_once()
+    assert "did not close within the drain allowance" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_proxy_binds_spawned_child_to_kill_on_close_job(monkeypatch):
     class FakeJobHandle:
-        def __init__(self):
+        def __init__(self, process):
             self.closed = 0
+            self.process = process
 
         def close(self):
             self.closed += 1
+            if self.process.returncode is None:
+                self.process.kill()
 
     spawn = asyncio.create_subprocess_exec
     processes = []
@@ -436,7 +457,7 @@ async def test_proxy_binds_spawned_child_to_kill_on_close_job(monkeypatch):
     async def record(*args, **kwargs):
         process = await spawn(*args, **kwargs)
         processes.append(process)
-        handle = FakeJobHandle()
+        handle = FakeJobHandle(process)
         handles.append(handle)
         return process, handle
 

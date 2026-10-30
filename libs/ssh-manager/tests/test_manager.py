@@ -77,6 +77,7 @@ async def test_process_cleanup_bounds_windows_taskkill(monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import Mock
     import ssh_manager.manager as module
+    import ssh_manager.process as process_module
 
     child = SimpleNamespace(pid=12345, returncode=None, kill=Mock())
 
@@ -86,8 +87,8 @@ async def test_process_cleanup_bounds_windows_taskkill(monkeypatch):
 
     child.wait = wait
     kill = Mock(side_effect=subprocess.TimeoutExpired("taskkill", 3))
-    monkeypatch.setattr(module, "sys", SimpleNamespace(platform="win32"))
-    monkeypatch.setattr(module, "_creation_flags", lambda: 0)
+    monkeypatch.setattr(process_module, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(process_module.subprocess, "CREATE_NO_WINDOW", 0, raising=False)
     monkeypatch.setattr(module.subprocess, "run", kill)
 
     await module._terminate_process_tree(child)
@@ -105,6 +106,7 @@ async def test_process_cleanup_finishes_reaping_before_propagating_cancellation(
     from types import SimpleNamespace
     from unittest.mock import Mock
     import ssh_manager.manager as module
+    import ssh_manager.process as process_module
 
     entered, release = asyncio.Event(), asyncio.Event()
     child = SimpleNamespace(pid=12345, returncode=None, kill=Mock())
@@ -116,8 +118,8 @@ async def test_process_cleanup_finishes_reaping_before_propagating_cancellation(
         return 1
 
     child.wait = wait
-    monkeypatch.setattr(module, "sys", SimpleNamespace(platform="win32"))
-    monkeypatch.setattr(module, "_creation_flags", lambda: 0)
+    monkeypatch.setattr(process_module, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(process_module.subprocess, "CREATE_NO_WINDOW", 0, raising=False)
     monkeypatch.setattr(module.subprocess, "run", Mock())
     cleanup = asyncio.create_task(module._terminate_process_tree(child))
     try:
@@ -146,7 +148,7 @@ async def test_taskkill_timeout_still_reaps_the_owned_native_process_tree(monkey
     script = (
         "import subprocess,sys,time\n"
         "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)'],"
-        "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,"
+        "stdin=subprocess.DEVNULL,stdout=sys.stdout,stderr=sys.stderr,"
         "creationflags=subprocess.CREATE_NO_WINDOW)\n"
         "print(child.pid,flush=True)\n"
         "time.sleep(30)\n"
@@ -155,7 +157,7 @@ async def test_taskkill_timeout_still_reaps_the_owned_native_process_tree(monkey
         sys.executable, "-c", script,
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     descendant = None
@@ -185,6 +187,126 @@ async def test_taskkill_timeout_still_reaps_the_owned_native_process_tree(monkey
                     descendant.terminate()
             finally:
                 descendant.close()
+
+
+@pytest.mark.asyncio
+async def test_command_cancellation_joins_registered_proxy_cleanup(
+    monkeypatch, win_platform, source,
+):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from ssh_manager.process import register_process_cleanup, _CLEANUPS
+
+    entered, release = asyncio.Event(), asyncio.Event()
+    child = SimpleNamespace(
+        pid=12345, returncode=None, kill=Mock(),
+        communicate=AsyncMock(side_effect=asyncio.CancelledError),
+    )
+
+    async def wait():
+        child.returncode = 1
+        return 1
+
+    async def close_proxy():
+        entered.set()
+        await release.wait()
+
+    child.wait = wait
+    register_process_cleanup(child, close_proxy)
+    manager = ConnectionManager(platform=win_platform)
+    await manager.ensure_connected("test-host", source)
+    monkeypatch.setattr("ssh_manager.manager.create_ssh_subprocess", AsyncMock(return_value=child))
+    monkeypatch.setattr("ssh_manager.manager.subprocess.run", Mock())
+    task = asyncio.create_task(manager.exec_command("test-host", "true", timeout=1))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+    finally:
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        cleaned = id(child) not in _CLEANUPS
+        entry = _CLEANUPS.pop(id(child), None)
+        if entry is not None and entry.task is not None:
+            await entry.task
+    assert cleaned
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform != "win32", reason="Native Windows broker Job ownership")
+async def test_cancelled_command_joins_native_broker_and_root_teardown(
+    monkeypatch, win_platform, source,
+):
+    import subprocess
+    from unittest.mock import Mock
+    from agent_procutil import spawn_in_kill_on_close_job
+    from ssh_manager import proxy
+    from ssh_manager.process import register_process_cleanup, _CLEANUPS
+    import ssh_manager.manager as module
+
+    script = "import time; print('ready',flush=True); time.sleep(30)"
+    broker = proxy._ProxyBroker([sys.executable, "-c", script], None)
+    children = []
+    spawn = broker._spawn_child
+
+    async def record_child():
+        child, handle = await spawn()
+        children.append(child)
+        return child, handle
+
+    monkeypatch.setattr(broker, "_spawn_child", record_child)
+    port = await broker.start()
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    root = job = task = None
+    try:
+        writer.write(broker.capability.encode("ascii"))
+        await writer.drain()
+        assert (await asyncio.wait_for(reader.readline(), timeout=5)).rstrip() == b"ready"
+        child_jobs = list(broker._child_jobs)
+        assert len(child_jobs) == 1
+        root, job = await spawn_in_kill_on_close_job(
+            sys.executable, "-c", "import time; time.sleep(30)",
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        proxy._track_owner_job(root, job)
+        register_process_cleanup(root, broker.close)
+        manager = ConnectionManager(platform=win_platform)
+        info = await manager.ensure_connected("test-host", source)
+        monkeypatch.setattr(module, "create_ssh_subprocess", AsyncMock(return_value=root))
+        monkeypatch.setattr(
+            module.subprocess, "run",
+            Mock(side_effect=subprocess.TimeoutExpired("taskkill", 3)),
+        )
+        task = asyncio.create_task(manager.exec_command("test-host", "true", timeout=30))
+        async with asyncio.timeout(2):
+            while root not in info.child_processes:
+                await asyncio.sleep(0)
+        started = time.monotonic()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=module.EXEC_COMMAND_CLEANUP_TIMEOUT + 1)
+        assert time.monotonic() - started < module.EXEC_COMMAND_CLEANUP_TIMEOUT
+        assert root.returncode is not None
+        assert len(children) == 1 and children[0].returncode is not None
+        assert not broker._clients and not broker._cleanups and not broker._child_jobs
+        assert id(root) not in _CLEANUPS
+    finally:
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        writer.close()
+        await writer.wait_closed()
+        await broker.close()
+        if job is not None:
+            job.close()
+        if root is not None:
+            if root.returncode is None:
+                root.kill()
+            await asyncio.wait_for(root.wait(), timeout=5)
 
 
 class TestConnectionManagerDirect:

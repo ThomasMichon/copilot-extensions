@@ -12,11 +12,8 @@ import hashlib
 import json
 import logging
 import math
-import os
 import re
-import signal
 import subprocess
-import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -31,7 +28,7 @@ from .platform import (
     ensure_socket_dir,
     socket_path_for_host,
 )
-from .process import terminate_ssh_process_tree
+from .process import PROCESS_CLEANUP_TIMEOUT, TERMINATE_GRACE, terminate_ssh_process_tree
 from .proxy import create_ssh_subprocess
 
 log = logging.getLogger("ssh-manager")
@@ -43,10 +40,7 @@ log = logging.getLogger("ssh-manager")
 # closed"). Mirror the acp library's 50 MB default so remote ACP sessions match
 # local ones.
 _STDIO_CHANNEL_LIMIT_BYTES = 50 * 1024 * 1024
-_TASKKILL_TIMEOUT = 3.0
-_TERMINATE_GRACE = 5.0
-_KILL_WAIT = 2.0
-EXEC_COMMAND_CLEANUP_TIMEOUT = _TASKKILL_TIMEOUT + _TERMINATE_GRACE + _KILL_WAIT
+EXEC_COMMAND_CLEANUP_TIMEOUT = PROCESS_CLEANUP_TIMEOUT
 
 
 def _carrier_transport_identity(info: ConnectionInfo) -> str:
@@ -83,20 +77,13 @@ def get_default_manager() -> ConnectionManager:
     return _default_manager
 
 
-def _creation_flags() -> int:
-    """Subprocess creation flags for Windows headless compatibility."""
-    if sys.platform == "win32":
-        return subprocess.CREATE_NO_WINDOW
-    return 0
-
-
 async def _terminate_process_tree(
     proc: asyncio.subprocess.Process,
     *,
-    grace: float = _TERMINATE_GRACE,
+    grace: float = TERMINATE_GRACE,
 ) -> None:
     """Terminate an SSH child and any children it spawned."""
-    cleanup = asyncio.create_task(_reap_process_tree(proc, grace=grace))
+    cleanup = asyncio.create_task(terminate_ssh_process_tree(proc, grace=grace))
     cancelled = False
     while not cleanup.done():
         try:
@@ -106,51 +93,6 @@ async def _terminate_process_tree(
     cleanup.result()
     if cancelled:
         raise asyncio.CancelledError
-
-
-async def _reap_process_tree(
-    proc: asyncio.subprocess.Process, *, grace: float,
-) -> None:
-    if proc.returncode is not None:
-        return
-    if sys.platform == "win32":
-        try:
-            subprocess.run(  # noqa: S603, S607
-                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                creationflags=_creation_flags(),
-                timeout=_TASKKILL_TIMEOUT,
-            )
-        except subprocess.TimeoutExpired:
-            log.warning("Process-tree termination timed out for pid %s; killing SSH root", proc.pid)
-            with contextlib.suppress(ProcessLookupError):
-                proc.kill()
-        except OSError:
-            proc.kill()
-    else:
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-        except OSError:
-            proc.kill()
-    try:
-        await asyncio.wait_for(proc.wait(), timeout=grace)
-        return
-    except (TimeoutError, asyncio.TimeoutError):
-        pass
-    if sys.platform != "win32":
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        except OSError:
-            proc.kill()
-    else:
-        proc.kill()
-    try:
-        await asyncio.wait_for(proc.wait(), timeout=_KILL_WAIT)
-    except (TimeoutError, asyncio.TimeoutError):
-        log.warning("Process tree rooted at pid %s did not exit", proc.pid)
 
 
 @dataclass

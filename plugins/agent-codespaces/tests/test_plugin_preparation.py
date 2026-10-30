@@ -136,6 +136,7 @@ async def test_relay_readiness_reserves_time_to_reap_cancelled_transport(monkeyp
     from unittest.mock import AsyncMock, Mock
     from ssh_manager import ConnectionManager
     import ssh_manager.manager as transport
+    import ssh_manager.process as process_module
     import agent_codespaces.plugin_preparation as preparation
 
     now = 0.0
@@ -162,8 +163,8 @@ async def test_relay_readiness_reserves_time_to_reap_cancelled_transport(monkeyp
     manager._connections = {"synthetic": info}
     monkeypatch.setattr(manager, "_mux_ssh_args", lambda info: [])
     monkeypatch.setattr(transport, "create_ssh_subprocess", AsyncMock(return_value=child))
-    monkeypatch.setattr(transport, "sys", SimpleNamespace(platform="win32"))
-    monkeypatch.setattr(transport, "_creation_flags", lambda: 0)
+    monkeypatch.setattr(process_module, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(process_module.subprocess, "CREATE_NO_WINDOW", 0, raising=False)
     monkeypatch.setattr(transport.subprocess, "run", Mock())
 
     def clock():

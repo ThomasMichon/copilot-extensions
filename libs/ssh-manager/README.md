@@ -17,10 +17,13 @@ outer process deadline remains authoritative.
 
 Callers with a total wall-clock budget must reserve the public
 `EXEC_COMMAND_CLEANUP_TIMEOUT` (10 seconds) for command cancellation cleanup,
-in addition to the selected execution timeout. Windows `taskkill` is bounded
-to 3 seconds, followed by up to 5 seconds of graceful wait and 2 seconds after
-forced kill. Cancellation joins this owned reaper rather than detaching it;
-children without a confirmed exit remain registered to their connection.
+in addition to the selected execution timeout. Owned Windows Jobs are closed
+before waiting for exit, so descendants retaining redirected pipes cannot
+block their own retirement. Roots without an owned Job use `taskkill`, bounded
+to 3 seconds, followed by up to 5 seconds of exit wait and 2 seconds after
+forced kill. Registered proxy cleanup runs alongside root retirement and is
+joined before cancellation returns; proxy writers have a bounded drain too.
+Children without a confirmed exit remain registered to their connection.
 
 ## Features
 

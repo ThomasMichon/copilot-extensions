@@ -93,6 +93,8 @@ async def test_callback_failure_preserves_error_and_owned_cleanup(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_command_timeout_joins_cleanup_when_the_outer_caller_cancels(monkeypatch):
+    import ssh_manager.process as process_module
+
     process = Process()
     process.pid = 12345
     process.communicate = AsyncMock(side_effect=asyncio.TimeoutError)
@@ -106,8 +108,8 @@ async def test_command_timeout_joins_cleanup_when_the_outer_caller_cancels(monke
 
     process.wait = wait
     item, info = manager(monkeypatch, process)
-    monkeypatch.setattr(module, "sys", SimpleNamespace(platform="win32"))
-    monkeypatch.setattr(module, "_creation_flags", lambda: 0)
+    monkeypatch.setattr(process_module, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(process_module.subprocess, "CREATE_NO_WINDOW", 0, raising=False)
     monkeypatch.setattr(module.subprocess, "run", Mock())
     operation = asyncio.create_task(item.exec_command("fixture-alias", "fixture resolve"))
     try:
