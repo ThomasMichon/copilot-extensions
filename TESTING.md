@@ -1,5 +1,11 @@
 # Testing copilot-extensions
 
+The optional `update_diagnostics` lane includes Manager's actual scoped
+engine handoff under a no-window captured parent. It verifies repeated stdout
+and stderr, the unchanged native nonzero result and unaffected unscoped
+passthrough controls. This proves stream delivery, not installed full-update
+success or native publication settlement.
+
 The optional `update_diagnostics` lane also runs MCP's focused
 `test_source_install_transactions.py -k footprint_routes` controls and
 `test_source_build.py` operational-identity and

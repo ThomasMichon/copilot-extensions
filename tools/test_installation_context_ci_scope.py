@@ -318,6 +318,8 @@ def test_update_diagnostics_native_packet_preserves_bounds_and_source(name, rout
                     "bootstrap_retains_update_repair", "native_launch_submits_fixed_phases",
                     "native_bootstrap_hold", "target_bypasses_bootstrap",
                     "bootstrap_preserves_hold_path",
+                    "engine_handoff_is_explicit_only_for_mutating_update_commands",
+                    "scoped_engine_passthrough_retains_both_channels",
                 ]
         assert "!cancelled() && steps.tooling.outcome == 'success'" in step["if"]
         assert not any(flag in command for flag in (
