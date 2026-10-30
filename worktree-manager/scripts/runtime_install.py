@@ -706,6 +706,9 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError) as error:
             print(f"Runtime source: {error}", file=sys.stderr)
             return 1
+    if _automatic_bootstrap_inhibited(args):
+        print("automatic-update KillSwitch active; nothing ran", file=sys.stderr)
+        return 3
     if os.name == "nt":
         driver = _execution_driver(args.payload)
         with _installation_custody() as custody:
@@ -719,9 +722,6 @@ def main(argv: list[str] | None = None) -> int:
     else:
         if args.install_only:
             raise RuntimeError("Windows installation participant is unsupported on this platform")
-        if _automatic_bootstrap_inhibited(args):
-            print("automatic-update KillSwitch active; nothing ran", file=sys.stderr)
-            return 3
         slot = _install(args)
     return _finish(args, slot, command)
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Check automatic bootstrap inhibition before Windows queue admission, preserving interrupted execution fences and ordinary manual admission.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
