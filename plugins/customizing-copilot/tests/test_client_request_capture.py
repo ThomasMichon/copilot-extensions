@@ -22,6 +22,8 @@ def test_real_authorization_and_scoped_environment(monkeypatch):
     monkeypatch.setenv("COPILOT_PROVIDER_BASE_URL", "https://example.com/shared")
     monkeypatch.setenv("COPILOT_PROVIDER_UNKNOWN_OPTION", "must-not-survive")
     monkeypatch.setenv("GH_TOKEN", "synthetic-ambient-credential")
+    for name in ("COPILOT_GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"):
+        monkeypatch.setenv(name, "synthetic-ambient-credential")
     monkeypatch.setenv("HTTPS_PROXY", "https://example.com/proxy")
     monkeypatch.setenv("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", "synthetic-instructions")
     environment = capture.child_environment("synthetic-key", 12345, "synthetic-model")
@@ -31,7 +33,10 @@ def test_real_authorization_and_scoped_environment(monkeypatch):
     assert environment["COPILOT_CUSTOM_INSTRUCTIONS_DIRS"] == "synthetic-instructions"
     assert environment["COPILOT_OFFLINE"] == "true"
     assert environment["NO_PROXY"] == "127.0.0.1"
-    assert not {"GH_TOKEN", "HTTPS_PROXY", "COPILOT_PROVIDER_UNKNOWN_OPTION"} & environment.keys()
+    assert not {
+        "GH_TOKEN", "COPILOT_GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+        "HTTPS_PROXY", "COPILOT_PROVIDER_UNKNOWN_OPTION",
+    } & environment.keys()
     assert os.environ["COPILOT_PROVIDER_BASE_URL"] == "https://example.com/shared"
 
 

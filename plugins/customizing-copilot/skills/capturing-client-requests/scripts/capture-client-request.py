@@ -186,6 +186,7 @@ def child_environment(key: str, port: int, model: str) -> dict[str, str]:
     for name in tuple(environment):
         if name.startswith("COPILOT_PROVIDER_") or name in {
             "GH_TOKEN", "GITHUB_TOKEN", "GITHUB_API_TOKEN",
+            "COPILOT_GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
             "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
             "http_proxy", "https_proxy", "all_proxy",
         }:

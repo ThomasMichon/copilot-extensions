@@ -145,3 +145,6 @@ made by GitHub's hosted provider.
   existing finite-worker behavior without weakening the guard.
 - All twenty controls, including actual native CLI qualification, passed after
   those corrections; the lifecycle census and touched-code lint passed.
+- The next review found three additional ambient GitHub credential variables
+  missing from the documented child filter. Added them and extended the
+  environment regression; no broader harness credential sanitization is claimed.
