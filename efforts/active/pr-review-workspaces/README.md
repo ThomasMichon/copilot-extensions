@@ -186,6 +186,17 @@ contract.
 
 ## Journal
 
+### 2026-10-30 - Priority native nullable-properties compatibility
+- Isolated the normalizer correction from the unpublished cache implementation,
+  preserving that cache source checkpoint for continuation.
+- Native discussion property bags may validly be null. Preserve that explicit
+  null separately from absence, retain existing dictionary filtering, and still
+  reject scalar/list bags. Wholly synthetic fixtures exercise actual generation,
+  source CLI load and offline comparison, not a bypassed record normalizer.
+- The focused source packet passed 68 cases. Backend qualification/retest remains
+  with the existing authorized owner; this source lane makes no claim about a
+  particular live failure frame and performs no live backend or auth changes.
+
 ### 2026-10-30 - Protected embedding merged; next cache contract
 - #9676 merged as `69064505eb9db002e462f000bcf4d8aa42ab4f47` after
   current-head Copilot approval, resolved feedback and required green checks.
