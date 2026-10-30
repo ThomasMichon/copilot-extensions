@@ -335,6 +335,11 @@ Desktop qualification remains a separate gate; do not relabel functional
 results, normal operator observations or a failed calibration as desktop proof.
 Both modes retain the existing whole deadline and 150-second worker cutoff,
 complete before/after source hashes and exact literal packet identities.
+Functional source hashing must finish before native admission. Each packet
+rechecks the original worker cutoff immediately before constructing its child;
+the shared child rechecks its unchanged request deadline after publishing the
+request and immediately before native process creation. Slow hashing, parent
+queries, earlier packets or request-file writes cannot launch a late worker.
 
 The `passive` mode creates no window and changes no foreground state: it checks
 the native bindings, complete raw-event/poll capture and private-pipe identity

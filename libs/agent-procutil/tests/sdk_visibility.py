@@ -154,7 +154,9 @@ class Child:
         self.lock = threading.Lock()
         self.readers = []
         request_file = directory / f"{name}-request.json"
+        require_time(request["deadline"], "owned child request publication")
         write_new(request_file, request)
+        require_time(request["deadline"], "owned child launch")
         self.process = subprocess.Popen(
             [*argv, str(request_file)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, bufsize=0, creationflags=subprocess.CREATE_NO_WINDOW,
@@ -493,10 +495,12 @@ def run_workers(
     report: dict, observer: DesktopObserver | None = None,
 ) -> None:
     packets = validate_case_packets(Path(request["sdk_root"]), request["case_packets"])
+    worker_deadline = min(deadline, start + 150)
+    require_time(worker_deadline, "native worker admission")
     parent = api.identity()
     child_request = {
         "nonce": request["nonce"], "parent_pid": parent["pid"],
-        "parent_birth": parent["birth"], "deadline": deadline,
+        "parent_birth": parent["birth"], "deadline": worker_deadline,
     }
     argv = [request["python"], "-I", "-B", "-X", "utf8", __file__]
     (root / "pytest.ini").open("x").close()
@@ -506,10 +510,11 @@ def run_workers(
     ]
     report["workers"] = []
     for index, nodes in enumerate(packets):
-        attempt = {"packet": index, "stage": "launch", "succeeded": False}
+        attempt = {"packet": index, "stage": "launch", "launched": False, "succeeded": False}
         report["workers"].append(attempt)
         primary_error = tests = None
         try:
+            require_time(worker_deadline, f"native worker {index + 1} launch")
             tests = Child(
                 api, [*argv, "worker"],
                 {**child_request, "sdk_root": request["sdk_root"], "output": str(root),
@@ -547,6 +552,7 @@ def functional(request: dict) -> int:
     source_before = verify_sources(request["sources"])
     start = time.monotonic()
     deadline = min(request["deadline"], start + 165)
+    require_time(deadline, "functional source verification")
     root = Path(request["output"])
     root.mkdir()
     report = {

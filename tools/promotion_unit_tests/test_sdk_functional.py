@@ -145,10 +145,11 @@ def test_functional_primary_error_survives_expired_final_clock(
 ) -> None:
     request, _, _ = functional_fixture
     request["deadline"] = 110
-    clock = iter((100, 100, 111))
-    monkeypatch.setattr(runner, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    clock = {"now": 100}
+    monkeypatch.setattr(runner, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
 
     def fail(*args: Any) -> None:
+        clock["now"] = 111
         raise runner.ObservationBlocked("original worker failure")
 
     monkeypatch.setattr(runner, "run_workers", fail)
@@ -158,3 +159,79 @@ def test_functional_primary_error_survives_expired_final_clock(
     assert "original worker failure" in report["error"]
     assert report["deadline_error"] == "immutable functional deadline exceeded"
     assert report["passed"] is False and report["desktop_qualified"] is False
+
+
+def test_functional_request_expired_by_hashing_cannot_reach_native_binding(
+    functional_fixture: tuple, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request, events, _ = functional_fixture
+    clock = {"now": 100}
+    request["deadline"] = 110
+    monkeypatch.setattr(runner, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
+
+    def hashing(values: list[dict]) -> list[dict]:
+        clock["now"] = 111
+        return values
+
+    monkeypatch.setattr(runner, "verify_sources", hashing)
+    monkeypatch.setattr(runner, "new_api", lambda: pytest.fail("native binding after expired hashing"))
+    with pytest.raises(runner.ObservationBlocked, match="deadline"):
+        runner.functional(request)
+    assert events == []
+    assert not Path(request["output"]).exists()
+
+
+def test_functional_request_expired_by_parent_identity_cannot_launch(
+    functional_fixture: tuple, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request, events, _ = functional_fixture
+    clock = {"now": 100}
+    request["deadline"] = 110
+    monkeypatch.setattr(runner, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
+
+    def identity() -> dict[str, int]:
+        clock["now"] = 111
+        return {"pid": 7, "birth": 8}
+
+    monkeypatch.setattr(runner, "new_api", lambda: SimpleNamespace(identity=identity))
+    with pytest.raises(runner.ObservationBlocked, match="deadline"):
+        runner.functional(request)
+    assert events == []
+
+
+def test_functional_request_expired_between_packets_cannot_launch_next(
+    functional_fixture: tuple, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request, events, _ = functional_fixture
+    clock = {"now": 100}
+    request["deadline"] = 110
+    monkeypatch.setattr(runner, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
+    original_close = runner.Child.close
+
+    def close(child: Any) -> None:
+        original_close(child)
+        if child.name == "worker-01":
+            clock["now"] = 111
+
+    monkeypatch.setattr(runner.Child, "close", close)
+    with pytest.raises(runner.ObservationBlocked, match="deadline"):
+        runner.functional(request)
+    assert "worker-01-close" in events and "worker-02-launch" not in events
+
+
+def test_owned_child_request_expired_during_request_write_cannot_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = {"now": 100}
+    monkeypatch.setattr(runner, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
+
+    def write(*args: Any) -> None:
+        clock["now"] = 111
+
+    monkeypatch.setattr(runner, "write_new", write)
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *a, **k: pytest.fail("expired child spawn"))
+    monkeypatch.setattr(runner.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    evidence: dict[str, Any] = {}
+    with pytest.raises(runner.ObservationBlocked, match="deadline"):
+        runner.Child(SimpleNamespace(), ["python"], {"deadline": 110}, tmp_path, "late", evidence=evidence)
+    assert evidence["launched"] is False
