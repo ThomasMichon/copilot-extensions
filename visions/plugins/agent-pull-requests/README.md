@@ -3,7 +3,7 @@
 - **Subject:** The first-class pull-request plugin and independently operable PR service.
 - **Scope:** leaf (child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-18
+- **Last revised:** 2026-10-30
 - **Reality docs:** [PR plugin](../../../plugins/agent-pull-requests/README.md)
 
 ## Purpose & Intent
@@ -72,6 +72,21 @@ can reconcile acceptance, resume pending delivery and acknowledge their own
 event identity without confusing another registration. Remote delivery does
 not presume that a client's local executable exists on a service machine.
 
+### reviewer-owned-load-sync-and-submit
+
+A reviewer obtains a coherent local PR representation, synchronizes meaningful
+upstream changes, analyzes exact source and submits explicitly selected comments
+and a named verdict through this domain surface. Provider details do not require
+another agent to interpret evidence on the reviewer's behalf.
+
+### scope-isolated-review-generations
+
+Immutable review generations retain endpoint, repository, account and revision
+identity, section completeness and observation intervals. Discussion-only changes
+remain visible without a source push. New source evidence cannot leave an older
+source attachment appearing current. Rebuildable observation caches and durable
+submission intent/receipts have distinct recovery and retention semantics.
+
 ## Behaviors
 
 ### one-operator-with-separated-scopes
@@ -101,6 +116,15 @@ Clients select supported native or fleet access explicitly. An unavailable
 fleet route does not silently use another account or local service. Credential
 providers retain issuance, renewal and revocation authority; the PR service
 does not turn its subscription store into a secret store.
+
+### honest-observation-and-partial-effects
+
+Local generation consistency does not imply an atomic forge snapshot. Missing
+or partial evidence remains unknown rather than empty success. Review submission
+refreshes action-specific checks, retains confirmed and unknown outcomes and
+reconciles before retry; it never invents atomic multi-action or head-conditional
+guarantees. Completion settings, other reviewers' state, caller policy and
+independent finding checks retain their existing owners.
 
 ## Non-Goals / Boundaries
 
