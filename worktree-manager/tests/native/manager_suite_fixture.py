@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from manager_suite_artifacts import (
     _DELIVERY, _MATERIALIZE, _command, _configuration, _env, _task_inventory_script, _write,
 )
+from manager_suite_diagnostics import retain_driver_logs
 
 REPO = Path(__file__).resolve().parents[3]
 SCHEMA = "worktree-manager.native-suite-replacement.v1"
@@ -89,8 +90,10 @@ def _run(
             "argv": list(map(str, argv)), "returncode": result.returncode,
             "stdout": result.stdout, "stderr": result.stderr,
         }) + "\n")
-    if check and result.returncode:
-        raise AssertionError(f"{argv}: {result.returncode}\n{result.stdout}\n{result.stderr}")
+    if result.returncode:
+        retain_driver_logs(case, "\n".join((result.stdout, result.stderr)))
+        if check:
+            raise AssertionError(f"{argv}: {result.returncode}\n{result.stdout}\n{result.stderr}")
     return result
 
 

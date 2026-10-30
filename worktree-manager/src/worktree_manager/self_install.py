@@ -1009,8 +1009,9 @@ def self_update(
     except update_auth.AuthRequired as e:
         return SelfUpdateResult(action="auth_required", previous=previous, reason=str(e))
     except (OSError, ValueError, subprocess.SubprocessError, engine_client.EngineError) as e:
+        detail = f"\n{e.stderr.strip()}" if isinstance(e, subprocess.CalledProcessError) and e.stderr else ""
         return SelfUpdateResult(action="error", previous=previous,
-                                reason=f"fetch failed: {e}")
+                                reason=f"fetch failed: {e}{detail}")
 
     if not (payload / "pyproject.toml").is_file():
         return SelfUpdateResult(action="error", previous=previous,

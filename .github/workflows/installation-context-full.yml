@@ -549,6 +549,8 @@ jobs:
             .validation/*/settlement.json
             .validation/*/commands.jsonl
             .validation/*/task-inventory.json
+            .validation/*/driver-diagnostics.json
+            .validation/*/driver-logs/*.log
           include-hidden-files: true
           if-no-files-found: warn
 
