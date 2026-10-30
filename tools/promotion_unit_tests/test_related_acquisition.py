@@ -40,7 +40,7 @@ def api(monkeypatch):
     load("acquisition_report")
     related = load("related_acquisition")
     config = load("config_acquisition")
-    return SimpleNamespace(related=related, config=config, stub=stub)
+    return SimpleNamespace(related=related, config=config, stub=stub, load=load)
 
 
 def test_entry_uncertainty_survives_complete_activation_without_discarding_positive(api, monkeypatch):
@@ -102,3 +102,114 @@ def test_retained_dropin_data_is_not_fresh_confirmed_positive(api, decision_stat
     assert "retained-value" not in repr(report.observations)
     assert "private YAML body" not in repr(report.observations)
     assert report.reusable is False
+
+
+def test_machine_root_resolution_failure_is_owner_uncertainty(api):
+    calls = []
+
+    def project_dir(project=None):
+        calls.append(project)
+        raise ValueError("synthetic private resolution failure")
+
+    api.stub("config", project_dir=project_dir)
+    owner = api.load("machine_config")
+    report = owner.machine_config_root_report("base", project="sample")
+    assert calls == ["sample"]
+    assert report.value is None
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert report.findings[0].detail == "ValueError"
+    assert "synthetic private resolution failure" not in repr(report.observations)
+    assert report.reusable is False
+
+
+def test_machine_marker_failure_keeps_later_positive_and_marker_order(api, monkeypatch):
+    import stat
+
+    api.stub("config", project_dir=lambda project=None: "overlay")
+    owner = api.load("machine_config")
+    calls = []
+    expected = [owner.os.path.join("overlay", marker) for marker in owner._MARKERS]
+    original_stat = owner.os.stat
+
+    def observed_stat(path, *args, **kwargs):
+        if path not in expected:
+            return original_stat(path, *args, **kwargs)
+        calls.append(path)
+        assert not args and not kwargs  # Default stat follows a symlink target.
+        if path == expected[0]:
+            raise PermissionError("synthetic private marker failure")
+        assert path == expected[1]
+        return SimpleNamespace(st_mode=stat.S_IFDIR)
+
+    monkeypatch.setattr(owner.os, "stat", observed_stat)
+    report = owner.machine_config_root_report("base", project="sample")
+    assert calls == expected
+    assert report.value == "overlay"
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert [(o.source, o.authority) for o in report.observations] == [
+        (expected[0], ScanAuthority.INDETERMINATE),
+        (expected[1], ScanAuthority.COMPLETE),
+        ("overlay", ScanAuthority.COMPLETE),
+    ]
+    assert "synthetic private marker failure" not in repr(report.observations)
+
+
+@pytest.mark.parametrize("marker_state", ["missing", "regular-file", "first-directory"])
+def test_machine_marker_classification_keeps_absence_and_short_circuit(api, monkeypatch, marker_state):
+    import stat
+
+    api.stub("config", project_dir=lambda project=None: "overlay")
+    owner = api.load("machine_config")
+    calls = []
+    expected = [owner.os.path.join("overlay", marker) for marker in owner._MARKERS]
+    original_stat = owner.os.stat
+
+    def observed_stat(path, *args, **kwargs):
+        if path not in expected:
+            return original_stat(path, *args, **kwargs)
+        calls.append(path)
+        if marker_state == "missing":
+            raise FileNotFoundError(path)
+        return SimpleNamespace(st_mode=stat.S_IFDIR if marker_state == "first-directory" else stat.S_IFREG)
+
+    monkeypatch.setattr(owner.os, "stat", observed_stat)
+    report = owner.machine_config_root_report("base", project="sample")
+    if marker_state == "first-directory":
+        assert calls == [owner.os.path.join("overlay", owner._MARKERS[0])]
+        assert report.value == "overlay"
+        assert report.authority is ScanAuthority.COMPLETE
+    else:
+        assert calls == [owner.os.path.join("overlay", marker) for marker in owner._MARKERS]
+        assert report.value is None
+        assert report.authority is ScanAuthority.ABSENT
+    assert not report.findings
+
+
+@pytest.mark.parametrize("fault_field", ["role", "delegate"])
+def test_related_entry_report_isolates_conversion_fault_at_field_boundary(api, monkeypatch, fault_field):
+    document = {"related": {
+        "first": {}, "broken": {fault_field: 123}, "last": {},
+    }}
+
+    def convert(value):
+        if value == 123:
+            raise AttributeError("synthetic private conversion body")
+        return ""
+
+    fields = {
+        "yaml": SimpleNamespace(safe_load=lambda text: document),
+        "RelatedConfig": lambda **kw: SimpleNamespace(primary=kw.get("primary", ""), related=kw.get("related", {})),
+        "RelatedEntry": lambda **kw: SimpleNamespace(**kw),
+        "normalize_role": convert, "_parse_delegate": convert,
+    }
+    for name in ["_parse_locus", "normalize_ownership", "normalize_audience", "_parse_ai_attribution", "_parse_plugins", "_parse_related_pr"]:
+        fields[name] = lambda value: None
+    api.stub("related", **fields)
+    monkeypatch.setattr(Path, "read_text", lambda *a, **k: "synthetic document")
+    observations = []
+    value = api.related.parse_file(Path("related.yaml"), observations)
+    assert set(value.related) == {"first", "last"}
+    assert any(o.authority is ScanAuthority.INDETERMINATE for o in observations)
+    assert "synthetic private conversion body" not in repr(observations)
+    with pytest.raises(AttributeError):
+        api.related.parse_file(Path("related.yaml"))

@@ -49,21 +49,26 @@ def parse_file(path: Path, observations: list[SourceObservation] | None = None, 
                 failed(observations, str(path), "related-file", "invalid-entry",
                        "related entry must be a mapping or null")
                 continue
-            related[str(name)] = r.RelatedEntry(
-                name=str(name),
-                role=r.normalize_role(entry.get("role", "")),
-                summary=str(entry.get("summary", "")).strip(),
-                doc=str(entry.get("doc", "")).strip(),
-                locus=r._parse_locus(entry.get("locus")),
-                delegate=r._parse_delegate(entry.get("delegate")),
-                ownership=r.normalize_ownership(entry.get("ownership")),
-                owner=str(entry.get("owner", "")).strip(),
-                audience=r.normalize_audience(entry.get("audience")),
-                ai_attribution=r._parse_ai_attribution(entry.get("ai_attribution")),
-                plugins=r._parse_plugins(entry.get("plugins")),
-                pr=r._parse_related_pr(entry.get("pr")),
-                doc_root=str(path.parent),
-            )
+            try:
+                related[str(name)] = r.RelatedEntry(
+                    name=str(name),
+                    role=r.normalize_role(entry.get("role", "")),
+                    summary=str(entry.get("summary", "")).strip(),
+                    doc=str(entry.get("doc", "")).strip(),
+                    locus=r._parse_locus(entry.get("locus")),
+                    delegate=r._parse_delegate(entry.get("delegate")),
+                    ownership=r.normalize_ownership(entry.get("ownership")),
+                    owner=str(entry.get("owner", "")).strip(),
+                    audience=r.normalize_audience(entry.get("audience")),
+                    ai_attribution=r._parse_ai_attribution(entry.get("ai_attribution")),
+                    plugins=r._parse_plugins(entry.get("plugins")),
+                    pr=r._parse_related_pr(entry.get("pr")),
+                    doc_root=str(path.parent),
+                )
+            except AttributeError as exc:
+                if observations is None:
+                    raise
+                failed(observations, str(path), "related-file", "invalid-entry", type(exc).__name__)
 
     else:
         failed(observations, str(path), "related-file", "invalid-shape",

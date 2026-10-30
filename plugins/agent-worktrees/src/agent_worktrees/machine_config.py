@@ -9,8 +9,12 @@ knowledge overlay, so a session in any checkout of the project resolves them.
 from __future__ import annotations
 
 import os
+import stat
+
+from dropin_registry import ScanAuthority
 
 from . import config as cfg
+from .acquisition_report import AcquisitionReport, SourceObservation, failed, observe
 
 _MARKERS = (
     ".agent-worktrees",  # marketplace-isolation: allow legacy-compatibility
@@ -20,15 +24,55 @@ _MARKERS = (
 
 def machine_config_root(base: str | None, *, project: str | None = None) -> str | None:
     """The selected project's local config root; omitted project retains ambient lookup."""
+    return _machine_config_root(base, project=project)
+
+
+def _machine_config_root(base, *, project=None, observations=None):
     try:
         root = str(cfg.project_dir(project))
-    except Exception:  # noqa: BLE001 -- an unresolvable project has no overlay
+    except Exception as exc:  # noqa: BLE001 -- legacy omission remains unchanged
+        failed(observations, "machine-config", "machine-source", "source-selection-failed", type(exc).__name__)
         return None
-    return config_overlay_root(root, base)
+    if observations is None:
+        return config_overlay_root(root, base)
+    return _config_overlay_root(root, base, observations)
 
 
 def config_overlay_root(root: str, base: str | None = None) -> str | None:
     """Classify an already-resolved project root using the normal overlay markers."""
+    return _config_overlay_root(root, base)
+
+
+def _config_overlay_root(root, base=None, observations=None):
     if base and os.path.abspath(root) == os.path.abspath(base):
+        observe(observations, root, "machine-source", ScanAuthority.ABSENT)
         return None
-    return root if any(os.path.isdir(os.path.join(root, m)) for m in _MARKERS) else None
+    for marker in _MARKERS:
+        candidate = os.path.join(root, marker)
+        if observations is None:
+            directory = os.path.isdir(candidate)
+        else:
+            try:
+                # Like isdir, stat follows links and classifies the target mode.
+                directory = stat.S_ISDIR(os.stat(candidate).st_mode)
+            except (FileNotFoundError, NotADirectoryError):
+                observe(observations, candidate, "machine-source-marker", ScanAuthority.ABSENT)
+                continue
+            except (OSError, ValueError) as exc:
+                failed(observations, candidate, "machine-source-marker", "source-selection-failed", type(exc).__name__)
+                continue
+            observe(observations, candidate, "machine-source-marker",
+                    ScanAuthority.COMPLETE if directory else ScanAuthority.ABSENT)
+        if directory:
+            observe(observations, root, "machine-source", ScanAuthority.COMPLETE)
+            return root
+    return None
+
+
+def machine_config_root_report(
+    base: str | None, *, project: str | None = None,
+) -> AcquisitionReport[str | None]:
+    """Select the normal overlay value while retaining lookup/marker uncertainty."""
+    observations: list[SourceObservation] = []
+    value = _machine_config_root(base, project=project, observations=observations)
+    return AcquisitionReport("machine-config-root", value, tuple(observations))

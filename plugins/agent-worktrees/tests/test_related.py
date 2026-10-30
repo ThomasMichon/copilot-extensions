@@ -2584,3 +2584,27 @@ def test_related_acquisition_report_source_selection_uses_one_config_and_activat
     assert report.authority is ScanAuthority.COMPLETE
     assert report.path_semantics == "not-resolved"
     assert report.reusable is False
+
+
+@pytest.mark.parametrize("malformed", [
+    {"role": 123}, {"delegate": {"via": 123}},
+    {"role": ["not-a-role-string"]}, {"delegate": {"via": ["not-a-delegate-string"]}},
+], ids=["numeric-role", "numeric-delegate-via", "list-role", "list-delegate-via"])
+def test_related_report_isolates_entry_conversion_failure_without_changing_legacy(tmp_path, monkeypatch, malformed):
+    from dropin_registry import ScanAuthority
+
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    path = related.related_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_text(yaml.safe_dump({"related": {
+        "first": {"role": "docs"}, "broken": malformed, "last": {"role": "tooling"},
+    }}, sort_keys=False), encoding="utf-8")
+    with pytest.raises(AttributeError):
+        related.read_related(tmp_path)
+    report = related.read_related_report(tmp_path)
+    assert set(report.value.related) == {"first", "last"}
+    assert report.value.related["first"].role == "docs"
+    assert report.value.related["last"].role == "tooling"
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert any(f.entry == str(path) and f.reason == "invalid-entry" for f in report.findings)
+    assert report.reusable is False

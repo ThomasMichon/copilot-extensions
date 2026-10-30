@@ -9,6 +9,10 @@ behavior. Optional in-process report siblings share the same acquisition path:
 `related_cli._related_config_source_anchors_report`,
 `config_sources.config_source_anchors_report`, `config._load_yaml_safe_report`
 and `config._load_config_d_report`. They add no CLI syntax or JSON fields.
+Machine-overlay reports borrow the machine-config owner's failure-aware lookup
+and link-following marker classification; lookup/stat errors are not absence.
+Report-mode related entry conversion failures retain healthy peers and surface
+uncertainty. Legacy entry conversion exceptions still propagate unchanged.
 
 Each `AcquisitionReport[T]` contains the legacy available value, a named
 operation scope, ordered source observations and `ScanAuthority`/`Finding`

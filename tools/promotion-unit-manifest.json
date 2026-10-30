@@ -3029,7 +3029,14 @@
         "tools/promotion_unit_tests/test_related_acquisition.py::test_entry_uncertainty_survives_complete_activation_without_discarding_positive",
         "tools/promotion_unit_tests/test_related_acquisition.py::test_retained_dropin_data_is_not_fresh_confirmed_positive[entry-uncertain]",
         "tools/promotion_unit_tests/test_related_acquisition.py::test_retained_dropin_data_is_not_fresh_confirmed_positive[registry-unavailable]",
-        "tools/promotion_unit_tests/test_related_acquisition.py::test_retained_dropin_data_is_not_fresh_confirmed_positive[registry-with-entry]"
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_retained_dropin_data_is_not_fresh_confirmed_positive[registry-with-entry]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_machine_root_resolution_failure_is_owner_uncertainty",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_machine_marker_failure_keeps_later_positive_and_marker_order",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_machine_marker_classification_keeps_absence_and_short_circuit[missing]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_machine_marker_classification_keeps_absence_and_short_circuit[regular-file]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_machine_marker_classification_keeps_absence_and_short_circuit[first-directory]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_related_entry_report_isolates_conversion_fault_at_field_boundary[role]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_related_entry_report_isolates_conversion_fault_at_field_boundary[delegate]"
     ],
     "sources": {
         "tools/core_python_artifacts.py": "cfeae35bfee4537022e1026ffae498b61b23508426a676d9dc09ca8ab8d4b4a0",
@@ -3384,10 +3391,11 @@
         "plugins/agent-machines/tests/test_cell_installer.py": "de004be5b70e1d4bed4945e766f393c167db0682979853eba4fa40814e01bf14",
         "plugins/agent-machines/scripts/cell_installer.py": "041a28230551d926c65ff00866213f5944ff5d1e0596c75e37ffa8cd0af64795",
         "libs/versioned-runtime/versioned_runtime_construction.py": "df703e23675c232079f28c74eb85977b3460aef252e2bb2079bbf9081ad1480d",
-        "tools/promotion_unit_tests/test_related_acquisition.py": "060ee6c711cac52d4e8b1a6b327b2cd08aae787d41103aeaca53dfa6603bc839",
+        "tools/promotion_unit_tests/test_related_acquisition.py": "6a24f243e88635ff0d6ba493ee6c33ac08b0e27c5cca6dd001982944e77fd927",
         "plugins/agent-worktrees/src/agent_worktrees/acquisition_report.py": "a83793221939d9744aa1be72c839bf631d279cee1fc2bb67601ca8fe68c8deed",
-        "plugins/agent-worktrees/src/agent_worktrees/related_acquisition.py": "da3912aadda48fc29165689f3122611384b302db33409d46639036ea41693e24",
-        "plugins/agent-worktrees/src/agent_worktrees/config_acquisition.py": "1b01f4ec8f7fd76cd8fc76a8b8339894436100da392825295ecf514a9793e6e7"
+        "plugins/agent-worktrees/src/agent_worktrees/related_acquisition.py": "b1c429c3b9f011c75481f08ea007d38b1ab36c226248ef99a7ccdb33c6c06403",
+        "plugins/agent-worktrees/src/agent_worktrees/config_acquisition.py": "1b01f4ec8f7fd76cd8fc76a8b8339894436100da392825295ecf514a9793e6e7",
+        "plugins/agent-worktrees/src/agent_worktrees/machine_config.py": "bf6840e7d62b1054e9a900327102529c5f7fab972ee98813d498b3a128e0b206"
     },
     "coverage_targets": [
         "tools/core_runtime_profile.py",
@@ -3548,7 +3556,8 @@
         "plugins/agent-machines/scripts/cell_installer.py",
         "plugins/agent-worktrees/src/agent_worktrees/acquisition_report.py",
         "plugins/agent-worktrees/src/agent_worktrees/related_acquisition.py",
-        "plugins/agent-worktrees/src/agent_worktrees/config_acquisition.py"
+        "plugins/agent-worktrees/src/agent_worktrees/config_acquisition.py",
+        "plugins/agent-worktrees/src/agent_worktrees/machine_config.py"
     ],
     "max_seconds": 300
 }

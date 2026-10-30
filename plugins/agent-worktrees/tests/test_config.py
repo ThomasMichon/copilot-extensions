@@ -2797,3 +2797,68 @@ def test_config_acquisition_report_retains_owner_verdict_for_last_known_data(tmp
     assert "retained-upstream" not in repr(report.observations)
     assert report.findings == (finding,)
     assert report.reusable is False
+
+
+def _machine_overlay_report_config(base: Path, tmp_path: Path):
+    return cfg.Config(
+        srcroot=str(tmp_path), machine="example", platform="windows", repo_name="sample",
+        repos={"sample": cfg.RepoConfig(anchor=str(base), worktree_root=str(tmp_path / "trees"))},
+    )
+
+
+def test_config_source_report_retains_suppressed_project_root_failure(tmp_path, monkeypatch):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_sources
+
+    base = tmp_path / "base"
+    base.mkdir()
+    config = _machine_overlay_report_config(base, tmp_path)
+
+    def unavailable(project=None):
+        raise ValueError("synthetic project root resolution failure")
+
+    monkeypatch.setattr(cfg, "project_dir", unavailable)
+    legacy = config_sources.config_source_anchors(config, base_anchor=str(base))
+    assert [(source.anchor, source.origin) for source in legacy] == [(str(base), "harness")]
+    report = config_sources.config_source_anchors_report(config, base_anchor=str(base))
+    assert report.value == legacy
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert report.findings
+    assert "synthetic project root resolution failure" not in repr(report.observations)
+    assert report.reusable is False
+
+
+@pytest.mark.parametrize("later_marker_present", [False, True], ids=["no-positive-marker", "later-positive-marker"])
+def test_config_source_report_retains_suppressed_marker_stat_failure(tmp_path, monkeypatch, later_marker_present):
+    import os
+
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_sources, machine_config
+
+    base, overlay = tmp_path / "base", tmp_path / "overlay"
+    base.mkdir()
+    overlay.mkdir()
+    denied = overlay / ".agent-worktrees"
+    if later_marker_present:
+        (overlay / ".copilot-extensions" / "agent-worktrees").mkdir(parents=True)
+    config = _machine_overlay_report_config(base, tmp_path)
+    monkeypatch.setattr(cfg, "project_dir", lambda project=None: overlay)
+    original_stat = machine_config.os.stat
+
+    def stat(path, *args, **kwargs):
+        if isinstance(path, (str, os.PathLike)) and os.path.normcase(os.fspath(path)) == os.path.normcase(str(denied)):
+            raise PermissionError("synthetic private marker failure")
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(machine_config.os, "stat", stat)
+    legacy = config_sources.config_source_anchors(config, base_anchor=str(base))
+    expected = [(str(base), "harness")]
+    if later_marker_present:
+        expected.append((str(overlay), "machine"))
+    assert [(source.anchor, source.origin) for source in legacy] == expected
+    report = config_sources.config_source_anchors_report(config, base_anchor=str(base))
+    assert report.value == legacy
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert report.findings
+    assert "synthetic private marker failure" not in repr(report.observations)
+    assert report.reusable is False

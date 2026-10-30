@@ -67,7 +67,7 @@ def knowledge_config_source(
 
 def _config_source_anchors(config, *, base_anchor=None, cwd=None, observations=None):
     from . import state_root
-    from .machine_config import machine_config_root
+    from .machine_config import machine_config_root, machine_config_root_report
 
     base = base_anchor or state_root._git_toplevel(cwd) or _default_anchor(config)
     sources = []
@@ -77,7 +77,12 @@ def _config_source_anchors(config, *, base_anchor=None, cwd=None, observations=N
     else:
         failed(observations, "base-anchor", "config-sources", "base-unavailable", "no base anchor resolved")
     try:
-        local = machine_config_root(base, project=config.repo_name)
+        if observations is None:
+            local = machine_config_root(base, project=config.repo_name)
+        else:
+            local_report = machine_config_root_report(base, project=config.repo_name)
+            local = local_report.value
+            observations.extend(local_report.observations)
     except Exception as exc:
         if observations is None:
             raise
@@ -85,8 +90,6 @@ def _config_source_anchors(config, *, base_anchor=None, cwd=None, observations=N
         local = None
     if local:
         sources.append(ConfigSource(anchor=local, origin="machine"))
-    observe(observations, local or "machine-config", "machine-source",
-            ScanAuthority.COMPLETE if local else ScanAuthority.ABSENT)
     if observations is None:
         knowledge = knowledge_config_source(config, base_anchor=base, cwd=cwd)
     else:
