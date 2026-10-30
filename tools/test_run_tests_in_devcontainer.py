@@ -2998,11 +2998,26 @@ def test_devcontainer_config_bootstraps_uv_via_a_pinned_verified_download() -> N
     # reopen: the bootstrap must pin an exact `uv` version and verify the
     # downloaded archive's SHA-256 before ever executing anything from it.
     config = _load_devcontainer_config()
-    on_create = config["onCreateCommand"]
+    on_create = config["onCreateCommand"]["uv"]
     assert "UV_VERSION=" in on_create
     assert "sha256sum" in on_create
     assert "| sh" not in on_create
     assert "astral.sh/uv/install.sh" not in on_create
+
+
+def test_devcontainer_config_bootstraps_node_before_offline_extension_tests() -> None:
+    config = _load_devcontainer_config()
+    bootstrap = config["onCreateCommand"]["node"]
+    assert "NODE_VERSION=22.15.0" in bootstrap
+    assert "x86_64) NODE_ARCH=x64" in bootstrap
+    assert "aarch64) NODE_ARCH=arm64" in bootstrap
+    assert "dafe2e8f82cb97de1bd10db9e2ec4c07bbf53389b0799b1e095a918951e78fd4" in bootstrap
+    assert "d68adf72c531f1118bee75b20ffbc5911accfda5e73454a798625464b40a4adf" in bootstrap
+    assert "https://nodejs.org/dist/v$NODE_VERSION/$ASSET.tar.xz" in bootstrap
+    assert bootstrap.index("sha256sum --check --status") < bootstrap.index("tar -xJf")
+    assert '--strip-components=2 "$ASSET/bin/node"' in bootstrap
+    assert '"$HOME/.local/bin/node" --version' in bootstrap
+    assert "set -eu;" in bootstrap
 
 
 def test_devcontainer_config_exempts_the_workspace_from_dubious_ownership_checks() -> None:
