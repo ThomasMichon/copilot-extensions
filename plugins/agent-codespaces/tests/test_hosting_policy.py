@@ -9,12 +9,15 @@ from agent_codespaces import hosting_policy
 
 
 @pytest.mark.asyncio
-async def test_invalid_explicit_installation_context_precedes_guest_transport(monkeypatch):
+@pytest.mark.parametrize("preflight", [False, True])
+async def test_invalid_explicit_installation_context_precedes_guest_transport(monkeypatch, preflight):
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", " ")
     execute = AsyncMock(side_effect=AssertionError("invalid context must not reach a guest"))
     monkeypatch.setattr("agent_codespaces._ssh_retry.exec_with_retry", execute)
     with pytest.raises(RuntimeError, match="installation context refused"):
-        await hosting_policy.require_guest_hosting(object(), "venue", "/workspaces/product")
+        await hosting_policy.require_guest_hosting(
+            object(), "venue", "/workspaces/product", preflight=preflight,
+        )
     execute.assert_not_awaited()
 
 
@@ -25,7 +28,9 @@ async def test_denial_uses_actual_guest_checkout_without_fallback(monkeypatch):
     ))
     monkeypatch.setattr("agent_codespaces._ssh_retry.exec_with_retry", execute)
     with pytest.raises(RuntimeError, match="expose_agent: false"):
-        await hosting_policy.require_guest_hosting(object(), "venue", "/workspaces/product")
+        await hosting_policy.require_guest_hosting(
+            object(), "venue", "/workspaces/product", preflight=True,
+        )
     assert execute.await_count == 1
     command = execute.call_args.args[2]
     assert "/workspaces/product" in command
@@ -56,7 +61,9 @@ async def test_absent_receiver_uses_fresh_canonical_reader_before_any_provisioni
         })),
     ])
     monkeypatch.setattr("agent_codespaces._ssh_retry.exec_with_retry", execute)
-    await hosting_policy.require_guest_hosting(object(), "venue", "/workspaces/product")
+    await hosting_policy.require_guest_hosting(
+        object(), "venue", "/workspaces/product", preflight=True,
+    )
     assert execute.await_count == 2
     probe = execute.call_args_list[1]
     assert "python3 -I -S -c" in probe.args[2]
@@ -73,7 +80,9 @@ async def test_fresh_reader_denial_remains_a_terminal_preflight_refusal(monkeypa
     ])
     monkeypatch.setattr("agent_codespaces._ssh_retry.exec_with_retry", execute)
     with pytest.raises(RuntimeError, match="expose_agent: false"):
-        await hosting_policy.require_guest_hosting(object(), "venue", "/workspaces/product")
+        await hosting_policy.require_guest_hosting(
+            object(), "venue", "/workspaces/product", preflight=True,
+        )
     assert execute.await_count == 2
 
 

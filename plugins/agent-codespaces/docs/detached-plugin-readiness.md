@@ -24,8 +24,9 @@ claims, credentials or plugin installation, using a temporary stdin bundle rathe
 than requiring Worktrees to be installed already. Both probes use the same guest
 login environment; the isolated reader refuses any explicit installation context,
 including one exported by login initialization. Existing receiver failures never
-select this fallback. The final installed guest-side check is unchanged; this
-does not add a container fallback.
+select this fallback. Only explicit preflight checks allow this reader; the
+final launch check requires the installed receiver even when provisioning or
+plugin preparation was skipped. This does not add a container fallback.
 The host's venue-name launch policy is a
 separate restriction, never a replacement for repository policy.
 Direct managed `ssh --stdio` uses this read-only admission before taking a

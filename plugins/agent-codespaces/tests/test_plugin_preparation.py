@@ -188,10 +188,11 @@ async def test_provider_selection_registers_before_consumer(tmp_path, monkeypatc
     )
     shared = Path(__file__).resolve().parents[3] / "libs" / "plugin-resolve" / "src"
 
-    async def local_policy(_manager, _name, workspace):
+    async def local_policy(_manager, _name, workspace, *, preflight):
         from repository_policy import require_agent_hosting
 
         assert workspace == str(target)
+        assert preflight is True
         require_agent_hosting(workspace)
 
     monkeypatch.setattr("agent_codespaces.hosting_policy.require_guest_hosting", local_policy)

@@ -201,6 +201,50 @@ def _patch_ssh_dependencies(monkeypatch, tmp_path, manager):
 
 
 class TestDiagnosticRemoteCmd:
+    def test_stdio_missing_receiver_refuses_final_launch_when_preparation_skipped(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        from unittest.mock import AsyncMock
+
+        calls: list[str] = []
+
+        class MissingReceiver(_FakeManager):
+            async def exec_command(self, _name, command, **_kwargs):
+                if "agent-policy check" in command:
+                    calls.append("missing-receiver")
+                    return SimpleNamespace(
+                        exit_code=127, stdout="__HOSTING_RECEIVER_ABSENT__\n",
+                        stderr="", timed_out=False,
+                    )
+                if "python3 -I -S -c" in command:
+                    calls.append("provisionless-preflight")
+                    return SimpleNamespace(
+                        exit_code=0, stderr="", timed_out=False,
+                        stdout=json.dumps({
+                            "version": 1, "allowed": True,
+                            "repository": "/workspaces/product",
+                            "expose_agent": None, "sources": [], "denied_by": [],
+                        }),
+                    )
+                return await super().exec_command(_name, command, **_kwargs)
+
+        manager = MissingReceiver(calls)
+        _patch_ssh_dependencies(monkeypatch, tmp_path, manager)
+        platform = AsyncMock()
+        monkeypatch.setattr(cli, "_preflight_copilot_platform", platform)
+        monkeypatch.setattr(cli, "_pipe_stdio", AsyncMock())
+
+        rc = main([
+            "ssh", "cs-dispatch", "--stdio", "--no-relay", "--no-provision",
+            "--remote-cmd", "copilot --acp",
+        ])
+
+        assert rc != 0
+        assert "receiver unsupported" in capsys.readouterr().err
+        assert calls.count("provisionless-preflight") == 1
+        assert "open_stdio_channel" not in calls
+        platform.assert_not_awaited()
+
     def test_skips_heavy_provisioning_by_default_and_emits_progress(
         self, tmp_path, monkeypatch, capsys
     ):

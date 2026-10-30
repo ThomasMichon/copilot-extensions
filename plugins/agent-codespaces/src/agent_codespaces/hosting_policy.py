@@ -80,6 +80,7 @@ def admit_stdio_launch(args: Namespace) -> None:
 
 async def require_guest_hosting(
     manager: ConnectionManager, name: str, workspace: str | None,
+    *, preflight: bool = False,
 ) -> None:
     from ._ssh_retry import exec_with_retry
     from .worktrees import validate_context
@@ -88,7 +89,10 @@ async def require_guest_hosting(
     result = await exec_with_retry(
         manager, name, f"bash -lc {shlex.quote(guest_check_command(workspace))}", timeout=90,
     )
-    if result.exit_code == 127 and result.stdout.strip() == _RECEIVER_ABSENT and not result.stderr.strip():
+    if (
+        preflight and result.exit_code == 127
+        and result.stdout.strip() == _RECEIVER_ABSENT and not result.stderr.strip()
+    ):
         from repository_policy.guest_probe import build_guest_policy_probe
 
         script, payload = build_guest_policy_probe()
@@ -169,7 +173,7 @@ def require_codespace_hosting(
                 if result.exit_code:
                     raise RuntimeError("Guest could not resolve the actual execution worktree")
                 actual = parse_execution_checkout(result.stdout)
-            await require_guest_hosting(manager, actual_name, actual)
+            await require_guest_hosting(manager, actual_name, actual, preflight=True)
         finally:
             await manager.disconnect(actual_name)
 
