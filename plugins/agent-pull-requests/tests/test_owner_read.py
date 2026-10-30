@@ -1,6 +1,7 @@
 """Synthetic owner gates; these controls do not establish an operational owner."""
 
 import copy
+import hashlib
 import json
 from pathlib import Path
 
@@ -148,6 +149,18 @@ def test_no_implicit_owner_or_credential_fallback(request_value):
                          max_payload_bytes=65536).read(request_value)
 
 
+def test_existing_owner_permission_denial_is_preserved_without_new_ceremony(request_value):
+    denied = PermissionError("existing owner pipeline denied this request")
+
+    def resolver(*_):
+        raise denied
+
+    handler = OwnerReadHandler(resolver, max_work_seconds=30, max_payload_bytes=65536)
+    with pytest.raises(PermissionError) as failure:
+        handler.read(request_value)
+    assert failure.value is denied
+
+
 @pytest.mark.parametrize("value", [True, False])
 def test_boolean_labels_cannot_be_used_as_owner_checkpoints(request_value, fixture_owner, value):
     state, resolver = fixture_owner
@@ -190,3 +203,29 @@ def test_returned_generations_compare_through_the_actual_offline_cli(
     assert compared["changed_sections"] == compared["invalidations"] == []
     path.write_text("null", encoding="utf-8")
     assert workspace_main(["compare", "--generation", str(path), "--previous", str(path)]) == 1
+
+
+@pytest.mark.parametrize("side", ["current", "previous"])
+@pytest.mark.parametrize("revision", [{}, {"head_sha": []}])
+def test_correct_hash_does_not_make_malformed_revision_comparable(
+    request_value, fixture_owner, tmp_path, capsys, side, revision,
+):
+    from agent_pull_requests.review_workspace_cli import main as workspace_main
+
+    _, resolver = fixture_owner
+    generation = OwnerReadHandler(
+        resolver, max_work_seconds=30, max_payload_bytes=65536,
+    ).read(request_value)["generation"]
+    malformed = copy.deepcopy(generation)
+    malformed["revision"] = revision
+    malformed["id"] = hashlib.sha256(json.dumps(
+        {key: value for key, value in malformed.items() if key != "id"},
+        sort_keys=True, separators=(",", ":"), allow_nan=False,
+    ).encode()).hexdigest()
+    current = tmp_path / "current.json"
+    previous = tmp_path / "previous.json"
+    current.write_text(json.dumps(malformed if side == "current" else generation), encoding="utf-8")
+    previous.write_text(json.dumps(malformed if side == "previous" else generation), encoding="utf-8")
+    assert workspace_main(["compare", "--generation", str(current), "--previous", str(previous)]) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert "error" in result and "generation" not in result

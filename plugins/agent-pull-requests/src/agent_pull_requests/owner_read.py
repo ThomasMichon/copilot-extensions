@@ -19,8 +19,8 @@ PRINCIPAL_SEMANTICS = "connectionData.authorizedUser.id"
 MAX_REQUEST_BYTES = 8192
 
 
-class OwnerReadUnavailable(PermissionError):
-    """No currently authorized owner/binding supplied this operation."""
+class OwnerReadUnavailable(RuntimeError):
+    """The selected owner interface/current binding is unavailable, not a new grant."""
 
 
 class OwnerReadBudgetExceeded(TimeoutError):

@@ -178,6 +178,7 @@ def test_unconfirmed_cleanup_retains_the_original_process_custody(monkeypatch):
     assert retained.value is failure
 
 
+@pytest.mark.timeout(60)
 @pytest.mark.parametrize("failure", [None, "disconnect", "scope"])
 def test_real_snapshot_child_renews_command_per_native_request(tmp_path, failure):
     helper = tmp_path / "credential.py"
@@ -229,10 +230,12 @@ def test_real_snapshot_child_renews_command_per_native_request(tmp_path, failure
         "sys.exit(pr_cli.cmd_pr_watch_dispatch(sys.argv[1:]))\n",
         encoding="utf-8",
     )
+    # This outer fixture includes cold SDK/venv startup and multiple helpers.
+    # It is separate from the per-helper work-deadline controls above.
     result = run_caller_owned(
         [sys.executable, str(native), "snapshot", "owner/repository", "7", "--config", str(config),
          "--credential-command", json.dumps([sys.executable, str(helper)]), "--json"],
-        timeout=20, max_stdout_bytes=65536, max_stderr_bytes=8192,
+        timeout=45, max_stdout_bytes=65536, max_stderr_bytes=8192,
     )
     assert "synthetic-command-" not in result.stdout + result.stderr
     if failure:

@@ -204,6 +204,19 @@ contract.
   contract gate also passed. Actual protected
   owner transport/adoption is still an external qualification prerequisite;
   no live ADO call or deployment occurred in this source lane.
+- Review corrections reject correctly hashed but structurally malformed
+  generations before comparison, with structured CLI errors, and prove that a
+  principal switch seen only by the final identity probe prevents publication.
+  The current source packet passed 204 cases, including unchanged propagation
+  of an actual owner permission denial separately from interface unavailability.
+- A cold native multi-helper fixture exhausted its old outer setup-inclusive
+  budget after one synthetic request. Its bounded outer fixture/cleanup allowance
+  now covers cold SDK/venv startup; production credential/owner work deadlines
+  are unchanged. Re-ran the native controls and complete focused packet.
+- Clarified that agent/process context isolation is not an extra permission,
+  issuer, provenance, read-count or delegation-time requirement. The embedding
+  reuses existing authorized owner gates; its explicit work/payload contracts
+  remain separate.
 
 ### 2026-10-30 - Acquisition merged; live owner adoption remains gated
 - #9667 merged as `14ef6f358ad3dfa0991ea0e9bcfeca63d0172755` after

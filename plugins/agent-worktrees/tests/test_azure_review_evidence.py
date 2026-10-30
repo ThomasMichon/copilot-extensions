@@ -56,6 +56,8 @@ class Forge:
         self.fail_threads_auth = False
         self.authorized_actor = "actor-id"
         self.authenticated_actor = "actor-id"
+        self.identity_reads = 0
+        self.authorized_actor_after = None
         self.pages = {
             0: {"changeEntries": [{"changeTrackingId": 7, "changeType": "edit",
                                    "item": {"path": "/example.txt"}}],
@@ -67,10 +69,13 @@ class Forge:
         path, query = parsed.path, parse_qs(parsed.query)
         self.requests.append((path, query))
         if path.endswith("/connectionData"):
+            self.identity_reads += 1
             actor = (
                 "other-actor" if "other-token" in request.get_header("Authorization")
                 else self.authorized_actor
             )
+            if self.identity_reads > 1 and self.authorized_actor_after is not None:
+                actor = self.authorized_actor_after
             result = {"authenticatedUser": {"id": self.authenticated_actor}}
             if actor is not None:
                 result["authorizedUser"] = {"id": actor}
@@ -469,3 +474,17 @@ def test_protected_owner_authority_and_namespace_refusals_precede_pr_read(failur
     with pytest.raises((ProviderError, ObservationCredentialError)):
         acquire_owned_evidence(owner, 42, budget=30)
     assert not any(path.endswith("/pullRequests/42") for path, _ in forge.requests)
+
+
+def test_protected_owner_final_probe_rejects_a_switch_after_collection():
+    from agent_worktrees.providers.azure_owned_evidence import acquire_owned_evidence
+
+    forge = Forge()
+    forge.authorized_actor, forge.authenticated_actor = "effective-actor", "transport-actor"
+    forge.authorized_actor_after = "another-effective-actor"
+    owner = protected_owner(forge, {})
+    with pytest.raises(ObservationCredentialError, match="effective principal mismatch"):
+        acquire_owned_evidence(owner, 42, budget=30)
+    assert forge.identity_reads == 2
+    assert forge.pr_reads == forge.iteration_reads == 2
+    assert any(path.endswith("/evaluations") for path, _ in forge.requests)

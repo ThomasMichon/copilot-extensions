@@ -6,6 +6,10 @@ It is **not an installed ADO operation, authorizer, issuer or standalone backend
 An existing ADO owner must explicitly adopt it inside that owner's normal
 authenticated, authorized and input-validated operation. Credentials stay there.
 Source availability or a schema label does not establish operational adoption.
+Calling from an agent or separate process does not introduce another permission
+ceremony, issuer, role or universal provenance verifier. Reuse the already
+authorized owner's normal context. The work/payload limits here are the selected
+API's IO contract, not limits on context-isolated delegation.
 
 ## Exact source entry points
 
@@ -109,6 +113,12 @@ The placeholder callbacks must come from an actual adopted owner, not a caller
 wrapper asserting labels. No new issuer, login, role grant, cache copy, runtime
 installation or service activation follows from this example. This source task
 does not install an operation into another owner's plugin.
+Here, adoption means wiring this source interface into that existing authorized
+execution path; it is not a new grant of access. A missing callable is an
+interface gap, not a denial of already granted backend permission.
+`OwnerReadUnavailable` is an interface/current-binding failure, not a
+`PermissionError` requesting another grant. Actual permission denials raised by
+the existing owner pipeline propagate unchanged.
 The current embedding is synchronous. An async owner must use its existing
 bounded execution/lifetime mechanism while preserving its normal request context;
 this component does not start a helper loop, thread or service to bypass it.

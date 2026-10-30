@@ -274,17 +274,45 @@ def _bounded(value: object, budget: int) -> None:
 def _generation(value: object, scope: dict) -> dict:
     _bounded(value, MAX_GENERATION_BYTES)
     if not isinstance(value, dict):
-        raise ValueError("previous generation must be an object")
+        raise ValueError("generation must be an object")
     body = {key: item for key, item in value.items() if key != "id"}
+    revision = value.get("revision")
+    required_revision = {"head_sha", "iteration", "iteration_target_sha", "common_sha", "target_sha"}
+    valid_revision = isinstance(revision, dict) and required_revision <= set(revision)
+    if valid_revision:
+        valid_revision = (
+            revision["iteration"] is None
+            or type(revision["iteration"]) is int and revision["iteration"] > 0
+        ) and all(
+            revision.get(key) is None
+            or isinstance(revision[key], str)
+            and re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", revision[key])
+            for key in (*sorted(required_revision - {"iteration"}), "iteration_head_sha")
+        )
+    sections = value.get("sections")
+    required_section = {"data", "complete", "errors", "observed_from", "observed_to"}
+    valid_sections = isinstance(sections, dict) and set(sections) == set(SECTIONS)
+    if valid_sections:
+        valid_sections = all(
+            isinstance(section, dict) and required_section <= set(section)
+            and type(section["complete"]) is bool
+            and isinstance(section["errors"], list)
+            and all(isinstance(error, str) for error in section["errors"])
+            and (
+                section["data"] is None and not section["complete"]
+                or isinstance(section["data"], dict if name == "pull_request" else list)
+            )
+            for name, section in sections.items()
+        )
     if (
         value.get("schema") != GENERATION_SCHEMA or type(value.get("version")) is not int
         or value["version"] != 1 or value.get("id") != _digest(body)
-        or value.get("scope") != scope or not isinstance(value.get("sections"), dict)
-        or set(value["sections"]) != set(SECTIONS)
-        or any(not isinstance(section, dict) for section in value["sections"].values())
-        or not isinstance(value.get("revision"), dict)
+        or value.get("scope") != scope or not valid_sections or not valid_revision
+        or type(value.get("complete")) is not bool
+        or not isinstance(value.get("source_attachment"), dict)
     ):
-        raise ValueError("previous generation is incompatible, corrupt or outside this scope")
+        raise ValueError("generation is incompatible, corrupt or outside this scope")
+    _scope(value["scope"])
     return value
 
 
