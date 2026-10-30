@@ -67,6 +67,27 @@ birth-verified pins before fixture cleanup. This lane remains outside required
 unit-only CI; continuous desktop observation, source/release and installed
 acceptance are separate evidence.
 
+The finite runner's `test_native_owned.py` exercises ordinary completion,
+descendant waiting, timeout cleanup, path refusal and original Job-scope
+publication on both native PowerShell hosts. Separately,
+`PROCUTIL_NATIVE_OWNED_LIFETIME=1` selects
+`test_native_owned_lifetime_native.py`: two cycles of caller loss, helper loss
+and runspace cancellation under normal and test-venv PATH Python. Its closed
+publications bind the original shell, actual helper, optional venv launcher,
+writer and leaf to native process births. Every unique pin must exit before
+fixture cleanup; a helper-loss transport failure remains unconfirmed rather
+than becoming successful cleanup evidence. Neither matrix belongs in required
+unit-only CI.
+
+`test_native_owned_powershell.py` separately uses real shells with an inert
+dispatcher and an in-memory Job owner. It proves import/legacy refusal,
+argument and Boolean-cleanup contracts and actual runspace-stop `finally`
+behavior without native process effects. `test_windows_owned_stdio.py` checks
+the two unique inherited stdio handles through synthetic native calls and
+owned file descriptors. The admitted `tools/promotion_unit_tests/test_native_owned.py`
+packet covers finite outcome/retirement logic with explicit native-boundary
+doubles; none of these portable checks replaces the native/desktop matrix.
+
 Update-driver's `test_native_lifetime.py -k queued_installer`, admitted with
 `UPDATE_DRIVER_NATIVE_LIFETIME=1`, separately exercises the real queued executor
 launching a disposable durable daemon. It pins the native identities before

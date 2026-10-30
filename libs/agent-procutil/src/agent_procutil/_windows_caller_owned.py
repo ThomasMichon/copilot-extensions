@@ -320,7 +320,10 @@ def spawn(argv: list[str], **kwargs):
         raise ValueError("allow_breakaway must be a boolean")
     job_name = _job_scopes.new_name()
     environment = _environment_block(
-        _job_scopes.child_environment(kwargs.get("env"), append=job_name),
+        _job_scopes.child_environment(
+            kwargs.get("env"), append=job_name,
+            inherit_current=kwargs.get("inherit_job_scopes", True),
+        ),
     )
     cwd = os.fspath(kwargs["cwd"]) if kwargs.get("cwd") is not None else None
     if cwd is not None and (not isinstance(cwd, str) or "\0" in cwd):
@@ -358,6 +361,13 @@ def spawn(argv: list[str], **kwargs):
                         os.close(parent)
                         raise
                     parent_streams.callback(stream.close)
+                elif name == "stderr" and kwargs[name] == subprocess.STDOUT:
+                    child = child_fds[1]
+                    stream = None
+                elif kwargs[name] not in (subprocess.DEVNULL, None):
+                    child = os.dup(kwargs[name].fileno())
+                    resources.callback(os.close, child)
+                    stream = None
                 else:
                     child = os.open(
                         os.devnull, (os.O_RDONLY if index == 0 else os.O_WRONLY) | os.O_BINARY,
@@ -366,7 +376,9 @@ def spawn(argv: list[str], **kwargs):
                     stream = None
                 child_fds.append(child)
                 streams.append(stream)
-            handles = (wintypes.HANDLE * 3)(*(msvcrt.get_osfhandle(fd) for fd in child_fds))
+            stdio = [msvcrt.get_osfhandle(fd) for fd in child_fds]
+            inherited = list(dict.fromkeys(stdio))
+            handles = (wintypes.HANDLE * len(inherited))(*inherited)
             jobs = (wintypes.HANDLE * 1)(handle)
             size = ctypes.c_size_t()
             kernel.InitializeProcThreadAttributeList(None, 2, 0, ctypes.byref(size))
@@ -387,7 +399,7 @@ def spawn(argv: list[str], **kwargs):
             startup.StartupInfo.cb = ctypes.sizeof(startup)
             startup.StartupInfo.dwFlags = 0x100 | 1
             startup.StartupInfo.hStdInput, startup.StartupInfo.hStdOutput, \
-                startup.StartupInfo.hStdError = handles
+                startup.StartupInfo.hStdError = stdio
             startup.lpAttributeList = ctypes.cast(attributes, wintypes.LPVOID)
             command = ctypes.create_unicode_buffer(subprocess.list2cmdline(argv))
             try:

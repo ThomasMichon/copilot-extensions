@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import re
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -24,9 +25,18 @@ def encoded(text):
     return base64.b64encode(text.encode("utf-16le")).decode("ascii")
 
 
+@pytest.fixture(params=["powershell", "pwsh"])
+def native_shell(request):
+    if request.param == "powershell":
+        return Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    shell = shutil.which("pwsh")
+    assert shell, "the admitted matrix requires native PowerShell 7"
+    return Path(shell)
+
+
 @pytest.mark.parametrize("timeout", [False, True])
-def test_native_owned_waits_for_descendants_and_attests_timeout_cleanup(tmp_path, timeout):
-    shell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+def test_native_owned_waits_for_descendants_and_attests_timeout_cleanup(tmp_path, timeout, native_shell):
+    shell = native_shell
     marker = tmp_path / "descendant"
     delay = 30000 if timeout else 500
     grandchild = encoded(
@@ -41,7 +51,7 @@ def test_native_owned_waits_for_descendants_and_attests_timeout_cleanup(tmp_path
         "[Console]::Out.WriteLine('root exits before its descendant'); exit 7"
     )
     log = tmp_path / "owned.log"
-    # Allow compilation/startup to finish before imposing the actual owned-tree deadline.
+    # The actual target deadline excludes the caller-owned transport's startup.
     deadline = 2500 if timeout else 20000
     body = (
         f"$ErrorActionPreference='Stop'; . {quoted(HELPER)}; "
@@ -52,8 +62,8 @@ def test_native_owned_waits_for_descendants_and_attests_timeout_cleanup(tmp_path
         "@{ code=$code; settled=$true } | ConvertTo-Json -Compress "
         "} catch { "
         "$e = $_.Exception; while ($e.InnerException -and "
-        "$e -isnot [CopilotExtensions.NativeOwnedProcessException]) { $e=$e.InnerException }; "
-        "@{ code=$null; settled=$e.CleanupConfirmed; error=$e.Message } | ConvertTo-Json -Compress }"
+        "-not $e.Data.Contains('CleanupConfirmed')) { $e=$e.InnerException }; "
+        "@{ code=$null; settled=$e.Data['CleanupConfirmed']; error=$e.Message } | ConvertTo-Json -Compress }"
     )
     result = subprocess.run(
         [str(shell), "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded(body)],
@@ -71,10 +81,10 @@ def test_native_owned_waits_for_descendants_and_attests_timeout_cleanup(tmp_path
     assert "root exits before its descendant" in log.read_text()
 
 
-def test_native_owned_job_retires_writers_when_its_owner_dies(tmp_path):
+def test_native_owned_job_retires_writers_when_its_owner_dies(tmp_path, native_shell):
     from agent_procutil.daemon_broker import WindowsDaemonProcess
 
-    shell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    shell = native_shell
     root_pid, child_pid = tmp_path / "root.pid", tmp_path / "child.pid"
     marker = tmp_path / "escaped-writer"
     grandchild = encoded(
@@ -130,8 +140,8 @@ def test_native_owned_job_retires_writers_when_its_owner_dies(tmp_path):
                 writer.close()
 
 
-def test_native_owned_rejects_all_partially_qualified_paths_before_opening_log(tmp_path):
-    shell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+def test_native_owned_rejects_all_partially_qualified_paths_before_opening_log(tmp_path, native_shell):
+    shell = native_shell
     log = tmp_path / "owned.log"
     body = (
         f"$ErrorActionPreference='Stop'; . {quoted(HELPER)}; $results=@(); "
@@ -155,8 +165,8 @@ def test_native_owned_rejects_all_partially_qualified_paths_before_opening_log(t
     assert not log.exists()
 
 
-def test_native_owned_publishes_one_fresh_scope_without_changing_parent_environment(tmp_path):
-    shell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+def test_native_owned_publishes_one_fresh_scope_without_changing_parent_environment(tmp_path, native_shell):
+    shell = native_shell
     report = tmp_path / "scopes.txt"
     child = encoded(
         f"[IO.File]::WriteAllText({quoted(report)}, $env:COPILOT_EXTENSIONS_OWNED_JOB_SCOPES)"
@@ -190,8 +200,8 @@ def test_native_owned_publishes_one_fresh_scope_without_changing_parent_environm
     ";".join(f"Local\\ce-owned-job-{value:032x}" for value in range(64)),
     "x" * 4097,
 ])
-def test_native_owned_refuses_invalid_or_full_scope_chain_before_child_start(tmp_path, scopes):
-    shell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+def test_native_owned_refuses_invalid_or_full_scope_chain_before_child_start(tmp_path, scopes, native_shell):
+    shell = native_shell
     report = tmp_path / "unexpected.txt"
     child = encoded(f"[IO.File]::WriteAllText({quoted(report)}, 'unexpected')")
     body = (
