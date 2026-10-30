@@ -116,6 +116,36 @@ def test_native_lifetime_fixture_parses_without_executing_or_compiling():
     assert result.stdout.strip() == "fixture-parsed"
 
 
+@pytest.mark.parametrize("relative,load", [
+    ("tools/windows_normal_process_lifetime.py",
+     "f\". {literal(native.with_name('daemon_instances.ps1'))}\\n\""),
+    ("libs/agent-procutil/tests/test_native_daemon.py",
+     "f\". {literal(helper.with_name('daemon_instances.ps1'))}\\n\""),
+    ("libs/agent-procutil/tests/fixture_native_daemon.ps1",
+     ". (Join-Path (Split-Path $Helper) 'daemon_instances.ps1')"),
+])
+def test_native_fixture_callers_load_birth_observer_in_their_own_scope(relative, load):
+    root = Path(__file__).resolve().parents[3]
+    source = (root / relative).read_text(encoding="utf-8")
+    assert source.index(load) < source.index("Get-DaemonInstanceProcessBirth")
+    result = _run(
+        "$ErrorActionPreference='Stop'; "
+        f". {_literal(HELPER)}; "
+        "function Start-Fixture { "
+        f". {_literal(HELPER)}; "
+        "return [Diagnostics.Process]::GetCurrentProcess() }; "
+        "$process=Start-Fixture; "
+        "try { $birth=Get-DaemonInstanceProcessBirth $process; "
+        "if ($birth -notlike 'windows:*') { throw 'caller observer unavailable' } "
+        "} finally { $process.Dispose() }; "
+        "if ($null -ne [AppDomain]::CurrentDomain.GetData('copilot-daemon-instance-shell-v1')) "
+        "{ throw 'scope fixture activated a helper' }; "
+        "[Console]::Out.WriteLine('caller-scope')"
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "caller-scope"
+
+
 def test_facade_retains_original_process_handle_and_guard_close_is_idempotent(tmp_path):
     result = _run(
         "$ErrorActionPreference='Stop'; Set-StrictMode -Version 2; "

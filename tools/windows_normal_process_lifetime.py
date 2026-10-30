@@ -159,6 +159,7 @@ def _qualify_native_shell(root: Path, environment, pu) -> list[dict]:
             "$ErrorActionPreference='Stop'\n"
             "Write-Output 'native caller loading admission'\n"
             f". {literal(native)}\n"
+            f". {literal(native.with_name('daemon_instances.ps1'))}\n"
             "Write-Output 'native caller starting daemon'\n"
             f"$p=Start-NativeDaemon -Script {literal(worker)} -Arguments @('fixture') "
             f"-WorkingDirectory {literal(directory)} -LogPath {literal(directory / 'daemon.log')}\n"

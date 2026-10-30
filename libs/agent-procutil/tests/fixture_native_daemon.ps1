@@ -7,6 +7,7 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($Mode -eq 'submit') {
     . $Helper
+    . (Join-Path (Split-Path $Helper) 'daemon_instances.ps1')
     $worker = Start-NativeDaemon -Script $PSCommandPath `
         -Arguments @('worker', $Root, $Helper, $Custody) -WorkingDirectory $Root `
         -LogPath (Join-Path $Root 'worker.log')

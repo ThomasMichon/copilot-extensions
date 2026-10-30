@@ -281,6 +281,8 @@ def test_actual_native_missing_registry_is_readonly_and_unknown_proof_is_held(tm
     shell = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
     quote = lambda value: "'" + str(value).replace("'", "''") + "'"
     command = (
+        "$ErrorActionPreference='Stop'; "
+        f". {quote(helper_root / 'daemon_instances.ps1')}; "
         f". {quote(helper_root / 'installer-instance-reconcile.ps1')}; "
         "1..2 | ForEach-Object { "
         f"Invoke-InstallerInstanceReconcile -HelperRoot {quote(helper_root)} "

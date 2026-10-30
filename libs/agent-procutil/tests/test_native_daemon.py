@@ -276,6 +276,7 @@ def test_native_contained_handshake_with_credential_free_private_profile(tmp_pat
         "$ErrorActionPreference='Stop'\n"
         "Write-Output 'native caller loading admission'\n"
         f". {literal(helper)}\n"
+        f". {literal(helper.with_name('daemon_instances.ps1'))}\n"
         "Write-Output 'native caller starting daemon'\n"
         f"$p=Start-NativeDaemon -Script {literal(worker)} -Arguments @("
         f"([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('{encoded_argument}')))) "
