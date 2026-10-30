@@ -1,5 +1,5 @@
 {
-  "comment": "Synchronize canonical immutable UV dependency policy and native lifecycle assets",
+  "comment": "Synchronize canonical immutable UV dependency policy",
   "changes": [
     {
       "plugin": "agent-containers",

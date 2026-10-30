@@ -235,7 +235,9 @@ def cold_environment(installation, project, area):
         AGENT_VAULT_HOME=str(installation), UV_PYTHON_PREFERENCE="only-managed",
         UV_PYTHON_DOWNLOADS="automatic", UV_NO_PROGRESS="1",
     )
-    env.pop("COPILOT_EXTENSIONS_TEST_CONTAINED", None)
+    if sys.platform == "linux" and env.get("COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT"):
+        # Test lifecycle supervision must not become product Python discovery.
+        env["COPILOT_EXTENSIONS_DAEMON_PYTHON"] = sys.executable
     env.pop("UPDATE_DRIVER_WITNESS", None)
     if os.name == "nt":
         env["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32")
@@ -261,6 +263,20 @@ def cold_environment(installation, project, area):
             (tools / name).symlink_to(executable)
         env["PATH"] = str(tools)
     return env
+
+
+def test_cold_environment_preserves_runner_lifetime_and_hides_product_python(area, monkeypatch):
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
+    monkeypatch.setenv("COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT", "fixture-context")
+    project = area / "project"
+    project.mkdir()
+    env = cold_environment(area / "profile/.agent-vault", project, area)
+    assert env["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
+    assert env["COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT"] == "fixture-context"
+    assert shutil.which("python", path=env["PATH"]) is None
+    assert shutil.which("python3", path=env["PATH"]) is None
+    if sys.platform == "linux":
+        assert env["COPILOT_EXTENSIONS_DAEMON_PYTHON"] == sys.executable
 
 
 @pytest.mark.parametrize("entry", ["payload", "primary"])
