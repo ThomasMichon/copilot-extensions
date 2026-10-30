@@ -210,7 +210,9 @@ def test_real_api_uses_standard_native_send_receipt(native_send):
     }
 
 
-def _command(native_send, monkeypatch, *, generation=51, transform=None, api=None):
+def _command(
+    native_send, monkeypatch, *, generation=51, transform=None, api=None, capabilities=None,
+):
     from agent_bridge import __main__ as core
 
     manager, session, request = native_send
@@ -234,7 +236,8 @@ def _command(native_send, monkeypatch, *, generation=51, transform=None, api=Non
 
         def _request(self, method, path, body=None, **kwargs):
             if path == "/health":
-                return {"protocol_version": generation, "min_protocol_version": 1}
+                return {"protocol_version": generation, "min_protocol_version": 1,
+                        "capabilities": capabilities or {}}
             calls.append((method, path, body))
             result = api.request(method, path, json=body)
             if result.is_error:

@@ -23,12 +23,13 @@ from .client_spawn_reservations import SpawnReservationClientMixin
 from .client_spawn_terminal import SpawnTerminalClientMixin
 from .client_steering import SteeringClientMixin
 from .client_suspend import SuspendClientMixin
+from .client_task_recovery import TaskRecoveryClientMixin
 from .client_transport import make_http_client
 from .client_verification import VerificationClientMixin
 from .client_worktree_status import WorktreeStatusClientMixin
 
 
-class DispatchClient(CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin):
+class DispatchClient(TaskRecoveryClientMixin, CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin):
     """A synchronous client for one coordinator base URL."""
 
     def __init__(

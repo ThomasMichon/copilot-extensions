@@ -139,6 +139,8 @@ def register_task_routes(
     fencing_guard: FencingGuard | None = None,
 ) -> None:
     register_task_grant_route(app, queue, control_token, fencing_guard, bus)
+    from .coordinator_task_recovery import register_task_recovery_routes
+    register_task_recovery_routes(app, queue, bus, control_token=control_token)
     from .acquisition_receipts import register_routes
     register_routes(app, queue)
     register_category_routes(app, queue, control_token=control_token,

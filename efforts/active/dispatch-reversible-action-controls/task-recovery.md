@@ -129,3 +129,39 @@ operator requests.
   evidence; no private live state is copied into source fixtures.
 - Proposal only. No runtime implementation, task mutation, process effect,
   installation update or reconciliation is claimed.
+
+### 2026-10-30 - Amendment reviewed
+
+- #9638 merged as `9fd66497ff` after current-head Copilot approval with no open
+  findings and successful required checks. Managed reconciliation retained the
+  prior source ref and aligned the existing worktree to the reviewed proposal.
+- Re-read the canonical Plan and Validation Plan. Only proposal review is
+  complete; implementation, release and every independent consumer gate remain.
+- Begin bounded queue diagnostics and recovery regressions, with a separate
+  receipt-only transport observation prerequisite. Missing transport history
+  remains unknown; source changes authorize no actual recovery operation.
+
+### 2026-10-30 - Recovery source implementation
+
+- Added bounded queue evidence and action-refusal reporting, distinct
+  revision-fenced assignment detachment and Proposed/Queued reset, atomic
+  recovery receipts, control-only REST/MCP admission and compatible client/CLI
+  surfaces. Existing reset also preserves unresolved execution custody.
+- Original-wake reconciliation observes Bridge's new receipt-only native
+  interface. A positive original receipt can settle acceptance; absence,
+  unsupported targets and unqualified historical traffic remain unknown.
+  No new prompt, timeout-to-absence conversion or universal credential exists.
+- Actual isolated regression packets pass: 156 task-recovery cases, including
+  both outboxes, restart replay, authority, truncation, retired attachment and
+  the receipt-only command; 211 Bridge receipt/admission/capability cases.
+  The earlier integrated recovery/adjacent lifecycle packet passed 294 cases
+  before the final edge-case extensions. Static source, module-size,
+  installation-contract and documentation guards pass.
+- A suspended-assignment control exposed detachment retaining the suspended
+  state; use the existing owned-state set when returning detached work to
+  Queued. The fixture and implementation now agree. A module-size refusal
+  moved the cohesive receipt CLI branch into its focused module rather than
+  widening the general send router.
+- Independent implementation review, containing release and separately
+  authorized running/native qualification remain open. No live task,
+  reservation, wake, installation or worker was operated.

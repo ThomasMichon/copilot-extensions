@@ -75,6 +75,8 @@ def stored_receipt(
             if connection is not None else db.execute_read(sql, (request.delivery_id(),)))
     if not rows:
         return None
+    if len(rows) != 1:
+        raise ValueError("native_admission_history_unproven")
     row = rows[0]
     if type(row["turn_index"]) is not int or row["turn_index"] < 0:
         raise ValueError("native_admission_history_unproven")

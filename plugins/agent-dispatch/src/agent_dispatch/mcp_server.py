@@ -27,6 +27,7 @@ from pydantic import PlainValidator, StrictInt, WithJsonSchema
 from .client import DispatchClient, DispatchError
 from .client_authority import Authority, default_authority
 from .identity import resolve_identity, resolve_repo, resolve_repo_selector
+from .mcp_task_recovery import TaskRecoveryToolsMixin
 from .queue import StructuredResult, worker_id_for
 
 ClientFactory = Callable[[], DispatchClient]
@@ -53,7 +54,7 @@ def _default_client() -> DispatchClient:
     return _resolve_cli_module()._client(argparse.Namespace())
 
 
-class DispatchTools:
+class DispatchTools(TaskRecoveryToolsMixin):
     """Transport-free implementation of the dispatch MCP tools.
 
     Each method opens a short-lived client to the coordinator. Identity-bearing
@@ -647,6 +648,11 @@ def build_server(tools: DispatchTools | None = None) -> Any:
     mcp.tool(name="dispatch_abandon")(t.abandon)
     mcp.tool(name="dispatch_heartbeat")(t.heartbeat)
     mcp.tool(name="dispatch_detach")(t.detach)
+    mcp.tool(name="dispatch_task_diagnostics")(t.task_diagnostics)
+    mcp.tool(name="dispatch_detach_agent")(t.detach_agent)
+    mcp.tool(name="dispatch_recover_task")(t.recover_task)
+    mcp.tool(name="dispatch_reset")(t.reset)
+    mcp.tool(name="dispatch_reconcile_wake")(t.reconcile_wake)
     mcp.tool(name="dispatch_recover")(t.recover)
     mcp.tool(name="dispatch_rearm_spawn")(t.rearm_spawn)
     return mcp

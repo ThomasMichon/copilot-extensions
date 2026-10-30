@@ -35,6 +35,10 @@ Held housekeeping on a completed task has a separate preview-first
 [`reservations retry-cleanup` recovery flow](docs/cleanup-recovery.md).
 It preserves failure and attachment history and never rearms completed work.
 
+For bounded task evidence and distinct assignment-detach, Proposed/Queued
+reset and original-wake reconciliation, see [task recovery](docs/task-recovery.md).
+These controls do not stop agents, erase unknown sends or authorize live recovery.
+
 The optional [execution handoff construction APIs](docs/execution-handoff.md)
 define the effect-adapter boundary and durable queue-level admission closure.
 They expose no live handoff command, destination activation or acknowledgement;

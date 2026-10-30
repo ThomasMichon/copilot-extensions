@@ -32,6 +32,20 @@ class NativeSendPrompt(BaseModel):
         return "native-send:v1:" + self.invocation_key
 
 
+async def read_receipt(
+    manager: Any, session_id: str, request: NativeSendPrompt,
+) -> dict[str, Any] | None:
+    """Observe historical admission without resuming or submitting on a miss."""
+    from .native_keyed_admission import stored_receipt, validate_holder
+
+    session = manager.get_session(session_id)
+    if session is None:
+        raise KeyError("native_session_unavailable")
+    async with session._turn_start_lock:
+        validate_holder(manager, session_id, session, request)
+        return stored_receipt(manager.db, session_id, request)
+
+
 async def submit(
     manager: Any, session_id: str, request: NativeSendPrompt,
 ) -> dict[str, Any]:
