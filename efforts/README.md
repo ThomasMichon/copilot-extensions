@@ -66,6 +66,7 @@ that pattern to this repository.
 | [Worktree Conclusion Tidier](active/worktree-conclusion-tidier/README.md) | Draft; audit capability released/installed, live pilot gated | #6060 |
 | [Native Context Handoff Compatibility](active/native-context-handoff-compatibility/README.md) | Active; capability-contract investigation | #6028 |
 | [Linux Role Fleet](active/linux-role-fleet/README.md) | Active; reviewed Komodo-first plan and isolated adoption proof | #6030, #5861 |
+| [Compact Checkout Paths](active/compact-checkout-paths/README.md) | Draft; opt-in physical path reduction, canonical identity unchanged | #8172; proposal before implementation, shared rollout separate |
 | [Gateway and SSH Fleet Onboarding](active/gateway-ssh-fleet-onboarding/README.md) | Active; bounded artifact-assembly source qualified and merged, proof/publication and ordered setup/adoption remain open | #6681 / #5861; closing source responsibility returns to tracked integration backlog |
 | [Durable PR-Watch Delegation](active/durable-pr-watch-delegation/README.md) | Active; first-class PR service/fleet plan reviewed; runtime, owner and dispatch gates retained | #6007, #6286, #7188 |
 | [Versioned Singleton Manager](active/versioned-singleton-manager/README.md) | Active | #5655 |
