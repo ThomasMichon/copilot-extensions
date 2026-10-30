@@ -83,23 +83,41 @@ Reports separate the operational `value` from ordered, metadata-only
   when a lower layer supplies a usable value. Recovered batch/presence failures
   remain visible rather than becoming an invented successful acquisition.
 
-The full loader currently reports opaque repository/adoption registries,
-knowledge-preference selection, control-plane PR discovery, installation-context
-selection and execution-machine discovery as `owner-coverage-unavailable` where
-those boundaries are used. Non-default committed parser callbacks likewise do
-not provide parser coverage. A valid `Config` or mapping is not proof that these
-owners supplied complete evidence. Fatal full-load and strict-parser/file errors
-propagate their original exceptions: there is no fabricated successful report
-for a failed operation.
+`repos_registry_reader.read_registry_report(path, *, strict=False)` borrows the
+original registry byte read, decoding, parser, schema and normalization path.
+An originally missing native read is absent; a valid empty mapping is complete
+only with original migration coverage. Invalid sources and skipped or discarded
+fields retain uncertainty without removing healthy permissive contributions.
+Writer-concurrency `_baseline` revisions and `invalid` markers are unchanged;
+they do not establish completeness, retained-value authority or stable reuse.
+Strict pre-read/ancestor selection remains unproven where no read outcome exists.
+Strict errors keep their original identity or wrapping and causes.
+
+Lazy migration observations describe only its original success, unavailable or
+caught-error branch. Fallback still returns the exact input object, and successful
+migration returns its original result; neither reporting nor consumers retry it.
+Anchor/default helpers borrow the original registry observations and retain
+originally suppressed failures. Replacements without owner observations remain
+opaque. Projects/adoption-default selection, knowledge preferences, control-plane
+PR discovery, installation context and execution-machine discovery still have
+opaque boundaries. Non-default committed parser callbacks likewise lack parser
+coverage. A valid `Config` or mapping does not certify those owners. Fatal loads
+propagate their original exceptions, never a success-shaped report.
 
 Disk candidate/marketplace presence selection preserves the existing single
 `Path.exists()` call and its exact native return/throw behavior. A negative result
 is `presence-provenance-unavailable` uncertainty: that API can suppress stat
 errors, so it cannot certify ordinary disk absence. The separate YAML-source
 report and existing `source_probes` consumers retain their own authoritative
-absence classification. Successful strict-file mapping is also an opaque owner:
-its empty result does not distinguish parsed empty from read-time disappearance.
-Neither boundary triggers another probe or read to reconstruct provenance.
+absence classification.
+
+`repos_configuration_sources.mapping_report(path)` reports the strict owner's
+original byte-read and parser outcomes. Its caught read-time `FileNotFoundError`
+is authoritative optional absence; successfully parsed empty YAML is complete.
+Other read errors and strict parser failures still raise without a success-shaped
+report. `inrepo_config_source.load_config_file(..., strict=True)` consumes those
+same observations; a replacement without owner provenance remains opaque.
+No additional presence probe, byte read or parse reconstructs provenance.
 
 The collector is request-scoped and restored on success or exception. Nested
 reports isolate their observations; a collector cannot be consumed by another

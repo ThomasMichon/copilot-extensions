@@ -326,8 +326,11 @@ def test_inrepo_strict_file_report_cannot_certify_empty_after_read_absence(tmp_p
     report = source.load_config_base_report(tmp_path, (Path("config.yaml"),), strict=True)
     assert report.value == {}
     assert reads == [path]
-    # The strict owner returned no evidence distinguishing absence from parsed empty.
-    assert report.authority.value == "indeterminate"
+    assert any(o.source == str(path) and o.stage == "config-source-bytes"
+               and o.authority.value == "absent" for o in report.observations)
+    assert not any(o.source == "strict-config-file" for o in report.observations)
+    # Both the unset committed HEAD and the original native read report absence.
+    assert report.authority.value == "absent"
 
 
 def test_inrepo_strict_mapping_propagates_nonabsence_read_error(tmp_path, monkeypatch):
@@ -340,9 +343,11 @@ def test_inrepo_strict_mapping_propagates_nonabsence_read_error(tmp_path, monkey
     path.write_text("marker: present\n", encoding="utf-8")
     original_read = Path.read_bytes
     failure = OSError(errno.ELOOP, "synthetic read failure")
+    reads = []
 
     def unreadable(candidate):
         if candidate == path:
+            reads.append(candidate)
             raise failure
         return original_read(candidate)
 
@@ -352,7 +357,97 @@ def test_inrepo_strict_mapping_propagates_nonabsence_read_error(tmp_path, monkey
         lambda: source.load_config_base(tmp_path, (Path("config.yaml"),), strict=True),
         lambda: source.load_config_base_report(tmp_path, (Path("config.yaml"),), strict=True),
     ):
+        reads.clear()
         with pytest.raises(OSError) as caught:
             load()
         assert caught.value is failure
+        assert reads == [path]
     assert acquisition.current_observations() is None
+
+
+@pytest.mark.parametrize("body", [None, "", "marker: value\n"])
+def test_strict_file_consumer_uses_original_read_observations(tmp_path, monkeypatch, body):
+    from agent_worktrees import config_acquisition as acquisition
+
+    path = tmp_path / "strict.yaml"
+    if body is not None:
+        path.write_text(body, encoding="utf-8")
+    original = Path.read_bytes
+    reads = []
+
+    def read(candidate):
+        if candidate == path:
+            reads.append(candidate)
+        return original(candidate)
+
+    monkeypatch.setattr(Path, "read_bytes", read)
+    legacy = source.load_config_file(path, strict=True)
+    assert reads == [path]
+    reads.clear()
+    with acquisition.capture_config_observations() as observations:
+        value = source.load_config_file(path, strict=True)
+    assert value == legacy == ({"marker": "value"} if body else {})
+    assert reads == [path]
+    assert any(o.source == str(path) and o.stage == "config-source-bytes"
+               and o.authority.value == ("absent" if body is None else "complete")
+               for o in observations)
+    assert not any(o.source == "strict-config-file" for o in observations)
+
+
+@pytest.mark.parametrize("bytes_only", [False, True])
+def test_strict_file_consumer_keeps_opaque_replacement(tmp_path, monkeypatch, bytes_only):
+    from agent_worktrees import config_acquisition as acquisition, repos_configuration_sources
+
+    path = tmp_path / "strict.yaml"
+    path.write_text("", encoding="utf-8")
+
+    def replacement(selected):
+        if bytes_only:
+            repos_configuration_sources.read_bytes(selected)
+        return {}
+
+    monkeypatch.setattr(repos_configuration_sources, "mapping", replacement)
+    with acquisition.capture_config_observations() as observations:
+        assert source.load_config_file(path, strict=True) == {}
+    assert any(o.source == "strict-config-file" and o.authority.value == "indeterminate"
+               for o in observations)
+
+
+@pytest.mark.parametrize("mode", ["empty", "populated", "bytes-only"])
+def test_base_report_replacement_is_opaque_without_reacquisition(tmp_path, monkeypatch, mode):
+    from agent_worktrees import repos_registry_transaction
+
+    path = tmp_path / "config.yaml"
+    path.write_text("marker: disk\n", encoding="utf-8")
+    value = {} if mode == "empty" else {"marker": "available"}
+    calls = []
+    original_read, original_exists = Path.read_bytes, Path.exists
+
+    def read(selected):
+        if selected == path:
+            calls.append("native-read")
+        return original_read(selected)
+
+    def exists(selected):
+        if selected == path:
+            pytest.fail("report added a presence probe")
+        return original_exists(selected)
+
+    monkeypatch.setattr(Path, "read_bytes", read)
+    monkeypatch.setattr(Path, "exists", exists)
+
+    def replacement(anchor, candidates, *, strict=False):
+        assert anchor == tmp_path and candidates == (Path("config.yaml"),) and strict is False
+        calls.append("base")
+        if mode == "bytes-only":
+            repos_registry_transaction.read_bytes(path)
+            calls.append("original-bytes")
+        return value
+
+    monkeypatch.setattr(source, "load_config_base", replacement)
+    monkeypatch.setattr(git_ops, "git", lambda *a, **k: pytest.fail("report replayed Git acquisition"))
+    report = source.load_config_base_report(tmp_path, (Path("config.yaml"),))
+    assert report.value is value
+    assert calls == (["base", "native-read", "original-bytes"] if mode == "bytes-only" else ["base"])
+    assert report.authority.value == "indeterminate"
+    assert any(f.reason == "owner-coverage-unavailable" for f in report.findings)

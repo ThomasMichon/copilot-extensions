@@ -522,3 +522,237 @@ def test_committed_config_report_preserves_canonical_acquisition_and_snapshot_me
     assert report.authority.value == expected
     assert report.reusable is False
     assert api.config.current_observations() is None
+
+
+@pytest.mark.parametrize("mode", ["absent", "empty", "value", "malformed", "encoding", "unreadable"])
+def test_strict_mapping_owner_preserves_original_read_and_consumer_provenance(api, mode):
+    import errno
+
+    api.stub("config")
+    api.stub("config_dropins", scan_config_dropin_registry=lambda *a, **k: None)
+    api.load("repos_registry_reader")
+    api.load("repos_registry_transaction")
+    owner = api.load("repos_configuration_sources")
+    api.stub("git_ops", git=lambda *a, **k: None)
+    consumer = api.load("inrepo_config_source")
+    calls = []
+    failure = OSError(errno.ELOOP, "private native failure body")
+    content = {"empty": b"", "malformed": b"private_setting: [\n", "encoding": b"\xff"}.get(
+        mode, b"setting: private-value\n",
+    )
+
+    class SyntheticSource:
+        def __str__(self):
+            return "synthetic-strict.yaml"
+
+        def read_bytes(self):
+            calls.append("read")
+            if mode == "absent":
+                raise FileNotFoundError("private disappearance body")
+            if mode == "unreadable":
+                raise failure
+            return content
+
+    path = SyntheticSource()
+    expected_error = OSError if mode == "unreadable" else owner.ConfigurationError
+    operations = (owner.mapping, owner.mapping_report,
+                  lambda selected: consumer.load_config_file(selected, strict=True))
+    for operation in operations:
+        calls.clear()
+        with api.config.capture_config_observations() as observations:
+            if mode in ("malformed", "encoding", "unreadable"):
+                with pytest.raises(expected_error) as caught:
+                    operation(path)
+                if mode == "unreadable":
+                    assert caught.value is failure
+                else:
+                    assert caught.value.code == "invalid-composition"
+            else:
+                result = operation(path)
+                value = result.value if operation is owner.mapping_report else result
+                assert value == ({"setting": "private-value"} if mode == "value" else {})
+                if operation is owner.mapping_report:
+                    assert result.authority.value == ("absent" if mode == "absent" else "complete")
+                    assert result.reusable is False
+                    assert "stable-owner-input-frontier" in result.missing_coverage
+                    observations = result.observations
+                assert any(o.stage == "config-source-bytes" and o.source == str(path)
+                           for o in observations)
+                assert not any(o.source == "strict-config-file" for o in observations)
+        assert calls == ["read"]
+        assert api.config.current_observations() is None
+        assert all(text not in repr(observations) for text in (
+            "private_setting", "private-value", "private native failure body", "private disappearance body",
+        ))
+
+
+def _registered_owner(api, monkeypatch):
+    sdk = ModuleType("config_migrate")
+    sdk.ManagedFile = lambda *a, **k: None
+    sdk.SchemaRegistry = lambda: SimpleNamespace(register=lambda *a, **k: None)
+    sdk.migrate_doc = lambda doc, *args: (doc, False)
+    sdk.run = lambda *args: []
+    monkeypatch.setitem(sys.modules, "config_migrate", sdk)
+    migration = api.load("config_migrations")
+
+    class Registry:
+        def __init__(self, **fields):
+            self.repos, self.srcroot, self.account_map = {}, {}, {}
+            self.__dict__.update(fields)
+
+    api.stub("repos", VALID_CLASSES=("reference", "singleton", "worktree", "knowledge"),
+             _LEGACY_TYPE_MAP={}, RepoEntry=lambda **fields: SimpleNamespace(**fields), ReposRegistry=Registry,
+             normalize_class=lambda value: value or "reference",
+             normalize_visibility=lambda value: value if value in ("public", "internal", "private") else "")
+    owner = api.load("repos_registry_reader")
+    api.load("repos_registry_transaction")
+    return owner, migration
+
+
+@pytest.mark.parametrize("mode", ["absent", "empty", "partial", "fields", "malformed", "unreadable", "unattributed-migration"])
+def test_registered_owner_report_retains_original_acquisition_and_partial_values(api, monkeypatch, mode):
+    owner, migration = _registered_owner(api, monkeypatch)
+    if mode == "unattributed-migration":
+        monkeypatch.setattr(migration, "migrate_loaded", lambda doc, schema_id: doc)
+    calls = []
+    content = {
+        "empty": b"{}\n", "partial": b"repos:\n  good: {default_branch: dev}\n  bad: []\n",
+        "fields": b"srcroot: []\naccount_map: []\nrepos:\n  good: {default_branch: dev}\n  lossy: {agent: maybe, tags: wrong, remote: [], visibility: unknown}\n",
+        "malformed": b"repos: [\n",
+    }.get(mode, b"{}\n")
+
+    class SyntheticSource:
+        def __str__(self):
+            return "synthetic-registry.yaml"
+
+        def resolve(self):
+            calls.append("resolve")
+            return self
+
+        def read_bytes(self):
+            calls.append("read")
+            if mode == "absent":
+                raise FileNotFoundError("private disappearance")
+            if mode == "unreadable":
+                raise PermissionError("private registry read failure")
+            return content
+
+    path = SyntheticSource()
+    legacy = owner.read_registry(path)
+    expected_calls = list(calls)
+    calls.clear()
+    report = owner.read_registry_report(path)
+    assert calls == expected_calls
+    assert calls[0] == "read" and calls.count("read") == 1
+    assert report.value._baseline == legacy._baseline
+    assert set(report.value.repos) == set(legacy.repos)
+    assert report.authority.value == ("absent" if mode == "absent" else "complete" if mode == "empty" else "indeterminate")
+    if mode in ("partial", "fields"):
+        assert report.value.repos["good"].default_branch == "dev"
+    assert report.reusable is False
+    assert "private registry read failure" not in repr(report.observations)
+    assert "private disappearance" not in repr(report.observations)
+
+
+@pytest.mark.parametrize("mode", ["unavailable", "error", "success", "unchanged"])
+def test_original_migration_branch_report_preserves_identity_without_second_attempt(api, monkeypatch, mode):
+    _, migration = _registered_owner(api, monkeypatch)
+    original, changed, calls = {"private-setting": "private-value"}, {"schema_version": 1}, []
+
+    def migrate(doc, schema_id, registry):
+        calls.append(doc)
+        if mode == "error":
+            raise ValueError("private migration failure body")
+        return (original, False) if mode == "unchanged" else (changed, True)
+
+    monkeypatch.setattr(migration, "_AVAILABLE", mode != "unavailable")
+    monkeypatch.setattr(migration, "migrate_doc", migrate)
+    with api.config.capture_config_observations() as observations:
+        value = migration.migrate_loaded(original, migration.SCHEMA_REPOS)
+    assert value is (changed if mode == "success" else original)
+    assert calls == ([] if mode == "unavailable" else [original])
+    assert any(o.stage == "config-migration" and o.source == migration.SCHEMA_REPOS
+               and o.authority.value == ("complete" if mode in ("success", "unchanged") else "indeterminate")
+               for o in observations)
+    assert all(text not in repr(observations) for text in ("private-setting", "private-value", "private migration failure body"))
+
+
+@pytest.mark.parametrize("mode", ["owned", "failed", "replacement"])
+def test_registry_consumer_boundary_uses_only_original_request_observations(api, mode):
+    from promotion_related_acquisition.acquisition_report import observe
+
+    calls = []
+    with api.config.capture_config_observations() as observations:
+        observe(observations, "old-source", "repository-registry", ScanAuthority.COMPLETE)
+        start = api.config.registry_call_started()
+        if mode == "owned":
+            calls.append("original-owner")
+            observe(observations, "selected-source", "repository-registry", ScanAuthority.COMPLETE)
+        elif mode == "failed":
+            calls.append("original-owner")
+            api.config.registry_call_failed("selected-source", PermissionError("private helper failure"))
+        api.config.registry_call_finished(start, "selected-source")
+    assert calls == ([] if mode == "replacement" else ["original-owner"])
+    assert any(f.reason == "owner-coverage-unavailable" for o in observations for f in o.findings) == (mode != "owned")
+    assert any(o.stage == "registry-consumer" for o in observations) == (mode == "failed")
+    assert "private helper failure" not in repr(observations)
+
+
+@pytest.mark.parametrize("kind, mode", [
+    ("mapping", "empty"), ("mapping", "populated"), ("mapping", "partial"),
+    ("registry", "empty"), ("registry", "populated"), ("registry", "partial"),
+    ("base", "empty"), ("base", "populated"), ("base", "partial"),
+])
+def test_report_wrappers_retain_missing_owner_uncertainty_without_replay(api, monkeypatch, kind, mode):
+    api.stub("config")
+    api.stub("config_dropins", scan_config_dropin_registry=lambda *a, **k: None)
+    registered, migration = _registered_owner(api, monkeypatch)
+    transaction = sys.modules[registered.__package__ + ".repos_registry_transaction"]
+    mapping = api.load("repos_configuration_sources")
+    api.stub("git_ops", git=lambda *a, **k: pytest.fail("report replayed Git acquisition"))
+    base = api.load("inrepo_config_source")
+    calls = []
+
+    class SyntheticSource:
+        def __str__(self):
+            return "synthetic-replacement.yaml"
+
+        def read_bytes(self):
+            calls.append("read")
+            return b"{}\n"
+
+        def exists(self):
+            pytest.fail("report added a presence probe")
+
+    path = SyntheticSource()
+    if kind == "registry":
+        registry_type = sys.modules[registered.__package__ + ".repos"].ReposRegistry
+        value = registry_type(repos={} if mode == "empty" else {"good": SimpleNamespace(name="good")})
+    else:
+        value = {} if mode == "empty" else {"marker": "available"}
+
+    def replacement(*args, **kwargs):
+        calls.append("owner")
+        if mode == "partial":
+            transaction.read_bytes(path)
+            if kind == "registry":
+                migration.migrate_loaded({}, migration.SCHEMA_REPOS)
+                calls.append("migration")
+        return value
+
+    monkeypatch.setattr(mapping, "parse_mapping", lambda *a: pytest.fail("report replayed parsing"))
+    if kind == "mapping":
+        monkeypatch.setattr(mapping, "mapping", replacement)
+        report = mapping.mapping_report(path)
+    elif kind == "registry":
+        monkeypatch.setattr(registered, "read_registry", replacement)
+        report = registered.read_registry_report(path)
+    else:
+        monkeypatch.setattr(base, "load_config_base", replacement)
+        report = base.load_config_base_report(path, (Path("config.yaml"),))
+    expected = ["owner", "read", "migration"] if mode == "partial" and kind == "registry" else (
+        ["owner", "read"] if mode == "partial" else ["owner"])
+    assert calls == expected
+    assert report.value is value
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert any(f.reason == "owner-coverage-unavailable" for f in report.findings)

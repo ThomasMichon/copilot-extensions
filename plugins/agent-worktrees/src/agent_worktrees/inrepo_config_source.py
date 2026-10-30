@@ -384,14 +384,17 @@ def _resolve_committed_config(
 
 def load_config_file(path: Path, *, strict: bool = False) -> dict[str, Any]:
     if strict:
-        from .repos_configuration_sources import mapping
+        from .repos_configuration_sources import _mapping_observed, mapping
 
+        observations = acquisition.current_observations()
+        start = len(observations) if observations is not None else 0
         try:
             value = mapping(path)
         except Exception as exc:
             failed(acquisition.current_observations(), str(path), "inrepo-file", "unreadable-source", type(exc).__name__)
             raise
-        acquisition.opaque_source("strict-config-file")
+        if observations is not None and not _mapping_observed(path, observations[start:]):
+            acquisition.opaque_source("strict-config-file")
         return value
     from .config import _load_yaml_safe
 
@@ -401,6 +404,8 @@ def load_config_file(path: Path, *, strict: bool = False) -> dict[str, Any]:
 def load_config_base(
     anchor: Path, candidates: tuple[Path, ...], *, strict: bool = False,
 ) -> dict[str, Any]:
+    observations = acquisition.current_observations()
+    start = len(observations) if observations is not None else 0
     parser = parse_yaml_text_safe
     if strict:
         from .repos_configuration_sources import parse_mapping
@@ -411,6 +416,11 @@ def load_config_base(
         base = next((anchor / rel for rel in candidates
                      if acquisition.source_exists(anchor / rel, "inrepo-disk")), None)
         merged = load_config_file(base, strict=strict) if base is not None else {}
+    if observations is not None:
+        if len(observations) == start:
+            acquisition.opaque_source("inrepo-config-base")
+        # Repeating an original verdict marks completion without upgrading absence.
+        observe(observations, str(anchor), "inrepo-config-base", observations[-1].authority)
     return merged
 
 
@@ -420,4 +430,6 @@ def load_config_base_report(
     """Report committed/disk base acquisition, excluding marketplace overlays."""
     with acquisition.capture_config_observations() as observations:
         value = load_config_base(anchor, candidates, strict=strict)
+        if not any(o.source == str(anchor) and o.stage == "inrepo-config-base" for o in observations):
+            acquisition.opaque_source("inrepo-config-base")
     return AcquisitionReport("inrepo-config-base", value, tuple(observations))
