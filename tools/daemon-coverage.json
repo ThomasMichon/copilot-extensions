@@ -258,7 +258,7 @@
       "b:transport.py::spawn_local::create_subprocess_exec": 1,
       "b:transport.py::spawn_raw::create_subprocess_exec": 1,
       "b:session_host/launcher.py::_spawn_child::create_subprocess_exec": 1,
-      "k:__main__.py::_exec_stdio::Popen": 1,
+      "k:stdio_pump.py::exec_stdio::Popen": 1,
       "s:copilot_detach.py::cmd_attached::Popen": 1,
       "w:__main__.py::cmd_launch::Popen": 1,
       "w:copilot_cli.py::cmd_copilot::Popen": 1,

@@ -31,22 +31,40 @@ def inspect_toolchain(
 ) -> tuple[str, ...]:
     """Validate only tools required by the configured fleet backends."""
     failures: list[str] = []
-    if config.fleets and command_finder("docker") is None:
+    docker_fleets = [f for f in config.fleets.values() if not f.driver]
+    if docker_fleets and command_finder("docker") is None:
         failures.append("docker CLI is not installed")
     if any(fleet.devcontainer_path for fleet in config.fleets.values()):
         if command_finder("devcontainer") is None:
             failures.append(
                 "devcontainer CLI is required by a configured devcontainer fleet"
             )
-    if any(not fleet.restricted for fleet in config.fleets.values()):
+    if any(not f.restricted for f in docker_fleets):
         if command_finder("ssh") is None:
             failures.append("OpenSSH is required by a configured trusted fleet")
     for name, fleet in sorted(config.fleets.items()):
+        if fleet.driver:
+            failures.extend(_driver_failures(name, fleet, command_finder))
+            continue
         if not fleet.devcontainer_path and not fleet.image:
             failures.append(
                 f"fleet {name!r} needs either devcontainer_path or image"
             )
     return tuple(failures)
+
+
+def _driver_failures(name, fleet, command_finder) -> list[str]:
+    """A driver fleet needs a registered driver that answers the protocol,
+    and OpenSSH only when its members use the trusted SSH transport."""
+    from .external_driver import ExternalDriver, find_driver
+
+    try:
+        capabilities = ExternalDriver(find_driver(fleet.driver), name, fleet).capabilities
+    except RuntimeError as exc:
+        return [f"fleet {name!r}: {exc}"]
+    if capabilities.ssh_transport and command_finder("ssh") is None:
+        return [f"OpenSSH is required by fleet {name!r} (driver ssh_transport)"]
+    return []
 
 
 def evaluate(

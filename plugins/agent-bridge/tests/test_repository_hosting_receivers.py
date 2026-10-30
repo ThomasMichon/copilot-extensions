@@ -441,6 +441,39 @@ async def test_supported_container_checks_actual_instance_user_and_guest_before_
 
 
 @pytest.mark.asyncio
+async def test_driver_backed_container_checks_through_provider_runtime_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = []
+    instance = "0123456789ab"
+    proxy = ["provider", "runtime-proxy"]
+
+    async def run(argv, **_kwargs):
+        calls.append(argv)
+        assert argv[:2] == proxy, "a driver-backed member must not be reached via docker"
+        if argv[2] == "inspect":
+            return 0, json.dumps([{"Id": instance, "State": {"Running": True}}]).encode(), b""
+        assert argv[2:8] == ["exec", "-u", "worker", instance, "bash", "-lc"]
+        assert "cd -- /actual" in argv[-1] and "agent-policy check" in argv[-1]
+        return 0, json.dumps({
+            "version": 1, "allowed": True, "repository": "/actual",
+            "expose_agent": None, "sources": [], "denied_by": [],
+        }).encode(), b""
+
+    monkeypatch.setattr("agent_bridge.session_host.container_transport._run_provider", run)
+    # A direct-exec driver venue carries no SSH container block.
+    target = SpawnTarget(
+        type="command", user="worker", cwd="/actual", explicit_cwd=True,
+        venue={"instance_id": instance, "target_id": "container:member", "driver": "example-driver",
+               "provider": "agent-containers"},
+        spawn_command=["provider", "exec", "--stdio", "member"],
+    )
+    monkeypatch.setattr("agent_bridge.provider_hosting._provider_command", lambda metadata: ["provider"])
+    await hosting_policy.require_target_hosting(target)
+    assert [argv[2] for argv in calls] == ["inspect", "exec"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("denied", [False, True])
 async def test_supported_codespace_checks_guest_and_closes_inspection(
     monkeypatch: pytest.MonkeyPatch, denied: bool,

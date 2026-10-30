@@ -85,10 +85,12 @@ def test_dev_case_alias_cannot_bypass_explicit_claim(tmp_path, version):
 def test_read_marker_surfaces_actual_storage_failure(tmp_path, monkeypatch):
     vr.mark_complete(tmp_path, "1.0")
 
-    def denied(path):
+    def denied(path, **_kwargs):
         raise PermissionError("denied completion evidence")
 
-    monkeypatch.setattr(vr, "_load_unique_json", denied)
+    # read_marker reads completion evidence through the construction component.
+    construction = vr._runtime_component("versioned_runtime_construction")
+    monkeypatch.setattr(construction, "read_completion", denied)
     with pytest.raises(PermissionError, match="denied completion"):
         vr.read_marker(tmp_path, "1.0")
     with pytest.raises(PermissionError, match="denied completion"):
