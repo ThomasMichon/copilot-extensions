@@ -37,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from manager_suite_artifacts import (
     _DELIVERY, _MATERIALIZE, _command, _configuration, _env, _task_inventory_script, _write,
 )
-from manager_suite_diagnostics import retain_driver_logs
+from manager_suite_diagnostics import _engine_probe, retain_driver_logs
 
 REPO = Path(__file__).resolve().parents[3]
 SCHEMA = "worktree-manager.native-suite-replacement.v1"
@@ -122,28 +122,6 @@ def _probe(case: Path, kind: str) -> dict[str, Any]:
     root = case / "h" / (".worktree-manager" if kind == "manager" else ".agent-worktrees")
     result = _run([_python(root), "-I", "-X", "utf8", "-B", __file__, "--probe", kind], case, timeout=30)
     return json.loads(result.stdout)
-
-
-def _engine_probe() -> dict[str, Any]:
-    import agent_worktrees
-    from agent_worktrees import config, reconcile, update_runtime, update_runtime_plan
-
-    config.set_active_project("example")
-    payload = reconcile.core_installed_payload_dir("agent-worktrees")
-    targets = update_runtime._registered_plugin_targets()
-    engine, modules, registered = update_runtime_plan.plan_portfolio(
-        payload, "windows", None, force=True, targets=targets, force_runtimes=(),
-    )
-    steps = ([engine] if engine is not None else []) + list(modules) + list(registered)
-    return {
-        "engine": {"root": str(config.install_dir()), "prefix": sys.prefix,
-                   "module": agent_worktrees.__file__},
-        "portfolio": {step.name: {
-            "eligible": step.eligible, "status": step.status,
-            "root": str(step.runtime_root) if step.runtime_root else None,
-            "payload": str(step.payload), "argv": list(step.argv),
-        } for step in steps},
-    }
 
 
 def _snapshot(path: Path) -> dict[str, Any]:
@@ -805,6 +783,11 @@ def prepare(directory: Path, mode: str) -> None:
         _run([shutil.which("pwsh"), "-NoProfile", "-File", payload.with_name("agent-index") / "scripts" / "install.ps1",
               "engine"], case, timeout=600)
         _run(_command(case, "worktree-manager", "mux-daemon", "ensure"), case, timeout=30)
+        _run([_python(case / "h" / ".agent-codespaces"), "-I", "-X", "utf8", "-B", "-c",
+              "from agent_codespaces.config import load_merged_config;"
+              "from agent_codespaces.connection_owner import ensure_owner_running;"
+              "assert ensure_owner_running(load_merged_config(include_cwd=False)),"
+              "'Canonical Codespaces owner did not become ready'"], case, timeout=60)
         before = _observe(case, declared)
         setup["before"] = before
         setup["required_residents"] = sorted(before["resident_roots"])
