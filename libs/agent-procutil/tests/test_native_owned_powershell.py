@@ -142,3 +142,61 @@ def test_facade_keeps_arguments_status_and_explicit_cleanup(
         assert value["code"] is None and value["error"]
         assert value["settled"] is (outcome == "confirmed-error")
     assert not (tmp_path / "unused.log").exists()
+
+
+@pytest.mark.parametrize("outcome", [
+    "confirmed", "denied", "missing", "malformed", "wrapped", "outer-denied", "success",
+])
+def test_foundation_child_preserves_cleanup_and_original_failure(
+    tmp_path: Path, outcome: str,
+) -> None:
+    producer = HELPER.parents[4] / "libs/update-driver/scripts/foundation-produce.ps1"
+    response = {
+        "confirmed": "$e.Data['CleanupConfirmed']=$true; throw $e",
+        "denied": "$e.Data['CleanupConfirmed']=$false; throw $e",
+        "missing": "throw $e",
+        "malformed": "$e.Data['CleanupConfirmed']='True'; throw $e",
+        "wrapped": (
+            "$e.Data['CleanupConfirmed']=$true; "
+            "throw [InvalidOperationException]::new('wrapper',$e)"
+        ),
+        "outer-denied": (
+            "$e.Data['CleanupConfirmed']=$true; "
+            "$outer=[InvalidOperationException]::new('fixture-outer-unknown',$e); "
+            "$outer.Data['CleanupConfirmed']=$false; throw $outer"
+        ),
+        "success": "return [pscustomobject]@{returncode=7}",
+    }[outcome]
+    shim = tmp_path / "foundation-dispatcher.ps1"
+    shim.write_text(
+        "function Invoke-DaemonInstanceRequest { param([hashtable]$Request)\n"
+        "$e=[InvalidOperationException]::new('fixture-child-failure')\n" + response + "\n}\n",
+        encoding="utf-8",
+    )
+    result = _run(
+        "$ErrorActionPreference='Stop'; "
+        f". {_literal(HELPER)}; $script:NativeOwnedInstances={_literal(shim)}; "
+        f"$plugin={_literal(tmp_path)}; $producer={_literal(producer)}; "
+        "$tokens=$null; $errors=$null; "
+        "$ast=[Management.Automation.Language.Parser]::ParseFile($producer,[ref]$tokens,[ref]$errors); "
+        "if ($errors.Count) { throw ($errors | Out-String) }; "
+        "$function=$ast.Find({param($node) "
+        "$node -is [Management.Automation.Language.FunctionDefinitionAst] -and "
+        "$node.Name -ceq 'Invoke-FoundationChild'},$true); "
+        "if ($null -eq $function) { throw 'source consumer unavailable' }; "
+        ". ([scriptblock]::Create($function.Extent.Text)); "
+        "$env:OS='Windows_NT'; $script:descendantsSettled=$true; $code=$null; $failure=$null; "
+        f"try {{ $code=Invoke-FoundationChild -Executable {_literal(HELPER)} "
+        f"-Arguments @('fixture') -Log {_literal(tmp_path / 'unused.log')} -Timeout 2345 }} "
+        "catch { $failure=$_.Exception.Message }; "
+        "@{settled=$script:descendantsSettled;code=$code;failure=$failure} | ConvertTo-Json -Compress"
+    )
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    if outcome == "success":
+        assert value == {"settled": True, "code": 7, "failure": None}
+    else:
+        assert value["code"] is None
+        assert "fixture-" in value["failure"]
+        assert value["settled"] is (outcome in ("confirmed", "wrapped"))
+    assert not (tmp_path / "unused.log").exists()

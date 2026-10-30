@@ -87,6 +87,11 @@ the two unique inherited stdio handles through synthetic native calls and
 owned file descriptors. The admitted `tools/promotion_unit_tests/test_native_owned.py`
 packet covers finite outcome/retirement logic with explicit native-boundary
 doubles; none of these portable checks replaces the native/desktop matrix.
+The same real-shell facade packet extracts the actual `Invoke-FoundationChild`
+consumer function and exercises child failure through the finite adapter. Only
+Boolean cleanup evidence is accepted, an outer false dominates an inner true,
+and the original failure must survive. It does not execute or qualify the
+remaining compiled foundation bootstrap or its opt-in acquisition lanes.
 
 Update-driver's `test_native_lifetime.py -k queued_installer`, admitted with
 `UPDATE_DRIVER_NATIVE_LIFETIME=1`, separately exercises the real queued executor
