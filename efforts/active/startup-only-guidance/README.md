@@ -345,9 +345,13 @@ existing review, custody and explicit approval gates.
   other runtime candidates failed the shared UV settings probe. Their previous
   selected runtimes remained in place. No adopter rewrite is claimed.
 - Read-only diagnosis distinguished the failures: the Bridge PID guard only
-  recognized the module spelling, while the shared installer appended a second
-  `--no-editable` option already supplied by its callers. These are not evidence
-  of disk exhaustion, a dead daemon or permission to bypass seasoning.
+  recognized the module spelling. In the observed UV 0.12.23 settings probe,
+  one `--no-editable` option was accepted and the second occurrence appended by
+  the shared installer was rejected. #9489 separately records UV 0.10.12
+  rejecting even one occurrence as unsupported. These related version-specific
+  failures remain with that repair owner; deduplication alone is not claimed
+  to repair the supported UV range. Neither failure proves disk exhaustion,
+  a dead daemon or permission to bypass seasoning.
 - The operator selected the bounded Bridge-only repair. #9649 merged after
   current-head Copilot approval, resolved feedback and required green checks.
   It recognizes supported module/console daemon argument positions, including
