@@ -316,7 +316,7 @@ def test_update_diagnostics_native_packet_preserves_bounds_and_source(name, rout
                 assert arguments[arguments.index("-k") + 1].split(" or ") == [
                     "manual_auto_hold", "operator_repair_classification",
                     "bootstrap_retains_update_repair", "native_launch_submits_fixed_phases",
-                    "posix_bootstrap_hold", "target_bypasses_bootstrap",
+                    "native_bootstrap_hold", "target_bypasses_bootstrap",
                     "bootstrap_preserves_hold_path",
                 ]
         assert "!cancelled() && steps.tooling.outcome == 'success'" in step["if"]
