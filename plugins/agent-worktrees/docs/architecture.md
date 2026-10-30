@@ -1907,6 +1907,11 @@ For the installer handover's exact admission, lock, busy-oracle and rollback
 sequence, and its bounded structural logs, see the
 [status-monitor drain audit](status-monitor-drain.md).
 
+The explicit `status-monitor-restart` command returns nonzero when its spawn
+attempt fails. Disabled and already-current cases still return zero, as does a
+successful spawn; this exit status does not prove acquired monitor ownership or
+serving readiness. The installer's separate cutover result handling is unchanged.
+
 A version bump publishes a fresh `~/.agent-worktrees/versions/<v>` slot and
 calls `status-monitor-restart` (`_restart_status_monitor`) from that new
 slot's interpreter. Alongside reaping the singleton status-monitor's own

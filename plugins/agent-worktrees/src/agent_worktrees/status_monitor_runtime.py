@@ -718,8 +718,8 @@ def _restart_status_monitor(
 def cmd_status_monitor_restart(args: argparse.Namespace) -> int:
     """``status-monitor-restart`` -- reap+respawn the resident monitor.
 
-    The auto-update cutover seam (installer-invoked from the new slot). Prints a
-    one-line summary; always exits 0 (advisory, never fails a deploy)."""
+    Prints a one-line summary and exits nonzero when spawning fails. The
+    installer's separate cutover failure handling is unchanged."""
     r = _restart_status_monitor()
     if not r.get("enabled"):
         print("status-monitor: disabled for this test run -- skipped")
@@ -733,7 +733,7 @@ def cmd_status_monitor_restart(args: argparse.Namespace) -> int:
     bits.append("spawned current monitor" if r.get("spawned") else "spawn failed")
     bits.extend(stale_runtime_reap.summary_bits(r.get("stale_runtime_reaped")))
     print("status-monitor: " + ", ".join(bits))
-    return 0
+    return 0 if r.get("spawned") else 1
 
 
 def cmd_reconcile_sessions(args: argparse.Namespace) -> int:
