@@ -303,3 +303,6 @@ existing review, custody and explicit approval gates.
   enabled job sets for each broker input and each owner exclusion. The combined
   workflow/delivery packet passes 160 tests; the pre-rename selector passes its
   one intended guard. Current-head review remains open.
+- Kept the suite-wide publication/discovery test in the ordinary integration
+  suite, not the fast guard packet. The declaration-only selector guard remains
+  the lightweight check; no new per-source Git subprocess matrix is added to it.

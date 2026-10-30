@@ -11,7 +11,6 @@ import pytest
 from test_instruction_delivery import delivery, fixture, projections
 
 
-@pytest.mark.guard
 def test_shipped_sources_publish_one_current_body_and_an_offline_fallback(tmp_path: Path) -> None:
     suite = Path(__file__).resolve().parents[3]
     sources = [
