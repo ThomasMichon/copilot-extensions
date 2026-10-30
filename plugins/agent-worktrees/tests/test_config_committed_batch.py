@@ -137,3 +137,222 @@ def test_binary_input_retains_requested_tree_runner(monkeypatch):
     assert git_ops.git("cat-file", "--batch", input_data=b"", kill_tree=True, timeout=1).stdout == b"packet"
     assert calls[0]["binary"] is True and calls[0]["input"] == b""
     assert calls[0]["timeout"] == 1
+
+
+@pytest.mark.parametrize("body, authority", [
+    (None, "indeterminate"), ("", "complete"), ("marker: disk\n", "complete"),
+    ("marker: [\n", "indeterminate"),
+])
+def test_inrepo_base_report_distinguishes_optional_empty_and_invalid(tmp_path, monkeypatch, body, authority):
+    monkeypatch.setattr(git_ops, "git", lambda *a, **k: SimpleNamespace(returncode=1, stdout=""))
+    if body is not None:
+        (tmp_path / "config.yaml").write_text(body, encoding="utf-8")
+    candidates = (Path("config.yaml"), Path("later.yaml"))
+    legacy = source.load_config_base(tmp_path, candidates)
+    report = source.load_config_base_report(tmp_path, candidates)
+    assert report.value == legacy
+    assert report.authority.value == authority
+    assert report.reusable is False
+    assert "stable-owner-input-frontier" in report.missing_coverage
+
+
+def test_inrepo_base_report_unreadable_and_strict_errors_keep_legacy_behavior(tmp_path, monkeypatch):
+    from agent_worktrees.repos_configuration_sources import ConfigurationError
+
+    monkeypatch.setattr(git_ops, "git", lambda *a, **k: SimpleNamespace(returncode=1, stdout=""))
+    path = tmp_path / "config.yaml"
+    path.write_text("marker: [\n", encoding="utf-8")
+    candidates = (Path("config.yaml"),)
+    with pytest.raises(ConfigurationError) as legacy:
+        source.load_config_base(tmp_path, candidates, strict=True)
+    with pytest.raises(ConfigurationError) as diagnostic:
+        source.load_config_base_report(tmp_path, candidates, strict=True)
+    assert diagnostic.value.code == legacy.value.code
+    real_open = open
+
+    def unreadable(file, *args, **kwargs):
+        if Path(file) == path:
+            raise PermissionError("fixture denied")
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", unreadable)
+    assert source.load_config_base(tmp_path, candidates) == {}
+    report = source.load_config_base_report(tmp_path, candidates)
+    assert report.value == {}
+    assert report.authority.value == "indeterminate"
+    assert any(f.reason == "unreadable-source" for f in report.findings)
+    assert "fixture denied" not in repr(report.observations)
+
+
+def test_inrepo_base_report_fallback_success_does_not_hide_unobserved_candidates(tmp_path, monkeypatch):
+    calls = []
+
+    def git(*args, **kwargs):
+        calls.append(args)
+        if args[0] == "symbolic-ref":
+            return SimpleNamespace(returncode=0, stdout="refs/remotes/origin/main\n")
+        if args == ("show", "origin/main:later.yaml"):
+            return SimpleNamespace(returncode=0, stdout="marker: retained\n")
+        return SimpleNamespace(returncode=128, stdout="")
+
+    monkeypatch.setattr(git_ops, "git", git)
+    candidates = (Path("first.yaml"), Path("later.yaml"))
+    assert source.load_config_base(tmp_path, candidates) == {"marker": "retained"}
+    calls.clear()
+    report = source.load_config_base_report(tmp_path, candidates)
+    assert report.value == {"marker": "retained"}
+    assert report.authority.value == "indeterminate"
+    assert report.findings
+    assert calls == [
+        ("symbolic-ref", "-q", "refs/remotes/origin/HEAD"), ("cat-file", "--batch"),
+        ("--literal-pathspecs", "ls-tree", "-z", "--full-tree", "origin/main", "--",
+         "first.yaml", "later.yaml"),
+        ("show", "origin/main:first.yaml"), ("show", "origin/main:later.yaml"),
+    ]
+
+
+def test_inrepo_base_report_snapshot_retains_original_acquisition_metadata(tmp_path, monkeypatch):
+    calls = []
+    spec = b"origin/main:config.yaml"
+    blob = b"marker: committed\n"
+    packet = b"a" * 40 + b" blob " + str(len(blob)).encode() + b"\n" + blob + b"\n"
+
+    def git(*args, **kwargs):
+        calls.append(args)
+        if args[0] == "symbolic-ref":
+            return SimpleNamespace(returncode=0, stdout="refs/remotes/origin/main\n")
+        assert args == ("cat-file", "--batch")
+        assert kwargs["input_data"] == spec + b"\n"
+        return SimpleNamespace(returncode=0, stdout=packet)
+
+    monkeypatch.setattr(git_ops, "git", git)
+    candidates = (Path("config.yaml"),)
+    with source.resolution_budget(reuse_snapshots=True):
+        first = source.load_config_base_report(tmp_path, candidates)
+        second = source.load_config_base_report(tmp_path, candidates)
+    assert first.value == second.value == {"marker": "committed"}
+    assert first.observations == second.observations
+    assert first.authority.value == second.authority.value == "complete"
+    assert len(calls) == 2
+    assert second.reusable is False
+
+
+
+def test_inrepo_base_report_retains_branch_probe_uncertainty_in_legacy_snapshot(tmp_path, monkeypatch):
+    calls = []
+    blob = b"default_branch: dev\nmarker: base\n"
+    packet = b"a" * 40 + b" blob " + str(len(blob)).encode() + b"\n" + blob + b"\n"
+
+    def git(*args, **kwargs):
+        calls.append(args)
+        if args[0] == "symbolic-ref":
+            return SimpleNamespace(returncode=0, stdout="refs/remotes/origin/main\n")
+        if args[0] == "cat-file":
+            return SimpleNamespace(returncode=0, stdout=packet)
+        assert args == ("show-ref", "--verify", "--quiet", "refs/remotes/origin/dev")
+        raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+    monkeypatch.setattr(git_ops, "git", git)
+    candidates = (Path("config.yaml"),)
+    with source.resolution_budget(reuse_snapshots=True):
+        legacy = source.load_config_base(tmp_path, candidates)
+        legacy["marker"] = "caller mutation"
+        report = source.load_config_base_report(tmp_path, candidates)
+    assert report.value == {"default_branch": "dev", "marker": "base"}
+    assert report.authority.value == "indeterminate"
+    assert any(o.stage == "committed-branch" and o.findings for o in report.observations)
+    assert len(calls) == 3
+    assert report.reusable is False
+
+
+
+@pytest.mark.parametrize("positive_peer", [False, True])
+def test_inrepo_base_report_preserves_suppressed_presence_error(tmp_path, monkeypatch, positive_peer):
+    import errno
+    from agent_worktrees import source_probes
+
+    monkeypatch.setattr(git_ops, "git", lambda *a, **k: SimpleNamespace(returncode=1, stdout=""))
+    missing = (Path("ordinary-missing.yaml"),)
+    ordinary_missing = source.load_config_base_report(tmp_path, missing)
+    assert ordinary_missing.authority.value == "indeterminate"
+    assert any(f.reason == "presence-provenance-unavailable" for f in ordinary_missing.findings)
+    first, later = tmp_path / "first.yaml", tmp_path / "later.yaml"
+    if positive_peer:
+        later.write_text("marker: fallback\n", encoding="utf-8")
+    original_stat = source_probes.os.stat
+    failed_probes = []
+
+    def stat(path, *args, **kwargs):
+        if isinstance(path, (str, source_probes.os.PathLike)) and Path(path) == first:
+            failed_probes.append(path)
+            raise OSError(errno.ELOOP, "synthetic inaccessible candidate")
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(source_probes.os, "stat", stat)
+    # Exercise pathlib's real suppression, not a mocked False return.
+    assert first.exists() is False
+    failed_probes.clear()
+    candidates = (Path("first.yaml"), Path("later.yaml"))
+    expected = {"marker": "fallback"} if positive_peer else {}
+    assert source.load_config_base(tmp_path, candidates) == expected
+    assert failed_probes == [first]
+    failed_probes.clear()
+    report = source.load_config_base_report(tmp_path, candidates)
+    assert report.value == expected
+    assert failed_probes == [first]
+    assert report.authority.value == "indeterminate"
+    assert any(o.source == str(first) and o.findings for o in report.observations)
+
+
+def test_inrepo_strict_file_report_cannot_certify_empty_after_read_absence(tmp_path, monkeypatch):
+    from agent_worktrees.repos_configuration_sources import mapping
+
+    monkeypatch.setattr(git_ops, "git", lambda *a, **k: SimpleNamespace(returncode=1, stdout=""))
+    path = tmp_path / "config.yaml"
+    path.write_text("marker: previously present\n", encoding="utf-8")
+    original_read = Path.read_bytes
+    reads = []
+
+    def missing_at_read(candidate):
+        if candidate == path:
+            reads.append(candidate)
+            raise FileNotFoundError("synthetic disappearance after selection")
+        return original_read(candidate)
+
+    monkeypatch.setattr(Path, "read_bytes", missing_at_read)
+    assert mapping(path) == {}
+    assert source.load_config_base(tmp_path, (Path("config.yaml"),), strict=True) == {}
+    reads.clear()
+    report = source.load_config_base_report(tmp_path, (Path("config.yaml"),), strict=True)
+    assert report.value == {}
+    assert reads == [path]
+    # The strict owner returned no evidence distinguishing absence from parsed empty.
+    assert report.authority.value == "indeterminate"
+
+
+def test_inrepo_strict_mapping_propagates_nonabsence_read_error(tmp_path, monkeypatch):
+    import errno
+    from agent_worktrees import config_acquisition as acquisition
+    from agent_worktrees.repos_configuration_sources import mapping
+
+    monkeypatch.setattr(git_ops, "git", lambda *a, **k: SimpleNamespace(returncode=1, stdout=""))
+    path = tmp_path / "config.yaml"
+    path.write_text("marker: present\n", encoding="utf-8")
+    original_read = Path.read_bytes
+    failure = OSError(errno.ELOOP, "synthetic read failure")
+
+    def unreadable(candidate):
+        if candidate == path:
+            raise failure
+        return original_read(candidate)
+
+    monkeypatch.setattr(Path, "read_bytes", unreadable)
+    for load in (
+        lambda: mapping(path),
+        lambda: source.load_config_base(tmp_path, (Path("config.yaml"),), strict=True),
+        lambda: source.load_config_base_report(tmp_path, (Path("config.yaml"),), strict=True),
+    ):
+        with pytest.raises(OSError) as caught:
+            load()
+        assert caught.value is failure
+    assert acquisition.current_observations() is None

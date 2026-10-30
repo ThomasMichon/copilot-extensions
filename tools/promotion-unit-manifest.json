@@ -3052,7 +3052,15 @@
         "tools/promotion_unit_tests/test_related_acquisition.py::test_default_git_root_owner_reports_one_unchanged_lookup_without_private_output[success]",
         "tools/promotion_unit_tests/test_related_acquisition.py::test_config_sources_uses_root_owner_once_and_preserves_explicit_bypass[explicit]",
         "tools/promotion_unit_tests/test_related_acquisition.py::test_config_sources_uses_root_owner_once_and_preserves_explicit_bypass[timeout-fallback]",
-        "tools/promotion_unit_tests/test_related_acquisition.py::test_default_root_fixture_loads_without_ambient_procutil"
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_default_root_fixture_loads_without_ambient_procutil",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_config_report_request_collection_restores_nested_failure_and_opaque_owners",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_config_report_unattributed_cached_value_is_not_replayed",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_committed_config_report_preserves_canonical_acquisition_and_snapshot_metadata[absent]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_committed_config_report_preserves_canonical_acquisition_and_snapshot_metadata[empty]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_committed_config_report_preserves_canonical_acquisition_and_snapshot_metadata[malformed]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_committed_config_report_preserves_canonical_acquisition_and_snapshot_metadata[partial]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_committed_config_report_preserves_canonical_acquisition_and_snapshot_metadata[snapshot]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_committed_config_report_preserves_canonical_acquisition_and_snapshot_metadata[replacement]"
     ],
     "sources": {
         "tools/core_python_artifacts.py": "cfeae35bfee4537022e1026ffae498b61b23508426a676d9dc09ca8ab8d4b4a0",
@@ -3407,14 +3415,16 @@
         "plugins/agent-machines/tests/test_cell_installer.py": "de004be5b70e1d4bed4945e766f393c167db0682979853eba4fa40814e01bf14",
         "plugins/agent-machines/scripts/cell_installer.py": "041a28230551d926c65ff00866213f5944ff5d1e0596c75e37ffa8cd0af64795",
         "libs/versioned-runtime/versioned_runtime_construction.py": "df703e23675c232079f28c74eb85977b3460aef252e2bb2079bbf9081ad1480d",
-        "tools/promotion_unit_tests/test_related_acquisition.py": "8bc666d9c2c3b27158f138e56d478f2e2440d2723efabffbebab080828e5bf1c",
+        "tools/promotion_unit_tests/test_related_acquisition.py": "899d4fae46e27feb87cc79afaa2c0be7c1b997bba5a19a8f5f5afd5d36dfff12",
         "plugins/agent-worktrees/src/agent_worktrees/acquisition_report.py": "a83793221939d9744aa1be72c839bf631d279cee1fc2bb67601ca8fe68c8deed",
         "plugins/agent-worktrees/src/agent_worktrees/related_acquisition.py": "085a6a6745c793e781dbf8db9c56c14c140e0f379550af8fd3d34b32770139c9",
-        "plugins/agent-worktrees/src/agent_worktrees/config_acquisition.py": "50fad08afef90e0fbd39eb343202042d3e259c03ea1bc2e98a9d948ecb05de82",
+        "plugins/agent-worktrees/src/agent_worktrees/config_acquisition.py": "cf4dd736cd6f85ee2201048a9bb8c8286bb3ee64b26f0843789f061a9f936efc",
         "plugins/agent-worktrees/src/agent_worktrees/machine_config.py": "5b5d263e95ccb49725e25d1eaa3b529df5f37050fffd14f16160fc3d5798ea33",
         "plugins/agent-worktrees/src/agent_worktrees/source_probes.py": "6d3a171db77782d50137e61ede48df22bab040eb0f5c3c18391675a11306a9a8",
         "plugins/agent-worktrees/src/agent_worktrees/state_root.py": "c885e37c248086b63ba2822453c11c45be758437e71682f57e11d2c017ccf215",
-        "plugins/agent-worktrees/src/agent_worktrees/config_sources.py": "af6f2d7632d492635cb1ba5f7085de2066a2a3e50fd81f7c7b3f6a466e07e637"
+        "plugins/agent-worktrees/src/agent_worktrees/config_sources.py": "af6f2d7632d492635cb1ba5f7085de2066a2a3e50fd81f7c7b3f6a466e07e637",
+        "plugins/agent-worktrees/src/agent_worktrees/inrepo_config_source.py": "5688fb72c987e9c303608f6e0010620d1525227c03ee00cc728547eb9237b6de",
+        "plugins/agent-worktrees/src/agent_worktrees/config.py": "5e63de96e3f4e370c8b4403c55b5a4c77b35acac92a847ab05ea35c68bcb576a"
     },
     "coverage_targets": [
         "tools/core_runtime_profile.py",
@@ -3579,7 +3589,8 @@
         "plugins/agent-worktrees/src/agent_worktrees/machine_config.py",
         "plugins/agent-worktrees/src/agent_worktrees/source_probes.py",
         "plugins/agent-worktrees/src/agent_worktrees/state_root.py",
-        "plugins/agent-worktrees/src/agent_worktrees/config_sources.py"
+        "plugins/agent-worktrees/src/agent_worktrees/config_sources.py",
+        "plugins/agent-worktrees/src/agent_worktrees/inrepo_config_source.py"
     ],
     "max_seconds": 300
 }

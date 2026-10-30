@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
+import threading
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .config import Config
 
 from dropin_registry import EntryStatus, ScanAuthority
 
@@ -11,9 +17,73 @@ from .acquisition_report import AcquisitionReport, SourceObservation, failed, ob
 from .source_probes import probe_source
 
 
+# A collector belongs to one report request and its calling thread, never a cache.
+_collector: contextvars.ContextVar[tuple[int, list[SourceObservation]] | None] = contextvars.ContextVar(
+    "_agent_worktrees_config_observations", default=None,
+)
+
+
+def current_observations() -> list[SourceObservation] | None:
+    active = _collector.get()
+    return active[1] if active is not None and active[0] == threading.get_ident() else None
+
+
+@contextlib.contextmanager
+def capture_config_observations():
+    observations: list[SourceObservation] = []
+    token = _collector.set((threading.get_ident(), observations))
+    try:
+        yield observations
+    finally:
+        _collector.reset(token)
+
+
+def opaque_source(source: str) -> None:
+    failed(current_observations(), source, "config-owner", "owner-coverage-unavailable",
+           "child owner does not expose complete acquisition provenance")
+
+
+def full_load_started() -> None:
+    observe(current_observations(), "load-config", "config-load", ScanAuthority.COMPLETE)
+    opaque_source("execution-machine")
+
+
+def source_exists(path: Path, stage: str) -> bool:
+    """Observe the owner's existing presence check, preserving raised errors."""
+    try:
+        present = path.exists()
+    except Exception as exc:
+        failed(current_observations(), str(path), stage, "unreadable-source", type(exc).__name__)
+        raise
+    if not present:
+        failed(current_observations(), str(path), stage, "presence-provenance-unavailable",
+               "legacy presence result does not expose a raw stat outcome")
+    return present
+
+
+def load_config_report(
+    path: Path | None = None, *, include_control_plane_related_pr: bool = True,
+    include_knowledge_preferences: bool = True, project: str | None = None,
+) -> AcquisitionReport[Config]:
+    """Report the canonical load, retaining its cache and fatal-error semantics."""
+    from . import config as cfg
+
+    with capture_config_observations() as observations:
+        value = cfg.load_config(
+            path, include_control_plane_related_pr=include_control_plane_related_pr,
+            include_knowledge_preferences=include_knowledge_preferences, project=project,
+        )
+        if not any(o.stage == "config-load" for o in observations):
+            failed(observations, "load-config", "config-load", "cached-config-unattributed",
+                   "available Config has no owned acquisition provenance")
+    return AcquisitionReport("load-config", value, tuple(observations))
+
+
 def yaml_value(path: Path, observations: list[SourceObservation] | None = None) -> dict[str, Any]:
     from . import config as cfg
 
+    if observations is None:
+        observations = current_observations()
     try:
         present = path.exists() if observations is None else probe_source(path, "exists", observations, "config-yaml")
         if not present:
@@ -43,6 +113,8 @@ def dropin_value(config_d: Path, *, project_name="", warn=False, observations=No
     from . import config as cfg
     from .config_dropins import scan_config_dropin_registry, warn_config_dropin_findings
 
+    if observations is None:
+        observations = current_observations()
     report = scan_config_dropin_registry(config_d, project_name=project_name)
     if warn:
         warn_config_dropin_findings(report)

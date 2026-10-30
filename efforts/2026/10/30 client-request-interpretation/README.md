@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** serial proposal and implementation PRs against `dev`
 - **Created:** 2026-10-29
-- **Status:** Active
+- **Status:** Done
 - **Vision:** `visions/harness-guidance`, `attributable-context-budget`
 - **Umbrella issue:** #9609
 
@@ -111,9 +111,9 @@ unclassified remainder separately instead of fabricating completeness.
   repository checks; preserve raw-body and privacy regressions.
 - [x] Apply the offline analyzer to an operator-approved existing snapshot
   locally, emitting only report metadata to the coordinating conversation.
-- [ ] Land the reviewed implementation and release changefile through the
+- [x] Land the reviewed implementation and release changefile through the
   normal merge/promotion flow, without an installed-consumer rollout.
-- [ ] Resolve the complete Plan and Validation Plan, then archive.
+- [x] Resolve the complete Plan and Validation Plan, then archive.
 
 ## Validation Plan
 
@@ -134,7 +134,7 @@ These are agent-recommended checks for the requested behavior.
   zero; system-message or leftover bytes are not exact builtin-prompt bytes.
 - [x] Offline analysis works without inference, hook execution, a running
   sibling service or publication of private snapshots/inventories.
-- [ ] Required CI/review and release checks pass; limitations are reflected
+- [x] Required CI/review and release checks pass; limitations are reflected
   in the living skill/usage documentation and the local report.
 
 ## Proposal
@@ -193,3 +193,23 @@ Unavailable attribution is a visible result, not a zero or guessed origin.
   fallback and skill warnings, added the native nested grammar shape, and
   replaced suffix-rescanning regexes with forward-only delimiter scans.
   Failed candidates are bounded and disclosed rather than silently omitted.
+
+### 2026-10-30 - Reviewed implementation merged
+- Implementation #9632 merged after a current-head Comment review with no
+  open Medium/High findings and required green CI. All reported findings were
+  addressed, including malformed-input and resource-boundary regressions.
+- The final correction packet passed 75 focused snapshot cases; existing
+  scanner discovery contracts also passed. The final offline interpretation
+  retained exact input bytes and emitted no analysis warnings.
+- Merge CI passed. Normal promotion remains the final release check; no
+  installed-consumer rollout is included or authorized by this effort.
+
+### 2026-10-30 - Release and completion
+- Normal promotion run 41037628770 succeeded and release candidate #9652
+  merged to Main. The released `customizing-copilot` version is
+  `0.2.48-dev1`; capture/analysis payloads and shared inventory helpers match
+  implementation merge #9632 byte-for-byte.
+- All Plan and Validation Plan items are resolved. Archived the completed
+  effort and retained the capture skill/usage reference as living guidance.
+- Installed-consumer rollout remains outside this effort's scope. No
+  installed plugin, operator setting or shared inference service was changed.
