@@ -126,7 +126,7 @@ def _repo_config_layers(repo_root: Path) -> list[Path]:
     return layers
 
 
-def load_config() -> ServiceConfig:
+def load_config(*, strict: bool = False) -> ServiceConfig:
     """Load config from YAML, falling back to defaults."""
     root = config_dir()
     cfg_path = root / "config.yaml"
@@ -152,6 +152,12 @@ def load_config() -> ServiceConfig:
                 "refusing caller-settings fallback"
             ) from exc
         except Exception as exc:
+            if strict:
+                raise ValueError("Invalid service configuration; refusing preference fallback") from exc
+            if isinstance(data, dict) and "session_modes" in data:
+                raise ValueError(
+                    "Invalid session_modes configuration; refusing preference fallback"
+                ) from exc
             if isinstance(exc, ValidationError) and any(
                 error["loc"] and str(error["loc"][0]).startswith("remote_acp")
                 for error in exc.errors()

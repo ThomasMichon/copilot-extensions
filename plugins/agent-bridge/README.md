@@ -34,6 +34,12 @@ requirements while adopters retain instance and credential-source bindings.
 
 Supports **Windows** and **Linux/WSL** (macOS planned).
 
+New-session ACP/CLI preferences are readable and explicitly writable offline
+with `config session-mode`. Operator policy can be global, venue-scoped or
+repository-scoped; missing policy defaults to ACP without a mode-choice prompt.
+See the [session-mode schema and commands](skills/agent-bridge/references/session-mode.md).
+Existing sessions and their launch/authentication owners are unchanged.
+
 The interactive extension's [retained SDK consumer](docs/retained-sdk-consumer.md)
 is explicitly opt-in. Legacy defaults are unchanged; selected retained delivery
 requires HTTP 50 recovery and never silently downgrades or resends an ambiguous

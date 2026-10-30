@@ -1,0 +1,9 @@
+{
+  "comment": "Add persistent scoped ACP/CLI preferences for new sessions with offline read and explicit atomic set commands.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
