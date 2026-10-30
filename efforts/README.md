@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Client Request Interpretation](active/client-request-interpretation/README.md) | Draft; current-model snapshots and evidence-aware local analysis proposal | #9609; extends released #9589, no shared inference logging or rollout |
 | [Startup-Only Guidance](active/startup-only-guidance/README.md) | Draft; startup projections and periodically synced non-discovered fallbacks, proposal only | Bounded #5993 follow-up; preserves existing delivery/native owners, no rollout |
 | [PR Review Workspaces](active/pr-review-workspaces/README.md) | Draft; ADO-first vision and architecture proposal only | #9535; successor PR plugin/service cache, existing #6007/#7188 and #7051 owners retained; no implementation or rollout |
 | [Launch Boundary Repairs](active/launch-boundary-repairs/README.md) | Active; structured-refusal repair merged, four source repair delivery gates open | #9520; #8051 relay budgets, #5761 discovery, #5512 monitor and open #9322 PATH retained; no rollout or live venue retry |
