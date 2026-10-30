@@ -55,8 +55,9 @@ known records but cannot establish full review readiness.
 - [x] Exercise the actual source CLI parser/serialization with no installed
   runtime selection or global side effects; give reviewers exact source/ref
   commands and documented limits.
-- [ ] Run focused tests, contained plugin validation and relevant source guards;
+- [x] Run focused tests, contained plugin validation and relevant source guards;
   publish through normal reviewed `dev` PRs.
+  Delivered in #9647 after current-head approval, resolved feedback and green CI.
 
 ## Remaining campaign
 
