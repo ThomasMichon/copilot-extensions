@@ -128,6 +128,10 @@ cancellation does not abandon teardown. The beacon's bounded `stop()` remains
 unchanged; daemon finalization additionally joins its thread before withdrawing
 liveness. Shutdown never starts an unstarted transport or replays an unknown
 transcript push, and dirty/prune markers retain any owed work for a later Owner.
+The liveness beacon also records the running process's frozen build `version`,
+alongside its PID and process-birth identity. Changing the selected runtime does
+not relabel an incumbent process. Legacy beacons without this additive field
+remain readable, but do not establish which build is running.
 
 `ssh`, `copilot`, and `namespace-resolve` accept repeatable
 `--stage-plugin SOURCE` and `--stage-plugin-disabled SOURCE`. The latter preserves

@@ -15,7 +15,6 @@ from urllib.parse import urlparse
 from agent_procutil import spawn_daemon
 from agent_procutil.daemon_instances import DaemonInstanceSpec
 from zdd import breadcrumb, diagnostics, routing
-from zdd.cutover import CutoverOrchestrator
 
 from . import mux_daemon_process
 from .mux_mapping_registry import _try_lock_file_once, _unlock_file
@@ -117,14 +116,9 @@ def is_superseded(root: Path | None, my_pid: int, my_generation: int) -> bool:
     endpoint = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
     if endpoint is None or endpoint.pid == my_pid or endpoint.generation <= my_generation:
         return False
-    host = endpoint.client_host
-    family = socket.AF_INET6 if ":" in host else socket.AF_INET
-    try:
-        with socket.socket(family, socket.SOCK_STREAM) as sock:
-            sock.settimeout(0.25)
-            return sock.connect_ex((host, endpoint.port)) == 0
-    except OSError:
-        return False
+    return bool(endpoint.version) and _health_check(
+        endpoint.client_host, endpoint.port, root=root, generation=endpoint.version,
+    )
 
 
 def _cmdline_root(cmdline: str) -> Path | None:
@@ -604,23 +598,17 @@ def activate_after_update(
     health_timeout: float = 60.0,
     drain_timeout: float = 30.0,
 ) -> dict[str, object]:
-    """Cut over to ``version``, the immutable slot name, not package version."""
+    """Start a healthy successor; incumbents observe routing and retire themselves.
+
+    The successor takes exclusive work only after acquiring the resident lease.
+    Historical recovery records remain available to explicit recovery, but are
+    not a prerequisite for installing and starting an independent generation.
+    """
     resolved_root = root if root is not None else default_root()
     summary: dict[str, object] = {"action": "noop", "root": str(resolved_root)}
 
-    from . import mux_daemon
-
-    # Fast, lock-free skip: don't even contend the cutover lock for a no-op
-    # reconciliation call -- the common case when sessions launch often. Only
-    # while there is no stale breadcrumb: a stale one must always fall
-    # through to the locked path below, where recovery/reaping runs before
-    # any no-op decision (a crashed prior cutover must never be masked by
-    # "the target version is already active" -- the same abandoned-passive
-    # gap `zdd.breadcrumb`'s module docstring describes; #5344 follow-up).
     pre_route = routed_endpoint(resolved_root)
-    if not _stale_cutover_in_progress(resolved_root) and _already_at_version(
-        pre_route, version, root=resolved_root
-    ):
+    if _already_at_version(pre_route, version, root=resolved_root):
         summary["reason"] = "already-active-version"
         summary["route"] = {
             "port": pre_route.port, "pid": pre_route.pid, "version": pre_route.version,
@@ -629,85 +617,32 @@ def activate_after_update(
 
     lease = _acquire_cutover_lock(resolved_root)
     try:
-        pre_recovery = breadcrumb.read_breadcrumb(routing_dir(resolved_root))
-        refusal = breadcrumb.recovery_refusal(routing_dir(resolved_root), pre_recovery)
-        if refusal is not None:
-            summary.update(
-                action="refused", reason=refusal, result={"ok": False, "error": refusal},
-            )
-            return summary
         load_or_create_control_token(resolved_root)
-        lock_data = mux_daemon.read_lock_data(mux_daemon.lock_path(resolved_root))
-        route = routed_endpoint(resolved_root)
-        if route is None:
-            if not _lock_data_is_live(lock_data):
-                summary["reason"] = "no-live-daemon"
-                return summary
-            return _legacy_lock_cutover(
-                root=resolved_root,
-                slot=slot,
-                version=version,
-                lock_data=lock_data or {},
-                health_timeout=health_timeout,
-            )
-        # Always run stale-cutover recovery and abandoned-passive reaping
-        # before deciding anything -- including the same-version no-op check
-        # right below -- so a crashed prior cutover's stranded old daemon or
-        # abandoned passive is never masked by an early "already active"
-        # return.
-        summary["recovery"] = breadcrumb.recover_stale_cutover(
-            routing_dir(resolved_root),
-            lambda base_url: _make_client(base_url, root=resolved_root),
-            health_check=lambda host, port: _health_check(host, port, root=resolved_root),
-        )
-        if summary["recovery"].get("refused"):
-            reason = breadcrumb.refusal_reason(summary["recovery"])
-            summary.update(action="refused", reason=reason, result={"ok": False, "error": reason})
-            return summary
-        summary["passive_reap"] = _reap_abandoned_passive(resolved_root, pre_recovery)
-        if summary["passive_reap"].get("refused"):
-            reason = breadcrumb.refusal_reason(summary["passive_reap"])
-            summary.update(action="refused", reason=reason, result={"ok": False, "error": reason})
-            return summary
-
-        # Re-check now, under the lock and after recovery/reap: another
-        # caller may have already cut over to this exact version while we
-        # waited for the lock, or the recovery above may just have healed
-        # the last aborted attempt back onto it.
         route = routed_endpoint(resolved_root)
         if _already_at_version(route, version, root=resolved_root):
             summary["reason"] = "already-active-version"
             summary["route"] = {"port": route.port, "pid": route.pid, "version": route.version}
             return summary
 
-        target_ports: set[int] = set()
-
-        def spawn_target(port):
-            handle = spawn_passive(slot, root=resolved_root, port=port)
-            target_ports.add(port)
-            return handle
-
-        orch = CutoverOrchestrator(
-            routing_dir(resolved_root),
-            bind=_BIND,
-            version=version,
-            spawn_passive=spawn_target,
-            health_check=lambda host, port: _health_check(
-                host, port, root=resolved_root,
-                generation=version if port in target_ports else None,
-            ),
-            make_client=lambda base_url: _make_client(base_url, root=resolved_root),
-            pick_free_port=pick_free_port,
-            service="worktree-manager-mux-daemon",
-        )
-        result = orch.run(
-            health_timeout=health_timeout,
-            drain_timeout=drain_timeout,
-            force=False,
-        )
+        port = pick_free_port()
+        incoming = spawn_passive(slot, root=resolved_root, port=port)
+        try:
+            if not _await_health(
+                _BIND, port, root=resolved_root, timeout=health_timeout, generation=version,
+            ):
+                summary.update(action="cutover", result={
+                    "ok": False, "new_port": port, "error": "health-timeout",
+                })
+                return summary
+            publish_route(port, root=resolved_root, pid=incoming.pid, version=version)
+        finally:
+            selected = routing.read_active_endpoint(routing_dir(resolved_root), verify_listener=False)
+            if selected is None or selected.pid != incoming.pid:
+                incoming.terminate()
+        summary.update(action="cutover", result={
+            "ok": True, "new_port": port, "new_pid": incoming.pid,
+            "retirement": "self-observed",
+        })
+        return summary
     finally:
         lease.release()
-
-    summary["action"] = "cutover"
-    summary["result"] = result.to_dict()
-    return summary

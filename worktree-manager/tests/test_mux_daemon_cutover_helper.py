@@ -153,10 +153,19 @@ def test_activate_after_update_cuts_over_and_converges(tmp_path, monkeypatch):
     )
     mux_daemon.register_mapping(_mapping_entry(), root=tmp_path)
 
+    observed = {old.pid: threading.Event(), first_new.pid: threading.Event()}
+
     def _self_retire(daemon: _FakeMuxDaemon) -> None:
+        selected = False
         while daemon.alive:
             active = routing.read_active_endpoint(route_dir, verify_listener=False)
-            if active is not None and active.pid != daemon.pid and not daemon.busy.is_set():
+            if active is not None and active.pid == daemon.pid:
+                selected = True
+                observed[daemon.pid].set()
+            if (
+                selected and active is not None
+                and active.pid != daemon.pid and not daemon.busy.is_set()
+            ):
                 daemon.force_terminate()
                 return
             time.sleep(0.05)
@@ -195,6 +204,7 @@ def test_activate_after_update_cuts_over_and_converges(tmp_path, monkeypatch):
     )
     assert first_pid == first_new.pid
     assert old.alive, "the old daemon exited before the first successor served"
+    assert observed[first_new.pid].wait(timeout=10)
 
     second_result = mdc.activate_after_update(
         root=tmp_path, slot=tmp_path / "slot-b", version="3.0.0"
@@ -229,7 +239,7 @@ def test_activate_after_update_cuts_over_and_converges(tmp_path, monkeypatch):
         daemon.force_terminate()
 
 
-def test_activate_after_update_bootstraps_a_legacy_lock_only_daemon(tmp_path, monkeypatch):
+def test_explicit_legacy_lock_recovery_can_retire_a_pinned_owner(tmp_path, monkeypatch):
     token = mdc.load_or_create_control_token(tmp_path)
     lock_path = mux_daemon.lock_path(tmp_path)
     old = _FakeMuxDaemon(101, token="legacy-token")
@@ -260,7 +270,10 @@ def test_activate_after_update_bootstraps_a_legacy_lock_only_daemon(tmp_path, mo
         lambda pid, *, root: (old.force_terminate(), True)[1] if pid == old.pid else False,
     )
 
-    result = mdc.activate_after_update(root=tmp_path, slot=tmp_path / "slot", version="2.0.0")
+    result = mdc._legacy_lock_cutover(
+        root=tmp_path, slot=tmp_path / "slot", version="2.0.0",
+        lock_data=json.loads(lock_path.read_text()), health_timeout=1,
+    )
 
     assert result["action"] == "legacy-cutover"
     assert result["result"]["ok"] is True
@@ -272,12 +285,120 @@ def test_activate_after_update_bootstraps_a_legacy_lock_only_daemon(tmp_path, mo
         daemon.force_terminate()
 
 
+@pytest.mark.parametrize("incumbent", [False, True])
+def test_update_starts_without_incumbent_readiness_or_recovery(tmp_path, monkeypatch, incumbent):
+    token = mdc.load_or_create_control_token(tmp_path)
+    old_port = mdc.pick_free_port()
+    if incumbent:
+        routing.publish_active(
+            mdc.routing_dir(tmp_path), bind="127.0.0.1", port=old_port,
+            pid=101, version="previous",
+        )
+    incoming = _FakeMuxDaemon(202, token=token)
+    spawned = []
+
+    def spawn(slot, *, root, port):
+        spawned.append((slot, root))
+        incoming.start(port)
+        return _Handle(incoming)
+
+    request = mdc.ControlClient._request
+
+    def incoming_only(client, *args, **kwargs):
+        assert client.port != old_port, "Replacement depends on predecessor IPC"
+        return request(client, *args, **kwargs)
+
+    def predecessor_action(*args, **kwargs):
+        pytest.fail("Replacement attempted predecessor recovery or termination")
+
+    monkeypatch.setattr(mdc, "spawn_passive", spawn)
+    monkeypatch.setattr(mdc.ControlClient, "_request", incoming_only)
+    monkeypatch.setattr(mdc, "_reap_abandoned_passive", predecessor_action)
+    monkeypatch.setattr(mdc, "_terminate_mux_daemon_pid", predecessor_action)
+    try:
+        result = mdc.activate_after_update(
+            root=tmp_path, slot=tmp_path / "incoming", version="2.0.0", health_timeout=1,
+        )
+        assert result["action"] == "cutover" and result["result"]["ok"], result
+        assert spawned == [(tmp_path / "incoming", tmp_path)]
+        assert routing.read_active_endpoint(
+            mdc.routing_dir(tmp_path), verify_listener=False,
+        ).pid == incoming.pid
+    finally:
+        incoming.force_terminate()
+
+
+def test_failed_incoming_health_preserves_predecessor_route_without_contact(tmp_path, monkeypatch):
+    token = mdc.load_or_create_control_token(tmp_path)
+    previous = routing.publish_active(
+        mdc.routing_dir(tmp_path), bind="127.0.0.1", port=mdc.pick_free_port(),
+        pid=101, version="previous",
+    )
+    incoming = _FakeMuxDaemon(202, token=token, generation="wrong-generation")
+
+    def spawn(slot, *, root, port):
+        incoming.start(port)
+        return _Handle(incoming)
+
+    monkeypatch.setattr(mdc, "spawn_passive", spawn)
+    request = mdc.ControlClient._request
+
+    def incoming_only(client, *args, **kwargs):
+        assert client.port != previous.port, "Failed incoming startup contacted its predecessor"
+        return request(client, *args, **kwargs)
+
+    monkeypatch.setattr(mdc.ControlClient, "_request", incoming_only)
+    try:
+        result = mdc.activate_after_update(
+            root=tmp_path, slot=tmp_path / "incoming", version="2.0.0", health_timeout=0,
+        )
+        assert result["result"]["ok"] is False, result
+        assert not incoming.alive
+        assert routing.read_active_endpoint(
+            mdc.routing_dir(tmp_path), verify_listener=False,
+        ) == previous
+    finally:
+        incoming.force_terminate()
+
+
+@pytest.mark.parametrize("published", [False, True])
+def test_publication_failure_settles_only_an_unselected_incoming(tmp_path, monkeypatch, published):
+    token = mdc.load_or_create_control_token(tmp_path)
+    previous = mdc.publish_route(
+        mdc.pick_free_port(), root=tmp_path, pid=101, version="previous",
+    )
+    incoming = _FakeMuxDaemon(202, token=token)
+    publish = mdc.publish_route
+
+    def spawn(slot, *, root, port):
+        incoming.start(port)
+        return _Handle(incoming)
+
+    def fail_publication(*args, **kwargs):
+        if published:
+            publish(*args, **kwargs)
+        raise RuntimeError("controlled route publication failure")
+
+    monkeypatch.setattr(mdc, "spawn_passive", spawn)
+    monkeypatch.setattr(mdc, "publish_route", fail_publication)
+    try:
+        with pytest.raises(RuntimeError, match="controlled route publication failure"):
+            mdc.activate_after_update(
+                root=tmp_path, slot=tmp_path / "incoming", version="2.0.0", health_timeout=1,
+            )
+        selected = routing.read_active_endpoint(mdc.routing_dir(tmp_path), verify_listener=False)
+        assert incoming.alive is published
+        assert selected.pid == (incoming.pid if published else previous.pid)
+    finally:
+        incoming.force_terminate()
+
+
 @pytest.mark.parametrize("route_mode", ["same-version", "legacy-live", "legacy-dead"])
 @pytest.mark.parametrize("content", [
     "{", "{}", '{"state":"unknown"}', '{"state":"conditional-started"}',
     '{"state":"publication-uncertain"}',
 ])
-def test_activation_refuses_unverifiable_custody_before_fast_or_legacy_paths(
+def test_independent_activation_preserves_historical_recovery_records(
     tmp_path, monkeypatch, route_mode, content,
 ):
     route_dir = mdc.routing_dir(tmp_path)
@@ -301,16 +422,22 @@ def test_activation_refuses_unverifiable_custody_before_fast_or_legacy_paths(
         return SimpleNamespace(release=lambda: events.append("release"))
 
     def unexpected(*args, **kwargs):
-        pytest.fail("mutation or legacy activation reached before custody refusal")
+        pytest.fail("independent startup attempted historical recovery")
 
     monkeypatch.setattr(mdc, "_acquire_cutover_lock", acquire)
-    monkeypatch.setattr(mdc, "load_or_create_control_token", unexpected)
     monkeypatch.setattr(mdc, "_legacy_lock_cutover", unexpected)
-    monkeypatch.setattr(mdc, "spawn_passive", unexpected)
+    monkeypatch.setattr(
+        mdc, "spawn_passive",
+        lambda *args, **kwargs: SimpleNamespace(pid=202, terminate=unexpected),
+    )
+    monkeypatch.setattr(mdc, "_reap_abandoned_passive", unexpected)
     result = mdc.activate_after_update(root=tmp_path, slot=tmp_path / "slot", version="1.2.3")
-    assert result["action"] == "refused" and result["result"]["ok"] is False
-    assert "owner-led recovery" in result["reason"]
-    assert events == ["acquire", "release"]
+    if route_mode == "same-version":
+        assert result["action"] == "noop"
+        assert events == []
+    else:
+        assert result["action"] == "cutover" and result["result"]["ok"]
+        assert events == ["acquire", "release"]
     assert path.read_text() == content
 
 
@@ -350,17 +477,9 @@ def test_activate_after_update_is_noop_when_already_at_target_version(tmp_path, 
     live.force_terminate()
 
 
-def test_activate_after_update_runs_recovery_despite_stale_breadcrumb_at_target_version(
+def test_same_generation_reuse_does_not_mutate_historical_cutover(
     tmp_path, monkeypatch
 ):
-    """A stale (non-terminal) breadcrumb from a crashed prior cutover must
-    never be masked by the same-version no-op path: the routed daemon can
-    already be healthy and on the target version while a stranded old
-    survivor or abandoned passive from that aborted attempt still needs
-    recovery/reaping (the abandoned-passive gap `zdd.breadcrumb`'s module
-    docstring describes; #5344 follow-up). Neither the lock-free pre-check
-    nor the under-lock re-check may return "noop" until recovery has
-    actually run."""
     route_dir = mdc.routing_dir(tmp_path)
     route_dir.mkdir(parents=True)
     token = mdc.load_or_create_control_token(tmp_path)
@@ -380,24 +499,22 @@ def test_activate_after_update_runs_recovery_despite_stale_breadcrumb_at_target_
         new_port=live.port,
         new_pid=live.pid,
     )
+    before = breadcrumb.breadcrumb_path(route_dir).read_bytes()
 
     def _spawn(*a, **k):
         raise AssertionError(
             "no real cutover is needed: the routed daemon already serves "
-            "the target version -- only recovery/reaping should run"
+            "the target version"
         )
 
     monkeypatch.setattr(mdc, "spawn_passive", _spawn)
 
     result = mdc.activate_after_update(root=tmp_path, slot=tmp_path / "slot", version="2.0.0")
 
-    # The stale breadcrumb must have forced the locked path -- recovery and
-    # abandoned-passive reaping actually ran -- rather than short-circuiting
-    # through either no-op shortcut before they could.
-    assert "recovery" in result
-    assert "passive_reap" in result
+    assert "recovery" not in result and "passive_reap" not in result
     assert result["action"] == "noop"
     assert result["reason"] == "already-active-version"
+    assert breadcrumb.breadcrumb_path(route_dir).read_bytes() == before
 
     live.force_terminate()
 
@@ -522,11 +639,7 @@ def test_activate_after_update_same_version_second_caller_converges_without_spaw
     assert second_result["reason"] == "already-active-version"
     assert len(spawn_calls) == 1, "second caller must not spawn a redundant passive"
 
-    _wait_for(
-        lambda: (not old.alive) and new.alive,
-        timeout=10,
-        message="old daemon never retired after the (only) real cutover",
-    )
+    assert old.alive and new.alive
 
     old.force_terminate()
     new.force_terminate()

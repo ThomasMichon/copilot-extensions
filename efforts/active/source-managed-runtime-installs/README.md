@@ -1475,4 +1475,32 @@ open until that implementation and qualification merge. All parent portfolio,
 installed adoption and live survival gates remain open; this proposal grants
 no concrete host cleanup or rollout.
 
+### 2026-10-29 - Independent incoming startup for ordinary and repair updates
+
+#9601 merged as `230c7b1012e6e6767d1fbe6dc4541e73019d7470` after genuine
+Copilot approval of exact head `6284c967bf8a7acc7c99b4ffed5cab03148e08cc`,
+with no active findings and all required checks passing. The one review
+finding exposed inherited force-termination acceptance clauses; the correction
+reconciles the complete retained normal/repair interpretation instead of fixing
+only the newly added test row. Effort/vision structure and whitespace checks
+passed. The source worktree pulled forward to the actual squash boundary and
+the complete current ROOT README was read back.
+
+The operator's decisive V1-to-V2 test and explicit normal-and-repair scope now
+govern replacement: apply/start the incoming generation independently, replace
+current commands/update task registrations, observe brief runtime overlap, then
+prove the outgoing owner recognizes supersession and retires itself. Mandatory
+installer-driven old-code/process retirement is superseded as an update
+prerequisite. Its unpublished prototype is retained separately, not deployed
+or credited as the new lifecycle implementation. Explicit uninstall and
+separately authorized recovery retain their own scopes.
+
+The next stretch builds the contained real Manager/suite acceptance for both
+ordinary update and repair/force-install, then extends the existing incoming
+startup and supersession owners to make it pass. Those Plan and Validation
+items remain open. The parent stays Active with its complete portfolio,
+same-existing-data adoption and live all-code-absent session/connectivity
+survival gates intact. No host install, task mutation, service stop, maintenance
+hold or rollout occurred.
+
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.

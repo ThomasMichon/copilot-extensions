@@ -13,6 +13,7 @@ import sys
 import venv
 import tomllib
 import tarfile
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from contextlib import redirect_stderr
@@ -387,7 +388,7 @@ def test_mux_passive_uses_target_retained_interpreter_without_pythonpath(constru
             captured.update(argv=argv, options=options)
             return object()
 
-        patch.setattr(cutover.subprocess, "Popen", capture)
+        patch.setattr(cutover, "spawn_daemon", capture)
         cutover.spawn_passive(slot, root=root, port=54321)
     options = captured["options"]
     assert "PYTHONPATH" not in options["env"]
@@ -440,6 +441,10 @@ def test_partial_publication_restores_native_selection_without_cutover(
 def test_same_package_generation_update_replaces_and_verifies_live_fixture_mux(constructed, monkeypatch):
     from worktree_manager import mux_daemon_cutover as cutover
 
+    started = time.monotonic()
+    def phase(name: str) -> None:
+        print(f"Manager replacement {name}: {time.monotonic() - started:.2f}s", flush=True)
+
     directory, env, root, previous, _ = constructed
     prepared = json.loads(Path(os.environ["MANAGER_RUNTIME_ACCEPTANCE_DATA"]).read_text())["constructed"]
     target = Path(prepared["target"])
@@ -457,6 +462,7 @@ def test_same_package_generation_update_replaces_and_verifies_live_fixture_mux(c
         assert Path(prefix).resolve() == slot.resolve()
         assert Path(module).resolve().is_relative_to(slot.resolve())
         assert generation == slot.name
+    phase("identity")
 
     processes = []
     popen = cutover.subprocess.Popen
@@ -480,6 +486,39 @@ def test_same_package_generation_update_replaces_and_verifies_live_fixture_mux(c
             assert cutover._await_health("127.0.0.1", port, root=root, timeout=8, poll=0.1,
                                          generation=previous.name)
             cutover.publish_route(port, root=root, pid=old.pid, version=previous.name)
+            deadline = time.monotonic() + 8
+            while not cutover.ControlClient(f"http://127.0.0.1:{port}", root=root).health()["active"]:
+                assert time.monotonic() < deadline, "Incumbent never acquired its work lease"
+                time.sleep(0.05)
+            retained = {
+                path: hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in previous.rglob("*") if path.is_file()
+            }
+            phase("incumbent-ready-and-snapshotted")
+            request = cutover.ControlClient._request
+
+            def independent_request(client, kind, *args, **kwargs):
+                assert client.port != port, "Update contacted the incumbent instead of starting independently"
+                return request(client, kind, *args, **kwargs)
+
+            overlap = []
+            await_health = cutover._await_health
+
+            def observe_startup(*args, **kwargs):
+                healthy = await_health(*args, **kwargs)
+                if healthy and kwargs.get("generation") == target.name:
+                    assert old.poll() is None, "Incumbent exited before incoming readiness"
+                    overlap.append(True)
+                return healthy
+
+            patch.setattr(cutover.ControlClient, "_request", independent_request)
+            patch.setattr(cutover, "_await_health", observe_startup)
+            patch.setattr(cutover, "_terminate_mux_daemon_pid", lambda *a, **kw: pytest.fail(
+                "Update attempted to terminate its predecessor",
+            ))
+            patch.setattr(cutover, "_reap_abandoned_passive", lambda *a, **kw: pytest.fail(
+                "Update required predecessor recovery before incoming startup",
+            ))
             actual_activation = cutover.activate_after_update
             result, callbacks = _update_from_payload(
                 Path(prepared["qualified"]), root, env,
@@ -487,6 +526,7 @@ def test_same_package_generation_update_replaces_and_verifies_live_fixture_mux(c
                     **kwargs, health_timeout=8, drain_timeout=2,
                 ),
             )
+            phase("successor-published")
             assert result.action == "updated", result
             assert callbacks == [str(target)]
             assert result.cutover["action"] == "cutover", result.cutover
@@ -499,6 +539,17 @@ def test_same_package_generation_update_replaces_and_verifies_live_fixture_mux(c
             assert health["version"] == si.payload_version(target / "payload")
             assert health["runtime_generation"] == target.name
             assert si.current_version(root) == target.name
+            assert overlap == [True]
+            phase("waiting-for-incumbent-exit")
+            assert old.wait(timeout=8) == 0
+            deadline = time.monotonic() + 8
+            while not cutover.ControlClient(route.base_url, root=root).health()["active"]:
+                assert time.monotonic() < deadline, "Successor never acquired its work lease"
+                time.sleep(0.05)
+            assert {
+                path: hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in previous.rglob("*") if path.is_file()
+            } == retained, "Replacement modified incumbent runtime bytes"
             target_spawns = [
                 entry for entry in processes
                 if str(target / ".runtime-bootstrap" / "runtime_launcher.py") in entry[0]

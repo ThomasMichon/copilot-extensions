@@ -21,6 +21,9 @@ platforms share a once-per-process-lifetime guard so a later
 from __future__ import annotations
 
 import importlib.util
+import importlib.metadata
+import asyncio
+import os
 import sys
 import types
 from pathlib import Path
@@ -44,6 +47,21 @@ def _load_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_health_freezes_the_running_engine_build(monkeypatch: pytest.MonkeyPatch) -> None:
+    package_version = importlib.metadata.version
+    monkeypatch.setattr(
+        importlib.metadata, "version",
+        lambda name: "1.2.3" if name == "agent-index-engine" else package_version(name),
+    )
+    module = _load_module()
+    monkeypatch.setattr(importlib.metadata, "version", lambda name: "9.9.9")
+    monkeypatch.setattr(module, "_check_gpu_deps", lambda: False)
+    health = asyncio.run(module.health())
+    assert health.pid == os.getpid()
+    assert health.version == "1.2.3"
+    assert health.model_loaded is False
 
 
 class _FakePipeline:
@@ -379,4 +397,3 @@ def test_lower_own_priority_is_best_effort(monkeypatch) -> None:
     monkeypatch.setattr(priority_module, "lower_current_process_priority", boom)
 
     module._lower_own_priority()  # must not raise
-

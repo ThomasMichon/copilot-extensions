@@ -12,6 +12,7 @@ import json
 import os
 import time
 import types
+from pathlib import Path
 
 import pytest
 from agent_codespaces import connection_owner as owner
@@ -901,3 +902,22 @@ def test_the_beacon_says_what_this_owner_heals(store):
     """Consumers (a board deciding whether to wait before relaunching) read it."""
     owner._write_liveness(15.0)
     assert set(json.loads(owner.LIVE_FILE.read_text("utf-8"))["heals"]) >= {"bridge-serving", "single-owner"}
+
+
+def test_beacon_identifies_running_build_after_selection_changes(
+    store: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(owner, "_PROCESS_VERSION", "1.2.3+source.incumbent")
+    (store / "current-version").write_text("1.2.3+source.successor\n", encoding="utf-8")
+    owner._write_liveness(15.0)
+    raw = json.loads(owner.LIVE_FILE.read_text(encoding="utf-8"))
+    assert raw["pid"] == os.getpid()
+    assert raw["version"] == "1.2.3+source.incumbent"
+    assert owner.read_liveness().version == raw["version"]
+
+
+def test_legacy_beacon_has_no_attributed_build(store: Path) -> None:
+    owner.LIVE_FILE.write_text(
+        json.dumps({"pid": 42, "heartbeat_at": time.time()}), encoding="utf-8",
+    )
+    assert owner.read_liveness().version == ""

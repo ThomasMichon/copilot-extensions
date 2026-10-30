@@ -86,6 +86,9 @@ than choosing an unordered source hash or downgrading to a plain package slot.
 `agent-vault --version` exposes the selected generation while package metadata
 is unchanged. Compatibility helpers continue through their existing command
 routes; this source-adoption path does not change service-supervision policy.
+The existing service `ping` response adds the running process's frozen package
+`version` alongside its PID. This identifies the responding build, not a newly
+selected slot; older responses without the field do not establish build identity.
 Retained source slots pass the same isolated interpreter CLI `--help` probe as
 fresh slots before activation; importing only the lazy initializer is insufficient.
 Reselection refreshes source and venv manifest fields

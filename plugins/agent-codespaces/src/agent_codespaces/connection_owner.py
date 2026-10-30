@@ -54,7 +54,9 @@ from .owner_identity import beacon_identity, owner_identity_matches, owner_proce
 from .owner_ports import sanitize_port as _sanitize_port
 from .owner_ports import clear_session_forwards, sanitize_hold_forwards, set_hold_forwards
 from .owner_startup import DEFAULT_OWNER_STARTUP_TIMEOUT, spawn_owner_process, wait_for_owner_startup
+from .owner_liveness import OwnerLiveness, _LIVE_STALE_FLOOR as _LIVE_STALE_FLOOR
 from . import owner_session_records
+from . import __version__ as _PROCESS_VERSION
 
 if TYPE_CHECKING:
     from .session_forwards import SessionForwards
@@ -445,41 +447,7 @@ def release(
 
 LIVE_FILE = RUNTIME_DIR / "connection-owner.live.json"
 
-# Treat the Owner as live only if its beacon was refreshed within this many
-# reconcile intervals (with a floor so a very fast interval can't make liveness
-# flap on scheduler jitter).
-_LIVE_STALE_INTERVALS = 3
-_LIVE_STALE_FLOOR = 45.0
 _PROCESS_STARTED_AT = time.time()
-# A future heartbeat (bogus beacon / backward clock jump) is NOT fresh, beyond a
-# sub-second-ish skew, so a tenant fails safe to owning its own relay.
-_LIVE_FUTURE_TOLERANCE = 5.0
-
-
-@dataclass
-class OwnerLiveness:
-    """A snapshot of the running Connection Owner daemon's liveness beacon."""
-
-    pid: int
-    host: str
-    heartbeat_at: float
-    interval: float
-    process_started_at: float = 0.0
-    process_identity: str | None = None  # OS birth identity of ``pid`` (beacon writer)
-    active: tuple[str, ...] = ()  # CodeSpaces with live relay channels (tenants defer)
-    bridge_forwards: tuple[str, ...] = ()  # CodeSpaces with a live host-bridge forward
-
-    def staleness_threshold(self) -> float:
-        return max(_LIVE_STALE_FLOOR, _LIVE_STALE_INTERVALS * max(self.interval, 0.0))
-
-    def is_fresh(self, now: float | None = None) -> bool:
-        now = time.time() if now is None else now
-        age = now - self.heartbeat_at
-        if age < 0:
-            # Future heartbeat (bogus beacon / backward clock jump): fail safe --
-            # only a sub-second skew within tolerance still counts as fresh.
-            return age >= -_LIVE_FUTURE_TOLERANCE
-        return age <= self.staleness_threshold()
 
 
 def _write_liveness(
@@ -496,6 +464,7 @@ def _write_liveness(
         ensure_runtime_dir()
         payload = {
             "pid": os.getpid(),
+            "version": _PROCESS_VERSION,
             "host": _this_host(),
             "process_started_at": _PROCESS_STARTED_AT,
             "process_identity": owner_process_identity(os.getpid()),
@@ -547,6 +516,7 @@ def read_liveness() -> OwnerLiveness | None:
             process_identity=beacon_identity(raw),
             active=tuple(str(cs) for cs in active_raw if isinstance(cs, str)),
             bridge_forwards=tuple(str(cs) for cs in bridge_raw if isinstance(cs, str)),
+            version=raw["version"] if isinstance(raw.get("version"), str) else "",
         )
     except (TypeError, ValueError):
         return None
