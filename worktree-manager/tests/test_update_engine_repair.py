@@ -5,11 +5,13 @@ from concurrent.futures import ThreadPoolExecutor
 import importlib.util
 import json
 import os
+import queue
 import secrets
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import textwrap
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
@@ -411,13 +413,15 @@ def repair_case(
     )
     incumbent = home / ".copilot/installed-plugins" / marketplace / "agent-worktrees"
     published = root / "registered-payload"
-    # Both initial payloads precede every ownership or damage mutation.
-    payload_copies = [
-        copies.submit(_copy_fixture_tree, fresh, destination, symlinks=True)
-        for destination in (incumbent, published)
-    ]
-    for future in payload_copies:
-        future.result()
+    # Marketplace acquisition publishes the release form, not escaping Dev refs.
+    _copy_fixture_tree(fresh, published, symlinks=True)
+    release = _load(REPO / "tools/materialize_main.py", "engine_repair_release_materializer")
+    materialized = release.materialize_uv_editable_ref_into(
+        source_consumer_dir=fresh, dest_consumer_dir=published, canonical_root=source,
+    )
+    skipped = [row for row in materialized if row.startswith("SKIP ")]
+    assert not skipped, "\n".join(skipped)
+    _copy_fixture_tree(published, incumbent, symlinks=True)
     cli = tools / ("copilot.exe" if os.name == "nt" else "copilot")
     cli.write_text("synthetic acquisition executable; never launched\n", encoding="utf-8")
     cli.chmod(0o700)
@@ -472,6 +476,12 @@ def repair_case(
 
     def execute_actual_installer(command, **options):
         assert not options.get("start_new_session")
+        if os.name == "nt" and any(Path(part).name == "install.ps1" for part in command):
+            if "-BootstrapPython" not in command:
+                # Exercise this native interpreter, not an unrelated registered seed.
+                command = [*command, "-BootstrapPython", str(Path(
+                    getattr(sys, "_base_executable", sys.executable),
+                ).resolve())]
         cwd = options.pop("cwd", home)
         # Scoped preflight performs the real repeated governance reads before
         # the fence; its measured native path needs headroom beyond shared admission.
@@ -492,6 +502,8 @@ def repair_case(
 
     @contextmanager
     def admitted_incumbent():
+        from update_driver import participant_environment
+
         lifecycle = binding._load_lifecycle()
         with lifecycle.legacy_lifecycle(
             binding._rules(), primitive, payload_root=incumbent, plugin_id="agent-worktrees",
@@ -503,6 +515,8 @@ def repair_case(
             with monkeypatch.context() as child:
                 child.setenv(lifecycle.TICKET_ENV, json.dumps(lease.ticket))
                 child.setenv("COPILOT_PLUGIN_STAGED_FROM", str(incumbent))
+                for key, value in participant_environment().items():
+                    child.setenv(key, value)
                 yield lease
 
     case = SimpleNamespace(
@@ -513,9 +527,44 @@ def repair_case(
         execute=execute_actual_installer,
         acquisitions=acquisitions,
     )
+    from update_driver import ParticipantError, RequestSpec, TrustedRunner, core, participant
+    from update_driver.participant import ENVIRONMENT_KEY
+
+    driver_root = home / ".copilot-extensions" / "update-driver"
+    update_request = core.enqueue(
+        RequestSpec("manager", repair=True),
+        runner=TrustedRunner((sys.executable, "-c", "pass"), str(home)),
+        root=driver_root,
+    )
+    ready = queue.Queue()
+    finished = threading.Event()
+
+    def own_update(transaction):
+        ready.put(transaction.participant_env())
+        # Fixture teardown owns this wait; the contained runner bounds the tree.
+        finished.wait()
+        return 0
+
+    owner = temporary.enter_context(ThreadPoolExecutor(max_workers=1))
+    draining = owner.submit(core.drain, root=driver_root, executor=own_update)
     try:
-        yield case
+        transport = ready.get(timeout=10)
+        # Direct repair entry tests retain the real public updater's outer custody.
+        with participant(root=driver_root, witness=transport[ENVIRONMENT_KEY]):
+            yield case
     finally:
+        finished.set()
+        try:
+            assert draining.result(timeout=10) == 0
+        except ParticipantError as error:
+            # The deliberate constructor abort must retain an honest fence,
+            # never be relabeled as completed installation or proven cleanup.
+            assert effect.is_file() and "unclosed participants" in str(error)
+            outcome = core.status(update_request.id, root=driver_root)
+            assert outcome.state == "interrupted" and outcome.exit_code is None
+            assert outcome.settlement_kind is None and outcome.released_at is None
+        else:
+            assert core.status(update_request.id, root=driver_root).exit_code == 0
         uv_calls = root / "uv-called"
         assert not uv_calls.exists(), (
             "construction fence did not contain UV effects: " + uv_calls.read_text()
@@ -542,6 +591,17 @@ def test_repair_fixture_owns_python_temporary_directory(repair_case, iteration):
     assert Path(tempfile.gettempdir()) == expected
     with tempfile.TemporaryDirectory(prefix=f"{iteration}-") as temporary:
         assert Path(temporary).parent == expected
+
+
+def test_repair_fixture_installed_payload_has_complete_owned_driver_graph(repair_case):
+    from worktree_manager import self_install
+
+    engine = self_install._runtime_installer().engine
+    roots = engine._package_roots(repair_case.incumbent)
+    assert all(root.is_relative_to(repair_case.incumbent) for root in roots)
+    assert {"agent-update-driver", "agent-procutil", "agent-single-instance-lease", "agent-zdd"} <= {
+        engine._package_name(root) for root in roots
+    }
 
 
 def test_legacy_source_owner_capture_is_readonly_before_acquisition(

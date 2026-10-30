@@ -43,10 +43,10 @@ def test_automatic_submission_uses_the_existing_execution_owner(monkeypatch):
         seen.append((verb, flags, args.detach, execute)) or 0
     ))
     assert launch.cmd_launch_update(_args(
-        phase="automatic", detach=True, no_update=True, with_reconcile=True,
+        phase="automatic", auto=True, detach=True, no_update=True, with_reconcile=True,
     )) == 0
     assert seen == [(
-        "launch-update", ["automatic", "--no-update", "--with-reconcile"], True, launch._execute,
+        "launch-update", ["automatic", "--auto", "--no-update", "--with-reconcile"], True, launch._execute,
     )]
 
 

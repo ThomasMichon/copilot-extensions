@@ -14,6 +14,7 @@ UPDATE_PHASES = ("payloads", "preflight", "runtimes", "anchors", "prune", "integ
 
 
 def add_update_options(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--auto", action="store_true", help="Automatic update: honor the automatic-update hold (default: manual, not forced)")
     p.add_argument("--target", metavar="PLUGIN", help="Update only this installed plugin; no Manager, anchors or unrelated components")
     p.add_argument("--inventory", action="store_true", help="Read installation inventory and supported update contract without installing")
     p.add_argument("--runtime-sources", metavar="JSON", help=argparse.SUPPRESS)
@@ -65,6 +66,8 @@ def forced_runtimes(args: argparse.Namespace) -> frozenset[str]:
 def forwarded_flags(args: argparse.Namespace) -> list[str]:
     """The options above, rebuilt for forwarding through the Manager seam."""
     flags: list[str] = []
+    if getattr(args, "auto", False):
+        flags.append("--auto")
     if getattr(args, "target", None) is not None:
         flags += ["--target", args.target]
     if getattr(args, "runtime_sources", None) is not None:

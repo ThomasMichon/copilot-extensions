@@ -383,9 +383,11 @@ def _foreground_install(args, driver) -> Path | int:
 
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     repair = False
+    automatic = False
     if command[:1] == ["update"]:
         options, _forwarded = parse_options(command[1:])
-        repair = options.repair
+        automatic = options.auto
+        repair = not automatic
     digest = _source_digest(args.payload)
     arguments = [
         sys.executable, "-I", "-S", "-B", "-X", "utf8", str(SCRIPTS / "runtime_install.py"),
@@ -403,6 +405,8 @@ def _foreground_install(args, driver) -> Path | int:
         evidence = str(args.recover_adopted.resolve())
         arguments.extend(["--recover-adopted", evidence])
         identity.extend(["recover-adopted", evidence])
+    if automatic:
+        identity.append("--auto")
     request = driver.enqueue(
         driver.RequestSpec(
             "manager-bootstrap", tuple(identity), project=str(args.root.resolve()),

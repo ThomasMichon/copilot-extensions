@@ -5208,7 +5208,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     pr_cli.add_parsers(sub)
     # stage-update (background marketplace download; #1430 stage-then-join)
-    sp = sub.add_parser("stage-update", help="Background-stage the plugin marketplace update (JSON status)")
+    sp = sub.add_parser("stage-update", help="Background-stage the plugin marketplace update (JSON status)", allow_abbrev=False)
+    sp.add_argument("--auto", action="store_true", help="Automatic acquisition; honor the automatic-update hold")
     _sh_path = "~/.agent-worktrees/updater-status.json"  # marketplace-isolation: allow legacy
     sp.add_argument("--status", default=None, help=f"Status file path (defaults to {_sh_path})")
     sp.add_argument("--indicator-state", action="store_true",

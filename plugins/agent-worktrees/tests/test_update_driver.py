@@ -100,13 +100,37 @@ def test_ordinary_update_queues_before_manager_discovery(queued):
 
 
 @pytest.mark.parametrize("values,repair", [
-    ({}, False), ({"force": True}, True),
+    ({}, True), ({"auto": True}, False), ({"auto": True, "force": True}, False),
+    ({"force": True}, True),
     ({"force_runtime": ["agent-bridge"]}, True), ({"recreate_venv": True}, True),
 ])
 def test_force_options_record_explicit_repair_request(queued, values, repair):
     seen, _request = queued
     assert boundary.cmd_update_request(_args(**values)) == 4
     assert seen["spec"].repair is repair
+    assert ("--auto" in seen["runner"].argv) is bool(values.get("auto"))
+    assert ("--force" in seen["runner"].argv) is bool(values.get("force"))
+
+
+@pytest.mark.parametrize("flags,automatic", [([], False), (["--auto"], True)])
+def test_repository_parser_carries_mode_to_the_real_request_adapter(queued, flags, automatic):
+    from agent_worktrees import __main__ as engine
+
+    args = engine.build_parser().parse_args(["update", *flags])
+    assert args.auto is automatic
+    assert not args.force and not args.recreate_venv and not args.force_runtime
+    assert boundary.cmd_update_request(args) == 4
+    seen, _request = queued
+    assert seen["spec"].repair is not automatic
+    assert seen["spec"].argv == tuple(flags)
+    with pytest.raises(SystemExit) as error:
+        engine.build_parser().parse_args(["update", "--aut"])
+    assert error.value.code == 2
+    for command in (["stage-update"], ["reconcile-plugins"], ["launch-update", "automatic"]):
+        assert engine.build_parser().parse_args([*command, "--auto"]).auto
+        with pytest.raises(SystemExit) as error:
+            engine.build_parser().parse_args([*command, "--aut"])
+        assert error.value.code == 2
 
 
 def test_detached_adapter_binds_relative_killswitch_to_original_invocation(tmp_path, monkeypatch):
@@ -124,7 +148,7 @@ def test_detached_adapter_binds_relative_killswitch_to_original_invocation(tmp_p
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", "./pause.json")
-    assert _enqueue_fixture_update(monkeypatch, scope, no_manager=True) == 0
+    assert _enqueue_fixture_update(monkeypatch, scope, no_manager=True, auto=True) == 0
     request, = update_driver.status()
     assert Path(request.spec.killswitch_path).samefile(invocation / "pause.json")
     monkeypatch.chdir(home)

@@ -232,17 +232,20 @@ def test_foreground_bootstrap_queues_only_its_fixed_installation_not_application
     (["--", "update", "--force"], True),
     (["update", "--force-runtime", "agent-worktrees"], True),
     (["update", "--recreate-venv"], True),
-    (["update"], False),
+    (["update"], True),
+    (["update", "--auto"], False),
+    (["update", "--auto", "--force"], False),
     (["create", "--prompt", "--force"], False),
 ])
+@pytest.mark.parametrize("held", [True, False])
 def test_bootstrap_retains_update_repair_authority_without_executing_inhibited_work(
-    installation, monkeypatch, command, repair,
+    installation, monkeypatch, command, repair, held,
 ):
     state = installation
     monkeypatch.setattr(state.adapter, "_source_digest", lambda payload: "a" * 64)
     state.adapter.runtime.mark_complete(state.root, state.slot.name, payload_hash="b" * 64)
     switch = state.root / "killswitch.json"
-    switch.write_text('{"active":true}', encoding="utf-8")
+    switch.write_text(json.dumps({"active": held}), encoding="utf-8")
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(switch))
     automatic = core.enqueue(
         core.RequestSpec("automatic-fixture", cwd=str(state.root)),
@@ -251,6 +254,9 @@ def test_bootstrap_retains_update_repair_authority_without_executing_inhibited_w
     executed = []
 
     def install(transaction):
+        if transaction.request.id == automatic.id:
+            executed.append(automatic.id)
+            return 0
         assert transaction.request.spec.backend == "manager-bootstrap"
         executed.append(transaction.request.id)
         transaction.log_path.write_text(json.dumps({
@@ -270,18 +276,22 @@ def test_bootstrap_retains_update_repair_authority_without_executing_inhibited_w
         skip_instance_reconcile=False,
     )
     result = state.adapter._foreground_install(args, driver)
-    assert result == (state.slot if repair else 3)
+    admitted = repair or not held
+    assert result == (state.slot if admitted else 3)
     skipped = core.status(automatic.id)
-    assert skipped.state == "completed" and skipped.exit_code == 3 and skipped.started_at is None
+    assert skipped.state == "completed" and skipped.exit_code == (3 if held else 0)
+    if held:
+        assert skipped.started_at is None
     bootstrap = next(request for request in core.status() if request.id != automatic.id)
     assert bootstrap.spec.repair is repair
-    assert bootstrap.state == "completed" and bootstrap.exit_code == (0 if repair else 3)
-    assert executed == ([bootstrap.id] if repair else [])
+    assert bootstrap.state == "completed" and bootstrap.exit_code == (0 if admitted else 3)
+    assert executed == ([] if held else [automatic.id]) + ([bootstrap.id] if admitted else [])
     assert bootstrap.spec.argv == (
-        ("install", "repair-update") if normalized[:1] == ["update"] else ("install",)
+        (*(("install", "repair-update") if normalized[:1] == ["update"] else ("install",)),
+         *(("--auto",) if "--auto" in normalized else ()))
     )
     assert "--force" not in bootstrap.runner.argv
-    assert json.loads(switch.read_text()) == {"active": True}
+    assert json.loads(switch.read_text()) == {"active": held}
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows removal execution ownership")

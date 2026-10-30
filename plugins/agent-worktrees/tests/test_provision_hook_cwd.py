@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
+
+import pytest
 
 
 _PLUGIN = Path(__file__).resolve().parents[1]
@@ -18,22 +21,61 @@ def _hooks() -> list[dict[str, object]]:
     ]
 
 
+def _assert_powershell_dispatch_after_detach(source: str, *, native_entry: str | None = None):
+    detach = source.find("Set-Location")
+    process_cwd = source.find("SetCurrentDirectory")
+    assert detach >= 0 and process_cwd > detach
+    dispatches = list(re.finditer(
+        r"(?:&|\.)\s+\$[A-Za-z_]\w*|\bInvoke-(?:PostToolHook|PreToolPolicy)\b",
+        source,
+    ))
+    assert dispatches
+    early = [call for call in dispatches if call.start() < process_cwd]
+    if early:
+        # The native pre-tool ingress owns its own detach before policy/children.
+        assert native_entry is not None and len(early) == 1
+        assert early[0].group() == "& $s" and "'scripts\\pre-tool-hook.ps1'" in source
+        _definitions, entry = native_entry.split("\ntry {", 1)
+        _assert_powershell_dispatch_after_detach(entry)
+    assert all(call.start() > process_cwd for call in dispatches if call not in early)
+
+
 def test_every_hook_leaves_payload_cwd_before_running_script():
+    native_entry = (_PLUGIN / "scripts" / "pre-tool-hook.ps1").read_text("utf-8")
     for hook in _hooks():
         powershell = str(hook["powershell"])
         bash = str(hook["bash"])
         assert "$env:USERPROFILE" in powershell
         assert "-ErrorAction Stop" in powershell
         assert "GetPathRoot" in powershell
-        ps_detach = powershell.find("Set-Location")
-        ps_script = powershell.find("$s")
-        assert ps_detach >= 0 and ps_script >= 0
-        assert ps_detach < ps_script
+        _assert_powershell_dispatch_after_detach(powershell, native_entry=native_entry)
         assert 'cd "$HOME"' in bash
         bash_detach = bash.find("cd ")
         bash_script = bash.find("s=")
         assert bash_detach >= 0 and bash_script >= 0
         assert bash_detach < bash_script
+
+
+@pytest.mark.parametrize("dispatch", ["& $s", ". $s", "& $py $s"])
+def test_hook_cwd_guard_distinguishes_assignment_from_early_dispatch(dispatch):
+    detach = "Set-Location $env:USERPROFILE; [IO.Directory]::SetCurrentDirectory($HOME); "
+    selection = "$s = 'fixture.ps1'; if ($s) { $selected = $s }; "
+    _assert_powershell_dispatch_after_detach(selection + detach + dispatch)
+    with pytest.raises(AssertionError):
+        _assert_powershell_dispatch_after_detach(selection + dispatch + "; " + detach)
+
+
+def test_native_ingress_cannot_exempt_a_dispatch_before_its_own_detach():
+    wrapper = "'scripts\\pre-tool-hook.ps1'; & $s; " + (
+        "Set-Location $HOME; [IO.Directory]::SetCurrentDirectory($HOME); & $py $s"
+    )
+    with pytest.raises(AssertionError):
+        _assert_powershell_dispatch_after_detach(
+            wrapper,
+            native_entry="\ntry {\n& $py $s; Set-Location $HOME; "
+            "[IO.Directory]::SetCurrentDirectory($HOME)\n}",
+        )
+
 
 def test_detached_provision_worker_runs_from_home():
     ps1 = (_PLUGIN / "scripts" / "provision-check.ps1").read_text("utf-8")

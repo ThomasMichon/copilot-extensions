@@ -188,7 +188,7 @@ def test_run_tier_invokes_worktree_manager_update_and_records_success(tmp_path):
     result = fleet_update.run_tier("sweep", opted_in=True, runner=runner, home=tmp_path)
     assert result.ok is True
     assert result.status == "ok"
-    assert calls == [["worktree-manager", "update"]]
+    assert calls == [["worktree-manager", "update", "--auto"]]
     assert result.success_at is not None
     status = fleet_update_state.tier_status(tmp_path, "sweep")
     assert status.last_success == result.success_at
@@ -474,19 +474,26 @@ def test_register_scheduled_task_daily_has_no_repetition_parameters():
     assert "-RepetitionInterval" not in script
 
 
-def test_task_action_arguments_uses_worktree_manager_binstub(monkeypatch):
-    monkeypatch.setattr(fleet_update_tasks.sys, "platform", "win32")
-    args = fleet_update_tasks.task_action_arguments("sweep", home=Path(r"C:\Users\operator"))
-    assert args.startswith("--headless cmd.exe /c ")
-    assert r"C:\Users\operator\.local\bin\worktree-manager.cmd" in args
-    assert " update" in args
+@pytest.mark.parametrize("platform", ["win32", "linux"])
+def test_task_action_arguments_uses_worktree_manager_binstub(monkeypatch, platform):
+    monkeypatch.setattr(fleet_update_tasks.sys, "platform", platform)
+    home = Path(r"C:\Users\operator" if platform == "win32" else "/home/operator")
+    args = fleet_update_tasks.task_action_arguments("sweep", home=home)
+    if platform == "win32":
+        assert args.startswith("--headless cmd.exe /c ")
+        assert r"C:\Users\operator\.local\bin\worktree-manager.cmd" in args
+    else:
+        assert args.startswith("--headless ")
+        assert fleet_update_tasks._linux_exec_start("sweep", home=home).endswith(" update --auto")
+    assert " update --auto" in args
     assert "self-update" not in args
     assert "agent-machines" not in args
 
 
-def test_task_definition_matches_its_own_generated_arguments(monkeypatch):
+@pytest.mark.parametrize("home", [r"C:\Users\operator", r"C:\Users\operator name"])
+def test_task_definition_matches_its_own_generated_arguments(monkeypatch, home):
     monkeypatch.setattr(fleet_update_tasks.sys, "platform", "win32")
-    home = Path(r"C:\Users\operator")
+    home = Path(home)
     snapshot = fleet_update_tasks.ScheduledTaskSnapshot(
         task_name=fleet_update_state.TIER_SPECS["sweep"].task_name,
         present=True,
@@ -501,6 +508,13 @@ def test_task_definition_matches_its_own_generated_arguments(monkeypatch):
         trigger_value=1,
     )
     assert fleet_update_tasks.task_definition_matches(snapshot, "sweep", home=home)
+    from dataclasses import replace
+
+    for marker in ("", " --automatic", " --auto-suffix", ' "--auto suffix"'):
+        invalid = replace(snapshot, arguments=snapshot.arguments.replace(" --auto", marker))
+        assert not fleet_update_tasks.task_definition_matches(invalid, "sweep", home=home)
+    quoted = replace(snapshot, arguments=snapshot.arguments.replace(" --auto", ' "--auto"'))
+    assert fleet_update_tasks.task_definition_matches(quoted, "sweep", home=home)
 
 
 def test_reconcile_task_defers_to_elevated_install_when_registration_is_denied(
