@@ -650,6 +650,13 @@ def test_source_tree_overlaps_bounded_reads_and_joins_before_return(tmp_path, mo
     for index in range(8):
         (tmp_path / f"input-{index}.py").write_bytes(f"VALUE={index}\n".encode())
     digest_file = builds._digest_file
+    walk = builds.os.walk
+
+    def descending(*args, **options):
+        for directory, children, names in walk(*args, **options):
+            yield directory, children, sorted(names, reverse=True)
+
+    monkeypatch.setattr(builds.os, "walk", descending)
     barrier = threading.Barrier(4)
     lock = threading.Lock()
     active = peak = finished = 0
@@ -660,8 +667,8 @@ def test_source_tree_overlaps_bounded_reads_and_joins_before_return(tmp_path, mo
             active += 1
             peak = max(peak, active)
         try:
-            barrier.wait(timeout=10)
-            if fail and path.name == "input-0.py":
+            index = barrier.wait(timeout=10)
+            if fail and index == 0:
                 raise builds.WheelError("synthetic read failure")
             return digest_file(path, *args, **options)
         finally:
