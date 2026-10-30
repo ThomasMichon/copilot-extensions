@@ -189,6 +189,8 @@ def _tools(
             _warn(warnings, "unsupported_tool_schema", schema_pointer)
         props = _properties(schema, schema_pointer, warnings) if kind == "function" else []
         grammar = schema.get("definition") if isinstance(schema, dict) and kind == "custom" else None
+        if isinstance(schema, dict) and kind == "custom" and isinstance(schema.get("grammar"), dict):
+            grammar = schema["grammar"].get("definition", grammar)
         record = {
             "name": name, "kind": kind, "pointer": pointer,
             "schema_status": "full_schema" if isinstance(schema, dict) else "declaration_only",

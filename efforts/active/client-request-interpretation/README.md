@@ -188,3 +188,8 @@ Unavailable attribution is a visible result, not a zero or guessed origin.
   and work limits, lower-bound counts on truncation, and sparse UTF-8 offset
   checkpoints rather than repeated full-prefix encoding. Multibyte and
   exhaustion regressions pass alongside the combined snapshot cases.
+- A later review exercised missing frontmatter names, nested grammar
+  definitions, and unterminated marker openings. Preserved agent filename
+  fallback and skill warnings, added the native nested grammar shape, and
+  replaced suffix-rescanning regexes with forward-only delimiter scans.
+  Failed candidates are bounded and disclosed rather than silently omitted.

@@ -164,7 +164,7 @@ def collect_inventory(
             warnings.append({"kind": "metadata_frontmatter_missing", "path": str(path)})
             continue
         frontmatter = split[0]
-        name = skill_reader.get_field(frontmatter, "name")
+        name = skill_reader.get_field(frontmatter, "name") or ""
         if len(name) >= 2 and name[0] == name[-1] and name[0] in "\"'":
             name = name[1:-1]
         if not name and path.name.endswith(".agent.md"):

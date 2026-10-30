@@ -131,14 +131,11 @@ def _marker_charge(budget: dict[str, int], characters: int) -> bool:
 def collect_markers(regions: list[dict[str, Any]], kind: str) -> dict[str, Any]:
     """Bound syntax candidates, parsing, content sizing, and byte-offset work."""
     selector = kind == "selector_reference"
-    pattern = (
-        r"<!--\s*copilot-extension-instruction-projection\s+(\{[^\r\n]*\})\s*-->"
-        if selector else r"<(memory|memories|user_memory|user_memories|memory_context|stored_memories)"
-        r"\b[^>]*>([\s\S]*?)</\1>"
-    )
+    opening = re.compile(r"<!--\s*copilot-extension-instruction-projection(?=\s|$)" if selector else
+                         r"<(memory|memories|user_memory|user_memories|memory_context|stored_memories)\b")
     budget = {"used": 0}
     coverage = {"candidate_limit": MAX_MARKER_CANDIDATES, "candidates_examined": 0,
-                "retained_count": 0, "omitted_candidates_lower_bound": 0, "complete": True,
+                "retained_count": 0, "omitted_candidates_lower_bound": 0, "failed_candidates": 0, "complete": True,
                 "counts_scope": "syntactic_marker_candidates", "work_character_limit": MAX_MARKER_CHARACTERS}
     records: list[dict[str, Any]] = []
     warnings: dict[str, str] = {}
@@ -147,23 +144,41 @@ def collect_markers(regions: list[dict[str, Any]], kind: str) -> dict[str, Any]:
             coverage["complete"] = False
             warnings[kind + "_work_limit"] = region["pointer"]
             break
-        for match in re.finditer(pattern, region["text"]):
-            limited = coverage["candidates_examined"] >= MAX_MARKER_CANDIDATES
-            if limited or not _marker_charge(budget, 2 * (match.end() - match.start())):
-                warnings[kind + ("_evidence_truncated" if limited else "_work_limit")] = region["pointer"]
+        text, cursor = region["text"], 0
+        # The prepaid region scan moves forward only; a failed closer search ends it.
+        while head := opening.search(text, cursor):
+            if coverage["candidates_examined"] >= MAX_MARKER_CANDIDATES:
+                warnings[kind + "_evidence_truncated"] = region["pointer"]
                 coverage["complete"] = False
                 coverage["omitted_candidates_lower_bound"] += 1
                 break
             coverage["candidates_examined"] += 1
+            body_start = head.end() if selector else text.find(">", head.end())
+            body_start += 0 if selector or body_start < 0 else 1
+            closer = "-->" if selector else "</" + head[1] + ">"
+            body_end = text.find(closer, body_start) if body_start >= 0 else -1
+            if body_end < 0:
+                warnings[kind + "_unterminated"] = region["pointer"]
+                coverage["failed_candidates"] += 1
+                coverage["complete"] = False
+                coverage["omitted_candidates_lower_bound"] += 1
+                break
+            cursor = body_end + len(closer)
+            if not _marker_charge(budget, 2 * (cursor - head.start())):
+                warnings[kind + "_work_limit"] = region["pointer"]
+                coverage["complete"] = False
+                coverage["omitted_candidates_lower_bound"] += 1
+                break
             if selector:
                 try:
-                    payload = json.loads(match[1])
+                    payload = json.loads(text[body_start:body_end])
                 except json.JSONDecodeError:
                     warnings.setdefault("invalid_projection_marker_json", region["pointer"])
+                    coverage["failed_candidates"] += 1
                     continue
                 if not isinstance(payload, dict) or payload.get("deliveryKind") != "selector":
                     continue
-            location = evidence(region, match.start(), match.end(), budget)
+            location = evidence(region, head.start(), cursor, budget)
             if location is None:
                 warnings[kind + "_work_limit"] = region["pointer"]
                 coverage["complete"] = False
@@ -177,8 +192,8 @@ def collect_markers(regions: list[dict[str, Any]], kind: str) -> dict[str, Any]:
                     "full_content_proven": False, "origin_authenticated": False,
                 })
             else:
-                records.append({"marker": match[1], "evidence": location,
-                                "content_utf8_bytes": len(match[2].encode("utf-8"))})
+                records.append({"marker": head[1], "evidence": location,
+                                "content_utf8_bytes": len(text[body_start:body_end].encode("utf-8"))})
         if not coverage["complete"]:
             break
     coverage.update(retained_count=len(records), work_characters_charged=budget["used"],

@@ -222,6 +222,19 @@ def test_quoted_frontmatter_names_correlate_without_yaml_quotes(tmp_path, monkey
     assert inventory["agents"][0]["aliases"] == ["example:sample-agent", "sample-agent"]
 
 
+def test_missing_names_warn_for_skills_and_use_the_agent_filename(tmp_path):
+    root = tmp_path / "repo"
+    write(root / ".git", "synthetic")
+    write(root / ".github" / "skills" / "unnamed" / "SKILL.md",
+          "---\ndescription: Synthetic unnamed skill.\n---\nBody\n")
+    write(root / ".github" / "agents" / "fallback.agent.md",
+          "---\ndescription: Synthetic unnamed agent.\n---\nBody\n")
+    inventory = collect_inventory(root, home=tmp_path / "home", config_root=tmp_path / "config")
+    assert inventory["skills"] == []
+    assert inventory["agents"][0]["name"] == "fallback"
+    assert any(w["kind"] == "metadata_name_missing" for w in inventory["warnings"])
+
+
 @pytest.mark.parametrize("oversized", [None, "catalog", "manifest"])
 def test_discovery_reads_share_cached_inventory_budget(tmp_path, monkeypatch, oversized):
     import snapshot_inventory

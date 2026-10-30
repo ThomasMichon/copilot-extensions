@@ -671,3 +671,63 @@ def test_sparse_utf8_offsets_do_not_reencode_growing_prefixes(monkeypatch) -> No
         assert location["end_utf8_byte"] == len(text[:start + 1].encode())
     assert budget["used"] <= len(text) + 100 * 2 * 7
     assert len(region["_utf8_checkpoints"]) <= len(text) // 8 + 1
+
+
+@pytest.mark.parametrize("kind, unfinished", [
+    ("memory_marker", "<memory>"),
+    ("memory_marker", "<memory"),
+    ("selector_reference", '<!-- copilot-extension-instruction-projection {'),
+])
+def test_unterminated_marker_openings_stop_without_rescanning_suffixes(kind: str, unfinished: str) -> None:
+    completed = (
+        '<!-- copilot-extension-instruction-projection '
+        '{"deliveryKind":"selector","destination":"example/é.md"} -->'
+        if kind == "selector_reference" else "<memory>é🙂</memory>"
+    )
+    prefix = "é🙂\n"
+    text = prefix + completed + unfinished * 20000
+    result = wire._METADATA.collect_markers([{"text": text, "pointer": "/messages/0/content"}], kind)
+    coverage = result["coverage"]
+    assert len(result["records"]) == coverage["retained_count"] == 1
+    assert coverage["candidates_examined"] == 2 and coverage["failed_candidates"] == 1
+    assert not coverage["complete"] and coverage["retained_count_is_lower_bound"]
+    assert coverage["omitted_candidates_lower_bound"] == 1
+    assert coverage["work_characters_charged"] <= len(text) + 4 * len(completed) + 32
+    assert result["records"][0]["evidence"] == {
+        "pointer": "/messages/0/content", "start_utf8_byte": len(prefix.encode()),
+        "end_utf8_byte": len((prefix + completed).encode()),
+    }
+    assert result["warnings"][0]["code"] == kind + "_unterminated"
+
+
+def test_malformed_closed_selector_starts_consume_candidate_budget(monkeypatch) -> None:
+    monkeypatch.setattr(wire._METADATA, "MAX_MARKER_CANDIDATES", 3)
+    text = '<!-- copilot-extension-instruction-projection { -->' * 20000
+    result = wire._METADATA.collect_markers(
+        [{"text": text, "pointer": "/messages/0/content"}], "selector_reference",
+    )
+    coverage = result["coverage"]
+    assert result["records"] == [] and coverage["candidates_examined"] == 3
+    assert coverage["failed_candidates"] == 3 and not coverage["complete"]
+    assert coverage["omitted_candidates_lower_bound"] == 1
+    assert coverage["retained_count_is_lower_bound"]
+    assert {w["code"] for w in result["warnings"]} == {
+        "invalid_projection_marker_json", "selector_reference_evidence_truncated",
+    }
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_custom_grammar_layouts_count_unicode_without_echoing_body(nested: bool) -> None:
+    body = "start: /SYNTHETIC_GRAMMAR_é🙂/"
+    grammar = {"syntax": "lark", "definition": body}
+    schema = {"type": "grammar", **(
+        {"grammar": grammar, "definition": "FLAT_FALLBACK_MUST_NOT_WIN"} if nested else grammar
+    )}
+    report = wire.analyze_request({"tools": [{
+        "type": "custom", "custom": {"name": "apply_patch", "format": schema},
+    }]}, {})
+    record = report["tools"]["observed"][0]
+    assert record["schema_kind"] == "grammar"
+    assert record["grammar_definition_utf8_bytes"] == len(body.encode("utf-8"))
+    assert "SYNTHETIC_GRAMMAR_" not in json.dumps(report)
+    assert "FLAT_FALLBACK_MUST_NOT_WIN" not in json.dumps(report)
