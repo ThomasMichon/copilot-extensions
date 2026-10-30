@@ -119,9 +119,10 @@ const hook = createResidentPreToolHook({
 });
 const result = await hook({ workingDirectory: cwd, sessionId: "lifetime-fixture",
   toolName: "edit", toolArgs: {}, timestamp: new Date() });
-assert.equal(result.permissionDecision, "deny");
+assert.equal(result.permissionDecision, undefined);
+assert.match(result.additionalContext, /policy-process-timeout/);
 assert.deepEqual(reports, ["policy-process-timeout"]);
-console.log("policy timeout denied after its owned scope was retired");
+console.log("policy timeout reported after its owned scope was retired");
 """,
         encoding="utf-8",
     )
@@ -173,7 +174,9 @@ console.log("policy timeout denied after its owned scope was retired");
             stdout, stderr = process.communicate(timeout=40)
             assert process.returncode == 0, (stdout, stderr)
             if consumer != "resident":
-                assert json.loads(stdout)["permissionDecision"] == "deny"
+                decision = json.loads(stdout)
+                assert "permissionDecision" not in decision
+                assert "policy worker execution" in decision["additionalContext"]
             assert time.monotonic() - started < 30, "policy exceeded the host hook deadline"
         assert retired(), "policy descendant survived its invocation/caller"
     finally:

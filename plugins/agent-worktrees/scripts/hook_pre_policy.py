@@ -27,6 +27,13 @@ def valid_decision(value: object) -> bool:
     )
 
 
+def unavailable(boundary: str) -> dict:
+    return {"additionalContext": (
+        f"[agent-worktrees pre-tool] Boundary: {boundary}. "
+        "Effect: this component could not evaluate policy; missing evidence is not authorization. This hook did not execute the tool; independent policy decisions remain in force. Next: inspect the selected installation pre-tool files and existing repairing-worktrees guidance; use its catalog command read-only doctor only if available. Retry: do not repeat the tool solely for this warning; inspect its result first, and retry evaluation only after this boundary changes."
+    )}
+
+
 def decide(
     payload: dict,
     *,
@@ -40,62 +47,32 @@ def decide(
     if contextual:
         helper = load_sibling("registry_root.py")
         if helper is None:
-            return {
-                "permissionDecision": "deny",
-                "permissionDecisionReason": (
-                    "agent-worktrees installation context cannot be validated"
-                ),
-            }
+            return unavailable("installation-context helper unavailable")
         try:
             helper.resolve_registry_root(
-                legacy_root=home / ".agent-worktrees",
-                environment=os.environ,
+                legacy_root=home / ".agent-worktrees", environment=os.environ,
             )
-        except Exception as error:
-            return {
-                "permissionDecision": "deny",
-                "permissionDecisionReason": (
-                    f"agent-worktrees installation context is invalid: {error}"
-                ),
-            }
+        except Exception:
+            return unavailable("installation-context validation failed")
     deadline = time.monotonic() + budget_seconds
     combined: dict = {}
     for name in (
-        "statelessness_guard.py",
-        "cross_repo_guard.py",
-        "anchor_write_guard.py",
-        "pr_supersede_guard.py",
+        "statelessness_guard.py", "cross_repo_guard.py",
+        "anchor_write_guard.py", "pr_supersede_guard.py",
     ):
         module = load_sibling(name)
-        if require_policy and not callable(getattr(module, "decide", None)):
-            return {
-                "permissionDecision": "deny",
-                "permissionDecisionReason": "Required agent-worktrees pre-tool policy is unavailable",
-            }
-        if module is None:
+        if not callable(getattr(module, "decide", None)):
+            combined = merge_decisions(combined, unavailable(f"{name} unavailable"))
             continue
         try:
             kwargs = {"deadline": deadline - 2.0} if name == "cross_repo_guard.py" else {}
             decision = module.decide(payload, home=home, **kwargs)
         except Exception:
-            if require_policy:
-                return {
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": "Required agent-worktrees pre-tool policy evaluation failed",
-                }
-            if contextual:
-                return {
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": (
-                        "agent-worktrees installation context changed during policy evaluation"
-                    ),
-                }
+            combined = merge_decisions(combined, unavailable(f"{name} evaluation failed"))
             continue
-        if require_policy and not valid_decision(decision):
-            return {
-                "permissionDecision": "deny",
-                "permissionDecisionReason": "Required agent-worktrees pre-tool policy returned an invalid response",
-            }
+        if not valid_decision(decision):
+            combined = merge_decisions(combined, unavailable(f"{name} response invalid"))
+            continue
         if isinstance(decision, dict) and decision:
             combined = merge_decisions(combined, decision)
             if combined.get("permissionDecision") == "deny":
