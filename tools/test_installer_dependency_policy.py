@@ -1635,7 +1635,8 @@ def test_native_unowned_directory_is_not_a_first_party_exemption(tmp_path, edita
     arguments = ([editable] if editable else []) + [str(source)]
     result = native_policy(tmp_path, arguments)
     assert result.returncode != 0
-    assert "trusted source roots" in result.stderr
+    expected = "non-editable immutable versioned slots" if editable else "trusted source roots"
+    assert expected in result.stderr
 
 
 @pytest.mark.parametrize("reference", ["path", "url", "named"])
@@ -1661,7 +1662,11 @@ def test_native_local_wheel_refused_even_inside_attested_root(tmp_path, referenc
         arguments = ([option] if option else []) + [requirement]
     result = native_policy(tmp_path, arguments, roots=(tmp_path,))
     assert result.returncode != 0
-    assert "local artifacts cannot prove release age" in result.stderr
+    expected = (
+        "non-editable immutable versioned slots" if option in ("-e", "--editable")
+        else "local artifacts cannot prove release age"
+    )
+    assert expected in result.stderr
 
 
 @pytest.mark.parametrize("filename", ["demo.tar.gz", "demo.zip"])
@@ -2172,6 +2177,25 @@ def test_default_cli_retains_product_attribution(monkeypatch, tmp_path):
     )
     assert policy.main(["--uv", "selected-uv", "--", "fixture-package"]) == 0
     assert discovered == [True] and calls == [(tmp_path,)]
+
+
+@pytest.mark.parametrize("options", [
+    ["--no-editable"], ["--link-mode", "copy"], ["--link-mode=copy", "--no-editable"],
+])
+def test_deployment_cli_does_not_duplicate_caller_immutable_options(monkeypatch, options):
+    calls = []
+    monkeypatch.setattr(
+        policy, "run_uv_install",
+        lambda uv, arguments, **kwargs: (
+            calls.append(arguments) or CompletedProcess([], 0)
+        ),
+    )
+    arguments = [*options, "fixture-package"]
+    assert policy.main(["--uv", "selected-uv", "--registry-only", "--", *arguments]) == 0
+    pairs = list(policy._argument_pairs(calls[0]))
+    assert sum(option == "--no-editable" for option, _ in pairs) == 1
+    assert [value for option, value in pairs if option == "--link-mode"] == ["copy"]
+    assert calls[0][:len(arguments)] == arguments
 
 
 @pytest.mark.parametrize("arguments", [

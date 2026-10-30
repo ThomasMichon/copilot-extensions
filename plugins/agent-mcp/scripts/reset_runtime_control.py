@@ -37,7 +37,7 @@ def _scope(home: Path) -> None:
 
 def _patterns() -> list[str]:
     path = Path(__file__).with_name("uninstall-profile.json")
-    manifest = footprint.parse(footprint.decode(footprint._marker_text(path)), "agent-mcp")
+    manifest = footprint.load_manifest(path, "agent-mcp")
     effect = manifest.effects.get("runtime-control", {})
     if (
         (effect.get("kind"), effect.get("scope"), effect.get("disposition"))

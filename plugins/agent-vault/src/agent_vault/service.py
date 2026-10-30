@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 from .cache import get_cache
+from . import __version__ as _PROCESS_VERSION
 from .config import (
     DEFAULT_TCP_PORT,
     ENDPOINT_ENV,
@@ -553,6 +554,7 @@ class VaultService:
             return {
                 "ok": True,
                 "pid": os.getpid(),
+                "version": _PROCESS_VERSION,
                 "ttl": self.ttl,
                 "cached": len(self.cache),
                 "cli": self.cli.status(kpdb or None),

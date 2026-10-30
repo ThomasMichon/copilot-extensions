@@ -114,6 +114,15 @@ locks describe different facts; no new competing artifact authority is needed.
 
 ## Request
 
+**I/O-only installation refusal boundary (2026-10-30), summary of operator direction:**
+only actual I/O errors, such as file locks or insufficient write permissions,
+may block applying an explicitly requested installation. Old layout,
+recognition, receipt, ownership-metadata and compatibility disagreements are not
+extra permission gates. The [verbatim clarification](inception-transcript.md#io-only-installation-refusal-boundary)
+is authoritative; the [fresh-default slice](fresh-default-installation.md)
+records the proposed installation/readiness outcome separation. Existing live
+operation approvals are unchanged.
+
 **Independent repair acceptance (2026-10-29), summary of operator direction:**
 install and run the complete V1 suite, then force-install V2 in repair mode
 without requiring a prior-install existence check or uninstalling, deleting,
@@ -410,6 +419,12 @@ reuse/admission behavior is not an exception to the fresh-default revision.
   mostly fresh known-runtime fallback. Preserve durable config/data, silence
   the displaced owner and retain one installation execution owner; do not
   turn missing incremental receipts back into update refusal.
+- [ ] **Operator-requested I/O-only refusal:** audit installation refusal paths
+  and remove non-I/O old-state admission vetoes. Use fresh construction and
+  current-output publication instead of demanding recognized old ownership,
+  receipts or contracts. Keep actual I/O failures attributable and preserve
+  unrelated/durable/protected state. **Agent-recommended realization:** separate
+  installation application from truthful build/start/readiness diagnostics.
 - [ ] Define maintained recognizer manifests with separate disposable-reset
   inventories and incremental marker/version/contract ranges, plus historical
   footprint deltas. Make installed-footprint changes carry manifest/migration
@@ -1028,6 +1043,16 @@ implementation, rollout or parent completion is declared.
   alternatives, finite metrics/venues and unchanged source/resource ownership.
 
 ## Validation Plan
+Completed refusal controls below retain their historical component evidence.
+They do not exempt an explicitly requested installation from the newer
+operator-requested I/O-only refusal boundary.
+
+- [ ] **Operator-requested I/O-only refusal:** absent/corrupt/contradictory old
+  metadata, unrecognized/edited historical outputs and incompatible incumbents
+  do not block applying the requested installation. Inject real lock/permission
+  I/O failures and report their exact cause; independently expose failed
+  build/start/readiness without manufacturing a healthy service or a new
+  permission gate. Qualify through real ordinary and repair entry points.
 - [ ] **Fresh-default orchestration:** resolve the [public-entry-point and construction-path matrix](fresh-default-installation.md#validation-plan): global project update interception, upstream Main/default and explicit overrides, cold/broken old runtime, compatible incremental/ZDD and missing/incompatible recognition reaching mostly fresh installation under the same execution owner. Receipts must not become update permission.
 - [x] **Agent-recommended bounded metadata recovery:** native Windows/Linux
   construction under pending missing/corrupt receipts publishes selectable
@@ -1414,5 +1439,33 @@ retries on Windows/Linux. The displaced-code Plan and Validation items remain
 open until that implementation and qualification merge. All parent portfolio,
 installed adoption and live survival gates remain open; this proposal grants
 no concrete host cleanup or rollout.
+
+### 2026-10-29 - Independent incoming startup for ordinary and repair updates
+
+#9601 merged as `230c7b1012e6e6767d1fbe6dc4541e73019d7470` after genuine
+Copilot approval of exact head `6284c967bf8a7acc7c99b4ffed5cab03148e08cc`,
+with no active findings and all required checks passing. The one review
+finding exposed inherited force-termination acceptance clauses; the correction
+reconciles the complete retained normal/repair interpretation instead of fixing
+only the newly added test row. Effort/vision structure and whitespace checks
+passed. The source worktree pulled forward to the actual squash boundary and
+the complete current ROOT README was read back.
+
+The operator's decisive V1-to-V2 test and explicit normal-and-repair scope now
+govern replacement: apply/start the incoming generation independently, replace
+current commands/update task registrations, observe brief runtime overlap, then
+prove the outgoing owner recognizes supersession and retires itself. Mandatory
+installer-driven old-code/process retirement is superseded as an update
+prerequisite. Its unpublished prototype is retained separately, not deployed
+or credited as the new lifecycle implementation. Explicit uninstall and
+separately authorized recovery retain their own scopes.
+
+The next stretch builds the contained real Manager/suite acceptance for both
+ordinary update and repair/force-install, then extends the existing incoming
+startup and supersession owners to make it pass. Those Plan and Validation
+items remain open. The parent stays Active with its complete portfolio,
+same-existing-data adoption and live all-code-absent session/connectivity
+survival gates intact. No host install, task mutation, service stop, maintenance
+hold or rollout occurred.
 
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.

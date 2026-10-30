@@ -234,6 +234,12 @@ def _marker_text(path: Path) -> str:
     return content.decode("utf-8-sig")
 
 
+def load_manifest(path: Path, plugin: str) -> Manifest:
+    """Read maintained source history independently of small installed markers."""
+    _plain_file(path)
+    return parse(decode(path.read_text(encoding="utf-8-sig")), plugin)
+
+
 def producer_problems(manifest: Manifest, payload: Path) -> list[str]:
     problems = []
     for relative, expected in manifest.producers.items():

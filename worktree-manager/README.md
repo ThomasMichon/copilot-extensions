@@ -1676,11 +1676,29 @@ repo = "https://github.com/<fork>/copilot-extensions.git"
 ref  = "canary"
 ```
 
-When a live `mux-daemon` is already serving managed sessions, `worktree-manager
-update` now cuts it over in place instead of stacking a stale resident beside
-the new code: the successor starts on a fresh loopback port, status writers
-follow the routed active endpoint first, and the predecessor drains accepted
-status-apply work plus its current republish cycle before retiring.
+Git-backed acquisition uses per-command Windows long-path support for cloning,
+fetching and checkout, including Main and custom refs. It does not change
+user-level or machine-level Git configuration. Main and custom-ref checkouts
+materialize only `worktree-manager`, its shared `libs`, and `.gitattributes`,
+including when reusing an existing staging checkout; unrelated plugin paths
+are not needed for Manager self-update.
+
+If acquired Manager content differs from an already published slot with the
+same package version, installation uses a distinct immutable repair generation
+instead of rewriting or rejecting the predecessor. Matching healthy generations
+remain reusable. I/O failures still propagate; this fallback does not authorize
+recovery of unknown execution effects or relax source-evidence validation.
+
+Manager update and bootstrap activation start the selected `mux-daemon` on a
+fresh loopback port without requiring a healthy or even present predecessor.
+Only the incoming generation is health-checked before routing is published;
+the installer does not recover, drain, shut down or terminate the old daemon.
+Each protocol-aware incumbent observes the healthy successor, drains its own
+accepted work and exits. Brief overlap is expected. The incoming process admits
+exclusive work only after acquiring the resident lease released by its
+predecessor. Existing cutover records and old code remain untouched; explicit
+legacy recovery is separate from ordinary update and repair. Publication proves
+incoming readiness, not that every old process has already converged.
 
 For a prepared source payload, `self_install(..., dry_run=True)` compares the
 full retained source identity and assembled bytes, not just the package version.

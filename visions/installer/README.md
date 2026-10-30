@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-10-29
+- **Last revised:** 2026-10-30
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -364,6 +364,19 @@ uncertain convergence stays explicit without turning incumbent inspection into
 an admission gate. Explicit uninstall or independently scoped reclamation is a
 separate operation, not a prerequisite for updating.
 
+### installation-refusal-boundary
+Only actual I/O failures, such as file locks or insufficient write permissions,
+may block applying an explicitly requested installation. Unknown layouts,
+missing or contradictory metadata, failed recognition and old-version contract
+disagreements do not confer a veto. They select fresh installation rather than
+permission checks against the incumbent.
+
+Installation and runtime readiness are separate outcomes. Validation and
+diagnostics describe what was installed and whether it works; they must not
+silently become additional permission to install or claim healthy operation
+that was not established. Recognizers govern safe reuse, migration and scoped
+cleanup, not installation admission.
+
 ### recognizer-manifests
 Each installed footprint has a maintained declarative manifest with two
 independent responsibilities: identify the disposable artifacts the installer
@@ -502,12 +515,14 @@ Selecting a runtime source alone never changes the plugin-content source.
 
 ### resilient-update-convergence
 An update pursues a verified good, current state rather than treating one
-best-effort pass as success. Cheap deterministic blockers are discovered before
-expensive work; costly and failure-prone preparation precedes short,
-health-gated activation, followed by inexpensive local integration. Verified
-progress survives retry. Transient failures receive safe retry and mitigation;
-authority, policy and integrity blockers remain explicit and durable. Existing
-lifecycle authorities, package governance and rollback remain intact.
+best-effort pass as success. Costly preparation precedes short publication and
+local integration; installation application obeys the
+[I/O-only refusal boundary](#installation-refusal-boundary). Runtime health,
+compatibility and convergence remain separately observed outcomes, not
+additional installer admission gates. Verified progress survives retry;
+transient I/O failures receive safe retry and mitigation. Diagnostics stay
+explicit and durable without manufacturing readiness. Existing lifecycle
+authorities, package governance and rollback retain their own scopes.
 
 ### historical-generated-command-migration
 Known generated commands from earlier versions migrate or retire automatically

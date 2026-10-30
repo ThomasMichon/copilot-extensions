@@ -1711,9 +1711,12 @@ explicit development generations. Canonical source references may use
 still install noneditable wheel content rather than references to those source
 directories. The canonical installer dependency CLI
 refuses explicit editable operands and non-copy link modes, and supplies
-`--no-editable --link-mode copy` to UV. The Python constructor enforces
+`--no-editable --link-mode copy` to UV only when the caller has not already
+supplied those options. The Python constructor enforces
 `--no-editable`, verifies installed origins and permits ordinary immutable
 wheel-cache hardlinks as described in the source-wheel cache contract below.
+Static admission recognizes the standard UV, setuptools and pywin32 bootstrap
+import hooks with their required slot-local modules, without executing them.
 Completion rejects symlink/reparse redirection, editable origins and escaping
 path hooks, not an ordinary file merely having another hardlink. Cache content
 is never modified in place; cache retirement unlinks its own names without
@@ -2543,6 +2546,11 @@ a health result. No new installed receipt is required.
 
 MCP's native installers now pass that maintained footprint into the existing
 attached construction session under the same installer lock/execution owner.
+The shared source-manifest loader keeps maintained history separate from the
+small installed-marker read budget, including construction, process retirement
+and control reset.
+PowerShell preserves an exited construction owner's captured stderr and exit
+code when its input pipe has already closed.
 A compatible layout can reuse an admitted candidate, including the selected
 same-input replacement generation. Otherwise construction is fresh: an occupied
 target receives a distinct `repair.<id>` generation, without rewriting the
@@ -4659,6 +4667,14 @@ compatibility. Mutable `dev_candidate()` refuses explicit local selections.
 The caller owns the named role, distinct immutable slot, role-specific health
 and ordinary publication/removal lifecycle; this construction seam does not
 make an installer, service supervisor or selected command catalog by itself.
+
+Numbered content conflicts raise the typed `ContentRepairRequired` signal,
+which remains a `RuntimeError` for existing callers. The Manager adapter handles
+it inside candidate construction by selecting a distinct repair generation,
+just as for a settled installed-health repair; it never rewrites the published
+slot or leaks this recoverable admission outcome out of borrowed execution
+custody. Exact wheel-receipt reuse still cannot construct another generation.
+Other callers retain their existing handling of content conflicts.
 
 Reused installed-health failures request distinct-generation repair when the
 probe exits unsuccessfully, cannot create its child, or reaches its deadline

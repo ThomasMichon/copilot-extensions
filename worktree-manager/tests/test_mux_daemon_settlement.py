@@ -181,6 +181,34 @@ def test_normal_shutdown_settles_native_threads_and_record(runtime):
     assert state(lifetime) == "finished"
 
 
+@pytest.mark.parametrize("lease_available", [False, True])
+def test_passive_loop_fences_observation_and_admits_before_recovery(
+    tmp_path, monkeypatch, lease_available,
+):
+    events = []
+    lease = object() if lease_available else None
+    monkeypatch.setattr(mux_daemon, "_acquire_daemon_lease", lambda root: lease)
+    monkeypatch.setattr(mux_daemon, "_release_daemon_lease", lambda handle: None)
+    monkeypatch.setattr(mux_daemon, "_status_monitor_lock_path", lambda: None)
+    monkeypatch.setattr(
+        mux_daemon.mux_daemon_cutover, "active_generation_for_pid", lambda *args, **kwargs: 1,
+    )
+
+    def activate(runtime):
+        assert runtime.accepting_requests(), "Recovery activated before work admission"
+        events.append("activate")
+
+    monkeypatch.setattr(mux_daemon.MuxDaemonRuntime, "activate_restart_recovery", activate)
+    monkeypatch.setattr(
+        mux_daemon.AttachedClientObserver, "observe",
+        lambda *args: events.append("observe"),
+    )
+    assert mux_daemon.run_daemon_foreground(
+        tmp_path, passive=True, max_iterations=1, poll_interval_s=0,
+    ) == 0
+    assert events == (["activate", "observe"] if lease_available else [])
+
+
 def test_interrupted_shutdown_caller_cannot_retire_live_handler(runtime, monkeypatch):
     held = HeldHealth(monkeypatch)
     runtime.start()

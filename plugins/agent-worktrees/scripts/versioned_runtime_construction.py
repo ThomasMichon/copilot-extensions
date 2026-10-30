@@ -147,7 +147,7 @@ def require_immutable_environment(
                     if not line or line.startswith("#"):
                         continue
                     if line.startswith(("import ", "import\t")):
-                        # These are the standard UV and setuptools bootstrap hooks.
+                        # These are standard installed-package bootstrap hooks.
                         # Unknown executable hooks cannot prove source independence.
                         if name == "_virtualenv.pth" and line == "import _virtualenv":
                             if (site / "_virtualenv.py").is_file():
@@ -157,6 +157,12 @@ def require_immutable_environment(
                             "enabled = os.environ.get(var, 'local') == 'local'; "
                             "enabled and __import__('_distutils_hack').add_shim();"
                         ) and (site / "_distutils_hack" / "__init__.py").is_file():
+                            continue
+                        if (
+                            name == "pywin32.pth" and line == "import pywin32_bootstrap"
+                            and (site / "win32" / "lib" / "pywin32_bootstrap.py").is_file()
+                            and (site / "pywin32_system32").is_dir()
+                        ):
                             continue
                         raise error_type(f"Unverified executable installed path hook: {path}")
                     if not (site / line).resolve().is_relative_to(base):
@@ -310,7 +316,7 @@ def construction_session(runtime: RuntimeOperations, root: Path, version: str, *
         spec.loader.exec_module(provider)
         if footprint.absolute() != source.with_name("uninstall-profile.json"):
             raise ValueError("Construction requires this payload's maintained footprint")
-        manifest = provider.parse(provider.decode(provider._marker_text(footprint)), plugin)
+        manifest = provider.load_manifest(footprint, plugin)
         plan = provider.plan_construction(
             manifest, root, version,
             admission=lambda root, version: runtime.check_admission(root, version, payload_hash=payload_hash),
@@ -737,14 +743,25 @@ function script:Start-RuntimeConstruction {
     }
     return $reuse
 }
+function script:Send-RuntimeConstructionCommand($Session, [string]$Message) {
+    try {
+        $Session.Process.StandardInput.WriteLine($Message)
+        $Session.Process.StandardInput.Flush()
+    } catch {
+        if ($Session.Process.HasExited) {
+            throw ("Construction owner exited (" + $Session.Process.ExitCode + "): " +
+                $Session.Errors.Result.Trim())
+        }
+        throw
+    }
+}
 function script:Complete-RuntimeConstruction([string]$PayloadHash, [switch]$RetainHelpers) {
     $session = $script:RuntimeConstructionSession
     if (-not $session) { throw 'Completion requires attached construction ownership' }
-    $session.Process.StandardInput.WriteLine(
+    Send-RuntimeConstructionCommand $session (
         (@{command='complete'; payload_hash=$PayloadHash; retain_helpers=[bool]$RetainHelpers} |
             ConvertTo-Json -Compress)
     )
-    $session.Process.StandardInput.Flush()
     $line = $session.Process.StandardOutput.ReadLine()
     if (-not $line -or -not ($line | ConvertFrom-Json).complete) {
         throw 'Construction completion refused; candidate remains non-selectable'
@@ -757,10 +774,9 @@ function script:Stop-RuntimeConstruction {
     $script:RuntimeConstructionSession = $null
     try {
         $command = if ($session.Complete) { 'settled' } else { 'abort' }
-        $session.Process.StandardInput.WriteLine(
+        Send-RuntimeConstructionCommand $session (
             (@{command=$command} | ConvertTo-Json -Compress)
         )
-        $session.Process.StandardInput.Flush()
         $line = $session.Process.StandardOutput.ReadLine()
         $session.Process.StandardInput.Close()
         $session.Process.WaitForExit()

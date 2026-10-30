@@ -4712,6 +4712,50 @@ fixture mux cutover to the source-qualified target. Injected failures before and
 after the second selector replacement prove both selector states and runtime
 receipts survive, with no failed-update cutover. Fixture mux processes suppress
 production breakaway and are terminated/waited within the containing test.
+The installed-generation update witness forbids installer IPC to the incumbent
+and predecessor recovery/termination. It waits for the real old daemon to exit
+cleanly and for its successor to acquire the work lease, while preserving all
+incumbent runtime file hashes. This Manager-only proof does not qualify the
+assembled suite's ordinary-update/repair paths or scheduled registrations.
+
+Whole-suite replacement has a separate manual Windows VM portfolio:
+`installation-context-full.yml`, `portfolio=manager-suite`. It runs normal
+update and repair in independent disposable GitHub-hosted Windows jobs:
+
+```text
+python tools/run-manager-suite-acceptance.py --root .v --mode normal
+python tools/run-manager-suite-acceptance.py --root .v --mode repair
+```
+
+These commands refuse local execution before creating fixtures. Each case
+constructs V1 and V2 through canonical materialization, starts the applicable
+V1 portfolio, and calls the real installed Manager against the same default
+HOME and durable data. Controlled acquisition replaces only external artifact
+delivery and credentials; the planner, constructors, launchers and scheduled
+registrations remain real. Missing prerequisite or resident-attribution evidence
+fails acceptance rather than reducing the portfolio.
+
+The Index host role is written as YAML readable by both native and
+dependency-free role resolvers. Preparation explicitly provisions its full
+independent engine through the native installer; ordinary Manager updates
+preserve that separately managed engine rather than provisioning it implicitly.
+After cold setup, the Codespaces owner starts through its verified native
+scheduled registration, with installed liveness observed before recording V1.
+Worktrees' V1 monitor is explicitly ensured through its installed on-demand API;
+installation alone intentionally need not start an absent monitor. Settlement
+uses Codespaces' generation-bound `owner --stop` and waits for normal channel
+cleanup before removing the exact owned scheduled registration. Task termination
+alone is not daemon-exit evidence. Idle policy, deadlines and final birth-verified
+resident-exit assertions are unchanged.
+
+Cold preparation and exercise each have a 900-second owned-process deadline;
+assertions retain a separate 300-second runner boundary and the usual pytest
+item limit. Settlement runs independently after success, stage failure or
+timeout. The disposable VM owns the outer scheduled-registration and explicit
+product-daemon lifetime boundary; this flow does not run inside a restrictive
+local test Job. The workflow retains synthetic diagnostics and cannot pass on
+failed or missing settlement. Neither this test flow nor a passing component
+test asserts that whole-suite acceptance has already passed.
 
 Prepared-source Manager selection/recovery has its own bounded native contract:
 

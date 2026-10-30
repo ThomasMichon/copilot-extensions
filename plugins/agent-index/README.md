@@ -178,6 +178,9 @@ runs its local service through the plugin's own installer/runtime lifecycle.
 use zdd cutover when replacing a live service. The independent durable engine's
 explicit lifecycle remains separate and is never coupled to routine host
 cutover.
+During suite updates, activation uses the selected consuming repository rather
+than the physical build artifact. The updater carries that repository through
+the existing `AGENT_INDEX_REPO` binding while preserving an explicit override.
 
 The installer exposes explicit installation-context actions for disposable
 installation-cell validation:

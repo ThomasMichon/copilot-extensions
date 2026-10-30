@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import shutil
+from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -116,3 +118,54 @@ def test_first_source_plan_names_immutable_target_without_creating_root(selectio
     assert result.action == "planned", result
     assert result.slot == str(si.version_slot(identity.runtime_version, selection))
     assert not selection.exists()
+
+
+@pytest.mark.parametrize("failure", ["content", "health", "io"])
+def test_candidate_selects_distinct_generation_for_repair_not_io_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    adapter = si._runtime_installer()
+    payload = tmp_path / "payload"
+    payload.mkdir()
+    (payload / "pyproject.toml").write_text(
+        '[project]\nname="copilot-extensions-worktree-manager"\nversion="1.2.3"\n',
+        encoding="utf-8",
+    )
+    root = tmp_path / "root"
+    previous = root / "versions" / "1.2.3"
+    previous.mkdir(parents=True)
+    sentinel = previous / "retained-code"
+    sentinel.write_bytes(b"untouched predecessor")
+    (root / "current-version").write_text("1.2.3\n", encoding="utf-8")
+    uv = tmp_path / "uv"
+    uv.touch()
+    monkeypatch.setattr(adapter.engine, "_select_uv_executable", lambda _: str(uv))
+    monkeypatch.setattr(adapter.runtime, "is_complete", lambda *a, **kw: True)
+    entries = []
+
+    @contextmanager
+    def candidate(actual_root: Path, generation: str, **kwargs: object):
+        assert actual_root == root
+        entries.append(generation)
+        if len(entries) == 1:
+            if failure == "content":
+                adapter.engine._refuse(adapter.runtime.ADMIT_CONTENT_CONFLICT, generation)
+            if failure == "health":
+                raise adapter.engine.HealthRepairRequired("fixture installed health failure")
+            raise OSError("fixture write denied")
+        assert kwargs["reuse_generations"] is False
+        assert generation.startswith("1.2.3+repair.")
+        yield SimpleNamespace(slot=root / "versions" / generation)
+
+    monkeypatch.setattr(adapter.engine, "numbered_candidate", candidate)
+    if failure == "io":
+        with pytest.raises(OSError, match="write denied"):
+            with adapter.candidate(payload, root, assemble=shutil.copytree, uv=uv):
+                pytest.fail("No constructed candidate")
+        assert entries == ["1.2.3"]
+    else:
+        with adapter.candidate(payload, root, assemble=shutil.copytree, uv=uv) as ready:
+            assert ready.slot.name == entries[-1] != previous.name
+        assert len(entries) == 2
+    assert sentinel.read_bytes() == b"untouched predecessor"
+    assert (root / "current-version").read_text(encoding="utf-8") == "1.2.3\n"

@@ -46,7 +46,7 @@ def _inspect(root: Path) -> dict[int, dict]:
 
 def _legacy_entries(root: Path) -> tuple[str, ...]:
     declaration = Path(__file__).absolute().with_name("uninstall-profile.json")
-    manifest = footprint.parse(footprint.decode(footprint._marker_text(declaration)), "agent-mcp")
+    manifest = footprint.load_manifest(declaration, "agent-mcp")
     effect = manifest.effects.get("legacy-runtime-processes")
     if not isinstance(effect, dict) or (
         effect["kind"], effect["scope"], effect["disposition"]

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 from pathlib import Path
 from types import SimpleNamespace
@@ -650,5 +652,7 @@ def test_engine_handoff_is_explicit_only_for_mutating_update_commands(args, carr
     assert ("UPDATE_DRIVER_WITNESS" in seen["env"]) == carries_witness
     if carries_witness and engine_client.os.name == "nt":
         assert seen["creationflags"] & engine_client.subprocess.CREATE_NO_WINDOW
+        assert seen["stdout"] is sys.stdout and seen["stderr"] is sys.stderr
     elif not carries_witness:
         assert "creationflags" not in seen
+        assert "stdout" not in seen and "stderr" not in seen

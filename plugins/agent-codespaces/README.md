@@ -125,6 +125,21 @@ cancellation does not abandon teardown. The beacon's bounded `stop()` remains
 unchanged; daemon finalization additionally joins its thread before withdrawing
 liveness. Shutdown never starts an unstarted transport or replays an unknown
 transcript push, and dirty/prune markers retain any owed work for a later Owner.
+The liveness beacon also records the running process's frozen build `version`,
+alongside its PID and process-birth identity. Changing the selected runtime does
+not relabel an incumbent process. Legacy beacons without this additive field
+remain readable, but do not establish which build is running.
+
+`agent-codespaces owner --stop` requests cooperative shutdown of the verified
+local PID and process-birth identity. The running beacon advertises
+`owner_control_version: 1` for the `agent-codespaces.owner-control` contract;
+an older or unknown provider is refused before writing a request. Version 1
+uses the existing owner registry lock and an atomic, bounded
+`connection-owner.stop.json` request/acknowledgement. The owner stops its loop
+and acknowledges only after normal channel cleanup returns; cleanup failure
+and the 30-second timeout are non-success outcomes, never process termination
+or permission to target a replacement. Holds and pending work remain intact.
+This explicit shutdown is not called by installation or replacement activation.
 
 `ssh`, `copilot`, and `namespace-resolve` accept repeatable
 `--stage-plugin SOURCE` and `--stage-plugin-disabled SOURCE`. The latter preserves
