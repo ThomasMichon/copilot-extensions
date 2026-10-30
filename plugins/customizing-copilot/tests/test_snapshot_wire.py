@@ -580,3 +580,94 @@ def test_last_agent_source_prefix_comparison_respects_character_budget(monkeypat
     assert not coverage["comparison_work_complete"]
     assert coverage["comparison_characters_charged"] <= 1000
     assert "PRIVATE_FOOTER" not in json.dumps(report)
+
+
+@pytest.mark.parametrize("kind", ["selector_reference", "memory_marker"])
+def test_marker_collectors_cap_candidates_and_preserve_multibyte_evidence(monkeypatch, kind: str) -> None:
+    monkeypatch.setattr(wire._METADATA, "MAX_MARKER_CANDIDATES", 2)
+    marker = (
+        '<!-- copilot-extension-instruction-projection '
+        '{"deliveryKind":"selector","destination":"example/rules.md"} -->'
+        if kind == "selector_reference" else "<memory>PRIVATE_MEMORY_é🙂</memory>"
+    )
+    text = "é🙂\n" + (marker + "\né🙂\n") * 20
+    report = wire.analyze_request({"messages": [{"role": "system", "content": text}]}, {})
+    records, coverage = (
+        (report["instruction_files"]["selector_references"],
+         report["instruction_files"]["selector_reference_evidence"])
+        if kind == "selector_reference" else
+        (report["memories"]["candidate_markup"], report["memories"]["candidate_evidence"])
+    )
+    assert len(records) == coverage["retained_count"] == 2
+    assert coverage["candidates_examined"] == 2
+    assert coverage["omitted_candidates_lower_bound"] == 1
+    assert coverage["retained_count_is_lower_bound"] and not coverage["complete"]
+    start = 0
+    for record in records:
+        start = text.index(marker, start)
+        assert record["evidence"] == {
+            "pointer": "/messages/0/content",
+            "start_utf8_byte": len(text[:start].encode()),
+            "end_utf8_byte": len(text[:start + len(marker)].encode()),
+        }
+        start += len(marker)
+    assert any(w["code"] == kind + "_evidence_truncated" for w in report["warnings"])
+    assert report["memories"]["exact_count"] is None
+    assert "PRIVATE_MEMORY_" not in json.dumps(report)
+
+
+def test_marker_scan_budget_exhaustion_exposes_unknown_not_complete_zero(monkeypatch) -> None:
+    monkeypatch.setattr(wire._METADATA, "MAX_MARKER_CHARACTERS", 1)
+    text = (
+        '<!-- copilot-extension-instruction-projection '
+        '{"deliveryKind":"selector","destination":"example/rules.md"} -->'
+        "<memory>PRIVATE_MEMORY</memory>"
+    )
+    report = wire.analyze_request({"messages": [{"role": "system", "content": text}]}, {})
+    for coverage in (
+        report["instruction_files"]["selector_reference_evidence"],
+        report["memories"]["candidate_evidence"],
+    ):
+        assert coverage["retained_count"] == 0 and not coverage["complete"]
+        assert coverage["retained_count_is_lower_bound"]
+        assert coverage["work_characters_charged"] <= 1
+    assert report["memories"]["exact_count"] is None
+    assert report["memories"]["exact_utf8_bytes"] is None
+    assert not report["coverage"]["metadata"]["complete"]
+    assert {w["code"] for w in report["warnings"]} >= {
+        "selector_reference_work_limit", "memory_marker_work_limit",
+    }
+
+
+def test_marker_offset_work_is_budgeted_before_retaining_evidence(monkeypatch) -> None:
+    metadata = wire._METADATA
+    marker = "<memory>é</memory>"
+    prefix = "🙂" * 200
+    text = prefix + marker * 10
+    first_cost = len(text) + 2 * len(marker) + 2 * len(prefix) + len(marker)
+    limit = first_cost + 2 * len(marker)
+    monkeypatch.setattr(metadata, "MAX_MARKER_CHARACTERS", limit)
+    result = metadata.collect_markers([{"text": text, "pointer": "/messages/0/content"}], "memory_marker")
+    assert len(result["records"]) == 1
+    assert result["coverage"]["candidates_examined"] == 2
+    assert result["coverage"]["work_characters_charged"] == limit
+    assert not result["coverage"]["complete"]
+    assert result["records"][0]["evidence"]["start_utf8_byte"] == len(prefix.encode())
+    assert result["records"][0]["content_utf8_bytes"] == len("é".encode())
+    assert result["warnings"][0]["code"] == "memory_marker_work_limit"
+
+
+def test_sparse_utf8_offsets_do_not_reencode_growing_prefixes(monkeypatch) -> None:
+    metadata = wire._METADATA
+    monkeypatch.setattr(metadata, "UTF8_CHECKPOINT_STRIDE", 8)
+    monkeypatch.setattr(metadata, "MAX_MARKER_CHARACTERS", 2000)
+    text = "é🙂abc" * 100
+    region = {"text": text, "pointer": "/messages/0/content"}
+    budget = {"used": 0}
+    for start in range(4, 404, 4):
+        location = metadata.evidence(region, start, start + 1, budget)
+        assert location is not None
+        assert location["start_utf8_byte"] == len(text[:start].encode())
+        assert location["end_utf8_byte"] == len(text[:start + 1].encode())
+    assert budget["used"] <= len(text) + 100 * 2 * 7
+    assert len(region["_utf8_checkpoints"]) <= len(text) // 8 + 1

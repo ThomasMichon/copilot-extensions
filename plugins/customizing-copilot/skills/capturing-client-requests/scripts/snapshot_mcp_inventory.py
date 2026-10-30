@@ -13,7 +13,7 @@ MAX_MCP_NAME_CHARACTERS = 256
 
 def collect_mcp_servers(
     directory: Path, root: Path, config_root: Path, plugins: list,
-    read: Callable[[Path], str | None], can_read: Callable[[], bool],
+    read: Callable[[Path], str | None], can_read: Callable[[Path], bool],
     parse: Callable[..., Any], warnings: list[dict],
 ) -> tuple[list[dict], bool]:
     records: list[dict] = []
@@ -35,7 +35,7 @@ def collect_mcp_servers(
         path = path.resolve()
         if path in documents:
             return documents[path]
-        if not can_read():
+        if not can_read(path):
             warn("mcp_shared_read_budget_exhausted", str(path))
             return None
         text = read(path)
@@ -130,14 +130,14 @@ def collect_mcp_servers(
     file_servers(config_root / "mcp-config.json", layered=True, allow_bare=False)
 
     for plugin in plugins:
-        if not can_read():
-            warn("mcp_shared_read_budget_exhausted", str(plugin.payload_root))
-            break
         manifests = (
             plugin.payload_root / "plugin.json",
             plugin.payload_root / ".claude-plugin" / "plugin.json",
         )
         manifest_path = next((path for path in manifests if path.is_file()), None)
+        if manifest_path is not None and not can_read(manifest_path):
+            warn("mcp_shared_read_budget_exhausted", str(plugin.payload_root))
+            break
         manifest = document(manifest_path) if manifest_path is not None else {}
         if manifest is None:
             continue

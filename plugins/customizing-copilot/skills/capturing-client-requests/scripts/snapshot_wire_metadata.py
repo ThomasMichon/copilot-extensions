@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 from itertools import chain, islice, zip_longest
+import json
 import re
 from typing import Any
 
@@ -12,6 +13,9 @@ MAX_METADATA_INDEX_ENTRIES = 8192
 MAX_CORRELATIONS_PER_RECORD = 16
 MAX_METADATA_CORRELATIONS = 2048
 MAX_METADATA_COMPARISON_CHARACTERS = 128 * 1024 * 1024
+MAX_MARKER_CANDIDATES = 1024
+MAX_MARKER_CHARACTERS = 32 * 1024 * 1024
+UTF8_CHECKPOINT_STRIDE = 4096
 
 
 class _CorrelationState:
@@ -95,14 +99,92 @@ class _CorrelationState:
         return True
 
 
-def evidence(region: dict[str, Any], start: int, end: int) -> dict[str, Any]:
-    """Offsets are half-open UTF-8 byte offsets within the pointed-to string."""
+def evidence(
+    region: dict[str, Any], start: int, end: int, budget: dict[str, int] | None = None,
+) -> dict[str, Any] | None:
+    """Cache sparse UTF-8 checkpoints; never repeatedly encode whole prefixes."""
     text = region["text"]
+    if not 0 <= start <= end <= len(text):
+        raise ValueError("invalid evidence span")
+    offsets = region.setdefault("_utf8_checkpoints", [0])
+    stride = UTF8_CHECKPOINT_STRIDE
+    work = max(0, end // stride - len(offsets) + 1) * stride + start % stride + end % stride
+    if budget is not None and not _marker_charge(budget, work):
+        return None
+    while len(offsets) <= end // stride:
+        base = (len(offsets) - 1) * stride
+        offsets.append(offsets[-1] + len(text[base:base + stride].encode("utf-8")))
+    positions = [offsets[pos // stride] + len(text[pos // stride * stride:pos].encode("utf-8"))
+                 for pos in (start, end)]
     return {
-        "pointer": region["pointer"],
-        "start_utf8_byte": len(text[:start].encode("utf-8")),
-        "end_utf8_byte": len(text[:end].encode("utf-8")),
+        "pointer": region["pointer"], "start_utf8_byte": positions[0], "end_utf8_byte": positions[1],
     }
+
+
+def _marker_charge(budget: dict[str, int], characters: int) -> bool:
+    if budget["used"] + characters > MAX_MARKER_CHARACTERS:
+        return False
+    budget["used"] += characters
+    return True
+
+
+def collect_markers(regions: list[dict[str, Any]], kind: str) -> dict[str, Any]:
+    """Bound syntax candidates, parsing, content sizing, and byte-offset work."""
+    selector = kind == "selector_reference"
+    pattern = (
+        r"<!--\s*copilot-extension-instruction-projection\s+(\{[^\r\n]*\})\s*-->"
+        if selector else r"<(memory|memories|user_memory|user_memories|memory_context|stored_memories)"
+        r"\b[^>]*>([\s\S]*?)</\1>"
+    )
+    budget = {"used": 0}
+    coverage = {"candidate_limit": MAX_MARKER_CANDIDATES, "candidates_examined": 0,
+                "retained_count": 0, "omitted_candidates_lower_bound": 0, "complete": True,
+                "counts_scope": "syntactic_marker_candidates", "work_character_limit": MAX_MARKER_CHARACTERS}
+    records: list[dict[str, Any]] = []
+    warnings: dict[str, str] = {}
+    for region in regions:
+        if not _marker_charge(budget, len(region["text"])):
+            coverage["complete"] = False
+            warnings[kind + "_work_limit"] = region["pointer"]
+            break
+        for match in re.finditer(pattern, region["text"]):
+            limited = coverage["candidates_examined"] >= MAX_MARKER_CANDIDATES
+            if limited or not _marker_charge(budget, 2 * (match.end() - match.start())):
+                warnings[kind + ("_evidence_truncated" if limited else "_work_limit")] = region["pointer"]
+                coverage["complete"] = False
+                coverage["omitted_candidates_lower_bound"] += 1
+                break
+            coverage["candidates_examined"] += 1
+            if selector:
+                try:
+                    payload = json.loads(match[1])
+                except json.JSONDecodeError:
+                    warnings.setdefault("invalid_projection_marker_json", region["pointer"])
+                    continue
+                if not isinstance(payload, dict) or payload.get("deliveryKind") != "selector":
+                    continue
+            location = evidence(region, match.start(), match.end(), budget)
+            if location is None:
+                warnings[kind + "_work_limit"] = region["pointer"]
+                coverage["complete"] = False
+                coverage["omitted_candidates_lower_bound"] += 1
+                break
+            if selector:
+                destination = payload.get("destination")
+                records.append({
+                    "path": destination if isinstance(destination, str) else None,
+                    "representation": "selector_reference", "evidence": location,
+                    "full_content_proven": False, "origin_authenticated": False,
+                })
+            else:
+                records.append({"marker": match[1], "evidence": location,
+                                "content_utf8_bytes": len(match[2].encode("utf-8"))})
+        if not coverage["complete"]:
+            break
+    coverage.update(retained_count=len(records), work_characters_charged=budget["used"],
+                    retained_count_is_lower_bound=not coverage["complete"])
+    return {"records": records, "coverage": coverage,
+            "warnings": [{"code": code, "pointer": pointer} for code, pointer in warnings.items()]}
 
 
 def field(block: str, name: str) -> str | None:
@@ -429,16 +511,9 @@ def analyze_metadata(
         record["schema_status"] = "advertised_only"
         record["pointer"] = record["evidence"]["pointer"]
         record["ownership"] = "unknown"
-    memory_candidates = []
-    for region in regions:
-        for match in re.finditer(
-            r"<(memory|memories|user_memory|user_memories|memory_context|stored_memories)"
-            r"\b[^>]*>([\s\S]*?)</\1>", region["text"],
-        ):
-            memory_candidates.append({
-                "marker": match[1], "evidence": evidence(region, match.start(), match.end()),
-                "content_utf8_bytes": len(match[2].encode("utf-8")),
-            })
+    memory_candidates = collect_markers(regions, "memory_marker")
+    state.warnings.extend(memory_candidates["warnings"])
+    state.coverage["complete"] &= memory_candidates["coverage"]["complete"]
     return {
         "metadata_coverage": state.coverage,
         "metadata_warnings": state.warnings,
@@ -473,7 +548,8 @@ def analyze_metadata(
             "status": "unknown",
             "exact_count": None, "exact_utf8_bytes": None,
             "reason": "no_authoritative_memory_boundary",
-            "candidate_markup": memory_candidates,
+            "candidate_markup": memory_candidates["records"],
+            "candidate_evidence": memory_candidates["coverage"],
         },
         "advertised_tools": advertised,
     }

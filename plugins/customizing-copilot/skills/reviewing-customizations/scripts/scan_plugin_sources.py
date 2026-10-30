@@ -7,6 +7,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 AGENT_WORKTREES_REPO_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 COPILOT_EXTENSIONS_SOURCE = "https://github.com/ThomasMichon/copilot-extensions"
@@ -68,10 +69,15 @@ class PluginSource:
         return self.origin.rsplit("/", 1)[0] if "/" in self.origin else ""
 
 
-def _load_json_optional(path: Path) -> dict | None:
+def _load_json_optional(
+    path: Path, *, read_text: Callable[[Path], str | None] | None = None,
+) -> dict | None:
     """Load a JSON object, distinguishing an empty object from failure."""
     try:
-        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        text = read_text(path) if read_text is not None else path.read_text(encoding="utf-8", errors="replace")
+        if text is None:
+            return None
+        data = json.loads(text)
         return data if isinstance(data, dict) else None
     except Exception:
         return None
@@ -140,10 +146,21 @@ def strict_json_document(text: str, path: Path, *, allow_line_comments: bool = F
     return json.loads(text, object_pairs_hook=unique)
 
 
-def _strict_settings(path: Path, *, allow_line_comments: bool = False) -> dict:
+def _strict_settings(
+    path: Path, *, allow_line_comments: bool = False,
+    read_text: Callable[[Path], str | None] | None = None,
+) -> dict:
     try:
-        with path.open("rb") as handle:
-            raw = handle.read(2 * 1024 * 1024 + 1)
+        if read_text is not None:
+            if not path.is_file():
+                return {}
+            text = read_text(path)
+            if text is None:
+                raise ValueError(f"settings could not be read within the inventory budget: {path}")
+            raw = text.encode("utf-8")
+        else:
+            with path.open("rb") as handle:
+                raw = handle.read(2 * 1024 * 1024 + 1)
     except FileNotFoundError:
         return {}
     if len(raw) > 2 * 1024 * 1024:
@@ -182,6 +199,7 @@ def _merged_settings(
     strict: bool = False,
     copilot_home: Path | None = None,
     settings_line_comments: bool = False,
+    read_text: Callable[[Path], str | None] | None = None,
 ) -> tuple[dict[str, bool], dict[str, tuple[dict, Path]]]:
     """Merge the settings that decide a repo's *loaded* plugin set.
 
@@ -223,7 +241,9 @@ def _merged_settings(
     enabled: dict[str, bool] = {}
     marketplaces: dict[str, tuple[dict, Path]] = {}
     for p, base in layers:
-        data = _strict_settings(p, allow_line_comments=settings_line_comments) if strict else _load_json(p)
+        data = _strict_settings(
+            p, allow_line_comments=settings_line_comments, read_text=read_text,
+        ) if strict else _load_json(p)
         ep = data.get("enabledPlugins")
         if isinstance(ep, dict):
             for k, v in ep.items():
@@ -503,7 +523,9 @@ def _has_reviewable_payload(footprint: Path) -> bool:
     )
 
 
-def _marketplace_manifest(root: Path) -> tuple[dict, Path] | None:
+def _marketplace_manifest(
+    root: Path, *, read_text: Callable[[Path], str | None] | None = None,
+) -> tuple[dict, Path] | None:
     """Load a supported marketplace manifest and its plugin-root base."""
     for relative in (
         Path(".github/plugin/marketplace.json"),
@@ -512,7 +534,7 @@ def _marketplace_manifest(root: Path) -> tuple[dict, Path] | None:
         Path(".claude-plugin/marketplace.json"),
     ):
         path = root / relative
-        data = _load_json_optional(path)
+        data = _load_json_optional(path, read_text=read_text)
         if data is not None:
             return data, root
     return None
@@ -611,6 +633,7 @@ def _directory_marketplace_plugin(
     *,
     agent_worktrees_command: str | None = None,
     strict: bool = False,
+    read_text: Callable[[Path], str | None] | None = None,
 ) -> Path | None:
     """Resolve one directory-marketplace entry with runtime-equivalent checks."""
     source = declaration.get("source")
@@ -647,7 +670,7 @@ def _directory_marketplace_plugin(
             return None
     else:
         return None
-    loaded = _marketplace_manifest(root)
+    loaded = _marketplace_manifest(root, read_text=read_text)
     if loaded is None:
         return None
     manifest, manifest_root = loaded
@@ -693,10 +716,10 @@ def _directory_marketplace_plugin(
         footprint.relative_to(plugin_root)
     except (OSError, ValueError):
         return None
-    manifest_data = _load_json_optional(footprint / "plugin.json")
+    manifest_data = _load_json_optional(footprint / "plugin.json", read_text=read_text)
     if manifest_data is None:
         manifest_data = _load_json_optional(
-            footprint / ".claude-plugin" / "plugin.json"
+            footprint / ".claude-plugin" / "plugin.json", read_text=read_text,
         )
     return (
         footprint
@@ -719,6 +742,7 @@ def assemble_enabled_plugins(
     copilot_home: Path | None = None,
     allow_legacy_command: bool = True,
     settings_line_comments: bool = False,
+    read_text: Callable[[Path], str | None] | None = None,
 ) -> list[PluginSource]:
     """Assemble the plugin set *actually loaded for this repo* into review scope."""
     selected_home = home or Path.home()
@@ -734,6 +758,7 @@ def assemble_enabled_plugins(
         strict=strict,
         copilot_home=selected_copilot,
         settings_line_comments=settings_line_comments,
+        read_text=read_text,
     )
     out: list[PluginSource] = []
     for key in sorted(enabled):
@@ -772,6 +797,7 @@ def assemble_enabled_plugins(
                 mkt, name, declaration, base,
                 agent_worktrees_command=agent_worktrees_command,
                 strict=strict,
+                read_text=read_text,
             )
             if strict and src_kind in {"directory", "local", "agent-worktrees-repo"} and footprint is None:
                 raise ValueError(f"configured marketplace cannot resolve enabled plugin: {origin}")

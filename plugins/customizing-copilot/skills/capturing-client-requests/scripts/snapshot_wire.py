@@ -368,29 +368,12 @@ def _instructions(
             )
     if ambiguity_omitted:
         _warn(warnings, "ambiguity_evidence_truncated", "/inventory/instructions")
-    references = []
-    for region in regions:
-        for marker in re.finditer(
-            r"<!--\s*copilot-extension-instruction-projection\s+(\{[^\r\n]*\})\s*-->",
-            region["text"],
-        ):
-            try:
-                payload = json.loads(marker[1])
-            except json.JSONDecodeError:
-                _warn(warnings, "invalid_projection_marker_json", region["pointer"])
-                continue
-            if not isinstance(payload, dict) or payload.get("deliveryKind") != "selector":
-                continue
-            destination = payload.get("destination")
-            references.append({
-                "path": destination if isinstance(destination, str) else None,
-                "representation": "selector_reference",
-                "evidence": _METADATA.evidence(region, marker.start(), marker.end()),
-                "full_content_proven": False, "origin_authenticated": False,
-            })
+    references = _METADATA.collect_markers(regions, "selector_reference")
+    warnings.extend(references["warnings"])
     union = sum(_union(spans) for spans in system_spans.values())
     return {
-        "files": files, "selector_references": references,
+        "files": files, "selector_references": references["records"],
+        "selector_reference_evidence": references["coverage"],
         "present_paths": sorted({file["path"] for file in files if file["full_content_present"] is True}),
         "match_evidence": {
             "global_limit": MAX_MATCHES, "per_source_limit": MAX_MATCHES_PER_SOURCE,

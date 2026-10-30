@@ -63,6 +63,44 @@ def collect_inventory(
     budget = scanner_module("context_budget")
     skill_reader = scanner_module("scan_skills")
     warnings: list[dict] = []
+    total_bytes = 0
+    file_count = 0
+    cache: dict[Path, str | None] = {}
+
+    def read(path: Path) -> str | None:
+        nonlocal total_bytes, file_count
+        path = path.resolve()
+        if path in cache:
+            return cache[path]
+        cache[path] = None
+        remaining = MAX_TOTAL_BYTES - total_bytes
+        if file_count >= MAX_FILES or remaining <= 0:
+            warnings.append({"kind": "inventory_read_budget_exhausted", "path": str(path)})
+            return None
+        try:
+            if not path.is_file():
+                return None
+            file_count += 1
+            with path.open("rb") as stream:
+                limit = min(MAX_FILE_BYTES, remaining)
+                if os.fstat(stream.fileno()).st_size > limit:
+                    warnings.append({"kind": "inventory_byte_limit", "path": str(path)})
+                    return None
+                raw = stream.read(limit)
+                grew_beyond_read = os.fstat(stream.fileno()).st_size > len(raw)
+            total_bytes += len(raw)
+            if grew_beyond_read:
+                warnings.append({"kind": "inventory_byte_limit", "path": str(path)})
+                return None
+            cache[path] = raw.decode("utf-8-sig")
+            return cache[path]
+        except (OSError, UnicodeError) as error:
+            warnings.append({
+                "kind": "inventory_file_unreadable", "path": str(path),
+                "error_type": type(error).__name__,
+            })
+            return None
+
     inventory: dict = {
         "instructions": [], "skills": [], "agents": [], "mcp_servers": [],
         "warnings": warnings,
@@ -80,6 +118,7 @@ def collect_inventory(
             include_metadata=False, agent_worktrees_command=agent_worktrees_command,
             allow_legacy_command=False,
             settings_line_comments=True,
+            read_text=read,
         )
     except (OSError, ValueError) as error:
         warnings.append({"kind": "plugin_discovery_failed", "error_type": type(error).__name__})
@@ -106,39 +145,6 @@ def collect_inventory(
     for folder in (config_root / "agents", home / ".claude" / "agents"):
         metadata.update(folder.glob("*.agent.md"))
     origins = {plugin.payload_root.resolve(): plugin.plugin_name for plugin in plugins}
-    total_bytes = 0
-    file_count = 0
-
-    def read(path: Path) -> str | None:
-        nonlocal total_bytes, file_count
-        if file_count >= MAX_FILES:
-            return None
-        remaining = MAX_TOTAL_BYTES - total_bytes
-        if remaining <= 0:
-            return None
-        file_count += 1
-        try:
-            if not path.is_file():
-                return None
-            with path.open("rb") as stream:
-                limit = min(MAX_FILE_BYTES, remaining)
-                if os.fstat(stream.fileno()).st_size > limit:
-                    warnings.append({"kind": "inventory_byte_limit", "path": str(path)})
-                    return None
-                raw = stream.read(limit)
-                grew_beyond_read = os.fstat(stream.fileno()).st_size > len(raw)
-            total_bytes += len(raw)
-            if grew_beyond_read:
-                warnings.append({"kind": "inventory_byte_limit", "path": str(path)})
-                return None
-            return raw.decode("utf-8-sig")
-        except (OSError, UnicodeError) as error:
-            warnings.append({
-                "kind": "inventory_file_unreadable", "path": str(path),
-                "error_type": type(error).__name__,
-            })
-            return None
-
     for path in sorted(instructions, key=str):
         if file_count >= MAX_FILES or total_bytes >= MAX_TOTAL_BYTES:
             warnings.append({"kind": "instruction_inventory_truncated"})
@@ -159,6 +165,8 @@ def collect_inventory(
             continue
         frontmatter = split[0]
         name = skill_reader.get_field(frontmatter, "name")
+        if len(name) >= 2 and name[0] == name[-1] and name[0] in "\"'":
+            name = name[1:-1]
         if not name and path.name.endswith(".agent.md"):
             name = path.name.removesuffix(".agent.md")
         description = skill_reader.get_field_block(frontmatter, "description").strip()
@@ -179,7 +187,10 @@ def collect_inventory(
 
     inventory["mcp_servers"], mcp_complete = collect_mcp_servers(
         directory, root, config_root, plugins, read,
-        lambda: file_count < MAX_FILES and total_bytes < MAX_TOTAL_BYTES,
+        lambda path: (
+            (path.resolve() in cache and cache[path.resolve()] is not None)
+            or (file_count < MAX_FILES and total_bytes < MAX_TOTAL_BYTES)
+        ),
         source_reader.strict_json_document, warnings,
     )
     mcp_complete = mcp_complete and not any(warning["kind"] in {

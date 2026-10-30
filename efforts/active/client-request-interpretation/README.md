@@ -178,3 +178,13 @@ Unavailable attribution is a visible result, not a zero or guessed origin.
   shared read quotas and bounded correlation evidence. Relative instruction
   paths now use the selected harness while existing scanner callers retain
   their default base. Focused regressions cover the supported forms and limits.
+- Follow-up review found discovery reads outside those shared quotas and
+  quoted metadata names that missed rendered aliases. Discovery now uses the
+  same bounded cache as instruction/MCP reads, including settings and manifests;
+  cached manifests remain usable at the quota boundary. Quoted skill and agent
+  names normalize before alias generation. Existing scanner discovery contracts
+  and focused inventory regressions pass.
+- Selector-reference and memory-marker evidence now have explicit candidate
+  and work limits, lower-bound counts on truncation, and sparse UTF-8 offset
+  checkpoints rather than repeated full-prefix encoding. Multibyte and
+  exhaustion regressions pass alongside the combined snapshot cases.

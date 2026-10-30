@@ -201,3 +201,73 @@ def test_global_unknown_wrapper_is_not_invented_as_a_bare_server(tmp_path):
     assert inventory["mcp_servers"] == []
     assert not inventory["coverage"]["mcp_complete"]
     assert any(w["kind"] == "mcp_global_schema_unrecognized" for w in inventory["warnings"])
+
+
+@pytest.mark.parametrize("quote", ['"', "'"])
+def test_quoted_frontmatter_names_correlate_without_yaml_quotes(tmp_path, monkeypatch, quote):
+    root, plugin = tmp_path / "repo", tmp_path / "plugin"
+    write(root / ".git", "synthetic")
+    write(plugin / "skills" / "sample" / "SKILL.md",
+          f"---\nname: {quote}sample{quote}\ndescription: Synthetic skill.\n---\nBody\n")
+    write(plugin / "agents" / "sample.agent.md",
+          f"---\nname: {quote}sample-agent{quote}\ndescription: Synthetic agent.\n---\nBody\n")
+    source = SimpleNamespace(
+        payload_root=plugin, skills_root=plugin / "skills", plugin_name="example",
+        origin="market/example", error="",
+    )
+    monkeypatch.setattr(scanner_module("scan_plugin_sources"), "assemble_enabled_plugins",
+                        lambda *_a, **_k: [source])
+    inventory = collect_inventory(root, home=tmp_path / "home", config_root=tmp_path / "config")
+    assert inventory["skills"][0]["aliases"] == ["example:sample", "sample"]
+    assert inventory["agents"][0]["aliases"] == ["example:sample-agent", "sample-agent"]
+
+
+@pytest.mark.parametrize("oversized", [None, "catalog", "manifest"])
+def test_discovery_reads_share_cached_inventory_budget(tmp_path, monkeypatch, oversized):
+    import snapshot_inventory
+
+    root, config = tmp_path / "repo", tmp_path / "config"
+    catalog = root / "market" / "marketplace.json"
+    manifest = root / "market" / "example" / "plugin.json"
+    settings = root / ".github" / "copilot" / "settings.json"
+    write(root / ".git", "synthetic")
+    write(settings, json.dumps({
+        "enabledPlugins": {"example@market": True},
+        "extraKnownMarketplaces": {"market": {"source": {
+            "source": "directory", "path": "market",
+        }}},
+    }))
+    write(catalog, json.dumps({
+        "name": "market", "plugins": [{"name": "example", "source": "example"}],
+    }))
+    write(manifest, json.dumps({
+        "name": "example", "mcpServers": {"synthetic": {"tools": ["lookup"]}},
+    }))
+    if oversized:
+        target = catalog if oversized == "catalog" else manifest
+        write(target, target.read_text(encoding="utf-8") + " " * 2048)
+    monkeypatch.setattr(snapshot_inventory, "MAX_FILE_BYTES", 1024)
+    if oversized is None:
+        monkeypatch.setattr(snapshot_inventory, "MAX_FILES", 3)
+    original = Path.read_text
+
+    def forbid_unbounded_discovery(path, *args, **kwargs):
+        if path in {catalog, manifest}:
+            pytest.fail("discovery must use the shared bounded reader")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", forbid_unbounded_discovery)
+    inventory = collect_inventory(root, home=tmp_path / "home", config_root=config)
+    expected = [settings]
+    if oversized != "catalog":
+        expected.append(catalog)
+    if oversized is None:
+        expected.append(manifest)
+        assert inventory["mcp_servers"][0]["name"] == "synthetic"
+        assert inventory["coverage"]["mcp_complete"]
+        assert inventory["coverage"]["files_examined"] == 3
+    else:
+        assert not inventory["mcp_servers"]
+        assert not inventory["coverage"]["mcp_complete"]
+        assert any(w["kind"] == "inventory_byte_limit" for w in inventory["warnings"])
+    assert inventory["coverage"]["source_bytes_read"] == sum(path.stat().st_size for path in expected)
