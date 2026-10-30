@@ -618,6 +618,12 @@ it does not itself move the task to `claimed`. The
 [pool-owned assignment/startup target](docs/spawn-supervisor.md#assignment-lifecycle-current-versus-target)
 and its linked repair plan are not implemented by this state diagram.
 
+**Current implementation.** The states below describe the worker-claim lifecycle. Supervised spawn
+reservation is a separate operation before the embodied worker claims the task;
+it does not itself move the task to `claimed`. The
+[pool-owned assignment/startup target](docs/spawn-supervisor.md#assignment-lifecycle-current-versus-target)
+and its linked repair plan are not implemented by this state diagram.
+
 ```
 proposed -> queued -> claimed -> started -> submitted -> completed
                 ^         |          |            |            (terminal)
