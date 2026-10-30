@@ -43,6 +43,7 @@ from .forward import LocalForward, build_forward_ssh_args, build_remote_exec_arg
 from .health import HealthStatus, check_health, ensure_healthy
 from .locks import LockHolder, TargetBusyError, TargetLock, locks_dir, pid_alive
 from .manager import (
+    EXEC_COMMAND_CLEANUP_TIMEOUT,
     TRANSIENT_SSH_STDERR,
     CommandResult,
     ConnectionInfo,
@@ -55,6 +56,7 @@ from .platform import MultiplexMode, PlatformInfo, detect_platform
 from .relay_channel import SupervisedRelayForward
 
 __all__ = [
+    "EXEC_COMMAND_CLEANUP_TIMEOUT",
     "TRANSIENT_SSH_STDERR",
     "CommandResult",
     "CarrierBackpressure",

@@ -14,6 +14,177 @@ import pytest
 from agent_codespaces.plugin_preparation import prepare_plugins
 
 
+@pytest.mark.asyncio
+async def test_relay_readiness_allows_slow_ssh_startup(monkeypatch):
+    from agent_codespaces.plugin_preparation import require_relay_ready
+
+    now = 0.0
+
+    async def execute(manager, name, command, *, timeout):
+        nonlocal now
+        assert name == "synthetic"
+        assert command.startswith("timeout 3 bash -c ")
+        now += min(8.0, timeout)
+        return SimpleNamespace(exit_code=0 if timeout > 8.0 else 1)
+
+    monkeypatch.setattr("agent_codespaces.plugin_preparation.time.monotonic", lambda: now)
+    monkeypatch.setattr("agent_codespaces._ssh_retry.exec_with_retry", execute)
+
+    await require_relay_ready(object(), "synthetic", 12001)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("elapsed", [30.0, 35.0])
+async def test_relay_readiness_still_refuses_failed_probe(monkeypatch, elapsed):
+    from agent_codespaces.plugin_preparation import require_relay_ready
+    from unittest.mock import AsyncMock
+
+    now = 0.0
+
+    async def execute(*args, **kwargs):
+        nonlocal now
+        now += elapsed
+        return SimpleNamespace(exit_code=1)
+
+    run = AsyncMock(side_effect=execute)
+    monkeypatch.setattr("agent_codespaces.plugin_preparation.time.monotonic", lambda: now)
+    monkeypatch.setattr("agent_codespaces._ssh_retry.exec_with_retry", run)
+
+    with pytest.raises(RuntimeError, match="Credential relay is not ready"):
+        await require_relay_ready(object(), "synthetic", 12001)
+    run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_relay_readiness_retries_after_slow_initial_failure(monkeypatch):
+    from agent_codespaces.plugin_preparation import require_relay_ready
+    from unittest.mock import AsyncMock
+
+    now = 0.0
+    attempts = 0
+
+    async def execute(*args, **kwargs):
+        nonlocal now, attempts
+        now += 8.0
+        attempts += 1
+        return SimpleNamespace(exit_code=0 if attempts == 2 else 1)
+
+    monkeypatch.setattr("agent_codespaces.plugin_preparation.time.monotonic", lambda: now)
+    monkeypatch.setattr("agent_codespaces.plugin_preparation.asyncio.sleep", AsyncMock())
+    monkeypatch.setattr("agent_codespaces._ssh_retry.exec_with_retry", execute)
+
+    await require_relay_ready(object(), "synthetic", 12001)
+    assert attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_relay_readiness_bounds_the_retry_transport(monkeypatch):
+    import asyncio
+    from agent_codespaces.plugin_preparation import require_relay_ready
+    from unittest.mock import AsyncMock
+
+    now = 0.0
+    attempts = []
+
+    async def execute(*args, timeout, **kwargs):
+        nonlocal now
+        attempts.append(timeout)
+        if len(attempts) == 1:
+            now += 18.0
+            return SimpleNamespace(exit_code=1)
+        raise asyncio.TimeoutError
+
+    monkeypatch.setattr("agent_codespaces.plugin_preparation.time.monotonic", lambda: now)
+    monkeypatch.setattr("agent_codespaces.plugin_preparation.asyncio.sleep", AsyncMock())
+    monkeypatch.setattr("agent_codespaces._ssh_retry.exec_with_retry", execute)
+
+    with pytest.raises(RuntimeError, match="Credential relay is not ready"):
+        await require_relay_ready(object(), "synthetic", 12001)
+    assert attempts == [20.0, 2.0]
+
+
+@pytest.mark.asyncio
+async def test_relay_readiness_cancels_stalled_transport_at_total_deadline(monkeypatch):
+    import asyncio
+    from agent_codespaces.plugin_preparation import require_relay_ready
+
+    clock = iter([0.0, 19.99])
+    cancelled = False
+
+    async def execute(*args, timeout, **kwargs):
+        nonlocal cancelled
+        assert timeout == pytest.approx(0.01)
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled = True
+
+    monkeypatch.setattr(
+        "agent_codespaces.plugin_preparation.time",
+        SimpleNamespace(monotonic=lambda: next(clock)),
+    )
+    monkeypatch.setattr("agent_codespaces._ssh_retry.exec_with_retry", execute)
+
+    with pytest.raises(RuntimeError, match="Credential relay is not ready"):
+        await require_relay_ready(object(), "synthetic", 12001)
+    assert cancelled
+
+
+@pytest.mark.asyncio
+async def test_relay_readiness_reserves_time_to_reap_cancelled_transport(monkeypatch):
+    import asyncio
+    from unittest.mock import AsyncMock, Mock
+    from ssh_manager import ConnectionManager
+    import ssh_manager.manager as transport
+    import ssh_manager.process as process_module
+    import agent_codespaces.plugin_preparation as preparation
+
+    now = 0.0
+    child = SimpleNamespace(pid=12345, returncode=None, kill=Mock())
+
+    async def communicate(*args, **kwargs):
+        if child.returncode is None:
+            await asyncio.Event().wait()
+        return b"", b""
+
+    async def wait():
+        nonlocal now
+        await asyncio.sleep(0.02)
+        now += 7.0
+        child.returncode = -1
+        return -1
+
+    child.communicate, child.wait = communicate, wait
+    info = SimpleNamespace(
+        config=SimpleNamespace(ssh_target="synthetic"), env={},
+        multiplexed=True, child_processes=[],
+    )
+    manager = ConnectionManager.__new__(ConnectionManager)
+    manager._connections = {"synthetic": info}
+    monkeypatch.setattr(manager, "_mux_ssh_args", lambda info: [])
+    monkeypatch.setattr(transport, "create_ssh_subprocess", AsyncMock(return_value=child))
+    monkeypatch.setattr(process_module, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(process_module.subprocess, "CREATE_NO_WINDOW", 0, raising=False)
+    monkeypatch.setattr(transport.subprocess, "run", Mock())
+
+    def clock():
+        nonlocal now
+        previous = now
+        if now == 0:
+            now = 19.99
+        return previous
+
+    monkeypatch.setattr(preparation, "time", SimpleNamespace(monotonic=clock))
+
+    with pytest.raises(RuntimeError, match="Credential relay is not ready"):
+        await asyncio.wait_for(
+            preparation.require_relay_ready(manager, "synthetic", 12001), timeout=0.2,
+        )
+    assert child.returncode is not None
+    assert info.child_processes == []
+    assert now < 30
+
+
 @pytest.mark.parametrize("bare_source", [False, True])
 @pytest.mark.parametrize("nested_source", [False, True])
 def test_registered_target_absolute_source_rebinds_through_provider_plan(

@@ -1,5 +1,6 @@
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -88,3 +89,50 @@ async def test_callback_failure_preserves_error_and_owned_cleanup(monkeypatch):
     assert raised.value is error
     assert terminated == [process]
     assert info.child_processes == []
+
+
+@pytest.mark.asyncio
+async def test_command_timeout_joins_cleanup_when_the_outer_caller_cancels(monkeypatch):
+    import ssh_manager.process as process_module
+
+    process = Process()
+    process.pid = 12345
+    process.communicate = AsyncMock(side_effect=asyncio.TimeoutError)
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def wait():
+        entered.set()
+        await release.wait()
+        process.returncode = -1
+        return -1
+
+    process.wait = wait
+    item, info = manager(monkeypatch, process)
+    monkeypatch.setattr(process_module, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(process_module.subprocess, "CREATE_NO_WINDOW", 0, raising=False)
+    monkeypatch.setattr(module.subprocess, "run", Mock())
+    operation = asyncio.create_task(item.exec_command("fixture-alias", "fixture resolve"))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        operation.cancel()
+        await asyncio.sleep(0)
+        assert not operation.done()
+        assert process in info.child_processes
+    finally:
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await operation
+    assert process.returncode is not None
+    assert info.child_processes == []
+
+
+@pytest.mark.asyncio
+async def test_unconfirmed_cancel_cleanup_retains_the_original_child(monkeypatch):
+    process = Process()
+    process.communicate = AsyncMock(side_effect=asyncio.CancelledError)
+    item, info = manager(monkeypatch, process)
+    monkeypatch.setattr(module, "_terminate_process_tree", AsyncMock())
+
+    with pytest.raises(asyncio.CancelledError):
+        await item.exec_command("fixture-alias", "fixture resolve")
+    assert process in info.child_processes
