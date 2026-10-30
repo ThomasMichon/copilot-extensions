@@ -193,7 +193,7 @@ def test_change_pagination_and_credentials_are_bounded_by_actual_pages(next_top)
 
 
 @pytest.mark.parametrize("failure", [
-    "missing", "repeated", "repeated_terminal", "nonadvancing", "oversize",
+    "missing", "repeated", "repeated_terminal", "nonadvancing", "oversize", "null_pair", "boolean_pair",
 ])
 def test_bad_change_continuation_retains_known_records_as_incomplete(failure):
     forge = Forge()
@@ -203,6 +203,10 @@ def test_bad_change_continuation_retains_known_records_as_incomplete(failure):
         forge.pages[0].update(nextSkip=0, nextTop=100)
     elif failure == "oversize":
         forge.pages[0].update(nextSkip=100, nextTop=20_001)
+    elif failure == "null_pair":
+        forge.pages[0].update(nextSkip=None, nextTop=None)
+    elif failure == "boolean_pair":
+        forge.pages[0].update(nextSkip=True, nextTop=100)
     else:
         forge.pages[0].update(nextSkip=100, nextTop=100)
         forge.pages[100] = copy.deepcopy(forge.pages[0])
@@ -215,6 +219,41 @@ def test_bad_change_continuation_retains_known_records_as_incomplete(failure):
     assert changes["errors"] == ["changes_incomplete"]
     assert changes["data"][0]["item"]["path"] == "/example.txt"
     assert len(changes["data"]) == 1
+
+
+@pytest.mark.parametrize("terminal", ["empty", "repeated", "missing_half"])
+@pytest.mark.parametrize("mode", ["credential", "protected_owner"])
+def test_cursorless_native_pages_require_a_real_terminal_witness(monkeypatch, terminal, mode):
+    root = Path(__file__).resolve().parents[3]
+    monkeypatch.syspath_prepend(str(root / "plugins" / "agent-pull-requests" / "src"))
+    from agent_pull_requests.review_workspace import build_generation
+
+    forge = Forge()
+    entry = {"changeTrackingId": 7, "changeType": "edit", "item": {"path": "/example.txt"}}
+    forge.pages = {0: {"changeEntries": [entry]}}
+    if terminal == "empty":
+        forge.pages[1] = {"changeEntries": []}
+    elif terminal == "repeated":
+        forge.pages[1] = {"changeEntries": [copy.deepcopy(entry)]}
+    else:
+        forge.pages[1] = {"changeEntries": [], "nextSkip": 1}
+    # The repeated-page case refuses at the second page, never reaching this.
+    if mode == "protected_owner":
+        from agent_worktrees.providers.azure_owned_evidence import acquire_owned_evidence
+        forge.authorized_actor = "effective-actor"
+        state = {}
+        raw = acquire_owned_evidence(protected_owner(forge, state), 42, budget=30)
+        assert state["checks"] >= 2 * len(forge.requests)
+    else:
+        raw = acquire(forge)
+    result = build_generation(raw)
+    changes = result["generation"]["sections"]["changes"]
+    assert changes["data"] == [entry]
+    assert changes["complete"] is (terminal == "empty")
+    assert result["generation"]["complete"] is (terminal == "empty")
+    queries = [query for path, query in forge.requests if path.endswith("/changes")]
+    assert [query["$skip"] for query in queries] == [["0"], ["1"]]
+    assert [query["$top"] for query in queries] == [["100"], ["100"]]
 
 
 def test_new_material_is_identity_checked_and_principal_switch_aborts():

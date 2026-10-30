@@ -123,8 +123,11 @@ never configuration definitions interpreted as evaluation results.
 
 Iterations, common-baseline iteration changes, all-status discussions and
 evaluations use the existing bounded HTTP reader. Iteration changes have their
-own `changeEntries`/`nextSkip`/`nextTop` protocol; missing, malformed, repeated or
-nonadvancing continuation leaves retained records explicitly incomplete.
+own `changeEntries`/`nextSkip`/`nextTop` protocol. When both cursor fields are
+absent, continue `$skip` by the number of records actually consumed, retain the
+requested `$top`, and require an explicit empty page before declaring completion;
+a short nonempty page is not a terminal witness. Partially supplied or malformed
+cursor pairs, repeated pages and nonadvancing cursors remain incomplete.
 Subsequent requests use the advertised `nextSkip` and `nextTop`, not a guessed
 page size; continuation beyond the existing record budget refuses explicitly.
 Unavailable policies are not an empty complete set. Credential loss aborts the
