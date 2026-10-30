@@ -31,6 +31,7 @@ dependency policy, immutable generation and service activation boundaries.
 | Participant | Role in this effort | Reached via |
 |---|---|---|
 | `buzzing-flywheel` | Proposal, isolated reproduction and non-overlapping implementation/validation | #9290 and the proposal PR |
+| `rusty-buckle` | Proposed acquisition/offline phase orchestration; preserves the existing cold-copy owner | #9290 and the phase-contract review |
 | Existing installer owners | Retained-input verification, source staging and release-lock input coordination | #8873/#8949, #5851, #6937/#6941 |
 
 ## Coordination
@@ -44,6 +45,10 @@ dependency policy, immutable generation and service activation boundaries.
   and #6941's release-lock input work intact.
 - **Handoff:** preserve reproduction results, input identity, outstanding review
   and native gates. A cache speedup or merged component is not portfolio adoption.
+- **Phase separation:** review the [network/offline contract](network-and-offline-phases.md)
+  before constructor edits. The phase participant owns only that orchestration;
+  the current cold-copy owner retains `_tree`/`_compact` batching and existing
+  dependency/source owners are not superseded.
 
 ## Context
 
@@ -137,6 +142,11 @@ builder, publisher or composition plan.
 
 ### Phase 3 - Proportionate completion and adoption
 
+- [ ] Review and implement the bounded
+  [network acquisition/offline source-wheel split](network-and-offline-phases.md),
+  with distinct phase accounting and no hidden download in the local build loop.
+  This is agent-recommended decomposition of the operator's explicit request
+  quoted in that contract, not authority to change installed runtimes.
 - [x] Qualify exact-input reuse for static graphs with different declared
   build requirements, retaining independently admitted tooling per requirement
   set rather than merging their resolution environments.
