@@ -233,6 +233,23 @@ evidence is no longer needed.
 
 ## Journal
 
+### 2026-10-30 - Review acquisition and offline phase separation
+
+- #9588 merged as `4149a454542111f7f6adc5e395a6a25dedfcacac` after
+  current-head Copilot approval 5707331484 and required CI.
+- The existing cold-copy owner confirmed a non-overlapping orchestration slice:
+  preserve `_tree`/`_compact`, cache identity, independent requirement tuples,
+  retained UV settings/cutoffs/admission, `build_tools`' four-field result and
+  `tool_sets`, every verification and original failure cause.
+- The implementation pre-acquires selected groups before local construction,
+  gives preparation/acquisition/offline work separate clocks and diagnostics,
+  and ends offline timing before yielding to the caller or unsupported fallback.
+  The configured numeric allowances and outer request lifetime are unchanged.
+- New deterministic phase regressions failed before implementation and pass
+  afterward. The actual two-group constructor also succeeds with the fixture
+  feed unavailable during offline construction. Broader regression, hosted
+  qualification, review and release remain open; this is not installed adoption.
+
 ### 2026-10-28,09:59 UTC - Exact build-requirement groups merged
 
 - #9389 actually merged as `07267d72d70f9d41e191285626f2097843c78c95`.

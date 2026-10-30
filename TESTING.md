@@ -577,6 +577,13 @@ Distinct build-requirement groups use independently admitted tool environments;
 the lower-bound control also runs with the real backend. A synthetic
 conflicting-pin control checks each actual backend's installed version and
 fresh-slot wheel reuse without unioning incompatible requirements.
+The phase controls prove that all selected groups finish acquisition before
+offline construction, then remove the fixture feed's routes and require no
+additional requests while the real constructor completes. Deterministic clock
+controls give acquisition and offline work independent allowances, identify
+the expired phase with its original deadline cause and preserve non-timeout
+integrity refusals. Phase diagnostics stay on stderr; unsupported fallback and
+the caller's subsequent installation are outside offline timing.
 `test_manager_source_native.py` exercises the real standalone Manager adapter and immutable
 constructor with a complete synthetic Manager/process-owner wheel closure:
 offline construction, retained reuse, changed binding, missing first-party
