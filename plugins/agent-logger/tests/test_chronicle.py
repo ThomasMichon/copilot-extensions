@@ -754,6 +754,20 @@ def test_digest_manifest_expands_objective_and_uses_compact_template() -> None:
     assert manifest["sessions"][0]["segment_ref"] == "a:0"
 
 
+def test_digest_manifest_metrics_are_null_unless_supplied() -> None:
+    """Discovery never estimates metrics: a block appears only when a caller
+    attached one, and it is carried verbatim."""
+    sink = LogSink(sink_id="dotfiles", repo_path=Path("/repo"))
+    router = OriginRepoRouter([], default_sink="dotfiles")
+    measured = _session("b", "owner/dotfiles")
+    measured.metrics = {"wall_clock_seconds": 120, "working_seconds": 45, "user_turns": 2}
+    digests = group_by_day([_session("a", "owner/dotfiles"), measured], router)
+    manifest = build_digest_manifest(digests[0], sink)
+    by_id = {entry["session_id"]: entry for entry in manifest["sessions"]}
+    assert by_id["a"]["metrics"] is None
+    assert by_id["b"]["metrics"] == measured.metrics
+
+
 # --------------------------------------------------------------------------
 # Landing policy: direct-commit into a real git repo
 # --------------------------------------------------------------------------

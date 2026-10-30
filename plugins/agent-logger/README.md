@@ -364,6 +364,25 @@ errors, not that every session's content or concurrent publication was verified.
 Ordinary single-archive discovery does not decompress transcript contents;
 conflicting compressed representations still require shared content validation.
 
+To measure one task carried by an ordered chain of sessions -- a session plus
+the successors it handed off to -- from their event logs alone:
+
+```bash
+agent-logger metrics --json <session-id> [<successor-id> ...]
+agent-logger metrics --json --until 2026-01-31T17:00:00Z <session-id>
+```
+
+The JSON report gives the kickoff, the wall-clock duration to the cutoff or the
+last logged event, the agent's working time without time spent waiting on the
+user (`ask_user` answers and permission prompts), and user and agent turn
+counts, per session and in aggregate. Sessions resolve like `session-fetch`, so
+live, archived, and synced sessions measure the same; no message or tool
+content is read or emitted. A chain with an unavailable session, or without a
+prompt, reports `status: unknown` with `null` metrics and exits 1 rather than
+reporting a partial or estimated measurement. See
+[`docs/session-metrics.md`](docs/session-metrics.md) for the measurement rules
+and schema.
+
 Repository files declare a `schema_version` (an omitted version is treated as
 the current schema, 3 as of this release) and may set `log.root`,
 `log.path_template`, `log.timezone`, `log.note_marker`, `log.template`,

@@ -24,7 +24,8 @@ log.
       "summary": "optional brief summary",
       "created_at": "2026-04-25T10:00:00Z",
       "updated_at": "2026-04-25T12:30:00Z",
-      "existing_log_path": "logs/2026/.../Title.md"
+      "existing_log_path": "logs/2026/.../Title.md",
+      "metrics": null
     }
   ],
   "output_root": "logs",
@@ -48,6 +49,7 @@ log.
 | `sessions[].session_path` | yes | Collation source -- an absolute path the segmenter can read. |
 | `sessions[].repository` / `branch` / `summary` / `created_at` / `updated_at` | no | Metadata for frontmatter and triage. |
 | `sessions[].existing_log_path` | no | A pre-existing log to skip / supplement / promote. |
+| `sessions[].metrics` | no | One session row's `metrics` block from `agent-logger metrics --json`, carried verbatim when the caller has it. `null` or absent means no measurement was supplied; it is never computed or estimated. See [session-metrics.md](session-metrics.md). |
 | `output_root` | yes | Root dir for emitted logs. |
 | `target_log_path` | no | Exact caller-prepared path for `single` mode. When present, the renderer uses it verbatim instead of deriving a path. |
 | `log_path_template` | no | Defaults to the agent-logger config template. Tokens: `{year} {month} {day} {hhmmss} {machine} {title}`. |
@@ -70,6 +72,7 @@ session. It sets `mode: "digest"` and adds three fields:
 | `sink` | The routed sink id (target harness repo) this digest lands in. |
 | `digest_template` | The compact daily-digest body template — **distinct** from the per-session `Summary / Key-Changes / Commits / Open-Items` shape. Tokens: `{date} {machine} {sink} {session_count} {sessions}`. |
 | `sessions[].segment_ref` | The `<parent_session_id>:<segment_index>` identity the daemon reserved for this unit (the reservation/dedup identity). |
+| `sessions[].metrics` | Always present: the per-session `metrics` block a runner attached to the discovered session, carried verbatim, else `null`. Discovery never computes it. |
 
 The writer renders **one** log for the whole day from `digest_template`, listing
 the day's sessions tersely. The voice seam is unchanged: `narration_style`
