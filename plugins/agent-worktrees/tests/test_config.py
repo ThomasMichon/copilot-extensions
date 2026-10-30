@@ -3768,3 +3768,202 @@ def test_knowledge_acquisition_wrappers_cannot_borrow_original_completion(
     assert any(f.reason == "owner-coverage-unavailable" for o in owned for f in o.findings)
     if self_restoring:
         assert getattr(cfg, callback_name) is original
+
+
+def test_installation_acquisition_original_unselected_outcome_has_no_child_effects(monkeypatch):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_acquisition as acquisition, registry_paths
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "  ")
+    calls = []
+
+    def forbidden():
+        calls.append("helper")
+        pytest.fail("an unselected context must not load a helper")
+
+    monkeypatch.setattr(registry_paths, "_helper", forbidden)
+    with acquisition.capture_config_observations() as observations:
+        value = registry_paths.installation_context()
+    assert value is None
+    assert calls == []
+    owned = [o for o in observations if o.stage == "installation-context"]
+    assert len(owned) == 1, "the original installation-context decision has no outcome"
+    assert owned[0].authority is ScanAuthority.COMPLETE
+
+
+def test_installation_acquisition_original_selected_keeps_identity_and_no_result_cache(tmp_path, monkeypatch):
+    import os
+
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_acquisition as acquisition, registry_paths
+    from agent_worktrees.acquisition_report import AcquisitionReport
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "context.json"))
+    result = {"marketplaceId": "example", "pluginRoot": str(tmp_path / "cell")}
+    calls = []
+
+    def resolve(**kwargs):
+        assert kwargs == {"payload_root": tmp_path, "environment": os.environ}
+        assert kwargs["environment"] is os.environ
+        calls.append("resolve")
+        return result
+
+    helper = SimpleNamespace(resolve_registry_context=resolve)
+    monkeypatch.setattr(registry_paths, "_helper", lambda: calls.append("helper") or helper)
+    monkeypatch.setattr(registry_paths, "_payload_root", lambda: calls.append("payload") or tmp_path)
+    with acquisition.capture_config_observations() as observations:
+        assert registry_paths.installation_context() is result
+        assert registry_paths.installation_context() is result
+    assert calls == ["helper", "payload", "resolve"] * 2
+    report = AcquisitionReport("installation-context", result, tuple(observations))
+    assert report.reusable is False
+    owned = [o for o in observations if o.stage == "installation-context"]
+    assert len(owned) == 2, "selected original decisions have no per-call provenance"
+    assert all(o.authority is ScanAuthority.COMPLETE for o in owned)
+    assert any(o.stage != "installation-context" and o.authority is ScanAuthority.INDETERMINATE
+               for o in observations), "a selected opaque helper must not become complete child coverage"
+    assert report.authority is ScanAuthority.INDETERMINATE
+
+
+@pytest.mark.parametrize("failure_at", ["helper", "resolve"])
+def test_installation_acquisition_original_errors_keep_exception_identity(tmp_path, monkeypatch, failure_at):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_acquisition as acquisition, registry_paths
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "context.json"))
+    error = ValueError("synthetic private context failure")
+    calls = []
+
+    def resolve(**kwargs):
+        calls.append("resolve")
+        raise error
+
+    def helper():
+        calls.append("helper")
+        if failure_at == "helper":
+            raise error
+        return SimpleNamespace(resolve_registry_context=resolve)
+
+    monkeypatch.setattr(registry_paths, "_helper", helper)
+    monkeypatch.setattr(registry_paths, "_payload_root", lambda: calls.append("payload") or tmp_path)
+    with acquisition.capture_config_observations() as observations:
+        with pytest.raises(ValueError) as caught:
+            registry_paths.installation_context()
+    assert caught.value is error
+    assert calls == (["helper"] if failure_at == "helper" else ["helper", "payload", "resolve"])
+    assert "synthetic private" not in repr(observations)
+    owned = [o for o in observations if o.stage == "installation-context"]
+    assert owned, "the original fatal installation-context outcome was not recorded"
+    assert owned[-1].authority is ScanAuthority.INDETERMINATE
+    assert any(f.detail == "ValueError" for o in owned for f in o.findings)
+
+
+def test_installation_acquisition_late_selection_preserves_overlay_read_parse_order(tmp_path, monkeypatch):
+    import builtins
+
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_acquisition as acquisition, registry_paths
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "")
+    overlay = tmp_path / cfg.MARKETPLACE_OVERLAYS_DIR / "example" / "config.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text("headless: true\n", encoding="utf-8")
+    calls = []
+    native_exists, native_open, native_load = Path.exists, builtins.open, cfg.yaml.load
+
+    def resolve(**kwargs):
+        calls.append("resolve")
+        return {"marketplaceId": " example "}
+
+    helper = SimpleNamespace(resolve_registry_context=resolve)
+
+    def base(*args, **kwargs):
+        calls.append("base")
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "context.json"))
+        monkeypatch.setattr(registry_paths, "_helper", lambda: calls.append("helper") or helper)
+        return {"headless": False, "default_branch": "dev"}
+
+    def exists(path):
+        if path == overlay:
+            calls.append("exists")
+        return native_exists(path)
+
+    def read(path, *args, **kwargs):
+        if Path(path) == overlay:
+            calls.append("read")
+        return native_open(path, *args, **kwargs)
+
+    def parse(stream, *args, **kwargs):
+        calls.append("parse")
+        assert kwargs["Loader"] is cfg._YamlSafeLoader
+        return native_load(stream, *args, **kwargs)
+
+    monkeypatch.setattr(cfg.inrepo_config_source, "load_config_base", base)
+    monkeypatch.setattr(registry_paths, "_helper", lambda: pytest.fail("helper selected before base acquisition"))
+    monkeypatch.setattr(registry_paths, "_payload_root", lambda: calls.append("payload") or tmp_path)
+    monkeypatch.setattr(Path, "exists", exists)
+    monkeypatch.setattr(builtins, "open", read)
+    monkeypatch.setattr(cfg.yaml, "load", parse)
+    with acquisition.capture_config_observations() as observations:
+        value = cfg._load_inrepo_config(str(tmp_path))
+    assert value == {"headless": True, "default_branch": "dev"}
+    assert calls == ["base", "helper", "payload", "resolve", "exists", "read", "parse"]
+    owned = [o for o in observations if o.stage == "installation-context"]
+    assert owned and owned[-1].authority is ScanAuthority.COMPLETE
+
+
+def test_installation_acquisition_self_restoring_callback_cannot_borrow_original_completion(tmp_path, monkeypatch):
+    from types import FunctionType
+
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_acquisition as acquisition, registry_paths
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "")
+    original = registry_paths.installation_context
+    calls, base = [], {"headless": True}
+
+    def wrapper():
+        calls.append("replacement")
+        monkeypatch.setattr(registry_paths, "installation_context", original)
+        return original()
+
+    replacement = FunctionType(wrapper.__code__, original.__globals__, closure=wrapper.__closure__)
+    assert replacement.__globals__ is original.__globals__
+    monkeypatch.setattr(registry_paths, "installation_context", replacement)
+    monkeypatch.setattr(cfg.inrepo_config_source, "load_config_base", lambda *a, **k: base)
+    with acquisition.capture_config_observations() as observations:
+        value = cfg._load_inrepo_config(str(tmp_path))
+    assert value is base
+    assert calls == ["replacement"]
+    assert registry_paths.installation_context is original
+    owned = [o for o in observations if o.stage == "installation-context"]
+    assert owned and owned[-1].authority is ScanAuthority.INDETERMINATE
+    assert any(f.reason == "owner-coverage-unavailable" for o in owned for f in o.findings)
+
+
+def test_installation_acquisition_method_binding_precedes_payload_callback(tmp_path, monkeypatch):
+    from agent_worktrees import registry_paths
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "context.json"))
+    calls, result = [], {"marketplaceId": "example"}
+
+    def original(**kwargs):
+        calls.append("original")
+        assert kwargs["payload_root"] is tmp_path
+        return result
+
+    def replacement(**kwargs):
+        pytest.fail("the resolver method was rebound after argument evaluation")
+
+    helper = SimpleNamespace(resolve_registry_context=original)
+
+    def payload():
+        calls.append("payload")
+        helper.resolve_registry_context = replacement
+        return tmp_path
+
+    monkeypatch.setattr(registry_paths, "_helper", lambda: calls.append("helper") or helper)
+    monkeypatch.setattr(registry_paths, "_payload_root", payload)
+    assert registry_paths.installation_context() is result
+    assert calls == ["helper", "payload", "original"]
+    assert helper.resolve_registry_context is replacement

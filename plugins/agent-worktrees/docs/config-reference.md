@@ -125,11 +125,25 @@ read, parse or probe, and preserves the existing portable-key allowlist, tier
 precedence, values and cache behavior. These reports remain `reusable=False`;
 owner completion is not reusable-data certification.
 
-Control-plane PR discovery, installation context and execution-machine discovery
-still have opaque boundaries. Non-default committed parser callbacks likewise
-lack parser coverage. A valid `Config` or mapping does not certify those owners.
-Fatal loads propagate their original exceptions, never a success-shaped report.
-These observations are not stable input witnesses.
+Installation-context observations describe the original Python decision in
+`registry_paths.installation_context()`, not its delegated validator's complete
+acquisition frontier. An unselected context completes that decision while returning
+`None` without loading a helper. A selected helper remains opaque and
+indeterminate even when the original decision completes and returns its value.
+The in-repo config consumer qualifies the exact callback selected after base
+acquisition; same-globals wrappers, calls to nested originals and self-restoring
+replacements cannot borrow original owner completion for their replacement value.
+The resolver method is still bound before payload-root and environment argument
+evaluation. Original results retain their identity, and original exceptions still
+propagate without fallback or rewrapping; diagnostics retain only the exception
+type, not its body. Reporting adds no read, parse, probe, replay or result cache,
+and an original completed decision does not make these reports reusable.
+
+Control-plane PR discovery and execution-machine discovery still have opaque
+boundaries. Non-default committed parser callbacks likewise lack parser coverage.
+A valid `Config` or mapping does not certify those owners. Fatal loads propagate
+their original exceptions, never a success-shaped report. These observations are
+not stable input witnesses.
 
 Disk candidate/marketplace presence selection preserves the existing single
 `Path.exists()` call and its exact native return/throw behavior. A negative result

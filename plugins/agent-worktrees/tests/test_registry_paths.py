@@ -113,6 +113,33 @@ def _register_repo(name: str, remote: str) -> None:
     repos.write_registry(registry)
 
 
+def test_registry_paths_standalone_import_needs_no_package_or_site_dependencies(tmp_path):
+    home = tmp_path / "synthetic-home"
+    program = """
+import importlib.util
+import sys
+
+assert sys.flags.isolated and sys.flags.no_site
+assert "site" not in sys.modules and "agent_worktrees" not in sys.modules
+spec = importlib.util.spec_from_file_location("standalone_registry_paths", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+assert module.__package__ == "" and "agent_worktrees" not in sys.modules
+print(module._legacy_root())
+"""
+    completed = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", "-c", program,
+         str(PLUGIN_ROOT / "src" / "agent_worktrees" / "registry_paths.py")],
+        cwd=tmp_path, env={**os.environ, "AGENT_HOME": str(home)},
+        capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == str(home / ".agent-worktrees") + "\n"
+    assert completed.stderr == ""
+
+
 def test_legacy_paths_remain_exact_and_ignore_runtime_root(monkeypatch, tmp_path):
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.delenv("AGENT_HOME", raising=False)

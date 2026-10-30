@@ -68,13 +68,47 @@ def registry_root(legacy_root: Path | None = None) -> Path:
 
 
 def installation_context() -> dict | None:
-    """Return the validated explicit context, or ``None`` in legacy mode."""
-    if not os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
-        return None
-    return _helper().resolve_registry_context(
-        payload_root=_payload_root(),
-        environment=os.environ,
+    """Report this original decision, not complete acquisition by its helper."""
+    from dropin_registry import ScanAuthority
+
+    from . import config_acquisition as acquisition
+
+    try:
+        if not os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
+            context = None
+        else:
+            acquisition.opaque_source("installation-context-helper")
+            context = _helper().resolve_registry_context(
+                payload_root=_payload_root(),
+                environment=os.environ,
+            )
+    except Exception as error:
+        acquisition.failed(
+            acquisition.current_observations(), "installation-context", "installation-context",
+            "installation-context-unavailable", type(error).__name__,
+        )
+        raise
+    acquisition.observe(
+        acquisition.current_observations(), "installation-context", "installation-context", ScanAuthority.COMPLETE,
     )
+    return context
+
+
+_INSTALLATION_CONTEXT_OWNER = installation_context
+
+
+def installation_context_call(callback):
+    """Keep the selected callback opaque when it is not the original owner."""
+    from . import config_acquisition as acquisition
+
+    try:
+        return callback()
+    finally:
+        if callback is not _INSTALLATION_CONTEXT_OWNER:
+            acquisition.failed(
+                acquisition.current_observations(), "installation-context", "installation-context",
+                "owner-coverage-unavailable", "selected installation-context callback is not the original owner",
+            )
 
 
 def registry_path(filename: str, *, legacy_root: Path | None = None) -> Path:
