@@ -169,10 +169,12 @@ def test_logger_bootstrap_refusal_keeps_independent_provider_and_guidance(materi
 def test_actual_logger_hook_deadline_caller_loss_drift_install_and_consumers(
     materialized_logger, area, native_window_observation,
 ):
+    print("Logger cold hook: preparing environment", file=sys.stderr, flush=True)
     payload, installation, project = materialized_logger
     profile = installation.parent
     root = profile / ".copilot-extensions/update-driver"
     env = cold_environment(installation, project, area, python_prerequisite=True)
+    print("Logger cold hook: environment ready", file=sys.stderr, flush=True)
     env.pop("AGENT_VAULT_HOME")
     env["AGENT_LOGGER_HOME"] = str(installation)
     env["BOOTSTRAP_KILLSWITCH_STATE_FILE"] = str(profile / "bootstrap-killswitch.json")
@@ -185,13 +187,15 @@ def test_actual_logger_hook_deadline_caller_loss_drift_install_and_consumers(
     command = hook_command(payload, project, profile)
 
     def diagnostic():
-        return "\n".join(
-            f"{path.relative_to(area)}:\n{path.read_text(errors='replace')[-16000:]}"
-            for path in area.rglob("*")
-            if path.is_file() and (path.suffix == ".log" or path.name in {"stdout", "stderr"})
-        )
+        reports = []
+        for path in area.rglob("*"):
+            if path.is_file() and (path.suffix == ".log" or path.name in {"stdout", "stderr"}):
+                print(f"Logger diagnostic read: {path.relative_to(area)}", file=sys.stderr, flush=True)
+                reports.append(f"{path.relative_to(area)}:\n{path.read_text(errors='replace')[-16000:]}")
+        return "\n".join(reports)
 
     def owned(label):
+        print(f"Logger cold hook: entering {label}", file=sys.stderr, flush=True)
         return owned_hook(
             command, env=env, project=project, directory=area / label,
             timeout=deadline, diagnostic=diagnostic, acknowledgement_prefix=ACKNOWLEDGEMENT,
@@ -205,12 +209,16 @@ def test_actual_logger_hook_deadline_caller_loss_drift_install_and_consumers(
         assert Path(admission["project"]) == project
 
     with owned("cold-first") as first:
+        print("Logger cold hook: first owner acknowledged", file=sys.stderr, flush=True)
         observe(lambda: foundation_status(root=root) is not None, 90, diagnostic)
+        print("Logger cold hook: foundation observed", file=sys.stderr, flush=True)
         operation = foundation_status(root=root).operation_id
         assert foundation_status(root=root).state == "running" and not first.exited(), diagnostic()
         first.close_caller()
+        print("Logger cold hook: first caller closed", file=sys.stderr, flush=True)
         assert not first.exited(), diagnostic()
         with owned("cold-second") as second:
+            print("Logger cold hook: second owner acknowledged", file=sys.stderr, flush=True)
             second.close_caller()
 
             def both_completed():
@@ -219,7 +227,9 @@ def test_actual_logger_hook_deadline_caller_loss_drift_install_and_consumers(
                     status(receipt, root=root).state == "completed" for receipt in receipts
                 )
 
+            print("Logger cold hook: waiting for both ordinary results", file=sys.stderr, flush=True)
             observe(both_completed, 850, diagnostic)
+            print("Logger cold hook: both ordinary results observed", file=sys.stderr, flush=True)
             for caller in (first, second):
                 observe(caller.exited, 60, diagnostic)
     requests = status(root=root)

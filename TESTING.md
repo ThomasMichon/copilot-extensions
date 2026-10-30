@@ -1829,6 +1829,8 @@ The Windows cold-hook packet streams bounded failure diagnostics before the
 observer waits for native owner settlement; that wait and its custody are unchanged.
 Fixture staging moves the already-materialized private payload into its installed
 location rather than copying the complete graph again.
+Bounded phase markers distinguish fixture readiness, owner acknowledgement,
+foundation observation and ordinary-result waits; diagnostic paths are fixture-relative.
 
 Windows runs recipe refusals, actual bootstrap hooks and the concurrent cold
 consumer in three separate contained packets. A filtered invocation combines
