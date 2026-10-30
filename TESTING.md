@@ -173,6 +173,16 @@ reaches the saved request without reading the operator's harness or publishing
 the raw artifact. Windows and POSIX qualification are separate; neither test
 claims hosted-provider prompt equivalence or OS egress isolation.
 
+The same plugin's `test_snapshot_defaults.py`, `test_snapshot_inventory.py`
+and `test_snapshot_wire.py` cover current-preference precedence, the 300-second
+default, private companion outputs, settings compatibility, content matches,
+bounded evidence, metadata/search surfaces and explicit unknown attribution.
+`tests/native/test_snapshot_report_cli.py` exercises the shipped offline
+entrypoint against synthetic artifacts without launching Copilot or contacting
+an MCP server. Select the focused files through the same contained runner;
+native entrypoint files require `--allow-explicit-tiers`. Private operator
+snapshots and inventories must never become public test fixtures.
+
 Agent-worktrees' `test_session_shell.py` checks canonical Windows setup copying
 for cold `embody`, without taking over its separate seed/admission owner.
 Its native PowerShell control invokes the actual copied wrapper/setup with

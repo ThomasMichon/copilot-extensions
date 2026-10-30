@@ -24,7 +24,7 @@ skill name) and Copilot loads the matching skill:
 | [building-harnesses](skills/building-harnesses/SKILL.md) | building or auditing an agent control harness | Entry point to the [Control-Harness Runbook](../../docs/harness-runbook.md): plugin set, repo adoption, `AGENTS.md`, delegation, validation, efforts, and visions |
 | [setting-up-release-pipeline](skills/setting-up-release-pipeline/SKILL.md) | building or auditing a marketplace/harness repo's own dev/main promotion pipeline | Entry point to the [dev/main promotion pipeline pattern](../../docs/patterns/dev-main-promotion-pipeline.md): branch roles, ruleset config, the changefile/version-bump/vendoring system, and a generic `CONTRIBUTING.md` template |
 | [reviewing-customizations](skills/reviewing-customizations/SKILL.md) | reviewing a repo's customization surfaces | Mechanical scan + design critique over skills, project/`.ai` agents, origin/version-aware advisory checks for enabled external plugin agents, instructions, hooks, and MCP configs |
-| [capturing-client-requests](skills/capturing-client-requests/SKILL.md) | inspecting the raw prompt and tools the client actually sends | Explicit operator-owned, one-shot loopback capture to a private local file; no shared inference logging or forwarding |
+| [capturing-client-requests](skills/capturing-client-requests/SKILL.md) | inspecting the raw prompt and tools the client actually sends | Current-model, one-shot loopback capture plus default local instruction/metadata/tool interpretation and byte accounting; no shared inference logging or forwarding |
 | [authoring-harness-plugins](skills/authoring-harness-plugins/SKILL.md) | packaging a repo's operator guidance for other control repos | The payload-only `<repo>-harness` pattern: contribute/diagnose skills, README bar, marketplace wiring, and adoption |
 | [diagnosing-copilot-cli-startup](skills/diagnosing-copilot-cli-startup/SKILL.md) | an interactive CLI is stuck on `Loading` or `Resuming` | Mux capture, process/session correlation, persisted events and logs, startup-boundary classification, bridge differential diagnosis, and operator-authorized reproduction |
 | [hoisting-plugin-agents](skills/hoisting-plugin-agents/SKILL.md) | a delegated/background sub-agent or nested `copilot` process can't reach a marketplace-enabled plugin agent | Hoisting enabled directory-marketplace plugin agents into a repo-local `.github/agents/` fallback; generating, verifying, and retiring the hoisted copies |
@@ -82,8 +82,10 @@ Extensions API is not yet fully replaceable.
 Provides:
 
 - An opt-in [raw client-request capture](skills/capturing-client-requests/references/usage.md)
-  script for debugging a selected harness with a temporary local fake provider.
-  Raw output stays local; the tool does not log an existing/shared service.
+  script and offline interpreter for debugging a selected harness with a
+  temporary local fake provider. Current model settings and a 300-second
+  timeout preserve large-harness behavior; raw data and interpretation stay
+  local. The tool does not log an existing/shared service or invent provenance.
 - Authoring and diagnostic skills, the bundled `reviewing-customizations` scanner and instruction
   projection manager, and the cross-platform
   `installing-plugins/scripts/plugin-activation.py` state helper.
