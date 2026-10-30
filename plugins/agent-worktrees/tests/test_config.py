@@ -2885,3 +2885,85 @@ def test_config_yaml_report_retains_bool_suppressed_source_lookup_error(tmp_path
     assert report.value == {}
     assert report.authority is ScanAuthority.INDETERMINATE
     assert any(o.source == str(path) and o.authority is ScanAuthority.INDETERMINATE for o in report.observations)
+
+
+@pytest.mark.parametrize("outcome", ["timeout", "os-error", "not-repo-nonzero", "other-nonzero", "empty-success"])
+def test_config_source_report_retains_default_root_lookup_uncertainty(tmp_path, monkeypatch, outcome):
+    import subprocess
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_sources, machine_config, state_root
+    from agent_worktrees.acquisition_report import AcquisitionReport
+
+    fallback, cwd = tmp_path / "fallback", tmp_path / "caller"
+    config = _machine_overlay_report_config(fallback, tmp_path)
+    monkeypatch.setattr(machine_config, "machine_config_root", lambda *a, **k: None)
+    monkeypatch.setattr(machine_config, "machine_config_root_report", lambda *a, **k: AcquisitionReport("machine", None, ()))
+    calls = []
+
+    def lookup(argv, **kwargs):
+        calls.append((argv, kwargs))
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"], output="private Git output", stderr="private Git error")
+        if outcome == "os-error":
+            raise OSError("private Git lookup failure")
+        if outcome == "not-repo-nonzero":
+            return SimpleNamespace(returncode=128, stdout="", stderr="fatal: not a git repository")
+        if outcome == "other-nonzero":
+            return SimpleNamespace(returncode=128, stdout="private Git output", stderr="private Git error")
+        return SimpleNamespace(returncode=0, stdout="  ", stderr="")
+
+    monkeypatch.setattr(state_root.subprocess, "run", lookup)
+    legacy = config_sources.config_source_anchors(config, cwd=str(cwd))
+    assert [(source.anchor, source.origin) for source in legacy] == [(str(fallback), "harness")]
+    assert len(calls) == 1
+    calls.clear()
+    report = config_sources.config_source_anchors_report(config, cwd=str(cwd))
+    assert report.value == legacy
+    assert len(calls) == 1
+    argv, options = calls[0]
+    assert argv == ["git", "-C", str(cwd), "rev-parse", "--show-toplevel"]
+    assert options["timeout"] == 10
+    assert options["capture_output"] is True and options["text"] is True
+    assert options["stdin"] is subprocess.DEVNULL
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert report.findings
+    assert "private Git" not in repr(report.observations)
+    assert "not a git repository" not in repr(report.observations)
+    assert report.reusable is False
+
+
+@pytest.mark.parametrize("selection", ["explicit-base", "git-success", "missing-default"])
+def test_config_source_report_default_selection_preserves_bypass_and_fallback_controls(tmp_path, monkeypatch, selection):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_sources, machine_config, state_root
+    from agent_worktrees.acquisition_report import AcquisitionReport
+
+    fallback, current = tmp_path / "fallback", tmp_path / "current"
+    config = _machine_overlay_report_config(fallback, tmp_path)
+    if selection == "missing-default":
+        from dataclasses import replace
+        config = replace(config, repos={})
+    monkeypatch.setattr(machine_config, "machine_config_root", lambda *a, **k: None)
+    monkeypatch.setattr(machine_config, "machine_config_root_report", lambda *a, **k: AcquisitionReport("machine", None, ()))
+    calls = []
+
+    def lookup(argv, **kwargs):
+        calls.append((argv, kwargs))
+        if selection == "explicit-base":
+            raise AssertionError("explicit positive base must skip Git lookup")
+        return SimpleNamespace(returncode=0, stdout=str(current) if selection == "git-success" else "", stderr="")
+
+    monkeypatch.setattr(state_root.subprocess, "run", lookup)
+    explicit = str(current) if selection == "explicit-base" else None
+    legacy = config_sources.config_source_anchors(config, base_anchor=explicit)
+    assert len(calls) == (0 if selection == "explicit-base" else 1)
+    calls.clear()
+    report = config_sources.config_source_anchors_report(config, base_anchor=explicit)
+    assert report.value == legacy
+    assert len(calls) == (0 if selection == "explicit-base" else 1)
+    if selection == "missing-default":
+        assert report.value == []
+        assert report.authority is ScanAuthority.INDETERMINATE
+    else:
+        assert [(source.anchor, source.origin) for source in report.value] == [(str(current), "harness")]
+        assert report.authority is ScanAuthority.COMPLETE

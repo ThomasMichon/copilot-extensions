@@ -69,7 +69,14 @@ def _config_source_anchors(config, *, base_anchor=None, cwd=None, observations=N
     from . import state_root
     from .machine_config import machine_config_root, machine_config_root_report
 
-    base = base_anchor or state_root._git_toplevel(cwd) or _default_anchor(config)
+    if base_anchor:
+        base = base_anchor
+    elif observations is None:
+        base = state_root._git_toplevel(cwd) or _default_anchor(config)
+    else:
+        root_report = state_root._git_toplevel_report(cwd)
+        observations.extend(root_report.observations)
+        base = root_report.value or _default_anchor(config)
     sources = []
     if base:
         sources.append(ConfigSource(anchor=base, origin="harness"))

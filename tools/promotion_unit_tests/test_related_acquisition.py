@@ -325,3 +325,77 @@ def test_resolution_helpers_keep_legacy_fallback_and_observe_failure_once(api, m
         assert calls == [anchor]
     assert observations[0].authority is ScanAuthority.INDETERMINATE
     assert "private resolution body" not in repr(observations)
+
+
+
+def _default_root_owner(api, monkeypatch):
+    api.stub("config")
+    environment = {"synthetic": "repository-identity-environment"}
+    api.stub("git_ops", repository_identity_env=lambda: environment)
+    api.stub("repos")
+    sources = api.load("config_sources")
+    owner = api.load("state_root")
+    monkeypatch.setattr(owner, "no_window_kwargs", lambda: {"creationflags": 1234})
+    return sources, owner, environment
+
+
+@pytest.mark.parametrize("outcome", ["timeout", "os-error", "nonzero", "empty", "none-output", "success"])
+def test_default_git_root_owner_reports_one_unchanged_lookup_without_private_output(api, monkeypatch, outcome):
+    import subprocess
+
+    _, owner, environment = _default_root_owner(api, monkeypatch)
+    calls = []
+
+    def lookup(argv, **kwargs):
+        calls.append((argv, kwargs))
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"], output="private Git output", stderr="private Git error")
+        if outcome == "os-error":
+            raise OSError("private Git error")
+        return SimpleNamespace(returncode=128 if outcome == "nonzero" else 0,
+                               stdout=" root " if outcome == "success" else None if outcome == "none-output" else " ",
+                               stderr="private Git error")
+
+    monkeypatch.setattr(owner.subprocess, "run", lookup)
+    legacy = owner._git_toplevel("synthetic-cwd")
+    assert legacy == ("root" if outcome == "success" else None)
+    assert len(calls) == 1
+    old_call = calls.pop()
+    report = owner._git_toplevel_report("synthetic-cwd")
+    assert report.value == legacy
+    assert calls == [old_call]
+    argv, options = calls[0]
+    assert argv == ["git", "-C", "synthetic-cwd", "rev-parse", "--show-toplevel"]
+    assert options == {"capture_output": True, "text": True, "timeout": 10,
+                       "env": environment, "stdin": subprocess.DEVNULL, "creationflags": 1234}
+    assert report.authority is (ScanAuthority.COMPLETE if outcome == "success" else ScanAuthority.INDETERMINATE)
+    assert "private Git" not in repr(report.observations)
+    assert report.reusable is False
+
+
+@pytest.mark.parametrize("selection", ["explicit", "timeout-fallback"])
+def test_config_sources_uses_root_owner_once_and_preserves_explicit_bypass(api, monkeypatch, selection):
+    import subprocess
+
+    sources, owner, _ = _default_root_owner(api, monkeypatch)
+    config = SimpleNamespace(repo_name="sample", default_repo=SimpleNamespace(
+        anchor="fallback", requires_external_state_root=False, stateless=False,
+    ))
+    api.stub("machine_config", machine_config_root=lambda *a, **k: None,
+             machine_config_root_report=lambda *a, **k: sources.AcquisitionReport("machine", None, ()))
+    calls = []
+
+    def lookup(argv, **kwargs):
+        calls.append((argv, kwargs))
+        if selection == "explicit":
+            raise AssertionError("explicit base must not call Git")
+        raise subprocess.TimeoutExpired(argv, kwargs["timeout"], stderr="private Git error")
+
+    monkeypatch.setattr(owner.subprocess, "run", lookup)
+    report = sources.config_source_anchors_report(
+        config, base_anchor="explicit" if selection == "explicit" else None, cwd="synthetic-cwd",
+    )
+    assert [(s.anchor, s.origin) for s in report.value] == [("explicit" if selection == "explicit" else "fallback", "harness")]
+    assert len(calls) == (0 if selection == "explicit" else 1)
+    assert report.authority is (ScanAuthority.COMPLETE if selection == "explicit" else ScanAuthority.INDETERMINATE)
+    assert "private Git" not in repr(report.observations)

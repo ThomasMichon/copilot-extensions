@@ -18,6 +18,10 @@ classifier rather than inferring absence from error-suppressing boolean probes.
 Missing candidates, confirmed incorrect kinds and failed lookups remain distinct.
 Manifest layout/identity and path-resolution fallbacks retain encountered
 uncertainty alongside available values; fallback keys are not stable witnesses.
+Default-base reports also borrow the existing state-root owner's single Git
+lookup result: lookup exceptions, ambiguous nonzero exits and empty successful
+output retain uncertainty even when a default anchor remains available. A
+positive explicit base bypasses that lookup; no Git execution policy changes.
 
 Each `AcquisitionReport[T]` contains the legacy available value, a named
 operation scope, ordered source observations and `ScanAuthority`/`Finding`
