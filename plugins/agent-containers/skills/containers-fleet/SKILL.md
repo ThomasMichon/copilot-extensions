@@ -116,6 +116,30 @@ discover other devcontainers, but they never inherit global credential or launch
 defaults. Restricted venues are re-inspected before start/exec; a stale image or
 weakened Docker posture is refused.
 
+To run a fleet on a runtime other than Docker, point it at an **external
+runtime driver** -- a registered command that provisions, enumerates, starts,
+stops, removes, execs into and copies files into members (for example a
+Podman-based tool):
+
+```yaml
+fleets:
+  example:
+    driver: example-driver        # ~/.agent-containers/drivers.d/example-driver.json
+    driver_options:               # or agent-containers-driver-example-driver on PATH
+      profile: default            # forwarded verbatim; never secret
+    size: 2
+    workspace_folder: /workspaces/example
+    exec_user: vscode
+    relay_enabled: false          # unless the driver owns_relay / ssh_transport
+```
+
+Leases, `borrow`/`release`, sizing, readiness and `container:<name>` dispatch
+work unchanged. Driver fleets are trusted-only and reject the Docker
+provisioning keys (`image`, `devcontainer_path`, `devcontainer_config`, `repo`,
+resource/mount keys). `agent-containers drivers` lists registered drivers. The
+command protocol, capabilities (`owns_relay`, `ssh_transport`) and fail-closed
+rules are in the plugin's `docs/runtime-drivers.md`.
+
 For an `image:`-backed **trusted** fleet that needs real, host-backed
 persistence and/or a working `systemd --user` (for its own maintenance
 timers), opt into `host_workspace_path`/`host_home_path`+`home_folder` and

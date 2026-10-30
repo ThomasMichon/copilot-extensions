@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING
 from agent_procutil import no_window_flags
 from plugin_resolve.reflection import selection_spec
 
-from . import lifecycle
+from . import lifecycle, runtime_drivers
 from ._invoke import payload_command_argv
 from .config import (
     DISPATCH_ONLY_LABEL,
@@ -749,7 +749,16 @@ class ContainerResolver:
             spec["venue"]["dispatch_only"] = True
             spec["venue"]["ready"] = False
             spec["venue"]["capabilities"]["task_projection"] = True
-        if not restricted:
+        plan = None
+        if fleet.driver and not restricted:
+            # Fails closed when the driver lacks a capability the fleet needs.
+            plan = await asyncio.to_thread(
+                runtime_drivers.launch_plan, fleet, name, relay_enabled,
+            )
+            spec["venue"]["driver"] = fleet.driver
+            spec["venue"]["transport"] = "ssh" if plan.ssh else "driver-exec"
+            spec["venue"]["capabilities"]["session_host"] = plan.ssh
+        if not restricted and (plan is None or plan.ssh):
             from .hosting_policy import guarded_launch
 
             instance_id = getattr(info, "container_id", None)
@@ -773,7 +782,9 @@ class ContainerResolver:
                 "ssh": asdict(ssh_config),
                 "provider_command": payload_command_argv(),
                 "relay_remote_port": (
-                    config.relay_port if relay_enabled else None
+                    config.relay_port
+                    if relay_enabled and (plan is None or plan.agent_relay)
+                    else None
                 ),
             }
         return spec

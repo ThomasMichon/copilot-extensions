@@ -1,7 +1,9 @@
 # agent-containers
 
 Local Docker dev-container **fleet manager**, **lease broker**, and
-optional agent-bridge **`container:` namespace provider**.
+optional agent-bridge **`container:` namespace provider**. A fleet can also run
+on another container runtime through an
+[external runtime driver](docs/runtime-drivers.md).
 
 Manages a persistent fleet of local dev containers (Docker Desktop WSL2
 backend), brokers *advisory* exclusive leases so an effort can borrow a
@@ -235,6 +237,38 @@ the supervisor and coordinator still own those decisions. Automatic dispatch
 placement and supervisor renewal are not yet integrated.
 
 ## Concepts
+
+### External runtime drivers
+
+Docker is the built-in runtime. A trusted fleet that sets `driver: <name>`
+delegates provisioning, enumeration, inspection, start/stop/remove, exec,
+streaming exec and file copy to an external driver command, while leases,
+borrow/release, sizing, readiness and the `container:<name>` resolver stay
+here:
+
+```yaml
+fleets:
+  example:
+    driver: example-driver
+    driver_options: {profile: default}   # forwarded verbatim to the driver
+    size: 2
+    workspace_folder: /workspaces/example
+    exec_user: vscode
+    relay_enabled: false
+```
+
+Drivers register through `~/.agent-containers/drivers.d/<name>.json` (or
+`$AGENT_CONTAINERS_DRIVERS_DIR`) or an `agent-containers-driver-<name>`
+executable on `PATH`; `agent-containers drivers` lists them. A driver declares
+`owns_relay` (it provides the `LC_GIT_CREDENTIAL_RELAY*` contract itself, so no
+relay shims or reverse forward are wired) and/or `ssh_transport` (the trusted
+OpenSSH transport rides on its streaming exec). Without `ssh_transport`, ACP
+runs over direct streaming exec; a fleet whose relay is enabled fails closed
+unless the driver has one of those capabilities. Docker provisioning keys
+(`image`, `devcontainer_path`, `devcontainer_config`, `repo`, resource and
+host-mount keys) are rejected on a driver fleet. Restricted fleets stay
+Docker-only. The protocol is specified in
+[`docs/runtime-drivers.md`](docs/runtime-drivers.md).
 
 ### Externally managed trusted members
 
@@ -509,6 +543,7 @@ agent-containers source-remove <name> --project <project>
 agent-containers ssh-profile <name> --json
                                       # inspect provider/profile metadata only
 agent-containers config-migrate      # stamp/migrate machine-local containers.yaml
+agent-containers drivers [--json]    # list registered external runtime drivers
 agent-containers version             # show version
 ```
 

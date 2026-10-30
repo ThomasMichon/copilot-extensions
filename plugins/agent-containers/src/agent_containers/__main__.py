@@ -31,7 +31,7 @@ from pathlib import Path
 
 from agent_procutil import no_window_flags as _creation_flags
 
-from . import claim_provider_cli, hosting_policy, rescue_capture_cli
+from . import claim_provider_cli, driver_cli, hosting_policy, rescue_capture_cli, runtime_drivers
 from . import copilot_process_auth as process_auth
 from .config import (
     RESTRICTED_PROFILE,
@@ -49,6 +49,7 @@ from .resolver import (
     resolve_live_exec_target,
     target_repo_for_cli,
 )
+from .stdio_pump import exec_stdio as _exec_stdio
 from .ssh_transport import (
     build_remote_command,
     build_ssh_command,
@@ -115,6 +116,7 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--force", action="store_true", help="Force removal")
 
     claim_provider_cli.add_claim_provider_parsers(sub)
+    driver_cli.add_drivers_parser(sub)
     rescue_capture_cli.add_rescue_capture_parser(sub)
     borrow_p = sub.add_parser("borrow", help="Lease a free container to an effort")
     borrow_p.add_argument("effort", help="Effort name (lease holder)")
@@ -706,6 +708,7 @@ def _cmd_fleet(args: argparse.Namespace) -> int:
                 "state": c.state,
                 "status": c.status,
                 "fleet": c.fleet,
+                "driver": c.driver,
                 "local_folder": c.local_folder,
                 "lease": lease.effort if lease else None,
                 "lifecycle_hold": hold_status,
@@ -1029,6 +1032,8 @@ def _launch_container_agent(
         return _exec_stdio(spawn_cmd, env)
 
     forward, relay_enabled = config.credentials_for(fleet)
+    plan = runtime_drivers.launch_plan(fleet, args.name, relay_enabled)
+    relay_enabled = plan.agent_relay
     env = os.environ.copy()
     if forward:
         token = host_gh_token()
@@ -1097,7 +1102,7 @@ def _launch_container_agent(
     env = process_auth.without_inference_token(env)
     copilot_auth_env = None
     try:
-        ssh_config = prepare_ssh_config(args.name, user)
+        ssh_config = prepare_ssh_config(args.name, user) if plan.ssh else None
         copilot_auth_env = process_auth.prepare_launch(config, fleet, args.name, user)
         acp_command = hosting_policy.guarded_launch(
             process_auth.wrap_command(acp_command, copilot_auth_env), fleet.workspace_folder or config.workspace_folder,
@@ -1107,8 +1112,8 @@ def _launch_container_agent(
             ssh_config,
             remote_command,
             reverse_forwards=reverse_forwards,
-        )
-        log.info("exec transport=ssh target=%s", args.name)
+        ) if plan.ssh else plan.driver.stream_exec_argv(args.name, ["sh", "-c", remote_command], user=user)
+        log.info("exec transport=%s target=%s", "ssh" if plan.ssh else "driver", args.name)
         if not args.stdio:
             proc = subprocess.run(
                 spawn_cmd, env=env, creationflags=_creation_flags()
@@ -1118,62 +1123,6 @@ def _launch_container_agent(
     finally:
         cleanup_remote_env(args.name, user, remote_env)
         cleanup_remote_env(args.name, user, copilot_auth_env)
-
-
-def _exec_stdio(spawn_cmd: list[str], env: dict[str, str]) -> int:
-    """Run a transport command, pumping stdio over explicit pipes."""
-    import threading
-
-    proc = subprocess.Popen(
-        spawn_cmd,
-        env=env,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        creationflags=_creation_flags(),
-    )
-
-    def _forward_in() -> None:
-        try:
-            in_fd = sys.stdin.buffer.fileno()
-            while True:
-                data = os.read(in_fd, 65536)
-                if not data:
-                    break
-                proc.stdin.write(data)
-                proc.stdin.flush()
-        except (OSError, ValueError) as exc:
-            log.error("transport stdin forwarding failed: %s", exc)
-        finally:
-            try:
-                proc.stdin.close()
-            except OSError:
-                pass
-
-    def _forward(src, dst) -> None:
-        try:
-            src_fd = src.fileno()
-            while True:
-                data = os.read(src_fd, 65536)
-                if not data:
-                    break
-                dst.write(data)
-                dst.flush()
-        except (OSError, ValueError) as exc:
-            log.error("transport output forwarding failed: %s", exc)
-
-    threads = [
-        threading.Thread(target=_forward_in, daemon=True),
-        threading.Thread(target=_forward, args=(proc.stdout, sys.stdout.buffer), daemon=True),
-        threading.Thread(target=_forward, args=(proc.stderr, sys.stderr.buffer), daemon=True),
-    ]
-    for t in threads:
-        t.start()
-    rc = proc.wait()
-    # Let the output pumps drain anything buffered after exit.
-    for t in threads[1:]:
-        t.join(timeout=2)
-    return rc
 
 
 if __name__ == "__main__":

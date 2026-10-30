@@ -75,7 +75,7 @@ def test_fleet_json_emits_bare_array_with_expected_fields(monkeypatch, capsys):
     row = data[0]
     assert set(row) == {
         "name", "container_id", "image", "state", "status",
-        "fleet", "local_folder", "lease", "security_profile",
+        "fleet", "driver", "local_folder", "lease", "security_profile",
         "configured_security_profile", "security_policy_current",
         "security_policy_errors", "network", "environment_names",
         "host_credentials", "lifecycle_hold", "rescue",
@@ -85,6 +85,7 @@ def test_fleet_json_emits_bare_array_with_expected_fields(monkeypatch, capsys):
     assert row["name"] == "aperture-1"
     assert row["state"] == "running"
     assert row["fleet"] == "myrepo"
+    assert row["driver"] is None
     assert row["lease"] == "my-effort"
     assert row["security_profile"] == "trusted"
     assert row["configured_security_profile"] == "trusted"

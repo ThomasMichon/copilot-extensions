@@ -118,11 +118,12 @@ def session_host_launch_inputs(
 
 
 def _run(target: ExecutionCheckout, command: str) -> subprocess.CompletedProcess[str]:
+    from .runtime_drivers import run_routed
+
+    argv = ["docker", "exec", "-u", target.user, target.container_id, "bash", "-lc", command]
     try:
-        result = subprocess.run(
-            ["docker", "exec", "-u", target.user, target.container_id,
-             "bash", "-lc", command],
-            capture_output=True, text=True, timeout=90, check=False,
+        result = run_routed(argv, timeout=90) or subprocess.run(
+            argv, capture_output=True, text=True, timeout=90, check=False,
             creationflags=no_window_flags(),
         )
     except (OSError, subprocess.SubprocessError) as exc:

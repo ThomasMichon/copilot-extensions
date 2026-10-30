@@ -154,6 +154,10 @@ def cmd_copilot(
     ):
         print("[FAIL] --ttl-seconds applies only to attached mode", file=sys.stderr)
         return 1
+    from .config import load_config as _load_config
+    from .runtime_drivers import require_ssh_transport
+
+    require_ssh_transport(_load_config(), args.name, "The `copilot` verb")
     if getattr(args, "stop", False) or getattr(args, "detach", False):
         from . import copilot_detach
 

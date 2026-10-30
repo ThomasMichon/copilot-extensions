@@ -31,17 +31,26 @@ def inspect_toolchain(
 ) -> tuple[str, ...]:
     """Validate only tools required by the configured fleet backends."""
     failures: list[str] = []
-    if config.fleets and command_finder("docker") is None:
+    docker_fleets = [f for f in config.fleets.values() if not f.driver]
+    if docker_fleets and command_finder("docker") is None:
         failures.append("docker CLI is not installed")
     if any(fleet.devcontainer_path for fleet in config.fleets.values()):
         if command_finder("devcontainer") is None:
             failures.append(
                 "devcontainer CLI is required by a configured devcontainer fleet"
             )
-    if any(not fleet.restricted for fleet in config.fleets.values()):
+    if any(not f.restricted for f in docker_fleets):
         if command_finder("ssh") is None:
             failures.append("OpenSSH is required by a configured trusted fleet")
     for name, fleet in sorted(config.fleets.items()):
+        if fleet.driver:
+            try:
+                from .external_driver import find_driver
+
+                find_driver(fleet.driver)
+            except RuntimeError as exc:
+                failures.append(f"fleet {name!r}: {exc}")
+            continue
         if not fleet.devcontainer_path and not fleet.image:
             failures.append(
                 f"fleet {name!r} needs either devcontainer_path or image"
