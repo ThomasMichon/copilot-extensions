@@ -1659,6 +1659,13 @@ repo = "https://github.com/<fork>/copilot-extensions.git"
 ref  = "canary"
 ```
 
+Git-backed acquisition uses per-command Windows long-path support for cloning,
+fetching and checkout, including Main and custom refs. It does not change
+user-level or machine-level Git configuration. Main and custom-ref checkouts
+materialize only `worktree-manager`, its shared `libs`, and `.gitattributes`,
+including when reusing an existing staging checkout; unrelated plugin paths
+are not needed for Manager self-update.
+
 Manager update and bootstrap activation start the selected `mux-daemon` on a
 fresh loopback port without requiring a healthy or even present predecessor.
 Only the incoming generation is health-checked before routing is published;

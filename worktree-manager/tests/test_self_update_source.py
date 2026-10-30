@@ -189,6 +189,7 @@ def test_main_git_failure_preserves_captured_cause(
     monkeypatch.setattr(si, "self_install", lambda **kw: pytest.fail("No acquired candidate"))
 
     def run(argv: list[str], **options: object) -> subprocess.CompletedProcess:
+        assert argv[:3] == ["git", "-c", "core.longpaths=true"]
         if command in argv:
             raise subprocess.CalledProcessError(128, argv, stderr="fatal: fixture checkout I/O failure")
         return subprocess.CompletedProcess(argv, 0)

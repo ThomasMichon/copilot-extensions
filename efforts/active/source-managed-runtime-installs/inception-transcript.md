@@ -220,3 +220,12 @@ Actual I/O failures remain explicit; application readiness must not be claimed
 without evidence. Separating file/registration application from readiness
 reporting is an agent-recommended realization of this boundary.
 This intent revision does not authorize a live-host install or removal.
+
+## Compact scratch and Git paths
+
+> We could use a shorter scratch folder name and also just figure out how to use shorter paths in Git
+
+Keep temporary path prefixes compact and avoid materializing unrelated Git
+trees when acquiring the Manager's payload and required libraries. This
+refines the path-length remedy; it does not authorize moving or deleting
+active scratch data or changing the installation's durable data root.

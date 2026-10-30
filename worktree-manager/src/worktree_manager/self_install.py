@@ -984,20 +984,26 @@ def self_update(
 
             payload = fetch(repo, r, environment=auth_env)
         elif use_git:
-            if (staging / ".git").is_dir():
-                subprocess.run(["git", "-C", str(staging), "fetch", "--depth", "1",
+            git = ["git", "-c", "core.longpaths=true"]
+            existing = (staging / ".git").is_dir()
+            if existing:
+                subprocess.run([*git, "-C", str(staging), "fetch", "--depth", "1",
                                 repo, ref], check=True, capture_output=True,
                                text=True, timeout=180, **environment)
-                subprocess.run(["git", "-C", str(staging), "checkout", "-q",
-                                "FETCH_HEAD"], check=True, capture_output=True,
-                               text=True, timeout=60, **environment)
             else:
                 # staging may hold a prior tarball payload (no .git); clear so the
                 # clone lands in an empty dir.
                 _clear_dir(staging)
-                subprocess.run(["git", "clone", "--depth", "1", "--branch", ref,
+                subprocess.run([*git, "clone", "--no-checkout", "--depth", "1", "--branch", ref,
                                 repo, str(staging)], check=True,
                                capture_output=True, text=True, timeout=300, cwd=staging, **environment)
+            sparse = staging / ".git" / "info" / "sparse-checkout"
+            sparse.parent.mkdir(parents=True, exist_ok=True)
+            sparse.write_text("/worktree-manager/\n/libs/\n/.gitattributes\n", encoding="utf-8")
+            subprocess.run([*git, "-c", "core.sparseCheckout=true",
+                            "-c", "core.sparseCheckoutCone=false", "-C", str(staging),
+                            "checkout", "-q", "FETCH_HEAD" if existing else "HEAD"], check=True,
+                           capture_output=True, text=True, timeout=60, **environment)
         else:
             url = manager_tarball_url(r, ref)
             if url is None:

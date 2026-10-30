@@ -81,7 +81,7 @@ def test_task_inventory_captures_only_owned_unicode_records(
 
 
 def test_diagnostics_copy_only_advertised_request_logs(tmp_path: Path) -> None:
-    root = tmp_path / "home" / ".copilot-extensions" / "update-driver"
+    root = tmp_path / "h" / ".copilot-extensions" / "update-driver"
     root.mkdir(parents=True)
     identifier = "a" * 32
     (root / (identifier + ".log")).write_text("actual failure", encoding="utf-8")
@@ -97,7 +97,7 @@ def test_diagnostics_copy_only_advertised_request_logs(tmp_path: Path) -> None:
 def test_diagnostics_bound_logs_without_mutating_the_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root = tmp_path / "home" / ".copilot-extensions" / "update-driver"
+    root = tmp_path / "h" / ".copilot-extensions" / "update-driver"
     root.mkdir(parents=True)
     identifier = "a" * 32
     source = root / (identifier + ".log")
@@ -123,7 +123,7 @@ def test_failed_commands_retain_driver_evidence_without_changing_their_outcome(
     from agent_procutil import _caller_owned
 
     identifier = "a" * 32
-    root = tmp_path / "home" / ".copilot-extensions" / "update-driver"
+    root = tmp_path / "h" / ".copilot-extensions" / "update-driver"
     root.mkdir(parents=True)
     (root / (identifier + ".log")).write_text("inner failure", encoding="utf-8")
     result = subprocess.CompletedProcess(["fixture"], 1, f"Update request {identifier}", "failure")
@@ -169,7 +169,7 @@ def test_installed_manager_replaces_the_whole_applicable_suite(mode: str) -> Non
     for generation in ("before", "after"):
         engine = report[generation]["engine"]
         assert Path(engine["module"]).is_relative_to(Path(engine["prefix"]))
-        assert Path(engine["root"]) == directory / mode / "home" / ".agent-worktrees"
+        assert Path(engine["root"]) == directory / mode / "h" / ".agent-worktrees"
         assert set(report[generation]["versions"]) == declared | {"worktree-manager"}
     for name in declared | {"worktree-manager"}:
         assert report["before"]["versions"][name] != report["after"]["versions"][name]
