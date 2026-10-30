@@ -10,6 +10,7 @@ installed a stale staged payload).
 from __future__ import annotations
 
 import base64
+from contextlib import contextmanager
 import importlib.util
 import json
 import os
@@ -37,6 +38,168 @@ _GIT_ID = [
 
 
 _LONG_SOURCE_PATH = Path("source-fixtures") / ("nested-" * 15) / ("file-" * 20 + ".txt")
+
+
+@contextmanager
+def _unprivileged_link_creator(directory: Path):
+    """RedirectionGuard permits links created by an administrator."""
+    import ctypes
+    from ctypes import wintypes
+
+    shell = ctypes.WinDLL("shell32", use_last_error=True)
+    if not shell.IsUserAnAdmin():
+        yield
+        return
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    security = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel.GetCurrentThread.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.LocalFree.argtypes = [wintypes.HLOCAL]
+    security.OpenProcessToken.argtypes = [
+        wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE),
+    ]
+    security.OpenThreadToken.argtypes = [
+        wintypes.HANDLE, wintypes.DWORD, wintypes.BOOL, ctypes.POINTER(wintypes.HANDLE),
+    ]
+    security.ConvertStringSidToSidW.argtypes = [
+        wintypes.LPCWSTR, ctypes.POINTER(wintypes.LPVOID),
+    ]
+    security.GetTokenInformation.argtypes = [
+        wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    security.SetNamedSecurityInfoW.argtypes = [
+        wintypes.LPWSTR, ctypes.c_int, wintypes.DWORD,
+        wintypes.LPVOID, wintypes.LPVOID, wintypes.LPVOID, wintypes.LPVOID,
+    ]
+
+    class SidAndAttributes(ctypes.Structure):
+        _fields_ = [("Sid", wintypes.LPVOID), ("Attributes", wintypes.DWORD)]
+
+    class Trustee(ctypes.Structure):
+        _fields_ = [
+            ("MultipleTrustee", wintypes.LPVOID), ("Operation", ctypes.c_int),
+            ("Form", ctypes.c_int), ("Type", ctypes.c_int), ("Name", wintypes.LPVOID),
+        ]
+
+    class ExplicitAccess(ctypes.Structure):
+        _fields_ = [
+            ("Permissions", wintypes.DWORD), ("Mode", ctypes.c_int),
+            ("Inheritance", wintypes.DWORD), ("Trustee", Trustee),
+        ]
+
+    security.GetNamedSecurityInfoW.argtypes = [
+        wintypes.LPWSTR, ctypes.c_int, wintypes.DWORD,
+        ctypes.POINTER(wintypes.LPVOID), ctypes.POINTER(wintypes.LPVOID),
+        ctypes.POINTER(wintypes.LPVOID), ctypes.POINTER(wintypes.LPVOID),
+        ctypes.POINTER(wintypes.LPVOID),
+    ]
+    security.SetEntriesInAclW.argtypes = [
+        wintypes.DWORD, ctypes.POINTER(ExplicitAccess), wintypes.LPVOID,
+        ctypes.POINTER(wintypes.LPVOID),
+    ]
+    security.CreateRestrictedToken.argtypes = [
+        wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
+        ctypes.POINTER(SidAndAttributes), wintypes.DWORD, wintypes.LPVOID,
+        wintypes.DWORD, wintypes.LPVOID, ctypes.POINTER(wintypes.HANDLE),
+    ]
+    security.ImpersonateLoggedOnUser.argtypes = [wintypes.HANDLE]
+    process_token, restricted_token, thread_token = (wintypes.HANDLE() for _ in range(3))
+    administrators = wintypes.LPVOID()
+    descriptor, original_acl, fixture_acl = (wintypes.LPVOID() for _ in range(3))
+    impersonating = False
+    try:
+        if security.OpenThreadToken(kernel.GetCurrentThread(), 8, True, ctypes.byref(thread_token)):
+            raise RuntimeError("Link fixture must begin without an impersonated thread token")
+        if ctypes.get_last_error() != 1008:  # ERROR_NO_TOKEN
+            raise ctypes.WinError(ctypes.get_last_error())
+        if not security.OpenProcessToken(kernel.GetCurrentProcess(), 10, ctypes.byref(process_token)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        size = wintypes.DWORD()
+        security.GetTokenInformation(process_token, 1, None, 0, ctypes.byref(size))
+        user = ctypes.create_string_buffer(size.value)
+        if not security.GetTokenInformation(
+            process_token, 1, user, len(user), ctypes.byref(size),
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        user_sid = SidAndAttributes.from_buffer(user).Sid
+        # Preserve pytest's ACL and admit only this same user to the owned fixture.
+        error = security.GetNamedSecurityInfoW(
+            str(directory), 1, 4, None, None, ctypes.byref(original_acl), None,
+            ctypes.byref(descriptor),
+        )
+        if error:
+            raise ctypes.WinError(error)
+        access = ExplicitAccess(0x1F01FF, 1, 3, Trustee(None, 0, 0, 1, user_sid))
+        error = security.SetEntriesInAclW(1, ctypes.byref(access), original_acl, ctypes.byref(fixture_acl))
+        if error:
+            raise ctypes.WinError(error)
+        error = security.SetNamedSecurityInfoW(str(directory), 1, 4, None, None, fixture_acl, None)
+        if error:
+            raise ctypes.WinError(error)
+        if not security.ConvertStringSidToSidW("S-1-5-32-544", ctypes.byref(administrators)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        disabled = SidAndAttributes(administrators, 0)
+        if not security.CreateRestrictedToken(
+            process_token, 1, 1, ctypes.byref(disabled), 0, None, 0, None,
+            ctypes.byref(restricted_token),
+        ):  # DISABLE_MAX_PRIVILEGE and deny-only Administrators membership.
+            raise ctypes.WinError(ctypes.get_last_error())
+        if not security.ImpersonateLoggedOnUser(restricted_token):
+            raise ctypes.WinError(ctypes.get_last_error())
+        impersonating = True
+        if shell.IsUserAnAdmin():
+            raise RuntimeError("Link creator still has administrator membership")
+        yield
+    finally:
+        try:
+            if impersonating and not security.RevertToSelf():
+                raise ctypes.WinError(ctypes.get_last_error())
+        finally:
+            for token in (thread_token, restricted_token, process_token):
+                if token:
+                    kernel.CloseHandle(token)
+            for allocation in (administrators, descriptor, fixture_acl):
+                if allocation:
+                    kernel.LocalFree(allocation)
+
+
+def _create_untrusted_junction(target: Path, link: Path) -> None:
+    import ctypes
+    from ctypes import wintypes
+    import struct
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    ]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.DeviceIoControl.argtypes = [
+        wintypes.HANDLE, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD,
+        wintypes.LPVOID, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID,
+    ]
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    substitute = ("\\??\\" + str(target)).encode("utf-16le")
+    printed = str(target).encode("utf-16le")
+    names = substitute + b"\0\0" + printed + b"\0\0"
+    payload = struct.pack("<HHHH", 0, len(substitute), len(substitute) + 2, len(printed)) + names
+    packet = struct.pack("<LHH", 0xA0000003, len(payload), 0) + payload
+    with _unprivileged_link_creator(link.parent):
+        link.mkdir()
+        handle = kernel.CreateFileW(str(link), 0x40000000, 7, None, 3, 0x02200000, None)
+        if handle == wintypes.HANDLE(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            returned = wintypes.DWORD()
+            if not kernel.DeviceIoControl(
+                handle, 0x900A4, ctypes.create_string_buffer(packet), len(packet),
+                None, 0, ctypes.byref(returned), None,
+            ):
+                raise ctypes.WinError(ctypes.get_last_error())
+        finally:
+            kernel.CloseHandle(handle)
 
 
 def _source_repo(root: Path, *, long_path: bool = False) -> Path:
@@ -385,16 +548,27 @@ def test_python_lookup_rejects_empty_success(tmp_path, after_install):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows RedirectionGuard")
+def test_unprivileged_link_creator_restores_thread_identity_after_failure(tmp_path):
+    import ctypes
+
+    shell = ctypes.WinDLL("shell32", use_last_error=True)
+    original = bool(shell.IsUserAnAdmin())
+    with pytest.raises(RuntimeError, match="fixture failure"):
+        with _unprivileged_link_creator(tmp_path):
+            assert not shell.IsUserAnAdmin()
+            raise RuntimeError("fixture failure")
+    assert bool(shell.IsUserAnAdmin()) == original
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows RedirectionGuard")
 @pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
 def test_guarded_python_lookup_reuses_real_physical_python_twice(tmp_path, host_name):
-    import _winapi
-
     host = shutil.which(host_name)
     if host is None:
         pytest.skip(f"{host_name} unavailable")
     physical = Path(sys._base_executable).resolve(strict=True)
     linked = tmp_path / "python-link"
-    _winapi.CreateJunction(str(physical.parent), str(linked))
+    _create_untrusted_junction(physical.parent, linked)
     logical = linked / physical.name
     uv = tmp_path / "uv.ps1"
     uv.write_text(
@@ -456,8 +630,6 @@ if (-not [BootstrapPythonGuard]::SetProcessMitigationPolicy(
 @pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
 @pytest.mark.parametrize("link_kind", ["junction", "file"])
 def test_physical_uv_runs_twice_while_logical_uv_is_guarded(tmp_path, host_name, link_kind):
-    import _winapi
-
     host = shutil.which(host_name)
     if host is None:
         pytest.skip(f"{host_name} unavailable")
@@ -475,11 +647,12 @@ def test_physical_uv_runs_twice_while_logical_uv_is_guarded(tmp_path, host_name,
     physical = Path(selected)
     logical = tmp_path / "uv-link"
     if link_kind == "junction":
-        _winapi.CreateJunction(str(physical.parent), str(logical))
+        _create_untrusted_junction(physical.parent, logical)
     else:
         logical.mkdir()
         try:
-            os.symlink(physical, logical / physical.name)
+            with _unprivileged_link_creator(logical):
+                os.symlink(physical, logical / physical.name)
         except OSError as error:
             if error.winerror == 1314:
                 pytest.skip("file symlink creation requires Windows developer mode or privilege")
