@@ -208,3 +208,15 @@ delta/migration updates, rather than leaving new artifacts or old layouts
 untracked. This refines the fresh-default direction above; it does not turn
 recognizer mismatch into permission to erase unknown data or into a veto on
 the scoped fresh installation.
+
+## I/O-only installation refusal boundary
+
+> Under what conditions can an install still refuse? Or are these cases where that previous refusal which now ensure never refuse? As far as I am concerned, the only thing which can block an install is I/O errors, like file locks and lack of write permissions
+
+This is the operator's installation-failure boundary, not a claim that current
+installers already conform. Existing-layout, recognition, receipt, ownership
+metadata and compatibility disagreements must not become installation vetoes.
+Actual I/O failures remain explicit; application readiness must not be claimed
+without evidence. Separating file/registration application from readiness
+reporting is an agent-recommended realization of this boundary.
+This intent revision does not authorize a live-host install or removal.

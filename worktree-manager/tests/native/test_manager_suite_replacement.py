@@ -11,12 +11,14 @@ import json
 import os
 from pathlib import Path
 import sys
+import shutil
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from manager_suite_fixture import SCHEMA, exercise, prepare, require_venue, settle
 from manager_suite_fixture import _record
+import manager_suite_fixture as fixture
 
 
 def test_fullsuite_refuses_execution_outside_the_disposable_venue(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -43,6 +45,37 @@ def test_observer_follows_successor_before_incumbent_releases_work_lease(
     )
     assert _record(tmp_path, name)[0]["pid"] == os.getpid()
     assert json.loads((tmp_path / lock_name).read_text(encoding="utf-8"))["pid"] == 101
+
+
+@pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Native PowerShell capture")
+@pytest.mark.parametrize("owned_count", (0, 1, 2))
+def test_task_inventory_captures_only_owned_unicode_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, owned_count: int,
+) -> None:
+    (tmp_path / "project").mkdir()
+    execute = fixture._run
+    captured: list[str] = []
+    prefix = (
+        "function Get-ScheduledTask {"
+        "foreach($i in 1..10){[pscustomobject]@{TaskName=\"foreign-$i\";TaskPath='\\';State='Ready'}};"
+        f"for($i=0;$i -lt {owned_count};$i++){{"
+        "[pscustomobject]@{TaskName=\"owned-$i\";TaskPath='\\';State='Ready'}}};"
+        "function Export-ScheduledTask {param($TaskName,$TaskPath);"
+        "if($TaskName.StartsWith('owned-')){"
+        "\"<Task><Home>$caseHome\\owned</Home><Description>$([char]0x2014)</Description></Task>\""
+        "}else{'<Task>foreign'+('x'*65536)+'</Task>'}};"
+    )
+
+    def run(argv: list[str], case: Path, **options: object) -> object:
+        result = execute([*argv[:-1], prefix + argv[-1]], case, **options)
+        captured.append(result.stdout)
+        return result
+
+    monkeypatch.setattr(fixture, "_run", run)
+    rows = fixture._tasks(tmp_path)
+    assert {row["name"] for row in rows} == {f"owned-{i}" for i in range(owned_count)}
+    assert len(captured[0]) < 4096 and "foreign" not in captured[0]
+    assert all("\u2014" in row["xml"] for row in rows)
 
 
 @pytest.mark.parametrize("mode", ("normal", "repair"))

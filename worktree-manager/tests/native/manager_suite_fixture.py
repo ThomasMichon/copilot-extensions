@@ -35,7 +35,7 @@ from xml.etree import ElementTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from manager_suite_artifacts import (
-    _DELIVERY, _MATERIALIZE, _command, _configuration, _env, _write,
+    _DELIVERY, _MATERIALIZE, _command, _configuration, _env, _task_inventory_script, _write,
 )
 
 REPO = Path(__file__).resolve().parents[3]
@@ -117,7 +117,7 @@ def _python(root: Path) -> Path:
 
 def _probe(case: Path, kind: str) -> dict[str, Any]:
     root = case / "home" / (".worktree-manager" if kind == "manager" else ".agent-worktrees")
-    result = _run([_python(root), "-I", "-B", __file__, "--probe", kind], case, timeout=30)
+    result = _run([_python(root), "-I", "-X", "utf8", "-B", __file__, "--probe", kind], case, timeout=30)
     return json.loads(result.stdout)
 
 
@@ -179,7 +179,7 @@ def _observe(case: Path, declared: dict[str, Any]) -> dict[str, Any]:
         )
         metadata = tomllib.loads((payload / "pyproject.toml").read_text(encoding="utf-8"))["project"]
         result = _run([
-            _python(root), "-I", "-B", __file__, "--probe", "identity",
+            _python(root), "-I", "-X", "utf8", "-B", __file__, "--probe", "identity",
             "--component", name, "--distribution", metadata["name"],
         ], case, timeout=30)
         origin = json.loads(result.stdout)
@@ -216,14 +216,9 @@ def _observe(case: Path, declared: dict[str, Any]) -> dict[str, Any]:
 
 
 def _tasks(case: Path) -> list[dict[str, Any]]:
-    script = (
-        "$ErrorActionPreference='Stop'; $rows=@("
-        "Get-ScheduledTask | ForEach-Object {"
-        "[pscustomobject]@{name=$_.TaskName;path=$_.TaskPath;state=[string]$_.State;"
-        "xml=(Export-ScheduledTask -TaskName $_.TaskName -TaskPath $_.TaskPath)}}"
-        "); ConvertTo-Json -InputObject $rows -Depth 4 -Compress"
-    )
+    script = _task_inventory_script(case / "home")
     result = _run([shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command", script], case, timeout=30)
+    (case / "task-inventory.json").write_text(result.stdout, encoding="utf-8")
     rows = json.loads(result.stdout)
     home = str(case / "home").casefold()
     owned = re.compile(re.escape(home) + r"""(?=[\\/"'<]|$)""")
@@ -363,7 +358,7 @@ def _health(case: Path, before: dict[str, Any], name: str, pid: int) -> dict[str
     root = Path(before["resident_roots"][name])
     interpreter_root = Path(before["roots"]["agent-index"]) if name == "agent-index/engine" else root
     result = _run([
-        _python(interpreter_root), "-I", "-B", __file__, "--probe", "resident",
+        _python(interpreter_root), "-I", "-X", "utf8", "-B", __file__, "--probe", "resident",
         "--component", name, "--root", root, "--pid", pid,
     ], case, timeout=10)
     health = json.loads(result.stdout)
@@ -429,7 +424,7 @@ def _exclusive(case: Path, root: Path) -> bool:
     lease = runpy.run_path(str(helper))["_publication_lease"]
     with lease(root, timeout=0):
         result = _run([
-            sys.executable, "-I", "-B", __file__, "--probe", "lease",
+            sys.executable, "-I", "-X", "utf8", "-B", __file__, "--probe", "lease",
             "--helper", helper, "--root", root,
         ], case, timeout=30)
     return json.loads(result.stdout)["contended"]
@@ -499,7 +494,7 @@ def _registration_routes(case: Path, before: dict[str, Any], after: dict[str, An
             if "resolve-python" not in body or "versioned_runtime.py" not in body:
                 raise RuntimeError(f"{task['name']}: unknown independent-engine task resolver")
             native = _run([
-                _python(Path(engine["root"])), "-I", "-B",
+                _python(Path(engine["root"])), "-I", "-X", "utf8", "-B",
                 Path(engine["root"]) / "versioned_runtime.py",
                 "--root", engine["root"], "resolve-python",
             ], case, timeout=30)
@@ -625,7 +620,7 @@ def _cleanup(case: Path) -> list[str]:
                 raise
             alive = False
         if alive:
-            _run([_python(manager), "-I", "-B", "-c",
+            _run([_python(manager), "-I", "-X", "utf8", "-B", "-c",
                   "from worktree_manager import mux_daemon_cutover as c;"
                   "e=c.routed_endpoint();"
                   "print(c.ControlClient(e.base_url).shutdown() if e else 'absent')"], case, timeout=30)
@@ -637,7 +632,7 @@ def _cleanup(case: Path) -> list[str]:
         with closing_process(marker["pid"]) as process:
             alive = process.times()[2] == 259
         if alive:
-            _run([_python(root), "-I", "-B", "-c",
+            _run([_python(root), "-I", "-X", "utf8", "-B", "-c",
                   "from agent_worktrees import status_monitor_cutover as c;"
                   "from zdd.routing import read_active_endpoint;"
                   "e=read_active_endpoint(c.routing_dir());"
@@ -759,7 +754,7 @@ def prepare(directory: Path, mode: str) -> None:
         target = case / name
         target.mkdir()
         _git(case, REPO, "checkout-index", "--all", "--prefix", str(target) + os.sep)
-        _run([base, "-I", "-B", "-c", _MATERIALIZE, target, str(count)], case)
+        _run([base, "-I", "-X", "utf8", "-B", "-c", _MATERIALIZE, target, str(count)], case)
         _git(case, target, "init", "-q", "-b", "main", "--template=")
         _commit(case, target)
     if index != _git(case, REPO, "ls-files", "--stage") or _git(case, REPO, "diff", "--name-only"):
@@ -783,7 +778,7 @@ def prepare(directory: Path, mode: str) -> None:
     (tools / "delivery.py").write_text(_DELIVERY, encoding="utf-8")
     for name in ("copilot", "gh"):
         (tools / (name + ".cmd")).write_text(
-            f'@echo off\n"{base}" -I -B "{tools / "delivery.py"}" {name} %*\nexit /b %errorlevel%\n',
+            f'@echo off\n"{base}" -I -X utf8 -B "{tools / "delivery.py"}" {name} %*\nexit /b %errorlevel%\n',
             encoding="utf-8",
         )
     _configuration(case, declared)
@@ -793,12 +788,12 @@ def prepare(directory: Path, mode: str) -> None:
     _git(case, case / "project", "fetch", "-q", "origin", "main")
     _git(case, case / "project", "branch", "--set-upstream-to=origin/main", "main")
     try:
-        _run([sys.executable, "-I", "-B", "-c",
+        _run([sys.executable, "-I", "-X", "utf8", "-B", "-c",
               "from pathlib import Path;import sys;"
               "from worktree_manager.self_install import _copy_payload;"
               "_copy_payload(Path(sys.argv[1]),Path(sys.argv[2]))",
               case / "published" / "worktree-manager", case / "manager-payload"], case)
-        _run([base, "-I", "-B", case / "manager-payload" / "scripts" / "runtime_install.py",
+        _run([base, "-I", "-X", "utf8", "-B", case / "manager-payload" / "scripts" / "runtime_install.py",
               "--root", Path(env["HOME"]) / ".worktree-manager",
               "--payload", case / "manager-payload", "--", "--version"], case)
         payload = Path(env["HOME"]) / ".copilot" / "installed-plugins" / "copilot-extensions" / "agent-worktrees"
@@ -877,7 +872,7 @@ def exercise(directory: Path, mode: str) -> None:
                     root = Path(before["resident_roots"][name])
                     interpreter_root = roots["agent-index"] if name == "agent-index/engine" else root
                     futures[name] = observer.submit(_run, [
-                        _python(interpreter_root), "-I", "-B", __file__, "--probe", "watch",
+                        _python(interpreter_root), "-I", "-X", "utf8", "-B", __file__, "--probe", "watch",
                         "--component", name, "--root", root, "--pid", process.pid,
                         "--control", control,
                     ], case, timeout=850)
@@ -930,7 +925,7 @@ def exercise(directory: Path, mode: str) -> None:
                 name: _exclusive(case, root) for name, root in roots.items()
             }
             lease = _run([
-                _python(roots["worktree-manager"]), "-I", "-B", "-c",
+                _python(roots["worktree-manager"]), "-I", "-X", "utf8", "-B", "-c",
                 "import json;from worktree_manager import mux_daemon_process as p;"
                 "lease=p.acquire_daemon_lease(p.default_root());"
                 "print(json.dumps({'held':lease is None}));"

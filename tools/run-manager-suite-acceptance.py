@@ -36,7 +36,7 @@ def qualify(root: Path, mode: str, python: Path) -> int:
         for stage in ("prepare", "exercise"):
             print(f"Manager suite {mode}: {stage}", flush=True)
             code = _run(
-                [str(python), "-I", "-B", str(FIXTURE), "--" + stage, str(root), "--mode", mode],
+                [str(python), "-I", "-X", "utf8", "-B", str(FIXTURE), "--" + stage, str(root), "--mode", mode],
                 timeout=900,
             )
             report["stages"][stage] = code
@@ -57,7 +57,7 @@ def qualify(root: Path, mode: str, python: Path) -> int:
             os.environ["MANAGER_SUITE_ACCEPTANCE_DATA"] = previous_data
         try:
             report["stages"]["settle"] = _run([
-                str(python), "-I", "-B", str(FIXTURE), "--settle", str(root), "--mode", mode,
+                str(python), "-I", "-X", "utf8", "-B", str(FIXTURE), "--settle", str(root), "--mode", mode,
             ], timeout=90)
         except Exception as error:
             report["errors"].append(f"settlement: {type(error).__name__}: {error}")

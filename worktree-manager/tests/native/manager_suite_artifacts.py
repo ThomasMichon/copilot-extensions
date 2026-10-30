@@ -15,6 +15,20 @@ def _write(path: Path, value: Any) -> None:
     pending.replace(path)
 
 
+def _task_inventory_script(home: Path) -> str:
+    quoted = str(home).replace("'", "''")
+    return (
+        "$ErrorActionPreference='Stop';"
+        "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);"
+        f"$caseHome='{quoted}'; $rows=@("
+        "Get-ScheduledTask | ForEach-Object {"
+        "$xml=Export-ScheduledTask -TaskName $_.TaskName -TaskPath $_.TaskPath;"
+        "if($xml.IndexOf($caseHome,[StringComparison]::OrdinalIgnoreCase) -ge 0){"
+        "[pscustomobject]@{name=$_.TaskName;path=$_.TaskPath;state=[string]$_.State;xml=$xml}}}"
+        "); ConvertTo-Json -InputObject $rows -Depth 4 -Compress"
+    )
+
+
 def _env(case: Path) -> dict[str, str]:
     # Keep Windows/toolchain discovery, but never inherit a host installation,
     # credential, profile/cell, pytest task suppression or per-runtime root.
