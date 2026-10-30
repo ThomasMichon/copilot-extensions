@@ -32,7 +32,7 @@ finding, not a claim that lexical absence proves universal absence.
 
 A separately scoped adopter audit found an independently selected local policy
 provider and a fixed unattended-publisher acknowledgement. The adopter driver
-will reconcile those through its own contribution flow:
+reconciled those through its own reviewed contribution flow:
 
 - retire the competing decision provider in favor of upstream configuration;
 - keep default signature data and private overrides separate from policy code;
@@ -42,3 +42,13 @@ will reconcile those through its own contribution flow:
 
 No adopter identity, implementation path or private evidence is required for
 the upstream contract or its synthetic tests.
+
+## Post-migration outcome
+
+The committed adopter selection enables only the canonical upstream provider;
+the local decision/wording fork is removed. Default templates and trusted
+private overrides are profile data. Remaining toolset callers reference the
+canonical skill with explicit dependencies. Generated selectors/fallbacks keep
+the upstream owner, and intentional fixed unattended acknowledgements retain
+their truthful review and independent authorization boundaries. This records
+source/configuration convergence, not installed or running activation.

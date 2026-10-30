@@ -2,10 +2,10 @@
 
 - **Slug:** `configurable-ai-attribution`
 - **Repo:** copilot-extensions
-- **Branch(es):** independent proposal and implementation PRs
+- **Branch(es):** independent proposal, implementation and closure PRs
 - **Created:** 2026-10-30
-- **Status:** Active
-- **Vision:** [Harness Guidance](../../../visions/harness-guidance/README.md#configurable-attribution-signatures)
+- **Status:** Done
+- **Vision:** [Harness Guidance](../../../../visions/harness-guidance/README.md#configurable-attribution-signatures)
 - **Umbrella issue:** #9633
 - **Sub-issues:** none; #2965 retains its separate owner
 
@@ -95,17 +95,17 @@ Private identifiers and adopter-specific context are intentionally absent.
 - [x] Complete the source-owned attribution inventory and classify real forks,
   fixed wording, canonical references and intentional safety/provenance copies.
 - [x] Replace genuine suite duplicates with canonical-owner references or data.
-- [ ] Supply the selected adopter's defaults/override seam and retire its
+- [x] Supply the selected adopter's defaults/override seam and retire its
   competing provider through the adopter's own reviewed flow.
-- [ ] Preserve independent sending authority, human-review truth and required
+- [x] Preserve independent sending authority, human-review truth and required
   static/offline delivery; cooperate with externally owned changes.
 
 ### Phase 4 - Validate and close
 - [x] Run focused unit, hook/CLI consumer and applicable native parity checks.
-- [ ] Land source and consumer changes through their required review/CI gates.
-- [ ] Record release versus installed/running state separately; transfer any
+- [x] Land source and consumer changes through their required review/CI gates.
+- [x] Record release versus installed/running state separately; transfer any
   unapproved rollout to a named objective rather than claiming deployment.
-- [ ] Resolve every plan/validation item, journal outcomes and archive Done.
+- [x] Resolve every plan/validation item, journal outcomes and archive Done.
 
 ## Validation Plan
 
@@ -127,9 +127,9 @@ of the confirmed scope, not additional operator-requested features.
 - [x] Exercise the actual entrypoints in disposable configuration/session roots,
   including cold/warm guidance and available native shell paths. Record what
   was exercised and any unavailable lane explicitly.
-- [ ] Audit both inventories after migration: no competing selected provider,
+- [x] Audit both inventories after migration: no competing selected provider,
   no new policy copies, no lost offline floor or provenance metadata.
-- [ ] Pass touched Python lint, repository documentation/effort/vision guards,
+- [x] Pass touched Python lint, repository documentation/effort/vision guards,
   changefile checks and required exact-head CI/review. Add no exhaustive native
   matrix to the required unit-only portfolio.
 
@@ -314,3 +314,49 @@ network dependency, parallel policy registry or mandatory sibling plugin.
   syntax and high-signal lint passed. The new POSIX work-count case is skipped
   on this Windows host, so no native Linux count/latency result is claimed.
   The existing periodic lane does not enroll this explicit-tier family.
+
+### 2026-10-30 - Canonical source merged; adopter integration next
+- #9646 merged as `6e06e9fb9a9b1973d8a0acacb73e9ca937585d5c` after the
+  exact-head Copilot Comment had no open issues and all required checks passed.
+  Every concrete review finding is corrected and its thread resolved.
+- The controlled source worktree is on the squashed `dev` result; its provider
+  and effort contents were verified identical before dropping replay of the
+  already-merged commits.
+- Source implementation is complete. The continuing objective is release-backed
+  adopter configuration/offline delivery, reviewed adopter publication, and
+  final effort closure. Release is not installation or activation; unapproved
+  rollout remains with the adopter's named operational follow-up.
+
+### 2026-10-30 - Release and isolated adopter validation
+- Release `0.1.5-dev1` is available on regenerated `main` commit
+  `68046a625657022a250bfcce9cbe25976c6596d2`. The shared provider and both
+  native readers were verified byte-for-byte against the merged source,
+  rather than inferring inclusion from ancestry.
+- The selected adopter generated canonical selectors/fallbacks through the
+  official scoped projection API; unrelated lock entries were unchanged.
+  Offline scanning has no blocking findings; aggregate-budget/overlap
+  advisories are reported rather than promoted into a new publication gate.
+- Eight actual released-helper cases passed for default/private overrides,
+  slots, truthful review context, exemption and idempotence. The real Windows
+  hook passed cold and warm-without-Python checks with the adopter profile and
+  a synthetic private override: 2,782/4,096 bytes.
+- No installation, runtime activation or human send was performed. The
+  adopter-owned canonical-provider activation objective retains unapproved
+  rollout. Adopter review/CI/publication and final archive remain open.
+
+### 2026-10-30 - Complete and archive
+- The selected adopter's migration merged after a clean current-head review,
+  required full validation and provenance readback. Its committed selection
+  now has one upstream owner; presentation defaults/private overrides are
+  data, not a local decision matrix or wording injector.
+- Reconciled remaining toolset skill prerequisites and declared canonical
+  dependencies. The post-migration inventory preserves intentional unattended
+  fallbacks, offline delivery, source/commit provenance, exact-draft review
+  truth, independent approvals and externally owned work.
+- Source #9646 and the reviewed adopter change are merged; `0.1.5-dev1` is
+  released. Every Plan and Validation Plan item is resolved. Native
+  Linux/macOS qualification remains explicitly unclaimed; installation and
+  activation are outside this source scope and retained by the named
+  adopter-owned canonical-provider activation objective.
+- No human send, replay or runtime rollout was performed. Archive this
+  completed effort; #2965 and #9627 retain their independent ownership.
