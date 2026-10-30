@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import shlex
 import shutil
 import subprocess
@@ -22,7 +23,7 @@ def steering_prompt(task_id: str, message: str | None) -> str:
     )
 
 
-def send_command(
+def _command_result(
     argv: list[str],
     prompt: str,
     *,
@@ -30,7 +31,7 @@ def send_command(
     launch_prefix: Callable[[], list[str] | None],
     run_ssh: Callable[..., subprocess.CompletedProcess],
     timeout: float | None,
-) -> bool:
+) -> subprocess.CompletedProcess | None:
     """Run the same Bridge CLI locally or through the existing SSH transport."""
     local = remote_dispatch.local_machine()
     remote = bridge_remote.normalize_host(machine) if machine is not None else None
@@ -42,7 +43,7 @@ def send_command(
         ssh = shutil.which("ssh")
         if ssh is None:
             log.warning("Bridge command delivery requires an available SSH executable")
-            return False
+            return None
         # marketplace-isolation: allow remote-management
         command = " ".join(shlex.quote(arg) for arg in ["agent-bridge", *argv])
         cmd = [ssh, "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", remote, command]
@@ -50,7 +51,7 @@ def send_command(
         exe = launch_prefix()
         if exe is None:
             log.warning("Bridge command delivery requires an available local runtime")
-            return False
+            return None
         cmd = [*exe, *argv]
     try:
         if is_remote:
@@ -62,13 +63,63 @@ def send_command(
             )
     except (subprocess.SubprocessError, OSError):
         log.warning("Bridge command delivery did not establish acceptance", exc_info=True)
-        return False
+        return None
     if result.returncode:
         log.warning(
             "Bridge command delivery returned exit status %s: %s",
             result.returncode, (result.stderr or "").strip()[:2048],
         )
-    return result.returncode == 0
+    return result
+
+
+def send_command(
+    argv: list[str], prompt: str, *, machine: str | None,
+    launch_prefix: Callable[[], list[str] | None],
+    run_ssh: Callable[..., subprocess.CompletedProcess], timeout: float | None,
+) -> bool:
+    """Run the standard Bridge send and retain its existing acceptance result."""
+    result = _command_result(
+        argv, prompt, machine=machine, launch_prefix=launch_prefix,
+        run_ssh=run_ssh, timeout=timeout,
+    )
+    return result is not None and result.returncode == 0
+
+
+def native_prompt_receipt(
+    bridge_session: str, native_session: str, prompt: str, *,
+    idempotency_key: str, machine: str | None,
+) -> dict:
+    """Observe an exact prior send; a miss never admits or resumes a prompt."""
+    from . import bridge
+    from .queue_records import TaskError
+
+    result = _command_result(
+        [
+            "--json", "send", bridge_session,
+            "--expected-native-session-id", native_session,
+            "--idempotency-key", idempotency_key,
+            "--caller", f"agent-dispatch:{idempotency_key}",
+            "--prompt-file", "-", "--receipt-only", "--no-wait",
+        ],
+        prompt, machine=machine, launch_prefix=bridge._agent_bridge_launch_prefix,
+        run_ssh=bridge.run_ssh_command, timeout=20.0,
+    )
+    if result is None or result.returncode:
+        raise TaskError("Bridge receipt observation unavailable; retained send remains unknown")
+    try:
+        receipt = json.loads(result.stdout)
+    except (TypeError, ValueError) as exc:
+        raise TaskError("Bridge receipt observation is malformed; retained send remains unknown") from exc
+    if not isinstance(receipt, dict) or (
+        type(receipt.get("version")) is not int or receipt["version"] != 1
+        or receipt.get("session_id") != bridge_session
+        or receipt.get("native_session_id") != native_session
+        or receipt.get("invocation_key") != idempotency_key
+        or receipt.get("admission") != "accepted" or receipt.get("queued") is not False
+        or type(receipt.get("turn_index")) is not int or receipt["turn_index"] < 0
+    ):
+        raise TaskError("Bridge receipt does not prove the retained native send")
+    return receipt
 
 
 def native_prompt(

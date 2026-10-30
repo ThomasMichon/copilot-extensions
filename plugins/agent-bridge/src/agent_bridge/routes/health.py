@@ -7,7 +7,12 @@ from ssh_manager import get_default_manager
 
 from .. import __version__
 from ..config import config_dir
-from ..protocol import HTTP_PROTOCOL_MIN_SUPPORTED, HTTP_PROTOCOL_VERSION
+from ..protocol import (
+    HTTP_PROTOCOL_MIN_SUPPORTED,
+    HTTP_PROTOCOL_VERSION,
+    NATIVE_SEND_RECEIPT_CAPABILITY,
+    NATIVE_SEND_RECEIPT_CAPABILITY_VERSION,
+)
 from ..drain_contract import DRAIN_CONTRACT_VERSION
 from ..hosting_admission_cli import HOSTING_CAPABILITY, HOSTING_CAPABILITY_VERSION
 from ..self_retire import slot_descriptor
@@ -37,7 +42,10 @@ async def health(request: Request) -> dict:
         "draining": draining,
         "protocol_version": HTTP_PROTOCOL_VERSION,
         "min_protocol_version": HTTP_PROTOCOL_MIN_SUPPORTED,
-        "capabilities": {HOSTING_CAPABILITY: HOSTING_CAPABILITY_VERSION},
+        "capabilities": {
+            HOSTING_CAPABILITY: HOSTING_CAPABILITY_VERSION,
+            NATIVE_SEND_RECEIPT_CAPABILITY: NATIVE_SEND_RECEIPT_CAPABILITY_VERSION,
+        },
         "drain_contract": {"minimum": DRAIN_CONTRACT_VERSION, "maximum": DRAIN_CONTRACT_VERSION},
         "ssh_carriers": get_default_manager().carrier_diagnostics(),
     }

@@ -223,6 +223,9 @@ RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION = 49
 RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION = 50
 # Standard native sends retain an idempotency receipt across exact-context resume.
 NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION = 51
+# Optional read-only receipt observation, advertised by the running daemon.
+NATIVE_SEND_RECEIPT_CAPABILITY = "native_send_receipt"
+NATIVE_SEND_RECEIPT_CAPABILITY_VERSION = 1
 HTTP_PROTOCOL_VERSION = 51
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of

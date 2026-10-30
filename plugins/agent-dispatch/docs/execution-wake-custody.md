@@ -45,8 +45,11 @@ If unresolved custody appears after a lease but before final
 admission, the drainer returns that unsent wake to pending without spending
 its transport retry budget; settlement makes it eligible again.
 Reconciliation requires the original retained send identity and actual transport
-evidence; an expired lease is not that evidence. There is no public reconciliation
-endpoint or automatic timeout-to-absence conversion.
+evidence; an expired lease is not that evidence. The control-only
+[task recovery endpoint](task-recovery.md#wake-reconciliation-is-observation-not-retry)
+observes an exact ordinary native Bridge admission receipt without sending.
+Legacy attempted wakes without qualified custody remain unresolved. There is
+no automatic timeout-to-absence conversion or caller-supplied outcome override.
 A known `not_sent` outcome remains retained and does not grant another send of
 the same wake; a newly authorized natural wake remains subject to normal fences.
 

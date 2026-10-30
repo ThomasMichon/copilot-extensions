@@ -1,20 +1,16 @@
 {
-  "evidence_family": "http51-unchanged-source-link-v1",
-  "preserved_from": {
-    "path": "plugins/agent-bridge/contract/fixtures/http/current/http50-source-health-py-3ed03282937f.json",
-    "sha256": "115593a95582398cf82a42319991bf16242c12419da98758e5fcc83e573b651f"
-  },
-  "advertisement_evidence": {
+  "evidence_family": "http51-shared-asgi-v1",
+  "shared_operation_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/http51-standard-native-send.json",
-    "sha256": "2faecd84656d66db0b8ccfac1e178474352e897477847eae3643d59c00256f05"
+    "sha256": "f23ad252d8881f8d28f90cf970081fcee1781a41e9708bcdf804997f764c68da"
   },
-  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "scope": "shared named ASGI portfolio, not an independent capture",
   "captured_from": {
-    "commit": "0d32ad183a03788a6a818e861acbbd631da5160d",
+    "commit": "de7207f728b9c754fd2387a40cb21ca00f358fbe",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 51,
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
-    "source_git_blob": "f58c73520d31488587e80b3ebd2c8b8148d13f06",
-    "source_sha256": "0767b1371b9738c3c4b524e3e06d4610f8ceefb7c7dea80392506b72a30f474b"
+    "source_git_blob": "ead5cd314ca146aee6d7c374804dcb61394044a1",
+    "source_sha256": "e19e8ca5d092c8eac30fc7cf7fe25a9b3cee2c6e2d42a2dc6bf2e0d9aae3ebcf"
   }
 }

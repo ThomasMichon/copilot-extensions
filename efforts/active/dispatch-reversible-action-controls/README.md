@@ -149,7 +149,7 @@ agent-recommended safeguards. It authorizes source work, not live recovery.
 
 ### Phase 5 - Diagnose and recover retained tasks
 
-- [ ] Review the [task-recovery amendment](task-recovery.md) before implementation.
+- [x] Review the [task-recovery amendment](task-recovery.md) before implementation.
 - [ ] Deliver #9636's diagnostic snapshot and distinct fenced recovery actions
       through the existing REST, client, CLI and MCP owners.
 - [ ] Resolve the amendment's complete validation and release checklist;

@@ -583,6 +583,8 @@ def test_health_fixture_matches_route_serialization(tmp_path, monkeypatch) -> No
     actual = asyncio.run(health_route.health(request))
     assert actual.pop("capabilities") == {
         health_route.HOSTING_CAPABILITY: health_route.HOSTING_CAPABILITY_VERSION,
+        bridge_protocol.NATIVE_SEND_RECEIPT_CAPABILITY:
+            bridge_protocol.NATIVE_SEND_RECEIPT_CAPABILITY_VERSION,
     }
     expected["protocol_version"] = bridge_protocol.HTTP_PROTOCOL_VERSION
     expected["drain_contract"] = _fixture("inputs/http47/negotiated-drain.json")["advertised"]["drain_contract"]

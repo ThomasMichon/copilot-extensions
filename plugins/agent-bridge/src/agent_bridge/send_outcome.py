@@ -11,7 +11,8 @@ path's existing keys and exit 0:
   original message's, and nothing new was enqueued.
 - ``accepted``: a keyed live message taken by an older daemon whose response
   has no ``duplicate`` field, so it can't say whether it matched an earlier
-  request (``duplicate: null``).
+  request (``duplicate: null``); or an ordinary native ``--receipt-only`` read
+  proving historical admission only, without new delivery or completion.
 - ``admitted`` / ``sdk_accepted`` / ``consumed``: current live receipt evidence,
   independent of requested urgency or whether a bounded reply wait settled.
 

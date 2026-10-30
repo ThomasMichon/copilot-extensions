@@ -210,7 +210,9 @@ def test_real_api_uses_standard_native_send_receipt(native_send):
     }
 
 
-def _command(native_send, monkeypatch, *, generation=51, transform=None, api=None):
+def _command(
+    native_send, monkeypatch, *, generation=51, transform=None, api=None, capabilities=None,
+):
     from agent_bridge import __main__ as core
 
     manager, session, request = native_send
@@ -234,7 +236,8 @@ def _command(native_send, monkeypatch, *, generation=51, transform=None, api=Non
 
         def _request(self, method, path, body=None, **kwargs):
             if path == "/health":
-                return {"protocol_version": generation, "min_protocol_version": 1}
+                return {"protocol_version": generation, "min_protocol_version": 1,
+                        "capabilities": capabilities or {}}
             calls.append((method, path, body))
             result = api.request(method, path, json=body)
             if result.is_error:
@@ -249,7 +252,7 @@ def _command(native_send, monkeypatch, *, generation=51, transform=None, api=Non
         def resolve_live_session(self, *args, **kwargs):
             pytest.fail("native send must not use a represented inbox")
 
-    monkeypatch.setattr(core, "_get_client", lambda: Client())
+    monkeypatch.setattr(core, "_get_client", lambda **_kwargs: Client())
     monkeypatch.setattr(core, "_caller_id_for", lambda args: "fixture-controller")
     monkeypatch.setattr(core, "_connection_identity", lambda *args: {})
     args = core.build_parser().parse_args([
