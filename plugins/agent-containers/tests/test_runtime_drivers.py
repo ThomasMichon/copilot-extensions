@@ -195,7 +195,6 @@ def test_up_provisions_through_driver_without_docker(fake, no_docker):
     assert first["workspaceFolder"] == "/workspaces/example"
     assert first["execUser"] == "vscode"
     assert first["environment"] == {"EXAMPLE": "1"}
-    assert {c["protocol_env"] for c in fake.state()["calls"]} == {"1"}
 
 
 def test_enumerate_inspect_start_stop_remove(fake, no_docker):
@@ -439,10 +438,13 @@ def test_lease_borrow_and_fleet_listing_cover_driver_members(fake, no_docker, tm
 
 def test_external_driver_rejects_foreign_member_reports(fake):
     driver = ExternalDriver(find_driver("example-driver"), "example", driver_fleet())
-    with pytest.raises(DriverError) as raised:
-        driver._member_or_error("list", {"name": "x-1", "id": "x1", "fleet": "other",
-                                          "state": "running"})
-    assert raised.value.code == "protocol_error"
+    for bad in (
+        {"name": "x-1", "id": "0123456789ab", "fleet": "other", "state": "running"},
+        {"name": "example-9", "id": "not-hex-id", "fleet": "example", "state": "running"},
+    ):
+        with pytest.raises(DriverError) as raised:
+            driver._member_or_error("list", bad)
+        assert raised.value.code == "protocol_error"
     assert external_driver.PROTOCOL_VERSION == 1
 
 
@@ -523,3 +525,81 @@ def test_ssh_only_launches_require_ssh_capability(fake, no_docker, monkeypatch):
     _provisioned(config)
     with pytest.raises(RuntimeError, match="needs the trusted SSH transport"):
         runtime_drivers.launch_plan(config.fleets["example"], "example-1", True, require_ssh=True)
+
+
+def _docker_rows(monkeypatch, *rows):
+    text = "".join("\t".join(row) + "\n" for row in rows)
+    monkeypatch.setattr(lifecycle, "_docker", lambda args, timeout=30.0:
+                        subprocess.CompletedProcess(args, 0, text, ""))
+
+
+def _row(name, container_id, fleet_label):
+    return [name, container_id, "example/image:1", "running", "Up",
+            f"agent-containers.fleet={fleet_label}", "trusted", "", ""]
+
+
+def test_docker_rows_claiming_a_driver_fleet_are_never_managed_around_it(fake, monkeypatch):
+    from agent_containers.lifecycle_ownership import DRIVER_REASON, lifecycle_blocker
+
+    config = ContainersConfig(fleets={
+        "example": driver_fleet(), "plain": FleetConfig(image="example/image:1"),
+    })
+    monkeypatch.setenv("FAKE_DRIVER_FAIL", "list:runtime_unavailable")
+    _docker_rows(monkeypatch, _row("example-7", "c" * 64, "example"), _row("plain-1", "b" * 64, "plain"))
+    assert [c.name for c in lifecycle.list_containers(config)] == ["plain-1"]
+    labels = {"agent-containers.fleet": "example"}
+    assert lifecycle_blocker(config, "example-7", labels) == DRIVER_REASON
+    assert lifecycle_blocker(config, "example-8", {}) == DRIVER_REASON
+    assert lifecycle_blocker(config, "plain-1", {"agent-containers.fleet": "plain"}) is None
+
+
+def test_docker_and_driver_handle_collisions(fake, monkeypatch):
+    config = ContainersConfig(fleets={
+        "example": driver_fleet(size=2), "plain": FleetConfig(image="example/image:1"),
+    })
+    _docker_rows(monkeypatch)
+    fleet.reconcile_up(config, "example")
+    members = {c.name: c for c in lifecycle.list_containers(config)}
+    same = members["example-1"]
+    # The same container seen through the Docker CLI is shown once ...
+    _docker_rows(monkeypatch, _row("example-1", same.container_id, "plain"),
+                 _row("example-2", "d" * 64, "plain"))
+    listed = lifecycle.list_containers(config)
+    assert sorted((c.name, c.driver or "docker") for c in listed) == [
+        ("example-1", "example-driver"),
+        ("example-2", "docker"), ("example-2", "example-driver"),
+    ]
+    # ... while a distinct Docker container sharing a name is never routed.
+    with pytest.raises(RuntimeError, match="more than one runtime driver"):
+        lifecycle.stop_container("example-2")
+    assert lifecycle.inspect_state("example-1") == "running"
+
+
+def test_unlaunchable_driver_is_a_typed_error_and_skipped(fake, no_docker):
+    script = fake.root / "not-a-program"
+    script.write_text("this is not a program\n")
+    script.chmod(0o755)
+    (fake.drivers / "broken-exec.json").write_text(json.dumps(
+        {"schema_version": 1, "name": "broken-exec", "command": [str(script)]},
+    ))
+    config = ContainersConfig(fleets={
+        "example": driver_fleet(size=1),
+        "broken": driver_fleet(driver="broken-exec"),
+    })
+    fleet.reconcile_up(config, "example")
+    with pytest.raises(DriverError) as raised:
+        runtime_drivers.driver_for_fleet(config, "broken", config.fleets["broken"]).list_members()
+    assert raised.value.code == "runtime_unavailable"
+    assert [c.name for c in lifecycle.list_containers(config)] == ["example-1"]
+
+
+@pytest.mark.parametrize("caps, failing", [({"ssh_transport": True}, True), ({}, False)])
+def test_readiness_requires_ssh_only_for_ssh_capable_drivers(fake, monkeypatch, caps, failing):
+    from agent_containers.installer_readiness import inspect_toolchain
+
+    monkeypatch.setenv("FAKE_DRIVER_CAPS", json.dumps(caps))
+    failures = inspect_toolchain(
+        driver_config(), command_finder=lambda name: None,
+    )
+    assert any("OpenSSH" in f for f in failures) is failing
+    assert not any("docker" in f for f in failures)

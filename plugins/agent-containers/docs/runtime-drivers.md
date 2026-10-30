@@ -85,8 +85,11 @@ Every non-interactive verb is:
 - The request is one JSON object on **stdin**; the response is one JSON object
   on **stdout**. Diagnostics go to stderr.
 - The call is non-interactive: no TTY, stdin carries only the request, and the
-  driver must never prompt. `AGENT_CONTAINERS_DRIVER_PROTOCOL=1` is set in its
-  environment.
+  driver must never prompt. The `--json` flag selects this protocol mode for
+  every verb, including `exec-stream`; the request's `protocolVersion` selects
+  the version. There is no environment marker, because streaming invocations
+  (an SSH `ProxyCommand`) may be spawned by processes agent-containers does not
+  control.
 - Exit `0` with `"ok": true` is success. Any failure exits non-zero with
   `"ok": false` and a typed error.
 
@@ -128,8 +131,13 @@ response.
  "image": "example/image:1", "repo": "example-repo"}
 ```
 
-- `name`, `id`: required, `[A-Za-z0-9][A-Za-z0-9_.-]{0,127}`. `id` identifies
-  this incarnation and must change when the member is recreated.
+- `name`: required, `[A-Za-z0-9][A-Za-z0-9_.-]{0,127}`.
+- `id`: required, lowercase hex `[0-9a-f]{12,64}` (the SSH profile alias,
+  Session Host recreation and agent-bridge key on a hex instance id). It
+  identifies this incarnation and must change when the member is recreated. A
+  runtime with non-hex ids should derive one, for example a SHA-256 of its
+  native id. If the same container is also visible to the Docker CLI, report
+  its Docker id so the two inventories are recognized as one member.
 - `fleet`: required; must equal the request's `fleet`. The driver persists the
   fleet/instance identity given at `provision` and reports it back.
 - `state`: required. Docker vocabulary: `running` is ready; `exited`,

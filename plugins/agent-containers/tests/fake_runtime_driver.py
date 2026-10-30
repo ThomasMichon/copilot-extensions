@@ -81,7 +81,6 @@ def main(argv: list[str]) -> int:
     state = _load()
     state["calls"].append({
         "verb": verb, "request": request,
-        "protocol_env": os.environ.get("AGENT_CONTAINERS_DRIVER_PROTOCOL"),
     })
     _save(state)
     if request.get("protocolVersion") != 1:
@@ -102,7 +101,7 @@ def main(argv: list[str]) -> int:
         if name in members:
             return _error("conflict", f"{name} exists")
         members[name] = {
-            "id": f"fake{state['next_id']:08d}", "fleet": member["fleet"],
+            "id": f"{state['next_id']:012x}", "fleet": member["fleet"],
             "instance": member["instance"], "state": "running",
             "environment": request.get("environment", {}),
         }

@@ -52,10 +52,12 @@ log = logging.getLogger("agent-containers")
 PROTOCOL_VERSION = 1
 MANIFEST_SCHEMA_VERSION = 1
 PATH_PREFIX = "agent-containers-driver-"
-PROTOCOL_ENV = "AGENT_CONTAINERS_DRIVER_PROTOCOL"
 DRIVERS_DIR_ENV = "AGENT_CONTAINERS_DRIVERS_DIR"
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _MEMBER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+# Lowercase hex, like Docker ids: the SSH profile alias, Session Host
+# recreation and agent-bridge all key on a hex instance id.
+_ID_RE = re.compile(r"^[0-9a-f]{12,64}$")
 _TIMEOUTS = {
     "capabilities": 30.0,
     "list": 60.0,
@@ -181,11 +183,6 @@ class ExternalDriver(RuntimeDriver):
             **payload,
         }
 
-    def _env(self) -> dict[str, str]:
-        env = os.environ.copy()
-        env[PROTOCOL_ENV] = str(PROTOCOL_VERSION)
-        return env
-
     def call(self, verb: str, payload: dict[str, Any] | None = None, *,
              timeout: float | None = None) -> dict[str, Any]:
         """Run one non-interactive verb and return its validated response."""
@@ -195,11 +192,11 @@ class ExternalDriver(RuntimeDriver):
             done = subprocess.run(
                 [*self.spec.command, verb, "--json"],
                 input=request, capture_output=True, text=True, timeout=limit,
-                env=self._env(), creationflags=no_window_flags(),
+                creationflags=no_window_flags(),
             )
-        except FileNotFoundError:
+        except OSError as exc:  # missing, not executable, ENOEXEC, ...
             raise DriverError(self.name, verb, "runtime_unavailable",
-                              f"{self.spec.command[0]} not found") from None
+                              f"cannot launch {self.spec.command[0]}: {exc}") from None
         except subprocess.TimeoutExpired:
             raise DriverError(self.name, verb, "timeout",
                               f"no response within {limit:.0f}s") from None
@@ -233,7 +230,9 @@ class ExternalDriver(RuntimeDriver):
         name = _require_member_name(payload.get("name"), "member.name")
         if expected is not None and name != expected:
             raise ValueError(f"reported member {name!r}, expected {expected!r}")
-        member_id = _require_member_name(payload.get("id"), "member.id")
+        member_id = payload.get("id")
+        if not isinstance(member_id, str) or not _ID_RE.fullmatch(member_id):
+            raise ValueError(f"member {name!r} id must match {_ID_RE.pattern}")
         if payload.get("fleet") != self.fleet_name:
             raise ValueError(
                 f"member {name!r} reports fleet {payload.get('fleet')!r}"

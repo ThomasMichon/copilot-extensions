@@ -473,16 +473,26 @@ def merge_driver_members(
 ) -> list:
     """Append driver-reported members to a Docker inventory.
 
-    Docker rows that collide with a driver member's name or claim a driver
-    fleet are dropped, so a runtime that is also visible to the Docker CLI
-    never shows a member twice.
+    Docker rows labelled with a driver fleet are dropped even when its driver
+    is unavailable, so they are never managed around the driver. A Docker row
+    that is the same container as a driver member (same id) is shown once.
     """
     members = list_driver_members(config)
-    if not members:
-        return containers
-    claimed = {m.name for m in members}
     driver_fleets = {n for n, f in config.fleets.items() if f.driver}
-    kept = [c for c in containers if c.name not in claimed and c.fleet not in driver_fleets]
+    by_handle = {h: m for m in members for h in (m.name, m.container_id)}
+    kept = []
+    for row in containers:
+        if row.fleet in driver_fleets:
+            continue  # a driver fleet's members come only from its driver
+        clashes = [by_handle[h] for h in (row.name, row.container_id) if h in by_handle]
+        if clashes and all(m.container_id == row.container_id for m in clashes):
+            continue  # the same container, also visible to the Docker CLI
+        if clashes:
+            # Distinct Docker and driver members share a handle: keep both
+            # visible but refuse to route that handle anywhere.
+            with _lock:
+                _ambiguous.update({row.name, row.container_id} & set(by_handle))
+        kept.append(row)
     if not all_containers:
         members = [m for m in members if m.is_running]
     return kept + members
