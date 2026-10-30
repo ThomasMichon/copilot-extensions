@@ -1146,6 +1146,8 @@ exact pending revision and frozen operation before transport. A coordinator
 rollback between discovery and publication cannot silently drop the new field
 and still trigger a send. A lost publication response retains startup custody;
 a later supported retry reconciles the stored operation, never infers absence.
+An unavailable delivery identity/runtime is logged per candidate and retains
+its pending startup; it does not abort processing the remaining reservations.
 Native owner/waiter wake
 commands also use an explicit key-bound caller. A receipt previously bound to a
 different implicit caller is not permission to change its key or replay accepted

@@ -3308,7 +3308,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                         )
                         self._redriven_spawn_keys.add(key)
                         redriven += 1
-                except (DispatchError, ValueError, KeyError):
+                except (DispatchError, ValueError, KeyError, RuntimeError):
                     log.exception("retained native redrive refused for %s", key)
                 continue
             if _parse_fleet_body_handle(res.get("session_handle")) is not None:
