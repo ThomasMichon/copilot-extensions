@@ -3395,7 +3395,7 @@
         "tools/promotion_unit_tests/test_powershell_adapter.py": "04ddf659f14f90abe44b9452b158cf1dcab83b6691085640b095e3dd0475a148",
         "libs/agent-procutil/src/agent_procutil/_shell_caller_owned.py": "ac7a083c4bcfd41fc9c657c367b4717837ae5fecdd57bff1dd215ce4253873b1",
         "libs/agent-procutil/src/agent_procutil/_windows_parent_job.py": "d59e628dae3016c67df4d0e691407cc9ca3e1f77df576a36b10ca17d7d658277",
-        "tools/promotion_unit_tests/test_shell_caller_owned.py": "16d13a2f62ed1115736832bb8b4aadf4b026f1de672ffb1c76d396150ed1216f",
+        "tools/promotion_unit_tests/test_shell_caller_owned.py": "0723f365986fc1e537f4507ab681a290b22abe99fd4a688eddfd02861df6cb5a",
         "libs/agent-procutil/tests/sdk_desktop_observer.py": "9937f27126d265bbe0af52f3394b0e319e8b35b95b6926e9c518565d0f675667",
         "libs/agent-procutil/tests/sdk_visibility.py": "1dd963ecc72096b8a9b91d1f3089dd4b9301ca0ee7e2ba89a71a3cfcb30ca901",
         "tools/promotion_unit_tests/test_sdk_desktop_observer.py": "7117cbb65e5d6010465969333d7d429dadf3e3652c1d3f6f9bba7e9a05f5456b",

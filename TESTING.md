@@ -2728,6 +2728,10 @@ On Windows, pytest's existing Colorama console adapter is initialized before
 unit observation starts. Unit-side native-loader attempts remain rejected;
 `tools/test_promotion_unit_windows_io.py` exercises that distinction in a fresh
 native process outside the admitted unit packet.
+Actor-free POSIX watcher controls supply their synthetic signal constant along
+with their mocked OS calls, so collection/execution does not require the host
+platform to expose POSIX-only signal constants. This does not qualify native
+POSIX process retirement on Windows.
 
 `tools/test_promotion_version_allocation.py` exercises actual Git composition
 from landed Main: unlanded aliases do not change versions, dependency/checkout

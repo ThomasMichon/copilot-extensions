@@ -106,11 +106,16 @@ The source implementation continuation is admitted; operational effects are not.
 - [ ] Admit concrete implementation slices through their own reviewed plans
   and source claims; keep operational rollout separately authorized.
   The first bounded [read-generation slice](read-generation-slice.md) is claimed
-  under #9535; its contract amendment clears review before source realization.
+  under #9535; its contract amendment cleared review in #9641 before source
+  realization. Further cache/acquisition/submission contracts remain open.
 
 ### Phase 2 - Build the ADO read and source path after admission
+- [x] Implement the admitted offline read-generation builder and comparison
+  entry point with synthetic contract tests; live acquisition remains open below.
 - [ ] Provide initial normalized load and section-aware incremental sync using
   the existing provider and credential authorities.
+  Next is the finite [authorized acquisition slice](acquisition-slice.md),
+  extending the existing provider reader without another HTTP client.
 - [ ] Add coherent cache generations, completeness/freshness, bounded recovery
   and materialized local read views.
 - [ ] Attach exact shallow source/head/common-baseline workspaces through the
@@ -173,6 +178,37 @@ submission recovery and remaining decisions. It is not a shipped CLI or wire
 contract.
 
 ## Journal
+
+### 2026-10-30 - Offline read-generation source candidate
+- #9641 merged after current-head Copilot approval with no findings and required
+  green checks. Re-read this effort before starting the admitted source slice.
+- Implemented the pure ADO adapter and strict offline module CLI, retaining
+  scope, completion presence, discussion contents/deletions and revision binding.
+- Focused contained validation passed 94 tests across the new workspace cases
+  and existing CLI/native CLI contracts; touched Python lint and install-contract
+  checks passed. Actual source-module capabilities and sample load passed without
+  runtime installation or backend effects.
+- The candidate has no live acquisition, source attachment, database publication
+  or submission capability. Those obligations and real eligible ADO qualification
+  remain open; offline source completion is not campaign completion or rollout.
+- Follow-up input hardening rejects duplicate JSON fields; all 30 focused
+  workspace tests pass. The local whole-unit packet found a Windows-incompatible
+  POSIX signal fixture after 2,873 passing cases. Corrected its mocked signal
+  namespace and refreshed only that admitted source hash; all 64 cases in the
+  affected unit file pass. Full required-packet acceptance remains the ordinary
+  CI gate; the failed local run is not passing proof.
+- Proposed the next finite provider-owned acquisition slice for review alongside
+  this source candidate; it retains existing transport and credential owners.
+- A consumer reported 14 offline replay scenarios passing for the initial
+  immutable candidate, including omitted policy evaluations and distinct absent/
+  null/zero votes. This is not live acquisition or independently executed
+  reviewer qualification.
+- The source PR's first current-head CI passed, including eligible units with
+  coverage. Its code review found five real input/revision issues: endpoint
+  parser error disclosure, a newer nonmatching iteration hidden by historical
+  matching data, unusable changed paths, non-round-trippable size bounds and a
+  null sync baseline. Added focused fixes and regressions rather than treating
+  the clean consumer replay as proof those edge cases were sound.
 
 ### 2026-10-30 - Source continuation admitted
 - Source implementation was explicitly authorized, with incremental candidates

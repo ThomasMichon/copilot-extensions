@@ -46,13 +46,13 @@ known records but cannot establish full review readiness.
 
 ## Acceptance
 
-- [ ] Initial ADO generation retains identity, revision and exact presence of
+- [x] Initial ADO generation retains identity, revision and exact presence of
   completion/reviewer/discussion fields with synthetic fixtures.
-- [ ] No-change, reply/edit/deletion, new head/iteration, target-only movement
+- [x] No-change, reply/edit/deletion, new head/iteration, target-only movement
   and partial/missing-section sync controls report honest changes/invalidation.
-- [ ] Reject cross-scope previous generations, malformed evidence, unsupported
+- [x] Reject cross-scope previous generations, malformed evidence, unsupported
   versions and incomplete identity without interpreting eligibility.
-- [ ] Exercise the actual source CLI parser/serialization with no installed
+- [x] Exercise the actual source CLI parser/serialization with no installed
   runtime selection or global side effects; give reviewers exact source/ref
   commands and documented limits.
 - [ ] Run focused tests, contained plugin validation and relevant source guards;

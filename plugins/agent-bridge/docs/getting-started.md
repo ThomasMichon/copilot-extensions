@@ -44,6 +44,12 @@ registers the always-on service.
 standalone `uv` into `~/.agent-bridge/tool` when it is absent; the Windows
 installer fails loudly with the install URL if `uv` is not on PATH.
 
+Serving-runtime reconciliation recognizes both `python -m agent_bridge start`
+and the installed `agent-bridge start` console entrypoint. A name appearing
+only in another program's arguments is not daemon ownership. Endpoint health,
+the routed slot, version and native process-generation checks still have to
+agree; changing the launch spelling does not require restarting a healthy daemon.
+
 The legacy/default session-start hook (`hooks.json` -> `scripts/bootstrap-check.*`)
 submits fixed `stamp` (snapshot + binstub) or drift `install` actions through the
 packaged installation foundation and ordinary installation queue. Cold admission
