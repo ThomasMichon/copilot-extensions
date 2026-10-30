@@ -1,6 +1,8 @@
 # Pool-owned assignment startup and retry eligibility
 
-Status: **proposed; documentation and reviewed repair design only**.
+Status: **reviewed design; implementation and native qualification pending**.
+The documentation/design slice merged in
+[#9710](https://github.com/ThomasMichon/copilot-extensions/pull/9710).
 Coordination: [#9709](https://github.com/ThomasMichon/copilot-extensions/issues/9709).
 Parent: [monitor and confirmed-state effort](README.md).
 Standing intent: [Dispatch vision](../../../visions/plugins/agent-dispatch/README.md#pool-owned-assignment-startup).
@@ -145,7 +147,7 @@ or the existing submission/conversation implementation ownership.
 
 ## Review and completion
 
-Land this documentation proposal through normal review before implementation.
+The documentation proposal has passed normal review and merged.
 Later source slices need their own eligible claims and current review gates.
 The parent remains Active until its complete Plan and Validation Plan are
 resolved or explicitly transferred, not merely because this amendment merges.
