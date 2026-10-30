@@ -1529,4 +1529,14 @@ same-existing-data adoption and live all-code-absent session/connectivity
 survival gates intact. No host install, task mutation, service stop, maintenance
 hold or rollout occurred.
 
+The installed-suite candidate also exposed Dispatch's copied global admission
+helper without its required Python SDK. Both installers now publish the full
+helper file set, and Bash's publication journal covers those same dependencies.
+An actual publisher/copied-helper regression failed with the hosted SDK error
+under both PowerShell hosts before the correction; the focused launcher packet
+then passed 8 tests with 1 platform skip. The Bash stamp control is skipped on
+the Windows host, so native POSIX qualification remains open. Installer,
+documentation, headless, size and lint guards pass; no hosted suite or installed
+adoption result is inferred from this bounded repair.
+
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.

@@ -1680,10 +1680,8 @@ function Deploy-SelfProvisioningBinstub {
     }
     $contextDir = Join-Path $binDir 'installation-context'
     [void][IO.Directory]::CreateDirectory($contextDir)
-    foreach ($r in @('installation-context.ps1', 'installation-context.sh',
-        'guest-environment.ps1', 'guest-environment.sh', 'json-query.awk')) {
-        Copy-Item -LiteralPath (Join-Path (Join-Path $PSScriptRoot 'installation-context') $r) `
-            -Destination (Join-Path $contextDir $r) -Force
+    foreach ($support in Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'installation-context') -File) {
+        Copy-Item -LiteralPath $support.FullName -Destination (Join-Path $contextDir $support.Name) -Force
     }
 
     if (-not (Test-Path -LiteralPath $legacyInstallDir -PathType Container) -or

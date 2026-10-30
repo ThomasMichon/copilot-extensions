@@ -130,6 +130,11 @@ def test_conditional_publication_failure_keeps_healthy_selection(tmp_path, monke
         "current-version", "last-known-good", "deploy-manifest.json", "payload-dir",
         "stamped-version", "machine", "bin/resolve-runtime.sh", "bin/resolve-runtime.ps1",
     )] + [bin_dir / "agent-dispatch", bin_dir / "agent-dispatch-board"]
+    paths.extend(
+        root / "bin/installation-context" / support.name
+        for support in (fixture.SCRIPTS / "installation-context").iterdir()
+        if support.is_file()
+    )
     before = snapshot(paths)
     completions = {
         identity.runtime_version: (root / "versions" / identity.runtime_version / ".install-complete.json").read_bytes()
@@ -469,4 +474,7 @@ exit 77
     assert (root / "stamped-version").read_text() == fixture.PACKAGE
     assert (root / "bin/runtime-gate.sh").is_file()
     assert (root / "bin/installation-context/installation-context.sh").is_file()
+    for support in (fixture.SCRIPTS / "installation-context").iterdir():
+        if support.is_file():
+            assert (root / "bin/installation-context" / support.name).read_bytes() == support.read_bytes()
     assert not list(root.rglob("*.publication.*"))

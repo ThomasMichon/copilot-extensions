@@ -234,6 +234,9 @@ names. Scoped stamping is not proof of isolated staging or service readiness.
 Launcher ownership compares actual directory identity, not the case-folded
 service-name suffix: equivalent legacy path spellings retain publication, while
 distinct case-sensitive directories do not acquire global commands.
+The installed admission helpers include the complete SDK, fragments and
+caller-lifetime worker bundle, not just shell entrypoints. The global wrappers
+therefore resolve policy through their own installed helper files.
 
 The actual process-boundary portfolio is the explicit T3 suite
 `libs/payload-invocation/tests/test_dispatch_first_use_publication.py`. Run it
