@@ -38,6 +38,7 @@ uv.lock
 /.test-venvs/
 .test-runs/
 /.validation/
+/.v/
 
 # Capture-owner recovery inputs and stable publication lock; never evidence.
 /plugins/agent-bridge/contract/.capture-publication/

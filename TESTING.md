@@ -5091,8 +5091,8 @@ Whole-suite replacement has a separate manual Windows VM portfolio:
 update and repair in independent disposable GitHub-hosted Windows jobs:
 
 ```text
-python tools/run-manager-suite-acceptance.py --root .validation --mode normal
-python tools/run-manager-suite-acceptance.py --root .validation --mode repair
+python tools/run-manager-suite-acceptance.py --root .v --mode normal
+python tools/run-manager-suite-acceptance.py --root .v --mode repair
 ```
 
 These commands refuse local execution before creating fixtures. Each case

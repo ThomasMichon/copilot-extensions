@@ -119,7 +119,7 @@ def _python(root: Path) -> Path:
 
 
 def _probe(case: Path, kind: str) -> dict[str, Any]:
-    root = case / "home" / (".worktree-manager" if kind == "manager" else ".agent-worktrees")
+    root = case / "h" / (".worktree-manager" if kind == "manager" else ".agent-worktrees")
     result = _run([_python(root), "-I", "-X", "utf8", "-B", __file__, "--probe", kind], case, timeout=30)
     return json.loads(result.stdout)
 
@@ -161,10 +161,10 @@ def _observe(case: Path, declared: dict[str, Any]) -> dict[str, Any]:
     for name, step in observed["portfolio"].items():
         if not step["eligible"] or step["status"] not in ("", "SKIPPED (current)"):
             raise RuntimeError(f"Applicable prerequisite unsatisfied: {name}: {step}")
-        if not Path(step["root"]).is_relative_to(case / "home"):
+        if not Path(step["root"]).is_relative_to(case / "h"):
             raise RuntimeError(f"Planner selected a non-default-home installation: {step}")
     roots = {name: Path(row["root"]) for name, row in observed["portfolio"].items()}
-    roots["worktree-manager"] = case / "home" / ".worktree-manager"
+    roots["worktree-manager"] = case / "h" / ".worktree-manager"
     observed["roots"] = {name: str(root) for name, root in roots.items()}
     observed["versions"] = {
         name: (root / "current-version").read_text(encoding="utf-8").strip()
@@ -219,11 +219,11 @@ def _observe(case: Path, declared: dict[str, Any]) -> dict[str, Any]:
 
 
 def _tasks(case: Path) -> list[dict[str, Any]]:
-    script = _task_inventory_script(case / "home")
+    script = _task_inventory_script(case / "h")
     result = _run([shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command", script], case, timeout=30)
     (case / "task-inventory.json").write_text(result.stdout, encoding="utf-8")
     rows = json.loads(result.stdout)
-    home = str(case / "home").casefold()
+    home = str(case / "h").casefold()
     owned = re.compile(re.escape(home) + r"""(?=[\\/"'<]|$)""")
     return [row for row in rows if owned.search(row["xml"].casefold())]
 
@@ -443,7 +443,7 @@ def _frontdoors(case: Path, after: dict[str, Any]) -> dict[str, Any]:
             for extension in declaration["variants"]:
                 command = declaration["command"]
                 basename = command + ("." + extension if extension else "")
-                path = case / "home" / ".local" / "bin" / basename
+                path = case / "h" / ".local" / "bin" / basename
                 if not path.is_file():
                     raise RuntimeError(f"{name}: declared Windows frontdoor was not produced: {path}")
                 trace = traces / (basename + ".jsonl")
@@ -483,7 +483,7 @@ def _registration_routes(case: Path, before: dict[str, Any], after: dict[str, An
         if match is None:
             raise RuntimeError(f"{task['name']}: scheduled producer has no recognized owned launcher")
         launcher = Path(match.group(1))
-        if not launcher.resolve().is_relative_to(case / "home"):
+        if not launcher.resolve().is_relative_to(case / "h"):
             raise RuntimeError(f"{task['name']}: launcher escapes the case HOME")
         body = launcher.read_text(encoding="utf-8-sig")
         for old_slot in [*before["slots"].values(), before["index_engine"]["slot"]]:
@@ -592,10 +592,10 @@ def _cleanup(case: Path) -> list[str]:
     for name in sorted(set(MARKERS) - {
         "agent-worktrees", "worktree-manager", "agent-codespaces", "agent-index/engine",
     }):
-        payload = case / "home" / ".copilot" / "installed-plugins" / "copilot-extensions" / name
+        payload = case / "h" / ".copilot" / "installed-plugins" / "copilot-extensions" / name
         installer = payload / "scripts" / "install.ps1"
         try:
-            root = case / "home" / ("." + name)
+            root = case / "h" / ("." + name)
             try:
                 record, _ = _record(root, name)
                 with closing_process(record["pid"]) as process:
@@ -611,7 +611,7 @@ def _cleanup(case: Path) -> list[str]:
         except Exception as error:
             errors.append(f"{name} normal producer stop: {error}")
     try:
-        manager = case / "home" / ".worktree-manager"
+        manager = case / "h" / ".worktree-manager"
         try:
             marker, _ = _record(manager, "worktree-manager")
             with closing_process(marker["pid"]) as process:
@@ -630,7 +630,7 @@ def _cleanup(case: Path) -> list[str]:
     except Exception as error:
         errors.append(f"Manager normal shutdown: {error}")
     try:
-        root = case / "home" / ".agent-worktrees"
+        root = case / "h" / ".agent-worktrees"
         marker, _ = _record(root, "agent-worktrees")
         with closing_process(marker["pid"]) as process:
             alive = process.times()[2] == 259
@@ -648,7 +648,7 @@ def _cleanup(case: Path) -> list[str]:
     except Exception as error:
         errors.append(f"Worktrees normal shutdown: {error}")
     try:
-        engine = case / "home" / ".agent-index" / "engine"
+        engine = case / "h" / ".agent-index" / "engine"
         if (engine / "engine.pid").is_file():
             record, _ = _record(engine, "agent-index/engine")
             with closing_process(record["pid"]) as process:
@@ -844,7 +844,7 @@ def exercise(directory: Path, mode: str) -> None:
     roots = {name: Path(value) for name, value in before["roots"].items()}
     witness = roots["agent-worktrees"] / "continuity.sqlite"
     durable = [roots["worktree-manager"] / "config.toml", witness,
-               case / "home" / ".example" / "config.yaml"]
+               case / "h" / ".example" / "config.yaml"]
     try:
         with closing(sqlite3.connect(witness)) as connection, connection:
             connection.executescript(

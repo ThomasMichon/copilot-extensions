@@ -536,21 +536,21 @@ jobs:
         shell: pwsh
         run: >-
           python tools\run-manager-suite-acceptance.py
-          --root .validation --mode ${{ matrix.mode }}
+          --root .v --mode ${{ matrix.mode }}
       - name: Retain synthetic qualification diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: manager-suite-${{ matrix.mode }}
           path: |
-            .validation/*-runner.json
-            .validation/*/result.json
-            .validation/*/preparation-error.json
-            .validation/*/settlement.json
-            .validation/*/commands.jsonl
-            .validation/*/task-inventory.json
-            .validation/*/driver-diagnostics.json
-            .validation/*/driver-logs/*.log
+            .v/*-runner.json
+            .v/*/result.json
+            .v/*/preparation-error.json
+            .v/*/settlement.json
+            .v/*/commands.jsonl
+            .v/*/task-inventory.json
+            .v/*/driver-diagnostics.json
+            .v/*/driver-logs/*.log
           include-hidden-files: true
           if-no-files-found: warn
 

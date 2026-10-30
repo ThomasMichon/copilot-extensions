@@ -15,7 +15,7 @@ def retain_driver_logs(case: Path, output: str) -> None:
     identifiers = sorted(set(re.findall(r"\bUpdate request ([0-9a-f]{32})\b", output)))
     if not identifiers:
         return
-    root = case / "home" / ".copilot-extensions" / "update-driver"
+    root = case / "h" / ".copilot-extensions" / "update-driver"
     destination = case / "driver-logs"
     records = []
     for identifier in identifiers:

@@ -37,7 +37,7 @@ def _env(case: Path) -> dict[str, str]:
     ) and key.upper() not in {
         "GH_TOKEN", "GITHUB_TOKEN", "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV",
     }}
-    home = case / "home"
+    home = case / "h"
     env.update({
         "HOME": str(home), "USERPROFILE": str(home),
         "APPDATA": str(home / "AppData" / "Roaming"),
@@ -115,7 +115,7 @@ raise SystemExit('Unexpected external delivery request: ' + repr((kind, args)))
 
 
 def _configuration(case: Path, declared: dict[str, Any]) -> None:
-    home, project = case / "home", case / "project"
+    home, project = case / "h", case / "project"
     machine = socket.gethostname().split(".")[0].strip().lower()
     state, config = home / ".agent-worktrees", home / ".example"
     state.mkdir(parents=True, exist_ok=True)
@@ -173,7 +173,7 @@ def _configuration(case: Path, declared: dict[str, Any]) -> None:
 
 
 def _command(case: Path, name: str, *args: str, extension: str = "cmd") -> list[str]:
-    entry = case / "home" / ".local" / "bin" / (name + ("." + extension if extension else ""))
+    entry = case / "h" / ".local" / "bin" / (name + ("." + extension if extension else ""))
     if not entry.is_file():
         raise RuntimeError(f"{name}: generated global command recognizer missing: {entry}")
     if extension == "ps1":
