@@ -209,3 +209,11 @@ network dependency, parallel policy registry or mandatory sibling plugin.
   authorize a rollout. The new effectful probes remain explicit-only.
 - Final full native-inclusive rerun after the short-ID fixture correction:
   **143 passed, 6 platform skips**. This supersedes the earlier failing attempt.
+
+### 2026-10-30 - Implementation PR and source-guard correction
+- Opened #9646 against `dev`. The source guard caught the refactored Git
+  subprocess without Windows console suppression; both writer child-process
+  paths now use the standard guarded headless flag.
+- The repository headless guard passed and the final affected consumer packet
+  passed 42 tests, including a direct process-kwargs regression. High-signal
+  lint passed. Exact-head CI and Copilot review still gate merge.

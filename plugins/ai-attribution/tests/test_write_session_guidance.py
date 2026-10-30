@@ -174,6 +174,22 @@ def test_root_lookup_is_reused_for_cache_and_profile(monkeypatch, tmp_path):
     assert calls == [str(repo)]
 
 
+def test_writer_subprocesses_do_not_allocate_windows_consoles(monkeypatch):
+    calls = []
+
+    def run(*args, **kwargs):
+        calls.append(kwargs)
+        output = b'{"additionalContext":"policy"}' if "input" in kwargs else "repo"
+        return SimpleNamespace(returncode=0, stdout=output)
+
+    monkeypatch.setattr(writer.subprocess, "run", run)
+    monkeypatch.setattr(writer, "_contributor_argv", lambda root: ["shell"])
+    assert writer._repo_root("repo") == "repo"
+    assert writer._run_contributor(Path("."), b"{}") == "policy"
+    expected = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    assert [call["creationflags"] for call in calls] == [expected, expected]
+
+
 def test_over_budget_content_writes_explicit_status(monkeypatch, tmp_path):
     monkeypatch.setattr(writer, "_run_contributor", lambda *args: "x" * 5000)
     assert writer.write_session_guidance({"sessionId": "session-1"}, home=tmp_path)

@@ -94,6 +94,7 @@ def _run_contributor(root: Path, payload: bytes) -> str:
             timeout=_SUBPROCESS_TIMEOUT_S,
             check=False,
             env={**os.environ, "PYTHONPATH": ""},
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
     except (OSError, subprocess.SubprocessError):
         return ""
@@ -116,6 +117,7 @@ def _repo_root(cwd: str) -> str:
             text=True,
             timeout=_GIT_SUBPROCESS_TIMEOUT_S,
             check=False,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         if completed.returncode == 0:
             candidate = completed.stdout.strip()
