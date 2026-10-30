@@ -20,6 +20,82 @@ rv = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(rv)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows process observation")
+@pytest.mark.parametrize("observation", ["recovered", "exited", "unknown", "changed"])
+def test_native_windows_census_refresh_keeps_identity_and_unknown_owner_refusal(
+    tmp_path, observation,
+):
+    from agent_procutil.owned_process import run_owned
+
+    root = Path(__file__).resolve().parents[3]
+    source = root / "libs/installer-engine/installer_engine_uninstall_windows.py"
+    spec = importlib.util.spec_from_file_location("native_windows_census_test", source)
+    inspector = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(inspector)
+    shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    image = str(tmp_path / "python.exe").replace("'", "''")
+    python = sys.executable.replace("'", "''")
+    preamble = r"""
+$observation='OBSERVATION'
+$target=$PID
+$current=[Diagnostics.Process]::GetCurrentProcess()
+try { $stamp=$current.StartTime.ToUniversalTime().ToFileTimeUtc() } finally { $current.Dispose() }
+$finished=$null
+if ($observation -eq 'exited') {
+    $start=[Diagnostics.ProcessStartInfo]::new()
+    $start.FileName='PYTHON'
+    $start.Arguments='-I -c pass'
+    $start.UseShellExecute=$false
+    $start.CreateNoWindow=$true
+    $finished=[Diagnostics.Process]::Start($start)
+    $target=$finished.Id
+    $stamp=$finished.StartTime.ToUniversalTime().ToFileTimeUtc()
+    if (-not $finished.WaitForExit(10000)) { throw 'Fixture child did not exit' }
+}
+$created=[datetime]::FromFileTimeUtc($stamp-($stamp%10))
+$script:observations=0
+function Get-CimInstance {
+    param($ClassName,$Filter,$ErrorAction)
+    $script:observations+=1
+    if ($script:observations -gt 2) { throw 'Census repeated its refresh' }
+    if ($Filter -and $observation -eq 'exited') { return }
+    $complete=$Filter -and $observation -ne 'unknown'
+    $birth=if ($Filter -and $observation -eq 'changed') { $created.AddSeconds(1) } else { $created }
+    [pscustomobject]@{
+        ProcessId=$target;ParentProcessId=0;Name='python.exe';CreationDate=$birth
+        ExecutablePath=$(if($complete){'IMAGE'}else{''})
+        CommandLine=$(if($complete){'fixture-census'}else{''})
+    }
+}
+function Invoke-CimMethod {
+    param($InputObject,$MethodName,$ErrorAction)
+    [pscustomobject]@{ReturnValue=0;Sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value}
+}
+""".replace("OBSERVATION", observation).replace("PYTHON", python).replace("IMAGE", image)
+
+    def run(argv):
+        argv = [*argv[:-1], preamble + argv[-1] + "\nif($finished){$finished.Dispose()}\n"]
+        result = run_owned(argv, timeout=30)
+        if result.returncode:
+            raise subprocess.CalledProcessError(
+                result.returncode, argv, output=result.stdout, stderr=result.stderr,
+            )
+        return result.stdout
+
+    if observation in {"unknown", "changed"}:
+        with pytest.raises(subprocess.CalledProcessError) as caught:
+            inspector.inspect_processes(tmp_path, str(shell), "fixture", run, descendants=True)
+        expected = "candidate process (pid=" if observation == "unknown" else "identity changed"
+        assert expected in caught.value.stderr
+    else:
+        rows = inspector.inspect_processes(tmp_path, str(shell), "fixture", run, descendants=True)
+        if observation == "exited":
+            assert rows == []
+        else:
+            assert len(rows) == 1 and rows[0]["image"] == str(tmp_path / "python.exe")
+            assert rows[0]["created"] > 0 and rows[0]["inspectionHost"]
+
+
 def _row(pid, parent, image, *, created=None):
     return {
         "pid": pid, "ppid": parent, "image": str(image), "argv": [str(image)],

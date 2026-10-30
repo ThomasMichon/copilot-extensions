@@ -11,6 +11,9 @@ remains absolute. The caller still owns launch, cancellation and tree retirement
 and must retire writers before `finish()` after an error. Relay-only callers
 can disable retained capture; this helper does not create keepalive output
 or change the existing generic owned-process timeout policy.
+After retiring its writers, a POSIX caller may use `finish(stop_at_idle=True)`
+to drain available bytes without waiting for EOF from an escaped daemon that
+retained an otherwise idle pipe. This never authorizes killing that daemon.
 
 `agent_procutil.process_retirement.PinnedProcess` is a finite external-process
 primitive for application-owned incumbent retirement on Windows and Linux.

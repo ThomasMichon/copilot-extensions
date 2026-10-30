@@ -19,6 +19,13 @@ def inspect_processes(
     script += r"""
 $ErrorActionPreference='Stop'
 $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+function Test-CensusProcessExited([int]$processId) {
+    try { $process=[Diagnostics.Process]::GetProcessById($processId) } catch {
+        if ($_.Exception.InnerException -is [ArgumentException]) { return $true }
+        throw
+    }
+    try { return $process.HasExited } finally { $process.Dispose() }
+}
 $raw=@(Get-CimInstance Win32_Process -ErrorAction Stop)
 $rooted=@($raw | Where-Object {
     ([string]$_.ExecutablePath).Replace('\','/').ToLowerInvariant().StartsWith($prefix+'/') -or
@@ -61,7 +68,24 @@ $rows=@($raw | ForEach-Object {
         throw 'A rooted descendant belongs to another user'
     }
     if ($owner.Sid -eq $sid) {
-        if (-not $image -or -not $command) { throw 'Cannot inspect a current-user candidate process' }
+        if (-not $image -or -not $command) {
+            $fresh=@(Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $row.ProcessId) -ErrorAction Stop)
+            if ($fresh.Count -gt 1) { throw 'Candidate process refresh is ambiguous' }
+            if ($fresh.Count -eq 1) {
+                if ($fresh[0].ProcessId -ne $row.ProcessId -or
+                    ([datetime]$fresh[0].CreationDate).ToFileTimeUtc() -ne
+                        ([datetime]$row.CreationDate).ToFileTimeUtc()) {
+                    throw 'Process identity changed during inspection'
+                }
+                $row=$fresh[0]
+                $image=([string]$row.ExecutablePath).Replace('\','/').ToLowerInvariant()
+                $command=([string]$row.CommandLine).Replace('\','/').ToLowerInvariant()
+            }
+            if (-not $image -or -not $command) {
+                if (Test-CensusProcessExited $row.ProcessId) { return }
+                throw ("Cannot inspect a current-user candidate process (pid={0})" -f $row.ProcessId)
+            }
+        }
         $created=$null
         if ($descendants) {
             try {

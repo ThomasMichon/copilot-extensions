@@ -8,6 +8,11 @@ and channel preservation, unchanged receipt judgment and incumbent health
 remain independent controls. Source-phase units also advance through verified
 file batches. These checks do not qualify every native self-stage watchdog,
 initial source retention or an installed whole-update footprint.
+The MCP retirement packet adds native Windows controls for one birth-checked
+incomplete-census refresh, completed processes and retained live-unknown/identity
+refusals. Its actual fresh-settlement fixture owns its complete child scope with
+the existing 60-second child bound; that case's 90-second outer guard allows
+owned timeout cleanup and reporting instead of preempting them.
 
 The optional `update_diagnostics` lane includes Manager's actual scoped
 engine handoff under a no-window captured parent. It verifies repeated stdout

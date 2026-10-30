@@ -220,7 +220,7 @@ def _kill_tree(proc: subprocess.Popen, job, capture: SyncProcessOutput | None = 
         push_timeout._kill_tree(proc)
     try:
         out, _ = (
-            capture.finish(_REAP_GRACE_S) if capture is not None
+            capture.finish(_REAP_GRACE_S, stop_at_idle=os.name != "nt") if capture is not None
             else proc.communicate(timeout=_REAP_GRACE_S)
         )
     except subprocess.TimeoutExpired:

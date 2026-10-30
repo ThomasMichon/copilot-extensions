@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import math
+import os
 import queue
+import select
 import subprocess
 import threading
 import time
@@ -33,6 +35,7 @@ class SyncProcessOutput:
         self._output = {"stdout": bytearray(), "stderr": bytearray()}
         self._last_output = time.monotonic()
         self._lock = threading.Lock()
+        self._stop_at_idle = threading.Event()
         self._readers = []
         self._startup_errors = []
         self._done = set()
@@ -59,7 +62,18 @@ class SyncProcessOutput:
         try:
             binary = getattr(stream, "buffer", stream)
             read = getattr(binary, "read1", binary.read)
-            while chunk := read(4096):
+            while True:
+                if os.name != "nt":
+                    ready, _, _ = select.select(
+                        [binary], [], [], 0 if self._stop_at_idle.is_set() else .1,
+                    )
+                    if not ready:
+                        if self._stop_at_idle.is_set():
+                            return
+                        continue
+                chunk = read(4096)
+                if not chunk:
+                    return
                 with self._lock:
                     self._last_output = time.monotonic()
                 self._events.put((name, chunk))
@@ -128,7 +142,13 @@ class SyncProcessOutput:
             values.append(value)
         return tuple(values)
 
-    def finish(self, timeout: float) -> tuple[str | bytes | None, str | bytes | None]:
+    def finish(
+        self, timeout: float, *, stop_at_idle: bool = False,
+    ) -> tuple[str | bytes | None, str | bytes | None]:
+        if stop_at_idle:
+            if os.name == "nt":
+                raise ValueError("idle pipe retirement requires POSIX selectable pipes")
+            self._stop_at_idle.set()
         self.wait(None, deadline=time.monotonic() + timeout)
         for reader in self._readers:
             reader.join()

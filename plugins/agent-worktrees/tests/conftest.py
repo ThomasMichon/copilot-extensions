@@ -890,6 +890,22 @@ class _SubprocessRunInstaller:
         return (getattr(result, "stdout", None) if capture else None), None
 
 
+class _SubprocessRunOutput:
+    def __init__(self, process, *, on_output, capture=True):
+        self.process = process
+        self.on_output = on_output
+        self.output = ("", None)
+
+    def wait(self, timeout, **kwargs):
+        self.output = self.process.communicate(timeout=timeout)
+        if self.output[0]:
+            content = self.output[0]
+            self.on_output("stdout", content.encode("utf-8") if isinstance(content, str) else content)
+
+    def finish(self, timeout, **kwargs):
+        return self.output
+
+
 @pytest.fixture(autouse=True)
 def _installer_processes_through_subprocess_run(request, monkeypatch):
     if request.node.get_closest_marker("real_installer_processes"):
@@ -902,7 +918,11 @@ def _installer_processes_through_subprocess_run(request, monkeypatch):
             _SubprocessRunInstaller(argv, cwd, env, capture, output_fd), None,
         ),
     )
-    monkeypatch.setattr(installer_run, "_kill_tree", lambda proc, job: "")
+    monkeypatch.setattr(installer_run, "SyncProcessOutput", _SubprocessRunOutput)
+    monkeypatch.setattr(
+        installer_run, "_kill_tree",
+        lambda proc, job, capture=None: (capture.finish(0)[0] or "") if capture is not None else "",
+    )
     if request.node.get_closest_marker("installer_receipts"):
         return
     # These fakes model an installer by its exit code alone: one that exits 0

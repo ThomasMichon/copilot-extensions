@@ -3521,7 +3521,7 @@
         "tools/promotion_unit_tests/test_cell_installer.py": "56b67d4a86aefa4ccfeb2662205b46c0dec27cecc6e4ce530a19a5b5c55b1af1",
         "plugins/agent-machines/tests/test_cell_installer.py": "de004be5b70e1d4bed4945e766f393c167db0682979853eba4fa40814e01bf14",
         "plugins/agent-machines/scripts/cell_installer.py": "041a28230551d926c65ff00866213f5944ff5d1e0596c75e37ffa8cd0af64795",
-        "libs/versioned-runtime/versioned_runtime_construction.py": "df703e23675c232079f28c74eb85977b3460aef252e2bb2079bbf9081ad1480d",
+        "libs/versioned-runtime/versioned_runtime_construction.py": "5f746c99a2d0b7561137b552f9dced3bb8dc8f967e312f7ad2d19392400b95f5",
         "tools/promotion_unit_tests/test_related_acquisition.py": "2b3eaa28edf9d4a7bbb935de5961d924b98391b93d61134331fd97d14b39338e",
         "plugins/agent-worktrees/src/agent_worktrees/acquisition_report.py": "a83793221939d9744aa1be72c839bf631d279cee1fc2bb67601ca8fe68c8deed",
         "plugins/agent-worktrees/src/agent_worktrees/related_acquisition.py": "1e0cd3516504aee4bbbb768e69f4ce74cf7b4435d5758cec7c5fdff2fbb4d2b0",

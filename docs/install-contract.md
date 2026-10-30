@@ -2244,6 +2244,13 @@ Receipt validation and watchdog exit `124` still determine the actual outcome.
 This does not change a native self-stage parent's separate watchdog policy or
 legacy non-receipt subprocess adapters.
 
+The read-only Windows consumer census refreshes an incomplete current-user
+candidate at most once by PID and checks that its creation identity is unchanged.
+A disappeared observation is omitted only after native process absence/exit
+confirmation; live unknown, ambiguous and changed-identity observations still
+refuse inspection. The existing native birth check and retirement pins remain
+separate, and the census never signals a process.
+
 The shared command-lifecycle runner passes the caller's stdout and stderr
 explicitly to its native installer child, including the strict Windows Job
 containment path. On Windows, a hidden child with only implicit OS stream
@@ -2644,7 +2651,11 @@ Coverage cannot be narrowed to selected files to hide a new
 producer. A producer change must carry its manifest revision and delta;
 published history is compared with the local publication merge-base, PR base, or CI push
 parent rather than trusting a rewritten baseline. Source digests are omission
-checks, not a signing or runtime-authorization protocol. This initial data
+checks, not a signing or runtime-authorization protocol. The complete append-only
+manifest has a separate bounded 1 MiB reader; selectors, deployment evidence and
+completion markers retain their 64 KiB budget. Construction and the source guard
+use the same manifest reader, so valid history is not mistaken for one small
+runtime marker and an oversized publication is refused before rollout. This initial data
 provider alone neither executes effects nor grants update permission; native
 construction and process settlement consume the applicable parts separately.
 

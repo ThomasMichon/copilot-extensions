@@ -170,17 +170,24 @@ _fixture_shutil.copytree = _fixture_copy
 def _run(
     tmp_path: Path, language: str, script: str, *, environment: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    from agent_procutil.owned_process import run_caller_owned
+
     host = _host(language)
     harness = tmp_path / f"native.{language}"
     harness.write_text(script, encoding="utf-8")
     args = [host, "-NoProfile", "-File", str(harness)] if language == "ps1" else [
         host, _quote(harness, "sh")[1:-1],
     ]
-    return subprocess.run(
-        args, cwd=tmp_path, capture_output=True, text=True, encoding="utf-8",
-        timeout=60, check=False, env=environment,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
+    try:
+        return run_caller_owned(
+            args, cwd=tmp_path, env=environment, timeout=60,
+            max_stdout_bytes=1 << 20, max_stderr_bytes=1 << 20,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise AssertionError(
+            f"Native {language} fixture exceeded its 60s child deadline after owned cleanup; "
+            f"stdout={error.stdout!r}; stderr={error.stderr!r}",
+        ) from error
 
 
 def _recovery_owner(payload: Path, home: Path, root: Path) -> tuple:
@@ -337,6 +344,8 @@ echo CONTINUED
         assert ("CONTINUED" in result.stdout) == (exit_code == 0)
 
 
+# Keep pytest outside the child's existing deadline and owned teardown.
+@pytest.mark.timeout(90)
 @pytest.mark.parametrize("language", ["ps1", "sh"])
 @pytest.mark.parametrize("socket_override", [False, True])
 def test_native_fresh_settlement_resets_the_actual_distinct_control_home(
