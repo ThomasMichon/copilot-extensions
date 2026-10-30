@@ -212,8 +212,13 @@ function Invoke-DaemonInstanceReconcile {
     assert proof.read_text() == "preserve"
 
 
-@pytest.mark.skipif(os.name != "nt", reason="PowerShell native adapter contract")
 def test_real_powershell_adapter_fresh_repeat_healthy_and_partial_outcomes(tmp_path):
+    shell = (
+        str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
+        if os.name == "nt" else shutil.which("pwsh")
+    )
+    if not shell:
+        pytest.skip("PowerShell adapter contract host is unavailable")
     helper_root = tmp_path / "helpers"
     helper_root.mkdir()
     shutil.copyfile(ENGINE / "installer-instance-reconcile.ps1", helper_root / "installer-instance-reconcile.ps1")
@@ -236,7 +241,6 @@ function Invoke-DaemonInstanceReconcile {
 """,
         encoding="utf-8",
     )
-    shell = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
     quote = lambda value: "'" + str(value).replace("'", "''") + "'"
     command = (
         f". {quote(helper_root / 'installer-instance-reconcile.ps1')}; "
@@ -251,13 +255,14 @@ function Invoke-DaemonInstanceReconcile {
     result = subprocess.run(
         [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
         text=True, capture_output=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout == "installer-success"
     assert (registry / "calls").read_text().splitlines() == ["one"] * 5
     assert "held: proof-changed" in result.stderr
     assert "deferred: native-reconcile-failed" in result.stderr
+    assert "(RuntimeException)" in result.stderr
     assert "private registry error details" not in result.stderr
 
 
@@ -268,6 +273,7 @@ def test_actual_native_missing_registry_is_readonly_and_unknown_proof_is_held(tm
     for source in (
         ENGINE / "installer-instance-reconcile.ps1",
         REPO / "libs" / "agent-procutil" / "src" / "agent_procutil" / "daemon_instances.ps1",
+        REPO / "libs" / "agent-procutil" / "src" / "agent_procutil" / "daemon_instance_runtime.pyz",
     ):
         shutil.copyfile(source, helper_root / source.name)
     registry = tmp_path / "never-created-registry"
@@ -279,11 +285,16 @@ def test_actual_native_missing_registry_is_readonly_and_unknown_proof_is_held(tm
         "1..2 | ForEach-Object { "
         f"Invoke-InstallerInstanceReconcile -HelperRoot {quote(helper_root)} "
         f"-RegistryRoot {quote(registry)} }}; "
+        f"if (@(Invoke-DaemonInstanceReconcile -RegistryRoot {quote(registry)}).Count -ne 0) "
+        "{ throw 'missing registry reconciliation did not complete successfully' }; "
         f"if (Test-Path -LiteralPath {quote(registry)}) {{ throw 'missing registry was created' }}; "
         f"[void][IO.Directory]::CreateDirectory({quote(registry)}); "
         f"[IO.File]::WriteAllText({quote(unknown)}, 'unowned-proof'); "
         f"Invoke-InstallerInstanceReconcile -HelperRoot {quote(helper_root)} "
         f"-RegistryRoot {quote(registry)}; "
+        f"$outcomes=@(Invoke-DaemonInstanceReconcile -RegistryRoot {quote(registry)}); "
+        "if ($outcomes.Count -ne 1 -or $outcomes[0].status -cne 'held' -or "
+        "$outcomes[0].reason -cne 'invalid-record') { throw 'held reconciliation did not complete' }; "
         f"if ([IO.File]::ReadAllText({quote(unknown)}) -cne 'unowned-proof') "
         "{ throw 'unowned proof changed' }; [Console]::Out.Write('preserved')"
     )
@@ -295,6 +306,7 @@ def test_actual_native_missing_registry_is_readonly_and_unknown_proof_is_held(tm
     assert result.returncode == 0, result.stderr
     assert result.stdout == "preserved"
     assert "held" in result.stderr
+    assert "native-reconcile-failed" not in result.stderr
 
 
 def test_standalone_host_extras_include_admission_dependency():

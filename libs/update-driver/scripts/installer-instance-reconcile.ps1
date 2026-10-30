@@ -22,7 +22,7 @@ function Invoke-InstallerInstanceReconcile {
         $null = Invoke-DaemonInstanceReconcile @arguments
     } catch {
         [Console]::Error.WriteLine(
-            "[installer-instance-gc] deferred: native-reconcile-failed ($($_.Exception.GetType().Name)): $($_.Exception.Message)")
+            "[installer-instance-gc] deferred: native-reconcile-failed ($($_.Exception.GetType().Name))")
     } finally {
         $global:LASTEXITCODE = $savedExit
     }
