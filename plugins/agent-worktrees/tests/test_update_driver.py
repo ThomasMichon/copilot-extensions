@@ -205,12 +205,17 @@ def test_partial_completion_does_not_report_full_verified_current(monkeypatch, t
     import update_telemetry as ut
     from agent_worktrees import update_events
 
+    run_ids = iter(("20260914T090000Z-1-ffff", "20260914T090000Z-1-0000"))
+    monkeypatch.setattr("update_telemetry.run.new_run_id", lambda: next(run_ids))
+    monkeypatch.setattr("update_telemetry.run.utc_now", lambda: "2026-09-14T09:00:00.000Z")
     environment = {ut.ENV_HOME: str(tmp_path / "telemetry")}
     previous = ut.Run.from_env_or_new("engine", environ=environment)
     previous.target("runtime_reconcile", "agent-example@copilot-extensions", ut.VERIFIED_CURRENT)
     assert previous.finish() == 0
     path = tmp_path / "telemetry" / "update-status.json"
     history = json.loads(path.read_text(encoding="utf-8"))
+    # This tests partial folding, not the random-ID tie-breaker for equal start times.
+    monkeypatch.setattr("update_telemetry.run.utc_now", lambda: "2026-09-14T09:00:00.001Z")
     run = ut.Run.from_env_or_new("engine", environ=environment)
     monkeypatch.setattr(update_events, "_ut", ut)
     monkeypatch.setattr(update_events, "_run", run)
