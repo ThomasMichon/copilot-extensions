@@ -841,9 +841,22 @@ jobs:
       - name: Qualify actual Logger hook, packaged foundation and fixed recipe regressions
         run: >-
           python tools/run-plugin-tests.py update-driver
-          --test-file tests/test_first_use_logger_bootstrap.py
           --test-file tests/test_first_use_logger.py
+          -k "not test_actual_logger_cold_concurrent_install_keeps_selection_and_six_installed_consumers"
           --max-files-per-sub-suite 1 --test-timeout 900 --timeout 1200
+      - name: Qualify actual cold hooks in their own storage boundary
+        env:
+          PYTEST_ADDOPTS: "--capture=tee-sys"
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_logger_bootstrap.py
+          --test-timeout 900 --timeout 1200
+      - name: Qualify concurrent cold installation in its own storage boundary
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_logger.py
+          -k test_actual_logger_cold_concurrent_install_keeps_selection_and_six_installed_consumers
+          --test-timeout 900 --timeout 1200
       - name: Qualify retained bootstrap and independent hooks
         run: >-
           python tools/run-plugin-tests.py agent-logger

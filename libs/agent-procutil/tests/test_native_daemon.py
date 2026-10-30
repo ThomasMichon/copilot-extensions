@@ -1,4 +1,4 @@
-"""Python-free native admission survives the actual submitting Job."""
+"""Native admission and setup-provided Python under the actual submitting Job."""
 
 import importlib.util
 import base64
@@ -52,7 +52,7 @@ def observed_worker(details):
 
 
 @pytest.mark.parametrize("mode", ["production", "contained"])
-def test_python_free_bootstrap_refuses_strict_escape_and_preserves_contained_custody(tmp_path, monkeypatch, mode):
+def test_native_bootstrap_refuses_strict_escape_and_preserves_contained_custody(tmp_path, monkeypatch, mode):
     base = Path(__file__).resolve().parents[2]
     monkeypatch.syspath_prepend(str(base / "single-instance-lease" / "src"))
     from single_instance_lease.operation import OperationLock, OperationLockedError
@@ -66,8 +66,9 @@ def test_python_free_bootstrap_refuses_strict_escape_and_preserves_contained_cus
             root = tmp_path / f"{mode}-{cycle}"
             root.mkdir()
             env = dict(os.environ)
-            # The native child has neither a Python nor uv command to discover.
-            env["PATH"] = str(shell.parent)
+            python = shutil.which("python")
+            assert python, "the native fixture requires setup-provided PATH Python"
+            env["PATH"] = str(Path(python).parent) + os.pathsep + str(shell.parent)
             if mode == "production":
                 env.pop("COPILOT_EXTENSIONS_TEST_CONTAINED", None)
             else:
@@ -275,12 +276,13 @@ def test_native_contained_handshake_with_credential_free_private_profile(tmp_pat
         "$ErrorActionPreference='Stop'\n"
         "Write-Output 'native caller loading admission'\n"
         f". {literal(helper)}\n"
+        f". {literal(helper.with_name('daemon_instances.ps1'))}\n"
         "Write-Output 'native caller starting daemon'\n"
         f"$p=Start-NativeDaemon -Script {literal(worker)} -Arguments @("
         f"([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('{encoded_argument}')))) "
         f"-WorkingDirectory {literal(directory)} -LogPath {literal(directory / 'daemon.log')}\n"
         "Write-Output 'native caller received admission'\n"
-        "@{pid=$p.Id;birth=[CopilotExtensions.DaemonInstanceNative]::Birth($p)} | ConvertTo-Json -Compress "
+        "@{pid=$p.Id;birth=(Get-DaemonInstanceProcessBirth $p)} | ConvertTo-Json -Compress "
         f"| Set-Content -LiteralPath {literal(directory / 'outcome.json')} -Encoding UTF8\n"
         "$p.Dispose()\n",
         encoding="utf-8",

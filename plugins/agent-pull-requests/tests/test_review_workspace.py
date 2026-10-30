@@ -350,3 +350,49 @@ def test_near_limit_load_output_round_trips_as_sync_baseline(
     assert main(["sync", "--evidence", str(supplied), "--previous", str(previous)]) == 0
     result = json.loads(capsys.readouterr().out)
     assert result["changed_sections"] == result["invalidations"] == []
+
+
+def test_native_nullable_property_bag_preserves_absence_and_object_filtering(
+    evidence, tmp_path, capsys,
+):
+    generations = {}
+    source = tmp_path / "evidence.json"
+    for kind in ("absent", "null", "object"):
+        value = copy.deepcopy(evidence)
+        thread = value["sections"]["discussions"]["data"][0]
+        if kind == "null":
+            thread["properties"] = None
+        elif kind == "object":
+            thread["properties"] = {
+                "CodeReviewVoteResult": {"$value": 0}, "unrelatedProperty": "not retained",
+            }
+        source.write_text(json.dumps(value), encoding="utf-8")
+        assert main(["load", "--evidence", str(source)]) == 0
+        current = json.loads(capsys.readouterr().out)["generation"]
+        record = current["sections"]["discussions"]["data"][0]
+        if kind == "absent":
+            assert "properties" not in record
+        elif kind == "null":
+            assert record["properties"] is None
+        else:
+            assert record["properties"] == {"CodeReviewVoteResult": {"$value": 0}}
+        generations[kind] = current
+    assert len({value["id"] for value in generations.values()}) == 3
+    nullable = tmp_path / "nullable.json"
+    absent = tmp_path / "absent.json"
+    nullable.write_text(json.dumps(generations["null"]), encoding="utf-8")
+    absent.write_text(json.dumps(generations["absent"]), encoding="utf-8")
+    assert main(["compare", "--generation", str(nullable), "--previous", str(nullable)]) == 0
+    unchanged = json.loads(capsys.readouterr().out)
+    assert unchanged["changed_sections"] == unchanged["invalidations"] == []
+    assert main(["compare", "--generation", str(nullable), "--previous", str(absent)]) == 0
+    changed = json.loads(capsys.readouterr().out)
+    assert changed["changed_sections"] == ["discussions"]
+    assert changed["invalidations"] == ["discussion_decisions", "review_decision"]
+
+
+@pytest.mark.parametrize("properties", [[], "malformed", 0, False])
+def test_malformed_native_property_bag_still_refuses(evidence, properties):
+    evidence["sections"]["discussions"]["data"][0]["properties"] = properties
+    with pytest.raises(ValueError, match="discussion properties"):
+        build_generation(evidence)

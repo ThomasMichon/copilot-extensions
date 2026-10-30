@@ -212,7 +212,17 @@ owns the revised implementation and validation boundary.
   signature, PE and physical-path interpreter attestation (#9262). This closes
   selector and consumer compatibility, not the remaining compiled SDK,
   installer or daemon entrypoints.
-- [ ] Replace executable embedded Windows helper compilation and runtime code
+- [x] Replace the compiled installation-context PowerShell SDK with its shared
+  standard-library Python owner and preserve original-shell lifetime, strict
+  action/policy behavior and source-only distribution. The complete bounded
+  44-case Windows SDK packet passes; merged in #9354. This does not migrate
+  daemon-instance entrypoints or complete Manager's separate native gate.
+- [x] Qualify the compiler-free PowerShell instance adapter and requalify its
+  changed common archive: all 107 native installer, instance and SDK cases pass
+  with independent source, desktop and retirement reconciliation. See the
+  [slice journal](journal/2026/10.30%20powershell-instance-custody.md);
+  current-head source review/CI/merge and remaining compiled launchers stay open.
+- [ ] Replace remaining executable embedded Windows helper compilation and runtime code
   emission through their existing installation-context, operation-lock,
   update-driver, process and session-host owners. Establish the existing
   setup-owned Python prerequisite before these helpers, invoke normal PATH
@@ -232,7 +242,9 @@ owns the revised implementation and validation boundary.
 The Linux slice merged in #9129. The leased-daemon owner's
 [implementation journal](../leased-daemon-instances/journal/2026/10.26%20compiler-free-amendment.md#linux-implementation-merged)
 records compiler-absent construction, installed lifecycle qualification and
-namespace-bound monotonic leases. Windows bootstrap/embedded-code replacement,
+namespace-bound monotonic leases. The shared SDK migration merged in #9354
+after its complete bounded native packet passed. Remaining Windows
+bootstrap/embedded-code replacement,
 whole-campaign acceptance, release attribution and authorized rollout remain
 open.
 
@@ -359,7 +371,9 @@ transfer without acceptance by a named tracked objective.
 
 ## Journal
 
-- [2026-10-28 - SDK caller bounds and negative native qualification](journal/2026/10.28%20sdk-caller-qualification.md)
+- [2026-10-30 - compiler-free PowerShell instance custody](journal/2026/10.30%20powershell-instance-custody.md)
+
+- [2026-10-28 - SDK caller bounds and native qualification](journal/2026/10.28%20sdk-caller-qualification.md)
 
 ### 2026-10-28 - Complete the full installation-context fixture repair
 

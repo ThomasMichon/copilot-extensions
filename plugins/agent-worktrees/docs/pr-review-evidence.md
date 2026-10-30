@@ -94,6 +94,14 @@ AAD object ID, account display name, email or truncated identifier. This ID is
 not another field to add to the credential DTO. The exporter observes it using
 the actual material and compares it exactly; it never converts an AAD identity
 into an ADO identity by assumption.
+When the provider's `authenticatedUser.id` differs under delegation, it is not
+the selected scope principal and cannot fill in a missing `authorizedUser.id`.
+The shared decoder and both acquisition profiles test this distinction.
+
+The [protected owner-read embedding](../../agent-pull-requests/docs/owner-read.md)
+provides a separate source integration seam for an already authorized owner that
+keeps credentials internally. It does not make an installed owner available or
+silently replace this credential-command profile.
 
 ## Acquisition and account scope
 

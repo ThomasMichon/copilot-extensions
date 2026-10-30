@@ -15,6 +15,22 @@ from tools import plugin_test_containment
 from tools.plugin_test_containment import Limits, isolated_environment
 
 
+@pytest.mark.parametrize("inherited_name", ["PSModulePath", "PSMODULEPATH", "psmodulepath"])
+def test_isolated_environment_overrides_native_module_path_identity(tmp_path, inherited_name):
+    base = {inherited_name: "inherited-modules"}
+    environment = isolated_environment(base, tmp_path)
+    expected = str(tmp_path.resolve() / "powershell-modules")
+    assert environment["PSModulePath"] == expected
+    aliases = {
+        name: value for name, value in environment.items()
+        if name.casefold() == "psmodulepath"
+    }
+    if os.name == "nt" or inherited_name == "PSModulePath":
+        assert aliases == {"PSModulePath": expected}
+    else:
+        assert aliases == {inherited_name: "inherited-modules", "PSModulePath": expected}
+
+
 @pytest.mark.parametrize("mode", ["package", "script"])
 def test_fresh_stdlib_caller_imports_native_cleanup_in_both_modes(tmp_path, mode):
     root = Path(__file__).resolve().parents[1]

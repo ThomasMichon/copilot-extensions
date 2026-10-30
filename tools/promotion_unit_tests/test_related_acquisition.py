@@ -978,3 +978,227 @@ def test_projects_callbacks_bind_actual_callable_identity_and_selection(api, mon
     assert len(owned) == 1
     assert owned[0].authority is (ScanAuthority.COMPLETE if mode == "read-time-swap" else ScanAuthority.INDETERMINATE)
     assert api.config.current_observations() is None
+
+
+def _knowledge_owner(api, monkeypatch):
+    import builtins
+    import io
+    import os
+    import stat
+
+    boundary = ModuleType("agent_procutil")
+    boundary.no_window_kwargs = lambda: {"creationflags": 1234}
+    monkeypatch.setitem(sys.modules, "agent_procutil", boundary)
+    _registered_owner(api, monkeypatch)
+    transport = ModuleType("machine_transport")
+    for name in (
+        "MachineEntry", "SSHEnvironment", "find_machine_entry", "machine_name", "detect_platform",
+        "find_machine_metadata", "merge_machines_yaml", "normalize_machine_entries", "parse_machines_yaml_file",
+    ):
+        setattr(transport, name, SimpleNamespace)
+    monkeypatch.setitem(sys.modules, "machine_transport", transport)
+    for name in ("project_state", "machine_instructions"):
+        api.stub(name)
+    api.stub("registry_paths", installation_context=lambda: {})
+    api.stub("publication_deadline", DEFAULT_PUSH_TIMEOUT=30)
+    api.stub("codename_config", CodenameConfig=SimpleNamespace, parse_codename=lambda value: value)
+    api.stub("pr_observation_config", ObservationConfig=SimpleNamespace, parse_observation=lambda value: value)
+    api.stub("pr_publication_config", PublicationChecksConfig=SimpleNamespace,
+             parse_publication_checks=lambda value: value, parse_string_tuple=tuple)
+    api.stub("pr_publication_labels", PublicationOrigin=SimpleNamespace, parse_origin=lambda value: value)
+    api.stub("pr_related_binding", parse_repository=lambda value: value)
+    api.stub("config_cache", ConfigCacheSession=SimpleNamespace,
+             cached_load_config_scope=lambda: None, memoize_in_scope=lambda fn, *a, **k: fn(*a, **k))
+    calls = []
+
+    def git(*args, **kwargs):
+        calls.append(("git", str(kwargs["cwd"])))
+        return SimpleNamespace(returncode=1, stdout="", stderr="")
+
+    api.stub("git_ops", git=git, GitError=RuntimeError)
+    api.load("inrepo_config_source")
+    owner = api.load("config")
+    launch = Path("synthetic-launch")
+    knowledge = Path("synthetic-knowledge")
+    launch_file = launch / owner.CANONICAL_INREPO_CONFIG_DIR / "config.yaml"
+    knowledge_file = knowledge / owner.CANONICAL_INREPO_CONFIG_DIR / "config.yaml"
+    documents = {
+        launch_file: "stateless: true\n",
+        knowledge_file: "headless: true\ncopilot_profiles: [{name: portable}]\nsrcroot: excluded\n",
+    }
+    state = SimpleNamespace(registered=True, on_read=None, errors={}, parsed={})
+    native_exists, native_stat, native_open, native_load = Path.exists, os.stat, builtins.open, owner.yaml.load
+
+    def exists(path):
+        if path.parts and path.parts[0] in (str(launch), str(knowledge)):
+            calls.append(("exists", str(path)))
+            return path in documents and documents[path] is not None
+        return native_exists(path)
+
+    def source_stat(path, *args, **kwargs):
+        if isinstance(path, (str, Path)) and Path(path) in documents:
+            calls.append(("stat", str(path)))
+            return SimpleNamespace(st_mode=stat.S_IFREG)
+        return native_stat(path, *args, **kwargs)
+
+    def read(path, *args, **kwargs):
+        if isinstance(path, (str, Path)) and Path(path) in documents:
+            path = Path(path)
+            calls.append(("read", str(path)))
+            assert kwargs["encoding"] == "utf-8"
+            if path in state.errors:
+                raise state.errors[path]
+            if state.on_read is not None:
+                state.on_read(path)
+            stream = io.StringIO(documents[path])
+            stream.name = str(path)
+            return stream
+        return native_open(path, *args, **kwargs)
+
+    def parse(stream, *args, **kwargs):
+        name = getattr(stream, "name", None)
+        path = Path(name) if name is not None else None
+        if path in documents:
+            calls.append(("parse", str(path)))
+            assert kwargs["Loader"] is owner._YamlSafeLoader
+        value = native_load(stream, *args, **kwargs)
+        if path in documents:
+            state.parsed[path] = value
+        return value
+
+    def registry():
+        calls.append(("registry", "knowledge"))
+        entry = SimpleNamespace(local_path=lambda platform: str(knowledge))
+        return SimpleNamespace(repos={"knowledge": entry} if state.registered else {})
+
+    monkeypatch.setattr(sys.modules[owner.__package__ + ".repos"], "read_registry", registry, raising=False)
+    monkeypatch.setattr(Path, "exists", exists)
+    monkeypatch.setattr(os, "stat", source_stat)
+    monkeypatch.setattr(builtins, "open", read)
+    monkeypatch.setattr(owner.yaml, "load", parse)
+    machine = {"knowledge_repo": "knowledge", "repos": {"launch": {"anchor": str(launch)}}}
+    return SimpleNamespace(owner=owner, machine=machine, documents=documents, state=state, calls=calls,
+                           launch=launch_file, knowledge=knowledge_file)
+
+
+def _knowledge_report(api, source):
+    owner = source.owner
+    with api.config.capture_config_observations() as observations:
+        value = api.config.knowledge_call(
+            owner._load_knowledge_overlay_config, owner._KNOWLEDGE_OVERLAY_OWNER,
+            source.machine, {}, "launch", "windows",
+        )
+    return api.config.AcquisitionReport("knowledge-preferences", value, tuple(observations))
+
+
+@pytest.mark.parametrize("mode", ["unbound", "stateful", "unregistered", "invalid-binding"])
+def test_knowledge_preference_owner_gate_decisions(api, monkeypatch, mode):
+    source = _knowledge_owner(api, monkeypatch)
+    if mode == "unbound":
+        source.machine["knowledge_repo"] = ""
+    elif mode == "invalid-binding":
+        source.machine["knowledge_repo"] = object()
+    elif mode == "stateful":
+        source.documents[source.launch] = "stateless: false\n"
+    else:
+        source.state.registered = False
+    report = _knowledge_report(api, source)
+    assert report.value == {} and report.reusable is False
+    reads = [path for event, path in source.calls if event == "read"]
+    assert reads == ([] if mode in ("unbound", "invalid-binding") else [str(source.launch)])
+    owned = [o for o in report.observations if o.stage == "knowledge-preferences"]
+    assert len(owned) == 1
+    assert owned[0].authority is (
+        ScanAuthority.INDETERMINATE if mode == "invalid-binding" else ScanAuthority.COMPLETE
+    )
+    if mode == "invalid-binding":
+        assert [(f.reason, f.detail) for f in owned[0].findings] == [
+            ("knowledge-preferences-failed", "AttributeError"),
+        ]
+    assert api.config.current_observations() is None
+
+
+@pytest.mark.parametrize("mode", ["complete", "malformed", "missing", "denied"])
+def test_knowledge_preference_child_reads_preserve_values_and_uncertainty(api, monkeypatch, mode):
+    source = _knowledge_owner(api, monkeypatch)
+    if mode == "malformed":
+        source.documents[source.knowledge] = "copilot_profiles: [\n"
+    elif mode == "missing":
+        source.documents[source.knowledge] = None
+    elif mode == "denied":
+        source.state.errors[source.knowledge] = PermissionError("private preference read body")
+    report = _knowledge_report(api, source)
+    expected = [("read", str(source.launch)), ("parse", str(source.launch))]
+    if mode != "missing":
+        expected.append(("read", str(source.knowledge)))
+    if mode not in ("missing", "denied"):
+        expected.append(("parse", str(source.knowledge)))
+    assert [(event, path) for event, path in source.calls if event in ("read", "parse")] == expected
+    assert sum(event == "git" for event, _ in source.calls) == 2
+    assert sum(event == "registry" for event, _ in source.calls) == 1
+    assert report.reusable is False and report.authority is ScanAuthority.INDETERMINATE
+    owned = [o for o in report.observations if o.stage == "knowledge-preferences"]
+    assert len(owned) == 1 and owned[0].authority is ScanAuthority.COMPLETE
+    if mode == "complete":
+        assert report.value["headless"] is True and "srcroot" not in report.value
+        assert report.value["copilot_profiles"] is source.state.parsed[source.knowledge]["copilot_profiles"]
+        assert any(o.source == str(source.knowledge) and o.stage == "config-yaml"
+                   and o.authority is ScanAuthority.COMPLETE for o in report.observations)
+    else:
+        assert report.value == {}
+        child = [o for o in report.observations if o.source.startswith("synthetic-knowledge")]
+        assert any(o.authority is ScanAuthority.INDETERMINATE for o in child)
+        assert not any(o.authority is ScanAuthority.ABSENT and o.stage != "committed-head" for o in child)
+    assert "private preference read body" not in repr(report.observations)
+    assert api.config.current_observations() is None
+
+
+@pytest.mark.parametrize("mode", [
+    "late-selection", "same-globals-reader", "self-restoring-reader", "same-globals-resolver",
+    "self-restoring-resolver", "same-globals-preferences", "self-restoring-preferences",
+])
+def test_knowledge_preference_callbacks_capture_actual_selection(api, monkeypatch, mode):
+    from types import FunctionType
+
+    source = _knowledge_owner(api, monkeypatch)
+    owner = source.owner
+    if mode == "late-selection":
+        def resolver(name, platform):
+            source.calls.append(("replacement-resolver", name))
+            return "synthetic-knowledge"
+
+        def on_read(path):
+            if path == source.launch:
+                monkeypatch.setattr(owner, "_resolve_anchor_from_registry", resolver)
+
+        source.state.on_read = on_read
+    else:
+        callback_name = {
+            "reader": "_load_inrepo_config", "resolver": "_resolve_anchor_from_registry",
+            "preferences": "_load_knowledge_overlay_config",
+        }[mode.rsplit("-", 1)[1]]
+        original = getattr(owner, callback_name)
+
+        def wrapper(*args, **kwargs):
+            if mode.startswith("self-restoring"):
+                monkeypatch.setattr(owner, callback_name, original)
+            return original(*args, **kwargs)
+
+        replacement = FunctionType(wrapper.__code__, original.__globals__, closure=wrapper.__closure__)
+        assert replacement.__globals__ is original.__globals__
+        monkeypatch.setattr(owner, callback_name, replacement)
+    report = _knowledge_report(api, source)
+    assert report.value["copilot_profiles"] is source.state.parsed[source.knowledge]["copilot_profiles"]
+    assert report.reusable is False and report.authority is ScanAuthority.INDETERMINATE
+    owned = [o for o in report.observations if o.stage == "knowledge-preferences"]
+    assert owned and owned[-1].authority is ScanAuthority.INDETERMINATE
+    assert any(f.reason == "owner-coverage-unavailable" for o in owned for f in o.findings)
+    reads = [path for event, path in source.calls if event == "read"]
+    assert reads == [str(source.launch), str(source.knowledge)]
+    if mode == "late-selection":
+        assert [event for event, _ in source.calls if event in ("read", "parse", "replacement-resolver")] == [
+            "read", "parse", "replacement-resolver", "read", "parse",
+        ]
+    elif mode.startswith("self-restoring"):
+        assert getattr(owner, callback_name) is original
+    assert api.config.current_observations() is None

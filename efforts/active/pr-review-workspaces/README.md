@@ -112,6 +112,8 @@ The source implementation continuation is admitted; operational effects are not.
 ### Phase 2 - Build the ADO read and source path after admission
 - [x] Implement the admitted offline read-generation builder and comparison
   entry point with synthetic contract tests; live acquisition remains open below.
+- [x] Implement the reviewed protected-owner embedding and shared provider
+  collection seam; actual owner adoption and live qualification remain open.
 - [ ] Provide initial normalized load and section-aware incremental sync using
   the existing provider and credential authorities.
   Next is the finite [authorized acquisition slice](acquisition-slice.md),
@@ -121,6 +123,8 @@ The source implementation continuation is admitted; operational effects are not.
   adopters without a qualified typed credential owner, without inventing one.
 - [ ] Add coherent cache generations, completeness/freshness, bounded recovery
   and materialized local read views.
+  The next [immutable generation-cache slice](generation-cache-slice.md) reuses
+  the existing PR storage owner and keeps operation receipts separate.
 - [ ] Attach exact shallow source/head/common-baseline workspaces through the
   existing source owner; retain previous review generations and refs.
 - [ ] Preserve existing GitHub behavior and use a provider-neutral contract.
@@ -181,6 +185,71 @@ submission recovery and remaining decisions. It is not a shipped CLI or wire
 contract.
 
 ## Journal
+
+### 2026-10-30 - Priority native nullable-properties compatibility
+- Isolated the normalizer correction from the unpublished cache implementation,
+  preserving that cache source checkpoint for continuation.
+- Native discussion property bags may validly be null. Preserve that explicit
+  null separately from absence, retain existing dictionary filtering, and still
+  reject scalar/list bags. Wholly synthetic fixtures exercise actual generation,
+  source CLI load and offline comparison, not a bypassed record normalizer.
+- The focused source packet passed 68 cases. Backend qualification/retest remains
+  with the existing authorized owner; this source lane makes no claim about a
+  particular live failure frame and performs no live backend or auth changes.
+
+### 2026-10-30 - Protected embedding merged; next cache contract
+- #9676 merged as `69064505eb9db002e462f000bcf4d8aa42ab4f47` after
+  current-head Copilot approval, resolved feedback and required green checks.
+  Review fixes covered malformed generation comparison, final identity-switch
+  refusal and unchanged in-collection owner permission errors.
+- Re-read the parent Plan/Validation Plan. The current source packet passed
+  205 cases; contained validation covered 141 Worktrees and 63 PR-domain cases,
+  followed by 29 final owner-propagation controls. These are source receipts,
+  not actual owner/live qualification or installed rollout.
+- Existing backend permission and input gates remain authoritative; context
+  isolation is not an extra permission or delegation-time/read-count limit.
+  Interface unavailability is distinct from an actual backend permission denial.
+- Proposed the next bounded immutable-cache contract, reusing current JSON,
+  atomic persistence and lock ownership without a new service/database or
+  operation ledger. Implementation awaits that contract's review.
+
+### 2026-10-30 - Protected owner embedding source
+- #9670 merged as `9466727cd34e9eed526dc60e1dc4c7b78db4c05d` after
+  current-head Copilot approval and required green checks. Re-read the parent
+  plan before implementing the reviewed generic contract.
+- Added a strict small owner request, protected binding/handler callbacks and
+  explicit owner work/payload limits. The offline inspector reports no
+  operational owner or backend access; it cannot authorize an operation.
+- Reused the native acquisition orchestration through an owner reader seam,
+  without a credential DTO, issuer or second HTTP/pagination implementation.
+  Added local comparison of returned immutable generations.
+- Made the principal decoder/metadata explicit and shared: only full native
+  `connectionData.authorizedUser.id` establishes effective scope. Delegated
+  `authenticatedUser.id` may differ and cannot be a fallback. Both profiles
+  carry synthetic positive and refusal controls for that distinction.
+- Generic component, scope/authority-loss, budget/payload, parser and delegated-
+  identity controls passed: 198 in the owned source environment, then 140
+  Worktrees and 58 PR-domain cases through the contained runners. The install
+  contract gate also passed. Actual protected
+  owner transport/adoption is still an external qualification prerequisite;
+  no live ADO call or deployment occurred in this source lane.
+- Review corrections reject correctly hashed but structurally malformed
+  generations before comparison, with structured CLI errors, and prove that a
+  principal switch seen only by the final identity probe prevents publication.
+  The current source packet passed 204 cases, including unchanged propagation
+  of an actual owner permission denial separately from interface unavailability.
+- A cold native multi-helper fixture exhausted its old outer setup-inclusive
+  budget after one synthetic request. Its bounded outer fixture/cleanup allowance
+  now covers cold SDK/venv startup; production credential/owner work deadlines
+  are unchanged. Re-ran the native controls and complete focused packet.
+- Clarified that agent/process context isolation is not an extra permission,
+  issuer, provenance, read-count or delegation-time requirement. The embedding
+  reuses existing authorized owner gates; its explicit work/payload contracts
+  remain separate.
+- Follow-up review found the provider checkpoint wrapper still reclassified an
+  actual `PermissionError`. Removed that conversion and proved an in-collection
+  revocation preserves the original owner exception and stops further reads.
+  The updated complete source packet passed 205 cases.
 
 ### 2026-10-30 - Acquisition merged; live owner adoption remains gated
 - #9667 merged as `14ef6f358ad3dfa0991ea0e9bcfeca63d0172755` after

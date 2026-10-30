@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent_worktrees import config as cfg
+from agent_worktrees.repos import read_registry as _knowledge_read_registry
 
 
 @pytest.mark.parametrize("body", ["repos: [\n", "- not-a-mapping\n"])
@@ -3559,3 +3560,211 @@ def test_projects_acquisition_read_time_loader_swap_preserves_original_evaluatio
     owned = [o for o in report.observations if o.source == str(projects) and o.stage == "projects-registry"]
     assert len(owned) == 1 and owned[0].authority is ScanAuthority.COMPLETE
     assert report.reusable is False
+
+
+@pytest.fixture
+def knowledge_acquisition_sources(tmp_path, monkeypatch):
+    from agent_worktrees import git_ops, registry_paths, repos
+
+    launch, knowledge = tmp_path / "launch", tmp_path / "knowledge"
+    paths = []
+    for anchor, body in ((launch, "stateless: true\n"), (knowledge, "headless: true\n")):
+        path = anchor / cfg.INREPO_CONFIG_DIRNAME / "config.yaml"
+        path.parent.mkdir(parents=True)
+        path.write_text(body, encoding="utf-8")
+        paths.append(path)
+    registry = tmp_path / "repos.yaml"
+    registry.write_text(
+        f"repos:\n  knowledge:\n    class: worktree\n    windows: '{knowledge}'\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(repos, "read_registry", _knowledge_read_registry)
+    monkeypatch.setattr(repos, "_repos_yaml_path", lambda: registry)
+    monkeypatch.setattr(registry_paths, "installation_context", lambda: {})
+    monkeypatch.setattr(git_ops, "git", lambda *a, **k: SimpleNamespace(
+        returncode=128, stdout="", stderr="",
+    ))
+    machine = {"knowledge_repo": "knowledge", "repos": {"launch": {"anchor": str(launch)}}}
+    return machine, paths[0], paths[1], registry
+
+
+@pytest.mark.parametrize("mode", ["unbound", "invalid-binding", "stateful", "unregistered"])
+def test_knowledge_acquisition_original_gate_outcomes(
+    monkeypatch, knowledge_acquisition_sources, mode,
+):
+    import builtins
+
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_acquisition as acquisition
+    from agent_worktrees.acquisition_report import AcquisitionReport
+
+    machine, launch, knowledge, registry = knowledge_acquisition_sources
+    if mode == "unbound":
+        machine["knowledge_repo"] = ""
+    elif mode == "invalid-binding":
+        machine["knowledge_repo"] = object()
+    elif mode == "stateful":
+        launch.write_text("stateless: false\n", encoding="utf-8")
+    else:
+        registry.write_text("repos: {}\n", encoding="utf-8")
+    opened = []
+    native_open = builtins.open
+
+    def open_source(path, *args, **kwargs):
+        if Path(path) in (launch, knowledge):
+            opened.append(Path(path))
+        return native_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", open_source)
+    with acquisition.capture_config_observations() as observations:
+        value = cfg._load_knowledge_overlay_config(machine, {}, "launch", "windows")
+    report = AcquisitionReport("knowledge-preferences", value, tuple(observations))
+    assert value == {}
+    assert opened == ([] if mode in ("unbound", "invalid-binding") else [launch])
+    assert report.reusable is False
+    owned = [o for o in report.observations if o.stage == "knowledge-preferences"]
+    assert owned, "the original knowledge owner did not report its terminal outcome"
+    expected = ScanAuthority.INDETERMINATE if mode == "invalid-binding" else ScanAuthority.COMPLETE
+    assert owned[-1].authority is expected
+    if mode == "invalid-binding":
+        assert any(f.detail == "AttributeError" for f in report.findings)
+
+
+@pytest.mark.parametrize("mode", ["populated", "malformed", "missing", "denied"])
+def test_knowledge_acquisition_original_data_and_uncertainty(
+    monkeypatch, knowledge_acquisition_sources, mode,
+):
+    import builtins
+
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_acquisition as acquisition
+    from agent_worktrees.acquisition_report import AcquisitionReport
+
+    machine, launch, knowledge, _ = knowledge_acquisition_sources
+    knowledge.write_text(
+        "headless: true\ncopilot_profiles: [{name: portable}]\nsrcroot: excluded\n"
+        if mode != "malformed" else "copilot_profiles: [\n",
+        encoding="utf-8",
+    )
+    if mode == "missing":
+        knowledge.unlink()
+    events, parsed = [], {}
+    native_open, native_load = builtins.open, cfg.yaml.load
+
+    def open_source(path, *args, **kwargs):
+        if Path(path) in (launch, knowledge):
+            events.append(("read", Path(path)))
+            if Path(path) == knowledge and mode == "denied":
+                raise PermissionError("synthetic private preference bytes")
+        return native_open(path, *args, **kwargs)
+
+    def parse(stream, *args, **kwargs):
+        name = getattr(stream, "name", None)
+        path = Path(name) if name is not None else None
+        if path in (launch, knowledge):
+            events.append(("parse", path))
+            assert kwargs["Loader"] is cfg._YamlSafeLoader
+        result = native_load(stream, *args, **kwargs)
+        if path in (launch, knowledge):
+            parsed[path] = result
+        return result
+
+    monkeypatch.setattr(builtins, "open", open_source)
+    monkeypatch.setattr(cfg.yaml, "load", parse)
+    with acquisition.capture_config_observations() as observations:
+        value = cfg._load_knowledge_overlay_config(machine, {}, "launch", "windows")
+    report = AcquisitionReport("knowledge-preferences", value, tuple(observations))
+    expected = [("read", launch), ("parse", launch)]
+    if mode != "missing":
+        expected.append(("read", knowledge))
+    if mode not in ("missing", "denied"):
+        expected.append(("parse", knowledge))
+    assert events == expected
+    assert report.reusable is False
+    assert "synthetic private" not in repr(report.observations)
+    if mode == "populated":
+        assert value["headless"] is True and "srcroot" not in value
+        assert value["copilot_profiles"] is parsed[knowledge]["copilot_profiles"]
+    else:
+        assert value == {}
+        failures = [o for o in report.observations if o.source == str(knowledge)]
+        assert any(o.authority is ScanAuthority.INDETERMINATE for o in failures)
+        assert not any(o.authority is ScanAuthority.ABSENT for o in failures)
+    owned = [o for o in report.observations if o.stage == "knowledge-preferences"]
+    assert owned, "acquired preference data has no original owner outcome"
+    assert owned[-1].authority is ScanAuthority.COMPLETE
+
+
+def test_knowledge_acquisition_late_callable_selection_keeps_identity_and_uncertainty(monkeypatch):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_acquisition as acquisition
+    from agent_worktrees.acquisition_report import AcquisitionReport
+
+    calls = []
+    profiles = [{"name": "replacement"}]
+
+    def resolve(name, platform):
+        calls.append(("resolve", name, platform))
+        return "knowledge-anchor"
+
+    def read(anchor):
+        calls.append(("read", anchor))
+        if anchor == "launch-anchor":
+            monkeypatch.setattr(cfg, "_resolve_anchor_from_registry", resolve)
+            return {"stateless": True}
+        return {"copilot_profiles": profiles}
+
+    monkeypatch.setattr(cfg, "_load_inrepo_config", read)
+    machine = {"knowledge_repo": "knowledge", "repos": {"launch": {"anchor": "launch-anchor"}}}
+    with acquisition.capture_config_observations() as observations:
+        value = cfg._load_knowledge_overlay_config(machine, {}, "launch", "windows")
+    report = AcquisitionReport("knowledge-preferences", value, tuple(observations))
+    assert calls == [("read", "launch-anchor"), ("resolve", "knowledge", "windows"),
+                     ("read", "knowledge-anchor")]
+    assert cfg._resolve_anchor_from_registry is resolve
+    assert value["copilot_profiles"] is profiles
+    assert report.reusable is False
+    owned = [o for o in report.observations if o.stage == "knowledge-preferences"]
+    assert owned and owned[-1].authority is ScanAuthority.INDETERMINATE
+
+
+@pytest.mark.parametrize("callback_name", [
+    "_load_knowledge_overlay_config", "_load_inrepo_config", "_resolve_anchor_from_registry",
+])
+@pytest.mark.parametrize("self_restoring", [False, True], ids=["same-globals", "self-restoring"])
+def test_knowledge_acquisition_wrappers_cannot_borrow_original_completion(
+    tmp_path, monkeypatch, knowledge_acquisition_sources, callback_name, self_restoring,
+):
+    from types import FunctionType
+
+    from dropin_registry import ScanAuthority
+
+    machine, _, _, _ = knowledge_acquisition_sources
+    original = getattr(cfg, callback_name)
+    module = cfg
+    selected = []
+
+    def wrapper(*args, **kwargs):
+        selected.append(args)
+        if self_restoring:
+            monkeypatch.setattr(module, callback_name, original)
+        return original(*args, **kwargs)
+
+    replacement = FunctionType(wrapper.__code__, original.__globals__, closure=wrapper.__closure__)
+    assert replacement.__globals__ is original.__globals__
+    monkeypatch.setattr(cfg, callback_name, replacement)
+    machine.update(repo_name="launch", platform="windows", machine="fixture")
+    machine_path = tmp_path / "machine.yaml"
+    machine_path.write_text(cfg.yaml.safe_dump(machine), encoding="utf-8")
+
+    report = cfg.load_config_report(machine_path, include_control_plane_related_pr=False)
+
+    assert selected
+    assert report.value.headless is True
+    assert report.reusable is False
+    assert report.authority is ScanAuthority.INDETERMINATE
+    owned = [o for o in report.observations if o.stage == "knowledge-preferences"]
+    assert owned and owned[-1].authority is ScanAuthority.INDETERMINATE
+    assert any(f.reason == "owner-coverage-unavailable" for o in owned for f in o.findings)
+    if self_restoring:
+        assert getattr(cfg, callback_name) is original
