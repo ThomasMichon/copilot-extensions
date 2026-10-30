@@ -1,9 +1,0 @@
-{
-  "comment": "Admit native runtime publication before staging through canonical deployment policy and lifecycle custody.",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

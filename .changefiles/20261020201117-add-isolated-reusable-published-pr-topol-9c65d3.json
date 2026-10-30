@@ -1,9 +1,0 @@
-{
-  "comment": "Add isolated reusable published PR topology fixtures and copy regressions.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

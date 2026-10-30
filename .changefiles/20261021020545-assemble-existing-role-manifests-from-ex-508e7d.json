@@ -1,9 +1,0 @@
-{
-  "comment": "Assemble existing role manifests from explicit artifact bytes",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

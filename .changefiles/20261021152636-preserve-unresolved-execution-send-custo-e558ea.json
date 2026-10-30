@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve unresolved execution-send custody across reservation retries and operator recovery",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}
