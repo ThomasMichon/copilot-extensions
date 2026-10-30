@@ -4660,6 +4660,14 @@ The caller owns the named role, distinct immutable slot, role-specific health
 and ordinary publication/removal lifecycle; this construction seam does not
 make an installer, service supervisor or selected command catalog by itself.
 
+Numbered content conflicts raise the typed `ContentRepairRequired` signal,
+which remains a `RuntimeError` for existing callers. The Manager adapter handles
+it inside candidate construction by selecting a distinct repair generation,
+just as for a settled installed-health repair; it never rewrites the published
+slot or leaks this recoverable admission outcome out of borrowed execution
+custody. Exact wheel-receipt reuse still cannot construct another generation.
+Other callers retain their existing handling of content conflicts.
+
 Reused installed-health failures request distinct-generation repair when the
 probe exits unsuccessfully, cannot create its child, or reaches its deadline
 after every owned writer has settled. Process creation is distinguished by

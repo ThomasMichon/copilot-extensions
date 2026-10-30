@@ -1666,6 +1666,12 @@ materialize only `worktree-manager`, its shared `libs`, and `.gitattributes`,
 including when reusing an existing staging checkout; unrelated plugin paths
 are not needed for Manager self-update.
 
+If acquired Manager content differs from an already published slot with the
+same package version, installation uses a distinct immutable repair generation
+instead of rewriting or rejecting the predecessor. Matching healthy generations
+remain reusable. I/O failures still propagate; this fallback does not authorize
+recovery of unknown execution effects or relax source-evidence validation.
+
 Manager update and bootstrap activation start the selected `mux-daemon` on a
 fresh loopback port without requiring a healthy or even present predecessor.
 Only the incoming generation is health-checked before routing is published;

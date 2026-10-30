@@ -142,7 +142,7 @@ def candidate(
         with ExitStack() as custody:
             try:
                 ready = custody.enter_context(engine.numbered_candidate(root, generation, **arguments))
-            except engine.HealthRepairRequired:
+            except (engine.HealthRepairRequired, engine.ContentRepairRequired):
                 if reuse_only:
                     raise
                 separator = "." if "+" in requested_generation else "+"
