@@ -216,7 +216,7 @@ def test_actual_cold_payload_command_uses_packaged_owner_or_refuses_without_plug
         assert not root.exists(), result.stdout + result.stderr
 
 
-def cold_environment(installation, project, area):
+def cold_environment(installation, project, area, *, python_prerequisite=False):
     profile = installation.parent
     env = dict(os.environ)
     for key, relative in {
@@ -237,7 +237,14 @@ def cold_environment(installation, project, area):
     )
     if sys.platform == "linux" and env.get("COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT"):
         # Test lifecycle supervision must not become product Python discovery.
-        env["COPILOT_EXTENSIONS_DAEMON_PYTHON"] = sys.executable
+        lifecycle = area / "lifecycle-python"
+        subprocess.run(
+            [sys.executable, "-m", "venv", "--without-pip", "--copies", str(lifecycle)],
+            check=True, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+        )
+        interpreter = lifecycle / "bin/python"
+        interpreter.chmod(0o700)
+        env["COPILOT_EXTENSIONS_DAEMON_PYTHON"] = str(interpreter)
     env.pop("UPDATE_DRIVER_WITNESS", None)
     if os.name == "nt":
         env["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32")
@@ -248,6 +255,9 @@ def cold_environment(installation, project, area):
             env=env, cwd=project, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
         )
         assert isolation.returncode == 0, "native qualification must not expose host Python"
+        if python_prerequisite:
+            env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env["PATH"]
+            assert Path(shutil.which("python", path=env["PATH"])).samefile(sys.executable)
     else:
         tools = area / "native-tools"
         tools.mkdir()
@@ -276,7 +286,28 @@ def test_cold_environment_preserves_runner_lifetime_and_hides_product_python(are
     assert shutil.which("python", path=env["PATH"]) is None
     assert shutil.which("python3", path=env["PATH"]) is None
     if sys.platform == "linux":
-        assert env["COPILOT_EXTENSIONS_DAEMON_PYTHON"] == sys.executable
+        interpreter = Path(env["COPILOT_EXTENSIONS_DAEMON_PYTHON"])
+        assert interpreter.is_relative_to(area) and not interpreter.is_symlink()
+        assert interpreter.stat().st_uid == os.getuid()
+        assert interpreter.stat().st_mode & 0o6022 == 0
+        script = Path(__file__).resolve().parents[2] / "agent-procutil/src/agent_procutil/daemon_instances.sh"
+        result = subprocess.run(
+            [shutil.which("bash"), "-c", 'source "$1"; _di_lifecycle lease-fields 30 60',
+             "bash", str(script)],
+            env=env, cwd=project, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+        )
+        assert result.returncode == 0 and result.stdout, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows caller-owned Python prerequisite")
+def test_cold_environment_can_supply_windows_caller_python_without_product_runtime(area):
+    project = area / "project"
+    project.mkdir()
+    installation = area / "profile/.agent-logger"
+    env = cold_environment(installation, project, area, python_prerequisite=True)
+    assert Path(shutil.which("python", path=env["PATH"])).samefile(sys.executable)
+    assert env["UV_PYTHON_PREFERENCE"] == "only-managed"
+    assert not installation.exists() and not any((installation.parent / "python").iterdir())
 
 
 @pytest.mark.parametrize("entry", ["payload", "primary"])

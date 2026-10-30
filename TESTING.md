@@ -1813,8 +1813,11 @@ personal sessions. This is an explicit manual integration lane, not required PR
 CI, live timer/serving-worker proof, selected-snapshot recipe admission or rollout.
 
 The cold consumer fixture keeps the canonical runner's containment and daemon
-lifetime context. On Linux, only the nonproduction lifecycle supervisor receives
-the runner's absolute interpreter; product `PATH` still contains no Python.
+lifetime context. On Windows, the actual Logger consumer supplies the documented
+`python` prerequisite for caller-owned admission; this is not Python-absent
+machine qualification. On Linux, only the nonproduction lifecycle supervisor
+receives a private, test-owned copy of the runner interpreter; product `PATH`
+still contains no Python.
 The installed foundation's SDK home must be inside the private fixture, proving
 it did not borrow that lifecycle interpreter. These are bounded consumer
 controls, not proof of escape from a caller cleanup Job.
