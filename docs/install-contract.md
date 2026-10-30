@@ -1715,6 +1715,8 @@ refuses explicit editable operands and non-copy link modes, and supplies
 supplied those options. The Python constructor enforces
 `--no-editable`, verifies installed origins and permits ordinary immutable
 wheel-cache hardlinks as described in the source-wheel cache contract below.
+Static admission recognizes the standard UV, setuptools and pywin32 bootstrap
+import hooks with their required slot-local modules, without executing them.
 Completion rejects symlink/reparse redirection, editable origins and escaping
 path hooks, not an ordinary file merely having another hardlink. Cache content
 is never modified in place; cache retirement unlinks its own names without

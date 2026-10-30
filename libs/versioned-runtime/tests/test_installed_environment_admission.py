@@ -60,6 +60,14 @@ def damage(slot, site, case, tmp_path):
     elif case == "modified-virtualenv-hook":
         (site / "_virtualenv.py").write_text("")
         (site / "_virtualenv.pth").write_text("import _virtualenv; import editable\n")
+    elif case in {"fake-pywin32-hook", "modified-pywin32-hook"}:
+        (site / "pywin32.pth").write_text("import pywin32_bootstrap\n")
+        if case == "modified-pywin32-hook":
+            library = site / "win32" / "lib"
+            library.mkdir(parents=True)
+            (library / "pywin32_bootstrap.py").write_text("")
+            (site / "pywin32_system32").mkdir()
+            (site / "pywin32.pth").write_text("import pywin32_bootstrap; import editable\n")
     elif case == "system-site-packages":
         (slot / "pyvenv.cfg").write_text("include-system-site-packages = true\n")
     elif case == "invalid-venv-encoding":
@@ -73,7 +81,8 @@ def damage(slot, site, case, tmp_path):
 @pytest.mark.parametrize("case", [
     "editable-origin", "editable-origin-case", "invalid-origin", "invalid-editable-type", "egg-link",
     "editable-finder", "external-path", "relative-external-path", "executable-hook",
-    "fake-virtualenv-hook", "modified-virtualenv-hook", "system-site-packages",
+    "fake-virtualenv-hook", "modified-virtualenv-hook", "fake-pywin32-hook",
+    "modified-pywin32-hook", "system-site-packages",
     "invalid-venv-encoding", "invalid-path-encoding",
 ])
 @pytest.mark.parametrize("published", [False, True])
@@ -110,6 +119,21 @@ def test_standard_bootstrap_hooks_and_slot_local_paths(installed):
     assert runtime.check_admission(root, "2.0", payload_hash="same") == runtime.ADMIT_REUSE
     assert runtime.mark_complete(root, "2.0", payload_hash="same") == marker
     assert marker.read_bytes() == before
+
+
+def test_packaged_pywin32_bootstrap_is_validated_without_execution(installed):
+    root, slot, site = installed
+    library = site / "win32" / "lib"
+    library.mkdir(parents=True)
+    (library / "pywin32_bootstrap.py").write_text("raise AssertionError('must not execute')\n")
+    (site / "pywin32_system32").mkdir()
+    (site / "pythonwin").mkdir()
+    (site / "pywin32.pth").write_text(
+        "# .pth file for the PyWin32 extensions\nwin32\nwin32\\lib\npythonwin\n"
+        "import pywin32_bootstrap\n",
+    )
+    runtime.mark_complete(root, "2.0", payload_hash="same")
+    assert runtime.check_admission(root, "2.0", payload_hash="same") == runtime.ADMIT_REUSE
 
 
 @pytest.mark.parametrize("published", [False, True])
