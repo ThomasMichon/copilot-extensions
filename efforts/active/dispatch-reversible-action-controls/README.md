@@ -7,6 +7,7 @@
 - **Status:** Active
 - **Vision:** [agent-dispatch](../../../visions/plugins/agent-dispatch/README.md#reversible-action-inhibition)
 - **Umbrella issue:** #9334
+- **Task-recovery amendment:** #9636; [scope and validation](task-recovery.md)
 
 ## Guiding Intent
 
@@ -73,6 +74,14 @@ Implementation and controlled Dispatch adoption are requested. This public
 source plan does not authorize an arbitrary installation change, foreign
 worker termination or cross-plugin rollout.
 
+**Additional requested behavior (public-safe summary):** add the full
+task-scoped diagnostic and recovery suite, including agent-assignment
+detachment, reset to Proposed or Queued, and a supported wake-reconciliation
+endpoint. Analyze retained task/session evidence before designing the actions.
+Explain task credentials separately from wake-delivery custody. The
+[amendment](task-recovery.md) records the requested scope and distinguishes
+agent-recommended safeguards. It authorizes source work, not live recovery.
+
 ## Plan
 
 ### Phase 1 - Review the action contract
@@ -138,6 +147,14 @@ worker termination or cross-plugin rollout.
 - [ ] Record running adoption or transfer that remaining gate to a named
       tracked objective before declaring this effort Done.
 
+### Phase 5 - Diagnose and recover retained tasks
+
+- [ ] Review the [task-recovery amendment](task-recovery.md) before implementation.
+- [ ] Deliver #9636's diagnostic snapshot and distinct fenced recovery actions
+      through the existing REST, client, CLI and MCP owners.
+- [ ] Resolve the amendment's complete validation and release checklist;
+      retain Phase 4's independent installed-consumer gates.
+
 ## Validation Plan
 
 - [ ] Start each supported service with inhibition active: it reaches readiness,
@@ -163,6 +180,8 @@ worker termination or cross-plugin rollout.
 - [x] Exercise both native installer frontends for maintenance changes, with a
       contained process-boundary control where practical. Source fixtures do
       not establish running native-account adoption.
+- [ ] Complete the [task-recovery validation matrix](task-recovery.md#validation-plan)
+      without erasing unknown effects or implying live recovery authority.
 
 The remaining unchecked service/loop criteria still require installed-consumer
 qualification. Source effect-boundary regressions and hosted native Windows
