@@ -188,7 +188,7 @@ def test_run_tier_invokes_worktree_manager_update_and_records_success(tmp_path):
     result = fleet_update.run_tier("sweep", opted_in=True, runner=runner, home=tmp_path)
     assert result.ok is True
     assert result.status == "ok"
-    assert calls == [["worktree-manager", "update", "--auto"]]
+    assert calls == [["worktree-manager", "update"]]
     assert result.success_at is not None
     status = fleet_update_state.tier_status(tmp_path, "sweep")
     assert status.last_success == result.success_at
@@ -484,8 +484,9 @@ def test_task_action_arguments_uses_worktree_manager_binstub(monkeypatch, platfo
         assert r"C:\Users\operator\.local\bin\worktree-manager.cmd" in args
     else:
         assert args.startswith("--headless ")
-        assert fleet_update_tasks._linux_exec_start("sweep", home=home).endswith(" update --auto")
-    assert " update --auto" in args
+        assert fleet_update_tasks._linux_exec_start("sweep", home=home).endswith(" update")
+    assert args.endswith(" update")
+    assert "--auto" not in args
     assert "self-update" not in args
     assert "agent-machines" not in args
 
@@ -510,10 +511,10 @@ def test_task_definition_matches_its_own_generated_arguments(monkeypatch, home):
     assert fleet_update_tasks.task_definition_matches(snapshot, "sweep", home=home)
     from dataclasses import replace
 
-    for marker in ("", " --automatic", " --auto-suffix", ' "--auto suffix"'):
-        invalid = replace(snapshot, arguments=snapshot.arguments.replace(" --auto", marker))
+    for marker in (" --auto", ' "--auto"', " --automatic", " --auto-suffix", ' "--auto suffix"'):
+        invalid = replace(snapshot, arguments=snapshot.arguments + marker)
         assert not fleet_update_tasks.task_definition_matches(invalid, "sweep", home=home)
-    quoted = replace(snapshot, arguments=snapshot.arguments.replace(" --auto", ' "--auto"'))
+    quoted = replace(snapshot, arguments=snapshot.arguments.removesuffix(" update") + ' "update"')
     assert fleet_update_tasks.task_definition_matches(quoted, "sweep", home=home)
 
 
