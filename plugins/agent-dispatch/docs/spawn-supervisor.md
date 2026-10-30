@@ -1102,7 +1102,7 @@ headless fleet for recoverable remote sweeps.
 owner's task is queued and unowned, `redrive_unclaimed_spawns` can address that
 same conversation from its retained `spawned` reservation. Queued `cold`
 reservations remain held: redrive does not bypass cold-resume capacity admission. The existing
-reservation read exposes version-1 `ordinary_redrive` facts and an `ordinary_redrive_error`
+reservation read exposes version-2 `ordinary_redrive` facts and an `ordinary_redrive_error`
 when unavailable. Missing support on an older coordinator is a hold, not a CLI
 fallback; unsupported fact versions likewise hold before transport. Older readers
 ignore the additive fields without changing their existing reservation semantics.
@@ -1113,14 +1113,33 @@ prevents the send; failed or superseded attempted wakes are not absence proof.
 Qualified execution scopes remain held until supervisor send enrollment is
 implemented, even if the owner-wake list is empty.
 
-The supervisor uses standard Bridge `send` with the captured native target and
-one reservation-bound `:redrive` idempotency key. Its continuation prompt stays
-identical across retries, supervisor restarts and later task-claim generations;
-it is not a replay of the accepted startup invocation. No `--queue`, force,
+Before transport, the existing `record_spawn` operation atomically rechecks the
+snapshot and records a pending startup revision together with the frozen
+continuation invocation in reservation metadata. Terminal cleanup and capacity
+release remain blocked while that startup is incomplete. An UNKNOWN return
+retains the revision; a restarted supervisor can retry only that operation,
+after fresh queued-task/native/custody admission. An unrelated pending startup
+cannot use this path. Successful transport closes only the matching revision
+and invocation, preserving any concurrent release state and intent. Generic
+startup completion cannot close a retained continuation's pending revision.
+
+The supervisor uses standard Bridge `send` with the captured native target,
+one reservation-bound `:redrive` idempotency key and an explicit operation-bound
+caller. The caller and frozen continuation prompt stay identical across retries,
+supervisor launch contexts, restarts and later task-claim generations;
+this is not a replay of the accepted startup invocation. No `--queue`, force,
 replacement session or supervisor-side task claim is used. The original worker
 must claim normally and start with its captured `--owner-session-id`; later
 claims require matching original-native attachment history. A successful send
 does not itself establish that the worker reclaimed or completed the task.
+
+Version 2 negotiates the pending-startup request through the existing reservation
+read before sending the additive `ordinary_redrive` field to `record_spawn`.
+Version-1, missing and unknown declarations hold before publication or transport;
+older callers keep their existing `record_spawn` syntax. Native owner/waiter wake
+commands also use an explicit key-bound caller. A receipt previously bound to a
+different implicit caller is not permission to change its key or replay accepted
+work: a conflict stays unresolved for reconciliation.
 
 **Retiring an unleased worktree-only reservation.** A `release_requested`
 reservation whose task never reached a captured `owner_session_id` (the normal

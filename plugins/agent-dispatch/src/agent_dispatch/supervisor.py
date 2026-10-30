@@ -3267,7 +3267,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             key = res.get("key")
             if not key or key in self._redriven_spawn_keys:
                 continue
-            if res.get("startup_complete") is not True:
+            if res.get("startup_complete") is not True and res.get("driver") != "ordinary-bridge":
                 continue
             if res.get("release_requested"):
                 continue
@@ -3276,7 +3276,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                     current = self.client.get_reservation(key)
                     session = current.get("ordinary_redrive")
                     if not isinstance(session, dict) or (
-                        type(session.get("version")) is not int or session["version"] != 1
+                        type(session.get("version")) is not int or session["version"] != 2
                     ):
                         log.info(
                             "native redrive held for %s: %s", key,
@@ -3290,9 +3290,19 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                         continue
                     if action_inhibited("worker-admission", logger=log):
                         break
+                    pending = self.client.record_spawn(
+                        key, session_handle=current["session_handle"], worktree=current["worktree"],
+                        startup_complete=False, startup_revision=session["startup_revision"],
+                        ordinary_redrive=session,
+                    )
                     if self.redrive_fn(
                         session["worktree_id"], session["machine"], task, session, current,
                     ):
+                        self.client.record_spawn(
+                            key, session_handle=pending["session_handle"], worktree=pending["worktree"],
+                            startup_complete=True, startup_revision=pending["startup_revision"],
+                            ordinary_redrive=session,
+                        )
                         self._redriven_spawn_keys.add(key)
                         redriven += 1
                 except (DispatchError, ValueError, KeyError):

@@ -107,11 +107,12 @@ class QueueBackedClient:
         return {"reserved": ok, "reservation": asdict(res)}
 
     def record_spawn(self, key, *, session_handle=None, worktree=None, startup_complete=None,
-                     startup_revision=None):
+                     startup_revision=None, ordinary_redrive=None):
         try:
             return asdict(self._q.record_spawn(
                 key, session_handle=session_handle, worktree=worktree,
                 startup_complete=startup_complete, startup_revision=startup_revision,
+                ordinary_redrive=ordinary_redrive,
             ))
         except TaskError as exc:
             raise DispatchError(409, str(exc)) from exc

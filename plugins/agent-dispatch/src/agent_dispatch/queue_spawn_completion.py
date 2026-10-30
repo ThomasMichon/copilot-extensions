@@ -58,6 +58,7 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
         startup_revision: int | None = None,
         now: float | None = None,
         authority_expected: tuple | None = None,
+        ordinary_redrive: dict | None = None,
     ) -> SpawnReservation:
         """Publish a body identity, optionally closing the launch caller.
 
@@ -73,8 +74,23 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
             raise TaskError("startup completion requires the current startup revision")
         if startup_complete and not (isinstance(session_handle, str) and session_handle.strip()):
             raise TaskError("startup completion requires an exact session handle")
+        if ordinary_redrive is not None:
+            from .ordinary_native_redrive import record_redrive
+
+            if startup_complete is None or authority_expected is not None:
+                raise TaskError("retained native redrive requires an explicit startup operation")
+            return record_redrive(
+                self, key, ordinary_redrive=ordinary_redrive,
+                startup_complete=startup_complete, startup_revision=startup_revision,
+                session_handle=session_handle, worktree=worktree, now=now,
+            )
 
         def authority_guard(row: sqlite3.Row) -> None:
+            if startup_complete is True and not row["startup_complete"] and row["agent_info"]:
+                import json
+
+                if json.loads(row["agent_info"]).get("retained_redrive") is not None:
+                    raise TaskError("retained native redrive completion requires its exact operation")
             if row["state"] == SpawnState.RELEASING and (
                 row["startup_fenced"]
                 or row["startup_complete"] and session_handle != row["session_handle"]

@@ -84,6 +84,7 @@ def native_prompt(
             "--json", "send", bridge_session,
             "--expected-native-session-id", native_session,
             "--idempotency-key", idempotency_key,
+            "--caller", f"agent-dispatch:{idempotency_key}",
             "--prompt-file", "-", "--no-wait",
         ],
         prompt, machine=machine, launch_prefix=launch_prefix, run_ssh=run_ssh,

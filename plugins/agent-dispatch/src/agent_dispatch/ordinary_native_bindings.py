@@ -147,7 +147,7 @@ def retained_redrive_facts(conn: Any, row: Any, task: Any) -> dict:
     if (
         row["driver"] != "ordinary-bridge"
         or row["state"] != SpawnState.SPAWNED
-        or not row["startup_complete"] or row["release_requested"]
+        or row["startup_fenced"] or row["release_requested"]
         or row["conversation_retired"] or row["cooling_token"] is not None
         or row["conclusion_state"] == "pending"
         or row["exclusive_key"] and row["exclusive_released"]
@@ -165,7 +165,7 @@ def retained_redrive_facts(conn: Any, row: Any, task: Any) -> dict:
         raise TaskError("retained native redrive is not the current attempt")
     if conn.execute(
         "SELECT 1 FROM spawn_reservations WHERE key<>? "
-        "AND (worktree=? OR exclusive_key IS NOT NULL AND exclusive_key=?) "
+        "AND (worktree=? OR exclusive_key IS NOT NULL AND exclusive_key=? AND exclusive_released=0) "
         "AND (state IN ('reserving','spawned','cold','releasing') OR conclusion_state='pending')",
         (row["key"], row["worktree"], row["exclusive_key"]),
     ).fetchone():
@@ -211,8 +211,12 @@ def retained_redrive_facts(conn: Any, row: Any, task: Any) -> dict:
     known, retired = native_bindings(conn, row, task)
     if native_conflict(actual.native, known, retired):
         raise TaskError("retained native redrive conflicts with native identity history")
+    from .ordinary_native_redrive import redrive_invocation
+
     return {
-        "version": 1, "task_id": task.id, "task_generation": task.generation,
+        "version": 2, "task_id": task.id, "task_generation": task.generation,
         "reservation_key": row["key"], "session_id": actual.bridge,
         "native_session_id": actual.native, "worktree_id": actual.worktree, "machine": host,
+        "startup_revision": row["startup_revision"],
+        "invocation": redrive_invocation(row, host),
     }

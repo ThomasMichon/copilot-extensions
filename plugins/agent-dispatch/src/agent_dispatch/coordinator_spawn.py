@@ -64,6 +64,7 @@ class RecordSpawnBody(BaseModel):
     session_info: dict | None = None
     startup_complete: bool | None = Field(default=None, strict=True)
     startup_revision: int | None = Field(default=None, ge=1, strict=True)
+    ordinary_redrive: dict | None = None
 
 class FenceSpawnStartupBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -416,6 +417,8 @@ def register_spawn_routes(
 
     @app.post("/spawn-reservations/{key}/spawned")
     def record_spawn(key: str, body: RecordSpawnBody) -> dict:
+        if body.ordinary_redrive is not None and body.session_info is not None:
+            raise HTTPException(status_code=409, detail="redrive cannot replace original startup evidence")
         if body.session_info is not None:
             from .ordinary_bridge import record_session_info
             _reservation_guard(lambda: record_session_info(queue, key, body.session_info))
@@ -433,6 +436,7 @@ def register_spawn_routes(
                 key, session_handle=body.session_handle, worktree=body.worktree,
                 startup_complete=body.startup_complete,
                 startup_revision=body.startup_revision,
+                ordinary_redrive=body.ordinary_redrive,
             )
         )
         bus.publish({"type": "spawn.spawned", "reservation": result})

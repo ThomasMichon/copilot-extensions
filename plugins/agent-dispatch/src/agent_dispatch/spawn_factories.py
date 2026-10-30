@@ -205,7 +205,7 @@ def make_redrive_sender(route: str = "") -> RedriveFn:
 
             captured = reservation.get("ordinary_redrive")
             if not isinstance(captured, dict) or captured != session or (
-                type(captured.get("version")) is not int or captured["version"] != 1
+                type(captured.get("version")) is not int or captured["version"] != 2
                 or captured.get("task_id") != task_id
                 or captured.get("task_generation") != task.get("generation")
                 or captured.get("reservation_key") != reservation.get("key")
@@ -213,22 +213,10 @@ def make_redrive_sender(route: str = "") -> RedriveFn:
                 or captured.get("machine") != machine
             ):
                 raise ValueError("retained native redrive lacks its current reservation snapshot")
-            native = captured["native_session_id"]
-            # Do not replay the accepted startup or vary this retry payload by process identity.
-            prompt = (
-                f"Continue your existing dispatched task {task_id} in this same native conversation. "
-                "Keep the original worktree identity and use the original coordinator "
-                "routing flags with each command below. "
-                f"Read the current task; if it is still queued and unowned, run "
-                f"`agent-dispatch claim --task {task_id} --evaluation --all-repos` "
-                "(add the task's required capabilities), evaluate normally, then "
-                f"`agent-dispatch start {task_id} --owner-session-id {native}`. "
-                "If its owner or state has changed, do not claim or override it. "
-                "Continue the original goal under the existing charter; do not create a replacement."
-            )
+            invocation = captured["invocation"]
             return native_prompt(
-                captured["session_id"], native, prompt, machine=machine,
-                idempotency_key=f"{reservation['key']}:redrive",
+                captured["session_id"], captured["native_session_id"], invocation["prompt"],
+                machine=machine, idempotency_key=invocation["idempotency_key"],
                 launch_prefix=bridge._agent_bridge_launch_prefix,
                 run_ssh=bridge.run_ssh_command,
             )

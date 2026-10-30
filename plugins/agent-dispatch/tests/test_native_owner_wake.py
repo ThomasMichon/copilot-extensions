@@ -6,7 +6,7 @@ import asyncio
 import json
 import shlex
 import subprocess
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 import pytest
 
@@ -71,6 +71,7 @@ def _expected(key):
     return [
         "bridge-python", "-m", "agent_bridge", "--json", "send", BRIDGE,
         "--expected-native-session-id", NATIVE, "--idempotency-key", key,
+        "--caller", f"agent-dispatch:{key}",
         "--prompt-file", "-", "--no-wait",
     ]
 
@@ -298,6 +299,19 @@ def _native_supervisor(queue: TaskQueue, client=None):
     )
 
 
+def _assert_redrive_custody(before, after):
+    assert after.startup_complete is True
+    assert after.startup_revision == before.startup_revision + 1
+    info = dict(after.agent_info)
+    marker = info.pop("retained_redrive")
+    assert info == before.agent_info
+    assert marker["startup_revision"] == after.startup_revision
+    assert replace(
+        after, startup_revision=before.startup_revision,
+        agent_info=before.agent_info, updated_at=before.updated_at,
+    ) == before
+
+
 @pytest.mark.parametrize("unresolved_wake", [False, True])
 @pytest.mark.parametrize("body_state", ["spawned", "cold"])
 @pytest.mark.parametrize("handle_kind", ["local", "fleet"])
@@ -334,7 +348,10 @@ def test_queued_ordinary_redrive_preserves_native_and_unresolved_wake(
     held = unresolved_wake or body_state == "cold"
     assert supervisor.redrive_unclaimed_spawns() == (0 if held else 1)
     assert queue.get(task_id) == before
-    assert queue.latest_reservation(task_id) == reservation
+    if held:
+        assert queue.latest_reservation(task_id) == reservation
+    else:
+        _assert_redrive_custody(reservation, queue.latest_reservation(task_id))
     if held:
         assert calls == []
     if unresolved_wake:
@@ -359,6 +376,13 @@ def test_queued_ordinary_redrive_unknown_retry_and_restart_keep_exact_key_and_pr
     calls = _capture(monkeypatch, unknown_first=True)
     supervisor = _native_supervisor(queue)
     assert supervisor.redrive_unclaimed_spawns() == 0
+    pending = queue.latest_reservation(task_id)
+    assert pending.startup_complete is False
+    monkeypatch.setattr(
+        "agent_dispatch.ordinary_native_redrive._prompt",
+        lambda *_args: "A new supervisor must not regenerate an UNKNOWN invocation.",
+    )
+    monkeypatch.setattr(bridge, "_agent_bridge_launch_prefix", lambda: ["other-context", "-m", "agent_bridge"])
     queue.claim_one(OWNER, task_id=task_id)
     queue.start(task_id, OWNER, owner_session_id=NATIVE)
     queue.yield_task(task_id, OWNER, release_spawn=False)
@@ -367,13 +391,17 @@ def test_queued_ordinary_redrive_unknown_retry_and_restart_keep_exact_key_and_pr
     assert _native_supervisor(queue).redrive_unclaimed_spawns() == 1
     assert len(calls) == 3
     first_argv, first_kwargs = calls[0]
-    assert all(argv == first_argv and kw["input"] == first_kwargs["input"] for argv, kw in calls)
+    assert all(argv[3:] == first_argv[3:] and kw["input"] == first_kwargs["input"] for argv, kw in calls)
+    assert calls[1][0][0] == "other-context"
+    assert first_argv[first_argv.index("--caller") + 1] == (
+        "agent-dispatch:" + queue.latest_reservation(task_id).key + ":redrive"
+    )
     assert first_argv[first_argv.index("--idempotency-key") + 1] == (
         queue.latest_reservation(task_id).key + ":redrive"
     )
 
 
-@pytest.mark.parametrize("provider", ["current", "legacy", "future"])
+@pytest.mark.parametrize("provider", ["current", "legacy", "old", "future"])
 def test_queued_ordinary_redrive_negotiates_existing_reservation_read(
     hosted: tuple[TaskQueue, str], monkeypatch: pytest.MonkeyPatch, provider: str, caplog,
 ) -> None:
@@ -397,12 +425,14 @@ def test_queued_ordinary_redrive_negotiates_existing_reservation_read(
                 assert payload["key"] == reservation.key
                 assert payload["state"] == reservation.state
                 assert payload["session_handle"] == reservation.session_handle
-                assert payload["ordinary_redrive"]["version"] == 1
+                assert payload["ordinary_redrive"]["version"] == 2
                 if provider == "legacy":
                     payload.pop("ordinary_redrive")
                     payload.pop("ordinary_redrive_error")
                 elif provider == "future":
-                    payload["ordinary_redrive"]["version"] = 2
+                    payload["ordinary_redrive"]["version"] = 3
+                elif provider == "old":
+                    payload["ordinary_redrive"]["version"] = 1
             return httpx.Response(result.status_code, json=payload)
 
         with DispatchClient("http://testserver", transport=httpx.MockTransport(exchange)) as client:
@@ -413,7 +443,162 @@ def test_queued_ordinary_redrive_negotiates_existing_reservation_read(
     assert len(calls) == (1 if provider == "current" else 0)
     if provider != "current":
         assert "unsupported coordinator redrive facts" in caplog.text
-    assert queue.latest_reservation(task_id) == reservation
+    if provider == "current":
+        _assert_redrive_custody(reservation, queue.latest_reservation(task_id))
+    else:
+        assert queue.latest_reservation(task_id) == reservation
+
+
+@pytest.mark.parametrize("returncode", [0, 70])
+def test_queued_redrive_holds_startup_during_terminal_overlap(
+    hosted: tuple[TaskQueue, str], monkeypatch: pytest.MonkeyPatch, returncode: int,
+) -> None:
+    queue, task_id = hosted
+    queue.resume(task_id, OWNER, reuse_session=True)
+    queue.yield_task(task_id, OWNER, release_spawn=False)
+    original = queue.latest_reservation(task_id)
+    supervisor = _native_supervisor(queue)
+
+    def run(argv, **kwargs):
+        pending = queue.latest_reservation(task_id)
+        assert pending.startup_complete is False
+        assert pending.startup_revision == original.startup_revision + 1
+        queue.abandon(task_id, worker_id=OWNER, permitted=True, reason="terminal overlap control")
+        current = queue.latest_reservation(task_id)
+        assert supervisor._reservation_has_live_process(
+            asdict(current), asdict(queue.get(task_id)),
+        )
+        with pytest.raises(TaskError, match="incomplete"):
+            queue.fence_spawn_startup(current.key, startup_revision=current.startup_revision)
+        queue.request_spawn_release(current.key, disposition="settled", detail="terminal overlap control")
+        return subprocess.CompletedProcess(argv, returncode, "", "")
+
+    monkeypatch.setattr(bridge.subprocess, "run", run)
+    assert supervisor.redrive_unclaimed_spawns() == (1 if returncode == 0 else 0)
+    after = queue.latest_reservation(task_id)
+    assert after.startup_complete is (returncode == 0)
+    assert after.release_requested is True
+    assert after.state == "releasing"
+    assert (after.key, after.worktree, after.session_handle) == (
+        original.key, original.worktree, original.session_handle,
+    )
+
+
+@pytest.mark.parametrize("same_worktree", [False, True])
+def test_queued_redrive_respects_released_sibling_exclusivity(
+    hosted: tuple[TaskQueue, str], monkeypatch: pytest.MonkeyPatch, same_worktree: bool,
+) -> None:
+    queue, task_id = hosted
+    queue.resume(task_id, OWNER, reuse_session=True)
+    queue.yield_task(task_id, OWNER, release_spawn=False)
+    sibling = queue.create("other", repo="queue-project", exclusive_key="shared")
+    other, _ = queue.reserve_spawn(sibling.id, reserved_by="other")
+    with queue._connect() as conn:
+        conn.execute(
+            "UPDATE spawn_reservations SET state='cold',exclusive_released=1,worktree=? WHERE key=?",
+            ("worktree-a" if same_worktree else "other-worktree", other.key),
+        )
+        conn.execute("UPDATE tasks SET exclusive_key='shared' WHERE id=?", (task_id,))
+        conn.execute("UPDATE spawn_reservations SET exclusive_key='shared' WHERE task_id=?", (task_id,))
+    calls = _capture(monkeypatch)
+    assert _native_supervisor(queue).redrive_unclaimed_spawns() == (0 if same_worktree else 1)
+    assert len(calls) == (0 if same_worktree else 1)
+
+
+@pytest.mark.parametrize("change", ["generic", "revision", "prompt", "native"])
+def test_queued_redrive_completion_requires_its_exact_operation(hosted, change):
+    from agent_dispatch.ordinary_agent_storage import reservation_native_facts
+
+    queue, task_id = hosted
+    queue.resume(task_id, OWNER, reuse_session=True)
+    queue.yield_task(task_id, OWNER, release_spawn=False)
+    original = queue.latest_reservation(task_id)
+    facts = reservation_native_facts(queue, original.key)["ordinary_redrive"]
+    kwargs = dict(
+        session_handle=original.session_handle, worktree=original.worktree,
+        ordinary_redrive=facts,
+    )
+    pending = queue.record_spawn(
+        original.key, startup_complete=False, startup_revision=original.startup_revision, **kwargs,
+    )
+    bad = json.loads(json.dumps(kwargs))
+    revision = pending.startup_revision
+    if change == "generic":
+        bad.pop("ordinary_redrive")
+    elif change == "revision":
+        revision -= 1
+    else:
+        field = "prompt" if change == "prompt" else "native_session_id"
+        bad["ordinary_redrive"]["invocation"][field] = "changed"
+    with pytest.raises(TaskError, match="startup|operation"):
+        queue.record_spawn(
+            original.key, startup_complete=True, startup_revision=revision, **bad,
+        )
+    assert queue.latest_reservation(task_id) == pending
+    completed = queue.record_spawn(
+        original.key, startup_complete=True, startup_revision=pending.startup_revision, **kwargs,
+    )
+    _assert_redrive_custody(original, completed)
+
+
+@pytest.mark.parametrize("change", ["generation", "release", "wake", "unrelated-startup"])
+def test_queued_redrive_admission_rechecks_snapshot_under_startup_lock(hosted, change):
+    from agent_dispatch.ordinary_agent_storage import reservation_native_facts
+
+    queue, task_id = hosted
+    queue.resume(task_id, OWNER, reuse_session=True)
+    queue.yield_task(task_id, OWNER, release_spawn=False)
+    original = queue.latest_reservation(task_id)
+    facts = reservation_native_facts(queue, original.key)["ordinary_redrive"]
+    if change == "release":
+        queue.request_spawn_release(original.key)
+    elif change == "unrelated-startup":
+        queue.record_spawn(
+            original.key, startup_complete=False, startup_revision=original.startup_revision,
+        )
+    elif change == "wake":
+        queue.claim_one(OWNER, task_id=task_id)
+        queue.start(task_id, OWNER, owner_session_id=NATIVE)
+        queue.suspend(task_id, OWNER, reason="external")
+        queue.resume(task_id, OWNER, reuse_session=True, wake_requested=True, wake_message="held")
+        queue.yield_task(task_id, OWNER, release_spawn=False)
+    else:
+        queue.claim_one(OWNER, task_id=task_id)
+        queue.yield_task(task_id, OWNER, release_spawn=False)
+    before = queue.latest_reservation(task_id)
+    with pytest.raises(TaskError, match="redrive"):
+        queue.record_spawn(
+            original.key, session_handle=original.session_handle, worktree=original.worktree,
+            startup_complete=False, startup_revision=original.startup_revision, ordinary_redrive=facts,
+        )
+    assert queue.latest_reservation(task_id) == before
+
+
+@pytest.mark.parametrize("change", ["marker", "revision", "caller", "target"])
+def test_queued_redrive_unknown_requires_its_frozen_pending_operation(hosted, monkeypatch, change):
+    queue, task_id = hosted
+    queue.resume(task_id, OWNER, reuse_session=True)
+    queue.yield_task(task_id, OWNER, release_spawn=False)
+    calls = _capture(monkeypatch, returncode=70)
+    assert _native_supervisor(queue).redrive_unclaimed_spawns() == 0
+    pending = queue.latest_reservation(task_id)
+    info = dict(pending.agent_info)
+    if change == "marker":
+        info.pop("retained_redrive")
+    elif change == "revision":
+        info["retained_redrive"]["startup_revision"] -= 1
+    elif change == "caller":
+        info["retained_redrive"]["invocation"]["caller"] = "another-caller"
+    else:
+        info["retained_redrive"]["invocation"]["native_session_id"] = "another-native"
+    with queue._connect() as conn:
+        conn.execute(
+            "UPDATE spawn_reservations SET agent_info=? WHERE key=?",
+            (json.dumps(info), pending.key),
+        )
+    assert _native_supervisor(queue).redrive_unclaimed_spawns() == 0
+    assert len(calls) == 1
+    assert queue.latest_reservation(task_id).startup_complete is False
 
 
 @pytest.mark.parametrize("change", [
