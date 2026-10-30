@@ -12,11 +12,8 @@ import hashlib
 import json
 import logging
 import math
-import os
 import re
-import signal
 import subprocess
-import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -31,7 +28,7 @@ from .platform import (
     ensure_socket_dir,
     socket_path_for_host,
 )
-from .process import terminate_ssh_process_tree
+from .process import PROCESS_CLEANUP_TIMEOUT, TERMINATE_GRACE, terminate_ssh_process_tree
 from .proxy import create_ssh_subprocess
 
 log = logging.getLogger("ssh-manager")
@@ -43,6 +40,7 @@ log = logging.getLogger("ssh-manager")
 # closed"). Mirror the acp library's 50 MB default so remote ACP sessions match
 # local ones.
 _STDIO_CHANNEL_LIMIT_BYTES = 50 * 1024 * 1024
+EXEC_COMMAND_CLEANUP_TIMEOUT = PROCESS_CLEANUP_TIMEOUT
 
 
 def _carrier_transport_identity(info: ConnectionInfo) -> str:
@@ -79,54 +77,22 @@ def get_default_manager() -> ConnectionManager:
     return _default_manager
 
 
-def _creation_flags() -> int:
-    """Subprocess creation flags for Windows headless compatibility."""
-    if sys.platform == "win32":
-        return subprocess.CREATE_NO_WINDOW
-    return 0
-
-
 async def _terminate_process_tree(
     proc: asyncio.subprocess.Process,
     *,
-    grace: float = 5.0,
+    grace: float = TERMINATE_GRACE,
 ) -> None:
     """Terminate an SSH child and any children it spawned."""
-    if proc.returncode is not None:
-        return
-    if sys.platform == "win32":
+    cleanup = asyncio.create_task(terminate_ssh_process_tree(proc, grace=grace))
+    cancelled = False
+    while not cleanup.done():
         try:
-            subprocess.run(  # noqa: S603, S607
-                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                creationflags=_creation_flags(),
-            )
-        except OSError:
-            proc.kill()
-    else:
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-        except OSError:
-            proc.kill()
-    try:
-        await asyncio.wait_for(proc.wait(), timeout=grace)
-        return
-    except (TimeoutError, asyncio.TimeoutError):
-        pass
-    if sys.platform != "win32":
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        except OSError:
-            proc.kill()
-    else:
-        proc.kill()
-    try:
-        await asyncio.wait_for(proc.wait(), timeout=2.0)
-    except (TimeoutError, asyncio.TimeoutError):
-        log.warning("Process tree rooted at pid %s did not exit", proc.pid)
+            await asyncio.shield(cleanup)
+        except asyncio.CancelledError:
+            cancelled = True
+    cleanup.result()
+    if cancelled:
+        raise asyncio.CancelledError
 
 
 @dataclass
@@ -600,34 +566,27 @@ class ConnectionManager:
             timed_out = False
             try:
                 info.child_processes.append(proc)
-                try:
-                    if on_output is None:
-                        capture = proc.communicate(input=input_bytes)
-                    else:
-                        from agent_procutil.streaming import communicate_progress
-                        capture = communicate_progress(
-                            proc, input_bytes=input_bytes, on_output=on_output,
-                        )
-                    stdout_bytes, stderr_bytes = await asyncio.wait_for(capture, timeout=timeout)
-                finally:
-                    if proc in info.child_processes and proc.returncode is not None:
-                        info.child_processes.remove(proc)
+                if on_output is None:
+                    capture = proc.communicate(input=input_bytes)
+                else:
+                    from agent_procutil.streaming import communicate_progress
+                    capture = communicate_progress(
+                        proc, input_bytes=input_bytes, on_output=on_output,
+                    )
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(capture, timeout=timeout)
             except (TimeoutError, asyncio.TimeoutError):
                 await _terminate_process_tree(proc)
                 stdout_bytes, stderr_bytes = await proc.communicate()
                 timed_out = True
-                if proc in info.child_processes:
-                    info.child_processes.remove(proc)
             except asyncio.CancelledError:
                 await _terminate_process_tree(proc)
-                if proc in info.child_processes:
-                    info.child_processes.remove(proc)
                 raise
             except Exception:
                 await _terminate_process_tree(proc)
-                if proc in info.child_processes:
-                    info.child_processes.remove(proc)
                 raise
+            finally:
+                if proc in info.child_processes and proc.returncode is not None:
+                    info.child_processes.remove(proc)
 
             result = CommandResult(
                 stdout=stdout_bytes.decode(errors="replace").rstrip(),

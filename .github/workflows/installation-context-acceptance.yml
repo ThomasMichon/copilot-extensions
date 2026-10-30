@@ -591,7 +591,7 @@ jobs:
           --test-file tests/test_launch_update_requests.py
           --test-file tests/test_installation_updates.py
           --test-file tests/test_bootstrap_repair_recovery.py
-          -k "manual_auto_hold or operator_repair_classification or bootstrap_retains_update_repair or native_launch_submits_fixed_phases or posix_bootstrap_hold or target_bypasses_bootstrap or bootstrap_preserves_hold_path"
+          -k "manual_auto_hold or operator_repair_classification or bootstrap_retains_update_repair or native_launch_submits_fixed_phases or native_bootstrap_hold or target_bypasses_bootstrap or bootstrap_preserves_hold_path"
       - name: Qualify automatic producer registrations and per-repository forwarding
         if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
         run: >-

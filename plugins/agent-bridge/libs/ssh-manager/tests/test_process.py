@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
+
+import pytest
 
 from ssh_manager import process
 
@@ -25,7 +28,8 @@ def test_ssh_subprocess_kwargs_posix_starts_new_session(monkeypatch):
     }
 
 
-def test_terminate_windows_tree_runs_taskkill_off_event_loop(monkeypatch):
+@pytest.mark.parametrize("taskkill_timeout", [False, True])
+def test_terminate_windows_tree_runs_taskkill_off_event_loop(monkeypatch, taskkill_timeout):
     class FakeProc:
         returncode = None
         pid = 123
@@ -43,6 +47,8 @@ def test_terminate_windows_tree_runs_taskkill_off_event_loop(monkeypatch):
     def fake_run(*args, **kwargs):
         assert inside_thread
         calls.append((args, kwargs))
+        if taskkill_timeout:
+            raise subprocess.TimeoutExpired("taskkill", kwargs["timeout"])
 
     async def fake_to_thread(func, *args, **kwargs):
         nonlocal inside_thread
@@ -60,6 +66,39 @@ def test_terminate_windows_tree_runs_taskkill_off_event_loop(monkeypatch):
     asyncio.run(process.terminate_ssh_process_tree(FakeProc()))
 
     assert calls[0][0][0] == ["taskkill", "/PID", "123", "/T", "/F"]
+    assert calls[0][1]["timeout"] == 3.0
+
+
+@pytest.mark.parametrize("returncode", [None, 0])
+def test_owned_job_closes_before_waiting_for_inherited_pipes(monkeypatch, returncode):
+    class FakeJob:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    job = FakeJob()
+
+    class FakeProc:
+        pid = 123
+
+        def __init__(self):
+            self.returncode = returncode
+
+        async def wait(self):
+            assert job.closed, "inherited pipes cannot close before the owned Job"
+            self.returncode = 1
+            return 1
+
+    child = FakeProc()
+    process._OWNER_JOBS[id(child)] = job
+    monkeypatch.setattr(process.sys, "platform", "win32")
+    try:
+        asyncio.run(process.terminate_ssh_process_tree(child))
+        assert job.closed
+        assert id(child) not in process._OWNER_JOBS
+    finally:
+        process._OWNER_JOBS.pop(id(child), None)
 
 
 def test_terminate_tree_ignores_already_exited_kill_race():

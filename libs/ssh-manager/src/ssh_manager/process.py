@@ -3,13 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import signal
 import subprocess
 import sys
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from agent_procutil import JobHandle
+
+log = logging.getLogger("ssh-manager")
+_TASKKILL_TIMEOUT = 3.0
+TERMINATE_GRACE = 5.0
+_KILL_WAIT = 2.0
+PROCESS_CLEANUP_TIMEOUT = _TASKKILL_TIMEOUT + TERMINATE_GRACE + _KILL_WAIT
 
 
 @dataclass
@@ -20,7 +30,16 @@ class _ProcessCleanup:
 
 
 _CLEANUPS: dict[int, _ProcessCleanup] = {}
+_OWNER_JOBS: dict[int, JobHandle] = {}
 _WINDOWS_DESCRIPTOR_STATE = "c28fc6f98a2c44abbbd89d6a3037d0d9_POSIX_FD_STATE".casefold()
+
+
+def close_process_job(process: asyncio.subprocess.Process) -> bool:
+    job = _OWNER_JOBS.pop(id(process), None)
+    if job is None:
+        return False
+    job.close()
+    return True
 
 
 def redirected_ssh_env(
@@ -101,14 +120,15 @@ def ssh_subprocess_kwargs(**kwargs: Any) -> dict[str, Any]:
 async def terminate_ssh_process_tree(
     proc: asyncio.subprocess.Process,
     *,
-    grace: float = 5.0,
+    grace: float = TERMINATE_GRACE,
 ) -> None:
     """Terminate an SSH root and the ProxyCommand descendants it spawned."""
+    cleanup = asyncio.create_task(run_process_cleanup(proc))
     try:
         await _terminate_ssh_process_tree(proc, grace=grace)
     finally:
         _close_unreaped_transport(proc)
-        await run_process_cleanup(proc)
+        await cleanup
 
 
 def _close_unreaped_transport(proc: asyncio.subprocess.Process) -> None:
@@ -135,6 +155,8 @@ def _close_unreaped_transport(proc: asyncio.subprocess.Process) -> None:
 async def _terminate_ssh_process_tree(
     proc: asyncio.subprocess.Process, *, grace: float,
 ) -> None:
+    # Close the owned Job before a descendant's inherited pipes can block wait().
+    owned_tree_closed = close_process_job(proc)
     if proc.returncode is not None:
         return
     pid = getattr(proc, "pid", None)
@@ -142,7 +164,7 @@ async def _terminate_ssh_process_tree(
         _kill_process(proc)
         await proc.wait()
         return
-    if sys.platform == "win32":
+    if sys.platform == "win32" and not owned_tree_closed:
         try:
             await asyncio.to_thread(
                 subprocess.run,
@@ -152,10 +174,14 @@ async def _terminate_ssh_process_tree(
                 stderr=subprocess.DEVNULL,
                 check=False,
                 creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout=_TASKKILL_TIMEOUT,
             )
+        except subprocess.TimeoutExpired:
+            log.warning("Process-tree termination timed out for pid %s; killing SSH root", pid)
+            _kill_process(proc)
         except OSError:
             _kill_process(proc)
-    else:
+    elif sys.platform != "win32":
         try:
             os.killpg(os.getpgid(pid), signal.SIGTERM)
         except OSError:
@@ -173,6 +199,6 @@ async def _terminate_ssh_process_tree(
     else:
         _kill_process(proc)
     try:
-        await asyncio.wait_for(proc.wait(), timeout=2.0)
+        await asyncio.wait_for(proc.wait(), timeout=_KILL_WAIT)
     except (TimeoutError, asyncio.TimeoutError):
-        pass
+        log.warning("Process tree rooted at pid %s did not exit", pid)

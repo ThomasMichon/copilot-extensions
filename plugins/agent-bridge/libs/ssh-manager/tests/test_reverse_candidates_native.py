@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import socket
 import sys
 
 import pytest
 
+from agent_procutil import direct_python, spawn_in_kill_on_close_job
 import ssh_manager.relay_channel as legacy
 import ssh_manager.reverse_candidates as candidate_mod
 from ssh_manager.config_sources import SSHConfig
-from ssh_manager.proxy import create_ssh_subprocess
+from ssh_manager.process import ssh_subprocess_kwargs
+from ssh_manager.proxy import _track_owner_job
 from ssh_manager.relay_channel import SupervisedRelayForward, _SettleResult
 from ssh_manager.reverse_candidates import (
     FiniteReverseForward, ReverseEndpoint, ReverseEvidence, ReverseForwardError,
@@ -53,6 +56,7 @@ async def test_real_retained_process_recovers_without_retiring_foreign_listener(
     extra_owners = []
     race_spawn_target = 0
     race_spawned = asyncio.Event()
+    python, python_env = direct_python(sys.executable)
 
     async def spawn(*args, **kwargs):
         spec = args[args.index("-R") + 1]
@@ -60,11 +64,14 @@ async def test_real_retained_process_recovers_without_retiring_foreign_listener(
         # The unchanged legacy forward omits an explicit bind address.
         if len(spec.split(":")) == 3:
             port = spec.split(":")[0]
-        proc = await create_ssh_subprocess(
-            sys.executable, "-c", CHILD, port, config=kwargs["config"],
-            env=kwargs["env"], stdin=asyncio.subprocess.DEVNULL,
+        proc, job = await spawn_in_kill_on_close_job(
+            python, "-c", CHILD, port,
+            env={**(os.environ if kwargs["env"] is None else kwargs["env"]), **python_env},
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            **ssh_subprocess_kwargs(),
         )
+        _track_owner_job(proc, job)
         processes.append(proc)
         if race_spawn_target and len(processes) >= race_spawn_target:
             race_spawned.set()
